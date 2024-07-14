@@ -2,17 +2,17 @@
 // Declares clang::SyntaxOnlyAction.
 #include "clang/AST/Decl.h"
 #include "clang/AST/Type.h"
-#include <algorithm>
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
 // Declares llvm::cl::extrahelp.
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
-#include <filesystem>
-#include <fstream>
 #include <llvm/Support/CommandLine.h>
 
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
