@@ -4,7 +4,12 @@ function (target_link_static_crt target)
     endif()
 
     if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        target_link_libraries(${target} PRIVATE -static gcc stdc++ $<$<PLATFORM_ID:Windows>:winpthread> -dynamic)
+        # target_link_libraries(${target} PRIVATE -static gcc stdc++ $<$<PLATFORM_ID:Windows>:winpthread> -dynamic)
+        target_link_options(${target} PRIVATE -static-libgcc -static-libstdc++)
+                                
+        if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            target_link_libraries(${target} PRIVATE -static -lpthread)
+        endif()
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         if (MSVC_VERSION GREATER_EQUAL 1900)
             target_compile_options(${target} PRIVATE "/MT$<$<CONFIG:Debug>:d>")

@@ -16,13 +16,6 @@ function(get_target_sources TARGET_NAME OUT_SOURCES)
     set(${OUT_SOURCES} ${ABS_PATHS} PARENT_SCOPE)
 endfunction()
 
-# todo: implement
-# this should be a cmake function or macro that can be called upon a target like
-#[[
-add_executable(target_name main.cpp)
-reflected_target(target_name OPTIONS)
-]]
-# todo: find program
 function(reflected_target TARGET_NAME)
     # todo: prevent calling twice on a single target
     # todo: prevent calling on itself
@@ -40,9 +33,18 @@ function(reflected_target TARGET_NAME)
     # - get all the sources (? including sources of linked static targets) 
     #  of the target and pass then to the program
     get_target_sources(${TARGET_NAME} REFL_TARGET_SOURCES)
+    message(STATUS "${TOOL_NAME}: in target `${TARGET_NAME}` reflected sources:")
     foreach(_SRC ${REFL_TARGET_SOURCES})
-        message(STATUS "${TOOL_NAME}: in target `${TARGET_NAME}` reflected source: ${_SRC}")
+        message(STATUS "${_SRC}")
     endforeach()
+
+    set(TOOL_RESOURCE_DIR "${${TOOL_NAME}_RESOURCE_DIR}")
+    if (NOT EXISTS ${TOOL_RESOURCE_DIR})
+        message(FATAL_ERROR "${TOOL_NAME}: resource dir \"${TOOL_RESOURCE_DIR}\" for bundled headers not found")
+    else()
+        # todo: remove
+        message(STATUS "${TOOL_NAME}: resource dir \"${TOOL_RESOURCE_DIR}\"")
+    endif()
 
     set(EXCLUDED_LIST)
     get_target_sources(omni::refl IGNORED_SELF_SOURCES)
@@ -54,10 +56,11 @@ function(reflected_target TARGET_NAME)
     set(GENERATED_FILE "${CMAKE_CURRENT_BINARY_DIR}/reflected_${TARGET_NAME}.cpp")
 
     add_custom_command(OUTPUT ${GENERATED_FILE}
-        COMMAND omni::tool "-p=${CMAKE_BINARY_DIR}/"
-                "-o=${GENERATED_FILE}"
-                "--excluded=${EXCLUDED}"
-                "${REFL_TARGET_SOURCES}"
+        COMMAND omni::tool "--resource-dir=${TOOL_RESOURCE_DIR}"
+            "-p=${CMAKE_BINARY_DIR}/"
+            "-o=${GENERATED_FILE}"
+            "--excluded=${EXCLUDED}"
+            "${REFL_TARGET_SOURCES}"
         DEPENDS ${REFL_TARGET_SOURCES}
         COMMENT "Running ${TOOL_NAME} for ${TARGET_NAME}"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

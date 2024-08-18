@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -23,8 +24,9 @@
 namespace {
 namespace impl {
 
+// todo: error should be more readable
 template <typename T>
-constexpr auto mem_vars = [] { /*static_assert(!sizeof(T), "mem_vars is not specialized");*/ };
+constexpr auto mem_vars = [] { static_assert(!sizeof(T), "mem_vars is not specialized"); };
 
 template <typename, typename = void>
 struct is_reflected: std::false_type {};
@@ -87,7 +89,7 @@ bool is_boolean(const ryml::ConstNodeRef &n) {
     || "TRUE" == v || "FALSE" == v;
 }
 
-bool is_number(const ryml::ConstNodeRef &n) {
+[[maybe_unused]] bool is_number(const ryml::ConstNodeRef &n) {
   return n.val().is_number();
 }
 
@@ -103,9 +105,15 @@ bool is_real(const ryml::ConstNodeRef &n) {
   return n.val().is_real();
 }
 
+// todo: implement serialize
+
 // todo: protect from invalid node
 // todo: additional argument to allow in-place reflection (re)definition + reflection definition for
 // local structs
+// todo: some fields might have a user-defined custom deserialization function, which need to be
+// called. which is currently resolved by `omni::deserialize_t`.
+// todo: aliased fields. Could be done by a adapter for ConstNodeRef (when enumerating json
+// children, names can be substituted by adapter)
 template <typename To>
 tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &to) noexcept {
   static_assert(!std::is_pointer_v<To>);
@@ -118,7 +126,8 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
   if constexpr (std::is_fundamental_v<_to>) {
     // just to reduce boilerplate
     const auto _deserialize = //
-      [&to, to_string_view](const ryml::ConstNodeRef &from,
+      [to_string_view](const ryml::ConstNodeRef &from,
+        To &to,
         bool valid,
         std::string_view err) -> result {
       const auto val = from.val();
@@ -132,13 +141,13 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
     };
 
     if constexpr (std::is_same_v<_to, bool>) {
-      return _deserialize(from, is_boolean(from), " is not a boolean");
+      return _deserialize(from, to, is_boolean(from), " is not a boolean");
     } else if constexpr (std::is_integral_v<_to> && std::is_unsigned_v<_to>) {
-      return _deserialize(from, is_unsigned_integer(from), " is not an unsigned integer");
+      return _deserialize(from, to, is_unsigned_integer(from), " is not an unsigned integer");
     } else if constexpr (std::is_integral_v<_to>) {
-      return _deserialize(from, is_integer(from), " is not an integer");
+      return _deserialize(from, to, is_integer(from), " is not an integer");
     } else if constexpr (std::is_floating_point_v<_to>) {
-      return _deserialize(from, is_real(from), " is not a real number");
+      return _deserialize(from, to, is_real(from), " is not a real number");
     }
     // todo: null, nan, etc?
     // todo: is_string, and use an allocator
@@ -176,22 +185,23 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
     });
 
     // todo: profile the difference between iterating json nodes vs iterating struct fields
+    // todo: support for aliased fields, preferrably without modifying the original json
     for (const ryml::ConstNodeRef &c : from.children()) {
       if (visited.size() == n_visited) {
         return tl::unexpected("unknown field '" + std::string(to_string_view(c.key())) + "'");
       }
 
       const auto name = to_string_view(c.key());
-      const auto mv = std::lower_bound(mem_vars.begin(),
-        mem_vars.end(),
+      const auto mv = std::lower_bound(mem_vars.cbegin(),
+        mem_vars.cend(),
         name,
         [](const auto &m, std::string_view name) { return m.name < name; });
 
-      if (mv == mem_vars.end()) {
+      if (mv == mem_vars.cend() || mv->name != name) {
         return tl::unexpected("unknown field '" + std::string(name) + "'");
       }
 
-      if (auto &v = visited[std::distance(mem_vars.begin(), mv)]; v) {
+      if (auto &v = visited[std::distance(mem_vars.cbegin(), mv)]; v) {
         return tl::unexpected("duplicate field '" + std::string(name) + "'");
       } else {
         v = true;
@@ -228,13 +238,16 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
     // via arguments or type traits, which would complicate the logic of this function.
     // hense, only the common types should be supported here, and composition should be used outside
     // to further figure-out custom user-defined classes
-  } else if constexpr (false) {
-    // todo: support for std::optional
+    return tl::unexpected("variant support is not implemented");
+  } else if constexpr (is<std::optional, _to>()) {
+    // todo: implement
     // in order to distinguish between the unspecified field or explicit `null` a union of 3 types
     // should be used: undefined, null, value
+    return tl::unexpected("optioinal support is not implemented");
   } else if constexpr (is<std::map, _to>()) {
     // todo: not only std::map, but preferrably flat_map
-    // todo: support for std::map
+    // todo: implement
+    return tl::unexpected("map support is not implemented");
   } else if constexpr (is_reflected<_to>()) {
     // todo: implement nested type erasure
     auto _obj = std::apply(
