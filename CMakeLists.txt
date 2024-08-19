@@ -13,10 +13,12 @@ message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
 
 option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
-# todo: options
+# todo: options:
 # - enable benchmarks
 
 find_package(Clang REQUIRED)
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 file(GLOB CLANG_RESOURCE_DIR "${CLANG_INCLUDE_DIRS}/../lib/clang/*/include")
 if (CLANG_RESOURCE_DIR)
     get_filename_component(CLANG_RESOURCE_DIR "${CLANG_RESOURCE_DIR}/../" ABSOLUTE)
@@ -28,31 +30,43 @@ endif()
 # todo: use find_package
 set(EXPECTED_BUILD_PACKAGE OFF CACHE INTERNAL "" FORCE)
 set(EXPECTED_BUILD_TESTS OFF CACHE INTERNAL "" FORCE)
-# todo: add these two to installation script
 add_subdirectory(lib/expected EXCLUDE_FROM_ALL)
-add_subdirectory(lib/rapidyaml EXCLUDE_FROM_ALL)
-
-message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+# add_subdirectory(lib/rapidyaml EXCLUDE_FROM_ALL)
+# refactorme: the include path is not very usable
+find_package(Python COMPONENTS Interpreter REQUIRED)
+set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
+set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
+add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
+    COMMAND Python::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml/tools/amalgamate.py"
+        "${RYML_AMALGAMATED_HEADER}"
+    COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
+    VERBATIM)
+add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
 
 # this library will be automatically linked to a reflected target
 add_library(refl INTERFACE)
-add_library(omni::refl ALIAS refl)
 target_sources(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.h>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/refl.h>)
-# set(PUBLIC_HEADERS include/omnirefl/refl.h)
-# set_target_properties(refl PROPERTIES PUBLIC_HEADER "${PUBLIC_HEADERS}")
 target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    $<BUILD_INTERFACE:${RYML_INCLUDE_DIR}/../> # /include/ryml -> include/
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    # fixme: this is needed because of 3rd party libs. Proper installation might be needed, 
+    #   however this would require version tracking...
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME})
 target_link_libraries(refl INTERFACE
     # default implementation for iteration 1
-    ryml
-    tl::expected)
+    # $<BUILD_INTERFACE:ryml>
+    $<BUILD_INTERFACE:tl::expected>
+    # $<INSTALL_INTERFACE:ryml::ryml>
+    )
+add_library(omni::refl ALIAS refl)
 
 # todo: implement as clang plugin
 add_executable(tool main.cpp)
+add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
     CXX_STANDARD 20
@@ -98,7 +112,12 @@ if (ENABLE_TESTING)
     add_executable(test.impl_ryml samples/test/test_impl_ryml.cpp)
     reflected_target(test.impl_ryml)
     target_include_directories(test.impl_ryml PRIVATE samples/test)
-    target_link_libraries(test.impl_ryml PRIVATE GTest::gtest)
+    target_link_libraries(test.impl_ryml PRIVATE GTest::gtest 
+        # fixme: these should be automatically linked by `reflected_target`,
+        # but currently the installation fails, since these targets are not installed
+        # (headers just copied)
+        # tl::expected ryml::ryml)
+    )
 endif()
 
 if (ENABLE_PACKAGE)
@@ -108,13 +127,28 @@ if (ENABLE_PACKAGE)
 
     install(TARGETS tool refl
         EXPORT "${PROJECT_NAME}Targets"
+        # todo: are these correct? Should I append ${PROJECT_NAME}?
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
+    # tool's public headers
+    install(FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.h
+        # Iteration 1
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/impl_ryml.h
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
+
+    install(DIRECTORY
+        # todo: proper way to include the dependency (with copyright, etc)
+        "${RYML_INCLUDE_DIR}/../"
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/expected/include/
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
+
+    # tool's cmake files
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"
         NAMESPACE omni::
-        DESTINATION cmake)
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
     include(CMakePackageConfigHelpers)
     write_basic_package_version_file(
@@ -124,20 +158,9 @@ if (ENABLE_PACKAGE)
 
     configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-        INSTALL_DESTINATION cmake)
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
-    # tool's public headers
-    install(FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.h
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
-
-    install(DIRECTORY
-        # todo: proper way to include the dependency (with copyright, etc)
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml/src/
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/expected/include/
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
-
-    # tool's cmake files
+    # todo: `omni::tool` target should be available regardless of the cmake build type!
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
@@ -147,8 +170,7 @@ if (ENABLE_PACKAGE)
     # bundle clang's headers
     install(DIRECTORY
         ${CLANG_RESOURCE_DIR}/include
-        # todo: add version here?
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
 
     # bundle samples
     configure_file(
@@ -158,7 +180,7 @@ if (ENABLE_PACKAGE)
     install(DIRECTORY
         ${CMAKE_BINARY_DIR}/samples
         ${CMAKE_SOURCE_DIR}/samples
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
     
     install(IMPORTED_RUNTIME_ARTIFACTS tool)
 

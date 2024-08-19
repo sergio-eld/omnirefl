@@ -3,7 +3,7 @@
 // todo: copiright notice (MIT)
 
 // default implementation for `iteration 1`
-#include <ryml.hpp>
+#include <ryml/ryml.hpp>
 #include <tl/expected.hpp>
 
 namespace omni {

@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
-project(@PROJECT_NAME@.samples LANGUAGES CXX C VERION @PROJECT_VERSION@)
+project(@PROJECT_NAME@.samples LANGUAGES CXX C VERSION @PROJECT_VERSION@)
 
 # todo: option for CMAKE_CXX_STANDARD with 17 as default
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(@PROJECT_NAME@ CONFIG REQURIED)
+find_package(@PROJECT_NAME@ CONFIG REQUIRED)
 # todo: add example here, which must provide a simple sanity check (generated and compiled)
 
 find_package(GTest CONFIG QUIET)

@@ -1,3 +1,8 @@
+// this will enable definitions for rapidyaml, since it has been amalgamated to a single header
+// it has to be defined before the headers that use it's interface
+#define RYML_SINGLE_HDR_DEFINE_NOW
+#include <ryml/ryml.hpp>
+
 #include "foo.h"
 
 #include <omnirefl/refl.h>

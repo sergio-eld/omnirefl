@@ -41,9 +41,6 @@ function(reflected_target TARGET_NAME)
     set(TOOL_RESOURCE_DIR "${${TOOL_NAME}_RESOURCE_DIR}")
     if (NOT EXISTS ${TOOL_RESOURCE_DIR})
         message(FATAL_ERROR "${TOOL_NAME}: resource dir \"${TOOL_RESOURCE_DIR}\" for bundled headers not found")
-    else()
-        # todo: remove
-        message(STATUS "${TOOL_NAME}: resource dir \"${TOOL_RESOURCE_DIR}\"")
     endif()
 
     set(EXCLUDED_LIST)
