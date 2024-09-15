@@ -19,6 +19,8 @@ message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
 find_package(Clang REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+message(STATUS "CLANG_INCLUDE_DIRS: ${CLANG_INCLUDE_DIRS}")
+message(STATUS "LLVM_INCLUDE_DIRS: ${LLVM_INCLUDE_DIRS}")
 file(GLOB CLANG_RESOURCE_DIR "${CLANG_INCLUDE_DIRS}/../lib/clang/*/include")
 if (CLANG_RESOURCE_DIR)
     get_filename_component(CLANG_RESOURCE_DIR "${CLANG_RESOURCE_DIR}/../" ABSOLUTE)
@@ -37,8 +39,14 @@ find_package(Python COMPONENTS Interpreter REQUIRED)
 set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
 set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
 add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
+    # ad hoc, since the script needs write permissions for some reason,
+    # which prevents setting `ro` mount for source in docker
+    COMMAND ${CMAKE_COMMAND} -E copy_directory 
+        "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml"
+        "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml"
+
     COMMAND Python::Interpreter
-        "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml/tools/amalgamate.py"
+        "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml/tools/amalgamate.py"
         "${RYML_AMALGAMATED_HEADER}"
     COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
     VERBATIM)
@@ -72,7 +80,7 @@ set_target_properties(tool PROPERTIES
     CXX_STANDARD 20
     INTERPROCEDURAL_OPTIMIZATION ON
     ENABLE_EXPORTS OFF)
-target_include_directories(tool PRIVATE ${CLANG_INCLUDE_DIRS})
+target_include_directories(tool PRIVATE ${CLANG_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
 # todo: fmt 
 # todo: figure which clang targets really needed for linking
 #   as of this writing, the resulting size is about 80M
@@ -83,7 +91,7 @@ target_link_libraries(tool PRIVATE
     clangTooling # todo: get rid of this
     tl::expected)
 target_link_static_crt(tool)
-target_compile_options(tool PRIVATE -fno-rtti)
+set_target_properties(tool PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tool PRIVATE -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections)
     target_link_options(tool PRIVATE -Wl,--gc-sections)
@@ -110,6 +118,7 @@ if (ENABLE_TESTING)
     # currenly this is needs to be manually copied to CMakeLists.txt.in.samples
     # should figure out how to remove boilreplate for samples (they are bundled with installation)
     add_executable(test.impl_ryml samples/test/test_impl_ryml.cpp)
+    # todo: this should be tested and benchmarked
     reflected_target(test.impl_ryml)
     target_include_directories(test.impl_ryml PRIVATE samples/test)
     target_link_libraries(test.impl_ryml PRIVATE GTest::gtest 
@@ -118,11 +127,11 @@ if (ENABLE_TESTING)
         # (headers just copied)
         # tl::expected ryml::ryml)
     )
+    add_test(NAME test.impl_ryml COMMAND test.impl_ryml)
 endif()
 
 if (ENABLE_PACKAGE)
     message(STATUS "Generating ${PROJECT_NAME} package")
-
     include(GNUInstallDirs)
 
     install(TARGETS tool refl
@@ -138,6 +147,7 @@ if (ENABLE_PACKAGE)
         ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/impl_ryml.h
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
 
+    # todo: dependencies on 3rd party should be optional, so should be the default implementation
     install(DIRECTORY
         # todo: proper way to include the dependency (with copyright, etc)
         "${RYML_INCLUDE_DIR}/../"
@@ -184,10 +194,14 @@ if (ENABLE_PACKAGE)
     
     install(IMPORTED_RUNTIME_ARTIFACTS tool)
 
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGE_CONTACT "sergey.kolesnik.ld@gmail.com")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sergei Kolesnik")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS YES)
+    # todo: deduce from the target arch
+    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+    set(CPACK_PACKAGE_ARCHITECTURE "amd64")
 
     # todo: description
     include(CPack)

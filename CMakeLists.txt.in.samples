@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
 project(@PROJECT_NAME@.samples LANGUAGES CXX C VERSION @PROJECT_VERSION@)
 
 # todo: option for CMAKE_CXX_STANDARD with 17 as default
@@ -7,13 +7,16 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(@PROJECT_NAME@ CONFIG REQUIRED)
 # todo: add example here, which must provide a simple sanity check (generated and compiled)
 
-find_package(GTest CONFIG QUIET)
-if (TARGET GTest::gtest)
+find_package(GTest QUIET)
+if (TARGET GTest::GTest)
+    set(TEST_NAME ${PROJECT_NAME}.test) 
     enable_testing()
+    message(STATUS "@PROJECT_NAME@.samples: enabled testing")
 
-    add_executable(${PROJECT_NAME}.test.impl_ryml test/test_impl_ryml.cpp)
-    reflected_target(${PROJECT_NAME}.test.impl_ryml)
-    target_include_directories(${PROJECT_NAME}.test.impl_ryml PRIVATE test)
-    target_link_libraries(${PROJECT_NAME}.test.impl_ryml PRIVATE GTest::gtest)
+    add_executable(${TEST_NAME}.impl_ryml test/test_impl_ryml.cpp)
+    reflected_target(${TEST_NAME}.impl_ryml)
+    target_include_directories(${TEST_NAME}.impl_ryml PRIVATE test)
+    target_link_libraries(${TEST_NAME}.impl_ryml PRIVATE GTest::GTest)
+    add_test(NAME ${TEST_NAME}.impl_ryml COMMAND ${TEST_NAME}.impl_ryml)
 endif()
 

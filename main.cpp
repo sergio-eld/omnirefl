@@ -22,6 +22,7 @@
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/PrecompiledPreamble.h>
+#include <clang/Lex/HeaderSearchOptions.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <clang/Tooling/ArgumentsAdjusters.h>
@@ -279,7 +280,7 @@ struct ast_action {
 
     // todo: go go Matchers
     std::unique_ptr<ASTUnit> ast = ASTUnit::LoadFromCompilerInvocation(i.compiler_invocation,
-      std::move(i.pch_cont_ops),
+      i.pch_cont_ops,
       clang::CompilerInstance::createDiagnostics(&i.compiler_invocation->getDiagnosticOpts(),
         i.diag_cons,
         /*ShouldOwnClient=*/false),
@@ -679,13 +680,45 @@ int main(int argc, char **argv) {
     // modification, which only has a partial effect
     configure_compiler_invocation{
       .c =
-        [](clang::CompilerInvocation &c) {
+        [&](clang::CompilerInvocation &c) {
           // todo: configure
-          // resource dir can't be changed at this point for some reason
-          // c.getHeaderSearchOpts().ResourceDir = "";
 
-          // debug: remove
-          // const std::string &_debug_resource_dir = c.getHeaderSearchOpts().ResourceDir;
+          // fixme: I have no idea at this point why other compiler's header paths are added here
+          std::erase_if(c.getHeaderSearchOpts().UserEntries,
+            [](const clang::HeaderSearchOptions::Entry &e) {
+              return clang::frontend::IncludeDirGroup::System == e.Group
+                && e.Path.find("omnirefl") == e.Path.npos;
+            });
+
+          // for some reason this doesn't have any effect if set up here, unlike the paths'
+          // modifications below 
+          // c.getHeaderSearchOpts().ResourceDir = resource_dir.getValue();
+
+          // todo: path from cli, since it is architecture dependent
+          c.getHeaderSearchOpts().AddPath(resource_dir.getValue()
+              + "/include/x86_64-unknown-linux-gnu/c++/v1",
+            clang::frontend::IncludeDirGroup::System,
+            /*IsFramework=*/false,
+            /*IgnoreSysRoot=*/false);
+
+          c.getHeaderSearchOpts().AddPath(resource_dir.getValue() + "/include/c++/v1",
+            clang::frontend::IncludeDirGroup::System,
+            // I have no idea what are these parameters
+            /*IsFramework=*/false,
+            /*IgnoreSysRoot=*/false);
+
+          // ad hoc: C++ headers must be included before C's
+          std::rotate(c.getHeaderSearchOpts().UserEntries.rbegin(),
+            c.getHeaderSearchOpts().UserEntries.rbegin() + 2,
+            c.getHeaderSearchOpts().UserEntries.rend());
+
+          for (const auto &h : c.getHeaderSearchOpts().UserEntries) {
+            std::cout << "debug: user header: " << h.Path << ", group: " << h.Group
+                      << ", is framework: " << h.IsFramework << '\n';
+          }
+          for (const auto &h : c.getHeaderSearchOpts().SystemHeaderPrefixes)
+            std::cout << "debug: system header prefix: " << h.Prefix << '\n';
+
           return disable_pch_and_warnings{}(c);
         },
     },
@@ -709,10 +742,18 @@ int main(int argc, char **argv) {
   // todo: don't use the tool, since it doesn't allow for parallel computations
   clang::tooling::ClangTool tool(*(compilation_db->get()), str_sources);
   // bolnoi ubliudok... this works
-  tool.appendArgumentsAdjuster(
-    clang::tooling::getInsertArgumentAdjuster({{"-resource-dir=" + resource_dir.getValue()}},
-      clang::tooling::ArgumentInsertPosition::BEGIN));
+  // todo: try to set them in `configure_compiler_invocation`
+  tool.appendArgumentsAdjuster(clang::tooling::getInsertArgumentAdjuster(
+    {
+    // for some reason it will only work from here
+      {"-resource-dir=" + resource_dir.getValue()},
+      // {"-isystem" + resource_dir.getValue() + "/include/c++/v1"},
+      // // todo: this should be configured at runtime!
+      // {"-isystem" + resource_dir.getValue() + "/include/x86_64-unknown-linux-gnu/c++/v1"},
+    },
+    clang::tooling::ArgumentInsertPosition::BEGIN));
 
+  // fixme: this actually doesn't fail, even with `fatal error:`
   if (const int error = tool.run(&ref)) {
     llvm::errs() << "Failed to build asts with error: " << error;
     return error;

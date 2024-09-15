@@ -1,0 +1,65 @@
+services:
+  build-alpine:
+    image: omnirefl-build-alpine
+    build:
+      context: .
+      dockerfile: build-alpine.Dockerfile
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine:/build:rw
+    working_dir: /build
+    entrypoint: ['/bin/ash', '-c']
+    command: 
+      - |
+        cmake /src -GNinja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DENABLE_PACKAGE=ON \
+          -DENABLE_TESTING=ON \
+          -DClang_DIR=$${CLANG_BUILD_LINUX}/install/lib/cmake/clang &&
+        cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
+        strip --strip-all omnirefl && # set(CPACK_STRIP_FILES TRUE) doesn't work
+        cmake --build . -j$$(nproc) &&
+        ctest . &&
+        cpack -G "DEB;TGZ"
+
+  test-ubuntu-18:
+    image: test-install-ubuntu-18
+    build:
+      context: .
+      dockerfile: test-install-ubuntu.Dockerfile
+      args: 
+        - UBUNTU_VERSION=18.04
+    volumes:
+      - ./build-alpine:/install:ro
+    working_dir: /install
+    entrypoint: ['/bin/bash', '-c']
+    command:
+      - |
+        apt install ./omnirefl*.deb &&
+        mkdir -p /tmp/test/build && cd /tmp/test/build
+        cp -r /usr/share/omnirefl/samples/* ../
+        cmake .. -GNinja &&
+        cmake --build . &&
+        ctest .
+
+  test-ubuntu-22:
+    image: test-install-ubuntu-22
+    build:
+      context: .
+      dockerfile: test-install-ubuntu.Dockerfile
+      args: 
+        - UBUNTU_VERSION=22.04
+    volumes:
+      - ./build-alpine:/install:ro
+    working_dir: /install
+    entrypoint: ['/bin/bash', '-c']
+    command:
+      - |
+        apt install ./omnirefl*.deb &&
+        mkdir -p /tmp/test/build && cd /tmp/test/build
+        cp -r /usr/share/omnirefl/samples/* ../
+        cmake .. -GNinja &&
+        cmake --build . &&
+        ctest .
+
+

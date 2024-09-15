@@ -1,3 +1,10 @@
+# list(JOIN <list> <glue> <output variable>) 
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+
+if (NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF")
+    message(STATUS "omnirefl: Forcing `CMAKE_EXPORT_COMPILE_COMMNADS=1")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile commands" FORCE)
+endif()
 
 function(get_target_sources TARGET_NAME OUT_SOURCES)
     if (NOT TARGET ${TARGET_NAME})
@@ -44,8 +51,9 @@ function(reflected_target TARGET_NAME)
     endif()
 
     set(EXCLUDED_LIST)
-    get_target_sources(omni::refl IGNORED_SELF_SOURCES)
-    list(APPEND EXCLUDED_LIST ${IGNORED_SELF_SOURCES})
+    # this will fail for old cmake versions
+    # get_target_sources(omni::refl IGNORED_SELF_SOURCES)
+    # list(APPEND EXCLUDED_LIST ${IGNORED_SELF_SOURCES})
     list(APPEND EXCLUDED_LIST ${CMAKE_BINARY_DIR})
     list(APPEND EXCLUDED_LIST ${GENERATED_FILE})
     list(JOIN EXCLUDED_LIST "," EXCLUDED)
@@ -53,6 +61,7 @@ function(reflected_target TARGET_NAME)
     set(GENERATED_FILE "${CMAKE_CURRENT_BINARY_DIR}/reflected_${TARGET_NAME}.cpp")
 
     add_custom_command(OUTPUT ${GENERATED_FILE}
+        # todo: `--resourse-dir` should be optional
         COMMAND omni::tool "--resource-dir=${TOOL_RESOURCE_DIR}"
             "-p=${CMAKE_BINARY_DIR}/"
             "-o=${GENERATED_FILE}"
