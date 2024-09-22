@@ -33,8 +33,13 @@ endif()
 set(EXPECTED_BUILD_PACKAGE OFF CACHE INTERNAL "" FORCE)
 set(EXPECTED_BUILD_TESTS OFF CACHE INTERNAL "" FORCE)
 add_subdirectory(lib/expected EXCLUDE_FROM_ALL)
-# add_subdirectory(lib/rapidyaml EXCLUDE_FROM_ALL)
-# refactorme: the include path is not very usable
+add_subdirectory(lib/variant EXCLUDE_FROM_ALL)
+
+# todo: suppress dev warning from the subdirectory
+set(OPTIONAL_BUILD_TESTS OFF)
+add_subdirectory(lib/optional EXCLUDE_FROM_ALL)
+add_subdirectory(lib/string-view-lite EXCLUDE_FROM_ALL)
+
 find_package(Python COMPONENTS Interpreter REQUIRED)
 set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
 set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
@@ -66,9 +71,11 @@ target_include_directories(refl INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME})
 target_link_libraries(refl INTERFACE
     # default implementation for iteration 1
-    # $<BUILD_INTERFACE:ryml>
+    # todo: separate default implementation to a target
     $<BUILD_INTERFACE:tl::expected>
-    # $<INSTALL_INTERFACE:ryml::ryml>
+    $<BUILD_INTERFACE:tl::optional>
+    $<BUILD_INTERFACE:mpark_variant>
+    $<BUILD_INTERFACE:nonstd::string-view-lite>
     )
 add_library(omni::refl ALIAS refl)
 
@@ -110,8 +117,6 @@ if (ENABLE_TESTING)
     # todo: profile build times for reflected targets.
     #   Should generate a very large file with a lot of types for serialization and
     #   profile reflection parsing and build times
-    # todo: set up the path to headers
-    # set path for `--resource-dir`, which will be used for clang's system headers
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
 
@@ -121,13 +126,10 @@ if (ENABLE_TESTING)
     # todo: this should be tested and benchmarked
     reflected_target(test.impl_ryml)
     target_include_directories(test.impl_ryml PRIVATE samples/test)
-    target_link_libraries(test.impl_ryml PRIVATE GTest::gtest 
-        # fixme: these should be automatically linked by `reflected_target`,
-        # but currently the installation fails, since these targets are not installed
-        # (headers just copied)
-        # tl::expected ryml::ryml)
-    )
+    target_link_libraries(test.impl_ryml PRIVATE GTest::gtest)
     add_test(NAME test.impl_ryml COMMAND test.impl_ryml)
+
+    # todo: add test for failure
 endif()
 
 if (ENABLE_PACKAGE)
@@ -152,6 +154,9 @@ if (ENABLE_PACKAGE)
         # todo: proper way to include the dependency (with copyright, etc)
         "${RYML_INCLUDE_DIR}/../"
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/expected/include/
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/variant/include/
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/optional/include/
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/string-view-lite/include/
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
 
     # tool's cmake files
@@ -208,6 +213,7 @@ if (ENABLE_PACKAGE)
 endif()
 # if enabled benchmarking:
 # benchmark: (move todos into .cpp file)
+# - parsing an empty source file
 # - reading files
 # - ast creation
 

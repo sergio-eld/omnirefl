@@ -42,9 +42,16 @@ RUN mkdir $CLANG_BUILD_LINUX; \
 RUN cmake --build $CLANG_BUILD_LINUX -j$(nproc)
 RUN cmake --install $CLANG_BUILD_LINUX
     
+# should it be passed as an argument?
+ADD ./llvm-project.patch $LLVM_DIR/
+RUN cd $LLVM_DIR/llvm-project; \
+    # ad hoc: can't build without LIBCXX_HAS_MUSL_LIBC on alpine, and it will be configured.
+    #   but the tool will fail on ubuntu, because of missing "bits/alltypes.h"
+    git apply ../llvm-project.patch
+
 RUN mkdir $CLANG_BUILD_HEADERS; \
     cd $CLANG_BUILD_HEADERS; \
-    export CC=clang-18; export CXX=clang++-18; \
+    CC=clang-18 CXX=clang++-18 \
         cmake ../llvm-project/runtimes -GNinja \
         # -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=./install \
@@ -58,7 +65,7 @@ RUN mkdir $CLANG_BUILD_HEADERS; \
         -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
         -DCOMPILER_RT_BUILD_XRAY=OFF \
         -DLIBCXXABI_ENABLE_ASSERTIONS=OFF \
-        -DLIBCXXABI_ENABLE_EXCEPTIONS=OFF \
+        # -DLIBCXXABI_ENABLE_EXCEPTIONS=OFF \
         -DLIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS=OFF \
         -DLIBCXXABI_ENABLE_SHARED=OFF \
         -DLIBCXXABI_ENABLE_THREADS=OFF \
@@ -66,19 +73,16 @@ RUN mkdir $CLANG_BUILD_HEADERS; \
         -DLIBCXXABI_INSTALL_LIBRARY=OFF \
         -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
         -DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF \
-        -DLIBCXX_ENABLE_FILESYSTEM=OFF \
+        # -DLIBCXX_ENABLE_FILESYSTEM=OFF \
         -DLIBCXX_ENABLE_SHARED=OFF \
         -DLIBCXX_ENABLE_STATIC=OFF \
-        -DLIBCXX_HAS_MUSL_LIBC=ON \
+        # -DLIBCXX_HAS_MUSL_LIBC=ON \ # handled by llvm-project.patch
         -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
         -DLIBCXX_INCLUDE_TESTS=OFF \
         -DLIBCXX_INSTALL_LIBRARY=OFF \
         -DLLVM_BUILD_RUNTIME=OFF \
     && cmake --build . -j$(nproc) \
     && cmake --install . \
-    # ad hoc: can't build without LIBCXX_HAS_MUSL_LIBC on alpine, and it will be configured.
-    #   but the tool will fail on ubuntu, because of missing "bits/alltypes.h"
-    && sed -i '/^#define _LIBCPP_HAS_MUSL_LIBC$/s/.*/\/\* #undef _LIBCPP_HAS_MUSL_LIBC\*\//' ./install/include/c++/v1/__config_site \
     && cp -r ./install/include/* $CLANG_BUILD_LINUX/install/lib/clang/*/include \
     &&:
 

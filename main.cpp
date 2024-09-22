@@ -160,7 +160,11 @@ bool is_header_file(std::string_view filename) {
 
 namespace actions {
 
-struct aggregated {
+// utility to aggregate several actions that will be run during `runInvocation` call
+// doesn't take ownership of the actions
+// expects `std::tuple<actions...>&` as input, where `bool action::operator()(aggregated_t::input)`
+struct aggregated_t {
+  // struct to aggregate parameters
   struct input {
     const std::shared_ptr<clang::CompilerInvocation> &compiler_invocation;
     clang::FileManager *files;
@@ -206,7 +210,7 @@ struct aggregated {
 struct print_files_progress {
   size_t total;
   size_t processing;
-  bool operator()(const aggregated::input &i) {
+  bool operator()(const aggregated_t::input &i) {
     // invocation is run on a single file. This is not obvious, but apparently
     // it is how it works
     const auto &sourse_file =
@@ -221,7 +225,7 @@ struct print_files_progress {
 template <typename Configure>
 struct configure_compiler_invocation {
   Configure c;
-  bool operator()(aggregated::input i) const {
+  bool operator()(aggregated_t::input i) const {
     return c(*i.compiler_invocation);
   }
 };
@@ -274,11 +278,11 @@ struct ast_action {
   size_t processed = 0;
   std::function<void(size_t)> n_processing{};
 
-  bool operator()(aggregated::input i) {
+  bool operator()(aggregated_t::input i) {
     if (n_processing)
       n_processing(processed + 1);
 
-    // todo: go go Matchers
+    // fixme: apparently this is function does not fail
     std::unique_ptr<ASTUnit> ast = ASTUnit::LoadFromCompilerInvocation(i.compiler_invocation,
       i.pch_cont_ops,
       clang::CompilerInstance::createDiagnostics(&i.compiler_invocation->getDiagnosticOpts(),
@@ -286,7 +290,7 @@ struct ast_action {
         /*ShouldOwnClient=*/false),
       i.files);
 
-    if (!ast)
+    if (ast->getDiagnostics().hasUnrecoverableErrorOccurred())
       return false;
 
     action(*ast);
@@ -683,15 +687,8 @@ int main(int argc, char **argv) {
         [&](clang::CompilerInvocation &c) {
           // todo: configure
 
-          // fixme: I have no idea at this point why other compiler's header paths are added here
-          std::erase_if(c.getHeaderSearchOpts().UserEntries,
-            [](const clang::HeaderSearchOptions::Entry &e) {
-              return clang::frontend::IncludeDirGroup::System == e.Group
-                && e.Path.find("omnirefl") == e.Path.npos;
-            });
-
           // for some reason this doesn't have any effect if set up here, unlike the paths'
-          // modifications below 
+          // modifications below
           // c.getHeaderSearchOpts().ResourceDir = resource_dir.getValue();
 
           // todo: path from cli, since it is architecture dependent
@@ -745,7 +742,7 @@ int main(int argc, char **argv) {
   // todo: try to set them in `configure_compiler_invocation`
   tool.appendArgumentsAdjuster(clang::tooling::getInsertArgumentAdjuster(
     {
-    // for some reason it will only work from here
+      {"-nostdinc++"}, // prevents from picking up on another compiler's C++ std libs
       {"-resource-dir=" + resource_dir.getValue()},
       // {"-isystem" + resource_dir.getValue() + "/include/c++/v1"},
       // // todo: this should be configured at runtime!
@@ -753,9 +750,9 @@ int main(int argc, char **argv) {
     },
     clang::tooling::ArgumentInsertPosition::BEGIN));
 
-  // fixme: this actually doesn't fail, even with `fatal error:`
+  // fixme: use descriptive errors
   if (const int error = tool.run(&ref)) {
-    llvm::errs() << "Failed to build asts with error: " << error;
+    llvm::errs() << "Failed to build ASTs with error: " << error;
     return error;
   }
 

@@ -3,16 +3,53 @@
 /**
  * This is a default implementation using rapidyaml library.
  */
+#if __cplusplus >= 201703L
+#  define HAS_CPP17
+#endif
+
+#ifdef HAS_CPP17
+#  include <optional>
+#  include <string_view>
+#  include <variant>
+
+namespace omni {
+template <typename T>
+using optional = std::optional<T>;
+
+template <typename CharT, typename Traits>
+using basic_string_view = std::basic_string_view<CharT, Traits>;
+using std::string_view;
+
+template <typename... T>
+using variant = std::variant<T...>;
+using std::visit;
+} // namespace omni
+#else
+#  include <mpark/variant.hpp>
+#  include <nonstd/string_view.hpp>
+#  include <tl/optional.hpp>
+
+namespace omni {
+template <typename... T>
+using variant = mpark::variant<T...>;
+using mpark::visit;
+
+template <typename CharT, typename Traits>
+using basic_string_view = nonstd::basic_string_view<CharT, Traits>;
+using nonstd::string_view;
+
+template <typename T>
+using optional = tl::optional<T>;
+} // namespace omni
+#endif
 
 #include <algorithm>
 #include <cstdint>
 #include <map>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <variant>
 #include <vector>
 
 #include <ryml/ryml.hpp>
@@ -24,6 +61,14 @@
 namespace {
 namespace impl {
 
+template <typename... Ts>
+struct make_void {
+  typedef void type;
+};
+
+template <typename... Ts>
+using void_t = typename make_void<Ts...>::type;
+
 // todo: error should be more readable
 template <typename T>
 constexpr auto mem_vars = [] { static_assert(!sizeof(T), "mem_vars is not specialized"); };
@@ -32,7 +77,7 @@ template <typename, typename = void>
 struct is_reflected: std::false_type {};
 
 template <typename T>
-struct is_reflected<T, std::void_t<std::tuple_size<decltype(mem_vars<T>)>>>: std::true_type {};
+struct is_reflected<T, void_t<std::tuple_size<decltype(mem_vars<T>)>>>: std::true_type {};
 
 template <typename>
 struct is_vector: std::false_type {};
@@ -51,11 +96,11 @@ struct mem_refl {
   using value_type = M;
 
   M T::*mem_ptr;
-  std::string_view name;
+  omni::string_view name;
 };
 
 template <typename T, typename M>
-mem_refl(M T::*, std::string_view) -> mem_refl<T, M>;
+mem_refl(M T::*, omni::string_view) -> mem_refl<T, M>;
 
 template <typename T, typename... M>
 constexpr std::tuple<mem_refl<T, M>...> make_reflect(mem_refl<T, M>... m) {
@@ -65,8 +110,8 @@ constexpr std::tuple<mem_refl<T, M>...> make_reflect(mem_refl<T, M>... m) {
 
 template <typename... T>
 struct mem_var {
-  std::string_view name;
-  std::variant<T *...> ptr;
+  omni::string_view name;
+  omni::variant<T *...> ptr;
 };
 
 // todo: implement for type erasure
@@ -117,7 +162,7 @@ bool is_real(const ryml::ConstNodeRef &n) {
 template <typename To>
 tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &to) noexcept {
   static_assert(!std::is_pointer_v<To>);
-  constexpr auto to_string_view = [](c4::csubstr s) -> std::string_view {
+  constexpr auto to_string_view = [](c4::csubstr s) -> omni::string_view {
     return {s.data(), s.size()};
   };
   using _to = std::decay_t<To>;
@@ -129,11 +174,11 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
       [to_string_view](const ryml::ConstNodeRef &from,
         To &to,
         bool valid,
-        std::string_view err) -> result {
+        omni::string_view err) -> result {
       const auto val = from.val();
       const auto _val = to_string_view(val);
       if (!valid)
-        return tl::unexpected(std::string(_val) + err.data());
+        return tl::make_unexpected(std::string(_val) + err.data());
 
       using c4::from_chars;
       from_chars(val, &to);
@@ -154,26 +199,26 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
   } else if constexpr (is<std::basic_string, _to>()) {
     // todo: is_string()
     if (!from.is_val_quoted()) {
-      return tl::unexpected(std::string(to_string_view(from.val())) + " is not a string");
+      return tl::make_unexpected(std::string(to_string_view(from.val())) + " is not a string");
     }
     to = std::string(to_string_view(from.val()));
     return {};
   } else if constexpr (is<std::vector, _to>::value) {
     // todo: is_array
     if (!from.is_seq()) {
-      return tl::unexpected(std::string(to_string_view(from.key())) + " is not an array");
+      return tl::make_unexpected(std::string(to_string_view(from.key())) + " is not an array");
     }
     to.reserve(from.num_children());
     for (const ryml::ConstNodeRef &c : from.children()) {
       auto res = deserialize(c, to.emplace_back());
       if (!res)
-        return tl::unexpected(std::move(res).error());
+        return tl::make_unexpected(std::move(res).error());
     }
     return {};
   } else if constexpr (is<object, _to>()) {
     // todo: is_map
     if (!from.is_map()) {
-      return tl::unexpected(std::string(to_string_view(from.key())) + " is not a dictionary");
+      return tl::make_unexpected(std::string(to_string_view(from.key())) + " is not a dictionary");
     }
 
     // todo: bitsets + custom allocator + profile
@@ -188,37 +233,37 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
     // todo: support for aliased fields, preferrably without modifying the original json
     for (const ryml::ConstNodeRef &c : from.children()) {
       if (visited.size() == n_visited) {
-        return tl::unexpected("unknown field '" + std::string(to_string_view(c.key())) + "'");
+        return tl::make_unexpected("unknown field '" + std::string(to_string_view(c.key())) + "'");
       }
 
       const auto name = to_string_view(c.key());
       const auto mv = std::lower_bound(mem_vars.cbegin(),
         mem_vars.cend(),
         name,
-        [](const auto &m, std::string_view name) { return m.name < name; });
+        [](const auto &m, omni::string_view name) { return m.name < name; });
 
       if (mv == mem_vars.cend() || mv->name != name) {
-        return tl::unexpected("unknown field '" + std::string(name) + "'");
+        return tl::make_unexpected("unknown field '" + std::string(name) + "'");
       }
 
       if (auto &v = visited[std::distance(mem_vars.cbegin(), mv)]; v) {
-        return tl::unexpected("duplicate field '" + std::string(name) + "'");
+        return tl::make_unexpected("duplicate field '" + std::string(name) + "'");
       } else {
         v = true;
         ++n_visited;
       }
 
-      auto res = std::visit(
+      auto res = omni::visit(
         [&c](auto *mem_var) -> tl::expected<void, std::string> {
           auto res = deserialize(c, *mem_var);
           if (!res)
-            return tl::unexpected(std::move(res).error());
+            return tl::make_unexpected(std::move(res).error());
           return {};
         },
         mv->ptr);
 
       if (!res)
-        return tl::unexpected(std::move(res).error());
+        return tl::make_unexpected(std::move(res).error());
     }
 
     if (visited.size() > n_visited) {
@@ -228,26 +273,26 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
           unvisited += (!unvisited.empty() ? ", " : "") + std::string(mem_vars[i].name);
       }
 
-      return tl::unexpected("missing fields: " + unvisited);
+      return tl::make_unexpected("missing fields: " + unvisited);
     }
 
     return {};
-  } else if constexpr (is<std::variant, _to>()) {
+  } else if constexpr (is<omni::variant, _to>()) {
     // todo: support for std::variant
     // we can't distinguish between custom user-defined type without providing additional context
     // via arguments or type traits, which would complicate the logic of this function.
     // hense, only the common types should be supported here, and composition should be used outside
     // to further figure-out custom user-defined classes
-    return tl::unexpected("variant support is not implemented");
-  } else if constexpr (is<std::optional, _to>()) {
+    return tl::make_unexpected("variant support is not implemented");
+  } else if constexpr (is<omni::optional, _to>()) {
     // todo: implement
     // in order to distinguish between the unspecified field or explicit `null` a union of 3 types
     // should be used: undefined, null, value
-    return tl::unexpected("optioinal support is not implemented");
+    return tl::make_unexpected("optioinal support is not implemented");
   } else if constexpr (is<std::map, _to>()) {
     // todo: not only std::map, but preferrably flat_map
     // todo: implement
-    return tl::unexpected("map support is not implemented");
+    return tl::make_unexpected("map support is not implemented");
   } else if constexpr (is_reflected<_to>()) {
     // todo: implement nested type erasure
     auto _obj = std::apply(
@@ -258,7 +303,7 @@ tl::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from, To &
       mem_vars<_to>);
     auto res = deserialize(from, _obj);
     if (!res)
-      return tl::unexpected(std::move(res).error());
+      return tl::make_unexpected(std::move(res).error());
 
     return {};
   } else {
@@ -287,7 +332,7 @@ tl::expected<T, std::string> deserialize(const ryml::ConstNodeRef &n) {
   T out;
 
   if (auto res = deserialize(n, out); !res)
-    return tl::unexpected(std::move(res).error());
+    return tl::make_unexpected(std::move(res).error());
   // todo: implement
   return {std::move(out)};
 }

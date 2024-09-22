@@ -7,3 +7,12 @@
 [submodule "lib/rapidyaml"]
 	path = lib/rapidyaml
 	url = git@github.com:biojppm/rapidyaml.git
+[submodule "lib/variant"]
+	path = lib/variant
+	url = https://github.com/mpark/variant.git
+[submodule "lib/optional"]
+	path = lib/optional
+	url = https://github.com/TartanLlama/optional.git
+[submodule "lib/string-view-lite"]
+	path = lib/string-view-lite
+	url = https://github.com/martinmoene/string-view-lite.git

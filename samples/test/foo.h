@@ -1,8 +1,9 @@
 #pragma once
 
 #include <string>
-#include <tuple>
-#include <variant>
+// fixme: older systems don't have C++17 support. 
+// #include <tuple>
+// #include <variant>
 #include <vector>
 
 // do not call serialization for this function directly, it should be generated when `bar` is
@@ -36,10 +37,12 @@ struct _1 {
 struct _2 {
   double b;
 };
-// call deserialization, dependent types should be detected
-struct s {
-  std::variant<_1, _2> v;
-};
+
+// fixme: older systems don't have support for c++17
+// // call deserialization, dependent types should be detected
+// struct s {
+//   std::variant<_1, _2> v;
+// };
 } // namespace dependent_types_variant
 
 // todo: nested structs

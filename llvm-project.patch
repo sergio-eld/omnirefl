@@ -1,0 +1,18 @@
+diff --git a/libcxx/include/__config_site.in b/libcxx/include/__config_site.in
+index 67022146c..f9648be26 100644
+--- a/libcxx/include/__config_site.in
++++ b/libcxx/include/__config_site.in
+@@ -31,6 +31,13 @@
+ #cmakedefine _LIBCPP_HAS_NO_STD_MODULES
+ #cmakedefine _LIBCPP_HAS_NO_TIME_ZONE_DATABASE
+ #cmakedefine _LIBCPP_INSTRUMENTED_WITH_ASAN
++// todo: check for wsl
++#if !defined(_LIBCPP_HAS_MUSL_LIBC)
++#  if __has_include(<bits/alltypes.h>)
++#    define _LIBCPP_HAS_MUSL_LIBC
++#  endif // __has_include(<bits/alltypes.h>)
++#endif // !defined(_LIBCPP_HAS_MUSL_LIBC)
++
+ 
+ // PSTL backends
+ #cmakedefine _LIBCPP_PSTL_BACKEND_SERIAL

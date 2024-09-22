@@ -8,6 +8,7 @@ RUN apt update \
         build-essential \
         clang \
         g++ \
+        git \
         libgtest-dev \
         neovim \
         ninja-build \

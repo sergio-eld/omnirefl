@@ -6,8 +6,18 @@
 #include <ryml/ryml.hpp>
 #include <tl/expected.hpp>
 
+#include <type_traits>
+
 namespace omni {
 namespace detail {
+template <typename... Ts>
+struct make_void {
+  typedef void type;
+};
+
+template <typename... Ts>
+using void_t = typename make_void<Ts...>::type;
+
 struct _noop;
 // todo: second arg
 void serialize(_noop, _noop);
@@ -17,7 +27,7 @@ template <typename, typename = void>
 struct serialize_implemented_by_user: std::false_type {};
 
 template <typename T>
-struct serialize_implemented_by_user<T, std::void_t<decltype(serialize(std::declval<const T>()))>>:
+struct serialize_implemented_by_user<T, void_t<decltype(serialize(std::declval<const T>()))>>:
     std::true_type {};
 
 template <typename, typename, typename = void>
@@ -26,7 +36,7 @@ struct deserialize_implemented_by_user: std::false_type {};
 template <typename Data, typename T>
 struct deserialize_implemented_by_user<Data,
   T,
-  std::void_t<decltype(deserialize(std::declval<const Data>(), std::declval<T &>()))>>:
+  void_t<decltype(deserialize(std::declval<const Data>(), std::declval<T &>()))>>:
     std::true_type {};
 } // namespace detail
 
@@ -92,7 +102,7 @@ class deserialize_t {
     auto res = (*this)(data, *to);
     if (res)
       return to;
-    return tl::unexpected(std::move(res).error());
+    return tl::make_unexpected(std::move(res).error());
   }
 
   private:

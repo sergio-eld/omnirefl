@@ -54,13 +54,14 @@ TEST(ryml, deserialize_with_vector) {
   }
 }
 
-// todo: enable when implemented
-TEST(ryml, DISABLED_deserialize_with_variant) {
-  const auto res = omni::deserialize.to<dependent_types_variant::s>(ryml::parse_in_arena( //
-    R"({"v": {"b": 108}})"));
-  ASSERT_TRUE(res) << res.error();
-  // todo: implement deserialization for std::variant and check
-}
+// fixme: older systems don't have support for c++17
+// // todo: enable when implemented
+// TEST(ryml, DISABLED_deserialize_with_variant) {
+//   const auto res = omni::deserialize.to<dependent_types_variant::s>(ryml::parse_in_arena( //
+//     R"({"v": {"b": 108}})"));
+//   ASSERT_TRUE(res) << res.error();
+//   // todo: implement deserialization for std::variant and check
+// }
 
 // todo: test and benchmark serialization
 //   - user-defined serialization function
