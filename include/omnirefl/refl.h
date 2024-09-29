@@ -9,11 +9,8 @@
 #  define OMNI_CONSTEXPR
 #endif
 
-// default implementation for `iteration 1`
-#include <ryml/ryml.hpp>
-#include <tl/expected.hpp>
-
 #include <type_traits>
+#include <utility>
 
 // todo: iteration 2
 //  - remove default implementation
@@ -73,7 +70,7 @@ struct reflected_call_t {
   private:
   // implementation will be generated for this function by omnirefl
   template <typename Impl, typename... Args>
-  static void _impl(Impl &&impl, Args &&...args);
+  static void _call_impl(Impl &&impl, Args &&...args);
 } const inline reflected_call;
 
 template <typename>
@@ -87,6 +84,10 @@ OMNI_CONSTEXPR reflected_t<T> reflected(T &&t) noexcept {
 } // namespace omni
 
 // todo: remove in iteration 2
+// default implementation for `iteration 1`
+#include <ryml/ryml.hpp>
+#include <tl/expected.hpp>
+
 namespace omni {
 namespace detail {
 template <typename... Ts>

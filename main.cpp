@@ -3,7 +3,7 @@
 // - ast caching (?)
 // - run queries on the ast and output the code
 
-#include "fmt/os.h"
+#include "fmt/base.h"
 #include <fmt/format.h>
 #include <tl/expected.hpp>
 #include <variant>
@@ -35,7 +35,6 @@
 #pragma GCC diagnostic pop
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -46,7 +45,6 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -106,56 +104,8 @@ bool is_header_file(std::string_view filename) {
 }
 } // namespace util
 
+// todo: does this namespace make sense now?
 namespace actions {
-
-// todo: do I _really_ need it? The only userful thing it provides is grouping the arguments to
-// `input` utility to aggregate several actions that will be run during `runInvocation` call doesn't
-// take ownership of the actions expects `std::tuple<actions...>&` as input, where `bool
-// action::operator()(aggregated_t::input)` refactorme: better name. When declaring function
-// argument `aggregated_t::input` it is not obvious what `aggregated_t` is
-struct aggregated_t {
-  // struct to aggregate parameters
-  struct input {
-    const std::shared_ptr<clang::CompilerInvocation> &compiler_invocation;
-    clang::FileManager *files;
-    const std::shared_ptr<clang::PCHContainerOperations> &pch_cont_ops;
-    clang::DiagnosticConsumer *diag_cons;
-  };
-
-  template <typename... A>
-  auto operator()(std::tuple<A...> &actions) const noexcept {
-    struct _impl: clang::tooling::ToolAction {
-      _impl(std::tuple<A...> &actions): _actions(actions) {
-      }
-      std::tuple<A...> &_actions;
-
-      private:
-      bool runInvocation(std::shared_ptr<clang::CompilerInvocation> inv,
-        clang::FileManager *files,
-        std::shared_ptr<clang::PCHContainerOperations> pch_cont_ops,
-        clang::DiagnosticConsumer *diag_cons) override {
-        return std::apply(
-          [&](auto &...actions) -> bool {
-            bool res = true;
-            ((res =
-                 // todo: don't force this interface upon the actions. Use
-                 // `operator()` instead + Context arg
-               actions(input{
-                 .compiler_invocation = inv,
-                 .files = files,
-                 .pch_cont_ops = pch_cont_ops,
-                 .diag_cons = diag_cons,
-               }))
-              && ...);
-            return res;
-          },
-          _actions);
-      }
-    };
-
-    return _impl(actions);
-  }
-} const inline aggregated{};
 
 // aggregated arguments of clang tool's `runInvocation` function
 struct clang_tool_input {
@@ -222,10 +172,9 @@ struct disable_pch_and_warnings {
   void operator()(clang::CompilerInvocation &ci) {
     // createInvocationFromCommandLine sets DisableFree.
     ci.getFrontendOpts().DisableFree = false;
-    // todo: ifdef based on clang verion
+    // todo: ifdef based on clang version, otherwise these code results in compilation errors
     // ci.getLangOpts()->CommentOpts.ParseAllComments = true;
     // ci.getLangOpts()->RetainCommentsFromSystemHeaders = true;
-    // todo: configure the resoulrce dir
 
     [](auto &diag) {
       diag.Warnings.clear();
@@ -266,6 +215,7 @@ struct match_reflections_ast {
       std::optional<std::string> error = std::nullopt;
 
       void run(const matchers::MatchFinder::MatchResult &mresult) override {
+        fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
         // todo: handle errors
         //  - tag has been found but type mismatches
         const auto add_node = [this](auto n) {
@@ -383,6 +333,7 @@ struct map_matches {
     std::vector<std::variant<matched_reflection, matched_reflected_call>> matches) const noexcept {
     tl::expected<context, std::string> result{tl::in_place};
     for (const auto &m : matches) {
+      (void)m;
       // if (const auto *struct_decl =
       //       result.Nodes.getNodeAs<clang::CXXRecordDecl>(context::k_struct_decl)) {
       //   const std::string name = struct_decl->getQualifiedNameAsString();
@@ -521,7 +472,7 @@ struct map_matches {
   };
 };
 
-tl::expected<context, std::string> update(context _current, context delta) noexcept {
+tl::expected<context, std::string> update(context _current, context /*delta*/) noexcept {
   tl::expected<context, std::string> result{std::move(_current)};
 
   // todo: implement
@@ -554,7 +505,7 @@ struct emit_code_t {
     std::vector<context::func_signature> reflected_calls;
   };
 
-  static tl::expected<reflection_data, std::string> prepare_input(context ctx) noexcept {
+  static tl::expected<reflection_data, std::string> prepare_input(context) noexcept {
     tl::expected<reflection_data, std::string> result{tl::in_place};
     // std::unordered_set<std::string> resolved;
     // std::vector<_resolved_type> result;
@@ -830,7 +781,7 @@ int main(int argc, char **argv) {
 
       if (ast->getDiagnostics().hasUnrecoverableErrorOccurred()) {
         // todo: filename and diagnostics
-        ctx = tl::unexpected("failed to parse AST");
+        ctx = tl::unexpected(std::string("failed to parse AST"));
         return false;
       }
       // refactorme: list of template arguments here will cause a lot of problems, because the order
@@ -903,7 +854,7 @@ int main(int argc, char **argv) {
     return -1;
   }
 
-  std::cout << "Generating file: " << output_file << std::endl;
+  fmt::println("Generating file: {}\n", output_file);
   std::ofstream f{std::filesystem::path{output_file.getValue()}, std::ios::binary};
   if (const auto res = emit_code(
         {
@@ -1073,7 +1024,7 @@ std::vector<std::string> resolve_types_field_depends_on(const clang::FieldDecl &
 
 // todo: unit test
 tl::expected<void, std::string>
-  emit_code_t::operator()(options opts, std::ostream &os, const reflection_data &data) const {
+  emit_code_t::operator()(options /*opts*/, std::ostream &os, const reflection_data &data) const {
   os << "// This file has been generated by omnirefl tool (todo: timestamp, data, etc)."
         "\n// Do not modify this file manually.\n";
 

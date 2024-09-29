@@ -7,10 +7,11 @@
 
 // todo: implement
 int main() {
-  std::vector<std::string> result;
   const example_types::person p{
     "JohnCena",
     47,
     "You can't see me",
   };
+  std::vector<std::string> result;
+  omni::reflected_call(example_impl::print_field_names, p, result);
 }
