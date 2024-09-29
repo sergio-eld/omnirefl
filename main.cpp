@@ -55,6 +55,25 @@ namespace matchers = clang::ast_matchers;
 using clang::ASTUnit;
 
 namespace util {
+
+template <typename>
+constexpr const std::tuple<> list_types = {};
+
+template <template <typename...> class Template, typename... Types>
+constexpr const auto list_types<Template<Types...>> = std::tuple{std::type_identity<Types>{}...};
+
+template <typename T, typename Variant>
+constexpr const size_t type_index = std::apply(
+  []<typename... Ts>(std::type_identity<Ts>...) {
+    constexpr const std::array _table{std::is_same_v<T, Ts>...};
+    for (size_t i = 0; i < _table.size(); ++i)
+      if (_table[i])
+        return i;
+
+    return size_t(-1);
+  },
+  list_types<Variant>);
+
 namespace str {
 struct is_empty {
   constexpr bool operator()(std::string_view s) const {
@@ -328,12 +347,50 @@ struct context {
   std::vector<func_signature> reflected_calls;
 };
 
-struct map_matches {
+struct fold_matches {
   tl::expected<context, std::string> operator()(
     std::vector<std::variant<matched_reflection, matched_reflected_call>> matches) const noexcept {
     tl::expected<context, std::string> result{tl::in_place};
+
     for (const auto &m : matches) {
-      (void)m;
+      using var_type = std::decay_t<decltype(m)>;
+      switch (m.index()) {
+      case util::type_index<matched_reflection, var_type>: {
+        const clang::ClassTemplateSpecializationDecl &decl =
+          *std::get<util::type_index<matched_reflection, var_type>>(m).node;
+        const std::string_view struct_name = decl.getName();
+
+        // omni::detail::_reflected_impl<T>
+        if ("_reflected_impl" == struct_name) {
+          //  todo:
+          //      collect type info + include path
+          break;
+        }
+
+        // omni::detail::_reflected_type<T>
+        if ("_reflected_type" == struct_name) {
+          //  todo:
+          //      collect type info + include path
+          //      collect field types + include paths
+          //      if has trait `value_type`, recursivelly collect type info
+          break;
+        }
+
+        // here may be:
+        // todo: implement
+        break;
+      }
+      case util::type_index<matched_reflected_call, var_type>: {
+        // todo:
+        //   collect argument types and names, also their includes, (? if possible)
+        // todo: implement
+        break;
+      }
+
+      default:
+        break;
+      }
+
       // if (const auto *struct_decl =
       //       result.Nodes.getNodeAs<clang::CXXRecordDecl>(context::k_struct_decl)) {
       //   const std::string name = struct_decl->getQualifiedNameAsString();
@@ -792,7 +849,7 @@ int main(int argc, char **argv) {
         return false;
       }
 
-      auto ctx_delta = map_matches{}(std::move(matches).value());
+      auto ctx_delta = fold_matches{}(std::move(matches).value());
       if (!ctx_delta) {
         ctx = tl::unexpected(std::move(ctx_delta).error());
         return false;
