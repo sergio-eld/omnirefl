@@ -40,6 +40,9 @@ set(OPTIONAL_BUILD_TESTS OFF)
 add_subdirectory(lib/optional EXCLUDE_FROM_ALL)
 add_subdirectory(lib/string-view-lite EXCLUDE_FROM_ALL)
 
+set(FMT_INSTALL OFF)
+add_subdirectory(lib/fmt EXCLUDE_FROM_ALL)
+
 find_package(Python COMPONENTS Interpreter REQUIRED)
 set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
 set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
@@ -96,7 +99,8 @@ target_link_libraries(tool PRIVATE
     # clangAST
     # clangASTMatchers
     clangTooling # todo: get rid of this
-    tl::expected)
+    tl::expected
+    fmt::fmt)
 target_link_static_crt(tool)
 set_target_properties(tool PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -128,6 +132,10 @@ if (ENABLE_TESTING)
     target_include_directories(test.impl_ryml PRIVATE samples/test)
     target_link_libraries(test.impl_ryml PRIVATE GTest::gtest)
     add_test(NAME test.impl_ryml COMMAND test.impl_ryml)
+
+    add_executable(test.field_names samples/test/simple/field_names.cpp)
+    reflected_target(test.field_names)
+    target_include_directories(test.field_names PRIVATE samples/test)
 
     # todo: add test for failure
 endif()

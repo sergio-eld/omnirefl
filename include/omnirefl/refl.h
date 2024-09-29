@@ -2,12 +2,91 @@
 
 // todo: copiright notice (MIT)
 
+#if __cplusplus >= 201703L
+#  define HAS_CPP17
+#  define OMNI_CONSTEXPR constexpr
+#else
+#  define OMNI_CONSTEXPR
+#endif
+
 // default implementation for `iteration 1`
 #include <ryml/ryml.hpp>
 #include <tl/expected.hpp>
 
 #include <type_traits>
 
+// todo: iteration 2
+//  - remove default implementation
+//  - provide `omni` utilities
+//  - should be compatible with at least C++11
+namespace omni {
+namespace detail {
+namespace {
+template <typename>
+struct _reflected_type {};
+
+template <typename>
+struct _reflected_impl {};
+} // namespace
+} // namespace detail
+
+/// meta function to register the type for reflection
+template <typename T>
+OMNI_CONSTEXPR void reflect(const T &) {
+  (void)detail::_reflected_type<typename std::decay<T>::type>{};
+}
+
+/// meta function to register the type for reflection
+template <typename T>
+OMNI_CONSTEXPR void reflect() {
+  (void)detail::_reflected_type<typename std::decay<T>::type>{};
+}
+
+/// meta function to register the type to be used as implementation
+template <typename T>
+OMNI_CONSTEXPR void use_impl(const T &) {
+  (void)detail::_reflected_impl<typename std::decay<T>::type>{};
+}
+
+/// meta function to register the type to be used as implementation
+template <typename T>
+OMNI_CONSTEXPR void use_impl() {
+  (void)detail::_reflected_impl<typename std::decay<T>::type>{};
+}
+
+// todo: infer `result_t` from Impl
+struct reflected_call_t {
+  template <typename Impl, typename T>
+  void operator()(Impl &&impl, T &&t) const {
+    use_impl(impl);
+    reflect(t);
+    _call_impl(std::forward<Impl>(impl), std::forward<T>(t));
+  }
+
+  template <typename Impl, typename T, typename R>
+  void operator()(Impl &&impl, T &&t, R &result) const {
+    use_impl(impl);
+    reflect(t);
+    _call_impl(std::forward<Impl>(impl), std::forward<T>(t), result);
+  }
+
+  private:
+  // implementation will be generated for this function by omnirefl
+  template <typename Impl, typename... Args>
+  static void _impl(Impl &&impl, Args &&...args);
+} const inline reflected_call;
+
+template <typename>
+struct reflected_t;
+
+template <typename T>
+OMNI_CONSTEXPR reflected_t<T> reflected(T &&t) noexcept {
+  return reflected_t<typename std::decay<T>::type>{t};
+}
+
+} // namespace omni
+
+// todo: remove in iteration 2
 namespace omni {
 namespace detail {
 template <typename... Ts>
@@ -18,7 +97,7 @@ struct make_void {
 template <typename... Ts>
 using void_t = typename make_void<Ts...>::type;
 
-struct _noop;
+struct _noop {};
 // todo: second arg
 void serialize(_noop, _noop);
 void deserialize(_noop, _noop);

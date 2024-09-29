@@ -16,3 +16,6 @@
 [submodule "lib/string-view-lite"]
 	path = lib/string-view-lite
 	url = https://github.com/martinmoene/string-view-lite.git
+[submodule "lib/fmt"]
+	path = lib/fmt
+	url = https://github.com/fmtlib/fmt.git
