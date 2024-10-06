@@ -14,4 +14,6 @@ int main() {
   };
   std::vector<std::string> result;
   omni::reflected_call(example_impl::print_field_names, p, result);
+
+  return 0;
 }

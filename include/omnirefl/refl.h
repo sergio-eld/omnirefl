@@ -3,7 +3,7 @@
 // todo: copiright notice (MIT)
 
 #if __cplusplus >= 201703L
-#  define HAS_CPP17
+#  define OMNI_HAS_CPP17
 #  define OMNI_CONSTEXPR constexpr
 #else
 #  define OMNI_CONSTEXPR
@@ -11,6 +11,17 @@
 
 #include <type_traits>
 #include <utility>
+#ifdef OMNI_HAS_CPP17
+#  include <variant>
+namespace omni {
+using std::variant;
+}
+#else
+#  include <mpark/variant.hpp>
+namespace omni {
+using mpark::variant;
+}
+#endif
 
 // todo: iteration 2
 //  - remove default implementation
@@ -73,6 +84,10 @@ struct reflected_call_t {
   static void _call_impl(Impl &&impl, Args &&...args);
 } const inline reflected_call;
 
+} // namespace omni
+
+namespace {
+namespace omni {
 template <typename>
 struct reflected_t;
 
@@ -80,8 +95,9 @@ template <typename T>
 OMNI_CONSTEXPR reflected_t<T> reflected(T &&t) noexcept {
   return reflected_t<typename std::decay<T>::type>{t};
 }
-
 } // namespace omni
+} // namespace
+
 
 // todo: remove in iteration 2
 // default implementation for `iteration 1`

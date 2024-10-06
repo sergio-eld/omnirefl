@@ -5,6 +5,8 @@
 
 #include "fmt/base.h"
 #include <fmt/format.h>
+#include <numeric>
+#include <stack>
 #include <tl/expected.hpp>
 #include <variant>
 
@@ -227,7 +229,7 @@ struct disable_pch_and_warnings {
 
 // this is an adaptor interface to allow folding the AST into the list of matches
 template <typename... Matchers>
-struct match_reflections_ast {
+struct fold_ast_to_matches {
   tl::expected<std::vector<std::variant<Matchers...>>, std::string> operator()(ASTUnit &ast) const {
     struct: matchers::MatchFinder::MatchCallback {
       std::vector<std::variant<Matchers...>> result;
@@ -303,8 +305,8 @@ struct matched_reflected_call {
 // structure that collects and saves intermediate state from several ASTs
 struct context {
   // flags for definition properties
+  // these are used to determine violated limitations when using the tool
   enum type_definition_flags {
-    // no flags has been set
     none = 0x0,
     // unnamed structure
     unnamed = 0x1,
@@ -317,6 +319,7 @@ struct context {
   };
 
   struct type_definition {
+    // refactorme: name is redundant. store it either only here or only in `definitions` map
     // fully namespace-qualified type name
     std::string name;
     fs::path source_file;
@@ -328,6 +331,10 @@ struct context {
 
     // fully namespace-qualified type
     std::string qualified_type;
+
+    // todo: I don't know how this can be useful, since there's a simple workaround for accessing
+    // bit fields without a member pointer
+    // bool is_bitfield;
   };
 
   struct func_arg {
@@ -340,200 +347,426 @@ struct context {
     std::vector<func_arg> args;
   };
 
+  // todo: profile and optimize
   // definitions for reflected types and implementations
-  std::unordered_map<std::string /*qualified_type*/, type_definition> definitions;
-  std::unordered_map<std::string /*qualified_type*/, std::vector<field_data>> reflected_types;
-  std::vector<std::string /*qualified_type*/> reflected_implementations;
+  std::unordered_map<std::string /*namespace_qualified_type*/, type_definition> definitions;
+
+  // todo: is it possible to have unresolved reflected types between ASTs? as of this writing - no,
+  // because we assume that forward declarations are not allowed. however, if intermediate forward
+  // declarations are allowed (defined in different AST), we should add a container to track them
+  std::unordered_map<std::string /*namespace_qualified_type*/, std::vector<field_data>>
+    reflected_types;
+
+  std::set<std::string /*namespace_qualified_type*/> reflected_implementations;
   std::vector<func_signature> reflected_calls;
+
+  // todo: profile and optimize with flat_set
+  // unique list of std headers. used for reflecting std containers and aggregated types like
+  // `std::tuple`, `std::variant`, `std::optional` and any other standard type that wraps a
+  // reflected type and defines `type` or `value_type` trait
+  std::set<std::string> std_includes;
 };
 
-struct fold_matches {
-  tl::expected<context, std::string> operator()(
-    std::vector<std::variant<matched_reflection, matched_reflected_call>> matches) const noexcept {
-    tl::expected<context, std::string> result{tl::in_place};
+// because stupid dap-ui doesn't show unordered_maps
+void print_debug(const context &ctx) {
+  fmt::println("debug: reflected_implementations: {}", ctx.reflected_implementations.size());
+  for (const auto &i : ctx.reflected_implementations)
+    fmt::println("  {}", i);
+  fmt::println("debug: reflected_types: {}", ctx.reflected_types.size());
+  for (const auto &i : ctx.reflected_types)
+    fmt::println("  {}", i.first);
+}
 
+struct fold_matches_to_context {
+  using result_type = tl::expected<context, std::string>;
+
+  const ASTUnit &ast;
+  result_type operator()(
+    std::vector<std::variant<matched_reflection, matched_reflected_call>> matches) const noexcept {
+    result_type r{tl::in_place};
     for (const auto &m : matches) {
+      // todo: better type matching api
       using var_type = std::decay_t<decltype(m)>;
       switch (m.index()) {
       case util::type_index<matched_reflection, var_type>: {
-        const clang::ClassTemplateSpecializationDecl &decl =
+        const clang::ClassTemplateSpecializationDecl &template_decl =
           *std::get<util::type_index<matched_reflection, var_type>>(m).node;
-        const std::string_view struct_name = decl.getName();
+        const std::string_view detail_struct_name = template_decl.getName();
+        const auto &template_args_list = template_decl.getTemplateArgs();
+
+        // todo: error if template_args_list is empty
+        const clang::TemplateArgument &first_arg = template_args_list.get(0);
+        if (clang::TemplateArgument::ArgKind::Type != first_arg.getKind()) {
+          return tl::unexpected(
+            fmt::format("non-type template argument `0` of {}", detail_struct_name));
+        }
+        const clang::Type &first_arg_type = *first_arg.getAsType().getTypePtr();
+        // todo: handle checks for `clang::Type::is...`
+        // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
+        //       allowed
+        if (!first_arg_type.isStructureOrClassType()) {
+          return tl::unexpected(fmt::format("unsupported type {} in {}",
+            first_arg_type.getTypeClassName(),
+            detail_struct_name));
+        }
 
         // omni::detail::_reflected_impl<T>
-        if ("_reflected_impl" == struct_name) {
-          //  todo:
-          //      collect type info + include path
-          break;
+        if ("_reflected_impl" == detail_struct_name) {
+          // type declaration of <T>
+          const clang::CXXRecordDecl &rdecl = *first_arg_type.getAsCXXRecordDecl();
+          // as of this writing there's a "fixme" to remove `std::string`, but it is not clear
+          // whether a new type will be used or another function should be called
+          const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
+          // fixme: do not use definitions, because reflected types also use them, but field info
+          // should be collected only for reflected types
+          if (r->definitions.contains(nm_qual_type))
+            continue;
+
+          r->definitions[nm_qual_type] =
+            resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
+          r->reflected_implementations.emplace(nm_qual_type);
+          // todo: should we allow wrapped types (using value_type trait)?
+          continue;
         }
 
         // omni::detail::_reflected_type<T>
-        if ("_reflected_type" == struct_name) {
-          //  todo:
-          //      collect type info + include path
-          //      collect field types + include paths
-          //      if has trait `value_type`, recursivelly collect type info
-          break;
+        if ("_reflected_type" == detail_struct_name) {
+          // type declaration of <T>
+          const clang::CXXRecordDecl &first_arg_decl = *first_arg_type.getAsCXXRecordDecl();
+          const std::string first_arg_nm_qual_type = first_arg_decl.getQualifiedNameAsString();
+          if (r->reflected_types.contains(first_arg_nm_qual_type))
+            continue;
+
+          // recursivelly collected types (including self)
+          const std::vector<const clang::RecordDecl *> types =
+            dfs_fold_reflected_types(first_arg_decl, r->reflected_types);
+
+          for (const clang::RecordDecl *_rdecl : types) {
+            const auto &rdecl = *_rdecl;
+            const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
+
+            if (rdecl.isInStdNamespace()) {
+              // todo: std include path should not be absolute
+              r->std_includes.emplace(
+                util::get_declaration_source_file(rdecl, ast.getSourceManager()));
+            } else {
+              assert(!r->definitions.contains(nm_qual_type));
+              r->definitions[nm_qual_type] =
+                resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
+            }
+
+            // refactorme: this code is duplicated when collecting types, but whatever
+            r->reflected_types.emplace(nm_qual_type,
+              [](const auto &_fields) -> std::vector<context::field_data> {
+                std::vector<context::field_data> r;
+                for (const clang::FieldDecl *fd : _fields) {
+                  // todo: logging for skipped fields, since we are not reporting them as errors
+                  // todo: checks that would prevent the field from being reflected (uniouns,
+                  // bitfields, what else?)
+                  if (clang::AccessSpecifier::AS_public != fd->getAccess())
+                    continue;
+                  r.push_back({
+                    .name = fd->getNameAsString(),
+                    .qualified_type = fd->getQualifiedNameAsString(),
+                  });
+                }
+                return r;
+              }(rdecl.fields()));
+          }
+
+          continue;
         }
 
-        // here may be:
-        // todo: implement
-        break;
+        continue;
       }
       case util::type_index<matched_reflected_call, var_type>: {
         // todo:
         //   collect argument types and names, also their includes, (? if possible)
         // todo: implement
+        // const auto get_param_types =
+        //     [this, &sm = *result.SourceManager](const auto &params) {
+        //       const static auto printing_policy = [] {
+        //         clang::PrintingPolicy p{{}};
+        //         p.SuppressTagKeyword = true;
+        //         p.SuppressScope = false;
+        //         p.PrintCanonicalTypes = true;
+
+        //         return p;
+        //       }();
+
+        //       const auto get_struct_field_names = [](const clang::ParmVarDecl *p)
+        //           -> std::optional<std::vector<std::string>> {
+        //         const clang::RecordDecl *rd =
+        //             p->getType().getNonReferenceType()->getAsRecordDecl();
+        //         if (!rd)
+        //           return std::nullopt;
+
+        //         // todo: handle forward delcarations
+        //         // todo: more specific logic
+        //         if (!rd->isStruct() || !rd->isThisDeclarationADefinition())
+        //           return std::nullopt;
+
+        //         std::vector<std::string> names;
+        //         // todo: there should be checks for correct podd-like types at
+        //         some
+        //         // point
+        //         for (const clang::FieldDecl *d : rd->fields())
+        //           names.push_back(d->getNameAsString());
+
+        //         return {std::move(names)};
+        //       };
+
+        //       std::vector<context::func_data::arg_data> args;
+        //       args.reserve(params.size());
+
+        //       for (const clang::ParmVarDecl *p : params) {
+        //         auto _split = p->getType().getNonReferenceType().split();
+        //         _split.Quals.removeCVRQualifiers();
+        //         args.push_back({
+        //             .cvr_qualified_type = p->getType().getAsString(),
+        //             .scoped_type =
+        //                 clang::QualType::getAsString(_split, printing_policy),
+        //         });
+        //         const auto &arg_type = args.back().scoped_type;
+        //         if (auto s = _c.structs.find(arg_type); s == _c.structs.cend()) {
+        //           auto fnames = get_struct_field_names(p);
+        //           if (fnames)
+        //             _c.structs.insert(
+        //                 {arg_type,
+        //                  {
+        //                      .declaration_file =
+        //                          util::get_declaration_source_file(*p, sm),
+        //                      .field_names = std::move(fnames).value(),
+        //                  }});
+        //         }
+        //       }
+        //       return args;
+        //     };
         break;
       }
 
       default:
         break;
       }
-
-      // if (const auto *struct_decl =
-      //       result.Nodes.getNodeAs<clang::CXXRecordDecl>(context::k_struct_decl)) {
-      //   const std::string name = struct_decl->getQualifiedNameAsString();
-      //   if (_c.definitions.contains(name))
-      //     return;
-      //   if (auto d = resolve_definiton(*static_cast<const clang::RecordDecl *>(struct_decl),
-      //         *result.SourceManager)) {
-      //     _c.definitions[name] = std::move(d).value();
-      //   }
-
-      //   return;
-      // }
-
-      // const auto *requested_impl_decl =
-      // result.Nodes.getNodeAs<clang::CXXRecordDecl>(context::k_impl); const auto *user_type_param
-      // =
-      //   result.Nodes.getNodeAs<clang::ParmVarDecl>(context::reflected_type::matcher_binding);
-      // const auto *serialization_type_param =
-      //   result.Nodes.getNodeAs<clang::ParmVarDecl>(context::serialization_type::matcher_binding);
-
-      // if (const auto [found, expected] =
-      //       [](const auto *...n) {
-      //         return std::pair{(size_t(nullptr != n) + ...), sizeof...(n)};
-      //       }(requested_impl_decl, user_type_param, serialization_type_param);
-      //     found != expected) {
-      //   llvm::errs() << "unexpected case: " << found << '/' << expected << " nodes found\n";
-      //   return;
-      // }
-
-      // const auto requested_impl_type = resolve_requested_impl_type(*requested_impl_decl);
-      // if (!requested_impl_type) {
-      //   llvm::errs() << "unexpected error: failed to resolve requested implementation\n";
-      //   return;
-      // }
-
-      // auto user_type = resolve_reflected_type(*user_type_param, *requested_impl_type);
-      // // auto serialization_type =
-      // //   resolve_serialization_type(*serialization_type_param, *requested_impl_type);
-      // if (!user_type /*|| !serialization_type*/) {
-      //   llvm::errs() << (user_type ? "" : "failed to resolve user provided type\n");
-      //   // llvm::errs() << (serialization_type ? "" : "failed to resolve serialization type\n");
-
-      //   return;
-      // }
-
-      // _c.reflected_types.push_back(std::move(user_type).value());
-      // todo: implement in the next iterations
-      // _c.serialization_types.push_back(std::move(serialization_type).value());
-
-      // todo: implement
-
-      // const auto func = result.Nodes.getNodeAs<clang::FunctionDecl>(kFuncName);
-      // if (!func)
-      //   return;
-
-      // // todo: (debug) remove or disable
-      // print_func_decl(func);
-
-      // const auto add_func = [this, is_definition =
-      //                                  func->hasBody()](context::func_data d) {
-      //   is_definition ? _c.definitions.push_back(std::move(d))
-      //                 : _c.declarations.push_back(std::move(d));
-      // };
-
-      // // todo: not capture this... this is rather unclear
-      // const auto get_param_types =
-      //     [this, &sm = *result.SourceManager](const auto &params) {
-      //       const static auto printing_policy = [] {
-      //         clang::PrintingPolicy p{{}};
-      //         p.SuppressTagKeyword = true;
-      //         p.SuppressScope = false;
-      //         p.PrintCanonicalTypes = true;
-
-      //         return p;
-      //       }();
-
-      //       const auto get_struct_field_names = [](const clang::ParmVarDecl *p)
-      //           -> std::optional<std::vector<std::string>> {
-      //         const clang::RecordDecl *rd =
-      //             p->getType().getNonReferenceType()->getAsRecordDecl();
-      //         if (!rd)
-      //           return std::nullopt;
-
-      //         // todo: handle forward delcarations
-      //         // todo: more specific logic
-      //         if (!rd->isStruct() || !rd->isThisDeclarationADefinition())
-      //           return std::nullopt;
-
-      //         std::vector<std::string> names;
-      //         // todo: there should be checks for correct podd-like types at
-      //         some
-      //         // point
-      //         for (const clang::FieldDecl *d : rd->fields())
-      //           names.push_back(d->getNameAsString());
-
-      //         return {std::move(names)};
-      //       };
-
-      //       std::vector<context::func_data::arg_data> args;
-      //       args.reserve(params.size());
-
-      //       for (const clang::ParmVarDecl *p : params) {
-      //         auto _split = p->getType().getNonReferenceType().split();
-      //         _split.Quals.removeCVRQualifiers();
-      //         args.push_back({
-      //             .cvr_qualified_type = p->getType().getAsString(),
-      //             .scoped_type =
-      //                 clang::QualType::getAsString(_split, printing_policy),
-      //         });
-      //         const auto &arg_type = args.back().scoped_type;
-      //         if (auto s = _c.structs.find(arg_type); s == _c.structs.cend()) {
-      //           auto fnames = get_struct_field_names(p);
-      //           if (fnames)
-      //             _c.structs.insert(
-      //                 {arg_type,
-      //                  {
-      //                      .declaration_file =
-      //                          util::get_declaration_source_file(*p, sm),
-      //                      .field_names = std::move(fnames).value(),
-      //                  }});
-      //         }
-      //       }
-      //       return args;
-      //     };
-
-      // add_func({
-      //     .declaration_file = get_declaration_source_file(
-      //         *func, *result.SourceManager), // todo: get
-      //     .qualified_name = func->getQualifiedNameAsString(),
-      //     .return_type = func->getReturnType().getAsString(),
-      //     .args = get_param_types(func->parameters()),
-      // });
-      // todo: implement
     }
-    return result;
+    return r;
+  };
+
+  private:
+  static context::type_definition resolve_definition(
+    // namespace-qualified typename is needed before the call to this function to check whether
+    // the definition has been already resolved
+    std::string qual_typename,
+    const clang::RecordDecl &rd,
+    const clang::SourceManager &sm) noexcept {
+    using td_flags = context::type_definition_flags;
+    std::string source_file = util::get_declaration_source_file(rd, sm);
+    const td_flags td_unnamed = td_flags::none; // todo:
+    const td_flags td_local = td_flags::none; // todo:
+    const td_flags td_in_cpp =
+      util::is_header_file(source_file) ? td_flags::none : td_flags::in_cpp;
+
+    return {
+      .name = std::move(qual_typename),
+      .source_file = std::move(source_file),
+      .definition_flags = td_flags(td_unnamed | td_local | td_in_cpp),
+    };
+  };
+
+  // types of interest for recursive reflection:
+  //   - value_type: std containers, std wrappers, std::optional
+  //   - key_type: std containers
+  //   - type: std::reference_wrapper
+  struct _member_typedef_decl {
+    std::string_view name;
+    clang::QualType qual_type;
+  };
+
+  static std::vector<_member_typedef_decl> member_typedefs(const clang::RecordDecl &rd) noexcept {
+    // todo: use `filter`
+    std::vector<_member_typedef_decl> r;
+    r.reserve(std::accumulate(rd.decls_begin(),
+      rd.decls_end(),
+      size_t(0),
+      [](size_t s, const clang::Decl *d) -> size_t {
+        const clang::Decl::Kind k = d->getKind();
+        return s + (clang::Decl::TypeAlias == k || clang::Decl::Typedef == k);
+      }));
+
+    for (const clang::Decl *_d : rd.decls()) {
+      const clang::Decl::Kind k = _d->getKind();
+      if (clang::Decl::TypeAlias != k && clang::Decl::Typedef != k)
+        continue;
+
+      const auto &d = *llvm::cast<clang::TypedefNameDecl>(_d);
+      r.push_back({
+        .name = d.getName(),
+        .qual_type = d.getUnderlyingType(),
+      });
+    }
+    return r;
+  };
+
+  /// fold AST from root to a vector of unique declarations that are not already present in
+  /// `reflected_types_map`
+  static std::vector<const clang::RecordDecl *>
+    dfs_fold_reflected_types(const clang::CXXRecordDecl &root, const auto &reflected_types_map) {
+    std::set<const clang::RecordDecl *> visited;
+    std::stack<const clang::RecordDecl *> stack;
+    stack.push(&root);
+
+    while (!stack.empty()) {
+      const clang::RecordDecl *cur = stack.top();
+      stack.pop();
+      const std::string _debug_nm_qual_type = cur->getQualifiedNameAsString();
+      if (visited.contains(cur) || reflected_types_map.contains(cur->getQualifiedNameAsString()))
+        continue;
+      // not generating reflection info for std types, at least for now, at least here...
+      if (!cur->isInStdNamespace())
+        visited.emplace(cur);
+
+      // we allow recursive reflection via certain member typedefs
+      for (const _member_typedef_decl &md : util::filtered(
+             [](const _member_typedef_decl &m) -> bool {
+               const static std::set<std::string_view> aliases{{
+                 "key_type",
+                 "value_type",
+                 "value",
+               }};
+               return !aliases.contains(m.name);
+             },
+             member_typedefs(*cur))) {
+        if (md.qual_type->isStructureOrClassType())
+          stack.push(md.qual_type->getAsRecordDecl());
+      }
+
+      // ad hoc solution. in c++ code template trait types can be used, but I don't know if
+      // it is possible to get from parsed ast
+      // I could, however, capture such types in `omni::detail`...
+      if (clang::Decl::ClassTemplateSpecialization == cur->getKind() &&
+          [](std::string_view name) -> bool { return "tuple" == name || "variant" == name; }(
+                                      cur->getName())) {
+        const auto arg_list = clang::cast<clang::ClassTemplateSpecializationDecl>(cur)
+                                ->getTemplateInstantiationArgs()
+                                .asArray();
+        if (1 != arg_list.size() || clang::TemplateArgument::Pack != arg_list.front().getKind()) {
+          // todo: log? this should not happen
+        } else {
+          for (const clang::TemplateArgument &t_arg : arg_list.front().getPackAsArray()) {
+            // not a type pack
+            if (clang::TemplateArgument::Type != t_arg.getKind())
+              break;
+
+            const clang::QualType qt = t_arg.getAsType();
+            if (qt->isRecordType())
+              stack.push(qt->getAsRecordDecl());
+          }
+        }
+      }
+
+      for (const clang::FieldDecl *fd : cur->fields()) {
+        if (clang::AccessSpecifier::AS_public != fd->getAccess()
+          // todo: other checks that would prevent the field from being
+          // reflected (uniouns, bitfields, what else?)
+          || fd->isUnnamedBitField())
+          continue;
+
+        const clang::QualType qt = fd->getType();
+        if (!qt->isStructureOrClassType())
+          continue;
+
+        // implement: support only non-static fields
+        stack.push(clang::cast<clang::RecordDecl>(qt->getAsRecordDecl()));
+      }
+    }
+
+    return {visited.cbegin(), visited.cend()};
   };
 };
 
-tl::expected<context, std::string> update(context _current, context /*delta*/) noexcept {
-  tl::expected<context, std::string> result{std::move(_current)};
+tl::expected<context, std::string> update(context _current, context delta) noexcept {
+  tl::expected<context, std::string> r{std::move(_current)};
+  fmt::println("current:");
+  print_debug(*r);
+  fmt::println("delta:");
+  print_debug(delta);
 
-  // todo: implement
-  return result;
+  // in-place utility
+  const auto merge_with_conflicts_check =
+    []<typename K, typename T>(std::unordered_map<K, T> first,
+      std::unordered_map<K, T> second,
+      // (const K&, const T&, const T&) -> std::optional<std::string> error
+      auto cmp) -> tl::expected<std::unordered_map<K, T>, std::string> {
+    for (auto node = second.begin(); node != second.end();) {
+      auto &&[k, v] = *node;
+      const auto found = first.find(k);
+      if (found == first.cend()) {
+        first.insert(second.extract(node++));
+        continue;
+      }
+      if (auto err = cmp(k, v, found->second))
+        return tl::unexpected(std::move(err).value());
+      ++node;
+    }
+    return {std::move(first)};
+  };
+
+  if (auto merged = merge_with_conflicts_check(std::move(r->definitions),
+        std::move(delta.definitions),
+        [](std::string_view qual_typename,
+          const context::type_definition &lhs,
+          const context::type_definition &rhs) -> std::optional<std::string> {
+          if (lhs.source_file != rhs.source_file) {
+            return fmt::format("found different locations for type {} definition: {}, {}",
+              qual_typename,
+              lhs.source_file.string(),
+              rhs.source_file.string());
+          }
+          if (lhs.definition_flags != rhs.definition_flags) {
+            return fmt::format("found different definition flags for type {} definition: {}, {}",
+              qual_typename,
+              // todo: stringify
+              int(lhs.definition_flags),
+              int(rhs.definition_flags));
+          }
+          return std::nullopt;
+        })) {
+    r->definitions = std::move(merged).value();
+  } else
+    return tl::unexpected(std::move(merged).error());
+
+  if (auto merged = merge_with_conflicts_check(std::move(r->reflected_types),
+        std::move(delta.reflected_types),
+        [](std::string_view qual_typename,
+          const std::vector<context::field_data> &lhs,
+          const std::vector<context::field_data> &rhs) -> std::optional<std::string> {
+          if (!std::equal(lhs.cbegin(),
+                lhs.cend(),
+                rhs.cbegin(),
+                [](const context::field_data &lhs, const context::field_data &rhs) -> bool {
+                  return lhs.qualified_type == rhs.qualified_type;
+                })) {
+            // todo: print detailed info on fields that differ
+            return fmt::format("found different data member types for type {}", qual_typename);
+          }
+          return std::nullopt;
+        })) {
+    r->reflected_types = std::move(merged).value();
+  } else
+    return tl::unexpected(std::move(merged).error());
+
+  r->reflected_implementations.merge(std::move(delta.reflected_implementations));
+
+  r->reflected_calls.reserve(r->reflected_calls.size() + delta.reflected_calls.size());
+  r->reflected_calls.insert(r->reflected_calls.end(),
+    std::make_move_iterator(delta.reflected_calls.begin()),
+    std::make_move_iterator(delta.reflected_calls.end()));
+
+  r->std_includes.merge(std::move(delta.std_includes));
+
+  fmt::println("current updated:");
+  print_debug(*r);
+  return r;
 };
 
 struct emit_code_t {
@@ -549,74 +782,151 @@ struct emit_code_t {
       std::vector<std::string> field_names;
     };
 
+    // todo: profile and optimize (std::set -> std::vector)
+    // list of unique header paths (non-reflection)
+    std::set<std::string> includes;
+
     // list of unique header paths or reflected types' headers
-    std::vector<fs::path> refl_includes;
+    std::set<fs::path> refl_includes;
 
     // list of unique header paths or reflected implementations' headers
-    std::vector<fs::path> refl_impl_includes;
+    std::set<std::string> refl_impl_includes;
 
     // list of unique reflected types
-    std::vector<reflected_type> reflected_types;
+    std::set<reflected_type,
+      decltype([](const reflected_type &lhs, const reflected_type &rhs) -> bool {
+        // types are unique
+        return lhs.name < rhs.name;
+      })>
+      reflected_types;
 
     // list of unique reflected call function signatures
     std::vector<context::func_signature> reflected_calls;
   };
 
-  static tl::expected<reflection_data, std::string> prepare_input(context) noexcept {
-    tl::expected<reflection_data, std::string> result{tl::in_place};
-    // std::unordered_set<std::string> resolved;
-    // std::vector<_resolved_type> result;
+  static tl::expected<reflection_data, std::string> prepare_input(context ctx) noexcept {
+    tl::expected<reflection_data, std::string> r{tl::in_place};
+    // todo: validate input
 
-    // // fixme: condition to stop. Only user-defined structures need to be resolved
-    // const auto resolve_fields =
-    //   [&resolved, &definitions = i.definitions, &result](auto resolve_fields,
-    //     const _resolved_type &rt) -> tl::expected<void, std::string> {
-    //   for (const auto &field : rt.definition.fields) {
-    //     for (const auto &depends_on_type : field.types_to_reflect) {
-    //       if (resolved.contains(depends_on_type))
-    //         continue;
-    //       const auto d = definitions.find(depends_on_type);
-    //       // fixme:
-    //       if (d == definitions.cend())
-    //         continue; // return tl::unexpected("unresolved definition for type: " +
-    //         f.qualified_type);
-    //       const auto &rf = result.emplace_back(_resolved_type{
-    //         .type =
-    //           {
-    //             .name = depends_on_type,
-    //             .requested_implementation = rt.type.requested_implementation,
-    //           },
-    //         .definition = d->second,
-    //       });
-    //       resolved.emplace(rf.type.name);
-    //       if (auto res = resolve_fields(resolve_fields, rf); !res)
-    //         return res;
-    //     }
-    //   }
+    r->includes = {std::make_move_iterator(ctx.std_includes.begin()),
+      std::make_move_iterator(ctx.std_includes.end())};
 
-    //   return {};
-    // };
+    for (const auto &[nm_qual_type, fields] : ctx.reflected_types) {
+      const auto definition = ctx.definitions.find(nm_qual_type);
+      if (definition == ctx.definitions.cend())
+        return tl::unexpected(fmt::format("no definition for reflected type {}", nm_qual_type));
 
-    // for (auto &&t : i.user_types) {
-    //   const auto d = i.definitions.find(t.name);
-    //   // fixme: no way to distinguish which types should be reflected, and which not...
-    //   //   at this point definitions will not contain the std definitions, and they are not
-    //   needed if (d == i.definitions.cend())
-    //     continue; // return tl::unexpected("unresolved definition for type: " + t.name);
+      r->refl_includes.emplace(definition->second.source_file);
+      r->reflected_types.insert({
+        .name = nm_qual_type,
+        .field_names =
+          [](const std::vector<context::field_data> &fields) -> std::vector<std::string> {
+          std::vector<std::string> r;
+          r.reserve(fields.size());
+          std::transform(fields.cbegin(),
+            fields.cend(),
+            std::back_inserter(r),
+            [](const context::field_data &fd) { return fd.name; });
+          return r;
+        }(fields),
+      });
+    }
 
-    //   const auto &rt = result.emplace_back(_resolved_type{
-    //     .type = std::move(t),
-    //     .definition = d->second,
-    //   });
-    //   if (auto res = resolve_fields(resolve_fields, rt); !res)
-    //     return res;
-    // }
-    // todo: implement
-    return result;
+    for (const auto &nm_qual_type : ctx.reflected_implementations) {
+      const auto definition = ctx.definitions.find(nm_qual_type);
+      if (definition == ctx.definitions.cend())
+        return tl::unexpected(
+          fmt::format("no definition for reflected implementation type {}", nm_qual_type));
+      const auto &sf = definition->second.source_file;
+      if (!r->refl_includes.contains(sf))
+        r->refl_impl_includes.emplace(sf);
+    }
+
+    std::set unique_func_signatures{std::make_move_iterator(ctx.reflected_calls.begin()),
+      std::make_move_iterator(ctx.reflected_calls.end()),
+      [](const context::func_signature &lhs, const context::func_signature &rhs) -> bool {
+        // because c++ std is UGLEEEEEEE
+        return std::lexicographical_compare(lhs.args.cbegin(),
+          lhs.args.cend(),
+          rhs.args.cbegin(),
+          rhs.args.cend(),
+          [](const context::func_arg &lhs, const context::func_arg &rhs) -> bool {
+            return lhs.qual_type < rhs.qual_type;
+          });
+      }};
+
+    r->reflected_calls = {std::make_move_iterator(unique_func_signatures.begin()),
+      std::make_move_iterator(unique_func_signatures.end())};
+
+    return r;
   }
 
   tl::expected<void, std::string>
-    operator()(options, std::ostream &, const reflection_data &) const;
+    operator()(options, std::ostream &os, const reflection_data &data) const {
+    os << "// This file has been generated by omnirefl tool (todo: timestamp, data, etc)."
+          "\n// Do not modify this file manually.\n";
+
+    os << "\n#include <omnirefl/refl.h>";
+
+    // todo: source paths should not be absolute.
+    //    use `options::target_include_paths` to resolve relative paths.
+    os << "\n\n// Headers of reflected types";
+    for (const fs::path &p : data.refl_includes)
+      os << fmt::format("\n#include \"{}\"", p.string());
+
+    os << "\n\n// Headers of reflected implementations";
+    for (const auto &p : data.refl_impl_includes)
+      os << fmt::format("\n#include \"{}\"", p);
+
+    // todo: write implementation
+    os << "\n\n// Generated specializations for types' reflection";
+    os << "\nnamespace {";
+    for (const auto &[reflected_type, field_names] : data.reflected_types) {
+      // refactorme: use fmt
+      // todo: use ctx
+      os << fmt::format(
+        "\ntemplate <>"
+        "\nstruct omni::reflected_t<{}> {{",
+        // todo: use fmt to print fields
+        reflected_type);
+      size_t n = 0;
+      const size_t last_field = field_names.size() - 1;
+      // refactorme: use fmt
+      for (const auto &field : field_names) {
+        const std::string_view before = 0 == n ? "" : "\n    ";
+        const std::string_view after = last_field != n ? "," : "";
+        os << before << "impl::mem_refl{"
+           << "&" << reflected_type << "::" << field << ", \"" << field << "\"}" << after;
+        ++n;
+      }
+      os << ");";
+    }
+    os << "\n} // namespace\n";
+
+    os << "\n// Generated implementations for reflected calls";
+    for (const context::func_signature &func_sig : data.reflected_calls) {
+      // refactorme: use fmt
+      os << "\ntemplate<>"
+            "\nvoid omni::reflected_call_t::_impl(";
+      size_t n = 0;
+      for (const auto &[arg_type, arg_name] : func_sig.args) {
+        os << (0 < n++ ? ",\n  " : "");
+        os << fmt::format("{} {}", arg_type, arg_name);
+      }
+      os << ") {"
+         << "\n"
+         << func_sig.args.front().name << "(";
+      for (size_t i = 1; i < func_sig.args.size(); ++i) {
+        os << (1 < i ? ", " : "");
+        os << func_sig.args[i].name;
+      }
+
+      os << ");\n}\n";
+    }
+
+    os << '\n';
+    return {};
+  }
 } const inline emit_code{};
 
 // clang-format off
@@ -843,13 +1153,13 @@ int main(int argc, char **argv) {
       }
       // refactorme: list of template arguments here will cause a lot of problems, because the order
       // must be specified exactly like in other places
-      auto matches = match_reflections_ast<matched_reflection, matched_reflected_call>{}(*ast);
+      auto matches = fold_ast_to_matches<matched_reflection, matched_reflected_call>{}(*ast);
       if (!matches) {
         ctx = tl::unexpected(std::move(matches).error());
         return false;
       }
 
-      auto ctx_delta = fold_matches{}(std::move(matches).value());
+      auto ctx_delta = fold_matches_to_context{.ast = *ast}(std::move(matches).value());
       if (!ctx_delta) {
         ctx = tl::unexpected(std::move(ctx_delta).error());
         return false;
@@ -937,214 +1247,10 @@ const static auto printing_policy = [] {
   return p;
 }();
 
-// todo: take implementation from here
-// std::optional<context::implementation_type> resolve_requested_impl_type(
-//   const clang::CXXRecordDecl &rd) {
-//   if (rd.isStruct()) {
-//     // todo: unit test
-//     // todo: what about allowing classes with public fields? Clarify the
-//     // requirements.
-//     llvm::errs() << "Only C++ struct can be serialized/deserialized\n";
-//     return std::nullopt;
-//   }
-//
-//   static const auto _printing_policy = [](clang::PrintingPolicy p) {
-//     p.SuppressScope = true;
-//     return p;
-//   }(printing_policy);
-//   auto _split = rd.getTypeForDecl()->getCanonicalTypeUnqualified().getNonReferenceType().split();
-//   _split.Quals.removeCVRQualifiers();
-//   const std::string name = clang::QualType::getAsString(_split, _printing_policy);
-//   if (context::k_serialize == name)
-//     return context::implementation_type::serialized;
-//   if (context::k_deserialize == name)
-//     return context::implementation_type::deserialized;
-//
-//   llvm::errs() << "Unexpected requested implementation type: " << name << "\n";
-//   return std::nullopt;
-// }
-
 std::string resolve_qualified_name(const clang::QualType &qt) {
   auto _split = qt.getNonReferenceType().split();
   _split.Quals.removeCVRQualifiers();
   return clang::QualType::getAsString(_split, printing_policy);
 };
-
-std::vector<std::string> resolve_types_field_depends_on(const clang::FieldDecl &fd) {
-  const auto has_value_type = [](const clang::CXXRecordDecl &rd) -> std::optional<clang::QualType> {
-    for (const auto *d : rd.decls()) {
-      if (const auto *alias_decl = llvm::dyn_cast<clang::TypedefNameDecl>(d);
-          alias_decl && alias_decl->getName() == "value_type") {
-        return alias_decl->getUnderlyingType();
-      }
-    }
-    return std::nullopt;
-  };
-
-  const auto resolve_types = [has_value_type](auto resolve_types,
-                               const clang::QualType &qtype,
-                               std::vector<std::string> types) -> std::vector<std::string> {
-    const clang::CXXRecordDecl *rdecl = qtype->getAsCXXRecordDecl();
-    if (!rdecl)
-      return types;
-
-    const bool is_std_type = rdecl->isInStdNamespace();
-    if (!is_std_type && rdecl->isStruct())
-      types.emplace_back(resolve_qualified_name(qtype));
-
-    if (auto value_type = has_value_type(*rdecl))
-      return resolve_types(resolve_types, *value_type, std::move(types));
-
-    // naive implementation
-    // todo: find a way to support tuple-like and variant-like types
-    if (const auto &[type_name, templ_type] =
-          std::tuple{
-            rdecl->getName(),
-            llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(rdecl),
-          };
-        is_std_type && ("tuple" == type_name || "variant" == type_name) && templ_type) {
-      const auto arg_list = templ_type->getTemplateInstantiationArgs().asArray();
-      if (arg_list.size() != 1 || arg_list.front().getKind() != clang::TemplateArgument::Pack) {
-        // todo: log, this should not happen
-      } else {
-        for (const auto &t_arg : arg_list.front().getPackAsArray()) {
-          // todo: also check that `t_arg` is a Type
-          types = resolve_types(resolve_types, t_arg.getAsType(), std::move(types));
-        }
-      }
-    }
-
-    return types;
-  };
-
-  return resolve_types(resolve_types, fd.getType(), {});
-}
-
-// todo: take implementation from here
-// std::optional<context::type_definition> resolve_definiton(const clang::RecordDecl &rd,
-//   const clang::SourceManager &sm) {
-//   // todo: unit test for this case, where definition is not available yet
-//   if (!rd.isThisDeclarationADefinition())
-//     return std::nullopt;
-//
-//   const std::string source_file = util::get_declaration_source_file(rd, sm);
-//   return context::type_definition{
-//     .source_file = source_file,
-//     .fields =
-//       [fields = rd.fields()] {
-//         std::vector<context::field_data> v;
-//         v.reserve(std::distance(fields.begin(), fields.end()));
-//         for (const clang::FieldDecl *d : fields) {
-//           v.push_back({
-//             .name = d->getNameAsString(),
-//             .types_to_reflect = resolve_types_field_depends_on(*d),
-//           });
-//         }
-//         return v;
-//       }(),
-//     .definition_flags =
-//       [&rd, &source_file] {
-//         // todo: unit testing
-//         //    - ensure that parsing c++ structs initializes correct flags
-//         // refactorme: flags initialization here is uglee
-//         // todo: I am not sure the flags are correctly deduced
-//         using flags_t = context::type_definition_flags;
-//         flags_t flags{};
-//         if (!rd.hasNameForLinkage())
-//           flags = (flags_t)(flags | flags_t::unnamed);
-//
-//         if (rd.isInLocalScopeForInstantiation())
-//           flags = (flags_t)(flags | flags_t::local);
-//
-//         if (!util::is_header_file(source_file))
-//           flags = (flags_t)(flags | flags_t::in_cpp);
-//
-//         return flags;
-//       }(),
-//   };
-// };
-
-// todo: take implementation from here
-// std::optional<context::reflected_type> resolve_reflected_type(const clang::ParmVarDecl &pvd,
-//   context::implementation_type irt) {
-//   const clang::RecordDecl *rd = pvd.getType().getNonReferenceType()->getAsRecordDecl();
-//   if (!rd || !rd->isStruct()) {
-//     llvm::errs() << "Unexpected: non-struct user type found\n";
-//     return std::nullopt;
-//   }
-//
-//   return context::reflected_type{
-//     .name = resolve_qualified_name(pvd.getType()),
-//     .requested_implementation = irt,
-//   };
-// }
-
-// todo: unit test
-tl::expected<void, std::string>
-  emit_code_t::operator()(options /*opts*/, std::ostream &os, const reflection_data &data) const {
-  os << "// This file has been generated by omnirefl tool (todo: timestamp, data, etc)."
-        "\n// Do not modify this file manually.\n";
-
-  os << "\n#include <omnirefl/refl.h>";
-
-  // todo: source paths should not be absolute.
-  //    use `options::target_include_paths` to resolve relative paths.
-  os << "\n\n// Headers of reflected types";
-  for (const fs::path &p : data.refl_includes)
-    os << fmt::format("\n#include \"{}\"", p.string());
-
-  os << "\n\n// Headers of reflected implementations";
-  for (const fs::path &p : data.refl_impl_includes)
-    os << fmt::format("\n#include \"{}\"", p.string());
-
-  // todo: write implementation
-  os << "\n// Generated specializations for types' reflection";
-  os << "\nnamespace {";
-  for (const auto &[reflected_type, field_names] : data.reflected_types) {
-    // refactorme: use fmt
-    // todo: use ctx
-    os << fmt::format(
-      "\ntemplate <>"
-      "\nstruct omni::reflected_t<{}> {{",
-      // todo: use fmt to print fields
-      reflected_type);
-    size_t n = 0;
-    const size_t last_field = field_names.size() - 1;
-    // refactorme: use fmt
-    for (const auto &field : field_names) {
-      const std::string_view before = 0 == n ? "" : "\n    ";
-      const std::string_view after = last_field != n ? "," : "";
-      os << before << "impl::mem_refl{"
-         << "&" << reflected_type << "::" << field << ", \"" << field << "\"}" << after;
-      ++n;
-    }
-    os << ");";
-  }
-  os << "\n} // namespace\n";
-
-  os << "\n// Generated implementations for reflected calls";
-  for (const context::func_signature &func_sig : data.reflected_calls) {
-    // refactorme: use fmt
-    os << "\ntemplate<>"
-          "\nvoid omni::reflected_call_t::_impl(";
-    size_t n = 0;
-    for (const auto &[arg_type, arg_name] : func_sig.args) {
-      os << (0 < n++ ? ",\n  " : "");
-      os << fmt::format("{} {}", arg_type, arg_name);
-    }
-    os << ") {"
-       << "\n"
-       << func_sig.args.front().name << "(";
-    for (size_t i = 1; i < func_sig.args.size(); ++i) {
-      os << (1 < i ? ", " : "");
-      os << func_sig.args[i].name;
-    }
-
-    os << ");\n}\n";
-  }
-
-  os << '\n';
-  return {};
-}
 
 } // namespace

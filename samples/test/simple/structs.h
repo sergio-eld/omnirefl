@@ -30,5 +30,7 @@ struct person {
   int age;
   std::string catchprase{};
   std::vector<championship> titles{};
+
+  // todo: nested struct
 };
 } // namespace example_types
