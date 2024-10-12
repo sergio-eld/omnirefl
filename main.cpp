@@ -3,12 +3,10 @@
 // - ast caching (?)
 // - run queries on the ast and output the code
 
-#include "fmt/base.h"
 #include <fmt/format.h>
-#include <numeric>
-#include <stack>
+#include <fmt/ranges.h>
+#include <sstream>
 #include <tl/expected.hpp>
-#include <variant>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -43,12 +41,140 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <numeric>
 #include <optional>
+#include <stack>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
+
+namespace {
+namespace util {
+template <typename Container>
+constexpr auto indexed(Container &c) noexcept {
+  using _iter_type = decltype(std::begin(c));
+  using value_type = std::decay_t<decltype(*std::begin(c))>;
+  struct _ref {
+    std::size_t index;
+    const value_type &value;
+  };
+  struct _indexed_iter {
+    _iter_type _begin;
+    _iter_type _end;
+    _iter_type _iter = _begin;
+    std::size_t _index = 0;
+
+    constexpr _indexed_iter begin() const {
+      return {_begin, _end};
+    }
+    constexpr _indexed_iter end() const {
+      return {_begin, _end, _end};
+    }
+    constexpr _indexed_iter operator++() {
+      ++_iter;
+      ++_index;
+      return *this;
+    }
+    constexpr bool operator==(const _indexed_iter &other) const noexcept {
+      return _iter == other._iter;
+    }
+    constexpr bool operator!=(const _indexed_iter &other) const noexcept {
+      return _iter != other._iter;
+    }
+    constexpr _ref operator*() const {
+      return {_index, *_iter};
+    }
+  };
+  return _indexed_iter{std::begin(c), std::end(c)};
+}
+
+template <typename T, typename Format>
+struct with_fmt {
+  const T &value;
+  Format format;
+};
+
+template <typename T>
+struct _with_fmt_rng {
+  using _wrapped_value_type = decltype(*std::declval<const T &>().begin());
+  using _wrapped_iterator_type = decltype(std::declval<const T &>().begin());
+
+  constexpr static auto begin(const T &t) noexcept {
+    return std::begin(t);
+  }
+  constexpr static auto end(const T &t) noexcept {
+    return std::end(t);
+  }
+};
+
+template <typename T>
+struct _with_fmt_rng<std::reference_wrapper<T>> {
+  using _wrapped_value_type = decltype(*std::declval<const T &>().begin());
+  using _wrapped_iterator_type = decltype(std::declval<const T &>().begin());
+
+  constexpr static auto begin(std::reference_wrapper<T> t) noexcept {
+    return std::begin(t.get());
+  }
+  constexpr static auto end(std::reference_wrapper<T> t) noexcept {
+    return std::end(t.get());
+  }
+};
+
+template <typename T, typename Format>
+struct with_fmt_rng {
+  T value;
+  Format format;
+
+  // fixme: should not force `const` in `std::reference_wrapper<Format>`, but otherwise doesn't
+  // compile..
+  using value_type =
+    with_fmt<typename _with_fmt_rng<T>::_wrapped_value_type, std::reference_wrapper<const Format>>;
+  using _wrapped_iterator_type = typename _with_fmt_rng<T>::_wrapped_iterator_type;
+
+  struct iterator_type {
+    using value_type = with_fmt_rng::value_type;
+
+    _wrapped_iterator_type i;
+    std::reference_wrapper<const Format> format;
+    value_type operator*() const {
+      return {.value = *i, .format = format};
+    }
+    _wrapped_iterator_type operator++() {
+      return ++i;
+    }
+    bool operator==(const iterator_type &other) const {
+      return i == other.i;
+    }
+    bool operator!=(const iterator_type &other) const {
+      return i != other.i;
+    }
+  };
+
+  constexpr iterator_type begin() const {
+    return iterator_type{.i = _with_fmt_rng<T>::begin(value), .format = std::ref(format)};
+  }
+  constexpr iterator_type end() const {
+    return iterator_type{.i = _with_fmt_rng<T>::end(value), .format = std::ref(format)};
+  }
+};
+
+template <typename T, typename Format>
+with_fmt(const T &, Format) -> with_fmt<T, Format>;
+} // namespace util
+} // namespace
+
+template <typename T, typename Format, typename Char>
+struct fmt::formatter<util::with_fmt<T, Format>, Char> {
+  constexpr auto parse(fmt::format_parse_context &ctx) {
+    return ctx.begin();
+  }
+  constexpr static auto format(const util::with_fmt<T, Format> &uf, fmt::format_context &ctx) {
+    return uf.format(uf.value, ctx);
+  }
+};
 
 namespace {
 namespace fs = std::filesystem;
@@ -318,6 +444,12 @@ struct context {
     in_cpp = 0x1 << 2,
   };
 
+  enum ref_type_t {
+    ref_none,
+    ref_lval,
+    ref_rval,
+  };
+
   struct type_definition {
     // refactorme: name is redundant. store it either only here or only in `definitions` map
     // fully namespace-qualified type name
@@ -330,7 +462,7 @@ struct context {
     std::string name;
 
     // fully namespace-qualified type
-    std::string qualified_type;
+    std::string nm_qual_type;
 
     // todo: I don't know how this can be useful, since there's a simple workaround for accessing
     // bit fields without a member pointer
@@ -338,9 +470,12 @@ struct context {
   };
 
   struct func_arg {
+    // todo: better store qualifiers and the typename separatelly
     // fully cv and namespace-qualified type
-    std::string qual_type;
-    std::string name;
+    std::string cvr_qualified_type;
+    std::string nm_qual_type;
+    bool is_const : 1;
+    ref_type_t ref_type;
   };
 
   struct func_signature {
@@ -381,6 +516,7 @@ struct fold_matches_to_context {
   using result_type = tl::expected<context, std::string>;
 
   const ASTUnit &ast;
+
   result_type operator()(
     std::vector<std::variant<matched_reflection, matched_reflected_call>> matches) const noexcept {
     result_type r{tl::in_place};
@@ -406,6 +542,7 @@ struct fold_matches_to_context {
         //       allowed
         if (!first_arg_type.isStructureOrClassType()) {
           return tl::unexpected(fmt::format("unsupported type {} in {}",
+            // fixme: `getTypeClassName` doesn't do what I thought it does
             first_arg_type.getTypeClassName(),
             detail_struct_name));
         }
@@ -467,7 +604,7 @@ struct fold_matches_to_context {
                     continue;
                   r.push_back({
                     .name = fd->getNameAsString(),
-                    .qualified_type = fd->getQualifiedNameAsString(),
+                    .nm_qual_type = fd->getQualifiedNameAsString(),
                   });
                 }
                 return r;
@@ -480,73 +617,84 @@ struct fold_matches_to_context {
         continue;
       }
       case util::type_index<matched_reflected_call, var_type>: {
-        // todo:
-        //   collect argument types and names, also their includes, (? if possible)
-        // todo: implement
-        // const auto get_param_types =
-        //     [this, &sm = *result.SourceManager](const auto &params) {
-        //       const static auto printing_policy = [] {
-        //         clang::PrintingPolicy p{{}};
-        //         p.SuppressTagKeyword = true;
-        //         p.SuppressScope = false;
-        //         p.PrintCanonicalTypes = true;
+        const clang::CXXMethodDecl &refl_call_decl =
+          *std::get<util::type_index<matched_reflected_call, var_type>>(m).node;
+        context::func_signature &refl_call = r->reflected_calls.emplace_back();
+        refl_call.args.reserve(refl_call_decl.parameters().size());
 
-        //         return p;
-        //       }();
+        for (const clang::ParmVarDecl *parm_decl : refl_call_decl.parameters()) {
+          const auto &[type, is_const, ref_type] = //
+                                                   // refactorme: it can return `context::func_arg`
+            [](const clang::QualType &q) {
+              struct _r {
+                const clang::Type &type;
+                bool is_const;
+                context::ref_type_t ref_type;
+              };
+              if (q->isLValueReferenceType()) {
+                return _r{
+                  .type = *q->getPointeeType().getTypePtr(),
+                  .is_const = q->getPointeeType().isConstQualified(),
+                  .ref_type = context::ref_type_t::ref_lval,
+                };
+              }
+              if (q->isRValueReferenceType()) {
+                return _r{
+                  .type = *q->getPointeeType().getTypePtr(),
+                  .is_const = q->getPointeeType().isConstQualified(),
+                  .ref_type = context::ref_type_t::ref_rval,
+                };
+              }
+              return _r{
+                .type = *q,
+                .is_const = q.isConstQualified(),
+                .ref_type = context::ref_type_t::ref_none,
+              };
+            }(parm_decl->getType());
+          // todo: validate that the type is not a forward declaration, since they are not supported
+          // at this point
 
-        //       const auto get_struct_field_names = [](const clang::ParmVarDecl *p)
-        //           -> std::optional<std::vector<std::string>> {
-        //         const clang::RecordDecl *rd =
-        //             p->getType().getNonReferenceType()->getAsRecordDecl();
-        //         if (!rd)
-        //           return std::nullopt;
+          const static auto printing_policy = [] {
+            clang::PrintingPolicy p{{}};
+            p.SuppressTagKeyword = true;
+            p.SuppressScope = false;
+            p.PrintCanonicalTypes = true;
 
-        //         // todo: handle forward delcarations
-        //         // todo: more specific logic
-        //         if (!rd->isStruct() || !rd->isThisDeclarationADefinition())
-        //           return std::nullopt;
+            return p;
+          }();
+          refl_call.args.push_back({
+            // todo: remove
+            .cvr_qualified_type = parm_decl->getType().getAsString(),
+            // fixme: it still prints `struct`
+            // refactorme: use `type`
+            .nm_qual_type = clang::QualType::getAsString(
+              [](clang::SplitQualType q) {
+                q.Quals.removeCVRQualifiers();
+                return q;
+              }(parm_decl->getType().getNonReferenceType().split()),
+              printing_policy),
+            .is_const = is_const,
+            .ref_type = ref_type,
+          });
+          const auto &nm_qual_type = refl_call.args.back().nm_qual_type;
 
-        //         std::vector<std::string> names;
-        //         // todo: there should be checks for correct podd-like types at
-        //         some
-        //         // point
-        //         for (const clang::FieldDecl *d : rd->fields())
-        //           names.push_back(d->getNameAsString());
+          // fixme: what about unions, built-in arrays?
+          if (!type.isStructureOrClassType())
+            continue;
+          const clang::RecordDecl &rd = *type.getAsRecordDecl();
 
-        //         return {std::move(names)};
-        //       };
-
-        //       std::vector<context::func_data::arg_data> args;
-        //       args.reserve(params.size());
-
-        //       for (const clang::ParmVarDecl *p : params) {
-        //         auto _split = p->getType().getNonReferenceType().split();
-        //         _split.Quals.removeCVRQualifiers();
-        //         args.push_back({
-        //             .cvr_qualified_type = p->getType().getAsString(),
-        //             .scoped_type =
-        //                 clang::QualType::getAsString(_split, printing_policy),
-        //         });
-        //         const auto &arg_type = args.back().scoped_type;
-        //         if (auto s = _c.structs.find(arg_type); s == _c.structs.cend()) {
-        //           auto fnames = get_struct_field_names(p);
-        //           if (fnames)
-        //             _c.structs.insert(
-        //                 {arg_type,
-        //                  {
-        //                      .declaration_file =
-        //                          util::get_declaration_source_file(*p, sm),
-        //                      .field_names = std::move(fnames).value(),
-        //                  }});
-        //         }
-        //       }
-        //       return args;
-        //     };
-        break;
+          if (rd.isInStdNamespace()) {
+            // todo: add std include
+          }
+          if (!r->definitions.contains(nm_qual_type))
+            r->definitions[nm_qual_type] =
+              resolve_definition(nm_qual_type, rd, ast.getSourceManager());
+        }
+        continue;
       }
 
       default:
-        break;
+        continue;
       }
     }
     return r;
@@ -556,7 +704,7 @@ struct fold_matches_to_context {
   static context::type_definition resolve_definition(
     // namespace-qualified typename is needed before the call to this function to check whether
     // the definition has been already resolved
-    std::string qual_typename,
+    std::string nm_qual_type,
     const clang::RecordDecl &rd,
     const clang::SourceManager &sm) noexcept {
     using td_flags = context::type_definition_flags;
@@ -567,7 +715,7 @@ struct fold_matches_to_context {
       util::is_header_file(source_file) ? td_flags::none : td_flags::in_cpp;
 
     return {
-      .name = std::move(qual_typename),
+      .name = std::move(nm_qual_type),
       .source_file = std::move(source_file),
       .definition_flags = td_flags(td_unnamed | td_local | td_in_cpp),
     };
@@ -639,6 +787,7 @@ struct fold_matches_to_context {
         if (md.qual_type->isStructureOrClassType())
           stack.push(md.qual_type->getAsRecordDecl());
       }
+      // fixme: what about unions, built-in arrays?
 
       // ad hoc solution. in c++ code template trait types can be used, but I don't know if
       // it is possible to get from parsed ast
@@ -672,10 +821,11 @@ struct fold_matches_to_context {
           continue;
 
         const clang::QualType qt = fd->getType();
+        // fixme: what about unions, built-in arrays?
         if (!qt->isStructureOrClassType())
           continue;
 
-        // implement: support only non-static fields
+        // todo: support only non-static fields
         stack.push(clang::cast<clang::RecordDecl>(qt->getAsRecordDecl()));
       }
     }
@@ -744,7 +894,7 @@ tl::expected<context, std::string> update(context _current, context delta) noexc
                 lhs.cend(),
                 rhs.cbegin(),
                 [](const context::field_data &lhs, const context::field_data &rhs) -> bool {
-                  return lhs.qualified_type == rhs.qualified_type;
+                  return lhs.nm_qual_type == rhs.nm_qual_type;
                 })) {
             // todo: print detailed info on fields that differ
             return fmt::format("found different data member types for type {}", qual_typename);
@@ -851,7 +1001,7 @@ struct emit_code_t {
           rhs.args.cbegin(),
           rhs.args.cend(),
           [](const context::func_arg &lhs, const context::func_arg &rhs) -> bool {
-            return lhs.qual_type < rhs.qual_type;
+            return lhs.cvr_qualified_type < rhs.cvr_qualified_type;
           });
       }};
 
@@ -878,50 +1028,116 @@ struct emit_code_t {
     for (const auto &p : data.refl_impl_includes)
       os << fmt::format("\n#include \"{}\"", p);
 
-    // todo: write implementation
     os << "\n\n// Generated specializations for types' reflection";
-    os << "\nnamespace {";
-    for (const auto &[reflected_type, field_names] : data.reflected_types) {
-      // refactorme: use fmt
-      // todo: use ctx
+    for (const auto &refl_type : data.reflected_types) {
       os << fmt::format(
         "\ntemplate <>"
-        "\nstruct omni::reflected_t<{}> {{",
-        // todo: use fmt to print fields
-        reflected_type);
-      size_t n = 0;
-      const size_t last_field = field_names.size() - 1;
-      // refactorme: use fmt
-      for (const auto &field : field_names) {
-        const std::string_view before = 0 == n ? "" : "\n    ";
-        const std::string_view after = last_field != n ? "," : "";
-        os << before << "impl::mem_refl{"
-           << "&" << reflected_type << "::" << field << ", \"" << field << "\"}" << after;
-        ++n;
-      }
-      os << ");";
-    }
-    os << "\n} // namespace\n";
+        "\nstruct omni::detail::fields_metadata<{type_name}> {{"
+        "\n  using type = {type_name};"
+        "\n  auto operator()() const noexcept {{"
+        "{fields_decl}"
+        "\n    return std::make_tuple({field_names});"
+        "\n  }}"
+        "\n}};\n",
+        fmt::arg("type_name", refl_type.name),
+        fmt::arg("fields_decl",
+          fmt::join(
+            util::with_fmt_rng{
+              .value = std::cref(refl_type.field_names),
+              .format =
+                [](const auto &field_name, fmt::format_context &ctx) {
+                  return fmt::format_to(ctx.out(),
+                    "\n    struct {{"
+                    "\n      constexpr static const auto& name() noexcept {{ return \"{field_name}\";}}"
+                    "\n      constexpr static auto getter() noexcept {{"
+                    "\n        return [](const type &t) noexcept -> const auto& {{ return t.{field_name}; }};"
+                    "\n      }}"
+                    "\n    }} const {field_name};",
+                    fmt::arg("field_name", field_name));
+                },
+            },
+            "\n")),
+        fmt::arg("field_names", fmt::join(refl_type.field_names, ", ")));
 
+      os << fmt::format(
+        "\ntemplate <>"
+        "\nstruct omni::reflected_t<{type_name}> :"
+        "\n  omni::detail::make_reflected_t<{type_name}> {{}};\n",
+        fmt::arg("type_name", refl_type.name));
+    }
+
+    // todo: write implementation
     os << "\n// Generated implementations for reflected calls";
     for (const context::func_signature &func_sig : data.reflected_calls) {
-      // refactorme: use fmt
-      os << "\ntemplate<>"
-            "\nvoid omni::reflected_call_t::_impl(";
-      size_t n = 0;
-      for (const auto &[arg_type, arg_name] : func_sig.args) {
-        os << (0 < n++ ? ",\n  " : "");
-        os << fmt::format("{} {}", arg_type, arg_name);
-      }
-      os << ") {"
-         << "\n"
-         << func_sig.args.front().name << "(";
-      for (size_t i = 1; i < func_sig.args.size(); ++i) {
-        os << (1 < i ? ", " : "");
-        os << func_sig.args[i].name;
-      }
+      // refactorme: this formatted printing doesn't really look cleaner than handwritten loops
+      // fixme: otherwise lambda does not compile
+      size_t arg_index = 0;
+      os << fmt::format(
+        "\ntemplate<>"
+        "\nvoid omni::reflected_call_t::_call_impl("
+        "\n  {params}) {{"
+        "\n  {invoke}({args});"
+        "\n}}",
+        // refactorme: consider using fold to a substring instead
+        fmt::arg("params",
+          fmt::join(
+            util::with_fmt_rng{
+              // fixme: .value = util::indexed(fund_sig.args),
+              .value = std::cref(func_sig.args),
+              .format =
+                [&arg_index](const context::func_arg &f_arg, fmt::format_context &ctx) {
+                  std::string param_name = 0 == arg_index //
+                    ? std::string("impl")
+                    : std::to_string(arg_index);
+                  ++arg_index;
+                  return fmt::format_to(ctx.out(),
+                    "{nm_qual_type} {const}{ref}_{param_name}",
+                    fmt::arg("nm_qual_type", f_arg.nm_qual_type),
+                    fmt::arg("const", f_arg.is_const ? "const" : ""),
+                    fmt::arg("ref",
+                      [](context::ref_type_t r) -> std::string_view {
+                        switch (r) {
+                        case context::ref_type_t::ref_lval:
+                          return "&";
+                        case context::ref_type_t::ref_rval:
+                          return "&&";
+                        case context::ref_none:
+                          return "";
+                        }
+                        return "/*unresolved_reference_type*/";
+                      }(f_arg.ref_type)),
+                    fmt::arg("param_name", std::move(param_name)));
+                },
+            },
+            ",\n  ")),
+        // refactorme: `util::indexed(util::sliced({1}, func_sig.args))`
+        fmt::arg("invoke",
+          [](const context::func_arg &arg_impl) -> std::string_view {
+            return context::ref_type_t::ref_rval == arg_impl.ref_type //
+              ? "std::move(_impl)"
+              : "_impl";
+          }(func_sig.args.front())),
+        // refactorme: this is outrigth ugly
+        fmt::arg("args", [](auto begin, auto end) -> std::string {
+          if (begin == end)
+            return "";
 
-      os << ");\n}\n";
+          std::stringstream ss;
+          size_t i = 1;
+          if (context::ref_type_t::ref_rval == begin->ref_type)
+            ss << "std::move(_" << i << ")";
+          else
+            ss << "_" << i;
+
+          while (++begin != end) {
+            ++i;
+            if (context::ref_type_t::ref_rval == begin->ref_type)
+              ss << ", std::move(_" << i << ")";
+            else
+              ss << ", _" << i;
+          }
+          return ss.str();
+        }(std::next(func_sig.args.cbegin()), func_sig.args.cend())));
     }
 
     os << '\n';
