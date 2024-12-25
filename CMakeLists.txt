@@ -94,9 +94,6 @@ set_target_properties(tool PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION ON
     ENABLE_EXPORTS OFF)
 target_include_directories(tool PRIVATE ${CLANG_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
-# todo: fmt 
-# todo: figure which clang targets really needed for linking
-#   as of this writing, the resulting size is about 80M
 # todo: (not here) figure out how to get rid of zlib dependency for clang
 target_link_libraries(tool PRIVATE
     # clangAST
@@ -127,18 +124,22 @@ if (ENABLE_TESTING)
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
 
-    # currenly this is needs to be manually copied to CMakeLists.txt.in.samples
-    # should figure out how to remove boilreplate for samples (they are bundled with installation)
-    add_executable(test.impl_ryml samples/test/test_impl_ryml.cpp)
-    # todo: this should be tested and benchmarked
-    reflected_target(test.impl_ryml)
-    target_include_directories(test.impl_ryml PRIVATE samples/test)
-    target_link_libraries(test.impl_ryml PRIVATE GTest::gtest)
-    add_test(NAME test.impl_ryml COMMAND test.impl_ryml)
+    # todo: add benchmark `test/simple/bench.cpp`
+    add_executable(test.simple samples/test/simple/test.cpp)
+    reflected_target(test.simple)
+    target_include_directories(test.simple PRIVATE samples/test/simple)
+    target_link_libraries(test.simple PRIVATE GTest::gtest)
+    add_test(NAME test.simple COMMAND test.simple)
 
-    add_executable(test.field_names samples/test/simple/field_names.cpp)
-    reflected_target(test.field_names)
-    target_include_directories(test.field_names PRIVATE samples/test)
+    # todo: add implementation later
+    # # currenly this is needs to be manually copied to CMakeLists.txt.in.samples
+    # # should figure out how to remove boilreplate for samples (they are bundled with installation)
+    # add_executable(test.impl_ryml samples/test/test_impl_ryml.cpp)
+    # # todo: this should be tested and benchmarked
+    # reflected_target(test.impl_ryml)
+    # target_include_directories(test.impl_ryml PRIVATE samples/test)
+    # target_link_libraries(test.impl_ryml PRIVATE GTest::gtest)
+    # add_test(NAME test.impl_ryml COMMAND test.impl_ryml)
 
     # todo: add test for failure
 endif()
@@ -156,8 +157,8 @@ if (ENABLE_PACKAGE)
     # tool's public headers
     install(FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.h
-        # Iteration 1
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/impl_ryml.h
+        # todo: default implementation for iteration 2
+        # ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/impl_ryml.h
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
 
     # todo: dependencies on 3rd party should be optional, so should be the default implementation
@@ -209,11 +210,13 @@ if (ENABLE_PACKAGE)
         ${CMAKE_SOURCE_DIR}/CMakeLists.txt.in.samples
         ${CMAKE_BINARY_DIR}/samples/CMakeLists.txt @ONLY)
     
+    # todo: what's in the binary dir...?
     install(DIRECTORY
         ${CMAKE_BINARY_DIR}/samples
         ${CMAKE_SOURCE_DIR}/samples
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
     
+    # this is hardly needed for an alpine build
     install(IMPORTED_RUNTIME_ARTIFACTS tool)
 
     set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)

@@ -26,9 +26,16 @@ enable_testing()
 
 message(STATUS "@PROJECT_NAME@.samples: enabled testing")
 
-add_executable(${TEST_NAME}.impl_ryml test/test_impl_ryml.cpp)
-reflected_target(${TEST_NAME}.impl_ryml)
-target_include_directories(${TEST_NAME}.impl_ryml PRIVATE test)
-target_link_libraries(${TEST_NAME}.impl_ryml PRIVATE GTest::GTest)
-add_test(NAME ${TEST_NAME}.impl_ryml COMMAND ${TEST_NAME}.impl_ryml)
+add_executable(${TEST_NAME}.simple test/simple/test.cpp)
+reflected_target(${TEST_NAME}.simple)
+target_include_directories(${TEST_NAME}.simple PRIVATE test/simple)
+target_link_libraries(${TEST_NAME}.simple PRIVATE GTest::gtest)
+add_test(NAME ${TEST_NAME}.simple COMMAND ${TEST_NAME}.simple)
+
+# todo: implement later
+# add_executable(${TEST_NAME}.impl_ryml test/test_impl_ryml.cpp)
+# reflected_target(${TEST_NAME}.impl_ryml)
+# target_include_directories(${TEST_NAME}.impl_ryml PRIVATE test)
+# target_link_libraries(${TEST_NAME}.impl_ryml PRIVATE GTest::GTest)
+# add_test(NAME ${TEST_NAME}.impl_ryml COMMAND ${TEST_NAME}.impl_ryml)
 

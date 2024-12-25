@@ -623,8 +623,9 @@ struct fold_matches_to_context {
         refl_call.args.reserve(refl_call_decl.parameters().size());
 
         for (const clang::ParmVarDecl *parm_decl : refl_call_decl.parameters()) {
-          const auto &[type, is_const, ref_type] = //
-                                                   // refactorme: it can return `context::func_arg`
+          const clang::QualType _qtype = parm_decl->getType(); //< keep alive
+          const auto [type, is_const, ref_type] = //
+                                                  // refactorme: it can return `context::func_arg`
             [](const clang::QualType &q) {
               struct _r {
                 const clang::Type &type;
@@ -650,7 +651,7 @@ struct fold_matches_to_context {
                 .is_const = q.isConstQualified(),
                 .ref_type = context::ref_type_t::ref_none,
               };
-            }(parm_decl->getType());
+            }(_qtype);
           // todo: validate that the type is not a forward declaration, since they are not supported
           // at this point
 
@@ -1043,6 +1044,7 @@ struct emit_code_t {
           "\n#endif\n";
     for (const auto &refl_type : data.reflected_types) {
       os << fmt::format(
+        // todo: annotate the header file where this type was included from
         "\ntemplate <>"
         "\nstruct omni::reflected_t<{type_name}>{{"
         "\n  using type = {type_name};"
@@ -1491,7 +1493,7 @@ namespace {
 //   p.SuppressTagKeyword = true;
 //   p.SuppressScope = false;
 //   p.PrintCanonicalTypes = true;
-// 
+//
 //   return p;
 // }();
 

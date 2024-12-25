@@ -19,7 +19,7 @@ services:
         cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
         strip --strip-all omnirefl && # set(CPACK_STRIP_FILES TRUE) doesn't work
         cmake --build . -j$$(nproc) &&
-        ctest . &&
+        ctest . -V &&
         cpack -G "DEB;TGZ"
 
   test-ubuntu-18:
@@ -40,7 +40,7 @@ services:
         cp -r /usr/share/omnirefl/samples/* ../
         cmake .. -GNinja &&
         cmake --build . &&
-        ctest .
+        ctest . -V
 
   test-ubuntu-22:
     image: test-install-ubuntu-22
@@ -60,6 +60,6 @@ services:
         cp -r /usr/share/omnirefl/samples/* ../
         cmake .. -GNinja &&
         cmake --build . &&
-        ctest .
+        ctest . -V
 
 
