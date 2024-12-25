@@ -19,3 +19,6 @@
 [submodule "lib/fmt"]
 	path = lib/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "lib/cpp_pm"]
+	path = lib/cpp_pm
+	url = https://github.com/sergio-eld/cpp_pm.git

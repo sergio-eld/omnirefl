@@ -1053,6 +1053,9 @@ struct emit_code_t {
         "\n  using fields_t = std::tuple<"
         "\n{field_names}"
         "\n  >;"
+        "\n"
+        "\n  constexpr reflected_binding<reflected_t<type>, type> operator()(type &t) const noexcept {{return {{t}};}}"
+        "\n  constexpr reflected_binding<reflected_t<type>, const type> operator()(const type &t) const noexcept {{return {{t}};}}"
         "\n}};\n",
         fmt::arg("type_name", refl_type.name),
         fmt::arg("field_decls",
@@ -1277,6 +1280,7 @@ int main(int argc, char **argv) {
     return paths;
   };
 
+  // refactorme: this in-place lambda call is ugly, capturing is obscure
   // todo: use pipes
   const auto filtered_sources = [&]() -> std::vector<fs::path> {
     using util::sorted;
@@ -1341,6 +1345,7 @@ int main(int argc, char **argv) {
 
   std::cout << "Filtered files: " << llvm::join(str_sources, "\n") << '\n';
 
+  // refactorme: wtf is happening??? absolutely no benefit in having this as lambda
   const auto make_tool_invocation = [](auto f) {
     struct _adapter: clang::tooling::ToolAction {
       _adapter(decltype(f) f): _f(f) {
@@ -1481,19 +1486,19 @@ int main(int argc, char **argv) {
 
 namespace {
 
-const static auto printing_policy = [] {
-  clang::PrintingPolicy p{{}};
-  p.SuppressTagKeyword = true;
-  p.SuppressScope = false;
-  p.PrintCanonicalTypes = true;
+// const static auto printing_policy = [] {
+//   clang::PrintingPolicy p{{}};
+//   p.SuppressTagKeyword = true;
+//   p.SuppressScope = false;
+//   p.PrintCanonicalTypes = true;
+// 
+//   return p;
+// }();
 
-  return p;
-}();
-
-std::string resolve_qualified_name(const clang::QualType &qt) {
-  auto _split = qt.getNonReferenceType().split();
-  _split.Quals.removeCVRQualifiers();
-  return clang::QualType::getAsString(_split, printing_policy);
-};
+// std::string resolve_qualified_name(const clang::QualType &qt) {
+//   auto _split = qt.getNonReferenceType().split();
+//   _split.Quals.removeCVRQualifiers();
+//   return clang::QualType::getAsString(_split, printing_policy);
+// };
 
 } // namespace

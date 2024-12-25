@@ -71,7 +71,10 @@ target_include_directories(refl INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     # fixme: this is needed because of 3rd party libs. Proper installation might be needed, 
     #   however this would require version tracking...
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME})
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME}
+    # ad hoc for lib/cpp_pm, todo: link as library eld::cpp_pm
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib>
+    )
 target_link_libraries(refl INTERFACE
     # default implementation for iteration 1
     # todo: separate default implementation to a target
@@ -165,7 +168,13 @@ if (ENABLE_PACKAGE)
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/variant/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/optional/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/string-view-lite/include/
+        # todo: check for the outcome
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
+
+    # todo: only /lib/cpp_pm/include should be copied, but as of this writing there's none
+    install(DIRECTORY
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/cpp_pm
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/cpp_pm")
 
     # tool's cmake files
     install(EXPORT "${PROJECT_NAME}Targets"

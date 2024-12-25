@@ -1,61 +1,60 @@
 #pragma once
 
+#include <cpp_pm/pattern_matching.hpp>
 #include <omnirefl/refl.h>
 
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <vector>
-
-namespace impl {
-template <typename>
-struct is_vector: std::false_type {};
-template <typename T, typename Alloc>
-struct is_vector<std::vector<T, Alloc>>: std::true_type {};
-} // namespace impl
-// todo: implementation for std::apply before C++17
 
 namespace example_impl {
 struct print_field_names_t {
   template <typename T>
-  void operator()(std::string_view name, const T &val, std::vector<std::string> &out) const {
-    std::stringstream ss;
-    ss << name << ": ";
-    if constexpr (impl::is_vector<T>()) {
-      std::vector<std::string> sub;
-      sub.reserve(val.size());
-      for (const auto &v : val)
-        (*this)(v, sub);
-      ss << "[";
-      for (const auto &s : sub)
-        ss << s << ",\n";
-      ss << "]";
-    } else {
-      ss << val;
-    }
-    out.emplace_back(ss.str());
-  }
-
-  template <typename T>
   void operator()(const T &t, std::vector<std::string> &out) const {
-    // todo: use at least C++14-friendly code
-    if constexpr (omni::is_reflected<T>()) {
-      using reflected_t = omni::reflected_t<T>;
-      std::apply(
-        [&](const auto &...field) { ((*this)(field.name(), field.get_value(t), out), ...); },
-        typename reflected_t::fields_t{});
-    }
+    namespace pm = pattern_matching;
+    for (auto f : omni::reflected(t).fields) {
+      const omni::string_view name = f.name;
+      f
+        | pm::matched_in_place( //
+          pm::m_if<std::is_fundamental>([&](const auto &v) { //
+            out.emplace_back(std::string(name) + ": " + std::to_string(v));
+          }),
+          pm::m_is<std::basic_string>([&](const auto &s) { //
+            out.emplace_back(std::string(name) + ": \"" + s + "\"");
+          }),
+          pm::m_is<std::vector>([&](const auto &v) { //
+            std::vector<std::string> sub;
+            sub.reserve(v.size());
+            for (const auto &i : v)
+              (*this)(i, sub);
 
-    // todo: design a convenient interface for reflection
-    // const auto &refl = omni::reflected(t);
-    // out.reserve(refl.fields.size());
-    // for (const auto &[name, value] : refl.fields) {
-    //   out.push_back(std::string(name));
-    //   // todo: recursion
-    //   // todo: matching
-    //   // value.match_if<omni::is_reflected>([&](const auto &) { out.back() += "(reflected)"; });
-    // }
+            std::stringstream ss;
+            ss << '[';
+            if (!sub.empty())
+              ss << sub.front();
+            for (size_t i = 1; i < sub.size(); ++i)
+              ss << ",\n  " << sub[i];
+            ss << ']';
+            out.emplace_back(std::string(name) + ": " + std::move(ss).str());
+          }),
+          pm::m_if<omni::is_reflected>([&](const auto &v) { //
+            std::vector<std::string> sub;
+            sub.reserve(omni::reflected(v).fields.size());
+            (*this)(v, sub);
+
+            std::stringstream ss;
+            ss << '{';
+            if (!sub.empty())
+              ss << sub.front();
+            for (size_t i = 1; i < sub.size(); ++i)
+              ss << ",\n  " << sub[i];
+            ss << '}';
+            out.emplace_back(std::string(name) + ": " + std::move(ss).str());
+          })
+          // , pm::m_any([](const auto &) {})
+        );
+    }
   }
 } const inline print_field_names{};
 } // namespace example_impl
