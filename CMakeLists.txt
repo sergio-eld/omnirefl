@@ -29,11 +29,12 @@ else()
     message(FATAL_ERROR "Failed to detect Clang resource dir")
 endif()
 
-# todo: use find_package
+# todo: use find_package or FetchContent
 set(EXPECTED_BUILD_PACKAGE OFF CACHE INTERNAL "" FORCE)
 set(EXPECTED_BUILD_TESTS OFF CACHE INTERNAL "" FORCE)
 add_subdirectory(lib/expected EXCLUDE_FROM_ALL)
 add_subdirectory(lib/variant EXCLUDE_FROM_ALL)
+add_subdirectory(lib/pattern_matching EXCLUDE_FROM_ALL)
 
 # todo: suppress dev warning from the subdirectory
 set(OPTIONAL_BUILD_TESTS OFF)
@@ -72,8 +73,6 @@ target_include_directories(refl INTERFACE
     # fixme: this is needed because of 3rd party libs. Proper installation might be needed, 
     #   however this would require version tracking...
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME}
-    # ad hoc for lib/cpp_pm, todo: link as library eld::cpp_pm
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib>
     )
 target_link_libraries(refl INTERFACE
     # default implementation for iteration 1
@@ -82,6 +81,7 @@ target_link_libraries(refl INTERFACE
     $<BUILD_INTERFACE:tl::optional>
     $<BUILD_INTERFACE:mpark_variant>
     $<BUILD_INTERFACE:nonstd::string-view-lite>
+    $<BUILD_INTERFACE:eld::pattern_matching>
     )
 add_library(omni::refl ALIAS refl)
 
@@ -169,13 +169,9 @@ if (ENABLE_PACKAGE)
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/variant/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/optional/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/string-view-lite/include/
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/pattern_matching/include/
         # todo: check for the outcome
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
-
-    # todo: only /lib/cpp_pm/include should be copied, but as of this writing there's none
-    install(DIRECTORY
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/cpp_pm
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/cpp_pm")
 
     # tool's cmake files
     install(EXPORT "${PROJECT_NAME}Targets"
@@ -193,7 +189,7 @@ if (ENABLE_PACKAGE)
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
-    # todo: `omni::tool` target should be available regardless of the cmake build type!
+    # todo: make sure `omni::tool` target is available regardless of the cmake build type!
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
