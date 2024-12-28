@@ -15,7 +15,7 @@ services:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DENABLE_PACKAGE=ON \
           -DENABLE_TESTING=ON \
-          -DClang_DIR=$${CLANG_BUILD_LINUX}/install/lib/cmake/clang &&
+          -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
         cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
         strip --strip-all omnirefl && # set(CPACK_STRIP_FILES TRUE) doesn't work
         cmake --build . -j$$(nproc) &&

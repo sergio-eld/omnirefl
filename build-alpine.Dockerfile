@@ -1,4 +1,5 @@
-FROM alpine:3.20.3
+# stage 1 build-clang
+FROM alpine:3.20.3 AS builder
 
 ENV DEBIAN_FRONTED=noninteractive
 
@@ -6,6 +7,12 @@ ENV LLVM_DIR=/tmp/llvm
 ENV CLANG_BUILD_LINUX=/tmp/llvm/build-linux
 ENV CLANG_BUILD_WINDOWS=/tmp/llvm/build-windows
 ENV CLANG_BUILD_HEADERS=/tmp/llvm/build-headers
+
+ENV CLANG_INSTALL_LINUX=/llvm/install-linux
+ENV CLANG_INSTALL_WINDOWS=/llvm/install-windows
+ENV CLANG_INSTALL_HEADERS=/llvm/install-headers
+
+ENV CLANG_BUILD_TYPE=Release
 
 RUN apk update && apk upgrade && \
     apk --no-cache add \
@@ -33,8 +40,8 @@ RUN mkdir $CLANG_BUILD_LINUX; \
     cd $CLANG_BUILD_LINUX; \
     CXX=g++ LDFLAGS=-static \
         cmake ../llvm-project/llvm -GNinja \
-        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-        -DCMAKE_INSTALL_PREFIX=./install \
+        -DCMAKE_BUILD_TYPE=$CLANG_BUILD_TYPE \
+        -DCMAKE_INSTALL_PREFIX=$CLANG_INSTALL_LINUX \
         -DLLVM_ENABLE_PROJECTS="clang" \
         -DLLVM_TARGETS_TO_BUILD=X86 \
         $(cat $LLVM_DIR/clang-cmake-options) \
@@ -54,7 +61,7 @@ RUN mkdir $CLANG_BUILD_HEADERS; \
     CC=clang-18 CXX=clang++-18 \
         cmake ../llvm-project/runtimes -GNinja \
         # -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=./install \
+        -DCMAKE_INSTALL_PREFIX=$CLANG_INSTALL_HEADERS \
         -DLLVM_INCLUDE_TESTS=OFF \
         # -DLLVM_TARGETS_TO_BUILD=X86 \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
@@ -83,7 +90,7 @@ RUN mkdir $CLANG_BUILD_HEADERS; \
         -DLLVM_BUILD_RUNTIME=OFF \
     && cmake --build . -j$(nproc) \
     && cmake --install . \
-    && cp -r ./install/include/* $CLANG_BUILD_LINUX/install/lib/clang/*/include \
+    && cp -r $CLANG_INSTALL_HEADERS/include/* $CLANG_INSTALL_LINUX/lib/clang/*/include \
     &&:
 
 RUN mkdir $CLANG_BUILD_WINDOWS; \
@@ -91,6 +98,29 @@ RUN mkdir $CLANG_BUILD_WINDOWS; \
 # todo: build for windows with mingw-w64
     &&:
 
-# todo: clean the resources
+# stage 2 final image
+FROM alpine:3.20.3
+
+ENV DEBIAN_FRONTED=noninteractive
+
+ENV CLANG_INSTALL_LINUX=/usr/local/llvm/install-linux
+
+# how can I reuse the $CLANG_INSTALL_LINUX from builder?
+COPY --from=builder /llvm/install-linux $CLANG_INSTALL_LINUX
+
+RUN apk update && apk upgrade && \
+    apk --no-cache add \
+        build-base \
+        cmake \
+        g++ \
+        git \
+        gtest \
+        gtest-dev \
+        mingw-w64-gcc \
+        neovim \
+        ninja \
+        python3 \
+        tar \
+        && rm -rf /var/cache/apk/*
 
 CMD ["ash"]
