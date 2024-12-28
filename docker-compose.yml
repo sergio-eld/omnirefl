@@ -1,6 +1,6 @@
 services:
-  build-alpine:
-    image: omnirefl-build-alpine
+  build:
+    image: sergioeld/omnirefl-build-alpine
     build:
       context: .
       dockerfile: build-alpine.Dockerfile
@@ -17,9 +17,33 @@ services:
           -DENABLE_TESTING=ON \
           -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
         cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
-        strip --strip-all omnirefl && # set(CPACK_STRIP_FILES TRUE) doesn't work
+        strip --strip-all omnirefl # set(CPACK_STRIP_FILES TRUE) doesn't work
+
+  # todo: test artifacts should be uploaded for continious testing
+  build-tests:
+    image: sergioeld/omnirefl-build-alpine
+      # depends_on: [ build ] # I am not sure it works this way
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine:/build:rw
+    working_dir: /build
+    entrypoint: ['/bin/ash', '-c']
+    command: 
+      - |
         cmake --build . -j$$(nproc) &&
-        ctest . -V &&
+        ctest . -V
+
+  install:
+    image: sergioeld/omnirefl-build-alpine
+      # depends_on: [ build-tests ] # I am not sure it works this way...
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine:/build:rw
+    working_dir: /build
+    entrypoint: ['/bin/ash', '-c']
+    # todo: specify a directory which is easy to upload as artifact
+    command: 
+      - |
         cpack -G "DEB;TGZ"
 
   test-ubuntu-18:
