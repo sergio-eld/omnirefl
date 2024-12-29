@@ -1,7 +1,7 @@
 #pragma once
 
 #include <eld/pattern_matching.hpp>
-#include <omnirefl/refl.h>
+#include <omnirefl/refl.hpp>
 
 #include <string>
 #include <type_traits>

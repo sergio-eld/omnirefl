@@ -64,8 +64,8 @@ add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
 # this library will be automatically linked to a reflected target
 add_library(refl INTERFACE)
 target_sources(refl INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.h>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/refl.h>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.hpp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/refl.hpp>)
 target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${RYML_INCLUDE_DIR}/../> # /include/ryml -> include/
@@ -160,7 +160,7 @@ if (ENABLE_PACKAGE)
 
     # tool's public headers
     install(FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.hpp
         # todo: default implementation for iteration 2
         # ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/impl_ryml.h
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")

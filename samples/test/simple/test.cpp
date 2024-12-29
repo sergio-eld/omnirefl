@@ -1,6 +1,6 @@
 #include "structs.h"
 
-#include <omnirefl/refl.h>
+#include <omnirefl/refl.hpp>
 
 #include <gtest/gtest.h>
 

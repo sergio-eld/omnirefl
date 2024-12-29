@@ -22,7 +22,10 @@ services:
   # todo: test artifacts should be uploaded for continious testing
   build-tests:
     image: sergioeld/omnirefl-build-alpine
-      # depends_on: [ build ] # I am not sure it works this way
+    # todo: this should be disabled for github CI
+    depends_on:
+      build:
+        condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine:/build:rw
@@ -35,7 +38,10 @@ services:
 
   install:
     image: sergioeld/omnirefl-build-alpine
-      # depends_on: [ build-tests ] # I am not sure it works this way...
+    # todo: this should be disabled for github CI
+    depends_on:
+      build:
+        condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine:/build:rw
@@ -53,6 +59,10 @@ services:
       dockerfile: test-install-ubuntu.Dockerfile
       args: 
         - UBUNTU_VERSION=18.04
+    # todo: this should be disabled for github CI
+    depends_on:
+      install:
+        condition: service_completed_successfully
     volumes:
       - ./build-alpine:/install:ro
     working_dir: /install
