@@ -16,7 +16,7 @@ struct print_field_names_simple_t {
     for (const auto &f : fields)
       out.emplace_back(std::string(f.name));
   }
-} const inline print_field_names_simple{};
+} const static print_field_names_simple{};
 
 struct print_field_names_recursive_t {
   template <typename T>
@@ -52,7 +52,7 @@ struct print_field_names_recursive_t {
           pm::m_any([](const auto &) { /*no-op*/ }));
     }
   }
-} const inline print_field_names_recursive{};
+} const static print_field_names_recursive{};
 
 struct print_field_values_recursive_t {
   template <typename T>
@@ -94,7 +94,7 @@ struct print_field_values_recursive_t {
           pm::m_any([](const auto &) { /*no-op*/ }));
     }
   }
-} const inline print_field_values_recursive{};
+} const static print_field_values_recursive{};
 } // namespace example_impl
 
 namespace example_types {

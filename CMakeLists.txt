@@ -129,6 +129,10 @@ if (ENABLE_TESTING)
     reflected_target(test.simple)
     target_include_directories(test.simple PRIVATE samples/test/simple)
     target_link_libraries(test.simple PRIVATE GTest::gtest)
+    set_target_properties(test.simple PROPERTIES
+        # todo: test with C++11
+        CXX_STANDAR 14
+    )
     add_test(NAME test.simple COMMAND test.simple)
 
     # todo: add implementation later

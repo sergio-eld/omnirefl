@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.11.4 FATAL_ERROR)
 project(@PROJECT_NAME@.samples LANGUAGES CXX C VERSION @PROJECT_VERSION@)
 
+# todo: use C++11, detect supported standards and build a matrix
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
