@@ -3,9 +3,12 @@
 // - ast caching (?)
 // - run queries on the ast and output the code
 
+#include "tool/data.h"
+#include "tool/tool_template.hpp"
+#include "tool/util.hpp"
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <sstream>
 #include <tl/expected.hpp>
 
 #pragma GCC diagnostic push
@@ -30,8 +33,6 @@
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/StringRef.h>
-#include <llvm/Support/CommandLine.h>
-#include <llvm/Support/Error.h>
 #pragma GCC diagnostic pop
 
 #include <algorithm>
@@ -50,137 +51,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-namespace {
-namespace util {
-template <typename Container>
-constexpr auto indexed(Container &c) noexcept {
-  using _iter_type = decltype(std::begin(c));
-  using value_type = std::decay_t<decltype(*std::begin(c))>;
-  struct _ref {
-    std::size_t index;
-    const value_type &value;
-  };
-  struct _indexed_iter {
-    _iter_type _begin;
-    _iter_type _end;
-    _iter_type _iter = _begin;
-    std::size_t _index = 0;
-
-    constexpr _indexed_iter begin() const {
-      return {_begin, _end};
-    }
-    constexpr _indexed_iter end() const {
-      return {_begin, _end, _end};
-    }
-    constexpr _indexed_iter operator++() {
-      ++_iter;
-      ++_index;
-      return *this;
-    }
-    constexpr bool operator==(const _indexed_iter &other) const noexcept {
-      return _iter == other._iter;
-    }
-    constexpr bool operator!=(const _indexed_iter &other) const noexcept {
-      return _iter != other._iter;
-    }
-    constexpr _ref operator*() const {
-      return {_index, *_iter};
-    }
-  };
-  return _indexed_iter{std::begin(c), std::end(c)};
-}
-
-template <typename T, typename Format>
-struct with_fmt {
-  const T &value;
-  Format format;
-};
-
-template <typename T>
-struct _with_fmt_rng {
-  using _wrapped_value_type = decltype(*std::declval<const T &>().begin());
-  using _wrapped_iterator_type = decltype(std::declval<const T &>().begin());
-
-  constexpr static auto begin(const T &t) noexcept {
-    return std::begin(t);
-  }
-  constexpr static auto end(const T &t) noexcept {
-    return std::end(t);
-  }
-};
-
-template <typename T>
-struct _with_fmt_rng<std::reference_wrapper<T>> {
-  using _wrapped_value_type = decltype(*std::declval<const T &>().begin());
-  using _wrapped_iterator_type = decltype(std::declval<const T &>().begin());
-
-  constexpr static auto begin(std::reference_wrapper<T> t) noexcept {
-    return std::begin(t.get());
-  }
-  constexpr static auto end(std::reference_wrapper<T> t) noexcept {
-    return std::end(t.get());
-  }
-};
-
-template <typename T, typename Format>
-struct with_fmt_rng {
-  T value;
-  Format format;
-
-  // fixme: should not force `const` in `std::reference_wrapper<Format>`, but otherwise doesn't
-  // compile..
-  using value_type =
-    with_fmt<typename _with_fmt_rng<T>::_wrapped_value_type, std::reference_wrapper<const Format>>;
-  using _wrapped_iterator_type = typename _with_fmt_rng<T>::_wrapped_iterator_type;
-
-  struct iterator_type {
-    using value_type = with_fmt_rng::value_type;
-
-    _wrapped_iterator_type i;
-    std::reference_wrapper<const Format> format;
-    value_type operator*() const {
-      return {.value = *i, .format = format};
-    }
-    _wrapped_iterator_type operator++() {
-      return ++i;
-    }
-    bool operator==(const iterator_type &other) const {
-      return i == other.i;
-    }
-    bool operator!=(const iterator_type &other) const {
-      return i != other.i;
-    }
-  };
-
-  constexpr iterator_type begin() const {
-    return iterator_type{.i = _with_fmt_rng<T>::begin(value), .format = std::ref(format)};
-  }
-  constexpr iterator_type end() const {
-    return iterator_type{.i = _with_fmt_rng<T>::end(value), .format = std::ref(format)};
-  }
-};
-
-template <typename T, typename Format>
-with_fmt(const T &, Format) -> with_fmt<T, Format>;
-} // namespace util
-} // namespace
-
-template <typename T, typename Format, typename Char>
-struct fmt::formatter<util::with_fmt<T, Format>, Char> {
-  constexpr auto parse(fmt::format_parse_context &ctx) {
-    return ctx.begin();
-  }
-  constexpr static auto format(const util::with_fmt<T, Format> &uf, fmt::format_context &ctx) {
-    return uf.format(uf.value, ctx);
-  }
-};
-
-namespace {
-namespace fs = std::filesystem;
-namespace matchers = clang::ast_matchers;
-
-using clang::ASTUnit;
 
 namespace util {
 
@@ -202,34 +72,6 @@ constexpr const size_t type_index = std::apply(
   },
   list_types<Variant>);
 
-namespace str {
-struct is_empty {
-  constexpr bool operator()(std::string_view s) const {
-    return s.empty();
-  }
-} constexpr const inline is_empty{};
-} // namespace str
-
-struct sorted_t {
-  template <typename Cmp, typename Container>
-  Container operator()(Cmp cmp, Container &&c) const {
-    // todo: what if non-const reference?
-    Container _s = std::forward<Container>(c);
-    std::sort(_s.begin(), _s.end(), cmp);
-    return _s;
-  }
-} constexpr const inline sorted{};
-
-struct filtered {
-  template <typename Condition, typename Container>
-  auto operator()(Condition cnd, Container &&c) const {
-    // todo: what if non-const reference?
-    Container _c = std::forward<Container>(c);
-    std::erase_if(_c, cnd);
-    return _c;
-  }
-} constexpr const inline filtered{};
-
 std::string get_declaration_source_file(const clang::Decl &d, const clang::SourceManager &sm) {
   const auto loc = d.getLocation();
   // todo: use expected?
@@ -250,6 +92,12 @@ bool is_header_file(std::string_view filename) {
     || ext.equals_insensitive(".hxx");
 }
 } // namespace util
+
+namespace {
+namespace fs = std::filesystem;
+namespace matchers = clang::ast_matchers;
+
+using clang::ASTUnit;
 
 // todo: does this namespace make sense now?
 namespace actions {
@@ -775,7 +623,7 @@ struct fold_matches_to_context {
         visited.emplace(cur);
 
       // we allow recursive reflection via certain member typedefs
-      for (const _member_typedef_decl &md : util::filtered(
+      for (const _member_typedef_decl &md : ::util::filtered(
              [](const _member_typedef_decl &m) -> bool {
                const static std::set<std::string_view> aliases{{
                  "key_type",
@@ -1177,157 +1025,47 @@ struct emit_code_t {
   }
 } const inline emit_code{};
 
-// clang-format off
-const char help_message[] =
-// todo: document all the parameters
-    "\n"
-    "-p <build-path> is used to read a compile command database.\n"
-    "\n"
-    "\tFor example, it can be a CMake build directory in which a file named\n"
-    "\tcompile_commands.json exists (use -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n"
-    "\tCMake option to get this output).\n"
-    "\n"
-    "[<source> ...] optionally specify the paths of source files. These paths are\n"
-    "\tlooked up in the compile command database. If the path of a file is\n"
-    "\tabsolute, it needs to point into CMake's source tree. If the path is\n"
-    "\trelative, the current working directory needs to be in the CMake\n"
-    "\tsource tree and the file must be in a subdirectory of the current\n"
-    "\tworking directory. \"./\" prefixes in the relative files will be\n"
-    "\tautomatically removed, but the rest of a relative path must be a\n"
-    "\tsuffix of a path in the compile command database.\n"
-    "\tIf no sources are specified, all the files from the compilation database\n"
-    "\twill be used.\n";
-// clang-format on
 } // namespace
 
+// refactorme: main should only contain a tool invocation code,
+// allowing to configure specific things:
+// - matchers
+// - output to file
+// - what else
 int main(int argc, char **argv) {
-  namespace cl = llvm::cl;
-
-  cl::extrahelp common_help{help_message};
-  cl::OptionCategory option_category{"Generation Options"};
-
-  cl::opt<std::string> compilation_db_path(cl::cat(option_category),
-    "p",
-    cl::desc("Specify path to `compile_commands.json`"),
-    cl::value_desc("path"),
-    cl::Required,
-    cl::ValueRequired);
-
-  cl::opt<std::string> output_file(cl::cat(option_category),
-    "o",
-    cl::desc("Specify output filename"),
-    cl::value_desc("filename"),
-    cl::Required,
-    cl::ValueRequired);
-  cl::list<std::string> source_paths(cl::cat(option_category),
-    cl::desc("[<source>...]"),
-    cl::ZeroOrMore,
-    cl::Positional);
-
-  cl::list<std::string> excluded_folders(cl::cat(option_category),
-    "excluded",
-    cl::desc("Specify paths within `compile_commands.json` to ignore"),
-    cl::value_desc("path or filename"),
-    cl::ZeroOrMore,
-    cl::ValueOptional);
-
-  cl::opt<std::string> resource_dir{
-    "resource-dir",
-    cl::cat(option_category),
-    cl::desc("Directory for system clang headers"),
-    cl::Hidden,
-    // todo: consider adding default value
-    cl::Required,
-  };
-
-  cl::ResetAllOptionOccurrences();
-  cl::HideUnrelatedOptions(option_category);
-  std::string _why_do_i_need_this;
-  llvm::raw_string_ostream _why_llvm_why_do_you_crash_without_it{_why_do_i_need_this};
-  if (!cl::ParseCommandLineOptions(argc,
-        argv,
-        /*TODO: Overview*/ {},
-        &_why_llvm_why_do_you_crash_without_it)) {
+  auto cli = tool::parse_cli(argc, argv);
+  if (!cli) {
+    llvm::errs() << cli.error();
     return -1;
   }
 
-  using clang::tooling::CompilationDatabase;
-  auto compilation_db =
-    [](llvm::StringRef path) -> llvm::Expected<std::unique_ptr<CompilationDatabase>> {
-    std::string err;
-    auto res = CompilationDatabase::loadFromDirectory(path, err);
-    if (res)
-      return {std::move(res)};
-    // todo: reference the path in the error
-    return llvm::make_error<llvm::StringError>(std::move(err), llvm::inconvertibleErrorCode());
-  }(compilation_db_path.getValue());
-
+  auto compilation_db = tool::load_compilation_db(cli->compilation_db_path);
   if (!compilation_db) {
-    llvm::errs() << compilation_db.takeError();
-    llvm::errs() << compilation_db_path.getValue() << '\n';
+    llvm::errs() << std::move(compilation_db).error();
+    llvm::errs() << cli->compilation_db_path << '\n';
     return -1;
   }
 
-  // todo: error for non-path strings
-  const auto to_std_paths = [](const auto &strings) {
-    std::vector<fs::path> paths;
-    paths.reserve(strings.size());
-    std::error_code ec{};
-    for (const auto &s : strings) {
-      paths.push_back(fs::absolute(s, ec).lexically_normal());
-      if (ec) {
-        throw std::invalid_argument("Invalid path `" + s + "`: " + ec.message());
-      }
-    }
-    return paths;
-  };
+  auto db_sources = util::to_std_paths((*compilation_db)->getAllFiles());
+  if (!db_sources) {
+    llvm::errs() << std::move(db_sources).error();
+    llvm::errs() << cli->compilation_db_path << '\n';
+    return -1;
+  }
 
-  // refactorme: this in-place lambda call is ugly, capturing is obscure
-  // todo: use pipes
-  const auto filtered_sources = [&]() -> std::vector<fs::path> {
-    using util::sorted;
-    using util::filtered;
-    const auto is_subpath = [](const fs::path &path, const fs::path &base) {
-      const auto mismatch_pair = std::mismatch(path.begin(), path.end(), base.begin(), base.end());
-      return mismatch_pair.second == base.end();
-    };
+  const auto filtered_sources = tool::filter_db_sources(
+    {
+      .specified_sources = cli->sources,
+      .excluded_folders = cli->excluded_folders,
+    },
+    *db_sources);
+  if (!filtered_sources) {
+    llvm::errs() << std::move(filtered_sources).error();
+    llvm::errs() << cli->compilation_db_path << '\n';
+    return -1;
+  }
 
-    auto _filtered = sorted(std::less{},
-      to_std_paths(filtered(util::str::is_empty, compilation_db.get()->getAllFiles())));
-    // refactorme: pass `source_paths` as an argument instead of capturing
-    if (!source_paths.empty()) {
-      // todo: what if the user excludes the `build` directory, but specifies a
-      // source file that is expected to be generated there...
-      auto specified_sources = sorted(std::less{}, to_std_paths(source_paths));
-      std::vector<fs::path> intersected;
-      intersected.reserve(specified_sources.size());
-      std::set_intersection(specified_sources.cbegin(),
-        specified_sources.cend(),
-        _filtered.cbegin(),
-        _filtered.cend(),
-        std::back_inserter(intersected));
-      _filtered = std::move(intersected);
-    }
-
-    _filtered = filtered(
-      [excluded =
-          // refactorme: `filter(util::str::is_empty, excluded_folders)`, but
-          // `excluded_folders` is `cl::list`, which will fail to compile
-        sorted(std::less{}, to_std_paths(excluded_folders)),
-        is_subpath](const fs::path &db_path) {
-        for (const fs::path &e : excluded) {
-          if (is_subpath(db_path, e))
-            return true;
-        }
-
-        return false;
-      },
-      std::move(_filtered));
-
-    return _filtered;
-  }();
-
-  // llvm doesn't know how to work with std::filesystem::path
+  // llvm doesn't know how to work with std::filesystem::path (so is fmt)
   // What a rotten way to die...
   const auto str_sources = [](const std::vector<fs::path> &paths) -> std::vector<std::string> {
     std::vector<std::string> res;
@@ -1335,17 +1073,9 @@ int main(int argc, char **argv) {
     for (const auto &p : paths)
       res.push_back(p.string());
     return res;
-  }(filtered_sources);
-
-  // todo: remove or disable in release
-  // todo: add option for resource-dir to just print it
-  std::cout << "-resource-dir=" << resource_dir.getValue() << '\n';
-  std::cout << "-p=" << compilation_db_path.getValue() << '\n';
-  std::cout << "-o=" << output_file.getValue() << '\n';
-  std::cout << "-excluded=[" << llvm::join(excluded_folders, ",") << "]\n";
-  std::cout << "sources: " << llvm::join(source_paths, ",") << '\n';
-
-  std::cout << "Filtered files: " << llvm::join(str_sources, "\n") << '\n';
+  }(*filtered_sources);
+  // todo: use verbosity option
+  fmt::println("Filtered sources: [{}]", fmt::join(str_sources, ", "));
 
   // refactorme: wtf is happening??? absolutely no benefit in having this as lambda
   const auto make_tool_invocation = [](auto f) {
@@ -1372,12 +1102,12 @@ int main(int argc, char **argv) {
   };
 
   actions::print_files_progress print_progress{
-    .total = filtered_sources.size(),
+    .total = filtered_sources->size(),
   };
   tl::expected<context, std::string> ctx{tl::in_place};
 
   const auto tr_unit_pipeline = //
-    [&ctx, resource_dir = resource_dir.getValue(), &print_progress](
+    [&ctx, resource_dir = cli->resource_dir, &print_progress](
       actions::clang_tool_input tool_input) {
       using namespace actions;
 
@@ -1401,8 +1131,8 @@ int main(int argc, char **argv) {
         ctx = tl::unexpected(std::string("failed to parse AST"));
         return false;
       }
-      // refactorme: list of template arguments here will cause a lot of problems, because the order
-      // must be specified exactly like in other places
+      // refactorme: list of template arguments here will cause a lot of problems, because the
+      // order must be specified exactly like in other places
       auto matches = fold_ast_to_matches<matched_reflection, matched_reflected_call>{}(*ast);
       if (!matches) {
         ctx = tl::unexpected(std::move(matches).error());
@@ -1454,7 +1184,7 @@ int main(int argc, char **argv) {
   tool.appendArgumentsAdjuster(clang::tooling::getInsertArgumentAdjuster(
     {
       {"-nostdinc++"}, // prevents from picking up on another compiler's C++ std libs
-      {"-resource-dir=" + resource_dir.getValue()},
+      {"-resource-dir=" + cli->resource_dir.string()},
       {"-fno-delayed-template-parsing"}, // it seems to not work thought
     },
     clang::tooling::ArgumentInsertPosition::BEGIN));
@@ -1472,8 +1202,8 @@ int main(int argc, char **argv) {
     return -1;
   }
 
-  fmt::println("Generating file: {}\n", output_file);
-  std::ofstream f{std::filesystem::path{output_file.getValue()}, std::ios::binary};
+  fmt::println("Generating file: {}\n", cli->output_file.string());
+  std::ofstream f{cli->output_file, std::ios::binary};
   if (const auto res = emit_code(
         {
           // todo: options
@@ -1488,7 +1218,6 @@ int main(int argc, char **argv) {
 }
 
 namespace {
-
 // const static auto printing_policy = [] {
 //   clang::PrintingPolicy p{{}};
 //   p.SuppressTagKeyword = true;
