@@ -33,6 +33,7 @@ jobs:
       - name: Run test
         run: docker compose run --rm build-tests
 
+      # todo: packaging should not run on a merge request (? I think)
       - name: Package omnirefl tool
         run: |
           docker compose run --rm install

@@ -39,7 +39,6 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <iterator>
 #include <numeric>
@@ -278,70 +277,18 @@ struct matched_reflected_call {
 // todo: context should be bound to list of matches to avoid compilation errors
 // structure that collects and saves intermediate state from several ASTs
 struct context {
-  // flags for definition properties
-  // these are used to determine violated limitations when using the tool
-  enum type_definition_flags {
-    none = 0x0,
-    // unnamed structure
-    unnamed = 0x1,
-    // definition within a scope
-    local = 0x1 << 1,
-    // defined within a .cpp file (source): when using a standalone tool
-    // definition can (probably) be generated within the same .cpp file via
-    // a force-include compiler command
-    in_cpp = 0x1 << 2,
-  };
-
-  enum ref_type_t {
-    ref_none,
-    ref_lval,
-    ref_rval,
-  };
-
-  struct type_definition {
-    // refactorme: name is redundant. store it either only here or only in `definitions` map
-    // fully namespace-qualified type name
-    std::string name;
-    fs::path source_file;
-    type_definition_flags definition_flags = none;
-  };
-
-  struct field_data {
-    std::string name;
-
-    // fully namespace-qualified type
-    std::string nm_qual_type;
-
-    // todo: I don't know how this can be useful, since there's a simple workaround for accessing
-    // bit fields without a member pointer
-    // bool is_bitfield;
-  };
-
-  struct func_arg {
-    // todo: better store qualifiers and the typename separatelly
-    // fully cv and namespace-qualified type
-    std::string cvr_qualified_type;
-    std::string nm_qual_type;
-    bool is_const : 1;
-    ref_type_t ref_type;
-  };
-
-  struct func_signature {
-    std::vector<func_arg> args;
-  };
-
   // todo: profile and optimize
   // definitions for reflected types and implementations
-  std::unordered_map<std::string /*namespace_qualified_type*/, type_definition> definitions;
+  std::unordered_map<std::string /*namespace_qualified_type*/, data::type_definition_data> definitions;
 
   // todo: is it possible to have unresolved reflected types between ASTs? as of this writing - no,
   // because we assume that forward declarations are not allowed. however, if intermediate forward
   // declarations are allowed (defined in different AST), we should add a container to track them
-  std::unordered_map<std::string /*namespace_qualified_type*/, std::vector<field_data>>
+  std::unordered_map<std::string /*namespace_qualified_type*/, std::vector<data::struct_field_data>>
     reflected_types;
 
   std::set<std::string /*namespace_qualified_type*/> reflected_implementations;
-  std::vector<func_signature> reflected_calls;
+  std::vector<data::func_signature> reflected_calls;
 
   // todo: profile and optimize with flat_set
   // unique list of std headers. used for reflecting std containers and aggregated types like
@@ -442,8 +389,8 @@ struct fold_matches_to_context {
 
             // refactorme: this code is duplicated when collecting types, but whatever
             r->reflected_types.emplace(nm_qual_type,
-              [](const auto &_fields) -> std::vector<context::field_data> {
-                std::vector<context::field_data> r;
+              [](const auto &_fields) -> std::vector<data::struct_field_data> {
+                std::vector<data::struct_field_data> r;
                 for (const clang::FieldDecl *fd : _fields) {
                   // todo: logging for skipped fields, since we are not reporting them as errors
                   // todo: checks that would prevent the field from being reflected (uniouns,
@@ -467,37 +414,37 @@ struct fold_matches_to_context {
       case util::type_index<matched_reflected_call, var_type>: {
         const clang::CXXMethodDecl &refl_call_decl =
           *std::get<util::type_index<matched_reflected_call, var_type>>(m).node;
-        context::func_signature &refl_call = r->reflected_calls.emplace_back();
+        data::func_signature &refl_call = r->reflected_calls.emplace_back();
         refl_call.args.reserve(refl_call_decl.parameters().size());
 
         for (const clang::ParmVarDecl *parm_decl : refl_call_decl.parameters()) {
           const clang::QualType _qtype = parm_decl->getType(); //< keep alive
           const auto [type, is_const, ref_type] = //
-                                                  // refactorme: it can return `context::func_arg`
+                                                  // refactorme: it can return `data::func_arg`
             [](const clang::QualType &q) {
               struct _r {
                 const clang::Type &type;
                 bool is_const;
-                context::ref_type_t ref_type;
+                data::reference_type ref_type;
               };
               if (q->isLValueReferenceType()) {
                 return _r{
                   .type = *q->getPointeeType().getTypePtr(),
                   .is_const = q->getPointeeType().isConstQualified(),
-                  .ref_type = context::ref_type_t::ref_lval,
+                  .ref_type = data::reference_type::ref_lval,
                 };
               }
               if (q->isRValueReferenceType()) {
                 return _r{
                   .type = *q->getPointeeType().getTypePtr(),
                   .is_const = q->getPointeeType().isConstQualified(),
-                  .ref_type = context::ref_type_t::ref_rval,
+                  .ref_type = data::reference_type::ref_rval,
                 };
               }
               return _r{
                 .type = *q,
                 .is_const = q.isConstQualified(),
-                .ref_type = context::ref_type_t::ref_none,
+                .ref_type = data::reference_type::ref_none,
               };
             }(_qtype);
           // todo: validate that the type is not a forward declaration, since they are not supported
@@ -550,13 +497,13 @@ struct fold_matches_to_context {
   };
 
   private:
-  static context::type_definition resolve_definition(
+  static data::type_definition_data resolve_definition(
     // namespace-qualified typename is needed before the call to this function to check whether
     // the definition has been already resolved
     std::string nm_qual_type,
     const clang::RecordDecl &rd,
     const clang::SourceManager &sm) noexcept {
-    using td_flags = context::type_definition_flags;
+    using td_flags = data::type_definition_flags;
     std::string source_file = util::get_declaration_source_file(rd, sm);
     const td_flags td_unnamed = td_flags::none; // todo:
     const td_flags td_local = td_flags::none; // todo:
@@ -714,8 +661,8 @@ tl::expected<context, std::string> update(context _current, context delta) noexc
   if (auto merged = merge_with_conflicts_check(std::move(r->definitions),
         std::move(delta.definitions),
         [](std::string_view qual_typename,
-          const context::type_definition &lhs,
-          const context::type_definition &rhs) -> std::optional<std::string> {
+          const data::type_definition_data &lhs,
+          const data::type_definition_data &rhs) -> std::optional<std::string> {
           if (lhs.source_file != rhs.source_file) {
             return fmt::format("found different locations for type {} definition: {}, {}",
               qual_typename,
@@ -738,12 +685,12 @@ tl::expected<context, std::string> update(context _current, context delta) noexc
   if (auto merged = merge_with_conflicts_check(std::move(r->reflected_types),
         std::move(delta.reflected_types),
         [](std::string_view qual_typename,
-          const std::vector<context::field_data> &lhs,
-          const std::vector<context::field_data> &rhs) -> std::optional<std::string> {
+          const std::vector<data::struct_field_data> &lhs,
+          const std::vector<data::struct_field_data> &rhs) -> std::optional<std::string> {
           if (!std::equal(lhs.cbegin(),
                 lhs.cend(),
                 rhs.cbegin(),
-                [](const context::field_data &lhs, const context::field_data &rhs) -> bool {
+                [](const data::struct_field_data &lhs, const data::struct_field_data &rhs) -> bool {
                   return lhs.nm_qual_type == rhs.nm_qual_type;
                 })) {
             // todo: print detailed info on fields that differ
@@ -801,7 +748,7 @@ struct emit_code_t {
       reflected_types;
 
     // list of unique reflected call function signatures
-    std::vector<context::func_signature> reflected_calls;
+    std::vector<data::func_signature> reflected_calls;
   };
 
   static tl::expected<reflection_data, std::string> prepare_input(context ctx) noexcept {
@@ -820,13 +767,13 @@ struct emit_code_t {
       r->reflected_types.insert({
         .name = nm_qual_type,
         .field_names =
-          [](const std::vector<context::field_data> &fields) -> std::vector<std::string> {
+          [](const std::vector<data::struct_field_data> &fields) -> std::vector<std::string> {
           std::vector<std::string> r;
           r.reserve(fields.size());
           std::transform(fields.cbegin(),
             fields.cend(),
             std::back_inserter(r),
-            [](const context::field_data &fd) { return fd.name; });
+            [](const data::struct_field_data &fd) { return fd.name; });
           return r;
         }(fields),
       });
@@ -844,13 +791,13 @@ struct emit_code_t {
 
     std::set unique_func_signatures{std::make_move_iterator(ctx.reflected_calls.begin()),
       std::make_move_iterator(ctx.reflected_calls.end()),
-      [](const context::func_signature &lhs, const context::func_signature &rhs) -> bool {
+      [](const data::func_signature &lhs, const data::func_signature &rhs) -> bool {
         // because c++ std is UGLEEEEEEE
         return std::lexicographical_compare(lhs.args.cbegin(),
           lhs.args.cend(),
           rhs.args.cbegin(),
           rhs.args.cend(),
-          [](const context::func_arg &lhs, const context::func_arg &rhs) -> bool {
+          [](const data::function_signature_arg &lhs, const data::function_signature_arg &rhs) -> bool {
             return lhs.cvr_qualified_type < rhs.cvr_qualified_type;
           });
       }};
@@ -946,9 +893,8 @@ struct emit_code_t {
     }
     os << "\n#undef OMNI_DEFINE_NAME_FUNC\n";
 
-    // todo: write implementation
     os << "\n// Generated implementations for reflected calls";
-    for (const context::func_signature &func_sig : data.reflected_calls) {
+    for (const data::func_signature &func_sig : data.reflected_calls) {
       // refactorme: this formatted printing doesn't really look cleaner than handwritten loops
       // fixme: otherwise lambda does not compile
       size_t arg_index = 0;
@@ -965,7 +911,7 @@ struct emit_code_t {
               // fixme: .value = util::indexed(fund_sig.args),
               .value = std::cref(func_sig.args),
               .format =
-                [&arg_index](const context::func_arg &f_arg, fmt::format_context &ctx) {
+                [&arg_index](const data::function_signature_arg &f_arg, fmt::format_context &ctx) {
                   std::string param_name = 0 == arg_index //
                     ? std::string("impl")
                     : std::to_string(arg_index);
@@ -975,13 +921,13 @@ struct emit_code_t {
                     fmt::arg("nm_qual_type", f_arg.nm_qual_type),
                     fmt::arg("const", f_arg.is_const ? "const" : ""),
                     fmt::arg("ref",
-                      [](context::ref_type_t r) -> std::string_view {
+                      [](data::reference_type r) -> std::string_view {
                         switch (r) {
-                        case context::ref_type_t::ref_lval:
+                        case data::reference_type::ref_lval:
                           return "&";
-                        case context::ref_type_t::ref_rval:
+                        case data::reference_type::ref_rval:
                           return "&&";
-                        case context::ref_none:
+                        case data::ref_none:
                           return "";
                         }
                         return "/*unresolved_reference_type*/";
@@ -992,8 +938,8 @@ struct emit_code_t {
             ",\n  ")),
         // refactorme: `util::indexed(util::sliced({1}, func_sig.args))`
         fmt::arg("invoke",
-          [](const context::func_arg &arg_impl) -> std::string_view {
-            return context::ref_type_t::ref_rval == arg_impl.ref_type //
+          [](const data::function_signature_arg &arg_impl) -> std::string_view {
+            return data::reference_type::ref_rval == arg_impl.ref_type //
               ? "std::move(_impl)"
               : "_impl";
           }(func_sig.args.front())),
@@ -1004,14 +950,14 @@ struct emit_code_t {
 
           std::stringstream ss;
           size_t i = 1;
-          if (context::ref_type_t::ref_rval == begin->ref_type)
+          if (data::reference_type::ref_rval == begin->ref_type)
             ss << "std::move(_" << i << ")";
           else
             ss << "_" << i;
 
           while (++begin != end) {
             ++i;
-            if (context::ref_type_t::ref_rval == begin->ref_type)
+            if (data::reference_type::ref_rval == begin->ref_type)
               ss << ", std::move(_" << i << ")";
             else
               ss << ", _" << i;
@@ -1033,6 +979,40 @@ struct emit_code_t {
 // - output to file
 // - what else
 int main(int argc, char **argv) {
+  // disregard this comment. I'm experimenting with interface here
+  /*
+   *  std::pair{argc, argv}
+   *  >>= chained
+   *      | applied(tool::parse_cli) // -> cli_opts
+   *      // will bind the result to the left
+   *      | with_result_l([](const auto &cli) {
+   *          return tool::load_compilation_db(cli->compilation_db_path);
+   *      }) // -> tuple<std::unique_ptr<CompilationDb>, cli_opts>
+   *      | with_result_l([](const auto &db, const auto &...) { return db.getAllFiles(); }
+   *          | filtered(empty_str)
+   *          | converted(to_std_path))
+   *      // -> tuple<vector<path>, unique_ptr<CompilationDb>, cli_opts>
+   *      | applied([](auto sources, auto db, auto cli_opts) {
+   *          return tuple{map([&db](auto src) {
+   *              auto opts = db.compileOptions(src);
+   *              return tuple{std::move(src), std::move(opts)},
+   *          stdd::move(db),
+   *          std::move(cli_opts),
+   *          };
+   *      }) // -> tuple<vector<tuple<path, compile_options>>, db, cli>
+   *      | applied([](auto compiled_sources, auto ... rest) {
+   *          return tuple{
+   *              foldl(tu_context{},
+   *              // this actually requies `applied` but a little bit different
+   *              [](auto ctx, const auto &src_path, const auto &compile_options){
+   *                  auto delta_ctx = match_ast(src_path, compile_options);
+   *                  return update(ctx, std::move(delta_ctx));
+   *              }, compiled_sources),
+   *              std::move(rest)...};
+   *      }) // -> tuple<tu_context, db, cli>
+   *      | // todo: validate accumulated tu_context and generate the .cpp file
+   */
+
   auto cli = tool::parse_cli(argc, argv);
   if (!cli) {
     llvm::errs() << cli.error();
@@ -1077,126 +1057,51 @@ int main(int argc, char **argv) {
   // todo: use verbosity option
   fmt::println("Filtered sources: [{}]", fmt::join(str_sources, ", "));
 
-  // refactorme: wtf is happening??? absolutely no benefit in having this as lambda
-  const auto make_tool_invocation = [](auto f) {
-    struct _adapter: clang::tooling::ToolAction {
-      _adapter(decltype(f) f): _f(f) {
-      }
-      decltype(f) _f;
+  // todo: fold
+  context ctx{};
+  size_t processing = 0;
+  // todo: util::indexed(*filtered_sources)
+  for (const auto &src : *filtered_sources) {
+    fmt::println("[{}/{}] building AST of file: {}\t\r",
+      ++processing,
+      filtered_sources->size(),
+      src.string());
 
-      private:
-      bool runInvocation(std::shared_ptr<clang::CompilerInvocation> inv,
-        clang::FileManager *files,
-        std::shared_ptr<clang::PCHContainerOperations> pch_cont_ops,
-        clang::DiagnosticConsumer *diag_cons) override {
-        return _f(actions::clang_tool_input{
-          .compiler_invocation = inv,
-          .files = files,
-          .pch_cont_ops = pch_cont_ops,
-          .diag_cons = diag_cons,
-        });
-      }
-    };
+    auto ast = tool::parse_ast({
+      .resource_dir = cli->resource_dir,
+      .source = src,
+      .db = **compilation_db,
+    });
+    if (!ast) {
+      llvm::errs() << ast.error();
+      return -1;
+    }
 
-    return _adapter(f);
-  };
+    using namespace actions;
 
-  actions::print_files_progress print_progress{
-    .total = filtered_sources->size(),
-  };
-  tl::expected<context, std::string> ctx{tl::in_place};
+    // refactorme: list of template arguments here will cause a lot of problems, because the
+    // order must be specified exactly like in other places
+    auto matches = fold_ast_to_matches<matched_reflection, matched_reflected_call>{}(**ast);
+    if (!matches) {
+      llvm::errs() << matches.error();
+      return -1;
+    }
 
-  const auto tr_unit_pipeline = //
-    [&ctx, resource_dir = cli->resource_dir, &print_progress](
-      actions::clang_tool_input tool_input) {
-      using namespace actions;
+    auto ctx_delta = fold_matches_to_context{.ast = **ast}(std::move(matches).value());
+    if (!ctx_delta) {
+      llvm::errs() << ctx_delta.error();
+      return -1;
+    }
 
-      configure_compiler_invocation{.resource_dir = resource_dir}(*tool_input.compiler_invocation);
-      disable_pch_and_warnings{}(*tool_input.compiler_invocation);
-
-      print_progress(tool_input);
-
-      // parse AST
-      std::unique_ptr<ASTUnit> ast =
-        ASTUnit::LoadFromCompilerInvocation(tool_input.compiler_invocation,
-          tool_input.pch_cont_ops,
-          clang::CompilerInstance::createDiagnostics(
-            &tool_input.compiler_invocation->getDiagnosticOpts(),
-            tool_input.diag_cons,
-            /*ShouldOwnClient=*/false),
-          tool_input.files);
-
-      if (ast->getDiagnostics().hasUnrecoverableErrorOccurred()) {
-        // todo: filename and diagnostics
-        ctx = tl::unexpected(std::string("failed to parse AST"));
-        return false;
-      }
-      // refactorme: list of template arguments here will cause a lot of problems, because the
-      // order must be specified exactly like in other places
-      auto matches = fold_ast_to_matches<matched_reflection, matched_reflected_call>{}(*ast);
-      if (!matches) {
-        ctx = tl::unexpected(std::move(matches).error());
-        return false;
-      }
-
-      auto ctx_delta = fold_matches_to_context{.ast = *ast}(std::move(matches).value());
-      if (!ctx_delta) {
-        ctx = tl::unexpected(std::move(ctx_delta).error());
-        return false;
-      }
-
-      assert(ctx);
-      ctx = update(std::move(ctx).value(), std::move(ctx_delta).value());
-      return bool(ctx);
-    };
-
-  // todo: don't use the tool. Should be similar to:
-  // ```
-  // -- Processing a single source file and updating the context
-  // tu_pipeline : context -> src -> context
-  // tu_pipeline ctx src =
-  // let configured_src = configure_compiler_invocation cli.compilation_db src
-  // let _ = print_files_progress configured_src  -- side-effect, logs progress
-  // let ast = parse_ast(configured_src)
-  // let matches = match_reflections(ast)
-  // let context_delta = map_matches(matches)
-  // ctx + context_delta  -- update the context with new data
-  //
-  // -- Folding over all sources to aggregate the context
-  // process_all_sources : sources -> context
-  // process_all_sources sources =
-  // foldl(tu_pipeline, context{}, sources)
-  //
-  // -- Emitting code based on the final aggregated context
-  // emit_generated_code : context -> ()
-  // emit_generated_code ctx =
-  // emit_code(cli.output_file, ctx)
-  //
-  // -- The overall program pipeline
-  // program : sources -> ()
-  // program sources =
-  // let final_context = process_all_sources(sources)
-  // emit_generated_code(final_context)
-  // ```
-  clang::tooling::ClangTool tool(*(compilation_db->get()), str_sources);
-  // bolnoi ubliudok... this works
-  // todo: try to set them in `configure_compiler_invocation`
-  tool.appendArgumentsAdjuster(clang::tooling::getInsertArgumentAdjuster(
-    {
-      {"-nostdinc++"}, // prevents from picking up on another compiler's C++ std libs
-      {"-resource-dir=" + cli->resource_dir.string()},
-      {"-fno-delayed-template-parsing"}, // it seems to not work thought
-    },
-    clang::tooling::ArgumentInsertPosition::BEGIN));
-
-  auto adapted_tool_invocation = make_tool_invocation(std::ref(tr_unit_pipeline));
-  if (const int error = tool.run(&adapted_tool_invocation)) {
-    assert(!ctx);
-    llvm::errs() << fmt::format("Clang tool error {}: {}", error, ctx.error());
-    return error;
+    if (auto updated = update(std::move(ctx), std::move(ctx_delta).value()); updated) {
+      ctx = std::move(updated).value();
+    } else {
+      llvm::errs() << updated.error();
+      return -1;
+    }
   }
 
-  auto validated_reflection_data = emit_code_t::prepare_input(std::move(ctx).value());
+  auto validated_reflection_data = emit_code_t::prepare_input(std::move(ctx));
   if (!validated_reflection_data) {
     llvm::errs() << validated_reflection_data.error();
     return -1;
@@ -1217,20 +1122,3 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-namespace {
-// const static auto printing_policy = [] {
-//   clang::PrintingPolicy p{{}};
-//   p.SuppressTagKeyword = true;
-//   p.SuppressScope = false;
-//   p.PrintCanonicalTypes = true;
-//
-//   return p;
-// }();
-
-// std::string resolve_qualified_name(const clang::QualType &qt) {
-//   auto _split = qt.getNonReferenceType().split();
-//   _split.Quals.removeCVRQualifiers();
-//   return clang::QualType::getAsString(_split, printing_policy);
-// };
-
-} // namespace

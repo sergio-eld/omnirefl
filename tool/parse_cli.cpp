@@ -106,11 +106,12 @@ tl::expected<data::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
     sources = std::move(paths).value();
 
   tl::expected<data::cli_opts, std::string> result{data::cli_opts{
-    .compilation_db_path = std::move(cl_compilation_db_path),
+    .resource_dir = std::move(resource_dir),
     .output_file = std::move(output_file),
+
+    .compilation_db_path = std::move(cl_compilation_db_path),
     .sources = std::move(sources),
     .excluded_folders = std::move(excluded_folders),
-    .resource_dir = std::move(resource_dir),
   }};
 
   // todo: add option for resource-dir to just print it

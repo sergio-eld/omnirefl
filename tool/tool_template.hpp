@@ -7,6 +7,7 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #pragma GCC diagnostic pop
 
@@ -45,5 +46,21 @@ struct filter_db_sources_t {
   tl::expected<std::vector<std::filesystem::path>, std::string> operator()(args a,
     std::vector<std::filesystem::path> db_sources) const noexcept;
 } const inline filter_db_sources{};
+
+// todo: add continious benchmarking to CI before optimizing this
+struct parse_ast_t {
+  struct args {
+    const std::filesystem::path &resource_dir;
+
+    // path to .cpp source file
+    const std::filesystem::path &source;
+
+    // todo: just compilation args
+    const clang::tooling::CompilationDatabase &db;
+  };
+
+  using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
+  result_t operator()(args a) const;
+} const inline parse_ast{};
 
 } // namespace tool
