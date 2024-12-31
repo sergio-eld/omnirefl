@@ -7,12 +7,16 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#include <clang/ASTMatchers/ASTMatchFinder.h>
+#include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #pragma GCC diagnostic pop
 
-#include <memory>
+#include <fmt/base.h>
 #include <tl/expected.hpp>
+
+#include <memory>
 
 namespace tool {
 // default implementation for cli parsing
@@ -62,5 +66,71 @@ struct parse_ast_t {
   using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
   result_t operator()(args a) const;
 } const inline parse_ast{};
+
+template <typename MatchT>
+struct matched_node {
+  using node_type = typename MatchT::node_type;
+  const node_type *node;
+};
+
+template <typename... T>
+using match_variant = std::variant<tool::matched_node<T>...>;
+
+struct match_ast_t {
+  // todo: refine MatchNode expected traits
+  /**
+   * struct MatchNode {
+   * // todo: remove/hide. This is some internal thing actually
+   * constexpr static const char binding_tag[] = "tag";
+   *
+   * // todo: this should be deducible from the return type
+   * using node_type = clang::ASTNodeT;
+   *
+   * auto operator()() const { return matchDecl(); }
+   * };
+   */
+  template <typename... MatchNode>
+  tl::expected<std::vector<match_variant<MatchNode...>>, std::string> operator()(
+    std::tuple<MatchNode...> match_nodes,
+    // MatchFinder::matchAST expects a non-const ASTContext
+    clang::ASTUnit &ast) const noexcept {
+    using namespace clang::ast_matchers;
+
+    // adapter
+    struct: MatchFinder::MatchCallback {
+      std::vector<match_variant<MatchNode...>> result;
+      std::optional<std::string> error = std::nullopt;
+
+      void run(const MatchFinder::MatchResult &mresult) override {
+        fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
+        // todo: handle errors
+        //  - tag has been found but type mismatches (it shouldn't be possible though)
+        const auto add_node = [this](auto n) {
+          if (n.node)
+            result.push_back(n);
+        };
+        (add_node(matched_node<MatchNode>{
+           .node = mresult.Nodes.getNodeAs<typename MatchNode::node_type>(MatchNode::binding_tag),
+         }),
+          ...);
+      }
+    } match_callback;
+
+    MatchFinder finder;
+    std::apply(
+      [&finder, &match_callback](MatchNode... match_node) {
+        (finder.addMatcher(
+           // TK_AsIs is needed to include template instantiations
+           traverse(clang::TK_AsIs, match_node().bind(MatchNode::binding_tag)),
+           &match_callback),
+          ...);
+      },
+      match_nodes);
+    finder.matchAST(ast.getASTContext());
+    if (match_callback.error)
+      return tl::unexpected(std::move(match_callback.error).value());
+    return std::move(match_callback.result);
+  }
+} constexpr inline match_ast{};
 
 } // namespace tool
