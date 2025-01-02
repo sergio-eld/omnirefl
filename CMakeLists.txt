@@ -86,14 +86,23 @@ target_link_libraries(refl INTERFACE
 add_library(omni::refl ALIAS refl)
 
 # todo: implement as clang plugin
-add_executable(tool main.cpp)
+add_executable(tool 
+    main.cpp
+    tool/parse_cli.cpp
+    tool/tool_impl.cpp
+    tool/reflection.cpp
+    tool/emit_code.cpp)
 add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
     CXX_STANDARD 20
     INTERPROCEDURAL_OPTIMIZATION ON
     ENABLE_EXPORTS OFF)
-target_include_directories(tool PRIVATE ${CLANG_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
+target_include_directories(tool PRIVATE 
+    ${CLANG_INCLUDE_DIRS} 
+    ${LLVM_INCLUDE_DIRS}
+    ${PROJECT_SOURCE_DIR}
+)
 # todo: (not here) figure out how to get rid of zlib dependency for clang
 target_link_libraries(tool PRIVATE
     # clangAST
