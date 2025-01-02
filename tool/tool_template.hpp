@@ -1,14 +1,11 @@
 #pragma once
 
-#include "tool/data.h"
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <clang/ASTMatchers/ASTMatchFinder.h>
-#include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #pragma GCC diagnostic pop
@@ -16,14 +13,41 @@
 #include <fmt/base.h>
 #include <tl/expected.hpp>
 
+#include <filesystem>
 #include <memory>
+#include <string>
+#include <vector>
 
+// todo: separate generic and implementation-specific code
 namespace tool {
+struct cli_opts {
+  /// directory for clang's system headers (bundled)
+  std::filesystem::path resource_dir;
+
+  /// path to where generate the reflected implementation
+  std::filesystem::path output_file;
+
+  // todo: group options specific to invocation with compilation db.
+  // one may want to invoke the tool on a single source file with compilation args
+
+  /// path to compilation database (currenly only compile_commands.json)
+  std::filesystem::path compilation_db_path;
+
+  // todo: can they be optional?
+  /// .cpp files to invoke the tool for.
+  /// must be found within the compilation_db
+  std::vector<std::filesystem::path> sources;
+
+  std::vector<std::filesystem::path> excluded_folders;
+};
+
 // default implementation for cli parsing
+// generic code
 struct parse_cli_t {
-  tl::expected<data::cli_opts, std::string> operator()(int argc, char **argv) const noexcept;
+  tl::expected<cli_opts, std::string> operator()(int argc, char **argv) const noexcept;
 } const inline parse_cli{};
 
+// generic code
 struct load_compilation_db_t {
   tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
     operator()(const std::filesystem::path & compilation_db_path) const noexcept {
@@ -41,6 +65,7 @@ struct load_compilation_db_t {
   };
 } const inline load_compilation_db{};
 
+// generic code
 struct filter_db_sources_t {
   struct args {
     std::vector<std::filesystem::path> specified_sources;
@@ -52,6 +77,7 @@ struct filter_db_sources_t {
 } const inline filter_db_sources{};
 
 // todo: add continious benchmarking to CI before optimizing this
+// generic code
 struct parse_ast_t {
   struct args {
     const std::filesystem::path &resource_dir;
@@ -67,15 +93,18 @@ struct parse_ast_t {
   result_t operator()(args a) const;
 } const inline parse_ast{};
 
+// generic code
 template <typename MatchT>
 struct matched_node {
   using node_type = typename MatchT::node_type;
   const node_type *node;
 };
 
+// generic code
 template <typename... T>
 using match_variant = std::variant<tool::matched_node<T>...>;
 
+// generic code
 struct match_ast_t {
   // todo: refine MatchNode expected traits
   /**
@@ -132,5 +161,4 @@ struct match_ast_t {
     return std::move(match_callback.result);
   }
 } constexpr inline match_ast{};
-
 } // namespace tool

@@ -44,7 +44,7 @@ struct convert_t {
 } constexpr inline converted{};
 
 namespace str {
-struct is_empty {
+struct is_empty_t {
   constexpr bool operator()(std::string_view s) const {
     return s.empty();
   }
@@ -61,7 +61,7 @@ struct sorted_t {
   }
 } constexpr const inline sorted{};
 
-struct filtered {
+struct filtered_t {
   template <typename Condition, typename Container>
   auto operator()(Condition cnd, Container &&c) const {
     // todo: what if non-const reference?
@@ -201,6 +201,29 @@ inline bool is_subpath(const std::filesystem::path &path, const std::filesystem:
   const auto mismatch_pair = std::mismatch(path.begin(), path.end(), base.begin(), base.end());
   return mismatch_pair.second == base.end();
 };
+
+struct foldl_t {
+  template <typename Callable, typename Result, typename Container>
+  constexpr auto operator()(Callable &&op, Result &&initial, Container &&container) const
+    -> std::decay_t<Result> {
+    auto _op = std::forward<Callable>(op);
+    auto _res = std::forward<Result>(initial);
+    for (auto &&e : std::forward<Container>(container)) {
+      _res = _op(std::move(_res), std::forward<decltype(e)>(e));
+    }
+    return _res;
+  }
+
+  template <typename Callable, typename Result>
+  constexpr auto operator()(Callable &&op, Result &&initial) const noexcept {
+    return [op = std::forward<Callable>(op), initial = std::forward<Result>(initial)](
+             auto &&container) mutable -> decltype(auto) {
+      return foldl_t{}(std::forward<Callable>(op),
+        std::forward<Result>(initial),
+        std::forward<decltype(container)>(container));
+    };
+  }
+} constexpr inline foldl{};
 
 } // namespace util
 

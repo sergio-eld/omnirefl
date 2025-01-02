@@ -1,6 +1,4 @@
-#include "fmt/base.h"
 #include "tool/tool_template.hpp"
-
 #include "tool/util.hpp"
 
 #pragma GCC diagnostic push
@@ -14,6 +12,8 @@
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Tooling/Tooling.h>
 #pragma GCC diagnostic pop
+
+#include <fmt/base.h>
 
 #include <string_view>
 

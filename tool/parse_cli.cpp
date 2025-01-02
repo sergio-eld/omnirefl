@@ -33,7 +33,7 @@ const char help_message[] =
 //
 } // namespace
 
-tl::expected<data::cli_opts, std::string> tool::parse_cli_t::operator()(int argc,
+tl::expected<tool::cli_opts, std::string> tool::parse_cli_t::operator()(int argc,
   char **argv) const noexcept {
   namespace cl = llvm::cl;
   cl::extrahelp common_help{help_message};
@@ -105,7 +105,7 @@ tl::expected<data::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
   else
     sources = std::move(paths).value();
 
-  tl::expected<data::cli_opts, std::string> result{data::cli_opts{
+  tl::expected<tool::cli_opts, std::string> result{tool::cli_opts{
     .resource_dir = std::move(resource_dir),
     .output_file = std::move(output_file),
 
@@ -119,8 +119,8 @@ tl::expected<data::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
   const auto to_string = [](const std::filesystem::path &p) { return p.string(); };
   // todo: print conditionally (add flag parameter)
   fmt::println("-resource-dir={}", result->resource_dir.string());
-  fmt::println("-p=", result->compilation_db_path.string());
-  fmt::println("-o=", result->output_file.string());
+  fmt::println("-p={}", result->compilation_db_path.string());
+  fmt::println("-o={}", result->output_file.string());
   fmt::println("-excluded=[{}]",
     fmt::join(util::converted(to_string, result->excluded_folders), ", "));
   fmt::println("sources [{}]", fmt::join(util::converted(to_string, result->sources), ", "));
