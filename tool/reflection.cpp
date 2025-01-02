@@ -7,6 +7,8 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#include <clang/AST/ASTDumper.h>
 #include <clang/AST/ASTImporter.h>
 #include <clang/AST/DeclBase.h>
 #include <clang/Basic/Diagnostic.h>
@@ -369,6 +371,23 @@ struct resolve_t {
           resolve_definition(nm_qual_type, rd, ast.getSourceManager());
     }
 
+    return {std::move(ctx)};
+  }
+
+  tl::expected<tool::refl::context, std::string> operator()(tool::refl::context ctx,
+    const clang::ASTUnit &ast,
+    const tool::matched_node<tool::refl::matches::_debug_templ_spec_decl> &m) const noexcept {
+    using namespace tool::refl;
+
+    const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
+    const std::string_view detail_struct_name = template_decl.getName();
+    fmt::println("debug: ClassTemplateSpecializationDecl: {}", detail_struct_name);
+    std::string buf;
+    llvm::raw_string_ostream os{buf};
+    clang::ASTDumper dmp{os, ast.getASTContext(), false};
+    dmp.SetTraversalKind(clang::TK_AsIs);
+    dmp.Visit(&template_decl);
+    fmt::print("ASTDump: {}\n", buf);
     return {std::move(ctx)};
   }
 } const inline resolve{};

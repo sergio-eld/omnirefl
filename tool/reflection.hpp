@@ -24,6 +24,9 @@
 namespace tool::refl {
 namespace matches {
 
+// todo: `reflected_impl`, although it will have almost identical matcher,
+// resolving function will be simpler due to type safety
+//
 // types reflected via instantiation of a designated template struct
 struct reflected_type {
   // todo: remove. `binding_tag` is implementation-specific
@@ -34,12 +37,15 @@ struct reflected_type {
 
   auto operator()() const noexcept {
     using namespace clang::ast_matchers;
-    return classTemplateSpecializationDecl(unless(isInStdNamespace()),
-      unless(isExpansionInSystemHeader()),
-      hasAncestor(namespaceDecl(hasName("omni::detail"))),
+
+    return classTemplateSpecializationDecl( //
+      unless(isInStdNamespace()),
+      hasAncestor(namespaceDecl(hasName("omni"))),
+      hasAncestor(namespaceDecl(hasName("detail"))),
       isTemplateInstantiation(),
-      isDefinition(),
-      isStruct());
+      isDefinition()
+      //
+    );
   }
 };
 
@@ -51,24 +57,46 @@ struct reflected_call {
   // todo: this should be deducible from the ASTMatchers' expression
   using node_type = clang::CXXMethodDecl;
 
+  // REMEMBER: DONT USE IT!!!!
+  // unless(isExpansionInSystemHeader()),
   auto operator()() const noexcept {
     using namespace clang::ast_matchers;
     return cxxMethodDecl( //
       unless(isInStdNamespace()),
-      unless(isExpansionInSystemHeader()),
       hasAncestor(namespaceDecl(hasName("omni"))),
       hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
       isTemplateInstantiation(),
       hasName("_call_impl"));
   }
 };
+
+// debug
+struct _debug_templ_spec_decl {
+  static constexpr const char binding_tag[] = "asshole_tag";
+
+  using node_type = clang::ClassTemplateSpecializationDecl;
+
+  auto operator()() const noexcept {
+    using namespace clang::ast_matchers;
+    return classTemplateSpecializationDecl( //
+      hasAncestor(namespaceDecl(hasName("omni"))),
+      hasAncestor(namespaceDecl(hasName("detail"))),
+      isTemplateInstantiation(),
+      isDefinition()
+      //
+    );
+  }
+};
+
 } // namespace matches
 
 // this typedef helps to avoid compilation errors,
 // since the order of template arguments must be the same
 using variant_reflected_match = tool::match_variant< //
   matches::reflected_type,
-  matches::reflected_call>;
+  matches::reflected_call,
+  // debug
+  matches::_debug_templ_spec_decl>;
 
 // flags for definition properties
 // these are used to determine violated limitations when using the tool

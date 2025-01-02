@@ -12,7 +12,18 @@
 #include "tool/tool_template.hpp"
 #include "tool/util.hpp"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#include <clang/AST/ASTDumper.h>
+#include <clang/Basic/SourceManager.h>
+#pragma GCC diagnostic pop
+
 #include <fmt/format.h>
+#include <iostream>
 #include <tl/expected.hpp>
 
 #include <fstream>
@@ -88,6 +99,20 @@ int main(int argc, char **argv) {
       llvm::errs() << ast.error();
       return -1;
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///// debug
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    // idk this asshole doesn't seem to print a valid ast
+    //
+    // const clang::ASTUnit &ast_unit = **ast;
+    // std::string buf;
+    // llvm::raw_string_ostream os{buf};
+    // clang::ASTDumper dmp{os, ast_unit.getASTContext(), false};
+    // dmp.SetTraversalKind(clang::TK_AsIs);
+    // dmp.Visit(ast_unit.getASTContext().getTranslationUnitDecl());
+    // fmt::print("ASTUnit: {}\n", buf);
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
 
     auto matches = tool::match_ast(std::vector<tool::refl::variant_reflected_match>{}, **ast);
     if (!matches) {

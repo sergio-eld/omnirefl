@@ -38,12 +38,31 @@ jobs:
         run: |
           docker compose run --rm install
 
+      # todo: separate these tests to another job
+      # - name: Test Ubuntu 18
+      #   run: |
+      #     docker compose run --rm test-install-ubuntu-18
+
+      # - name: Test Ubuntu 20
+      #   run: |
+      #     docker compose run --rm test-install-ubuntu-20
+
+      # - name: Test Ubuntu 22
+      #   run: |
+      #     docker compose run --rm test-install-ubuntu-22
+
       # todo: test results and benchmarks (for continious bench)
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: install
           path: ./build-alpine/install/
+
+      - name: Upload Test Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: install
+          path: ./build-alpine/test/
 
   # this should actually use the install package and test on several images
   # test:
