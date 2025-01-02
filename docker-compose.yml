@@ -9,6 +9,7 @@ services:
       - ./build-alpine:/build:rw
     working_dir: /build
     entrypoint: ['/bin/ash', '-c']
+    # todo: debug symbols should be available
     command: 
       - |
         cmake /src -GNinja \
@@ -34,7 +35,9 @@ services:
     command: 
       - |
         cmake --build . -j$$(nproc) &&
-        ctest . -V
+        mkdir -p /build/test/alpine &&
+        ctest . --output-junit /build/test/alpine/results.xml \
+          -V | tee /build/test/alpine/test_results.log
 
   install:
     image: sergioeld/omnirefl-build-alpine
@@ -50,7 +53,9 @@ services:
     # todo: specify a directory which is easy to upload as artifact
     command: 
       - |
-        cpack -G "DEB;TGZ"
+        cpack -G "DEB;TGZ" &&
+        mkdir -p /build/install &&
+        mv *.deb *.tar.gz /build/install/
 
   test-ubuntu-18:
     image: test-install-ubuntu-18
