@@ -1,7 +1,6 @@
 
 // todo:
 // - ast caching (?)
-// - run queries on the ast and output the code
 
 // todo:
 // #include "tool/..." // - tool related code
@@ -19,7 +18,6 @@
 #include <fstream>
 #include <vector>
 
-// refactorme: main should only contain a tool invocation code,
 // allowing to configure specific things:
 // - matchers
 // - output to file
@@ -91,14 +89,7 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    // refactorme: (?) list of template arguments here will cause a lot of problems, because the
-    // order must be specified exactly like in other places
-    auto matches = tool::match_ast(
-      std::tuple{
-        tool::refl::matches::reflected_type{},
-        tool::refl::matches::reflected_call{},
-      },
-      **ast);
+    auto matches = tool::match_ast(std::vector<tool::refl::variant_reflected_match>{}, **ast);
     if (!matches) {
       llvm::errs() << matches.error();
       return -1;

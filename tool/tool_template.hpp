@@ -120,7 +120,7 @@ struct match_ast_t {
    */
   template <typename... MatchNode>
   tl::expected<std::vector<match_variant<MatchNode...>>, std::string> operator()(
-    std::tuple<MatchNode...> match_nodes,
+    std::vector<match_variant<MatchNode...>> initial,
     // MatchFinder::matchAST expects a non-const ASTContext
     clang::ASTUnit &ast) const noexcept {
     using namespace clang::ast_matchers;
@@ -144,17 +144,15 @@ struct match_ast_t {
           ...);
       }
     } match_callback;
+    match_callback.result = std::move(initial);
 
     MatchFinder finder;
-    std::apply(
-      [&finder, &match_callback](MatchNode... match_node) {
-        (finder.addMatcher(
-           // TK_AsIs is needed to include template instantiations
-           traverse(clang::TK_AsIs, match_node().bind(MatchNode::binding_tag)),
-           &match_callback),
-          ...);
-      },
-      match_nodes);
+    (finder.addMatcher(
+       // TK_AsIs is needed to include template instantiations
+       traverse(clang::TK_AsIs, MatchNode{}().bind(MatchNode::binding_tag)),
+       &match_callback),
+      ...);
+
     finder.matchAST(ast.getASTContext());
     if (match_callback.error)
       return tl::unexpected(std::move(match_callback.error).value());

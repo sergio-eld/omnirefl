@@ -377,7 +377,7 @@ struct resolve_t {
 tl::expected<tool::refl::context, std::string> //
   tool::refl::resolve_matched_node(context ctx,
     const clang::ASTUnit &ast,
-    tool::match_variant<matches::reflected_type, matches::reflected_call> match) noexcept {
+    variant_reflected_match match) noexcept {
   return std::visit( //
     [&](const auto &m) noexcept { return resolve(std::move(ctx), ast, m); }, //
     match);

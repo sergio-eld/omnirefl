@@ -225,6 +225,15 @@ struct foldl_t {
   }
 } constexpr inline foldl{};
 
+template <typename>
+struct to_tuple;
+
+template <typename ... T, template <typename...> class List>
+struct to_tuple<List<T...>> { using type = std::tuple<T...>; };
+
+template <typename List>
+using to_tuple_t = typename to_tuple<List>::type;
+
 } // namespace util
 
 // the only way is to specialize in the global namespace

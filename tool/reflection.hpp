@@ -64,6 +64,12 @@ struct reflected_call {
 };
 } // namespace matches
 
+// this typedef helps to avoid compilation errors,
+// since the order of template arguments must be the same
+using variant_reflected_match = tool::match_variant< //
+  matches::reflected_type,
+  matches::reflected_call>;
+
 // flags for definition properties
 // these are used to determine violated limitations when using the tool
 enum type_definition_flags {
@@ -139,7 +145,7 @@ struct context {
 
 tl::expected<context, std::string> resolve_matched_node(context ctx,
   const clang::ASTUnit &ast,
-  tool::match_variant<matches::reflected_type, matches::reflected_call> node) noexcept;
+  variant_reflected_match node) noexcept;
 
 tl::expected<tool::refl::context, std::string> update(context _current, context delta) noexcept;
 } // namespace tool::refl
