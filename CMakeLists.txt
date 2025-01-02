@@ -90,7 +90,8 @@ add_executable(tool
     main.cpp
     tool/parse_cli.cpp
     tool/tool_impl.cpp
-    tool/reflection.cpp)
+    tool/reflection.cpp
+    tool/emit_code.cpp)
 add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
