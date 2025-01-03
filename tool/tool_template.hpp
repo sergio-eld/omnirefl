@@ -134,13 +134,15 @@ struct match_ast_t {
         fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
         // todo: handle errors
         //  - tag has been found but type mismatches (it shouldn't be possible though)
-        const auto add_node = [this](auto n) {
+        const auto add_node = [this](auto n, std::string_view tag) {
           if (n.node)
             result.push_back(n);
+          else 
+              fmt::println("debug: !!! unmatched tag {}", tag);
         };
         (add_node(matched_node<MatchNode>{
            .node = mresult.Nodes.getNodeAs<typename MatchNode::node_type>(MatchNode::binding_tag),
-         }),
+         }, MatchNode::binding_tag),
           ...);
       }
     } match_callback;

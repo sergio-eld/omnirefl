@@ -37,7 +37,7 @@ services:
         cmake --build . -j$$(nproc) &&
         mkdir -p /build/test/alpine &&
         ctest . --output-junit /build/test/alpine/results.xml \
-          -V | tee /build/test/alpine/test_results.log
+          -V | tee /build/test/alpine/results.log
 
   install:
     image: sergioeld/omnirefl-build-alpine
@@ -57,8 +57,10 @@ services:
         mkdir -p /build/install &&
         mv *.deb *.tar.gz /build/install/
 
+  # todo: as of this writing I have no idea how to make it usable in github ci
+  # as a separate job, so I end up duplicating the code in the CI file
   test-ubuntu-18:
-    image: test-install-ubuntu-18
+    image: sergioeld/test-install-ubuntu-18
     build:
       context: .
       dockerfile: test-install-ubuntu.Dockerfile
@@ -69,7 +71,7 @@ services:
       install:
         condition: service_completed_successfully
     volumes:
-      - ./build-alpine:/install:ro
+      - ./build-alpine/install:/install:ro
     working_dir: /install
     entrypoint: ['/bin/bash', '-c']
     command:
@@ -79,17 +81,45 @@ services:
         cp -r /usr/share/omnirefl/samples/* ../
         cmake .. -GNinja &&
         cmake --build . &&
-        ctest . -V
+        mkdir -p /build/test/ubuntu-18 &&
+        ctest . --output-junit /build/test/ubuntu-18/results.xml \
+          -V | tee /build/test/ubuntu-18/results.log
+
+  test-ubuntu-20:
+    image: sergioeld/test-install-ubuntu-20
+    build:
+      context: .
+      dockerfile: test-install-ubuntu.Dockerfile
+      args: 
+        - UBUNTU_VERSION=20.04
+    # todo: this should be disabled for github CI
+    depends_on:
+      install:
+        condition: service_completed_successfully
+    volumes:
+      - ./build-alpine/install:/install:ro
+    working_dir: /install
+    entrypoint: ['/bin/bash', '-c']
+    command:
+      - |
+        apt install ./omnirefl*.deb &&
+        mkdir -p /tmp/test/build && cd /tmp/test/build
+        cp -r /usr/share/omnirefl/samples/* ../
+        cmake .. -GNinja &&
+        cmake --build . &&
+        mkdir -p /build/test/ubuntu-18 &&
+        ctest . --output-junit /build/test/ubuntu-20/results.xml \
+          -V | tee /build/test/ubuntu-20/results.log
 
   test-ubuntu-22:
-    image: test-install-ubuntu-22
+    image: sergioeld/test-install-ubuntu-22
     build:
       context: .
       dockerfile: test-install-ubuntu.Dockerfile
       args: 
         - UBUNTU_VERSION=22.04
     volumes:
-      - ./build-alpine:/install:ro
+      - ./build-alpine/install:/install:ro
     working_dir: /install
     entrypoint: ['/bin/bash', '-c']
     command:
@@ -99,6 +129,7 @@ services:
         cp -r /usr/share/omnirefl/samples/* ../
         cmake .. -GNinja &&
         cmake --build . &&
-        ctest . -V
-
+        mkdir -p /build/test/ubuntu-22 &&
+        ctest . --output-junit /build/test/ubuntu-22/results.xml \
+          -V | tee /build/test/ubuntu-22/results.log
 

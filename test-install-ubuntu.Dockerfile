@@ -1,5 +1,5 @@
 ARG UBUNTU_VERSION=18.04
-FROM ubuntu:$UBUNTU_VERSION
+FROM ubuntu:$UBUNTU_VERSION AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -9,12 +9,13 @@ RUN apt update \
         clang \
         g++ \
         git \
-        libgtest-dev \
+        # libgtest-dev \
         neovim \
         ninja-build \
         wget \
     && apt clean -y
 
+# todo: this is questionable and very slow for a CI
 ADD https://github.com/Kitware/CMake/releases/download/v3.30.3/cmake-3.30.3.tar.gz /tmp/cmake/
 RUN cd /tmp/cmake \
     ; tar --strip-components=1 -zxf ./cmake-*.tar.gz \
@@ -28,6 +29,7 @@ RUN cd /tmp/cmake \
     && cd / \
     && rm -rf /tmp/cmake
 
+# todo: this is questionable and very slow for a CI
 RUN mkdir /tmp/gtest \
     ; cd /tmp/gtest \
     ; cmake /usr/src/gtest -GNinja -DCMAKE_BUILD_TYPE=Release \
@@ -36,4 +38,5 @@ RUN mkdir /tmp/gtest \
     && apt remove libgtest-dev -y
 
 RUN rm -rf /var/lib/apt/lists/*
+
 CMD ["bash"]
