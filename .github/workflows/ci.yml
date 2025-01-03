@@ -37,6 +37,14 @@ jobs:
       - name: Package omnirefl tool
         run: |
           docker compose run --rm install
+      
+      # todo: test results and benchmarks (for continious bench)
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: install
+          path: ./build-alpine/install/
+
 
       # todo: separate these tests to another job
       # - name: Test Ubuntu 18
@@ -51,18 +59,11 @@ jobs:
       #   run: |
       #     docker compose run --rm test-install-ubuntu-22
 
-      # todo: test results and benchmarks (for continious bench)
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: install
-          path: ./build-alpine/install/
-
-      - name: Upload Test Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: install
-          path: ./build-alpine/test/
+      # - name: Upload Test Artifacts
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: test-result
+      #     path: ./build-alpine/test/
 
   # this should actually use the install package and test on several images
   # test:
