@@ -143,7 +143,7 @@ void configure_compiler_invocation(const std::string_view &resource_dir,
 
 tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
   struct: clang::tooling::ToolAction {
-    result_t m_result = tl::unexpected("unexpected: tool was not invoced");
+    result_t m_result = tl::unexpected("unexpected: tool was not invoked");
     std::string_view m_resource_dir;
 
     // as of now this ad hoc is only needed because ClangTool initializes the args for
@@ -188,6 +188,7 @@ tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
     },
     clang::tooling::ArgumentInsertPosition::BEGIN));
 
-  tool.run(&adapter);
-  return std::move(adapter.m_result);
+  if (0 == tool.run(&adapter))
+    return std::move(adapter.m_result);
+  return tl::unexpected("errors while invoking ClangTool::run");
 }

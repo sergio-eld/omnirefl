@@ -140,9 +140,21 @@ if (ENABLE_TESTING)
     target_link_libraries(test.simple PRIVATE GTest::gtest)
     set_target_properties(test.simple PROPERTIES
         # todo: test with C++11
-        CXX_STANDAR 14
+        CXX_STANDARD 14
     )
     add_test(NAME test.simple COMMAND test.simple)
+
+    add_executable(test.odr 
+        samples/test/odr/test.cpp
+        samples/test/odr/impl_a.cpp
+        samples/test/odr/impl_b.cpp)
+    reflected_target(test.odr)
+    target_include_directories(test.odr PRIVATE samples/test/odr)
+    target_link_libraries(test.odr PRIVATE GTest::gtest)
+    set_target_properties(test.odr PROPERTIES
+        CXX_STANDARD 11
+    )
+    add_test(NAME test.odr COMMAND test.odr)
 
     # todo: add implementation later
     # # currenly this is needs to be manually copied to CMakeLists.txt.in.samples

@@ -33,6 +33,18 @@ target_include_directories(${TEST_NAME}.simple PRIVATE test/simple)
 target_link_libraries(${TEST_NAME}.simple PRIVATE GTest::gtest)
 add_test(NAME ${TEST_NAME}.simple COMMAND ${TEST_NAME}.simple)
 
+add_executable(${TEST_NAME}.odr 
+    test/odr/test.cpp
+    test/odr/impl_a.cpp
+    test/odr/impl_b.cpp)
+reflected_target(${TEST_NAME}.odr)
+target_include_directories(${TEST_NAME}.odr PRIVATE samples/test/odr)
+target_link_libraries(${TEST_NAME}.odr PRIVATE GTest::gtest)
+set_target_properties(${TEST_NAME}.odr PROPERTIES
+    CXX_STANDARD 11
+)
+add_test(NAME ${TEST_NAME}.odr COMMAND ${TEST_NAME}.odr)
+
 # todo: implement later
 # add_executable(${TEST_NAME}.impl_ryml test/test_impl_ryml.cpp)
 # reflected_target(${TEST_NAME}.impl_ryml)

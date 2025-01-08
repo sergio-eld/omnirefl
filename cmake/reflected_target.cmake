@@ -56,17 +56,17 @@ function(reflected_target TARGET_NAME)
     # list(APPEND EXCLUDED_LIST ${IGNORED_SELF_SOURCES})
     list(APPEND EXCLUDED_LIST ${CMAKE_BINARY_DIR})
     list(APPEND EXCLUDED_LIST ${GENERATED_FILE})
-    list(JOIN EXCLUDED_LIST "," EXCLUDED)
+    list(JOIN EXCLUDED_LIST "," ARG_EXCLUDED)
 
     set(GENERATED_FILE "${CMAKE_CURRENT_BINARY_DIR}/reflected_${TARGET_NAME}.cpp")
 
     add_custom_command(OUTPUT ${GENERATED_FILE}
-        # todo: `--resourse-dir` should be optional
+        # todo: (?) `--resourse-dir` should be optional
         COMMAND omni::tool "--resource-dir=${TOOL_RESOURCE_DIR}"
             "-p=${CMAKE_BINARY_DIR}/"
             "-o=${GENERATED_FILE}"
-            "--excluded=${EXCLUDED}"
-            "${REFL_TARGET_SOURCES}"
+            "--excluded=${ARG_EXCLUDED}"
+            ${REFL_TARGET_SOURCES}
         DEPENDS ${REFL_TARGET_SOURCES}
         COMMENT "Running ${TOOL_NAME} for ${TARGET_NAME}"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
