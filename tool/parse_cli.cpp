@@ -52,6 +52,7 @@ tl::expected<tool::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
     cl::value_desc("filename"),
     cl::Required,
     cl::ValueRequired);
+
   cl::list<std::string> cl_source_paths(cl::cat(option_category),
     cl::desc("[<source>...]"),
     cl::ZeroOrMore,
@@ -121,9 +122,12 @@ tl::expected<tool::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
   fmt::println("-resource-dir={}", result->resource_dir.string());
   fmt::println("-p={}", result->compilation_db_path.string());
   fmt::println("-o={}", result->output_file.string());
-  fmt::println("-excluded=[{}]",
+  fmt::println("-excluded({})=[{}]",
+    result->excluded_folders.size(),
     fmt::join(util::converted(to_string, result->excluded_folders), ", "));
-  fmt::println("sources [{}]", fmt::join(util::converted(to_string, result->sources), ", "));
+  fmt::println("sources({}) [{}]",
+    result->sources.size(),
+    fmt::join(util::converted(to_string, result->sources), ", "));
 
   const auto &_debug_result = *result;
   (void)_debug_result;
