@@ -125,7 +125,7 @@ tl::expected<void, std::string>
                   "\n    }}"
                   "\n"
                   "\n    template <typename V>"
-                  "\n    void set_value(type &t, V &&v) {{"
+                  "\n    static void set_value(type &t, V &&v) {{"
                   "\n      t.{field_name} = std::forward<V>(v);"
                   "\n    }}"
                   "\n  }} constexpr static {field_name}{{}};",
@@ -154,6 +154,7 @@ tl::expected<void, std::string>
     // fixme: otherwise lambda does not compile
     size_t arg_index = 0;
     os << fmt::format(
+      "\n"
       "\ntemplate<>"
       "\nvoid omni::reflected_call_t::_call_impl("
       "\n  {params}) {{"

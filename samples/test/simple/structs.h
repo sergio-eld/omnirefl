@@ -3,6 +3,7 @@
 #include <eld/pattern_matching.hpp>
 #include <omnirefl/refl.hpp>
 
+#include <map>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -95,6 +96,33 @@ struct print_field_values_recursive_t {
     }
   }
 } const static print_field_values_recursive{};
+
+// naive implementation, does not support containers
+struct simple_from_map_t {
+  template <typename T>
+  void operator()(T &to, const std::map<std::string, std::string> &from) const noexcept {
+    namespace pm = pattern_matching;
+    for (auto f : omni::reflected(to).fields) {
+      const auto it = from.find(std::string(f.name));
+      if (it == from.cend())
+        continue;
+      f
+        | pm::matched_in_place(
+          // fixme: deduction from non-template lambda doesn't compile with 2 args.
+          // maybe due to the deduction of a template...
+          // [&](const int &, const omni::setter<int> &set_value) {
+          //   set_value(std::stoi(it->second));
+          // },
+          pm::m_if<std::is_integral>([&](const int &, const omni::setter<int> &set_value) {
+            set_value(std::stoi(it->second));
+          }),
+          pm::m_is<std::basic_string>(
+            [&](const std::string &, const omni::setter<std::string> &set_value) {
+              set_value(it->second);
+            }));
+    }
+  }
+} const static simple_from_map{};
 } // namespace example_impl
 
 namespace example_types {
@@ -119,5 +147,10 @@ struct wrestler {
   } info{};
   // todo: add support for an unnamed nested struct (specialization is possible via
   // `decltype(std::declval<person>().unnamed_nested)`
+};
+
+struct settable {
+  std::string str;
+  int i;
 };
 } // namespace example_types

@@ -44,6 +44,7 @@ jobs:
         with:
           name: install
           path: ./build-alpine/install/
+          if-no-files-found: error
 
 
       # todo: separate these tests to another job
