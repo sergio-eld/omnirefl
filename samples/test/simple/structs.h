@@ -108,18 +108,12 @@ struct simple_from_map_t {
         continue;
       f
         | pm::matched_in_place(
-          // fixme: deduction from non-template lambda doesn't compile with 2 args.
-          // maybe due to the deduction of a template...
-          // [&](const int &, const omni::setter<int> &set_value) {
-          //   set_value(std::stoi(it->second));
-          // },
-          pm::m_if<std::is_integral>([&](const int &, const omni::setter<int> &set_value) {
+          [&](const int &, const omni::setter<int> &set_value) {
             set_value(std::stoi(it->second));
-          }),
-          pm::m_is<std::basic_string>(
-            [&](const std::string &, const omni::setter<std::string> &set_value) {
-              set_value(it->second);
-            }));
+          },
+          [&](const std::string &, const omni::setter<std::string> &set_value) {
+            set_value(it->second);
+          });
     }
   }
 } const static simple_from_map{};
