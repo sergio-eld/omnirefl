@@ -104,7 +104,10 @@ struct _is_get_set_invocable<Callable,
 
 template <typename R, typename... Fields>
 struct variant_field {
+  // reflected structure's field name
   omni::string_view name;
+
+  // implementation-related data
   R &_ref;
   omni::variant<Fields...> _v;
 
