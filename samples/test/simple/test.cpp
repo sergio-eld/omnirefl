@@ -114,6 +114,18 @@ TEST(print_values, recursive) {
   EXPECT_EQ(expected, result);
 }
 
+TEST(modify_fields, simple) {
+  const static std::map<std::string, std::string> input{
+    {"str", "oceanic"},
+    {"i", "815"},
+  };
+  const auto value = [](const std::string &k) { return input.find(k)->second; };
+  example_types::settable output;
+  omni::reflected_call(example_impl::simple_from_map, output, input);
+  EXPECT_EQ(std::to_string(output.i), value("i"));
+  EXPECT_EQ(output.str, value("str"));
+}
+
 // todo: implement
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
