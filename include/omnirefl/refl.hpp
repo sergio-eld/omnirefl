@@ -114,13 +114,13 @@ struct variant_field {
     Callable &&_c;
     Ref &_r;
 
-    template <typename Field>
-    constexpr auto _invoke(std::true_type /*get, set*/) const {
+    template <typename Field, typename ReturnT>
+    constexpr ReturnT _invoke(std::true_type /*get, set*/) const {
       return std::forward<Callable>(_c)(Field::get_value(_r), _setter<Ref, Field>{_r});
     }
 
-    template <typename Field>
-    constexpr auto _invoke(std::false_type /*only get*/) const {
+    template <typename Field, typename ReturnT>
+    constexpr ReturnT _invoke(std::false_type /*only get*/) const {
       return std::forward<Callable>(_c)(Field::get_value(_r));
     }
 
@@ -132,7 +132,8 @@ struct variant_field {
     template <typename Field,
       typename Invocable = detail::_is_get_set_invocable<Callable, Ref, Field>>
     constexpr auto operator()(Field) const -> typename Invocable::return_t {
-      return _invoke<Field>(std::integral_constant<bool, Invocable::value>{});
+      return _invoke<Field, typename Invocable::return_t>(
+        std::integral_constant<bool, Invocable::value>{});
     }
   };
 
