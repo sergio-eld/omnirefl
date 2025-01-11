@@ -121,6 +121,7 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 endif()
 add_executable(omni::tool ALIAS tool)
 
+# todo: disable for cross compilation, since it requires running the compiled binary
 if (ENABLE_TESTING)
     # todo: benchmarks
     enable_testing()

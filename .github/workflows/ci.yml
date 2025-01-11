@@ -24,28 +24,36 @@ jobs:
       - name: Pull build-alpine Image
         run: docker pull sergioeld/omnirefl-build-alpine:latest
 
-      - name: Build omnirefl tool
+      - name: Build omnirefl tool for Linux
         run: |
-          docker compose run --rm build
+          docker compose run --rm build-linux
+
+      - name: Build omnirefl tool for Windows
+        run: |
+          docker compose run --rm build-windows
 
       # this should run in a test job, but it uses the docker compose file,
       # which resides in the git repo which would need to be checked out (again)
       - name: Run test
-        run: docker compose run --rm build-tests
+        run: docker compose run --rm build-tests-alpine
 
       # todo: packaging should not run on a merge request (? I think)
-      - name: Package omnirefl tool
+      - name: Package omnirefl tool for Linux
         run: |
-          docker compose run --rm install
+          docker compose run --rm package-linux
+
+      - name: Package omnirefl tool for Windows
+        run: |
+          docker compose run --rm package-windows
       
       # todo: test results and benchmarks (for continious bench)
+      # todo: separate packages for windows and linux
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: install
-          path: ./build-alpine/install/
+          path: ./build-alpine/*/install/
           if-no-files-found: error
-
 
       # todo: separate these tests to another job
       # - name: Test Ubuntu 18

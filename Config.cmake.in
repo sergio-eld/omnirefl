@@ -1,6 +1,5 @@
 @PACKAGE_INIT@
 
-# todo: if the package is not standalone, need to `find_package(Clang)` as the dependency
 set(@PROJECT_NAME@_RESOURCE_DIR 
     "${PACKAGE_PREFIX_DIR}/share/@PROJECT_NAME@/clang/@LLVM_VERSION@")
 if (NOT EXISTS "${@PROJECT_NAME@_RESOURCE_DIR}/include")

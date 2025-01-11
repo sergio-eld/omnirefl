@@ -44,14 +44,14 @@ int main(int argc, char **argv) {
   auto compilation_db = tool::load_compilation_db(cli->compilation_db_path);
   if (!compilation_db) {
     llvm::errs() << std::move(compilation_db).error();
-    llvm::errs() << cli->compilation_db_path << '\n';
+    llvm::errs() << cli->compilation_db_path.string() << '\n';
     return -1;
   }
 
   auto db_sources = util::to_std_paths((*compilation_db)->getAllFiles());
   if (!db_sources) {
     llvm::errs() << std::move(db_sources).error();
-    llvm::errs() << cli->compilation_db_path << '\n';
+    llvm::errs() << cli->compilation_db_path.string() << '\n';
     return -1;
   }
 
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
     *db_sources);
   if (!filtered_sources) {
     llvm::errs() << std::move(filtered_sources).error();
-    llvm::errs() << cli->compilation_db_path << '\n';
+    llvm::errs() << cli->compilation_db_path.string() << '\n';
     return -1;
   }
 
@@ -99,20 +99,6 @@ int main(int argc, char **argv) {
       llvm::errs() << ast.error();
       return -1;
     }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///// debug
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    // idk this asshole doesn't seem to print a valid ast
-    //
-    // const clang::ASTUnit &ast_unit = **ast;
-    // std::string buf;
-    // llvm::raw_string_ostream os{buf};
-    // clang::ASTDumper dmp{os, ast_unit.getASTContext(), false};
-    // dmp.SetTraversalKind(clang::TK_AsIs);
-    // dmp.Visit(ast_unit.getASTContext().getTranslationUnitDecl());
-    // fmt::print("ASTUnit: {}\n", buf);
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
 
     auto matches = tool::match_ast(std::vector<tool::refl::variant_reflected_match>{}, **ast);
     if (!matches) {

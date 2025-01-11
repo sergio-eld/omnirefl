@@ -1,4 +1,4 @@
-# list(JOIN <list> <glue> <output variable>) 
+# list(JOIN <list> <glue> <output variable>) since 3.12
 cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 
 if (NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF")
