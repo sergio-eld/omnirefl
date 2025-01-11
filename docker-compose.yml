@@ -48,9 +48,9 @@ services:
   build-tests-alpine:
     image: sergioeld/omnirefl-build-alpine
     # todo: this should be disabled for github CI
-    depends_on:
-      build-linux:
-        condition: service_completed_successfully
+    # depends_on:
+    #   build-linux:
+    #     condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
@@ -66,9 +66,9 @@ services:
   package-linux:
     image: sergioeld/omnirefl-build-alpine
     # todo: this should be disabled for github CI
-    depends_on:
-      build-linux:
-        condition: service_completed_successfully
+    # depends_on:
+    #   build-linux:
+    #     condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
@@ -84,9 +84,9 @@ services:
   package-windows:
     image: sergioeld/omnirefl-build-alpine
     # todo: this should be disabled for github CI
-    depends_on:
-      build-windows:
-        condition: service_completed_successfully
+    # depends_on:
+    #   build-windows:
+    #     condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine/windows:/build:rw
@@ -109,9 +109,9 @@ services:
       args: 
         - UBUNTU_VERSION=18.04
     # todo: this should be disabled for github CI
-    depends_on:
-      package-linux:
-        condition: service_completed_successfully
+    # depends_on:
+    #   package-linux:
+    #     condition: service_completed_successfully
     volumes:
       - ./build-alpine/linux/install:/install:ro
     working_dir: /install
@@ -135,9 +135,9 @@ services:
       args: 
         - UBUNTU_VERSION=20.04
     # todo: this should be disabled for github CI
-    depends_on:
-      package-linux:
-        condition: service_completed_successfully
+    # depends_on:
+    #   package-linux:
+    #     condition: service_completed_successfully
     volumes:
       - ./build-alpine/linux/install:/install:ro
     working_dir: /install
@@ -161,9 +161,9 @@ services:
       args: 
         - UBUNTU_VERSION=22.04
     # todo: this should be disabled for github CI
-    depends_on:
-      package-linux:
-        condition: service_completed_successfully
+    # depends_on:
+    #   package-linux:
+    #     condition: service_completed_successfully
     volumes:
       - ./build-alpine/linux/install:/install:ro
     working_dir: /install
