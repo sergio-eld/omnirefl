@@ -40,7 +40,7 @@ tl::expected<codegen::reflection_data, std::string> codegen::prepare_input(
         fmt::format("no definition for reflected implementation type {}", nm_qual_type));
     const auto &sf = definition->second.source_file;
     if (!r->refl_includes.contains(sf))
-      r->refl_impl_includes.emplace(sf);
+      r->refl_impl_includes.emplace(sf.string());
   }
 
   std::set unique_func_signatures{std::make_move_iterator(ctx.reflected_calls.begin()),

@@ -1,12 +1,12 @@
 services:
-  build:
+  build-linux:
     image: sergioeld/omnirefl-build-alpine
     build:
       context: .
       dockerfile: build-alpine.Dockerfile
     volumes:
       - ./:/src:ro
-      - ./build-alpine:/build:rw
+      - ./build-alpine/linux:/build:rw
     working_dir: /build
     entrypoint: ['/bin/ash', '-c']
     # todo: debug symbols should be available
@@ -20,16 +20,40 @@ services:
         cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
         strip --strip-all omnirefl # set(CPACK_STRIP_FILES TRUE) doesn't work
 
+  build-windows:
+    image: sergioeld/omnirefl-build-alpine
+    build:
+      context: .
+      dockerfile: build-alpine.Dockerfile
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine/windows:/build:rw
+    working_dir: /build
+    entrypoint: ['/bin/ash', '-c']
+    # todo: debug symbols should be available
+    # testing only possible in Windows container
+    command: 
+      - |
+        CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ LDFLAGS=-static \
+          cmake /src -GNinja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_SYSTEM_NAME=Windows \
+          -DENABLE_PACKAGE=ON \
+          -DENABLE_TESTING=OFF \
+          -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
+        cmake --build . -t omnirefl.exe -j$$(nproc) && # strip it before running tests 
+        strip --strip-all omnirefl.exe # set(CPACK_STRIP_FILES TRUE) doesn't work
+
   # todo: test artifacts should be uploaded for continious testing
-  build-tests:
+  build-tests-alpine:
     image: sergioeld/omnirefl-build-alpine
     # todo: this should be disabled for github CI
     depends_on:
-      build:
+      build-linux:
         condition: service_completed_successfully
     volumes:
       - ./:/src:ro
-      - ./build-alpine:/build:rw
+      - ./build-alpine/linux:/build:rw
     working_dir: /build
     entrypoint: ['/bin/ash', '-c']
     command: 
@@ -39,15 +63,15 @@ services:
         ctest . --output-junit /build/test/alpine/results.xml \
           -V | tee /build/test/alpine/results.log
 
-  install:
+  package-linux:
     image: sergioeld/omnirefl-build-alpine
     # todo: this should be disabled for github CI
     depends_on:
-      build:
+      build-linux:
         condition: service_completed_successfully
     volumes:
       - ./:/src:ro
-      - ./build-alpine:/build:rw
+      - ./build-alpine/linux:/build:rw
     working_dir: /build
     entrypoint: ['/bin/ash', '-c']
     # todo: specify a directory which is easy to upload as artifact
@@ -56,6 +80,24 @@ services:
         cpack -G "DEB;TGZ" &&
         mkdir -p /build/install &&
         mv *.deb *.tar.gz /build/install/
+
+  package-windows:
+    image: sergioeld/omnirefl-build-alpine
+    # todo: this should be disabled for github CI
+    depends_on:
+      build-windows:
+        condition: service_completed_successfully
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine/windows:/build:rw
+    working_dir: /build
+    entrypoint: ['/bin/ash', '-c']
+    # todo: specify a directory which is easy to upload as artifact
+    command: 
+      - |
+        cpack -G "ZIP" &&
+        mkdir -p /build/install &&
+        mv *.zip /build/install/
 
   # todo: as of this writing I have no idea how to make it usable in github ci
   # as a separate job, so I end up duplicating the code in the CI file
@@ -68,10 +110,10 @@ services:
         - UBUNTU_VERSION=18.04
     # todo: this should be disabled for github CI
     depends_on:
-      install:
+      package-linux:
         condition: service_completed_successfully
     volumes:
-      - ./build-alpine/install:/install:ro
+      - ./build-alpine/linux/install:/install:ro
     working_dir: /install
     entrypoint: ['/bin/bash', '-c']
     command:
@@ -94,10 +136,10 @@ services:
         - UBUNTU_VERSION=20.04
     # todo: this should be disabled for github CI
     depends_on:
-      install:
+      package-linux:
         condition: service_completed_successfully
     volumes:
-      - ./build-alpine/install:/install:ro
+      - ./build-alpine/linux/install:/install:ro
     working_dir: /install
     entrypoint: ['/bin/bash', '-c']
     command:
@@ -118,8 +160,12 @@ services:
       dockerfile: test-install-ubuntu.Dockerfile
       args: 
         - UBUNTU_VERSION=22.04
+    # todo: this should be disabled for github CI
+    depends_on:
+      package-linux:
+        condition: service_completed_successfully
     volumes:
-      - ./build-alpine/install:/install:ro
+      - ./build-alpine/linux/install:/install:ro
     working_dir: /install
     entrypoint: ['/bin/bash', '-c']
     command:

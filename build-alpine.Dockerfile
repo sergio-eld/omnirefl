@@ -56,6 +56,20 @@ RUN cd $LLVM_DIR/llvm-project; \
     #   but the tool will fail on ubuntu, because of missing "bits/alltypes.h"
     git apply ../llvm-project.patch
 
+RUN mkdir $CLANG_BUILD_WINDOWS; \
+    cd $CLANG_BUILD_WINDOWS; \
+    CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ LDFLAGS=-static \
+        cmake ../llvm-project/llvm -GNinja \
+        -DCMAKE_BUILD_TYPE=$CLANG_BUILD_TYPE \
+        -DCMAKE_SYSTEM_NAME=Windows \
+        -DCMAKE_INSTALL_PREFIX=$CLANG_INSTALL_WINDOWS \
+        -DLLVM_ENABLE_PROJECTS="clang" \
+        -DLLVM_TARGETS_TO_BUILD=X86 \
+        $(cat $LLVM_DIR/clang-cmake-options) \
+    &&:
+RUN cmake --build $CLANG_BUILD_WINDOWS -j$(nproc)
+RUN cmake --install $CLANG_BUILD_WINDOWS
+
 RUN mkdir $CLANG_BUILD_HEADERS; \
     cd $CLANG_BUILD_HEADERS; \
     CC=clang-18 CXX=clang++-18 \
@@ -91,11 +105,7 @@ RUN mkdir $CLANG_BUILD_HEADERS; \
     && cmake --build . -j$(nproc) \
     && cmake --install . \
     && cp -r $CLANG_INSTALL_HEADERS/include/* $CLANG_INSTALL_LINUX/lib/clang/*/include \
-    &&:
-
-RUN mkdir $CLANG_BUILD_WINDOWS; \
-    cd $CLANG_BUILD_WINDOWS \
-# todo: build for windows with mingw-w64
+    && cp -r $CLANG_INSTALL_HEADERS/include/* $CLANG_INSTALL_WINDOWS/lib/clang/*/include \
     &&:
 
 # stage 2 final image
@@ -104,9 +114,11 @@ FROM alpine:3.20.3
 ENV DEBIAN_FRONTED=noninteractive
 
 ENV CLANG_INSTALL_LINUX=/usr/local/llvm/install-linux
+ENV CLANG_INSTALL_WINDOWS=/usr/local/llvm/install-windows
 
 # how can I reuse the $CLANG_INSTALL_LINUX from builder?
 COPY --from=builder /llvm/install-linux $CLANG_INSTALL_LINUX
+COPY --from=builder /llvm/install-windows $CLANG_INSTALL_WINDOWS
 
 RUN apk update && apk upgrade && \
     apk --no-cache add \
