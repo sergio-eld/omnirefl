@@ -10,6 +10,7 @@ on:
 jobs:
   remove-old-artifacts:
     runs-on: ubuntu-latest
+    permissions: write-all
     timeout-minutes: 10
 
     steps:
