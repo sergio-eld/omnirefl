@@ -10,10 +10,7 @@ on:
 jobs:
   remove-old-artifacts:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      repository-projects: write
+    permissions: write-all
     timeout-minutes: 10
 
     steps:
