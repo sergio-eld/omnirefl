@@ -9,8 +9,18 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-package:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows]
+        include:
+          - os: linux
+            run_tests: true
+          - os: windows
+            run_tests: false
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -26,28 +36,18 @@ jobs:
       - name: Pull build-alpine Image
         run: docker pull sergioeld/omnirefl-build-alpine:latest
 
-      - name: Build omnirefl tool for Linux
+      - name: Build omnirefl tool
         run: |
-          docker compose run --rm build-linux
+          docker compose run --rm build-${{ matrix.os }}
 
-      - name: Build omnirefl tool for Windows
-        run: |
-          docker compose run --rm build-windows
-
-      # this should run in a test job, but it uses the docker compose file,
-      # which resides in the git repo which would need to be checked out (again)
-      # also it depends on the cmake configuration. 
       - name: Run test
+        if: ${{ matrix.run_tests }}
         run: docker compose run --rm build-tests-alpine
 
       # todo: packaging should not run on a merge request (? I think)
-      - name: Package omnirefl tool for Linux
+      - name: Package omnirefl tool
         run: |
-          docker compose run --rm package-linux
-
-      - name: Package omnirefl tool for Windows
-        run: |
-          docker compose run --rm package-windows
+          docker compose run --rm package-${{ matrix.os }}
       
       # todo: test results and benchmarks (for continious bench)
       # todo: separate packages for windows and linux
@@ -80,7 +80,7 @@ jobs:
   # todo: this should actually use the install package and test on several images
   test:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-package
     steps:
       # needed only for `docker-compose.yml`
       - name: Checkout Repository
