@@ -24,13 +24,10 @@
 namespace tool::refl {
 namespace matches {
 
-// todo: `reflected_impl`, although it will have almost identical matcher,
-// resolving function will be simpler due to type safety
-//
 // types reflected via instantiation of a designated template struct
 struct reflected_type {
   // todo: remove. `binding_tag` is implementation-specific
-  constexpr static const char binding_tag[] = "matched_reflection";
+  constexpr static const char binding_tag[] = "reflected_type";
 
   // todo: this should be deducible from the ASTMatchers' expression
   using node_type = clang::ClassTemplateSpecializationDecl;
@@ -42,6 +39,30 @@ struct reflected_type {
       unless(isInStdNamespace()),
       hasAncestor(namespaceDecl(hasName("omni"))),
       hasAncestor(namespaceDecl(hasName("detail"))),
+      hasName("_reflected_type"),
+      isTemplateInstantiation(),
+      isDefinition()
+      //
+    );
+  }
+};
+
+// implementation types reflected via instantiation of a designated template struct
+struct reflected_impl {
+  // todo: remove. `binding_tag` is implementation-specific
+  constexpr static const char binding_tag[] = "reflected_impl";
+
+  // todo: this should be deducible from the ASTMatchers' expression
+  using node_type = clang::ClassTemplateSpecializationDecl;
+
+  auto operator()() const noexcept {
+    using namespace clang::ast_matchers;
+
+    return classTemplateSpecializationDecl( //
+      unless(isInStdNamespace()),
+      hasAncestor(namespaceDecl(hasName("omni"))),
+      hasAncestor(namespaceDecl(hasName("detail"))),
+      hasName("_reflected_impl"),
       isTemplateInstantiation(),
       isDefinition()
       //
@@ -94,7 +115,9 @@ struct _debug_templ_spec_decl {
 // since the order of template arguments must be the same
 using variant_reflected_match = tool::match_variant< //
   matches::reflected_type,
+  matches::reflected_impl,
   matches::reflected_call,
+
   // debug
   matches::_debug_templ_spec_decl>;
 
