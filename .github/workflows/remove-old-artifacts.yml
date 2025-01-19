@@ -20,4 +20,4 @@ jobs:
         age: '90 seconds' # '<number> <unit>', e.g. 5 days, 2 years, 90 seconds, parsed by Moment.js
         # Optional inputs
         skip-tags: true
-        skip-recent: 5
+        skip-recent: 3
