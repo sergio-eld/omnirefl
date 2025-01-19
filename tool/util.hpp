@@ -141,7 +141,13 @@ struct _with_fmt_rng<std::reference_wrapper<T>> {
   }
 };
 
+// todo: implement and use instead of `with_fmt_rng`
+// template <typename Range, typename Format>
+// auto join_with_fmt(Format &&fmt, Range &&r, std::string_view sep) {
+// }
+
 // refactorme: pretty cumbersome interface
+// consider `join_with_fmt`, so it can be used in place of `fmt::join` directly
 template <typename T, typename Format>
 struct with_fmt_rng {
   T value;

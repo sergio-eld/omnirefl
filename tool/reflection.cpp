@@ -193,204 +193,229 @@ std::vector<const clang::RecordDecl *> dfs_fold_reflected_types(const clang::CXX
   return {visited.cbegin(), visited.cend()};
 }
 
-struct resolve_t {
-  tl::expected<tool::refl::context, std::string> operator()(tool::refl::context ctx,
-    const clang::ASTUnit &ast,
-    const tool::matched_node<tool::refl::matches::reflected_type> &m) const noexcept {
-    using namespace tool::refl;
+tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+  const clang::ASTUnit &ast,
+  const tool::matched_node<tool::refl::matches::reflected_type> &m) noexcept {
+  using namespace tool::refl;
 
-    const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
-    const std::string_view detail_struct_name = template_decl.getName();
-    const auto &template_args_list = template_decl.getTemplateArgs();
+  const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
+  const std::string_view detail_struct_name = template_decl.getName();
+  const auto &template_args_list = template_decl.getTemplateArgs();
 
-    // todo: error if template_args_list is empty
-    const clang::TemplateArgument &first_arg = template_args_list.get(0);
-    if (clang::TemplateArgument::ArgKind::Type != first_arg.getKind()) {
-      return tl::unexpected(
-        fmt::format("non-type template argument `0` of {}", detail_struct_name));
-    }
-    const clang::Type &first_arg_type = *first_arg.getAsType().getTypePtr();
-    // todo: handle checks for `clang::Type::is...`
-    // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
-    //       allowed
-    if (!first_arg_type.isStructureOrClassType()) {
-      return tl::unexpected(fmt::format("unsupported type {} in {}",
-        // fixme: `getTypeClassName` doesn't do what I thought it does
-        first_arg_type.getTypeClassName(),
-        detail_struct_name));
-    }
+  if (template_args_list.size() < 1) {
+    return tl::unexpected(
+      fmt::format("invalid template signature for internal omnirefl type {}", detail_struct_name));
+  }
 
-    // omni::detail::_reflected_impl<T>
-    if ("_reflected_impl" == detail_struct_name) {
-      // type declaration of <T>
-      const clang::CXXRecordDecl &rdecl = *first_arg_type.getAsCXXRecordDecl();
-      // as of this writing there's a "fixme" to remove `std::string`, but it is not clear
-      // whether a new type will be used or another function should be called
-      const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
-      // fixme: do not use definitions, because reflected types also use them, but field info
-      // should be collected only for reflected types
-      if (ctx.definitions.contains(nm_qual_type))
-        return {std::move(ctx)};
+  const clang::TemplateArgument &first_arg = template_args_list.get(0);
+  if (clang::TemplateArgument::ArgKind::Type != first_arg.getKind()) {
+    return tl::unexpected(fmt::format("non-type template argument `0` of {}", detail_struct_name));
+  }
+  const clang::Type &first_arg_type = *first_arg.getAsType().getTypePtr();
+  // todo: handle checks for `clang::Type::is...`
+  // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
+  // allowed
+  if (!first_arg_type.isStructureOrClassType()) {
+    return tl::unexpected(fmt::format("unsupported type {} in {}",
+      // fixme: `getTypeClassName` doesn't do what I thought it does
+      first_arg_type.getTypeClassName(),
+      detail_struct_name));
+  }
 
+  // omni::detail::_reflected_type<T>
+  // type declaration of <T>
+  const clang::CXXRecordDecl &first_arg_decl = *first_arg_type.getAsCXXRecordDecl();
+  const std::string first_arg_nm_qual_type = first_arg_decl.getQualifiedNameAsString();
+  if (ctx.reflected_types.contains(first_arg_nm_qual_type))
+    return {std::move(ctx)};
+
+  // recursivelly collected types (including self)
+  const std::vector<const clang::RecordDecl *> types =
+    dfs_fold_reflected_types(first_arg_decl, ctx.reflected_types);
+
+  for (const clang::RecordDecl *_rdecl : types) {
+    const auto &rdecl = *_rdecl;
+    const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
+
+    if (rdecl.isInStdNamespace()) {
+      // todo: std include path should not be absolute
+      ctx.std_includes.emplace(get_declaration_source_file(rdecl, ast.getSourceManager()));
+    } else {
+      assert(!ctx.definitions.contains(nm_qual_type));
       ctx.definitions[nm_qual_type] =
         resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
-      ctx.reflected_implementations.emplace(nm_qual_type);
-      // todo: should we allow wrapped types (using value_type trait)?
-      return {std::move(ctx)};
     }
 
-    // omni::detail::_reflected_type<T>
-    if ("_reflected_type" == detail_struct_name) {
-      // type declaration of <T>
-      const clang::CXXRecordDecl &first_arg_decl = *first_arg_type.getAsCXXRecordDecl();
-      const std::string first_arg_nm_qual_type = first_arg_decl.getQualifiedNameAsString();
-      if (ctx.reflected_types.contains(first_arg_nm_qual_type))
-        return {std::move(ctx)};
-
-      // recursivelly collected types (including self)
-      const std::vector<const clang::RecordDecl *> types =
-        dfs_fold_reflected_types(first_arg_decl, ctx.reflected_types);
-
-      for (const clang::RecordDecl *_rdecl : types) {
-        const auto &rdecl = *_rdecl;
-        const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
-
-        if (rdecl.isInStdNamespace()) {
-          // todo: std include path should not be absolute
-          ctx.std_includes.emplace(get_declaration_source_file(rdecl, ast.getSourceManager()));
-        } else {
-          assert(!ctx.definitions.contains(nm_qual_type));
-          ctx.definitions[nm_qual_type] =
-            resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
+    // refactorme: this code is duplicated when collecting types, but whatever
+    ctx.reflected_types.emplace(nm_qual_type,
+      [](const auto &_fields) -> std::vector<struct_field_data> {
+        std::vector<struct_field_data> r;
+        for (const clang::FieldDecl *fd : _fields) {
+          // todo: logging for skipped fields, since we are not reporting them as errors
+          // todo: checks that would prevent the field from being reflected (uniouns,
+          // bitfields, what else?)
+          if (clang::AccessSpecifier::AS_public != fd->getAccess())
+            continue;
+          r.push_back({
+            .name = fd->getNameAsString(),
+            .nm_qual_type = fd->getQualifiedNameAsString(),
+          });
         }
-
-        // refactorme: this code is duplicated when collecting types, but whatever
-        ctx.reflected_types.emplace(nm_qual_type,
-          [](const auto &_fields) -> std::vector<struct_field_data> {
-            std::vector<struct_field_data> r;
-            for (const clang::FieldDecl *fd : _fields) {
-              // todo: logging for skipped fields, since we are not reporting them as errors
-              // todo: checks that would prevent the field from being reflected (uniouns,
-              // bitfields, what else?)
-              if (clang::AccessSpecifier::AS_public != fd->getAccess())
-                continue;
-              r.push_back({
-                .name = fd->getNameAsString(),
-                .nm_qual_type = fd->getQualifiedNameAsString(),
-              });
-            }
-            return r;
-          }(rdecl.fields()));
-      }
-
-      return {std::move(ctx)};
-    }
-
-    return tl::unexpected("unexpected reflection tag");
+        return r;
+      }(rdecl.fields()));
   }
 
-  tl::expected<tool::refl::context, std::string> operator()(tool::refl::context ctx,
-    const clang::ASTUnit &ast,
-    const tool::matched_node<tool::refl::matches::reflected_call> &m) const noexcept {
-    using namespace tool::refl;
+  return {std::move(ctx)};
 
-    const clang::CXXMethodDecl &refl_call_decl = *m.node;
-    func_signature &refl_call = ctx.reflected_calls.emplace_back();
-    refl_call.args.reserve(refl_call_decl.parameters().size());
+  return tl::unexpected("unexpected reflection tag");
+}
 
-    for (const clang::ParmVarDecl *parm_decl : refl_call_decl.parameters()) {
-      const clang::QualType _qtype = parm_decl->getType(); //< keep alive
-      const auto [type, is_const, ref_type] =
-        // refactorme: it can return `func_arg`
-        [](const clang::QualType &q) {
-          struct _r {
-            const clang::Type &type;
-            bool is_const;
-            reference_type ref_type;
-          };
-          if (q->isLValueReferenceType()) {
-            return _r{
-              .type = *q->getPointeeType().getTypePtr(),
-              .is_const = q->getPointeeType().isConstQualified(),
-              .ref_type = reference_type::ref_lval,
-            };
-          }
-          if (q->isRValueReferenceType()) {
-            return _r{
-              .type = *q->getPointeeType().getTypePtr(),
-              .is_const = q->getPointeeType().isConstQualified(),
-              .ref_type = reference_type::ref_rval,
-            };
-          }
+tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+  const clang::ASTUnit &ast,
+  const tool::matched_node<tool::refl::matches::reflected_impl> &m) noexcept {
+  using namespace tool::refl;
+
+  const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
+  const std::string_view detail_struct_name = template_decl.getName();
+  const auto &template_args_list = template_decl.getTemplateArgs();
+
+  if (template_args_list.size() < 1) {
+    return tl::unexpected(
+      fmt::format("invalid template signature for internal omnirefl type {}", detail_struct_name));
+  }
+
+  const clang::TemplateArgument &first_arg = template_args_list.get(0);
+  if (clang::TemplateArgument::ArgKind::Type != first_arg.getKind()) {
+    return tl::unexpected(fmt::format("non-type template argument `0` of {}", detail_struct_name));
+  }
+  const clang::Type &first_arg_type = *first_arg.getAsType().getTypePtr();
+  // todo: handle checks for `clang::Type::is...`
+  // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
+  // allowed
+  if (!first_arg_type.isStructureOrClassType()) {
+    return tl::unexpected(fmt::format("unsupported type {} in {}",
+      // fixme: `getTypeClassName` doesn't do what I thought it does
+      first_arg_type.getTypeClassName(),
+      detail_struct_name));
+  }
+
+  // type declaration of <T>
+  const clang::CXXRecordDecl &rdecl = *first_arg_type.getAsCXXRecordDecl();
+  // as of this writing there's a "fixme" to remove `std::string`, but it is not clear
+  // whether a new type will be used or another function should be called
+  const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
+  // fixme: do not use definitions, because reflected types also use them, but field info
+  // should be collected only for reflected types
+  if (ctx.definitions.contains(nm_qual_type))
+    return {std::move(ctx)};
+
+  ctx.definitions[nm_qual_type] = resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
+  ctx.reflected_implementations.emplace(nm_qual_type);
+  // todo: should we allow wrapped types (using value_type trait)?
+  return {std::move(ctx)};
+}
+
+tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+  const clang::ASTUnit &ast,
+  const tool::matched_node<tool::refl::matches::reflected_call> &m) noexcept {
+  using namespace tool::refl;
+
+  const clang::CXXMethodDecl &refl_call_decl = *m.node;
+  func_signature &refl_call = ctx.reflected_calls.emplace_back();
+  refl_call.args.reserve(refl_call_decl.parameters().size());
+
+  for (const clang::ParmVarDecl *parm_decl : refl_call_decl.parameters()) {
+    const clang::QualType _qtype = parm_decl->getType(); //< keep alive
+    const auto [type, is_const, ref_type] =
+      // refactorme: it can return `func_arg`
+      [](const clang::QualType &q) {
+        struct _r {
+          const clang::Type &type;
+          bool is_const;
+          reference_type ref_type;
+        };
+        if (q->isLValueReferenceType()) {
           return _r{
-            .type = *q,
-            .is_const = q.isConstQualified(),
-            .ref_type = reference_type::ref_none,
+            .type = *q->getPointeeType().getTypePtr(),
+            .is_const = q->getPointeeType().isConstQualified(),
+            .ref_type = reference_type::ref_lval,
           };
-        }(_qtype);
-      // todo: validate that the type is not a forward declaration,
-      // since they are not supported at this point
+        }
+        if (q->isRValueReferenceType()) {
+          return _r{
+            .type = *q->getPointeeType().getTypePtr(),
+            .is_const = q->getPointeeType().isConstQualified(),
+            .ref_type = reference_type::ref_rval,
+          };
+        }
+        return _r{
+          .type = *q,
+          .is_const = q.isConstQualified(),
+          .ref_type = reference_type::ref_none,
+        };
+      }(_qtype);
+    // todo: validate that the type is not a forward declaration,
+    // since they are not supported at this point
 
-      const static auto printing_policy = [] {
-        clang::PrintingPolicy p{{}};
-        // todo: do I need to supress the tag here?
-        // It is actually needed in template specialization
-        p.SuppressTagKeyword = true;
-        p.SuppressScope = false;
-        p.PrintCanonicalTypes = true;
+    const static auto printing_policy = [] {
+      clang::PrintingPolicy p{{}};
+      // todo: do I need to supress the tag here?
+      // It is actually needed in template specialization
+      p.SuppressTagKeyword = true;
+      p.SuppressScope = false;
+      p.PrintCanonicalTypes = true;
 
-        return p;
-      }();
+      return p;
+    }();
 
-      refl_call.args.push_back({
-        // todo: remove
-        .cvr_qualified_type = parm_decl->getType().getAsString(),
-        // fixme: it still prints `struct`
-        // refactorme: use `type`
-        .nm_qual_type = clang::QualType::getAsString(
-          [](clang::SplitQualType q) {
-            q.Quals.removeCVRQualifiers();
-            return q;
-          }(parm_decl->getType().getNonReferenceType().split()),
-          printing_policy),
-        .is_const = is_const,
-        .ref_type = ref_type,
-      });
-      const auto &nm_qual_type = refl_call.args.back().nm_qual_type;
+    refl_call.args.push_back({
+      // todo: remove
+      .cvr_qualified_type = parm_decl->getType().getAsString(),
+      // fixme: it still prints `struct`
+      // refactorme: use `type`
+      .nm_qual_type = clang::QualType::getAsString(
+        [](clang::SplitQualType q) {
+          q.Quals.removeCVRQualifiers();
+          return q;
+        }(parm_decl->getType().getNonReferenceType().split()),
+        printing_policy),
+      .is_const = is_const,
+      .ref_type = ref_type,
+    });
+    const auto &nm_qual_type = refl_call.args.back().nm_qual_type;
 
-      // fixme: what about unions, built-in arrays?
-      if (!type.isStructureOrClassType())
-        continue;
-      const clang::RecordDecl &rd = *type.getAsRecordDecl();
+    // fixme: what about unions, built-in arrays?
+    if (!type.isStructureOrClassType())
+      continue;
+    const clang::RecordDecl &rd = *type.getAsRecordDecl();
 
-      if (rd.isInStdNamespace()) {
-        // todo: add std include
-      }
-      if (!ctx.definitions.contains(nm_qual_type))
-        ctx.definitions[nm_qual_type] =
-          resolve_definition(nm_qual_type, rd, ast.getSourceManager());
+    if (rd.isInStdNamespace()) {
+      // todo: add std include
     }
-
-    return {std::move(ctx)};
+    if (!ctx.definitions.contains(nm_qual_type))
+      ctx.definitions[nm_qual_type] = resolve_definition(nm_qual_type, rd, ast.getSourceManager());
   }
 
-  tl::expected<tool::refl::context, std::string> operator()(tool::refl::context ctx,
-    const clang::ASTUnit &ast,
-    const tool::matched_node<tool::refl::matches::_debug_templ_spec_decl> &m) const noexcept {
-    using namespace tool::refl;
+  return {std::move(ctx)};
+}
 
-    const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
-    const std::string_view detail_struct_name = template_decl.getName();
-    fmt::println("debug: ClassTemplateSpecializationDecl: {}", detail_struct_name);
-    std::string buf;
-    llvm::raw_string_ostream os{buf};
-    clang::ASTDumper dmp{os, ast.getASTContext(), false};
-    dmp.SetTraversalKind(clang::TK_AsIs);
-    dmp.Visit(&template_decl);
-    fmt::print("ASTDump: {}\n", buf);
-    return {std::move(ctx)};
-  }
-} const inline resolve{};
+tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+  const clang::ASTUnit &ast,
+  const tool::matched_node<tool::refl::matches::_debug_templ_spec_decl> &m) noexcept {
+  using namespace tool::refl;
+
+  const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
+  const std::string_view detail_struct_name = template_decl.getName();
+  fmt::println("debug: ClassTemplateSpecializationDecl: {}", detail_struct_name);
+  std::string buf;
+  llvm::raw_string_ostream os{buf};
+  clang::ASTDumper dmp{os, ast.getASTContext(), false};
+  dmp.SetTraversalKind(clang::TK_AsIs);
+  dmp.Visit(&template_decl);
+  fmt::print("ASTDump: {}\n", buf);
+  return {std::move(ctx)};
+}
+
 } // namespace
 
 tl::expected<tool::refl::context, std::string> //
