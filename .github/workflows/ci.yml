@@ -56,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-${{ matrix.os }}
-          path: ./build-alpine/${{ matrix.os }}/install/
+          path: ./build-alpine/*/install/
           if-no-files-found: error
 
       # todo: separate these tests to another job
@@ -106,6 +106,8 @@ jobs:
         with:
           name: install-linux
           path: ./build-alpine/
-    # todo: matrix to for testing on ubuntu [18, 20, 22] and windows
 
+      - name: Run Test
+        run: docker compose run --rm test-ubuntu-${{ matrix.version }}
 
+# todo: windows
