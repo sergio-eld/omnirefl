@@ -104,7 +104,6 @@ services:
         mkdir -p /tmp/test/build && cd /tmp/test/build
         cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        cmake --build . &&
         mkdir -p /build/test/ubuntu-18 &&
         ctest . --output-junit /build/test/ubuntu-18/results.xml \
           -V | tee /build/test/ubuntu-18/results.log \
@@ -127,7 +126,6 @@ services:
         mkdir -p /tmp/test/build && cd /tmp/test/build
         cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        cmake --build . &&
         mkdir -p /build/test/ubuntu-18 &&
         ctest . --output-junit /build/test/ubuntu-20/results.xml \
           -V | tee /build/test/ubuntu-20/results.log \
@@ -150,7 +148,6 @@ services:
         mkdir -p /tmp/test/build && cd /tmp/test/build
         cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        cmake --build . &&
         mkdir -p /build/test/ubuntu-22 &&
         ctest . --output-junit /build/test/ubuntu-22/results.xml \
           -V | tee /build/test/ubuntu-22/results.log \
