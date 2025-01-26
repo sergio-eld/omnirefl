@@ -56,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-${{ matrix.os }}
-          path: ./build-alpine/*/install/
+          path: ./build-alpine/*/install/*
           if-no-files-found: error
 
       # todo: separate these tests to another job
@@ -98,7 +98,7 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Pull build-alpine Image
+      - name: Pull Docker Image
         run: docker pull sergioeld/test-install-ubuntu-${{ matrix.version }}
 
       - name: Download Build Artifacts
