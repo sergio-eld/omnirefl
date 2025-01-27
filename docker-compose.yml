@@ -125,7 +125,7 @@ services:
         mkdir -p /tmp/test/build && cd /tmp/test/build
         cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-18 &&
+        mkdir -p /build/test/ubuntu-20 &&
         ctest . --parallel --output-junit /build/test/ubuntu-20/results.xml \
           -V | tee /build/test/ubuntu-20/results.log \
         && apt remove -y omnirefl

@@ -109,5 +109,6 @@ jobs:
 
       - name: Run Test
         run: docker compose run --rm test-ubuntu-${{ matrix.version }}
+      # todo: upload artifacts. If before merged, upload only if failed
 
 # todo: windows
