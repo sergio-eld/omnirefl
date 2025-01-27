@@ -133,41 +133,9 @@ if (ENABLE_TESTING)
     #   profile reflection parsing and build times
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
+    add_subdirectory(tests)
 
     # todo: add benchmark `test/simple/bench.cpp`
-    add_executable(test.simple samples/test/simple/test.cpp)
-    reflected_target(test.simple)
-    target_include_directories(test.simple PRIVATE samples/test/simple)
-    target_link_libraries(test.simple PRIVATE GTest::gtest)
-    set_target_properties(test.simple PROPERTIES
-        # todo: test with C++11
-        CXX_STANDARD 14
-    )
-    add_test(NAME test.simple COMMAND test.simple)
-
-    add_executable(test.odr 
-        samples/test/odr/test.cpp
-        samples/test/odr/impl_a.cpp
-        samples/test/odr/impl_b.cpp)
-    reflected_target(test.odr)
-    target_include_directories(test.odr PRIVATE samples/test/odr)
-    target_link_libraries(test.odr PRIVATE GTest::gtest)
-    set_target_properties(test.odr PROPERTIES
-        CXX_STANDARD 11
-    )
-    add_test(NAME test.odr COMMAND test.odr)
-
-    # todo: add implementation later
-    # # currenly this is needs to be manually copied to CMakeLists.txt.in.samples
-    # # should figure out how to remove boilreplate for samples (they are bundled with installation)
-    # add_executable(test.impl_ryml samples/test/test_impl_ryml.cpp)
-    # # todo: this should be tested and benchmarked
-    # reflected_target(test.impl_ryml)
-    # target_include_directories(test.impl_ryml PRIVATE samples/test)
-    # target_link_libraries(test.impl_ryml PRIVATE GTest::gtest)
-    # add_test(NAME test.impl_ryml COMMAND test.impl_ryml)
-
-    # todo: add test for failure
 endif()
 
 if (ENABLE_PACKAGE)
@@ -227,15 +195,9 @@ if (ENABLE_PACKAGE)
         ${CLANG_RESOURCE_DIR}/include
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
 
-    # bundle samples
-    configure_file(
-        ${CMAKE_SOURCE_DIR}/CMakeLists.txt.in.samples
-        ${CMAKE_BINARY_DIR}/samples/CMakeLists.txt @ONLY)
-    
     # todo: what's in the binary dir...?
     install(DIRECTORY
-        ${CMAKE_BINARY_DIR}/samples
-        ${CMAKE_SOURCE_DIR}/samples
+        ${CMAKE_SOURCE_DIR}/tests
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
     
     # this is hardly needed for an alpine build

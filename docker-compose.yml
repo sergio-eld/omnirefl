@@ -44,13 +44,8 @@ services:
         cmake --build . -t omnirefl.exe -j$$(nproc) && # strip it before running tests 
         strip --strip-all omnirefl.exe # set(CPACK_STRIP_FILES TRUE) doesn't work
 
-  # todo: test artifacts should be uploaded for continious testing
   build-tests-alpine:
     image: sergioeld/omnirefl-build-alpine
-    # todo: this should be disabled for github CI
-    # depends_on:
-    #   build-linux:
-    #     condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
@@ -58,17 +53,12 @@ services:
     entrypoint: ['/bin/ash', '-c']
     command: 
       - |
-        cmake --build . -j$$(nproc) &&
         mkdir -p /build/test/alpine &&
-        ctest . --output-junit /build/test/alpine/results.xml \
+        ctest . --parallel --output-junit /build/test/alpine/results.xml \
           -V | tee /build/test/alpine/results.log
 
   package-linux:
     image: sergioeld/omnirefl-build-alpine
-    # todo: this should be disabled for github CI
-    # depends_on:
-    #   build-linux:
-    #     condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
@@ -83,10 +73,6 @@ services:
 
   package-windows:
     image: sergioeld/omnirefl-build-alpine
-    # todo: this should be disabled for github CI
-    # depends_on:
-    #   build-windows:
-    #     condition: service_completed_successfully
     volumes:
       - ./:/src:ro
       - ./build-alpine/windows:/build:rw
@@ -99,8 +85,7 @@ services:
         mkdir -p /build/install &&
         mv *.zip /build/install/
 
-  # todo: as of this writing I have no idea how to make it usable in github ci
-  # as a separate job, so I end up duplicating the code in the CI file
+  # todo: can I have a matrix for 18, 20, 22?
   test-ubuntu-18:
     image: sergioeld/test-install-ubuntu-18
     build:
@@ -108,10 +93,6 @@ services:
       dockerfile: test-install-ubuntu.Dockerfile
       args: 
         - UBUNTU_VERSION=18.04
-    # todo: this should be disabled for github CI
-    # depends_on:
-    #   package-linux:
-    #     condition: service_completed_successfully
     volumes:
       - ./build-alpine/linux/install:/install:ro
     working_dir: /install
@@ -120,12 +101,12 @@ services:
       - |
         apt install ./omnirefl*.deb &&
         mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/samples/* ../
+        cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        cmake --build . &&
         mkdir -p /build/test/ubuntu-18 &&
-        ctest . --output-junit /build/test/ubuntu-18/results.xml \
-          -V | tee /build/test/ubuntu-18/results.log
+        ctest . --parallel --output-junit /build/test/ubuntu-18/results.xml \
+          -V | tee /build/test/ubuntu-18/results.log \
+        && apt remove -y omnirefl
 
   test-ubuntu-20:
     image: sergioeld/test-install-ubuntu-20
@@ -134,10 +115,6 @@ services:
       dockerfile: test-install-ubuntu.Dockerfile
       args: 
         - UBUNTU_VERSION=20.04
-    # todo: this should be disabled for github CI
-    # depends_on:
-    #   package-linux:
-    #     condition: service_completed_successfully
     volumes:
       - ./build-alpine/linux/install:/install:ro
     working_dir: /install
@@ -146,12 +123,12 @@ services:
       - |
         apt install ./omnirefl*.deb &&
         mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/samples/* ../
+        cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        cmake --build . &&
-        mkdir -p /build/test/ubuntu-18 &&
-        ctest . --output-junit /build/test/ubuntu-20/results.xml \
-          -V | tee /build/test/ubuntu-20/results.log
+        mkdir -p /build/test/ubuntu-20 &&
+        ctest . --parallel --output-junit /build/test/ubuntu-20/results.xml \
+          -V | tee /build/test/ubuntu-20/results.log \
+        && apt remove -y omnirefl
 
   test-ubuntu-22:
     image: sergioeld/test-install-ubuntu-22
@@ -160,10 +137,6 @@ services:
       dockerfile: test-install-ubuntu.Dockerfile
       args: 
         - UBUNTU_VERSION=22.04
-    # todo: this should be disabled for github CI
-    # depends_on:
-    #   package-linux:
-    #     condition: service_completed_successfully
     volumes:
       - ./build-alpine/linux/install:/install:ro
     working_dir: /install
@@ -172,10 +145,10 @@ services:
       - |
         apt install ./omnirefl*.deb &&
         mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/samples/* ../
+        cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja &&
-        cmake --build . &&
         mkdir -p /build/test/ubuntu-22 &&
-        ctest . --output-junit /build/test/ubuntu-22/results.xml \
-          -V | tee /build/test/ubuntu-22/results.log
+        ctest . --parallel --output-junit /build/test/ubuntu-22/results.xml \
+          -V | tee /build/test/ubuntu-22/results.log \
+        && apt remove -y omnirefl
 

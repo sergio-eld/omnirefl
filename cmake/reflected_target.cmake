@@ -23,6 +23,9 @@ function(get_target_sources TARGET_NAME OUT_SOURCES)
     set(${OUT_SOURCES} ${ABS_PATHS} PARENT_SCOPE)
 endfunction()
 
+# todo: add args
+# - list of cpp files (to run only on the subset)
+# - output args string to run omnirefl tool with
 function(reflected_target TARGET_NAME)
     # todo: prevent calling twice on a single target
     # todo: prevent calling on itself
@@ -59,21 +62,30 @@ function(reflected_target TARGET_NAME)
     list(JOIN EXCLUDED_LIST "," ARG_EXCLUDED)
 
     set(GENERATED_FILE "${CMAKE_CURRENT_BINARY_DIR}/reflected_${TARGET_NAME}.cpp")
+    set(MARKER_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}.omni.marker")
 
-    add_custom_command(OUTPUT ${GENERATED_FILE}
-        # todo: (?) `--resourse-dir` should be optional
-        COMMAND omni::tool "--resource-dir=${TOOL_RESOURCE_DIR}"
-            "-p=${CMAKE_BINARY_DIR}/"
-            "-o=${GENERATED_FILE}"
-            "--excluded=${ARG_EXCLUDED}"
-            ${REFL_TARGET_SOURCES}
-        DEPENDS ${REFL_TARGET_SOURCES}
+    # Save tool arguments for reuse
+    set(${TARGET_NAME}_OMNI_ARGS
+        "--resource-dir=${TOOL_RESOURCE_DIR}"
+        "-p=${CMAKE_BINARY_DIR}/"
+        "-o=${GENERATED_FILE}"
+        "--excluded=${CMAKE_BINARY_DIR},${GENERATED_FILE}"
+        ${REFL_TARGET_SOURCES}
+    )
+
+    # manually regenerate
+    add_custom_target(${TARGET_NAME}.omni
+        COMMAND omni::tool ${${TARGET_NAME}_OMNI_ARGS}
         COMMENT "Running ${TOOL_NAME} for ${TARGET_NAME}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         VERBATIM)
 
-    add_custom_target(reflected_${TARGET_NAME} DEPENDS ${GENERATED_FILE})
-    add_dependencies(${TARGET_NAME} reflected_${TARGET_NAME})
+    # todo: (?) should this rerun if generated file has been updated
+    # I have no idea how to implement it though...
+    add_custom_command(OUTPUT ${GENERATED_FILE}
+        COMMAND omni::tool ${${TARGET_NAME}_OMNI_ARGS}
+        COMMENT "Running ${TOOL_NAME} for ${TARGET_NAME}"
+        DEPENDS ${REFL_TARGET_SOURCES}
+        VERBATIM)
 
     target_sources(${TARGET_NAME} PRIVATE ${GENERATED_FILE})
     target_link_libraries(${TARGET_NAME} PUBLIC omni::refl)
