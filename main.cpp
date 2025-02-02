@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
       res.push_back(p.string());
     return res;
   }(*filtered_sources);
-  // todo: use verbosity option
+  // todo: use verbosity flag
   fmt::println("Filtered sources: [{}]", fmt::join(str_sources, ", "));
 
   // todo: fold
@@ -85,6 +85,7 @@ int main(int argc, char **argv) {
   size_t processing = 0;
   // todo: util::indexed(*filtered_sources)
   for (const auto &src : *filtered_sources) {
+    // todo: use verbosity flag
     fmt::println("[{}/{}] building AST of file: {}\t\r",
       ++processing,
       filtered_sources->size(),
@@ -94,22 +95,38 @@ int main(int argc, char **argv) {
       .resource_dir = cli->resource_dir,
       .source = src,
       .db = **compilation_db,
+      .print_debug = cli->print_debug,
     });
     if (!ast) {
       llvm::errs() << ast.error();
       return -1;
     }
 
-    auto matches = tool::match_ast(std::vector<tool::refl::variant_reflected_match>{}, **ast);
+    auto matches = tool::match_ast(
+      {
+        .print_debug = cli->print_debug,
+      },
+      std::vector<tool::refl::variant_reflected_match>{},
+      **ast);
     if (!matches) {
       llvm::errs() << matches.error();
       return -1;
     }
 
+    // refactorme: these 2 calls (resolve && update) don't look clean
+    // should `update` be implicit/part of the signature?
     auto ctx_delta = util::foldl(
-      [&ast = **ast](tl::expected<tool::refl::context, std::string> ctx, const auto &match) {
-        if (ctx)
-          return tool::refl::resolve_matched_node(std::move(ctx).value(), ast, match);
+      [&ast = **ast, &cli](tl::expected<tool::refl::context, std::string> ctx, const auto &match) {
+      // refactorme: this will continue iterating on error...
+        if (ctx) {
+          return tool::refl::resolve_matched_node(
+            {
+              .print_debug = cli->print_debug,
+            },
+            ast,
+            std::move(ctx).value(),
+            match);
+        }
         return ctx;
       },
       tl::expected<tool::refl::context, std::string>{tl::in_place},
@@ -120,7 +137,7 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    if (auto updated = update(std::move(ctx), std::move(ctx_delta).value()); updated) {
+    if (auto updated = update(cli->print_debug, std::move(ctx), std::move(ctx_delta).value()); updated) {
       ctx = std::move(updated).value();
     } else {
       llvm::errs() << updated.error();
@@ -134,6 +151,7 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+  // todo: use verbosity flag
   fmt::println("Generating file: {}\n", cli->output_file.string());
   std::ofstream f{cli->output_file, std::ios::binary};
   if (const auto res = codegen::emit_code(

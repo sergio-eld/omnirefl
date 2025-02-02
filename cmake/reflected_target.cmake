@@ -27,6 +27,23 @@ endfunction()
 # - list of cpp files (to run only on the subset)
 # - output args string to run omnirefl tool with
 function(reflected_target TARGET_NAME)
+    # Parse optional arguments
+    set(OPTIONS PRINT_DEBUG)
+    set(ONE_VALUE_ARGS)
+    set(MULTI_VALUE_ARGS)
+    cmake_parse_arguments(ARG 
+        "${OPTIONS}" 
+        "${ONE_VALUE_ARGS}"
+        "${MULTI_VALUE_ARGS}" 
+        ${ARGN})
+
+    if (NOT ARG_PRINT_DEBUG)
+        set(ARG_PRINT_DEBUG "")
+    else()
+        set(ARG_PRINT_DEBUG "--print-debug")
+        message(STATUS "omnirefl: debug enabled for target ${TARGET_NAME}")
+    endif()
+
     # todo: prevent calling twice on a single target
     # todo: prevent calling on itself
     set(TOOL_NAME omnirefl)
@@ -64,8 +81,10 @@ function(reflected_target TARGET_NAME)
     set(GENERATED_FILE "${CMAKE_CURRENT_BINARY_DIR}/reflected_${TARGET_NAME}.cpp")
     set(MARKER_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}.omni.marker")
 
+    # TODO: Use target's binary dir instead of CMAKE_BINARY_DIR
     # Save tool arguments for reuse
     set(${TARGET_NAME}_OMNI_ARGS
+        "${ARG_PRINT_DEBUG}"
         "--resource-dir=${TOOL_RESOURCE_DIR}"
         "-p=${CMAKE_BINARY_DIR}/"
         "-o=${GENERATED_FILE}"

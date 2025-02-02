@@ -19,7 +19,12 @@ struct options {
 struct reflected_type {
   // fully namespace-qualified type
   std::string name;
+
+  // list of public fields
   std::vector<std::string> field_names;
+  // todo: use enum from `TagTypeKind::`, but what about `Enum`? `reflected_type::field_names`
+  // shouldn't be 'reused'
+  bool is_class;
 };
 
 // todo: consider reusing data types from `reflection.hpp`

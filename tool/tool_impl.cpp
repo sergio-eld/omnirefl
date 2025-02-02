@@ -64,7 +64,8 @@ tl::expected<std::vector<std::filesystem::path>, std::string> tool::filter_db_so
 }
 
 namespace {
-void configure_compiler_invocation(const std::string_view &resource_dir,
+void configure_compiler_invocation(bool a_print_debug,
+  const std::string_view &resource_dir,
   clang::CompilerInvocation &ci) {
   // for some reason this doesn't have any effect if set up here, unlike the paths'
   // modifications below
@@ -89,18 +90,20 @@ void configure_compiler_invocation(const std::string_view &resource_dir,
     ci.getHeaderSearchOpts().UserEntries.rbegin() + 2,
     ci.getHeaderSearchOpts().UserEntries.rend());
 
-  for (const auto &h : ci.getHeaderSearchOpts().UserEntries) {
-    fmt::println(
-      "debug: user header: {header},"
-      " group: {group},"
-      " is framework: {is_framework}",
-      fmt::arg("header", h.Path),
-      fmt::arg("group", int(h.Group)),
-      fmt::arg("is_framework", h.IsFramework));
-  }
+  if (a_print_debug) {
+    for (const auto &h : ci.getHeaderSearchOpts().UserEntries) {
+      fmt::println(
+        "debug: user header: {header},"
+        " group: {group},"
+        " is framework: {is_framework}",
+        fmt::arg("header", h.Path),
+        fmt::arg("group", int(h.Group)),
+        fmt::arg("is_framework", h.IsFramework));
+    }
 
-  for (const auto &h : ci.getHeaderSearchOpts().SystemHeaderPrefixes) {
-    fmt::println("debug: system header prefix: {prefix}", fmt::arg("prefix", h.Prefix));
+    for (const auto &h : ci.getHeaderSearchOpts().SystemHeaderPrefixes) {
+      fmt::println("debug: system header prefix: {prefix}", fmt::arg("prefix", h.Prefix));
+    }
   }
 
   // disable pch and warnings
@@ -145,6 +148,7 @@ tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
   struct: clang::tooling::ToolAction {
     result_t m_result = tl::unexpected("unexpected: tool was not invoked");
     std::string_view m_resource_dir;
+    bool print_debug;
 
     // as of now this ad hoc is only needed because ClangTool initializes the args for
     // LoadFromCompilerInvocation
@@ -152,7 +156,7 @@ tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
       clang::FileManager *files,
       std::shared_ptr<clang::PCHContainerOperations> pch_cont_ops,
       clang::DiagnosticConsumer *diag_cons) override {
-      configure_compiler_invocation(m_resource_dir, *inv);
+      configure_compiler_invocation(print_debug, m_resource_dir, *inv);
 
       // todo: this should be sufficient, without ClangTool
       // parse AST
@@ -175,6 +179,7 @@ tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
   } adapter{};
   auto str_resource_dir = a.resource_dir.string();
   adapter.m_resource_dir = str_resource_dir;
+  adapter.print_debug = a.print_debug;
 
   clang::tooling::ClangTool tool(a.db, {a.source.string()});
 

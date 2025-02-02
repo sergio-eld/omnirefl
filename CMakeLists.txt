@@ -15,6 +15,8 @@ option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
 # todo: options:
 # - enable benchmarks
+option(ENABLE_TESTING "Enable benchmarks" OFF)
+message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
 find_package(Clang REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
@@ -184,6 +186,7 @@ if (ENABLE_PACKAGE)
         INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
     # todo: make sure `omni::tool` target is available regardless of the cmake build type!
+    # fixme: apt remove gives warning `/usr/lib/cmake` is not empty
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
@@ -215,11 +218,30 @@ if (ENABLE_PACKAGE)
     # todo: description
     include(CPack)
 endif()
-# if enabled benchmarking:
-# benchmark: (move todos into .cpp file)
-# - parsing an empty source file
-# - reading files
-# - ast creation
+
+if (ENABLE_BENCH)
+    # benchmark: (move todos into .cpp file)
+    # - parsing an empty source file
+    # - reading files
+    # - ast creation
+
+    add_executable(generate_structs generate_structs.cpp)
+    set_target_properties(generate_structs
+        PROPERTIES 
+        CXX_STANDARD 20)
+    target_link_libraries(generate_structs fmt::fmt)
+
+    # todo: generate files using generate_structs
+    add_custom_target(bench.structs_100.generate
+        COMMAND generate_structs 100 ./bench structs_100.h test_structs_100.cpp
+        # WORKING_DIRECTORY ${PROJECT_BINARY_DIR} # defaults to
+        BYPRODUCTS ./bench/structs_100.h ./bench/test_structs_100.cpp
+        VERBATIM)
+    add_executable(bench.structs_100 ${PROJECT_BINARY_DIR}/bench/test_structs_100.cpp)
+    reflected_target(bench.structs_100)
+    add_dependencies(bench.structs_100.omni bench.structs_100.generate)
+endif()
+
 
 # if enabled testing
 # todo: 

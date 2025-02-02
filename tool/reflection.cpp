@@ -31,9 +31,9 @@
 #include <variant>
 
 namespace {
+// todo: use expected
 std::string get_declaration_source_file(const clang::Decl &d, const clang::SourceManager &sm) {
   const auto loc = d.getLocation();
-  // todo: use expected?
   if (!loc.isValid())
     return "";
 
@@ -61,22 +61,18 @@ void print_debug(const tool::refl::context &ctx) {
     fmt::println("  {}", i.first);
 }
 
-tool::refl::type_definition_data resolve_definition(
-  // namespace-qualified typename is needed before the call to this function to check whether
-  // the definition has been already resolved
-  std::string nm_qual_type,
-  const clang::RecordDecl &rd,
+tool::refl::type_definition_data resolve_definition(const clang::CXXRecordDecl &rd,
   const clang::SourceManager &sm) noexcept {
   using td_flags = tool::refl::type_definition_flags;
   std::string source_file = get_declaration_source_file(rd, sm);
-  const td_flags td_unnamed = td_flags::none; // todo:
-  const td_flags td_local = td_flags::none; // todo:
+  const td_flags td_unnamed = rd.getIdentifier() ? td_flags::none : td_flags::unnamed;
+  const td_flags td_local = rd.isLocalClass() ? td_flags::local : td_flags::none;
   const td_flags td_in_cpp = is_header_file(source_file) ? td_flags::none : td_flags::in_cpp;
 
   return {
-    .name = std::move(nm_qual_type),
     .source_file = std::move(source_file),
     .definition_flags = td_flags(td_unnamed | td_local | td_in_cpp),
+    .is_class = rd.isClass(),
   };
 }
 
@@ -116,14 +112,14 @@ std::vector<member_typedef_decl> member_typedefs(const clang::RecordDecl &rd) no
 
 /// fold AST from root to a vector of unique declarations that are not already present in
 /// `reflected_types_map`
-std::vector<const clang::RecordDecl *> dfs_fold_reflected_types(const clang::CXXRecordDecl &root,
+std::vector<const clang::CXXRecordDecl *> dfs_fold_reflected_types(const clang::CXXRecordDecl &root,
   const auto &reflected_types_map) {
-  std::set<const clang::RecordDecl *> visited;
-  std::stack<const clang::RecordDecl *> stack;
+  std::set<const clang::CXXRecordDecl *> visited;
+  std::stack<const clang::CXXRecordDecl *> stack;
   stack.push(&root);
 
   while (!stack.empty()) {
-    const clang::RecordDecl *cur = stack.top();
+    const clang::CXXRecordDecl *cur = stack.top();
     stack.pop();
     const std::string _debug_nm_qual_type = cur->getQualifiedNameAsString();
     if (visited.contains(cur) || reflected_types_map.contains(cur->getQualifiedNameAsString()))
@@ -144,7 +140,7 @@ std::vector<const clang::RecordDecl *> dfs_fold_reflected_types(const clang::CXX
            },
            member_typedefs(*cur))) {
       if (md.qual_type->isStructureOrClassType())
-        stack.push(md.qual_type->getAsRecordDecl());
+        stack.push(md.qual_type->getAsCXXRecordDecl());
     }
     // fixme: what about unions, built-in arrays?
 
@@ -167,8 +163,8 @@ std::vector<const clang::RecordDecl *> dfs_fold_reflected_types(const clang::CXX
             break;
 
           const clang::QualType qt = t_arg.getAsType();
-          if (qt->isRecordType())
-            stack.push(qt->getAsRecordDecl());
+          if (qt->isStructureOrClassType())
+            stack.push(qt->getAsCXXRecordDecl());
         }
       }
     }
@@ -186,15 +182,20 @@ std::vector<const clang::RecordDecl *> dfs_fold_reflected_types(const clang::CXX
         continue;
 
       // todo: support only non-static fields
-      stack.push(clang::cast<clang::RecordDecl>(qt->getAsRecordDecl()));
+      stack.push(qt->getAsCXXRecordDecl());
     }
   }
 
   return {visited.cbegin(), visited.cend()};
 }
 
-tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+struct resolve_args {
+  bool print_debug;
+};
+
+tl::expected<tool::refl::context, std::string> resolve(const resolve_args &,
   const clang::ASTUnit &ast,
+  tool::refl::context ctx,
   const tool::matched_node<tool::refl::matches::reflected_type> &m) noexcept {
   using namespace tool::refl;
 
@@ -230,10 +231,10 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
     return {std::move(ctx)};
 
   // recursivelly collected types (including self)
-  const std::vector<const clang::RecordDecl *> types =
+  const std::vector<const clang::CXXRecordDecl *> types =
     dfs_fold_reflected_types(first_arg_decl, ctx.reflected_types);
 
-  for (const clang::RecordDecl *_rdecl : types) {
+  for (const clang::CXXRecordDecl *_rdecl : types) {
     const auto &rdecl = *_rdecl;
     const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
 
@@ -241,9 +242,10 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
       // todo: std include path should not be absolute
       ctx.std_includes.emplace(get_declaration_source_file(rdecl, ast.getSourceManager()));
     } else {
+      // `dfs_fold_reflected_types` discards alrady reflected types, so `types` should not contain
+      // the ones that are being inserted
       assert(!ctx.definitions.contains(nm_qual_type));
-      ctx.definitions[nm_qual_type] =
-        resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
+      ctx.definitions[nm_qual_type] = resolve_definition(rdecl, ast.getSourceManager());
     }
 
     // refactorme: this code is duplicated when collecting types, but whatever
@@ -253,7 +255,9 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
         for (const clang::FieldDecl *fd : _fields) {
           // todo: logging for skipped fields, since we are not reporting them as errors
           // todo: checks that would prevent the field from being reflected (uniouns,
-          // bitfields, what else?)
+          //    bitfields, what else?)
+          // todo: consider supporting non-public types with selecting based on a typename,
+          //    like `fields(specific_typename)`
           if (clang::AccessSpecifier::AS_public != fd->getAccess())
             continue;
           r.push_back({
@@ -270,8 +274,9 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
   return tl::unexpected("unexpected reflection tag");
 }
 
-tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+tl::expected<tool::refl::context, std::string> resolve(const resolve_args &,
   const clang::ASTUnit &ast,
+  tool::refl::context ctx,
   const tool::matched_node<tool::refl::matches::reflected_impl> &m) noexcept {
   using namespace tool::refl;
 
@@ -309,14 +314,15 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
   if (ctx.definitions.contains(nm_qual_type))
     return {std::move(ctx)};
 
-  ctx.definitions[nm_qual_type] = resolve_definition(nm_qual_type, rdecl, ast.getSourceManager());
+  ctx.definitions[nm_qual_type] = resolve_definition(rdecl, ast.getSourceManager());
   ctx.reflected_implementations.emplace(nm_qual_type);
   // todo: should we allow wrapped types (using value_type trait)?
   return {std::move(ctx)};
 }
 
-tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+tl::expected<tool::refl::context, std::string> resolve(const resolve_args &,
   const clang::ASTUnit &ast,
+  tool::refl::context ctx,
   const tool::matched_node<tool::refl::matches::reflected_call> &m) noexcept {
   using namespace tool::refl;
 
@@ -369,10 +375,7 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
     }();
 
     refl_call.args.push_back({
-      // todo: remove
-      .cvr_qualified_type = parm_decl->getType().getAsString(),
-      // fixme: it still prints `struct`
-      // refactorme: use `type`
+      // refactorme: use `type` (why? I forgot...)
       .nm_qual_type = clang::QualType::getAsString(
         [](clang::SplitQualType q) {
           q.Quals.removeCVRQualifiers();
@@ -387,22 +390,26 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
     // fixme: what about unions, built-in arrays?
     if (!type.isStructureOrClassType())
       continue;
-    const clang::RecordDecl &rd = *type.getAsRecordDecl();
+    const clang::CXXRecordDecl &rd = *type.getAsCXXRecordDecl();
 
     if (rd.isInStdNamespace()) {
-      // todo: add std include
+      // todo: add std include (but actually why? user struct's header will be included)
     }
+
     if (!ctx.definitions.contains(nm_qual_type))
-      ctx.definitions[nm_qual_type] = resolve_definition(nm_qual_type, rd, ast.getSourceManager());
+      ctx.definitions[nm_qual_type] = resolve_definition(rd, ast.getSourceManager());
   }
 
   return {std::move(ctx)};
 }
 
-tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
+tl::expected<tool::refl::context, std::string> resolve(const resolve_args &a,
   const clang::ASTUnit &ast,
+  tool::refl::context ctx,
   const tool::matched_node<tool::refl::matches::_debug_templ_spec_decl> &m) noexcept {
   using namespace tool::refl;
+  if (!a.print_debug)
+    return {std::move(ctx)};
 
   const clang::ClassTemplateSpecializationDecl &template_decl = *m.node;
   const std::string_view detail_struct_name = template_decl.getName();
@@ -412,28 +419,40 @@ tl::expected<tool::refl::context, std::string> resolve(tool::refl::context ctx,
   clang::ASTDumper dmp{os, ast.getASTContext(), false};
   dmp.SetTraversalKind(clang::TK_AsIs);
   dmp.Visit(&template_decl);
-  fmt::print("ASTDump: {}\n", buf);
+  fmt::print("debug: ASTDump: {}\n", buf);
   return {std::move(ctx)};
 }
 
 } // namespace
 
-tl::expected<tool::refl::context, std::string> //
-  tool::refl::resolve_matched_node(context ctx,
+tool::refl::resolve_matched_node_t::result_t //
+  tool::refl::resolve_matched_node_t::operator()(const args &a,
     const clang::ASTUnit &ast,
-    variant_reflected_match match) noexcept {
+    context ctx,
+    variant_reflected_match match) const noexcept {
   return std::visit( //
-    [&](const auto &m) noexcept { return resolve(std::move(ctx), ast, m); }, //
+    [&](const auto &m) noexcept {
+      return resolve(
+        {
+          .print_debug = a.print_debug,
+        },
+        ast,
+        std::move(ctx),
+        m);
+    }, //
     match);
 }
 
-tl::expected<tool::refl::context, std::string> tool::refl::update(tool::refl::context _current,
+tl::expected<tool::refl::context, std::string> tool::refl::update(bool a_print_debug,
+  tool::refl::context _current,
   tool::refl::context delta) noexcept {
   tl::expected<tool::refl::context, std::string> r{std::move(_current)};
-  fmt::println("current:");
-  print_debug(*r);
-  fmt::println("delta:");
-  print_debug(delta);
+  if (a_print_debug) {
+    fmt::println("debug: current:");
+    print_debug(*r);
+    fmt::println("debug: delta:");
+    print_debug(delta);
+  }
 
   // in-place utility
   const auto merge_with_conflicts_check =
@@ -508,7 +527,9 @@ tl::expected<tool::refl::context, std::string> tool::refl::update(tool::refl::co
 
   r->std_includes.merge(std::move(delta.std_includes));
 
-  fmt::println("current updated:");
-  print_debug(*r);
+  if (a_print_debug) {
+    fmt::println("debug: current updated:");
+    print_debug(*r);
+  }
   return r;
 };
