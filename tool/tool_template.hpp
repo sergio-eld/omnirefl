@@ -39,6 +39,12 @@ struct cli_opts {
   std::vector<std::filesystem::path> sources;
 
   std::vector<std::filesystem::path> excluded_folders;
+
+  // todo: flags
+  // - debug (duh)
+  // - print parsed types
+  // - print input args
+  bool print_debug;
 };
 
 // default implementation for cli parsing
@@ -68,6 +74,7 @@ struct load_compilation_db_t {
 // generic code
 struct filter_db_sources_t {
   struct args {
+    // todo: these should be mutually-exclusive
     std::vector<std::filesystem::path> specified_sources;
     std::vector<std::filesystem::path> excluded_folders;
   };
@@ -87,6 +94,8 @@ struct parse_ast_t {
 
     // todo: just compilation args
     const clang::tooling::CompilationDatabase &db;
+
+    bool print_debug;
   };
 
   using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
@@ -106,6 +115,9 @@ using match_variant = std::variant<tool::matched_node<T>...>;
 
 // generic code
 struct match_ast_t {
+  struct args {
+    bool print_debug;
+  };
   // todo: refine MatchNode expected traits
   /**
    * struct MatchNode {
@@ -119,7 +131,7 @@ struct match_ast_t {
    * };
    */
   template <typename... MatchNode>
-  tl::expected<std::vector<match_variant<MatchNode...>>, std::string> operator()(
+  tl::expected<std::vector<match_variant<MatchNode...>>, std::string> operator()(const args &a,
     std::vector<match_variant<MatchNode...>> initial,
     // MatchFinder::matchAST expects a non-const ASTContext
     clang::ASTUnit &ast) const noexcept {
@@ -129,24 +141,29 @@ struct match_ast_t {
     struct: MatchFinder::MatchCallback {
       std::vector<match_variant<MatchNode...>> result;
       std::optional<std::string> error = std::nullopt;
+      bool print_debug;
 
       void run(const MatchFinder::MatchResult &mresult) override {
-        fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
+        if (print_debug)
+          fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
         // todo: handle errors
         //  - tag has been found but type mismatches (it shouldn't be possible though)
         const auto add_node = [this](auto n, std::string_view tag) {
           if (n.node)
             result.push_back(n);
-          else 
-              fmt::println("debug: !!! unmatched tag {}", tag);
+          else if (print_debug)
+            fmt::println("debug: !!! unmatched tag {}", tag);
         };
-        (add_node(matched_node<MatchNode>{
-           .node = mresult.Nodes.getNodeAs<typename MatchNode::node_type>(MatchNode::binding_tag),
-         }, MatchNode::binding_tag),
+        (add_node(
+           matched_node<MatchNode>{
+             .node = mresult.Nodes.getNodeAs<typename MatchNode::node_type>(MatchNode::binding_tag),
+           },
+           MatchNode::binding_tag),
           ...);
       }
     } match_callback;
     match_callback.result = std::move(initial);
+    match_callback.print_debug = a.print_debug;
 
     MatchFinder finder;
     (finder.addMatcher(

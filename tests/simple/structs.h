@@ -134,7 +134,8 @@ struct wrestler {
   // todo: for nested structs better use `struct person::nested` (struct or class, this info needs
   // to be collected) in generated specialization
   // ... or maybe add `struct` or `class` always?
-  struct info_t {
+  class info {
+    public:
     std::string ring_name;
     std::string signature_move;
     int debut_year;

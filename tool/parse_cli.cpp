@@ -39,39 +39,59 @@ tl::expected<tool::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
   cl::extrahelp common_help{help_message};
   cl::OptionCategory option_category{"Generation Options"};
 
-  cl::opt<std::string> cl_compilation_db_path(cl::cat(option_category),
+  cl::opt<std::string> cl_compilation_db_path{
+    cl::cat(option_category),
     "p",
     cl::desc("Specify path to `compile_commands.json`"),
     cl::value_desc("path"),
     cl::Required,
-    cl::ValueRequired);
+    cl::ValueRequired,
+  };
 
-  cl::opt<std::string> cl_output_file(cl::cat(option_category),
+  cl::opt<std::string> cl_output_file{
+    cl::cat(option_category),
     "o",
     cl::desc("Specify output filename"),
     cl::value_desc("filename"),
     cl::Required,
-    cl::ValueRequired);
+    cl::ValueRequired,
+  };
 
-  cl::list<std::string> cl_source_paths(cl::cat(option_category),
+  cl::list<std::string> cl_source_paths{
+    cl::cat(option_category),
     cl::desc("[<source>...]"),
     cl::ZeroOrMore,
-    cl::Positional);
+    cl::Positional,
+  };
 
-  cl::list<std::string> cl_excluded_folders(cl::cat(option_category),
+  cl::list<std::string> cl_excluded_folders{
+    cl::cat(option_category),
     "excluded",
+    cl::cat(option_category),
     cl::desc("Specify paths within `compile_commands.json` to ignore"),
     cl::value_desc("path or filename"),
     cl::ZeroOrMore,
-    cl::ValueOptional);
+    cl::ValueOptional,
+  };
 
   cl::opt<std::string> cl_resource_dir{
-    "resource-dir",
     cl::cat(option_category),
+    "resource-dir",
     cl::desc("Directory for system clang headers"),
     cl::Hidden,
     // todo: consider adding default value
     cl::Required,
+  };
+
+  // todo: consider using verbosity level instead
+  cl::opt<bool> cl_debug{
+    cl::cat(option_category),
+    // fixme: for some reason I can't have "debug"
+    "print-debug",
+    cl::desc("Print debug output"),
+    cl::init(false),
+    cl::Hidden,
+    cl::ValueOptional,
   };
 
   cl::ResetAllOptionOccurrences();
@@ -106,28 +126,33 @@ tl::expected<tool::cli_opts, std::string> tool::parse_cli_t::operator()(int argc
   else
     sources = std::move(paths).value();
 
-  tl::expected<tool::cli_opts, std::string> result{tool::cli_opts{
-    .resource_dir = std::move(resource_dir),
-    .output_file = std::move(output_file),
+  tl::expected<tool::cli_opts, std::string> result{
+    tool::cli_opts{
+      .resource_dir = std::move(resource_dir),
+      .output_file = std::move(output_file),
 
-    .compilation_db_path = std::move(compilation_db_path),
-    .sources = std::move(sources),
-    .excluded_folders = std::move(excluded_folders),
-  }};
+      .compilation_db_path = std::move(compilation_db_path),
+      .sources = std::move(sources),
+      .excluded_folders = std::move(excluded_folders),
+
+      .print_debug = cl_debug.getValue(),
+    },
+  };
 
   // todo: add option for resource-dir to just print it
 
   const auto to_string = [](const std::filesystem::path &p) { return p.string(); };
   // todo: print conditionally (add flag parameter)
-  fmt::println("-resource-dir={}", result->resource_dir.string());
+  fmt::println("--resource-dir={}", result->resource_dir.string());
   fmt::println("-p={}", result->compilation_db_path.string());
   fmt::println("-o={}", result->output_file.string());
-  fmt::println("-excluded({})=[{}]",
+  fmt::println("--excluded({})=[{}]",
     result->excluded_folders.size(),
     fmt::join(util::converted(to_string, result->excluded_folders), ", "));
   fmt::println("sources({}) [{}]",
     result->sources.size(),
     fmt::join(util::converted(to_string, result->sources), ", "));
+  fmt::println("--print-debug={}", result->print_debug);
 
   const auto &_debug_result = *result;
   (void)_debug_result;

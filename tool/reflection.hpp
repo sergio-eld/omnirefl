@@ -142,16 +142,15 @@ enum reference_type {
 };
 
 struct type_definition_data {
-  // todo: remove, use map key instead
-  std::string name;
   std::filesystem::path source_file;
   type_definition_flags definition_flags = none;
+  bool is_class;
 };
 
 struct struct_field_data {
   std::string name;
 
-  // fully namespace-qualified type
+  // fully namespace-qualified type, used to uniquely identify the type
   std::string nm_qual_type;
 
   // todo: I don't know how this can be useful, since there's a simple workaround for accessing
@@ -160,9 +159,7 @@ struct struct_field_data {
 };
 
 struct function_signature_arg {
-  // todo: better store qualifiers and the typename separatelly
-  // fully cv and namespace-qualified type
-  std::string cvr_qualified_type;
+  // fully namespace-qualified type, used to uniquely identify the type
   std::string nm_qual_type;
   bool is_const : 1;
   reference_type ref_type;
@@ -194,9 +191,17 @@ struct context {
   std::set<std::string> std_includes;
 };
 
-tl::expected<context, std::string> resolve_matched_node(context ctx,
-  const clang::ASTUnit &ast,
-  variant_reflected_match node) noexcept;
+struct resolve_matched_node_t {
+  struct args {
+    bool print_debug;
+  };
+  using result_t = tl::expected<context, std::string>;
+  result_t operator()(const args &a,
+    const clang::ASTUnit &ast,
+    context ctx,
+    variant_reflected_match node) const noexcept;
+} const inline resolve_matched_node{};
 
-tl::expected<tool::refl::context, std::string> update(context _current, context delta) noexcept;
+tl::expected<tool::refl::context, std::string>
+  update(bool print_debug, context _current, context delta) noexcept;
 } // namespace tool::refl
