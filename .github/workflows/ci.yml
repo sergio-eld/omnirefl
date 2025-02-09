@@ -49,9 +49,17 @@ jobs:
         run: |
           docker compose run --rm package-${{ matrix.os }}
       
-      # todo: remove old build artifacts
       # todo: test results and benchmarks (for continious bench)
       # todo: separate packages for windows and linux
+      - name: Remove old artifacts
+        uses: c-hive/gha-remove-artifacts@v1
+        with:
+          age: '90 seconds' # '<number> <unit>', e.g. 5 days, 2 years, 90 seconds, parsed by Moment.js
+          # Optional inputs
+          skip-tags: true
+          # ATTENTION: TODO: Ensure it doesn't remove artifacts from other jobs running in parallel
+          skip-recent: 5
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -85,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [18, 20, 22]
+        version: [ubuntu-18, ubuntu-20, ubuntu-22]
 
     steps:
       # needed only for `docker-compose.yml`
@@ -108,7 +116,7 @@ jobs:
           path: ./build-alpine/
 
       - name: Run Test
-        run: docker compose run --rm test-ubuntu-${{ matrix.version }}
+        run: docker compose run --rm test-${{ matrix.version }}
       # todo: upload artifacts. If before merged, upload only if failed
 
 # todo: windows
