@@ -1,5 +1,7 @@
 #pragma once
 
+// As of this writing, this header should not be publicly exposed by a reflected target
+// that is being linked by a non-reflected one.
 #include <omnirefl/refl.hpp>
 
 #include <string>
@@ -14,10 +16,4 @@ struct print_field_names_t {
   }
 } const static print_field_names{};
 
-struct dummy {
-  int oceanic;
-};
-
-std::vector<std::string> get_field_names_a(const dummy &);
-std::vector<std::string> get_field_names_b(const dummy &);
 } // namespace odr

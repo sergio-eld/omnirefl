@@ -24,6 +24,8 @@ function(get_target_sources TARGET_NAME OUT_SOURCES)
 endfunction()
 
 # todo: add args
+# - documentation:
+#   - mention that omni::refl is linked privately
 # - list of cpp files (to run only on the subset)
 # - output args string to run omnirefl tool with
 function(reflected_target TARGET_NAME)
@@ -107,5 +109,5 @@ function(reflected_target TARGET_NAME)
         VERBATIM)
 
     target_sources(${TARGET_NAME} PRIVATE ${GENERATED_FILE})
-    target_link_libraries(${TARGET_NAME} PUBLIC omni::refl)
+    target_link_libraries(${TARGET_NAME} PRIVATE omni::refl)
 endfunction() 

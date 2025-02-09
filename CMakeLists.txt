@@ -112,7 +112,7 @@ target_link_libraries(tool PRIVATE
     clangTooling # todo: get rid of this
     tl::expected
     fmt::fmt)
-# target_link_static_crt(tool)
+target_link_static_crt(tool)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tool PRIVATE -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections)
     target_link_options(tool PRIVATE -Wl,--gc-sections)
@@ -258,6 +258,7 @@ if (ENABLE_BENCH)
     # todo: remove code duplication
     add_executable(bench.parse_ast bench/parse_ast.cpp
         tool/ast.cpp)
+    target_link_static_crt(bench.parse_ast)
     # todo: it should depend on byproduct and not trigger the generation every time
     add_dependencies(bench.parse_ast bench.structs_100.generate)
     set_target_properties(bench.parse_ast PROPERTIES 
@@ -272,7 +273,7 @@ if (ENABLE_BENCH)
         clangTooling # todo: get rid of this
         tl::expected
         fmt::fmt)
-    # todo: proper input arguments
+    # fixme: pass as runtime arguments, or as relative paths (mapped volumes have different paths)
     target_compile_definitions(bench.parse_ast PRIVATE
         DB_PATH="${CMAKE_CURRENT_BINARY_DIR}"
         CPP_PATH="${CMAKE_CURRENT_BINARY_DIR}/bench/test_structs_100.cpp"
