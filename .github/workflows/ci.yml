@@ -109,7 +109,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Pull Docker Image
-        run: docker pull sergioeld/test-install-ubuntu-${{ matrix.version }}
+        run: docker pull sergioeld/test-install-${{ matrix.version }}
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
