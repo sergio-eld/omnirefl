@@ -198,25 +198,25 @@ struct _reflected_impl {};
 
 /// meta function to register the type for reflection
 template <typename T>
-constexpr void reflect(const T &) {
+void reflect(const T &) {
   (void)detail::_reflected_type<typename std::decay<T>::type>{};
 }
 
 /// meta function to register the type for reflection
 template <typename T>
-constexpr void reflect() {
+void reflect() {
   (void)detail::_reflected_type<typename std::decay<T>::type>{};
 }
 
 /// meta function to register the type to be used as implementation
 template <typename T>
-constexpr void use_impl(const T &) {
+void use_impl(const T &) {
   (void)detail::_reflected_impl<typename std::decay<T>::type>{};
 }
 
 /// meta function to register the type to be used as implementation
 template <typename T>
-constexpr void use_impl() {
+void use_impl() {
   (void)detail::_reflected_impl<typename std::decay<T>::type>{};
 }
 

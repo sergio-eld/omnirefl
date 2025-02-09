@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
 
 project(omnirefl_tests LANGUAGES CXX)
-# todo: this file/subfolder should be packaged for testing on different platforms
 
 if (NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
@@ -23,6 +22,6 @@ endif()
 enable_testing()
 
 add_subdirectory(simple)
-add_subdirectory(odr)
+add_subdirectory(multitarget)
 # todo: add test for failure
 
