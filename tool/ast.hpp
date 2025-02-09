@@ -47,29 +47,27 @@ struct cli_opts {
   bool print_debug;
 };
 
+// refactorme: tool-specific free functions
+
+// todo: add continious benchmarking to CI before optimizing this
+// todo: accept and return 'cache-context' to store parsed sources
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> parse_ast_from_source(
+  const std::filesystem::path &resource_dir,
+  const std::filesystem::path &source,
+  // refactorme: pass command-line args
+  const clang::tooling::CompilationDatabase &db,
+  bool print_debug = false);
+
+// refactorme: should this be in a header?
+// refactorme: just use a free function
 // default implementation for cli parsing
 // generic code
 struct parse_cli_t {
   tl::expected<cli_opts, std::string> operator()(int argc, char **argv) const noexcept;
 } const inline parse_cli{};
 
-// generic code
-struct load_compilation_db_t {
-  tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
-    operator()(const std::filesystem::path & compilation_db_path) const noexcept {
-    std::string err;
-    auto ptr =
-      clang::tooling::CompilationDatabase::loadFromDirectory(compilation_db_path.string(), err);
-
-    // todo: reference the path in the error
-    if (!ptr)
-      return tl::unexpected(std::move(err));
-    return {
-      tl::in_place,
-      std::move(ptr),
-    };
-  };
-} const inline load_compilation_db{};
+tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
+  load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept;
 
 // generic code
 struct filter_db_sources_t {
@@ -82,25 +80,6 @@ struct filter_db_sources_t {
   tl::expected<std::vector<std::filesystem::path>, std::string> operator()(args a,
     std::vector<std::filesystem::path> db_sources) const noexcept;
 } const inline filter_db_sources{};
-
-// todo: add continious benchmarking to CI before optimizing this
-// generic code
-struct parse_ast_t {
-  struct args {
-    const std::filesystem::path &resource_dir;
-
-    // path to .cpp source file
-    const std::filesystem::path &source;
-
-    // todo: just compilation args
-    const clang::tooling::CompilationDatabase &db;
-
-    bool print_debug;
-  };
-
-  using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
-  result_t operator()(args a) const;
-} const inline parse_ast{};
 
 // generic code
 template <typename MatchT>

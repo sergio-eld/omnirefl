@@ -1,6 +1,6 @@
 #pragma once
 
-#include "tool/tool_template.hpp"
+#include "tool/ast.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
