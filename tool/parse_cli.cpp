@@ -1,4 +1,4 @@
-#include "tool/tool_template.hpp"
+#include "tool/ast.hpp"
 
 #include "tool/util.hpp"
 

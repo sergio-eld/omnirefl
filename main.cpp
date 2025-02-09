@@ -7,26 +7,16 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
+#include "tool/ast.hpp"
 #include "tool/emit_code.hpp"
 #include "tool/reflection.hpp"
-#include "tool/tool_template.hpp"
 #include "tool/util.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wdeprecated"
-#include <clang/AST/ASTDumper.h>
-#include <clang/Basic/SourceManager.h>
-#pragma GCC diagnostic pop
-
 #include <fmt/format.h>
-#include <iostream>
 #include <tl/expected.hpp>
 
 #include <fstream>
+#include <iostream>
 #include <vector>
 
 // allowing to configure specific things:
@@ -57,6 +47,7 @@ int main(int argc, char **argv) {
 
   const auto filtered_sources = tool::filter_db_sources(
     {
+      // todo: std::variant
       .specified_sources = cli->sources,
       .excluded_folders = cli->excluded_folders,
     },
@@ -80,23 +71,25 @@ int main(int argc, char **argv) {
   // todo: use verbosity flag
   fmt::println("Filtered sources: [{}]", fmt::join(str_sources, ", "));
 
-  // todo: fold
-  tool::refl::context ctx{};
-  size_t processing = 0;
-  // todo: util::indexed(*filtered_sources)
-  for (const auto &src : *filtered_sources) {
-    // todo: use verbosity flag
-    fmt::println("[{}/{}] building AST of file: {}\t\r",
-      ++processing,
+  const auto parse_ast = [&](const std::filesystem::path &src, size_t n) {
+    fmt::println( //
+      "[{}/{}] building AST of file: {}\t\r",
+      n,
       filtered_sources->size(),
       src.string());
 
-    auto ast = tool::parse_ast({
-      .resource_dir = cli->resource_dir,
-      .source = src,
-      .db = **compilation_db,
-      .print_debug = cli->print_debug,
-    });
+    return tool::parse_ast_from_source( //
+      cli->resource_dir,
+      src,
+      **compilation_db,
+      cli->print_debug);
+  };
+
+  // todo: fold
+  tool::refl::context ctx{};
+  for (const auto &[src, n_processing] : util::indexed(*filtered_sources)) {
+    // todo: use verbosity flag
+    auto ast = parse_ast(src, n_processing);
     if (!ast) {
       llvm::errs() << ast.error();
       return -1;
@@ -117,7 +110,7 @@ int main(int argc, char **argv) {
     // should `update` be implicit/part of the signature?
     auto ctx_delta = util::foldl(
       [&ast = **ast, &cli](tl::expected<tool::refl::context, std::string> ctx, const auto &match) {
-      // refactorme: this will continue iterating on error...
+        // refactorme: this will continue iterating on error...
         if (ctx) {
           return tool::refl::resolve_matched_node(
             {
@@ -137,7 +130,8 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    if (auto updated = update(cli->print_debug, std::move(ctx), std::move(ctx_delta).value()); updated) {
+    if (auto updated = update(cli->print_debug, std::move(ctx), std::move(ctx_delta).value());
+      updated) {
       ctx = std::move(updated).value();
     } else {
       llvm::errs() << updated.error();
@@ -160,7 +154,7 @@ int main(int argc, char **argv) {
         },
         f,
         *validated_reflection_data);
-      !res) {
+    !res) {
     llvm::errs() << res.error() << '\n';
     return -1;
   };

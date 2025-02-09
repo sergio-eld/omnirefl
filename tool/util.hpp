@@ -16,8 +16,7 @@ namespace util {
 struct convert_t {
   template <typename C,
     typename From,
-    template <typename>
-    class Alloc,
+    template <typename> class Alloc,
     typename To = std::invoke_result_t<C, From>>
   auto operator()(C &&convert, std::vector<From, Alloc<From>> &&from) const noexcept
     -> std::vector<To, Alloc<To>> {
@@ -30,8 +29,7 @@ struct convert_t {
 
   template <typename C,
     typename From,
-    template <typename>
-    class Alloc,
+    template <typename> class Alloc,
     typename To = std::invoke_result_t<C, From>>
   auto operator()(C &&convert, const std::vector<From, Alloc<From>> &from) const noexcept
     -> std::vector<To, Alloc<To>> {
@@ -74,10 +72,10 @@ struct filtered_t {
 template <typename Container>
 constexpr auto indexed(Container &c) noexcept {
   using _iter_type = decltype(std::begin(c));
-  using value_type = std::decay_t<decltype(*std::begin(c))>;
+  using reference_type = decltype(*std::begin(c));
   struct _ref {
+    reference_type value;
     std::size_t index;
-    const value_type &value;
   };
   struct _indexed_iter {
     _iter_type _begin;
@@ -103,7 +101,7 @@ constexpr auto indexed(Container &c) noexcept {
       return _iter != other._iter;
     }
     constexpr _ref operator*() const {
-      return {_index, *_iter};
+      return {*_iter, _index};
     }
   };
   return _indexed_iter{std::begin(c), std::end(c)};
@@ -234,8 +232,10 @@ struct foldl_t {
 template <typename>
 struct to_tuple;
 
-template <typename ... T, template <typename...> class List>
-struct to_tuple<List<T...>> { using type = std::tuple<T...>; };
+template <typename... T, template <typename...> class List>
+struct to_tuple<List<T...>> {
+  using type = std::tuple<T...>;
+};
 
 template <typename List>
 using to_tuple_t = typename to_tuple<List>::type;

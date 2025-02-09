@@ -1,4 +1,4 @@
-#include "tool/tool_template.hpp"
+#include "tool/ast.hpp"
 #include "tool/util.hpp"
 
 #pragma GCC diagnostic push
@@ -144,7 +144,13 @@ void configure_compiler_invocation(bool a_print_debug,
 }
 } // namespace
 
-tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> tool::parse_ast_from_source(
+  const std::filesystem::path &resource_dir,
+  const std::filesystem::path &source,
+  // refactorme: pass command-line args
+  const clang::tooling::CompilationDatabase &db,
+  bool print_debug) {
+  using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
   struct: clang::tooling::ToolAction {
     result_t m_result = tl::unexpected("unexpected: tool was not invoked");
     std::string_view m_resource_dir;
@@ -177,11 +183,11 @@ tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
       return true;
     }
   } adapter{};
-  auto str_resource_dir = a.resource_dir.string();
+  auto str_resource_dir = resource_dir.string();
   adapter.m_resource_dir = str_resource_dir;
-  adapter.print_debug = a.print_debug;
+  adapter.print_debug = print_debug;
 
-  clang::tooling::ClangTool tool(a.db, {a.source.string()});
+  clang::tooling::ClangTool tool(db, {source.string()});
 
   // bolnoi ubliudok... this works
   // todo: try to set them in `configure_compiler_invocation`
@@ -197,3 +203,18 @@ tool::parse_ast_t::result_t tool::parse_ast_t::operator()(args a) const {
     return std::move(adapter.m_result);
   return tl::unexpected("errors while invoking ClangTool::run");
 }
+
+tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
+  tool::load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept {
+  std::string err;
+  auto ptr =
+    clang::tooling::CompilationDatabase::loadFromDirectory(compilation_db_path.string(), err);
+
+  if (!ptr)
+    // todo: reference the path in the error
+    return tl::unexpected(std::move(err));
+  return {
+    tl::in_place,
+    std::move(ptr),
+  };
+};
