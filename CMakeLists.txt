@@ -248,7 +248,8 @@ if (ENABLE_BENCH)
     add_dependencies(bench.structs_100.omni bench.structs_100.generate)
 
     # micro bench
-    set(BENCHMARK_ENABLE_TESTING OFF) # to suppress benchmark internal tests
+    set(BENCHMARK_ENABLE_INSTALL OFF)
+    set(BENCHMARK_ENABLE_TESTING OFF)
     FetchContent_Declare(benchmark
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG v1.7.1)
