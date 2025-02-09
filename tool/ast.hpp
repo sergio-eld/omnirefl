@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // todo: separate generic and implementation-specific code
@@ -47,28 +48,10 @@ struct cli_opts {
   bool print_debug;
 };
 
-// refactorme: tool-specific free functions
-
-// todo: add continious benchmarking to CI before optimizing this
-// todo: accept and return 'cache-context' to store parsed sources
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> parse_ast_from_source(
-  const std::filesystem::path &resource_dir,
-  const std::filesystem::path &source,
-  // refactorme: pass command-line args
-  const clang::tooling::CompilationDatabase &db,
-  bool print_debug = false);
-
 // refactorme: should this be in a header?
-// refactorme: just use a free function
-// default implementation for cli parsing
-// generic code
-struct parse_cli_t {
-  tl::expected<cli_opts, std::string> operator()(int argc, char **argv) const noexcept;
-} const inline parse_cli{};
+tl::expected<cli_opts, std::string> parse_cli(int argc, char **argv) noexcept;
 
-tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
-  load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept;
-
+// refactorme: remove from this header
 // generic code
 struct filter_db_sources_t {
   struct args {
@@ -81,80 +64,96 @@ struct filter_db_sources_t {
     std::vector<std::filesystem::path> db_sources) const noexcept;
 } const inline filter_db_sources{};
 
-// generic code
-template <typename MatchT>
+// todo: add continious benchmarking to CI before optimizing this
+// todo: accept and return 'cache-context' to store parsed sources
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> parse_ast_from_source(
+  const std::filesystem::path &resource_dir,
+  const std::filesystem::path &source,
+  // refactorme: pass command-line args
+  const clang::tooling::CompilationDatabase &db,
+  bool print_debug = false);
+
+tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
+  load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept;
+
+/**
+ * // todo: refine Match expected traits
+ * // should be something like mapping: match_decl -> (matched_node, context){}
+ * struct Matcher {
+ * // todo: remove/hide. This is some internal thing actually
+ * constexpr static const char binding_tag[] = "tag";
+ *
+ * // todo: this should be deducible from the return type
+ * using node_type = clang::ASTNodeT;
+ *
+ * auto operator()() const { return matchDecl(); }
+ * };
+ */
+template <typename Match>
 struct matched_node {
-  using node_type = typename MatchT::node_type;
+  using node_type = typename Match::node_type;
   const node_type *node;
 };
 
-// generic code
-template <typename... T>
-using match_variant = std::variant<tool::matched_node<T>...>;
+// refactorme: this is _very_ confusing to use in combination with the variant wrapper
+// refactorme: this should not be used for function signatures...
+// User should only be responsible for providing an overload for his Match.
+// That overload must otherwise adhere to expected signature
+template <typename... Matches>
+using matched_node_variant = std::variant<tool::matched_node<Matches>...>;
 
-// generic code
-struct match_ast_t {
-  struct args {
+// todo: consider returning `vector<expected<node, error>>` instead
+template <typename... Matches>
+tl::expected<std::vector<matched_node_variant<Matches...>>, std::string> match_ast_nodes(
+  // TBH it is used for type deduction
+  std::vector<matched_node_variant<Matches...>> initial,
+  // fixme: MatchFinder::matchAST expects a non-const ASTContext
+  clang::ASTUnit &ast,
+  bool print_debug = false) noexcept {
+  using namespace clang::ast_matchers;
+
+  // adapter
+  struct: MatchFinder::MatchCallback {
+    std::vector<matched_node_variant<Matches...>> result;
+    std::optional<std::string> error = std::nullopt;
     bool print_debug;
-  };
-  // todo: refine MatchNode expected traits
-  /**
-   * struct MatchNode {
-   * // todo: remove/hide. This is some internal thing actually
-   * constexpr static const char binding_tag[] = "tag";
-   *
-   * // todo: this should be deducible from the return type
-   * using node_type = clang::ASTNodeT;
-   *
-   * auto operator()() const { return matchDecl(); }
-   * };
-   */
-  template <typename... MatchNode>
-  tl::expected<std::vector<match_variant<MatchNode...>>, std::string> operator()(const args &a,
-    std::vector<match_variant<MatchNode...>> initial,
-    // MatchFinder::matchAST expects a non-const ASTContext
-    clang::ASTUnit &ast) const noexcept {
-    using namespace clang::ast_matchers;
 
-    // adapter
-    struct: MatchFinder::MatchCallback {
-      std::vector<match_variant<MatchNode...>> result;
-      std::optional<std::string> error = std::nullopt;
-      bool print_debug;
+    void run(const MatchFinder::MatchResult &mresult) override {
+      if (print_debug)
+        fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
+      // todo: handle errors
+      //  - tag has been found but type mismatches (it shouldn't be possible though)
+      const auto add_node = [this](auto n, std::string_view tag) {
+        if (n.node)
+          result.push_back(n);
+        else if (print_debug)
+          fmt::println("debug: !!! unmatched tag {}", tag);
+      };
+      (add_node(
+         matched_node<Matches>{
+           .node = mresult.Nodes.getNodeAs<typename Matches::node_type>(Matches::binding_tag),
+         },
+         Matches::binding_tag),
+        ...);
+    }
+  } match_callback;
+  match_callback.result = std::move(initial);
+  match_callback.print_debug = print_debug;
 
-      void run(const MatchFinder::MatchResult &mresult) override {
-        if (print_debug)
-          fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
-        // todo: handle errors
-        //  - tag has been found but type mismatches (it shouldn't be possible though)
-        const auto add_node = [this](auto n, std::string_view tag) {
-          if (n.node)
-            result.push_back(n);
-          else if (print_debug)
-            fmt::println("debug: !!! unmatched tag {}", tag);
-        };
-        (add_node(
-           matched_node<MatchNode>{
-             .node = mresult.Nodes.getNodeAs<typename MatchNode::node_type>(MatchNode::binding_tag),
-           },
-           MatchNode::binding_tag),
-          ...);
-      }
-    } match_callback;
-    match_callback.result = std::move(initial);
-    match_callback.print_debug = a.print_debug;
+  MatchFinder finder;
+  (finder.addMatcher(
+     // todo: TraverseKind from MatchNode ?
+     // TK_AsIs is needed to include template instantiations
+     traverse(clang::TK_AsIs, Matches{}().bind(Matches::binding_tag)),
+     &match_callback),
+    ...);
 
-    MatchFinder finder;
-    (finder.addMatcher(
-       // TK_AsIs is needed to include template instantiations
-       traverse(clang::TK_AsIs, MatchNode{}().bind(MatchNode::binding_tag)),
-       &match_callback),
-      ...);
+  finder.matchAST(ast.getASTContext());
+  if (match_callback.error)
+    return tl::unexpected(std::move(match_callback.error).value());
+  return std::move(match_callback.result);
+}
 
-    finder.matchAST(ast.getASTContext());
-    if (match_callback.error)
-      return tl::unexpected(std::move(match_callback.error).value());
-    return std::move(match_callback.result);
-  }
-} constexpr inline match_ast{};
+// todo: generic interface for resolving matched nodes
+
 } // namespace tool

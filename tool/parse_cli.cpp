@@ -33,8 +33,7 @@ const char help_message[] =
 //
 } // namespace
 
-tl::expected<tool::cli_opts, std::string> tool::parse_cli_t::operator()(int argc,
-  char **argv) const noexcept {
+tl::expected<tool::cli_opts, std::string> tool::parse_cli(int argc, char **argv) noexcept {
   namespace cl = llvm::cl;
   cl::extrahelp common_help{help_message};
   cl::OptionCategory option_category{"Generation Options"};

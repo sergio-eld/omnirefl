@@ -7,6 +7,8 @@
 #else
 #endif
 
+// todo: reduce dependencies on system headers to improve parsing performance.
+//   consider having reflection interface as a separate header.
 #include <array>
 #include <type_traits>
 #include <utility>

@@ -1,13 +1,9 @@
-// todo: write a test
-
 #include "get_field_names.hpp"
 
 #include <gtest/gtest.h>
 
-// testing several reflected .cpp files using custom reflected types and user implementation
-// todo: ideally, `_call_impl` should not be exported as a symbol in the resulting cmake target
-// binary
-TEST(odr, compare_field_names) {
+// testing linking 2 reflected static libraries that do not expose reflected context
+TEST(multitarget, compare_field_names) {
   static const std::vector<std::string> expected{"oceanic"};
   const odr::dummy d{};
   const auto fields_a = odr::get_field_names_a(d);
