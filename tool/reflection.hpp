@@ -22,6 +22,8 @@
 
 // iteration 2 implementation
 namespace tool::refl {
+struct context;
+
 namespace matches {
 
 // types reflected via instantiation of a designated template struct
@@ -45,6 +47,11 @@ struct reflected_type {
       //
     );
   }
+
+  static tl::expected<context, std::string> resolve(const node_type &node,
+    const clang::ASTUnit &ast,
+    const context &ctx,
+    bool print_debug = false);
 };
 
 // implementation types reflected via instantiation of a designated template struct
@@ -68,6 +75,11 @@ struct reflected_impl {
       //
     );
   }
+
+  static tl::expected<context, std::string> resolve(const node_type &node,
+    const clang::ASTUnit &ast,
+    const context &ctx,
+    bool print_debug = false);
 };
 
 // invocations
@@ -89,6 +101,11 @@ struct reflected_call {
       isTemplateInstantiation(),
       hasName("_call_impl"));
   }
+
+  static tl::expected<context, std::string> resolve(const node_type &node,
+    const clang::ASTUnit &ast,
+    const context &ctx,
+    bool print_debug = false);
 };
 
 // debug
@@ -107,19 +124,14 @@ struct _debug_templ_spec_decl {
       //
     );
   }
+
+  static tl::expected<context, std::string> resolve(const node_type &node,
+    const clang::ASTUnit &ast,
+    const context &ctx,
+    bool print_debug = false);
 };
 
 } // namespace matches
-
-// this typedef helps to avoid compilation errors,
-// since the order of template arguments must be the same
-using variant_reflected_match = tool::match_variant< //
-  matches::reflected_type,
-  matches::reflected_impl,
-  matches::reflected_call,
-
-  // debug
-  matches::_debug_templ_spec_decl>;
 
 // flags for definition properties
 // these are used to determine violated limitations when using the tool
@@ -169,6 +181,7 @@ struct func_signature {
   std::vector<function_signature_arg> args;
 };
 
+// todo: can this type really be independent from the matches?
 // structure that collects and saves intermediate state from several ASTs
 struct context {
   // todo: profile and optimize
@@ -191,17 +204,20 @@ struct context {
   std::set<std::string> std_includes;
 };
 
-struct resolve_matched_node_t {
-  struct args {
-    bool print_debug;
-  };
-  using result_t = tl::expected<context, std::string>;
-  result_t operator()(const args &a,
-    const clang::ASTUnit &ast,
-    context ctx,
-    variant_reflected_match node) const noexcept;
-} const inline resolve_matched_node{};
+// refactorme: this function should be in ast.hpp. Now it depends only on the `context`
+template <typename... Matches>
+tl::expected<context, std::string> resolve_matched_node(
+  const matched_node_variant<Matches...> &match,
+  const clang::ASTUnit &ast,
+  const context &ctx,
+  bool print_debug = false) noexcept {
+  return std::visit(
+    [&]<typename Match>(const matched_node<Match> &m) { //
+      return Match::resolve(*m.node, ast, ctx, print_debug);
+    },
+    match);
+}
 
 tl::expected<tool::refl::context, std::string>
-  update(bool print_debug, context _current, context delta) noexcept;
+  update(context current, context delta, bool print_debug) noexcept;
 } // namespace tool::refl

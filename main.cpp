@@ -7,10 +7,12 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
+#include "fmt/ranges.h"
 #include "tool/ast.hpp"
 #include "tool/emit_code.hpp"
 #include "tool/reflection.hpp"
 #include "tool/util.hpp"
+#include "llvm/Support/raw_ostream.h"
 
 #include <fmt/format.h>
 #include <tl/expected.hpp>
@@ -71,7 +73,16 @@ int main(int argc, char **argv) {
   // todo: use verbosity flag
   fmt::println("Filtered sources: [{}]", fmt::join(str_sources, ", "));
 
+  /*
+   * // refactorme:
+   * either<context, error> ctx_delta =
+   *   std::tie(src, n_processing) >>=
+   *     | unpack_to(parse_ast)
+   *     | match_ast
+   *     | foldl(std::move(ctx), resolve_matched_node);
+   */
   const auto parse_ast = [&](const std::filesystem::path &src, size_t n) {
+    // todo: use verbosity flag
     fmt::println( //
       "[{}/{}] building AST of file: {}\t\r",
       n,
@@ -85,56 +96,55 @@ int main(int argc, char **argv) {
       cli->print_debug);
   };
 
-  // todo: fold
   tool::refl::context ctx{};
+  std::vector<std::string> errors;
+
   for (const auto &[src, n_processing] : util::indexed(*filtered_sources)) {
-    // todo: use verbosity flag
-    auto ast = parse_ast(src, n_processing);
+    tl::expected ast = parse_ast(src, n_processing + 1);
     if (!ast) {
       llvm::errs() << ast.error();
       return -1;
     }
 
-    auto matches = tool::match_ast(
-      {
-        .print_debug = cli->print_debug,
-      },
-      std::vector<tool::refl::variant_reflected_match>{},
-      **ast);
+    // refactorme: should it be a 'table' {match{}, resolve{}}?
+    // this would allow to untie the match type from context type and provide different
+    // variants of implementations
+    using ast_match = tool::matched_node_variant< //
+      tool::refl::matches::reflected_type,
+      tool::refl::matches::reflected_impl,
+      tool::refl::matches::reflected_call,
+      tool::refl::matches::_debug_templ_spec_decl>;
+    tl::expected matches = tool::match_ast_nodes( //
+      std::vector<ast_match>{},
+      **ast,
+      cli->print_debug);
     if (!matches) {
       llvm::errs() << matches.error();
       return -1;
     }
 
-    // refactorme: these 2 calls (resolve && update) don't look clean
-    // should `update` be implicit/part of the signature?
-    auto ctx_delta = util::foldl(
-      [&ast = **ast, &cli](tl::expected<tool::refl::context, std::string> ctx, const auto &match) {
-        // refactorme: this will continue iterating on error...
-        if (ctx) {
-          return tool::refl::resolve_matched_node(
-            {
-              .print_debug = cli->print_debug,
-            },
-            ast,
-            std::move(ctx).value(),
-            match);
-        }
-        return ctx;
-      },
-      tl::expected<tool::refl::context, std::string>{tl::in_place},
-      std::move(matches).value());
-
-    if (!ctx_delta) {
-      llvm::errs() << ctx_delta.error();
-      return -1;
+    for (const ast_match &m : *matches) {
+      tl::expected ctx_delta = //
+        tool::refl::resolve_matched_node(m, **ast, ctx, cli->print_debug);
+      if (!ctx_delta) {
+        errors.emplace_back(std::move(ctx_delta).error());
+        continue;
+      }
+      tl::expected updated = tool::refl::update(std::move(ctx), //
+        std::move(ctx_delta).value(),
+        cli->print_debug);
+      if (!updated) {
+        llvm::errs() //
+          << fmt::format("Error updating context: {}", std::move(updated).error());
+        return -1;
+      }
+      ctx = std::move(updated).value();
     }
 
-    if (auto updated = update(cli->print_debug, std::move(ctx), std::move(ctx_delta).value());
-      updated) {
-      ctx = std::move(updated).value();
-    } else {
-      llvm::errs() << updated.error();
+    // todo: errors, add flag to stop on errors
+    if (!errors.empty()) {
+      llvm::errs() //
+        << fmt::format("Errors while matching nodes: {}", fmt::join(errors, ", "));
       return -1;
     }
   }

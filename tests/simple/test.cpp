@@ -126,7 +126,6 @@ TEST(modify_fields, simple) {
   EXPECT_EQ(output.str, value("str"));
 }
 
-// todo: implement
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

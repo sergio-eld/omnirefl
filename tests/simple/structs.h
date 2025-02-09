@@ -131,9 +131,6 @@ struct wrestler {
   std::string catchphrase{};
   std::vector<championship> titles{};
 
-  // todo: for nested structs better use `struct person::nested` (struct or class, this info needs
-  // to be collected) in generated specialization
-  // ... or maybe add `struct` or `class` always?
   class info {
     public:
     std::string ring_name;

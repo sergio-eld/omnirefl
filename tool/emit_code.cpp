@@ -113,7 +113,7 @@ tl::expected<void, std::string>
       // todo: annotate the header file where this type was included from
       "\ntemplate <>"
       "\nstruct omni::reflected_t<{type_tag} {type_name}>{{"
-      // todo: this will give a warning
+      // fixme: this gives a warning
       "\n  using type = {type_tag} {type_name};"
       "\n"
       "\n  // fields meta types declarations"
