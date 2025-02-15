@@ -38,6 +38,158 @@ using nonstd::string_view;
 //  - should be compatible with at least C++11
 //  - must only define reflection-related interface
 namespace omni {
+// todo: separate the functions below to a standalone header without any includes
+namespace detail {
+namespace {
+// tag used to collect reflected types
+template <typename>
+struct _reflected_type {};
+
+// tag used to collect reflected implementation types
+template <typename>
+struct _reflected_impl {};
+
+// todo: remove #define
+// #define OMNI_INPLACE_REFLECTION
+#ifdef OMNI_INPLACE_REFLECTION
+template <int Id>
+struct counter {
+  struct generator {
+#  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wnon-template-friend"
+#  elif defined _MSC_VER
+#    pragma warning(push)
+#    pragma warning(disable : 4396)
+#  endif
+
+    // This does not compile on GCC < 11, and gives warning if not a template
+    // template <typename...>
+    friend constexpr bool generate(counter) {
+      return true;
+    }
+  };
+
+  // template <typename...>
+  friend constexpr bool generate(counter);
+
+#  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+#    pragma GCC diagnostic pop
+#  elif defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
+
+#  if defined _MSC_VER
+#    pragma warning(push)
+#    pragma warning(disable : 4514)
+#    pragma warning(disable : 4710)
+#  endif
+
+  template <typename Tag = counter, int I = (int)generate(Tag{})>
+  static constexpr std::true_type exists(int) {
+    return {};
+  }
+
+  static constexpr std::false_type exists(...) {
+    return generator(), std::false_type{};
+  }
+#  if defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
+};
+
+template <typename T, int Id>
+constexpr int unique_id(std::false_type) {
+  return Id;
+}
+
+template <typename T, int Id>
+constexpr int unique_id(std::true_type);
+
+template <typename T, int Id = {}>
+constexpr int unique_id() {
+  return unique_id<T, Id>(counter<Id>::exists(Id));
+}
+
+template <typename T, int Id>
+constexpr int unique_id(std::true_type) {
+  return unique_id<T, Id + 1>();
+}
+
+// meta type to assign index to a type upon instantiation
+template <typename T, int Index = unique_id<T>()>
+struct _type_index {};
+
+#endif
+} // namespace
+} // namespace detail
+
+/// class to invoke a callable implementation object
+struct reflected_call_t {
+  template <typename Impl, typename T, typename... Args>
+  void operator()(Impl &&impl, T &&t, Args &&...args) const {
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    using type = typename std::decay<T>::type;
+    (void)detail::_reflected_type<type>{};
+#ifdef OMNI_INPLACE_REFLECTION
+    (void)detail::_type_index<type>{};
+#endif
+    _call_impl(std::forward<Impl>(impl), std::forward<T>(t), std::forward<Args>(args)...);
+  }
+
+  private:
+  // implementation will be generated for this function by omnirefl
+  template <typename Impl, typename... Args>
+  static void _call_impl(Impl &&impl, Args &&...args);
+} const reflected_call{};
+
+namespace detail {
+namespace {
+
+// specializations, containing reflection interface for T will be generated
+// default argument is used to delay template instantiaton by partial specialization
+template <typename T, typename = T>
+struct _reflected;
+
+// in inline-reflection mode is used to generate specializatioin for indexed types (local structs,
+// unnamed) `_reflected_t<_indexed_type<unique_id<decltype(t)>()>>`
+template <int>
+struct _indexed_type;
+
+// SFINAE utility to select named types (for with `_reflected<named_type>` can be generated).
+// In inplace-reflection mode specializations for each reflected type will be generated, that will
+// be selected for non-local types, preventing the call to `unique_id`. Local types will already be
+// indexed at this point, so call to `unique_id` will not increment the counter.
+template <typename T, typename = T>
+struct _fetch_reflected {
+#ifdef OMNI_INPLACE_REFLECTION
+  // by default indexed_type is used.
+  // For already indexed types the counter will not be incremented,
+  // the other types will be catched by generated specializations of `reflected_t`
+  using type = _reflected<_indexed_type<unique_id<T>()>>;
+#else
+  using type = _reflected<T>;
+#endif
+};
+} // namespace
+} // namespace detail
+
+/**
+ * interface to get reflection data for T.
+ * example:
+ ```
+ struct reflected_impl {
+ template <typename T>
+ constexpr void operator()(const T &t) const {
+ // reflected context inside this scope
+ using refl = omni::reflected_t<T>;
+ }
+ };
+ ```
+ */
+template <typename T>
+using reflected_t = typename detail::_fetch_reflected<typename std::decay<T>::type>::type;
+
 namespace detail {
 namespace {
 template <typename... Ts>
@@ -87,6 +239,7 @@ struct _setter: setter<ValueT> {
 
 namespace detail {
 namespace {
+// refactorme: simplify
 template <typename Callable, typename Ref, typename Field, typename = void>
 struct _is_get_set_invocable: std::false_type {
   using return_t = decltype(std::declval<Callable>()(Field::get_value(std::declval<const Ref>())));
@@ -151,9 +304,6 @@ struct variant_field {
   }
 };
 
-template <typename T>
-struct reflected_t;
-
 /// (!!!) do not instantiate this outside of a reflected context
 template <typename, typename = void>
 struct is_reflected: std::false_type {};
@@ -163,99 +313,41 @@ template <typename T>
 struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>: std::true_type {};
 
 // reflected binding is needed to hold a reference to the reflected object
-template <typename T /*reflected_t<T>*/, typename /*Ref*/, typename = typename T::fields_t>
+template <typename T, typename = typename reflected_t<T>::fields_t>
 struct reflected_binding;
 
 /// runtime adapter to conveniently operate on object's reflection data
-template <typename T, typename R, typename... Fields>
-struct reflected_binding<reflected_t<T>, R, std::tuple<Fields...>> {
-  // R is the same as T, but a (possibly) const qualified reference
-  R &_ref;
-  std::array<variant_field<R, Fields...>, sizeof...(Fields)> fields{
+template <typename T, typename... Fields>
+struct reflected_binding<T, std::tuple<Fields...>> {
+  // possibly const qualified reference
+  T &_ref;
+
+  // refactorme: can this be simplified?
+  // array of fields that allows runtime loop-based iteration
+  std::array<variant_field<T, Fields...>, sizeof...(Fields)> fields{
     {{Fields::name(), _ref, omni::variant<Fields...>{Fields{}}}...}};
 
-  constexpr reflected_binding(R &r): _ref(r) {
+  // requied for C++11, since `_ref` is used for `fields` default initialization
+  constexpr reflected_binding(T &ref): _ref(ref) {
   }
+  constexpr reflected_binding(const reflected_binding &) = default;
 };
 
 /// access reflection data using a (potentially const) reference to the reflected object.
-/// `reflected_t<T>` must be specialized at the point of invocation
+/// `reflected_t<T>` must be specialized at the point of invocation.
+/// warning: DO NOT call this function outside of the reflected implementation.
+/// todo: implement check within the tool to validate that this is not called outside of the
+/// reflected implementation
 template <typename T>
-constexpr auto reflected(T &t) noexcept
-  -> reflected_binding<reflected_t<typename std::decay<T>::type>, T> {
-  return reflected_t<typename std::decay<T>::type>{}(t);
+constexpr reflected_binding<T> reflected(T &t) noexcept {
+  return {t};
 }
-
-namespace detail {
-namespace {
-// tag used to collect reflected types
-template <typename>
-struct _reflected_type {};
-
-// tag used to collect reflected implementation types
-template <typename>
-struct _reflected_impl {};
-} // namespace
-} // namespace detail
-
-/// meta function to register the type for reflection
-template <typename T>
-void reflect(const T &) {
-  (void)detail::_reflected_type<typename std::decay<T>::type>{};
-}
-
-/// meta function to register the type for reflection
-template <typename T>
-void reflect() {
-  (void)detail::_reflected_type<typename std::decay<T>::type>{};
-}
-
-/// meta function to register the type to be used as implementation
-template <typename T>
-void use_impl(const T &) {
-  (void)detail::_reflected_impl<typename std::decay<T>::type>{};
-}
-
-/// meta function to register the type to be used as implementation
-template <typename T>
-void use_impl() {
-  (void)detail::_reflected_impl<typename std::decay<T>::type>{};
-}
-
-/// class to invoke a callable implementation object
-struct reflected_call_t {
-  template <typename Impl, typename T>
-  void operator()(Impl &&impl, T &&t) const {
-    use_impl(impl);
-    reflect(t);
-    _call_impl(std::forward<Impl>(impl), std::forward<T>(t));
-  }
-
-  template <typename Impl, typename T, typename R>
-  void operator()(Impl &&impl, T &&t, R &result) const {
-    use_impl(impl);
-    reflect(t);
-    _call_impl(std::forward<Impl>(impl), std::forward<T>(t), result);
-  }
-
-  // todo: do I need the other 2 versions??
-  template <typename Impl, typename T, typename... Args>
-  void operator()(Impl &&impl, T &&t, Args &&...args) const {
-    use_impl(impl);
-    reflect(t);
-    _call_impl(std::forward<Impl>(impl), std::forward<T>(t), std::forward<Args>(args)...);
-  }
-
-  private:
-  // implementation will be generated for this function by omnirefl
-  template <typename Impl, typename... Args>
-  static void _call_impl(Impl &&impl, Args &&...args);
-} const reflected_call{};
 
 } // namespace omni
 
-// todo: pragma to enable the exposition
-#include <tuple>
+#ifdef OMNI_ENABLE_EXPOSITION
+
+#  include <tuple>
 
 namespace omni {
 struct _exposition {
@@ -264,12 +356,12 @@ struct _exposition {
 };
 } // namespace omni
 
-#ifndef OMNI_DEFINE_NAME_FUNC
-#  define OMNI_DEFINE_NAME_FUNC(STR) \
-    constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] { \
-      return STR; \
-    }
-#endif
+#  ifndef OMNI_DEFINE_NAME_FUNC
+#    define OMNI_DEFINE_NAME_FUNC(STR) \
+      constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] { \
+        return STR; \
+      }
+#  endif
 
 // todo: default value for a field
 // this specialization will be generated by the tool
@@ -311,5 +403,7 @@ struct omni::reflected_t<omni::_exposition> {
     return {t};
   }
 };
+
+#endif
 
 #undef OMNI_DEFINE_NAME_FUNC

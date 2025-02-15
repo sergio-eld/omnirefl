@@ -70,122 +70,104 @@ struct filtered_t {
 } constexpr const inline filtered{};
 
 template <typename Container>
-constexpr auto indexed(Container &c) noexcept {
-  using _iter_type = decltype(std::begin(c));
+constexpr auto indexed(Container &&c) noexcept {
+  using iterator_type = decltype(std::begin(c));
   using reference_type = decltype(*std::begin(c));
   struct _ref {
     reference_type value;
     std::size_t index;
   };
-  struct _indexed_iter {
-    _iter_type _begin;
-    _iter_type _end;
-    _iter_type _iter = _begin;
+  struct _indexed_iterator {
+    iterator_type _begin;
+    iterator_type _end;
+    iterator_type _iter = _begin;
     std::size_t _index = 0;
 
-    constexpr _indexed_iter begin() const {
+    constexpr _indexed_iterator begin() const {
       return {_begin, _end};
     }
-    constexpr _indexed_iter end() const {
+    constexpr _indexed_iterator end() const {
       return {_begin, _end, _end};
     }
-    constexpr _indexed_iter operator++() {
+    constexpr _indexed_iterator &operator++() {
       ++_iter;
       ++_index;
       return *this;
     }
-    constexpr bool operator==(const _indexed_iter &other) const noexcept {
+    constexpr bool operator==(const _indexed_iterator &other) const noexcept {
       return _iter == other._iter;
     }
-    constexpr bool operator!=(const _indexed_iter &other) const noexcept {
+    constexpr bool operator!=(const _indexed_iterator &other) const noexcept {
       return _iter != other._iter;
     }
     constexpr _ref operator*() const {
       return {*_iter, _index};
     }
   };
-  return _indexed_iter{std::begin(c), std::end(c)};
+  return _indexed_iterator{std::begin(c), std::end(c)};
 }
 
-template <typename T, typename Format>
-struct with_fmt {
-  const T &value;
-  Format format;
+template <typename T, typename Format, typename = void>
+struct _wrapped_element {
+  using value_type = std::conditional_t< //
+    std::is_lvalue_reference_v<T>,
+    std::add_const_t<std::remove_reference_t<T>> &,
+    T>;
+  value_type value;
+  Format &format;
 };
 
-template <typename T>
-struct _with_fmt_rng {
-  using _wrapped_value_type = decltype(*std::declval<const T &>().begin());
-  using _wrapped_iterator_type = decltype(std::declval<const T &>().begin());
+template <typename Iter, typename Format>
+struct _wrapped_iterator {
+  using value_type = _wrapped_element<std::decay_t<decltype(*std::declval<Iter>())>, Format>;
 
-  constexpr static auto begin(const T &t) noexcept {
-    return std::begin(t);
+  Iter i;
+  Format &format;
+  constexpr value_type operator*() const {
+    return {.value = *i, .format = format};
   }
-  constexpr static auto end(const T &t) noexcept {
-    return std::end(t);
-  }
-};
 
-template <typename T>
-struct _with_fmt_rng<std::reference_wrapper<T>> {
-  using _wrapped_value_type = decltype(*std::declval<const T &>().begin());
-  using _wrapped_iterator_type = decltype(std::declval<const T &>().begin());
-
-  constexpr static auto begin(std::reference_wrapper<T> t) noexcept {
-    return std::begin(t.get());
+  constexpr _wrapped_iterator &operator++() {
+    ++i;
+    return *this;
   }
-  constexpr static auto end(std::reference_wrapper<T> t) noexcept {
-    return std::end(t.get());
+  constexpr bool operator==(const _wrapped_iterator &other) const {
+    return i == other.i;
+  }
+  constexpr bool operator!=(const _wrapped_iterator &other) const {
+    return i != other.i;
   }
 };
 
-// todo: implement and use instead of `with_fmt_rng`
-// template <typename Range, typename Format>
-// auto join_with_fmt(Format &&fmt, Range &&r, std::string_view sep) {
-// }
+template <typename FormatString, typename Element>
+constexpr auto
+  _format(std::false_type, FormatString fmt_string, const Element &e, fmt::format_context &ctx) {
+  return fmt::format_to(ctx.out(), fmt_string(), e);
+}
 
-// refactorme: pretty cumbersome interface
-// consider `join_with_fmt`, so it can be used in place of `fmt::join` directly
-template <typename T, typename Format>
-struct with_fmt_rng {
-  T value;
-  Format format;
+template <typename FormatString, typename Element>
+constexpr auto
+  _format(std::true_type, FormatString fmt_string, const Element &e, fmt::format_context &ctx) {
+  return fmt_string(e, ctx);
+}
 
-  // fixme: should not force `const` in `std::reference_wrapper<Format>`, but otherwise doesn't
-  // compile..
-  using value_type =
-    with_fmt<typename _with_fmt_rng<T>::_wrapped_value_type, std::reference_wrapper<const Format>>;
-  using _wrapped_iterator_type = typename _with_fmt_rng<T>::_wrapped_iterator_type;
-
-  struct iterator_type {
-    using value_type = with_fmt_rng::value_type;
-
-    _wrapped_iterator_type i;
-    std::reference_wrapper<const Format> format;
-    value_type operator*() const {
-      return {.value = *i, .format = format};
-    }
-    _wrapped_iterator_type operator++() {
-      return ++i;
-    }
-    bool operator==(const iterator_type &other) const {
-      return i == other.i;
-    }
-    bool operator!=(const iterator_type &other) const {
-      return i != other.i;
-    }
+template <typename Range, typename Char, typename FmtStr>
+constexpr auto join(const Range &rng, std::basic_string_view<Char> delim, FmtStr fmt_string) {
+  const auto formatter = [fmt_string](const auto &e, fmt::format_context &ctx) {
+    return _format(std::is_invocable<decltype(fmt_string), decltype(e), decltype(ctx)>{},
+      fmt_string,
+      e,
+      ctx);
   };
+  return fmt::join(_wrapped_iterator{rng.begin(), formatter},
+    _wrapped_iterator{rng.end(), formatter},
+    delim);
+}
 
-  constexpr iterator_type begin() const {
-    return iterator_type{.i = _with_fmt_rng<T>::begin(value), .format = std::ref(format)};
-  }
-  constexpr iterator_type end() const {
-    return iterator_type{.i = _with_fmt_rng<T>::end(value), .format = std::ref(format)};
-  }
-};
-
-template <typename T, typename Format>
-with_fmt(const T &, Format) -> with_fmt<T, Format>;
+template <typename Range, typename Char, size_t N, typename FmtStr>
+constexpr auto join(const Range &rng, const Char (&delim)[N], FmtStr fmt_string) {
+  return join(rng, std::basic_string_view<Char>(delim), fmt_string);
+}
 
 // todo: error for non-path strings
 auto to_std_paths(const auto &strings)
@@ -244,11 +226,12 @@ using to_tuple_t = typename to_tuple<List>::type;
 
 // the only way is to specialize in the global namespace
 template <typename T, typename Format, typename Char>
-struct fmt::formatter<util::with_fmt<T, Format>, Char> {
+struct fmt::formatter<util::_wrapped_element<T, Format>, Char> {
   constexpr auto parse(fmt::format_parse_context &ctx) {
     return ctx.begin();
   }
-  constexpr static auto format(const util::with_fmt<T, Format> &uf, fmt::format_context &ctx) {
-    return uf.format(uf.value, ctx);
+  constexpr auto format(const util::_wrapped_element<T, Format> &we,
+    fmt::format_context &ctx) const {
+    return we.format(we.value, ctx);
   }
 };

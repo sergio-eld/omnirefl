@@ -12,7 +12,7 @@ namespace example_impl {
 struct print_field_names_simple_t {
   template <typename T>
   void operator()(const T &t, std::vector<std::string> &out) const {
-    const auto &fields = omni::reflected(t).fields;
+    const auto fields = omni::reflected(t).fields;
     out.reserve(fields.size());
     for (const auto &f : fields)
       out.emplace_back(std::string(f.name));
@@ -24,7 +24,7 @@ struct print_field_names_recursive_t {
   void operator()(const T &t, std::vector<std::string> &out) const {
     namespace pm = pattern_matching;
 
-    const auto &fields = omni::reflected(t).fields;
+    const auto fields = omni::reflected(t).fields;
     out.reserve(fields.size());
     for (const auto &f : fields) {
       out.emplace_back(f.name);

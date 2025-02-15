@@ -6,6 +6,7 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <clang/ASTMatchers/ASTMatchFinder.h>
+#include <clang/ASTMatchers/ASTMatchersInternal.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #pragma GCC diagnostic pop
@@ -73,6 +74,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> parse_ast_from_source
   const clang::tooling::CompilationDatabase &db,
   bool print_debug = false);
 
+// refactorme: move away from this header (ast.hpp)
 tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
   load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept;
 
@@ -111,6 +113,8 @@ tl::expected<std::vector<matched_node_variant<Matches...>>, std::string> match_a
   clang::ASTUnit &ast,
   bool print_debug = false) noexcept {
   using namespace clang::ast_matchers;
+
+  // todo: instantiate binding tag strings here (somehow)
 
   // adapter
   struct: MatchFinder::MatchCallback {

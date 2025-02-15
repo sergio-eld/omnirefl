@@ -7,14 +7,14 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
-#include "fmt/ranges.h"
 #include "tool/ast.hpp"
 #include "tool/emit_code.hpp"
 #include "tool/reflection.hpp"
 #include "tool/util.hpp"
-#include "llvm/Support/raw_ostream.h"
 
+#include <fmt/base.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <tl/expected.hpp>
 
 #include <fstream>
@@ -98,6 +98,7 @@ int main(int argc, char **argv) {
 
   tool::refl::context ctx{};
   std::vector<std::string> errors;
+  std::map<std::filesystem::path, std::unordered_map<int, std::string>> type_indexes_for_cpp;
 
   for (const auto &[src, n_processing] : util::indexed(*filtered_sources)) {
     tl::expected ast = parse_ast(src, n_processing + 1);
@@ -109,7 +110,9 @@ int main(int argc, char **argv) {
     // refactorme: should it be a 'table' {match{}, resolve{}}?
     // this would allow to untie the match type from context type and provide different
     // variants of implementations
-    using ast_match = tool::matched_node_variant< //
+    using ast_match = tool::matched_node_variant<
+      // refactorme: should this run only in the `inplace-reflection` mode?
+      tool::refl::matches::reflected_type_index,
       tool::refl::matches::reflected_type,
       tool::refl::matches::reflected_impl,
       tool::refl::matches::reflected_call,
@@ -147,6 +150,9 @@ int main(int argc, char **argv) {
         << fmt::format("Errors while matching nodes: {}", fmt::join(errors, ", "));
       return -1;
     }
+
+    // refactorme: this should not be part of the context in non-inline reflection mode
+    type_indexes_for_cpp[src] = std::move(ctx.reflected_types_indexes);
   }
 
   auto validated_reflection_data = codegen::prepare_input(std::move(ctx));

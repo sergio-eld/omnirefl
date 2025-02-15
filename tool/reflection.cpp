@@ -1,4 +1,5 @@
 #include "tool/reflection.hpp"
+#include "fmt/format.h"
 #include "tl/expected.hpp"
 #include "tool/util.hpp"
 #include <string>
@@ -59,6 +60,10 @@ void print_debug(const tool::refl::context &ctx) {
   fmt::println("debug: reflected_types: {}", ctx.reflected_types.size());
   for (const auto &i : ctx.reflected_types)
     fmt::println("  {}", i.first);
+
+  fmt::println("debug: indexed reflected types: {}", ctx.reflected_types_indexes.size());
+  for (const auto &[index, nm_qual_typename] : ctx.reflected_types_indexes)
+    fmt::println("  {}: {}", index, nm_qual_typename);
 }
 
 tool::refl::type_definition_data resolve_definition(const clang::CXXRecordDecl &rd,
@@ -194,9 +199,87 @@ std::vector<const clang::CXXRecordDecl *>
   return {visited.cbegin(), visited.cend()};
 }
 
+tl::expected<clang::Type const *, std::string>
+  get_template_arg_type(const clang::ClassTemplateSpecializationDecl &template_decl, size_t n) {
+  const auto &template_args_list = template_decl.getTemplateArgs();
+
+  if (template_args_list.size() < n) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return tl::unexpected(
+      fmt::format("invalid template signature for internal omnirefl type {}", detail_struct_name));
+  }
+
+  const clang::TemplateArgument &arg = template_args_list.get(n);
+  if (clang::TemplateArgument::ArgKind::Type != arg.getKind()) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return tl::unexpected(
+      fmt::format("non-type template argument `{}` of {}", n, detail_struct_name));
+  }
+
+  return arg.getAsType().getTypePtr();
+}
+
+tl::expected<int, std::string>
+  get_template_arg_value(const clang::ClassTemplateSpecializationDecl &template_decl, size_t n) {
+  const auto &template_args_list = template_decl.getTemplateArgs();
+
+  if (template_args_list.size() < n) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return tl::unexpected(
+      fmt::format("invalid template signature for internal omnirefl type {}", detail_struct_name));
+  }
+
+  const clang::TemplateArgument &arg = template_args_list.get(n);
+  if (clang::TemplateArgument::ArgKind::Integral != arg.getKind()) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return tl::unexpected(
+      fmt::format("non-integral template argument `{}` of {}", n, detail_struct_name));
+  }
+
+  return arg.getAsIntegral().getExtValue();
+}
 } // namespace
 
 namespace tool::refl::matches {
+
+tl::expected<context, std::string> reflected_type_index::resolve(const node_type &node,
+  [[maybe_unused]] const clang::ASTUnit &ast,
+  [[maybe_unused]] const context &ctx,
+  [[maybe_unused]] bool print_debug) {
+  using namespace tool::refl;
+
+  // omni::detail::_type_index<typename reflected_type, int reflected_type_index>
+  const clang::ClassTemplateSpecializationDecl &template_decl = node;
+  tl::expected _reflected_type = get_template_arg_type(template_decl, 0);
+  if (!_reflected_type)
+    return tl::unexpected(std::move(_reflected_type).error());
+  const clang::Type &reflected_type = **_reflected_type;
+
+  // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
+  // allowed
+  // fixme: what about fundamental types??? I think I just need to skip them. Also need to write a
+  // test that involves fundamental or non-user defined types. However, I think it is a rather
+  // complex question whether I should allow it or not.
+  if (!reflected_type.isStructureOrClassType()) {
+    return tl::unexpected(fmt::format("unsupported type {} in {}",
+      // fixme: `getTypeClassName` doesn't do what I thought it does
+      reflected_type.getTypeClassName(),
+      template_decl.getName()));
+  }
+
+  tl::expected _reflected_type_index = get_template_arg_value(template_decl, 1);
+  if (!_reflected_type_index)
+    return tl::unexpected(std::move(_reflected_type_index).error());
+  const int reflected_type_index = *_reflected_type_index;
+  const clang::CXXRecordDecl &reflected_type_decl = *reflected_type.getAsCXXRecordDecl();
+  std::string nm_qual_type = reflected_type_decl.getQualifiedNameAsString();
+
+  tl::expected<context, std::string> ctx_delta{tl::in_place};
+  ctx_delta->reflected_types_indexes[reflected_type_index] = std::move(nm_qual_type);
+
+  // todo: should I check for conflicting indexes here or on update? let's do on update for now...
+  return ctx_delta;
+}
 
 tl::expected<context, std::string> reflected_type::resolve(const node_type &node,
   const clang::ASTUnit &ast,
@@ -204,31 +287,23 @@ tl::expected<context, std::string> reflected_type::resolve(const node_type &node
   [[maybe_unused]] bool print_debug) {
   using namespace tool::refl;
 
-  // refactorme: DRY. reflected_impl shares these traits
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  const std::string_view detail_struct_name = template_decl.getName();
-  const auto &template_args_list = template_decl.getTemplateArgs();
+  tl::expected _first_arg_type = get_template_arg_type(template_decl, 0);
+  if (!_first_arg_type)
+    return tl::unexpected(std::move(_first_arg_type).error());
+  const clang::Type &first_arg_type = **_first_arg_type;
 
-  if (template_args_list.size() < 1) {
-    return tl::unexpected(
-      fmt::format("invalid template signature for internal omnirefl type {}", detail_struct_name));
-  }
-
-  const clang::TemplateArgument &first_arg = template_args_list.get(0);
-  if (clang::TemplateArgument::ArgKind::Type != first_arg.getKind()) {
-    return tl::unexpected(fmt::format("non-type template argument `0` of {}", detail_struct_name));
-  }
-  const clang::Type &first_arg_type = *first_arg.getAsType().getTypePtr();
-  // todo: handle checks for `clang::Type::is...`
   // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
   // allowed
+  // fixme: what about fundamental types??? I think I just need to skip them. Also need to write a
+  // test that involves fundamental or non-user defined types. However, I think it is a rather
+  // complex question whether I should allow it or not.
   if (!first_arg_type.isStructureOrClassType()) {
     return tl::unexpected(fmt::format("unsupported type {} in {}",
       // fixme: `getTypeClassName` doesn't do what I thought it does
       first_arg_type.getTypeClassName(),
-      detail_struct_name));
+      template_decl.getName()));
   }
-  ////////////////////////////////////////////////////////////////////////////////
 
   // omni::detail::_reflected_type<T>
   // type declaration of <T>
@@ -287,26 +362,16 @@ tl::expected<context, std::string> reflected_impl::resolve(const node_type &node
   [[maybe_unused]] bool print_debug) {
   using namespace tool::refl;
 
-  // refactorme: DRY. reflected_type shares these traits
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  const std::string_view detail_struct_name = template_decl.getName();
-  const auto &template_args_list = template_decl.getTemplateArgs();
+  tl::expected _first_arg_type = get_template_arg_type(template_decl, 0);
+  if (!_first_arg_type)
+    return tl::unexpected(std::move(_first_arg_type).error());
+  const clang::Type &first_arg_type = **_first_arg_type;
 
-  if (template_args_list.size() < 1) {
-    return tl::unexpected(
-      fmt::format("invalid template signature for internal omnirefl type {}", detail_struct_name));
-  }
-
-  const clang::TemplateArgument &first_arg = template_args_list.get(0);
-  if (clang::TemplateArgument::ArgKind::Type != first_arg.getKind()) {
-    return tl::unexpected(fmt::format("non-type template argument `0` of {}", detail_struct_name));
-  }
-
-  const clang::Type &first_arg_type = *first_arg.getAsType().getTypePtr();
-  // todo: handle checks for `clang::Type::is...`
   // todo: `hasDefinition` - at this point (as of this writing) forward declarations are not
   // allowed
   if (!first_arg_type.isStructureOrClassType()) {
+    const std::string_view detail_struct_name = template_decl.getName();
     return tl::unexpected(fmt::format("unsupported type {} in {}",
       // fixme: `getTypeClassName` doesn't do what I thought it does
       first_arg_type.getTypeClassName(),
@@ -326,7 +391,7 @@ tl::expected<context, std::string> reflected_impl::resolve(const node_type &node
   tl::expected<context, std::string> ctx_delta{tl::in_place};
   ctx_delta->definitions[nm_qual_type] = resolve_definition(rdecl, ast.getSourceManager());
   ctx_delta->reflected_implementations.emplace(nm_qual_type);
-  // todo: should we allow wrapped types (using value_type trait)?
+  // todo: should we capture wrapped types (using value_type trait)?
   return ctx_delta;
 }
 
@@ -420,11 +485,11 @@ tl::expected<context, std::string> reflected_call::resolve(const node_type &node
 
 tl::expected<context, std::string> _debug_templ_spec_decl::resolve(const node_type &node,
   const clang::ASTUnit &ast,
-  const context &ctx,
+  [[maybe_unused]] const context &ctx,
   bool print_debug) {
   using namespace tool::refl;
   if (!print_debug)
-    return {std::move(ctx)};
+    return {};
 
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
   const std::string_view detail_struct_name = template_decl.getName();
@@ -435,7 +500,7 @@ tl::expected<context, std::string> _debug_templ_spec_decl::resolve(const node_ty
   dmp.SetTraversalKind(clang::TK_AsIs);
   dmp.Visit(&template_decl);
   fmt::print("debug: ASTDump: {}\n", buf);
-  return {std::move(ctx)};
+  return {};
 }
 
 } // namespace tool::refl::matches
@@ -456,7 +521,6 @@ tl::expected<tool::refl::context, std::string> //
   const auto merge_with_conflicts_check =
     []<typename K, typename T>(std::unordered_map<K, T> first,
       std::unordered_map<K, T> second,
-      // (const K&, const T&, const T&) -> std::optional<std::string> error
       auto cmp) -> tl::expected<std::unordered_map<K, T>, std::string> {
     for (auto node = second.begin(); node != second.end();) {
       auto &&[k, v] = *node;
@@ -465,42 +529,44 @@ tl::expected<tool::refl::context, std::string> //
         first.insert(second.extract(node++));
         continue;
       }
-      if (auto err = cmp(k, v, found->second))
-        return tl::unexpected(std::move(err).value());
+      if (tl::expected res = cmp(k, v, found->second); !res)
+        return tl::unexpected(std::move(res).error());
       ++node;
     }
     return {std::move(first)};
   };
 
-  if (auto merged = merge_with_conflicts_check(std::move(r->definitions),
+  if (tl::expected merged = merge_with_conflicts_check(std::move(r->definitions),
         std::move(delta.definitions),
         [](std::string_view qual_typename,
           const type_definition_data &lhs,
-          const type_definition_data &rhs) -> std::optional<std::string> {
+          const type_definition_data &rhs) -> tl::expected<void, std::string> {
           if (lhs.source_file != rhs.source_file) {
-            return fmt::format("found different locations for type {} definition: {}, {}",
-              qual_typename,
-              lhs.source_file.string(),
-              rhs.source_file.string());
+            return tl::unexpected(
+              fmt::format("found different locations for type {} definition: {}, {}",
+                qual_typename,
+                lhs.source_file.string(),
+                rhs.source_file.string()));
           }
           if (lhs.definition_flags != rhs.definition_flags) {
-            return fmt::format("found different definition flags for type {} definition: {}, {}",
-              qual_typename,
-              // todo: stringify
-              int(lhs.definition_flags),
-              int(rhs.definition_flags));
+            return tl::unexpected(
+              fmt::format("found different definition flags for type {} definition: {}, {}",
+                qual_typename,
+                // todo: stringify
+                int(lhs.definition_flags),
+                int(rhs.definition_flags)));
           }
-          return std::nullopt;
+          return {};
         })) {
     r->definitions = std::move(merged).value();
   } else
     return tl::unexpected(std::move(merged).error());
 
-  if (auto merged = merge_with_conflicts_check(std::move(r->reflected_types),
+  if (tl::expected merged = merge_with_conflicts_check(std::move(r->reflected_types),
         std::move(delta.reflected_types),
         [](std::string_view qual_typename,
           const std::vector<struct_field_data> &lhs,
-          const std::vector<struct_field_data> &rhs) -> std::optional<std::string> {
+          const std::vector<struct_field_data> &rhs) -> tl::expected<void, std::string> {
           if (!std::equal(lhs.cbegin(),
                 lhs.cend(),
                 rhs.cbegin(),
@@ -508,9 +574,10 @@ tl::expected<tool::refl::context, std::string> //
                   return lhs.nm_qual_type == rhs.nm_qual_type;
                 })) {
             // todo: print detailed info on fields that differ
-            return fmt::format("found different data member types for type {}", qual_typename);
+            return tl::unexpected(
+              fmt::format("found different data member types for type {}", qual_typename));
           }
-          return std::nullopt;
+          return {};
         })) {
     r->reflected_types = std::move(merged).value();
   } else
@@ -524,6 +591,16 @@ tl::expected<tool::refl::context, std::string> //
     std::make_move_iterator(delta.reflected_calls.end()));
 
   r->std_includes.merge(std::move(delta.std_includes));
+  if (tl::expected merged = merge_with_conflicts_check(std::move(r->reflected_types_indexes),
+        std::move(delta.reflected_types_indexes),
+        [](const int type_index, const std::string &lhs, const std::string &rhs)
+          -> tl::expected<void, std::string> {
+          return tl::unexpected(
+            fmt::format("confict for type index {}, types: {}, {}", type_index, lhs, rhs));
+        });
+    !merged) {
+    return tl::unexpected(std::move(merged).error());
+  }
 
   if (a_print_debug) {
     fmt::println("debug: current updated:");

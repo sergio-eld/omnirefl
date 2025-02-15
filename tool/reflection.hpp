@@ -26,6 +26,33 @@ struct context;
 
 namespace matches {
 
+struct reflected_type_index {
+  // todo: remove. `binding_tag` is implementation-specific
+  constexpr static const char binding_tag[] = "reflected_type_index";
+
+  // todo: this should be deducible from the ASTMatchers' expression
+  using node_type = clang::ClassTemplateSpecializationDecl;
+
+  auto operator()() const noexcept {
+    using namespace clang::ast_matchers;
+
+    return classTemplateSpecializationDecl( //
+      unless(isInStdNamespace()),
+      hasAncestor(namespaceDecl(hasName("omni"))),
+      hasAncestor(namespaceDecl(hasName("detail"))),
+      hasName("_type_index"),
+      isTemplateInstantiation(),
+      isDefinition()
+      //
+    );
+  }
+
+  static tl::expected<context, std::string> resolve(const node_type &node,
+    const clang::ASTUnit &ast,
+    const context &ctx,
+    bool print_debug = false);
+};
+
 // types reflected via instantiation of a designated template struct
 struct reflected_type {
   // todo: remove. `binding_tag` is implementation-specific
@@ -202,6 +229,11 @@ struct context {
   // `std::tuple`, `std::variant`, `std::optional` and any other standard type that wraps a
   // reflected type and defines `type` or `value_type` trait
   std::set<std::string> std_includes;
+
+  // fixme: this should not be present when working with several .cpp files in non-inline-reflection
+  // mode... as of now as an ad hoc I can store for each processed .cpp and erase before processing
+  // the next .cpp
+  std::unordered_map<int, std::string> reflected_types_indexes;
 };
 
 // refactorme: this function should be in ast.hpp. Now it depends only on the `context`
