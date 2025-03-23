@@ -1,8 +1,7 @@
 
-#include "fmt/base.h"
-#include <charconv>
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <charconv>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>

@@ -13,7 +13,7 @@
 #include <clang/Tooling/Tooling.h>
 #pragma GCC diagnostic pop
 
-#include <fmt/base.h>
+#include <fmt/core.h>
 
 #include <string_view>
 

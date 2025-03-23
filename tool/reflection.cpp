@@ -1,8 +1,9 @@
 #include "tool/reflection.hpp"
-#include "fmt/format.h"
-#include "tl/expected.hpp"
+
 #include "tool/util.hpp"
-#include <string>
+
+#include <fmt/core.h>
+#include <tl/expected.hpp>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -22,13 +23,11 @@
 #include <clang/Serialization/PCHContainerOperations.h>
 #pragma GCC diagnostic pop
 
-#include <fmt/base.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <numeric>
-#include <optional>
 #include <stack>
+#include <string>
 #include <string_view>
 
 namespace {

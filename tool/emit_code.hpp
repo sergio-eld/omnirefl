@@ -9,11 +9,6 @@
 #include <vector>
 
 namespace codegen {
-struct options {
-  // todo: options
-  // - formatting
-  // - annotating
-};
 
 // used to generate `omni::reflected_t<user_type>` specializations
 struct reflected_type {
@@ -55,6 +50,16 @@ struct reflection_data {
 };
 
 tl::expected<reflection_data, std::string> prepare_input(tool::refl::context ctx) noexcept;
-tl::expected<void, std::string> emit_code(options, std::ostream &os, const reflection_data &data);
+
+struct options {
+  // todo: options
+  // - formatting
+  // - annotating
+};
+tl::expected<void, std::string>
+  emit_reflection_cpp_file(options, std::ostream &os, const reflection_data &data);
+
+tl::expected<void, std::string>
+  emit_inplace_reflection_header_file(options, std::ostream &os, const reflection_data &data);
 
 } // namespace codegen

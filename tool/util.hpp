@@ -1,6 +1,6 @@
 #pragma once
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <tl/expected.hpp>
 
@@ -114,7 +114,7 @@ struct _wrapped_element {
     std::add_const_t<std::remove_reference_t<T>> &,
     T>;
   value_type value;
-  Format &format;
+  Format format;
 };
 
 template <typename Iter, typename Format>
@@ -122,7 +122,7 @@ struct _wrapped_iterator {
   using value_type = _wrapped_element<std::decay_t<decltype(*std::declval<Iter>())>, Format>;
 
   Iter i;
-  Format &format;
+  Format format;
   constexpr value_type operator*() const {
     return {.value = *i, .format = format};
   }

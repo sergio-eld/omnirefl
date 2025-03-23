@@ -2,8 +2,7 @@
 #include "tool/ast.hpp"
 
 #include <benchmark/benchmark.h>
-
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include <filesystem>
 

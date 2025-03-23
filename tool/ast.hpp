@@ -11,7 +11,7 @@
 #include <clang/Tooling/CompilationDatabase.h>
 #pragma GCC diagnostic pop
 
-#include <fmt/base.h>
+#include <fmt/core.h>
 #include <tl/expected.hpp>
 
 #include <filesystem>
@@ -22,36 +22,6 @@
 
 // todo: separate generic and implementation-specific code
 namespace tool {
-struct cli_opts {
-  /// directory for clang's system headers (bundled)
-  std::filesystem::path resource_dir;
-
-  /// path to where generate the reflected implementation
-  std::filesystem::path output_file;
-
-  // todo: group options specific to invocation with compilation db.
-  // one may want to invoke the tool on a single source file with compilation args
-
-  /// path to compilation database (currenly only compile_commands.json)
-  std::filesystem::path compilation_db_path;
-
-  // todo: can they be optional?
-  /// .cpp files to invoke the tool for.
-  /// must be found within the compilation_db
-  std::vector<std::filesystem::path> sources;
-
-  std::vector<std::filesystem::path> excluded_folders;
-
-  // todo: flags
-  // - debug (duh)
-  // - print parsed types
-  // - print input args
-  bool print_debug;
-};
-
-// refactorme: should this be in a header?
-tl::expected<cli_opts, std::string> parse_cli(int argc, char **argv) noexcept;
-
 // refactorme: remove from this header
 // generic code
 struct filter_db_sources_t {
@@ -61,22 +31,25 @@ struct filter_db_sources_t {
     std::vector<std::filesystem::path> excluded_folders;
   };
 
-  tl::expected<std::vector<std::filesystem::path>, std::string> operator()(args a,
+  tl::expected<std::vector<std::filesystem::path>, std::string> operator()(
+    args a,
     std::vector<std::filesystem::path> db_sources) const noexcept;
 } const inline filter_db_sources{};
 
 // todo: add continious benchmarking to CI before optimizing this
 // todo: accept and return 'cache-context' to store parsed sources
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> parse_ast_from_source(
-  const std::filesystem::path &resource_dir,
-  const std::filesystem::path &source,
-  // refactorme: pass command-line args
-  const clang::tooling::CompilationDatabase &db,
-  bool print_debug = false);
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+  parse_ast_from_source(const std::filesystem::path &resource_dir,
+    const std::filesystem::path &source,
+    // refactorme: pass command-line args
+    const clang::tooling::CompilationDatabase &db,
+    bool print_debug = false);
 
 // refactorme: move away from this header (ast.hpp)
-tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string> //
-  load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept;
+tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>,
+  std::string> //
+  load_compilation_db(
+    const std::filesystem::path &compilation_db_path) noexcept;
 
 /**
  * // todo: refine Match expected traits
@@ -97,21 +70,22 @@ struct matched_node {
   const node_type *node;
 };
 
-// refactorme: this is _very_ confusing to use in combination with the variant wrapper
-// refactorme: this should not be used for function signatures...
-// User should only be responsible for providing an overload for his Match.
-// That overload must otherwise adhere to expected signature
+// refactorme: this is _very_ confusing to use in combination with the variant
+// wrapper refactorme: this should not be used for function signatures... User
+// should only be responsible for providing an overload for his Match. That
+// overload must otherwise adhere to expected signature
 template <typename... Matches>
 using matched_node_variant = std::variant<tool::matched_node<Matches>...>;
 
 // todo: consider returning `vector<expected<node, error>>` instead
 template <typename... Matches>
-tl::expected<std::vector<matched_node_variant<Matches...>>, std::string> match_ast_nodes(
-  // TBH it is used for type deduction
-  std::vector<matched_node_variant<Matches...>> initial,
-  // fixme: MatchFinder::matchAST expects a non-const ASTContext
-  clang::ASTUnit &ast,
-  bool print_debug = false) noexcept {
+tl::expected<std::vector<matched_node_variant<Matches...>>, std::string>
+  match_ast_nodes(
+    // TBH it is used for type deduction
+    std::vector<matched_node_variant<Matches...>> initial,
+    // fixme: MatchFinder::matchAST expects a non-const ASTContext
+    clang::ASTUnit &ast,
+    bool print_debug = false) noexcept {
   using namespace clang::ast_matchers;
 
   // todo: instantiate binding tag strings here (somehow)
@@ -126,7 +100,8 @@ tl::expected<std::vector<matched_node_variant<Matches...>>, std::string> match_a
       if (print_debug)
         fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
       // todo: handle errors
-      //  - tag has been found but type mismatches (it shouldn't be possible though)
+      //  - tag has been found but type mismatches (it shouldn't be possible
+      //  though)
       const auto add_node = [this](auto n, std::string_view tag) {
         if (n.node)
           result.push_back(n);
@@ -135,7 +110,8 @@ tl::expected<std::vector<matched_node_variant<Matches...>>, std::string> match_a
       };
       (add_node(
          matched_node<Matches>{
-           .node = mresult.Nodes.getNodeAs<typename Matches::node_type>(Matches::binding_tag),
+           .node = mresult.Nodes.getNodeAs<typename Matches::node_type>(
+             Matches::binding_tag),
          },
          Matches::binding_tag),
         ...);
@@ -157,7 +133,5 @@ tl::expected<std::vector<matched_node_variant<Matches...>>, std::string> match_a
     return tl::unexpected(std::move(match_callback.error).value());
   return std::move(match_callback.result);
 }
-
-// todo: generic interface for resolving matched nodes
 
 } // namespace tool

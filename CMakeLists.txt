@@ -2,11 +2,23 @@ cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
 
 project(omnirefl LANGUAGES CXX C VERSION 0.0.1)
 
+# todo: what if I just define 20 globally instead?
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 include(cmake/clean_build.cmake)
 include(cmake/target_link_static_crt.cmake)
+
+function(add_static_compile_options TARGET)
+    target_link_static_crt(${TARGET})
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${TARGET} PRIVATE -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections)
+        target_link_options(${TARGET} PRIVATE -Wl,--gc-sections)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+        target_compile_options(${TARGET} PRIVATE /GR- /GL)
+        target_link_options(${TARGET} PRIVATE /LTCG)
+    endif()
+endfunction()
 
 option(ENABLE_PACKAGE "Building the package" OFF)
 message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
@@ -18,6 +30,16 @@ message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
 option(ENABLE_TESTING "Enable benchmarks" OFF)
 message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
+include(FetchContent)
+FetchContent_Declare(
+    cli11_proj
+    QUIET
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG v2.3.2
+)
+FetchContent_MakeAvailable(cli11_proj)
+
+list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
 find_package(Clang REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -87,13 +109,28 @@ target_link_libraries(refl INTERFACE
     )
 add_library(omni::refl ALIAS refl)
 
+# for unit testing
+add_library(tool.cli STATIC tool/cli.cpp)
+target_include_directories(tool.cli 
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+    PUBLIC ${PROJECT_SOURCE_DIR} 
+)
+target_link_libraries(tool.cli 
+    # for llvm::cl
+    PRIVATE CLI11::CLI11 fmt::fmt LLVMOption
+    PUBLIC tl::expected
+)
+set_target_properties(tool.cli PROPERTIES CXX_STANDARD 20)
+add_static_compile_options(tool.cli)
+
 # todo: implement as clang plugin
 add_executable(tool 
     main.cpp
-    tool/parse_cli.cpp
     tool/ast.cpp
     tool/reflection.cpp
     tool/emit_code.cpp)
+# fixme: this is supposed to reduce compilation time for fmt...
+# target_precompile_headers(tool PRIVATE fmt/format.h)
 add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
@@ -107,19 +144,13 @@ target_include_directories(tool PRIVATE
 )
 # todo: (not here) figure out how to get rid of zlib dependency for clang
 target_link_libraries(tool PRIVATE
+    tool.cli
     # clangAST
     # clangASTMatchers
     clangTooling # todo: get rid of this
     tl::expected
     fmt::fmt)
-target_link_static_crt(tool)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(tool PRIVATE -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections)
-    target_link_options(tool PRIVATE -Wl,--gc-sections)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(tool PRIVATE /GR- /GL)
-    target_link_options(tool PRIVATE /LTCG)
-endif()
+add_static_compile_options(tool)
 add_executable(omni::tool ALIAS tool)
 
 if (ENABLE_PACKAGE)
@@ -203,9 +234,25 @@ endif()
 
 # todo: disable for cross compilation, since it requires running the compiled binary
 if (ENABLE_TESTING)
-    # todo: benchmarks
     enable_testing()
     find_package(GTest CONFIG REQUIRED)
+    if (NOT TARGET GTest::GTest)
+        add_library(GTest::GTest ALIAS GTest::gtest)
+    endif()
+    if (NOT TARGET GTest::Main)
+        add_library(GTest::Main ALIAS GTest::gtest_main)
+    endif()
+
+    # refactorme: separate directory
+    add_executable(test.cli tool/tests/cli.cpp)
+    set_target_properties(test.cli PROPERTIES CXX_STANDARD 20)
+    # todo: implement
+    # target_link_libraries(test.cli PRIVATE tool.cli GTest::GTest GTest::Main)
+    # add_test(NAME test.cli COMMAND test.cli)
+
+    add_executable(sb.cli tool/tests/sb_cli.cpp)
+    target_link_libraries(sb.cli PRIVATE tool.cli)
+
     # todo: (also) test this in a sub project where `omni::tool` has been installed 
     #   and found by `find_package`
     # todo: profile build times for reflected targets.

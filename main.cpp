@@ -8,12 +8,12 @@
 // #include "plugin/..." // - plugin related code
 
 #include "tool/ast.hpp"
+#include "tool/cli.hpp"
 #include "tool/emit_code.hpp"
 #include "tool/reflection.hpp"
 #include "tool/util.hpp"
 
-#include <fmt/base.h>
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <tl/expected.hpp>
 
@@ -27,7 +27,7 @@
 // - what else
 int main(int argc, char **argv) {
   // todo: reduce error-handling boilerplate by using chained calls
-  auto cli = tool::parse_cli(argc, argv);
+  auto cli = tool::cli::parse_old(argc, argv);
   if (!cli) {
     llvm::errs() << cli.error();
     return -1;
@@ -62,8 +62,8 @@ int main(int argc, char **argv) {
 
   // llvm doesn't know how to work with std::filesystem::path (so is fmt)
   // What a rotten way to die...
-  const auto str_sources =
-    [](const std::vector<std::filesystem::path> &paths) -> std::vector<std::string> {
+  const auto str_sources = [](const std::vector<std::filesystem::path> &paths)
+    -> std::vector<std::string> {
     std::vector<std::string> res;
     res.reserve(paths.size());
     for (const auto &p : paths)
@@ -98,7 +98,8 @@ int main(int argc, char **argv) {
 
   tool::refl::context ctx{};
   std::vector<std::string> errors;
-  std::map<std::filesystem::path, std::unordered_map<int, std::string>> type_indexes_for_cpp;
+  std::map<std::filesystem::path, std::unordered_map<int, std::string>>
+    type_indexes_for_cpp;
 
   for (const auto &[src, n_processing] : util::indexed(*filtered_sources)) {
     tl::expected ast = parse_ast(src, n_processing + 1);
@@ -108,8 +109,8 @@ int main(int argc, char **argv) {
     }
 
     // refactorme: should it be a 'table' {match{}, resolve{}}?
-    // this would allow to untie the match type from context type and provide different
-    // variants of implementations
+    // this would allow to untie the match type from context type and provide
+    // different variants of implementations
     using ast_match = tool::matched_node_variant<
       // refactorme: should this run only in the `inplace-reflection` mode?
       tool::refl::matches::reflected_type_index,
@@ -138,7 +139,8 @@ int main(int argc, char **argv) {
         cli->print_debug);
       if (!updated) {
         llvm::errs() //
-          << fmt::format("Error updating context: {}", std::move(updated).error());
+          << fmt::format("Error updating context: {}",
+               std::move(updated).error());
         return -1;
       }
       ctx = std::move(updated).value();
@@ -147,11 +149,13 @@ int main(int argc, char **argv) {
     // todo: errors, add flag to stop on errors
     if (!errors.empty()) {
       llvm::errs() //
-        << fmt::format("Errors while matching nodes: {}", fmt::join(errors, ", "));
+        << fmt::format("Errors while matching nodes: {}",
+             fmt::join(errors, ", "));
       return -1;
     }
 
-    // refactorme: this should not be part of the context in non-inline reflection mode
+    // refactorme: this should not be part of the context in non-inline
+    // reflection mode
     type_indexes_for_cpp[src] = std::move(ctx.reflected_types_indexes);
   }
 
@@ -164,7 +168,7 @@ int main(int argc, char **argv) {
   // todo: use verbosity flag
   fmt::println("Generating file: {}\n", cli->output_file.string());
   std::ofstream f{cli->output_file, std::ios::binary};
-  if (const auto res = codegen::emit_code(
+  if (const auto res = codegen::emit_reflection_cpp_file(
         {
           // todo: options
         },
