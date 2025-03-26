@@ -280,7 +280,6 @@ if (ENABLE_BENCH)
         CXX_STANDARD 20)
     target_link_libraries(generate_structs fmt::fmt)
 
-    # todo: generate files using generate_structs
     # todo: do I need it as a custom_target? Maybe custom_command instead
     add_custom_target(bench.structs_100.generate
         COMMAND generate_structs 100 ./bench structs_100.h test_structs_100.cpp
@@ -320,6 +319,7 @@ if (ENABLE_BENCH)
         clangTooling # todo: get rid of this
         tl::expected
         fmt::fmt)
+
     # fixme: pass as runtime arguments, or as relative paths (mapped volumes have different paths)
     target_compile_definitions(bench.parse_ast PRIVATE
         DB_PATH="${CMAKE_CURRENT_BINARY_DIR}"

@@ -42,7 +42,9 @@ function(reflected_target TARGET_NAME)
     if (NOT ARG_PRINT_DEBUG)
         set(ARG_PRINT_DEBUG "")
     else()
-        set(ARG_PRINT_DEBUG "--print-debug")
+        # todo: fill when verbosity flag is implemented. As of writing, everything is printed
+        set(ARG_PRINT_DEBUG "")
+        # set(ARG_PRINT_DEBUG "--print-debug")
         message(STATUS "omnirefl: debug enabled for target ${TARGET_NAME}")
     endif()
 
@@ -88,9 +90,11 @@ function(reflected_target TARGET_NAME)
     set(${TARGET_NAME}_OMNI_ARGS
         "${ARG_PRINT_DEBUG}"
         "--resource-dir=${TOOL_RESOURCE_DIR}"
-        "-p=${CMAKE_BINARY_DIR}/"
-        "-o=${GENERATED_FILE}"
-        "--excluded=${CMAKE_BINARY_DIR},${GENERATED_FILE}"
+        "--compilation-db=${CMAKE_BINARY_DIR}/"
+        "--output-dir=${CMAKE_CURRENT_BINARY_DIR}"
+        "--output-file=${GENERATED_FILE}"
+        # todo: add cmake arg. New cli interface excludes generated files automatically
+        # "--excluded=${CMAKE_BINARY_DIR},${GENERATED_FILE}"
         ${REFL_TARGET_SOURCES}
     )
 
@@ -108,6 +112,7 @@ function(reflected_target TARGET_NAME)
         DEPENDS ${REFL_TARGET_SOURCES}
         VERBATIM)
 
+    # todo: for in-place mode add includes for each reflected source
     target_sources(${TARGET_NAME} PRIVATE ${GENERATED_FILE})
     target_link_libraries(${TARGET_NAME} PRIVATE omni::refl)
 endfunction() 

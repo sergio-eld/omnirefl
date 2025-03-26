@@ -1,5 +1,6 @@
 #pragma once
 
+#include "tool/cli.hpp"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -22,20 +23,6 @@
 
 // todo: separate generic and implementation-specific code
 namespace tool {
-// refactorme: remove from this header
-// generic code
-struct filter_db_sources_t {
-  struct args {
-    // todo: these should be mutually-exclusive
-    std::vector<std::filesystem::path> specified_sources;
-    std::vector<std::filesystem::path> excluded_folders;
-  };
-
-  tl::expected<std::vector<std::filesystem::path>, std::string> operator()(
-    args a,
-    std::vector<std::filesystem::path> db_sources) const noexcept;
-} const inline filter_db_sources{};
-
 // todo: add continious benchmarking to CI before optimizing this
 // todo: accept and return 'cache-context' to store parsed sources
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
@@ -43,7 +30,8 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::filesystem::path &source,
     // refactorme: pass command-line args
     const clang::tooling::CompilationDatabase &db,
-    bool print_debug = false);
+    // todo: verbosity
+    bool print_debug = false) noexcept;
 
 // refactorme: move away from this header (ast.hpp)
 tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>,
@@ -85,6 +73,7 @@ tl::expected<std::vector<matched_node_variant<Matches...>>, std::string>
     std::vector<matched_node_variant<Matches...>> initial,
     // fixme: MatchFinder::matchAST expects a non-const ASTContext
     clang::ASTUnit &ast,
+    // todo: verbosity
     bool print_debug = false) noexcept {
   using namespace clang::ast_matchers;
 
@@ -94,6 +83,7 @@ tl::expected<std::vector<matched_node_variant<Matches...>>, std::string>
   struct: MatchFinder::MatchCallback {
     std::vector<matched_node_variant<Matches...>> result;
     std::optional<std::string> error = std::nullopt;
+    // todo: verbosity
     bool print_debug;
 
     void run(const MatchFinder::MatchResult &mresult) override {

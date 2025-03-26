@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <string>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -65,21 +66,49 @@ struct inplace_mode {
 
 struct compilation_db_entry {
   std::filesystem::path path;
+
+  // if `true`, `options::sources` will be excluded from the set of
+  // `compile_commands.json`, otherwise `options::sources` will be used for
+  // fetching compilation commands.
+  bool filter_paths;
 };
 
 struct compilation_target {
   std::string name;
 };
 
+// todo: move to utils, add operators which necessary
+template <typename>
+struct is_bit_flag: std::false_type {};
+
+template <typename Flag, typename = std::enable_if_t<is_bit_flag<Flag>{}>>
+constexpr Flag operator|(Flag lhs, Flag rhs) noexcept {
+  using type = std::underlying_type_t<Flag>;
+  return static_cast<Flag>(static_cast<type>(lhs) | static_cast<type>(rhs));
+}
+
+template <typename Flag, typename = std::enable_if_t<is_bit_flag<Flag>{}>>
+constexpr Flag operator&(Flag lhs, Flag rhs) noexcept {
+  using type = std::underlying_type_t<Flag>;
+  return static_cast<Flag>(static_cast<type>(lhs) & static_cast<type>(rhs));
+}
+
 enum verbosity_level {
   none,
-  debug = 1 << 0,
-  input = 1 << 1,
+  input = 1 << 0,
+  info = 1 << 1,
   parsed_types = 1 << 2,
+
+  debug = input | info | parsed_types,
 };
+
+template <>
+struct is_bit_flag<verbosity_level>: std::true_type {};
 
 // todo: from_string
 std::string to_string(verbosity_level v) noexcept;
+tl::expected<verbosity_level, tl::monostate> from_string(
+  std::string_view) noexcept;
 
 struct options {
   std::variant<target_mode, inplace_mode> mode;
