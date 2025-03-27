@@ -38,7 +38,8 @@ using nonstd::string_view;
 //  - should be compatible with at least C++11
 //  - must only define reflection-related interface
 namespace omni {
-// todo: separate the functions below to a standalone header without any includes
+// todo: separate the functions below to a standalone header without any
+// includes
 namespace detail {
 namespace {
 // tag used to collect reflected types
@@ -52,6 +53,15 @@ struct _reflected_impl {};
 // todo: remove #define
 // #define OMNI_INPLACE_REFLECTION
 #ifdef OMNI_INPLACE_REFLECTION
+// todo: investigate. For some reason I can't get rid of this function. If I
+// invoke the implementation directly inside the reflected_call_t::operator(),
+// everything breaks (default _reflected<T> is picked up instead of the
+// generated one)
+//
+// implementation will be generated for this function by omnirefl
+template <typename Impl, typename... Args>
+void _inplace_call_impl(Impl &&impl, Args &&...args);
+
 template <int Id>
 struct counter {
   struct generator {
@@ -132,45 +142,54 @@ struct reflected_call_t {
     using type = typename std::decay<T>::type;
     (void)detail::_reflected_type<type>{};
 #ifdef OMNI_INPLACE_REFLECTION
+    // todo: detect that it has not been invoked in a header file: forced
+    // include may break the order of index instantiations (as long as
+    // inplace-mode includes headers of reflected types).
     (void)detail::_type_index<type>{};
+    detail::_inplace_call_impl(std::forward<Impl>(impl),
+      std::forward<T>(t),
+      std::forward<Args>(args)...);
+#else
+    _call_impl(std::forward<Impl>(impl),
+      std::forward<T>(t),
+      std::forward<Args>(args)...);
 #endif
-    _call_impl(std::forward<Impl>(impl), std::forward<T>(t), std::forward<Args>(args)...);
   }
 
   private:
+#ifndef OMNI_INPLACE_REFLECTION
   // implementation will be generated for this function by omnirefl
   template <typename Impl, typename... Args>
   static void _call_impl(Impl &&impl, Args &&...args);
+#endif
 } const reflected_call{};
 
 namespace detail {
 namespace {
 
-// specializations, containing reflection interface for T will be generated
-// default argument is used to delay template instantiaton by partial specialization
+#ifdef OMNI_INPLACE_REFLECTION
+// Used in inplace-mode to generate specializatioin for indexed types (local
+// structs, unnamed)
+template <int>
+struct _indexed_reflected;
+
+// Instantiations by named non-local types will be caught by the generated
+// partial specializations of `_reflected<T>` like for target-mode. This will
+// prevent from calling `unique_id<T>()` and not increment the counter.
+//
+// For unnamed and/or local types, the default specialization will be selected,
+// using generated `_indexed_reflected<N>` specialization.
+template <typename T, typename = T>
+struct _reflected: _indexed_reflected<unique_id<T>()> {};
+
+#else
+// Specializations, containing reflection interface for T will be generated.
+// Default argument is used to delay template instantiaton by partial
+// specialization.
 template <typename T, typename = T>
 struct _reflected;
-
-// in inline-reflection mode is used to generate specializatioin for indexed types (local structs,
-// unnamed) `_reflected_t<_indexed_type<unique_id<decltype(t)>()>>`
-template <int>
-struct _indexed_type;
-
-// SFINAE utility to select named types (for with `_reflected<named_type>` can be generated).
-// In inplace-reflection mode specializations for each reflected type will be generated, that will
-// be selected for non-local types, preventing the call to `unique_id`. Local types will already be
-// indexed at this point, so call to `unique_id` will not increment the counter.
-template <typename T, typename = T>
-struct _fetch_reflected {
-#ifdef OMNI_INPLACE_REFLECTION
-  // by default indexed_type is used.
-  // For already indexed types the counter will not be incremented,
-  // the other types will be catched by generated specializations of `reflected_t`
-  using type = _reflected<_indexed_type<unique_id<T>()>>;
-#else
-  using type = _reflected<T>;
 #endif
-};
+
 } // namespace
 } // namespace detail
 
@@ -178,17 +197,17 @@ struct _fetch_reflected {
  * interface to get reflection data for T.
  * example:
  ```
- struct reflected_impl {
- template <typename T>
- constexpr void operator()(const T &t) const {
- // reflected context inside this scope
- using refl = omni::reflected_t<T>;
- }
+ struct reflected_user_impl {
+   template <typename T>
+   constexpr void operator()(const T &t) const {
+   // reflected context inside this scope
+   using refl = omni::reflected_t<T>;
+   }
  };
  ```
  */
 template <typename T>
-using reflected_t = typename detail::_fetch_reflected<typename std::decay<T>::type>::type;
+using reflected_t = detail::_reflected<typename std::decay<T>::type>;
 
 namespace detail {
 namespace {
@@ -202,7 +221,8 @@ using void_t = typename make_void<Ts...>::type;
 } // namespace
 } // namespace detail
 
-// C++11 adapter, because generic lambdas (with `auto` arg) are only available since C++14
+// C++11 adapter, because generic lambdas (with `auto` arg) are only available
+// since C++14
 template <typename T>
 struct setter {
   virtual void operator()(T &&) const = 0;
@@ -214,7 +234,8 @@ struct setter {
 
 template <typename Ref,
   typename Field,
-  typename ValueT = typename std::decay<decltype(Field::get_value(std::declval<Ref>()))>::type>
+  typename ValueT =
+    typename std::decay<decltype(Field::get_value(std::declval<Ref>()))>::type>
 struct _setter: setter<ValueT> {
   // todo: static_assert Field belongs to Ref
 
@@ -242,16 +263,19 @@ namespace {
 // refactorme: simplify
 template <typename Callable, typename Ref, typename Field, typename = void>
 struct _is_get_set_invocable: std::false_type {
-  using return_t = decltype(std::declval<Callable>()(Field::get_value(std::declval<const Ref>())));
+  using return_t = decltype(std::declval<Callable>()(
+    Field::get_value(std::declval<const Ref>())));
 };
 
 template <typename Callable, typename Ref, typename Field>
 struct _is_get_set_invocable<Callable,
   Ref,
   Field,
-  void_t<decltype(std::declval<Callable>()(Field::get_value(std::declval<const Ref>()),
+  void_t<decltype(std::declval<Callable>()(
+    Field::get_value(std::declval<const Ref>()),
     std::declval<const _setter<Ref, Field>>()))>>: std::true_type {
-  using return_t = decltype(std::declval<Callable>()(Field::get_value(std::declval<const Ref>()),
+  using return_t = decltype(std::declval<Callable>()(
+    Field::get_value(std::declval<const Ref>()),
     std::declval<_setter<Ref, Field>>()));
 };
 } // namespace
@@ -274,7 +298,8 @@ struct variant_field {
 
     template <typename Field, typename ReturnT>
     constexpr ReturnT _invoke(std::true_type /*get, set*/) const {
-      return std::forward<Callable>(_c)(Field::get_value(_r), _setter<Ref, Field>{_r});
+      return std::forward<Callable>(
+        _c)(Field::get_value(_r), _setter<Ref, Field>{_r});
     }
 
     template <typename Field, typename ReturnT>
@@ -285,7 +310,8 @@ struct variant_field {
     // todo: enable if either
     // - is invocable with getter and setter, or
     // - is invocable with getter and NOT setter
-    // - catch case to static_assert and reference the Callable type and value type
+    // - catch case to static_assert and reference the Callable type and value
+    // type
 
     template <typename Field,
       typename Invocable = detail::_is_get_set_invocable<Callable, Ref, Field>>
@@ -297,20 +323,24 @@ struct variant_field {
 
   template <typename Callable>
   friend constexpr auto visit(Callable &&c, variant_field<R, Fields...> v)
-    // yes, this trailing decltype has to be this complicated, since it doesn't compile otherwise
+    // yes, this trailing decltype has to be this complicated, since it doesn't
+    // compile otherwise
     -> decltype(omni::visit(std::declval<_visitor<Callable &&, R &>>(),
       std::declval<omni::variant<Fields...>>())) {
-    return omni::visit(_visitor<Callable, R>{std::forward<Callable>(c), v._ref}, v._v);
+    return omni::visit(_visitor<Callable, R>{std::forward<Callable>(c), v._ref},
+      v._v);
   }
 };
 
+// todo: implement the check in tool
 /// (!!!) do not instantiate this outside of a reflected context
 template <typename, typename = void>
 struct is_reflected: std::false_type {};
 
 /// (!!!) do not instantiate this outside of a reflected context
 template <typename T>
-struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>: std::true_type {};
+struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>:
+    std::true_type {};
 
 // reflected binding is needed to hold a reference to the reflected object
 template <typename T, typename = typename reflected_t<T>::fields_t>
@@ -333,11 +363,11 @@ struct reflected_binding<T, std::tuple<Fields...>> {
   constexpr reflected_binding(const reflected_binding &) = default;
 };
 
-/// access reflection data using a (potentially const) reference to the reflected object.
-/// `reflected_t<T>` must be specialized at the point of invocation.
-/// warning: DO NOT call this function outside of the reflected implementation.
-/// todo: implement check within the tool to validate that this is not called outside of the
-/// reflected implementation
+/// access reflection data using a (potentially const) reference to the
+/// reflected object. `reflected_t<T>` must be specialized at the point of
+/// invocation. warning: DO NOT call this function outside of the reflected
+/// implementation. todo: implement check within the tool to validate that this
+/// is not called outside of the reflected implementation
 template <typename T>
 constexpr reflected_binding<T> reflected(T &t) noexcept {
   return {t};
@@ -363,6 +393,7 @@ struct _exposition {
       }
 #  endif
 
+// todo: actualize exposition example
 // todo: default value for a field
 // this specialization will be generated by the tool
 template <>
@@ -371,7 +402,8 @@ struct omni::reflected_t<omni::_exposition> {
 
   struct field_a_t {
     OMNI_DEFINE_NAME_FUNC("field_a");
-    constexpr static auto get_value(const type &t) noexcept -> const decltype(t.field_a) & {
+    constexpr static auto get_value(const type &t) noexcept -> const
+      decltype(t.field_a) & {
       return t.field_a;
     }
 
@@ -383,7 +415,8 @@ struct omni::reflected_t<omni::_exposition> {
 
   struct field_b_t {
     OMNI_DEFINE_NAME_FUNC("field_b");
-    constexpr static auto get_value(const type &t) noexcept -> const decltype(t.field_b) & {
+    constexpr static auto get_value(const type &t) noexcept -> const
+      decltype(t.field_b) & {
       return t.field_b;
     }
 
@@ -395,7 +428,8 @@ struct omni::reflected_t<omni::_exposition> {
 
   using fields_t = std::tuple<field_a_t, field_b_t>;
 
-  constexpr reflected_binding<reflected_t<type>, type> operator()(type &t) const noexcept {
+  constexpr reflected_binding<reflected_t<type>, type> operator()(
+    type &t) const noexcept {
     return {t};
   }
   constexpr reflected_binding<reflected_t<type>, const type> operator()(

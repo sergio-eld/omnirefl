@@ -7,8 +7,6 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
-#include "fmt/base.h"
-#include "fmt/format.h"
 #include "tool/ast.hpp"
 #include "tool/cli.hpp"
 #include "tool/emit_code.hpp"
@@ -224,11 +222,20 @@ int main(int argc, char **argv) {
         src.string());
     }
 
-    return tool::parse_ast_from_source( //
-      cli->resource_dir,
-      src,
-      *compilation_db,
-      cli::verbosity_level::debug & cli->verbosity);
+    return std::visit(
+      [&](const auto &mode) {
+        // todo:
+        // benchmark reflecting multiple files. Current implementation
+        // uses internal ClangTool invocation which is destroyed between parsing
+        // the .src files. Curious to see how keeping the ClangTool instance
+        // alive will increase the performance.
+        return tool::parse_ast_from_source(mode,
+          cli->resource_dir,
+          src,
+          *compilation_db,
+          cli->verbosity);
+      },
+      cli->mode);
   };
 
   tool::refl::context ctx{};
@@ -255,14 +262,17 @@ int main(int argc, char **argv) {
     using ast_match = tool::matched_node_variant<
       // refactorme: should this run only in the `inplace-reflection` mode?
       tool::refl::matches::reflected_type_index,
+
       tool::refl::matches::reflected_type,
       tool::refl::matches::reflected_impl,
       tool::refl::matches::reflected_call,
+
       tool::refl::matches::_debug_templ_spec_decl>;
     tl::expected matches = tool::match_ast_nodes( //
       std::vector<ast_match>{},
       **ast,
-      cli::verbosity_level::debug & cli->verbosity);
+      // refactorme: pass verbosity
+      tool::cli::print_debug(cli->verbosity));
     if (!matches) {
       llvm::errs() << matches.error();
       return -1;
@@ -273,7 +283,8 @@ int main(int argc, char **argv) {
         tool::refl::resolve_matched_node(m,
           **ast,
           ctx,
-          cli::verbosity_level::debug & cli->verbosity);
+          // refactorme: pass verbosity
+          tool::cli::print_debug(cli->verbosity));
 
       if (!ctx_delta) {
         errors.emplace_back(std::move(ctx_delta).error());
@@ -282,7 +293,8 @@ int main(int argc, char **argv) {
 
       tl::expected updated = tool::refl::update(std::move(ctx), //
         std::move(ctx_delta).value(),
-        cli::verbosity_level::debug & cli->verbosity);
+        // refactorme: pass verbosity
+        tool::cli::print_debug(cli->verbosity));
 
       if (!updated) {
         std::cerr //
@@ -325,7 +337,7 @@ int main(int argc, char **argv) {
           mode.output_dir / mode.output_file;
 
         if (cli::verbosity_level::info & cli->verbosity)
-          fmt::println("Generating file: {}\n", output_file.string());
+          fmt::println("Generating reflection file: {}", output_file.string());
 
         std::ofstream f{output_file, std::ios::binary};
         if (const auto res = codegen::emit_reflection_cpp_file(
@@ -341,10 +353,42 @@ int main(int argc, char **argv) {
         return fmt::format("Successfully generated {}.", output_file.string());
       } else {
         static_assert(std::is_same_v<cli::inplace_mode, mode_type>);
+        const cli::inplace_mode &mode = _mode;
+        const size_t total_files = type_indexes_for_cpp.size();
 
-        // todo: implement
-        return tl::unexpected(
-          std::pair{std::string("In-place mode not implemented"), -1});
+        for (const auto &[src, n_processing] :
+          util::indexed(type_indexes_for_cpp)) {
+          const auto &[cpp_path, index_type_map] = src;
+          const std::filesystem::path output_file =
+            mode.output_dir / cpp_path.stem().replace_extension(".hpp");
+          if (cli::verbosity_level::info & cli->verbosity) {
+            fmt::println("Generating reflection header [{}/{}]: {} -> {}",
+              n_processing + 1,
+              total_files,
+              cpp_path.string(),
+              output_file.string());
+          }
+
+          std::ofstream f{output_file, std::ios::binary};
+          if (const auto res = codegen::emit_inplace_reflection_header_file(
+                {
+                  // todo: options
+                },
+                f,
+                *validated_reflection_data,
+                index_type_map);
+            !res) {
+            return tl::unexpected(std::pair{res.error(), -1});
+          };
+
+          if (cli::verbosity_level::info & cli->verbosity) {
+            fmt::println("Successfully generated {}.", output_file.string());
+          }
+        }
+
+        return fmt::format("Successfully generated {} headers to {}.",
+          total_files,
+          mode.output_dir.string());
       }
     },
     cli->mode);

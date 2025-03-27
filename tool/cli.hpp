@@ -110,6 +110,10 @@ std::string to_string(verbosity_level v) noexcept;
 tl::expected<verbosity_level, tl::monostate> from_string(
   std::string_view) noexcept;
 
+inline constexpr bool print_debug(verbosity_level v) noexcept {
+  return (verbosity_level::debug & v) == v;
+}
+
 struct options {
   std::variant<target_mode, inplace_mode> mode;
 

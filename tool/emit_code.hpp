@@ -17,14 +17,14 @@ struct reflected_type {
 
   // list of public fields
   std::vector<std::string> field_names;
-  // todo: use enum from `TagTypeKind::`, but what about `Enum`? `reflected_type::field_names`
-  // shouldn't be 'reused'
+  // todo: use enum from `TagTypeKind::`, but what about `Enum`?
+  // `reflected_type::field_names` shouldn't be 'reused'
   bool is_class;
 };
 
 // todo: consider reusing data types from `reflection.hpp`
-// this struct can and should be used for standalone unit testing (without actually building and ast
-// or parsing a source file)
+// this struct can and should be used for standalone unit testing (without
+// actually building and ast or parsing a source file)
 struct reflection_data {
   // todo: profile and optimize (std::set -> std::vector)
   // list of unique header paths (non-reflection)
@@ -37,7 +37,8 @@ struct reflection_data {
   std::set<std::string> refl_impl_includes;
 
   struct _cmp_reflected_types {
-    bool operator()(const reflected_type &lhs, const reflected_type &rhs) const noexcept {
+    bool operator()(const reflected_type &lhs,
+      const reflected_type &rhs) const noexcept {
       // types are unique
       return lhs.name < rhs.name;
     }
@@ -49,17 +50,21 @@ struct reflection_data {
   std::vector<tool::refl::func_signature> reflected_calls;
 };
 
-tl::expected<reflection_data, std::string> prepare_input(tool::refl::context ctx) noexcept;
+tl::expected<reflection_data, std::string> prepare_input(
+  tool::refl::context ctx) noexcept;
 
 struct options {
   // todo: options
   // - formatting
   // - annotating
 };
-tl::expected<void, std::string>
-  emit_reflection_cpp_file(options, std::ostream &os, const reflection_data &data);
+tl::expected<void, std::string> emit_reflection_cpp_file(options,
+  std::ostream &os,
+  const reflection_data &data);
 
-tl::expected<void, std::string>
-  emit_inplace_reflection_header_file(options, std::ostream &os, const reflection_data &data);
+tl::expected<void, std::string> emit_inplace_reflection_header_file(options,
+  std::ostream &os,
+  const reflection_data &data,
+  const std::unordered_map<int, std::string> &index_type_map);
 
 } // namespace codegen

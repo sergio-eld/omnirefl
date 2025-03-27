@@ -23,5 +23,6 @@ enable_testing()
 
 add_subdirectory(simple)
 add_subdirectory(multitarget)
+add_subdirectory(inplace)
 # todo: add test for failure
 

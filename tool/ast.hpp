@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tool/cli.hpp"
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -21,21 +22,25 @@
 #include <utility>
 #include <vector>
 
-// todo: separate generic and implementation-specific code
 namespace tool {
 // todo: add continious benchmarking to CI before optimizing this
-// todo: accept and return 'cache-context' to store parsed sources
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
-  parse_ast_from_source(const std::filesystem::path &resource_dir,
+  parse_ast_from_source(const cli::target_mode &,
+    const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     // refactorme: pass command-line args
     const clang::tooling::CompilationDatabase &db,
-    // todo: verbosity
-    bool print_debug = false) noexcept;
+    tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
 
-// refactorme: move away from this header (ast.hpp)
-tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>,
-  std::string> //
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+  parse_ast_from_source(const cli::inplace_mode &,
+    const std::filesystem::path &resource_dir,
+    const std::filesystem::path &source,
+    // refactorme: pass command-line args
+    const clang::tooling::CompilationDatabase &db,
+    tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
+
+tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
   load_compilation_db(
     const std::filesystem::path &compilation_db_path) noexcept;
 
