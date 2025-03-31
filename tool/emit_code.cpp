@@ -1,18 +1,47 @@
 #include "tool/emit_code.hpp"
 
+#include "fmt/base.h"
+#include "fmt/format.h"
+#include "fmt/ranges.h"
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <stack>
+#include <string_view>
 
 namespace {
+bool is_cpp_file(const std::filesystem::path &filename) {
+  const auto &ext = filename.extension();
+  return ".cpp" == ext || ".cxx" == ext || ".c" == ext;
+}
+
 auto fmt_include(const std::filesystem::path &p,
   fmt::format_context &ctx) noexcept {
   return fmt::format_to(ctx.out(), "#include \"{}\"", p.string());
 };
 
-auto fmt_reflected_field(std::string_view field_name,
+auto fmt_reflected_field(const tool::refl::struct_field_data &field,
+  fmt::format_context &ctx) {
+  return fmt::format_to(ctx.out(),
+    // ad hoc: manual offset
+    R"(  struct {field_name}_t {{
+    OMNI_DEFINE_NAME_FUNC("{field_name}")
+    constexpr static auto get_value(const type &t) noexcept
+      -> const decltype(t.{field_name})& {{
+      return t.{field_name};
+    }}
+
+    template <typename V>
+    static void set_value(type &t, V &&v) {{
+      t.{field_name} = std::forward<V>(v);
+    }}
+  }} constexpr static {field_name}{{}};)",
+    fmt::arg("field_name", field.name));
+}
+
+auto fmt_indexed_reflected_field(std::string_view field_name,
   fmt::format_context &ctx) {
   return fmt::format_to(ctx.out(),
     // ad hoc: manual offset
@@ -60,11 +89,69 @@ struct _reflected<{type_tag} {type_name}, T> {{
     fmt::arg("type_tag", refl_type.is_class ? "class"sv : "struct"sv),
     fmt::arg("type_name", refl_type.name),
     fmt::arg("reflected_fields", //
-      util::join(refl_type.field_names, "\n\n", fmt_reflected_field)),
+      util::join(refl_type.fields, "\n\n", fmt_reflected_field)),
     fmt::arg("field_names",
-      // ad hoc: manual offset
-      util::join(refl_type.field_names, ",\n", [] { return "    {}_t"; })));
+      util::join(refl_type.fields,
+        ",\n",
+        [](const tool::refl::struct_field_data &field, fmt::context &ctx) {
+          return fmt::format_to(ctx.out(),
+            // ad hoc: manual offset
+            "    {}_t",
+            field.name);
+        })));
 };
+
+auto fmt_indexed_reflected_specialization(size_t index,
+  const std::vector<std::string> &field_names,
+  fmt::context &ctx) {
+  using namespace std::string_view_literals;
+
+  return fmt::format_to(ctx.out(),
+    R"(template <>
+struct _indexed_reflected<{index}> {{
+
+  // fields meta types declarations
+{reflected_fields}
+
+  using fields_t = std::tuple<
+{field_names}
+  >;
+
+  template <typename T>
+  constexpr reflected_binding<T> operator()(T &t) const noexcept {{
+    return {{t}};
+  }}
+
+  template <typename T>
+  constexpr reflected_binding<const T> operator()(const T &t) const noexcept {{
+    return {{t}};
+  }}
+}};)",
+    fmt::arg("index", index),
+    fmt::arg("reflected_fields", //
+      util::join(field_names, "\n\n", fmt_indexed_reflected_field)),
+    fmt::arg("field_names",
+      util::join(field_names,
+        ",\n",
+        // ad hoc: manual offset
+        [] { return "    {}_t"; })));
+}
+
+auto fmt_forward_declaration(const codegen::reflected_type &t,
+  fmt::context &ctx) {
+  std::vector<std::string_view> namespaces;
+  std::string_view name = t.name;
+
+  // todo: implement
+  return fmt::format_to(ctx.out(),
+    "{open_namespaces}\n{tag} {name};\n{close_namespaces}",
+    fmt::arg("open_namespaces",
+      util::join(namespaces, "\n", [] { return "namespace {} {{"; })),
+    fmt::arg("tag", t.is_class ? "class" : "struct"),
+    fmt::arg("name", name),
+    fmt::arg("close_namespaces",
+      util::join(namespaces, "\n", [] { return "}}"; })));
+}
 
 auto fmt_reflected_call(const tool::refl::func_signature &func_sig,
   fmt::format_context &ctx) {
@@ -125,10 +212,10 @@ void omni::reflected_call_t::_call_impl(
 
 } // namespace
 
-tl::expected<codegen::reflection_data, std::string> codegen::prepare_input(
-  tool::refl::context ctx) noexcept {
-  tl::expected<reflection_data, std::string> r{tl::in_place};
-  // todo: validate input
+tl::expected<codegen::target_mode_reflection_data, std::string>
+  codegen::prepare_input(tool::refl::context ctx,
+    tool::cli::target_mode mode) noexcept {
+  tl::expected<target_mode_reflection_data, std::string> r{tl::in_place};
 
   r->includes = {std::make_move_iterator(ctx.std_includes.begin()),
     std::make_move_iterator(ctx.std_includes.end())};
@@ -140,37 +227,42 @@ tl::expected<codegen::reflection_data, std::string> codegen::prepare_input(
         fmt::format("no definition for reflected type {}", nm_qual_type));
 
     const auto &[_, definition] = *_definition;
-    using td_flags = tool::refl::type_definition_flags;
-    // todo: consider validating the flags beforehand, so all the info can be
-    // reported at once.
-    if (td_flags::local & definition.definition_flags)
-      // todo: additional info
-      // fixme: inplace-mode
-      return tl::unexpected(fmt::format("local types are not supported"));
+    // fixme:
+    // if (std::holds_alternative<tool::cli::target_mode>(mode)) {
+    //   using td_flags = tool::refl::type_definition_flags;
+    //   // todo: consider validating the flags beforehand, so all the info can
+    //   be
+    //   // reported at once.
+    //   if (td_flags::local & definition.definition_flags)
+    //     // todo: additional info
+    //     return tl::unexpected(
+    //       fmt::format("local types are not supported in target mode: {}",
+    //         nm_qual_type));
 
-    if (td_flags::in_cpp & definition.definition_flags) {
-      // fixme: inplace-mode
-      return tl::unexpected(
-        fmt::format("types defined in .cpp are not supported: {}",
-          nm_qual_type));
-    }
+    //   if (::is_cpp_file(definition.source_file)) {
+    //     return tl::unexpected(fmt::format(
+    //       "types defined in .cpp are not supported in target mode: {}",
+    //       nm_qual_type));
+    //   }
+    // }
 
     r->refl_includes.emplace(definition.source_file);
-    r->reflected_types.insert({
-      .name = nm_qual_type,
-      .field_names = [](
-                       const std::vector<tool::refl::struct_field_data> &fields)
-        -> std::vector<std::string> {
-        std::vector<std::string> r;
-        r.reserve(fields.size());
-        std::transform(fields.cbegin(),
-          fields.cend(),
-          std::back_inserter(r),
-          [](const tool::refl::struct_field_data &fd) { return fd.name; });
-        return r;
-      }(fields),
-      .is_class = definition.is_class,
-    });
+    // r->reflected_types.insert({
+    //   .name = nm_qual_type,
+    //   .field_names = //
+    //   // refactorme: use util transform
+    //   [](const std::vector<tool::refl::struct_field_data> &fields)
+    //     -> std::vector<std::string> {
+    //     std::vector<std::string> r;
+    //     r.reserve(fields.size());
+    //     std::transform(fields.cbegin(),
+    //       fields.cend(),
+    //       std::back_inserter(r),
+    //       [](const tool::refl::struct_field_data &fd) { return fd.name; });
+    //     return r;
+    //   }(fields),
+    //   .is_class = definition.is_class,
+    // });
   }
 
   for (const auto &nm_qual_type : ctx.reflected_implementations) {
@@ -239,7 +331,7 @@ tl::expected<codegen::reflection_data, std::string> codegen::prepare_input(
 
 tl::expected<void, std::string> codegen::emit_reflection_cpp_file(options,
   std::ostream &os,
-  const reflection_data &data) {
+  const target_mode_reflection_data &data) {
   using namespace std::string_view_literals;
   os << fmt::format(
     R"(// This file has been generated by omnirefl tool (todo: timestamp, data, etc).
@@ -283,14 +375,14 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
 
 // end)",
     fmt::arg("headers_reflected_types",
-      util::join(data.refl_includes, "\n", fmt_include)),
+      util::join(data.refl_includes, "\n", ::fmt_include)),
     fmt::arg("headers_reflected_implementations",
-      util::join(data.refl_impl_includes, "\n", fmt_include)),
-    fmt::arg("other_headers", util::join(data.includes, "\n", fmt_include)),
+      util::join(data.refl_impl_includes, "\n", ::fmt_include)),
+    fmt::arg("other_headers", util::join(data.includes, "\n", ::fmt_include)),
     fmt::arg("reflected_types_specializations",
-      util::join(data.reflected_types, "\n\n", fmt_reflected_specialization)),
+      util::join(data.reflected_types, "\n\n", ::fmt_reflected_specialization)),
     fmt::arg("reflected_calls",
-      util::join(data.reflected_calls, "\n\n", fmt_reflected_call))
+      util::join(data.reflected_calls, "\n\n", ::fmt_reflected_call))
     //
   );
 
@@ -344,16 +436,20 @@ struct reflected_t<indexed_type<5>, _T> {
 tl::expected<void, std::string> codegen::emit_inplace_reflection_header_file(
   options,
   std::ostream &os,
-  const reflection_data &data,
-  const std::unordered_map<int, std::string> &index_type_map) {
+  const inplace_mode_reflection_data &data) {
   using namespace std::string_view_literals;
+
   os << fmt::format(
     R"(// This header has been generated by omnirefl tool (todo: timestamp, data, etc).
 // Do not modify this file manually.
 
+// Forward declarations of reflected types
+{forward_declarations}
+
 // Headers of reflected types
 {headers_reflected_types}
 
+// todo: these headers show as unused
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -362,10 +458,14 @@ namespace omni {{
 namespace detail {{
 namespace {{
 
+// fixme: this shows a warning
 template <typename Impl, typename... Args>
 void _inplace_call_impl(Impl &&impl, Args &&...args) {{
   std::forward<Impl>(impl)(std::forward<Args>(args)...);
 }}
+
+template <typename T, typename = T>
+struct _reflected;
 
 #ifndef OMNI_DEFINE_NAME_FUNC
 // macro for static member function definition to
@@ -374,22 +474,29 @@ void _inplace_call_impl(Impl &&impl, Args &&...args) {{
 constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return STR; }}
 #endif
 
-// Generated specializations for types' reflection
+// Generated reflection specializations for types
 {reflected_types_specializations}
 
-// todo: indexed types specializations
+// Generated reflection specializations for indexed types
+{indexed_types_specializations}
 
 }} // namespace
 }} // namespace detail
 }} // namespace omni
 )",
+    fmt::arg("forward_declarations",
+      util::join(data.reflected_types, "\n\n", ::fmt_forward_declaration)),
     fmt::arg("headers_reflected_types",
-      util::join(data.refl_includes, "\n", fmt_include)),
+      util::join(data.refl_includes, "\n", ::fmt_include)),
     fmt::arg("reflected_types_specializations",
-      util::join(data.reflected_types, "\n\n", fmt_reflected_specialization)));
-  // todo: implement
-  (void)data;
-  (void)index_type_map;
+      util::join(data.reflected_types, "\n\n", ::fmt_reflected_specialization)),
+    fmt::arg("indexed_types_specializations",
+      util::join(data.reflected_indexed_types,
+        "\n\n",
+        [](const auto &key_val, fmt::context &ctx) {
+          const auto &[index, fields] = key_val;
+          return ::fmt_indexed_reflected_specialization(index, fields, ctx);
+        })));
 
   return {};
 }

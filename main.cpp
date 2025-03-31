@@ -7,6 +7,8 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
+#include "fmt/base.h"
+#include "fmt/format.h"
 #include "tool/ast.hpp"
 #include "tool/cli.hpp"
 #include "tool/emit_code.hpp"
@@ -16,6 +18,7 @@
 #include <clang/Tooling/CompilationDatabase.h>
 
 #include <fmt/core.h>
+#include <memory>
 #include <tl/expected.hpp>
 
 #include <algorithm>
@@ -23,7 +26,9 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <tuple>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -119,6 +124,254 @@ cli::options normalize_paths(cli::options o) noexcept {
   return o;
 }
 
+tl::expected<tl::monostate, std::string> run_pipeline(
+  const cli::target_mode &mode,
+  const cli::options &cli,
+  const std::vector<std::filesystem::path> &sources,
+  const clang::tooling::CompilationDatabase &compilation_db) {
+  // for (const auto &[src, n_processing] : util::indexed(src_files)) {
+  //   tl::expected ast = parse_ast(src, n_processing + 1);
+  //   if (!ast) {
+  //     llvm::errs() << ast.error();
+  //     return -1;
+  //   }
+
+  //   using ast_match = std::variant<
+  //     // refactorme: should this run only in the `inplace-reflection` mode?
+  //     tool::refl::matches::reflected_indexed_type,
+
+  //     tool::refl::matches::reflected_type,
+  //     tool::refl::matches::reflected_impl,
+  //     tool::refl::matches::reflected_call,
+
+  //     tool::refl::matches::_debug_templ_spec_decl>;
+  //   tl::expected matches = tool::match_ast_nodes( //
+  //     std::type_identity<ast_match>{},
+  //     **ast,
+
+  //     // refactorme: pass verbosity
+  //     tool::cli::print_debug(cli->verbosity));
+  //   if (!matches) {
+  //     llvm::errs() << matches.error();
+  //     return -1;
+  //   }
+
+  //   for (const ast_match &m : *matches) {
+  //     tl::expected ctx_delta = //
+  //       tool::refl::resolve_matched_node(m,
+  //         **ast,
+  //         ctx,
+  //         // refactorme: pass verbosity
+  //         tool::cli::print_debug(cli->verbosity));
+
+  //     if (!ctx_delta) {
+  //       errors.emplace_back(std::move(ctx_delta).error());
+  //       continue;
+  //     }
+
+  //     tl::expected updated = tool::refl::update(std::move(ctx), //
+  //       std::move(ctx_delta).value(),
+  //       // refactorme: pass verbosity
+  //       tool::cli::print_debug(cli->verbosity));
+
+  //     if (!updated) {
+  //       std::cerr //
+  //         << fmt::format("Error updating context: {}",
+  //              std::move(updated).error());
+  //       return -1;
+  //     }
+
+  //     ctx = std::move(updated).value();
+  //   }
+
+  //   // todo: errors, add flag to stop on errors
+  //   if (!errors.empty()) {
+  //     std::cerr //
+  //       << fmt::format("Errors while matching nodes: {}",
+  //            fmt::join(errors, ", "));
+  //     return -1;
+  //   }
+
+  // }
+  // auto validated_reflection_data = codegen::prepare_input(std::move(ctx),
+  // mode); if (!validated_reflection_data) {
+  //   return tl::unexpected(
+  //     std::pair{fmt::format("Error while validating data: {}",
+  //                 std::move(validated_reflection_data).error()),
+  //       -1});
+  // }
+
+  // // todo: validation?
+  // const std::filesystem::path output_file = mode.output_dir /
+  // mode.output_file;
+
+  // if (cli::verbosity_level::info & cli->verbosity)
+  //   fmt::println("Generating reflection file: {}", output_file.string());
+
+  // std::ofstream f{output_file, std::ios::binary};
+  // if (const auto res = codegen::emit_reflection_cpp_file(
+  //       {
+  //         // todo: options
+  //       },
+  //       f,
+  //       *validated_reflection_data);
+  //   !res) {
+  //   return tl::unexpected(std::pair{res.error(), -1});
+  // };
+
+  // return fmt::format("Successfully generated {}.", output_file.string());
+
+  // todo: implement
+  return tl::unexpected(std::string("target mode not implemented"));
+}
+
+tl::expected<tl::monostate, std::string> run_pipeline(
+  const cli::inplace_mode &mode,
+  const cli::options &cli,
+  const std::vector<std::filesystem::path> &sources,
+  const clang::tooling::CompilationDatabase &compilation_db) {
+  namespace matches = tool::refl::matches;
+
+  using reflection_data = codegen::inplace_mode_reflection_data;
+
+  std::unordered_set<std::string> resolved_types;
+
+  const tool::tu_pipeline run_pipeline{
+    .resource_dir = cli.resource_dir,
+    .compilation_db = compilation_db,
+    .verbosity = cli.verbosity,
+    .mode = mode,
+
+    .transforms =
+      std::tuple{
+        tool::node_transform{
+          .match_node = matches::reflected_type{},
+          .resolve_node = //
+          [&resolved_types = std::as_const(resolved_types),
+            verbosity =
+              cli.verbosity](const matches::reflected_type::node_type &n,
+            const clang::ASTUnit &ast)
+            -> tl::expected<typename matches::reflected_type::result,
+              std::string> {
+            return matches::reflected_type::resolve(n,
+              ast,
+              resolved_types,
+              cli::print_debug(verbosity));
+          },
+          .fold_result = //
+          [verbosity = cli.verbosity](reflection_data _accum,
+            matches::reflected_type::result r)
+            -> tl::expected<reflection_data, std::string> {
+            tl::expected<reflection_data, std::string> accum{std::move(_accum)};
+
+            if (cli::verbosity_level::parsed_types & verbosity) {
+              if (r.matched_type)
+                fmt::println("matched reflected type {}",
+                  r.matched_type->first);
+
+              if (!r.matched_type_dependencies.empty()) {
+                fmt::println("matched reflected dependency type {}",
+                  util::join(r.matched_type_dependencies,
+                    "\n",
+                    [](const auto &k_val, fmt::context &ctx) {
+                      const auto &[name, _] = k_val;
+                      return fmt::format_to(ctx.out(), "{}", name);
+                    }));
+              }
+            }
+
+            // todo: populate when implemented/if needed
+            (void)accum->refl_includes;
+
+            // refactorme: reduce conversions, reuse data
+            const auto to_reflected_type =
+              [](std::string name,
+                tool::refl::matches::reflected_type_data data)
+              -> codegen::reflected_type {
+              return {
+                .name = std::move(name),
+                .fields = std::move(data.fields),
+                .is_class = data.definition_data.is_class,
+              };
+            };
+
+            if (r.matched_type) {
+              auto &&[name, data] = *r.matched_type;
+              accum->reflected_types.emplace(
+                to_reflected_type(std::move(name), std::move(data)));
+            }
+
+            for (auto &&[name, data] : r.matched_type_dependencies) {
+              // todo: merge with conflicts check
+              accum->reflected_types.emplace(
+                to_reflected_type(std::move(name), std::move(data)));
+            }
+            return accum;
+          },
+        },
+
+        // todo: reflected_indexed_type
+      },
+  };
+
+  std::unordered_map<std::filesystem::path, reflection_data> reflected_sources;
+  for (const auto &[src, n_processing] : util::indexed(sources)) {
+    if (cli::verbosity_level::info & cli.verbosity) {
+      fmt::println("[{}/{}] running in-place mode for file: {}\t\r",
+        n_processing + 1,
+        sources.size(),
+        src.string());
+    }
+
+    tl::expected tu_reflected_data = run_pipeline(reflection_data{}, src);
+    if (!tu_reflected_data) {
+      if (cli::print_debug(cli.verbosity)) {
+        fmt::println("DEBUG: error running pipeline for file {}: {}",
+          src.string(),
+          tu_reflected_data.error());
+      }
+      // handle errors
+      continue;
+    }
+    reflected_sources[src] = std::move(tu_reflected_data).value();
+  }
+
+  for (const auto &[key_val, n_processing] : util::indexed(reflected_sources)) {
+    const auto &[src, reflection_data] = key_val;
+    const std::filesystem::path output_file =
+      mode.output_dir / src.stem().replace_extension(".hpp");
+    if (cli::verbosity_level::info & cli.verbosity) {
+      fmt::println("Generating reflection header [{}/{}]: {} -> {}",
+        n_processing + 1,
+        reflected_sources.size(),
+        src.string(),
+        output_file.string());
+    }
+
+    std::ofstream f{output_file, std::ios::binary};
+    if (const auto res = codegen::emit_inplace_reflection_header_file(
+          {
+            // todo: options
+          },
+          f,
+          reflection_data);
+      !res) {
+      // refactorme: I didn't stop on errors for when running pipelines. But
+      // stop here -> wasting everything else...
+      return tl::unexpected(
+        fmt::format("Error generating reflection header {}: {}",
+          output_file.string(),
+          res.error()));
+    };
+
+    if (cli::verbosity_level::info & cli.verbosity) {
+      fmt::println("Successfully generated {}", output_file.string());
+    }
+  }
+
+  return {};
+}
+
 } // namespace
 
 // allowing to configure specific things:
@@ -138,6 +391,7 @@ int main(int argc, char **argv) {
     std::cerr << evaluated.error() << '\n';
     return -1;
   }
+  // todo: validations
   if (cli::verbosity_level::input & cli->verbosity)
     fmt::println("{}", cli::to_string(*cli));
 
@@ -191,7 +445,8 @@ int main(int argc, char **argv) {
     return -1;
   }
 
-  // TODO: remove this atrocity (see `sources` evaluation above)
+  // TODO: remove (compilation_db) this atrocity (see `sources` evaluation
+  // above)
   const auto &[src_files, compilation_db] = *sources;
 
   if (cli::verbosity_level::info & cli->verbosity)
@@ -205,202 +460,15 @@ int main(int argc, char **argv) {
           return fmt::format_to(ctx.out(), "{}", p.string());
         }));
 
-  /*
-   * // refactorme:
-   * either<context, error> ctx_delta =
-   *   std::tie(src, n_processing) >>=
-   *     | unpack_to(parse_ast)
-   *     | match_ast
-   *     | foldl(std::move(ctx), resolve_matched_node);
-   */
-  const auto parse_ast = [&](const std::filesystem::path &src, size_t n) {
-    if (cli::verbosity_level::info & cli->verbosity) {
-      fmt::println( //
-        "[{}/{}] building AST of file: {}\t\r",
-        n,
-        src_files.size(),
-        src.string());
-    }
-
-    return std::visit(
-      [&](const auto &mode) {
-        // todo:
-        // benchmark reflecting multiple files. Current implementation
-        // uses internal ClangTool invocation which is destroyed between parsing
-        // the .src files. Curious to see how keeping the ClangTool instance
-        // alive will increase the performance.
-        return tool::parse_ast_from_source(mode,
-          cli->resource_dir,
-          src,
-          *compilation_db,
-          cli->verbosity);
-      },
-      cli->mode);
-  };
-
-  tool::refl::context ctx{};
-  std::vector<std::string> errors;
-
-  // refactorme: this should only be used/available for in-place mode
-  std::map<std::filesystem::path, std::unordered_map<int, std::string>>
-    type_indexes_for_cpp;
-
-  // TODO: support in-place mode. For in-place mode, unlike the target mode, N
-  // headers will be generated, where N is equal to input reflected .cpp files.
-  // But the reflected data in the context should be reused (would it be
-  // correct?).
-  for (const auto &[src, n_processing] : util::indexed(src_files)) {
-    tl::expected ast = parse_ast(src, n_processing + 1);
-    if (!ast) {
-      llvm::errs() << ast.error();
-      return -1;
-    }
-
-    // refactorme: should it be a 'table' {match{}, resolve{}}?
-    // this would allow to untie the match type from context type and provide
-    // different variants of implementations
-    using ast_match = tool::matched_node_variant<
-      // refactorme: should this run only in the `inplace-reflection` mode?
-      tool::refl::matches::reflected_type_index,
-
-      tool::refl::matches::reflected_type,
-      tool::refl::matches::reflected_impl,
-      tool::refl::matches::reflected_call,
-
-      tool::refl::matches::_debug_templ_spec_decl>;
-    tl::expected matches = tool::match_ast_nodes( //
-      std::vector<ast_match>{},
-      **ast,
-      // refactorme: pass verbosity
-      tool::cli::print_debug(cli->verbosity));
-    if (!matches) {
-      llvm::errs() << matches.error();
-      return -1;
-    }
-
-    for (const ast_match &m : *matches) {
-      tl::expected ctx_delta = //
-        tool::refl::resolve_matched_node(m,
-          **ast,
-          ctx,
-          // refactorme: pass verbosity
-          tool::cli::print_debug(cli->verbosity));
-
-      if (!ctx_delta) {
-        errors.emplace_back(std::move(ctx_delta).error());
-        continue;
-      }
-
-      tl::expected updated = tool::refl::update(std::move(ctx), //
-        std::move(ctx_delta).value(),
-        // refactorme: pass verbosity
-        tool::cli::print_debug(cli->verbosity));
-
-      if (!updated) {
-        std::cerr //
-          << fmt::format("Error updating context: {}",
-               std::move(updated).error());
-        return -1;
-      }
-
-      ctx = std::move(updated).value();
-    }
-
-    // todo: errors, add flag to stop on errors
-    if (!errors.empty()) {
-      std::cerr //
-        << fmt::format("Errors while matching nodes: {}",
-             fmt::join(errors, ", "));
-      return -1;
-    }
-
-    // refactorme: this should not be part of the context in non-inline
-    // reflection mode
-    type_indexes_for_cpp[src] = std::move(ctx.reflected_types_indexes);
-  }
-
-  auto validated_reflection_data = codegen::prepare_input(std::move(ctx));
-  if (!validated_reflection_data) {
-    llvm::errs() << validated_reflection_data.error();
-    return -1;
-  }
-
-  const tl::expected tool_result = std::visit(
-    [&](const auto &_mode)
-      -> tl::expected<std::string, std::pair<std::string, int>> {
-      using mode_type = std::decay_t<decltype(_mode)>;
-      if constexpr (std::is_same_v<cli::target_mode, mode_type>) {
-        const cli::target_mode &mode = _mode;
-
-        // todo: validation?
-        const std::filesystem::path output_file =
-          mode.output_dir / mode.output_file;
-
-        if (cli::verbosity_level::info & cli->verbosity)
-          fmt::println("Generating reflection file: {}", output_file.string());
-
-        std::ofstream f{output_file, std::ios::binary};
-        if (const auto res = codegen::emit_reflection_cpp_file(
-              {
-                // todo: options
-              },
-              f,
-              *validated_reflection_data);
-          !res) {
-          return tl::unexpected(std::pair{res.error(), -1});
-        };
-
-        return fmt::format("Successfully generated {}.", output_file.string());
-      } else {
-        static_assert(std::is_same_v<cli::inplace_mode, mode_type>);
-        const cli::inplace_mode &mode = _mode;
-        const size_t total_files = type_indexes_for_cpp.size();
-
-        for (const auto &[src, n_processing] :
-          util::indexed(type_indexes_for_cpp)) {
-          const auto &[cpp_path, index_type_map] = src;
-          const std::filesystem::path output_file =
-            mode.output_dir / cpp_path.stem().replace_extension(".hpp");
-          if (cli::verbosity_level::info & cli->verbosity) {
-            fmt::println("Generating reflection header [{}/{}]: {} -> {}",
-              n_processing + 1,
-              total_files,
-              cpp_path.string(),
-              output_file.string());
-          }
-
-          std::ofstream f{output_file, std::ios::binary};
-          if (const auto res = codegen::emit_inplace_reflection_header_file(
-                {
-                  // todo: options
-                },
-                f,
-                *validated_reflection_data,
-                index_type_map);
-            !res) {
-            return tl::unexpected(std::pair{res.error(), -1});
-          };
-
-          if (cli::verbosity_level::info & cli->verbosity) {
-            fmt::println("Successfully generated {}.", output_file.string());
-          }
-        }
-
-        return fmt::format("Successfully generated {} headers to {}.",
-          total_files,
-          mode.output_dir.string());
-      }
+  const auto success = std::visit(
+    [&](const auto &mode) {
+      return run_pipeline(mode, *cli, src_files, *compilation_db);
     },
     cli->mode);
-
-  if (!tool_result) {
-    const auto &[msg, code] = tool_result.error();
-    std::cerr << fmt::format("Error writing reflected files: {}\n", msg);
-    return code;
+  if (!success) {
+    std::cerr << fmt::format("{}\n", success.error());
+    return -1;
   }
-
-  if (cli::verbosity_level::info & cli->verbosity)
-    fmt::println("{}", *tool_result);
-
+  // todo: logging?
   return 0;
 }

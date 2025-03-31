@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tool/cli.hpp"
+#include "tool/util.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -19,6 +20,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -44,89 +46,187 @@ tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
   load_compilation_db(
     const std::filesystem::path &compilation_db_path) noexcept;
 
-/**
- * // todo: refine Match expected traits
- * // should be something like mapping: match_decl -> (matched_node, context){}
- * struct Matcher {
- * // todo: remove/hide. This is some internal thing actually
- * constexpr static const char binding_tag[] = "tag";
- *
- * // todo: this should be deducible from the return type
- * using node_type = clang::ASTNodeT;
- *
- * auto operator()() const { return matchDecl(); }
- * };
- */
-template <typename Match>
-struct matched_node {
-  using node_type = typename Match::node_type;
-  const node_type *node;
+template <typename Match, typename ResolveNode, typename FoldResult>
+struct node_transform {
+  using match_node_type = Match;
+
+  Match match_node;
+  ResolveNode resolve_node;
+
+  // todo: requires can be invoked with `Accum, Result`. However, Accum is a
+  // template arg and is not known at this point
+  FoldResult fold_result;
+
+  static_assert(requires(const Match &m) {
+    typename Match::node_type;
+    { Match::binding_tag } -> std::convertible_to<std::string_view>;
+    // todo: validate node_type from `m()` invocation
+    m();
+  });
+
+  static_assert(requires(const ResolveNode &resolve,
+    const typename Match::node_type &n,
+    const clang::ASTUnit &ast) {
+    tl::expected{resolve(n, ast)};
+    { resolve(n, ast).error() } -> std::convertible_to<std::string>;
+  });
 };
 
-// refactorme: this is _very_ confusing to use in combination with the variant
-// wrapper refactorme: this should not be used for function signatures... User
-// should only be responsible for providing an overload for his Match. That
-// overload must otherwise adhere to expected signature
-template <typename... Matches>
-using matched_node_variant = std::variant<tool::matched_node<Matches>...>;
+template <typename T, template <typename...> class Template>
+struct is_of_template: std::false_type {};
 
-// todo: consider returning `vector<expected<node, error>>` instead
-template <typename... Matches>
-tl::expected<std::vector<matched_node_variant<Matches...>>, std::string>
-  match_ast_nodes(
-    // TBH it is used for type deduction
-    std::vector<matched_node_variant<Matches...>> initial,
-    // fixme: MatchFinder::matchAST expects a non-const ASTContext
-    clang::ASTUnit &ast,
-    // todo: verbosity
-    bool print_debug = false) noexcept {
-  using namespace clang::ast_matchers;
+template <template <typename...> class Template, typename... T>
+struct is_of_template<Template<T...>, Template>: std::true_type {};
 
-  // todo: instantiate binding tag strings here (somehow)
+template <typename T, template <typename...> class Template>
+concept of_template = requires { is_of_template<T, Template>{}; };
 
-  // adapter
-  struct: MatchFinder::MatchCallback {
-    std::vector<matched_node_variant<Matches...>> result;
-    std::optional<std::string> error = std::nullopt;
-    // todo: verbosity
-    bool print_debug;
+template <typename Mode, typename... NodeTransforms>
+struct tu_pipeline {
+  static_assert((of_template<NodeTransforms, node_transform> && ...));
+  const std::filesystem::path &resource_dir;
 
-    void run(const MatchFinder::MatchResult &mresult) override {
-      if (print_debug)
-        fmt::println("debug: matched {} nodes", mresult.Nodes.getMap().size());
-      // todo: handle errors
-      //  - tag has been found but type mismatches (it shouldn't be possible
-      //  though)
-      const auto add_node = [this](auto n, std::string_view tag) {
-        if (n.node)
-          result.push_back(n);
-        else if (print_debug)
-          fmt::println("debug: !!! unmatched tag {}", tag);
-      };
-      (add_node(
-         matched_node<Matches>{
-           .node = mresult.Nodes.getNodeAs<typename Matches::node_type>(
-             Matches::binding_tag),
-         },
-         Matches::binding_tag),
-        ...);
+  // todo: remove this atrocity
+  const clang::tooling::CompilationDatabase &compilation_db;
+  const cli::verbosity_level verbosity;
+
+  const Mode &mode;
+
+  std::tuple<NodeTransforms...> transforms;
+
+  template <typename Accum>
+  tl::expected<Accum, std::string> operator()(Accum _accum,
+    const std::filesystem::path &src) const noexcept {
+    tl::expected ast = tool::parse_ast_from_source(mode,
+      resource_dir,
+      src,
+      // todo: continious benchmark before
+      // todo: remove dependency on compilation_db, pass flags direclty
+      compilation_db,
+      verbosity);
+    if (!ast) {
+      return tl::unexpected(fmt::format("Error parsing AST of file {}: {}",
+        src.string(),
+        std::move(ast).error()));
     }
-  } match_callback;
-  match_callback.result = std::move(initial);
-  match_callback.print_debug = print_debug;
 
-  MatchFinder finder;
-  (finder.addMatcher(
-     // todo: TraverseKind from MatchNode ?
-     // TK_AsIs is needed to include template instantiations
-     traverse(clang::TK_AsIs, Matches{}().bind(Matches::binding_tag)),
-     &match_callback),
-    ...);
+    using fetch_transform = std::variant<const NodeTransforms *...> (*)(
+      const std::tuple<NodeTransforms...> &);
+    static const auto k_transform_by_tag_map =
+      []<size_t... I>(std::index_sequence<I...>,
+        std::type_identity<NodeTransforms>...)
+      -> std::map<std::string_view, fetch_transform> {
+      return {{std::string_view{NodeTransforms::match_node_type::binding_tag},
+        static_cast<fetch_transform>(
+          [](const std::tuple<NodeTransforms...> &t)
+            -> std::variant<const NodeTransforms *...> {
+            return std::addressof(std::get<I>(t));
+          })}...};
+    }(std::index_sequence_for<NodeTransforms...>(),
+        std::type_identity<NodeTransforms>{}...);
 
-  finder.matchAST(ast.getASTContext());
-  if (match_callback.error)
-    return tl::unexpected(std::move(match_callback.error).value());
-  return std::move(match_callback.result);
-}
+    tl::expected<Accum, std::string> accum{std::move(_accum)};
+    // adapter
+    using namespace clang::ast_matchers;
+    struct: MatchFinder::MatchCallback {
+      const tu_pipeline *_this;
+      const clang::ASTUnit *ast;
+      Accum *accum;
+      std::vector<std::string> errors;
+
+      // todo: fail on error/recovery options
+      bool fatal_error = false;
+
+      void run(const MatchFinder::MatchResult &mresult) override {
+        for (const auto &[str_tag, node] : mresult.Nodes.getMap()) {
+          const auto n_transform =
+            k_transform_by_tag_map.find(std::string_view(str_tag));
+          if (k_transform_by_tag_map.cend() == n_transform) {
+            errors.emplace_back(fmt::format("unmatched tag {}", str_tag));
+            continue;
+          }
+
+          if (cli::verbosity_level::parsed_types & _this->verbosity)
+            fmt::println("matched tag {}", str_tag);
+
+          if (tl::expected resolved = std::visit(
+                [&]<typename Match, typename ResolveNode, typename FoldResult>(
+                  const node_transform<Match, ResolveNode, FoldResult>
+                    *_node_transform)
+                  -> tl::expected<tl::monostate, std::string> {
+                  const node_transform<Match, ResolveNode, FoldResult>
+                    &node_transform = *_node_transform;
+                  const auto *expected_node =
+                    node.template get<typename Match::node_type>();
+                  if (!expected_node) {
+                    return tl::unexpected(
+                      fmt::format("Error: unexpected node type for tag {}",
+                        str_tag));
+                  }
+
+                  tl::expected resolved_reflection_data =
+                    node_transform.resolve_node(*expected_node, *ast);
+                  if (!resolved_reflection_data) {
+                    return tl::unexpected(fmt::format(
+                      "Error: failed resolving reflection data for tag {}: {}",
+                      str_tag,
+                      std::move(resolved_reflection_data).error()));
+                  }
+                  tl::expected updated_accum =
+                    node_transform.fold_result(std::move(*accum),
+                      std::move(resolved_reflection_data).value());
+
+                  if (!updated_accum) {
+                    fatal_error = true;
+                    return tl::unexpected(fmt::format(
+                      "Error: failed updating reflection data for tag {}: {}",
+                      str_tag,
+                      std::move(updated_accum).error()));
+                  }
+                  *accum = std::move(updated_accum).value();
+
+                  return {};
+                },
+                n_transform->second(_this->transforms));
+            !resolved) {
+            errors.emplace_back(std::move(resolved).error());
+            if (fatal_error)
+              return;
+          }
+        }
+      }
+    } match_callback;
+    // Can't call designated initialization of inheriting class
+    match_callback._this = this;
+    match_callback.ast = &**ast;
+    match_callback.accum = std::addressof(accum.value());
+
+    MatchFinder finder;
+    std::apply(
+      [&finder, &match_callback]<typename... Match, typename... T>(
+        const node_transform<Match, T...> &...) {
+        (finder.addMatcher(
+           // todo: TraverseKind from MatchNode ?
+           // TK_AsIs is needed to include template instantiations
+           traverse(clang::TK_AsIs, Match{}().bind(Match::binding_tag)),
+           &match_callback),
+          ...);
+      },
+      transforms);
+
+    finder.matchAST((*ast)->getASTContext());
+    if (!match_callback.errors.empty()
+      && cli::verbosity_level::info & verbosity) {
+      fmt::println("Errors while running translation unit pipeline:\n{}",
+        util::join(match_callback.errors, "\n", [] { return "{}"; }));
+    }
+
+    if (!match_callback.fatal_error)
+      return accum;
+
+    return tl::unexpected(
+      fmt::format("{}", fmt::join(std::move(match_callback.errors), "\n")));
+  }
+};
 
 } // namespace tool

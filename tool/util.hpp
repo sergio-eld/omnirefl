@@ -18,7 +18,8 @@ struct convert_t {
     typename From,
     template <typename> class Alloc,
     typename To = std::invoke_result_t<C, From>>
-  auto operator()(C &&convert, std::vector<From, Alloc<From>> &&from) const noexcept
+  auto operator()(C &&convert,
+    std::vector<From, Alloc<From>> &&from) const noexcept
     -> std::vector<To, Alloc<To>> {
     std::vector<std::invoke_result_t<C, From>> result;
     result.reserve(from.size());
@@ -31,7 +32,8 @@ struct convert_t {
     typename From,
     template <typename> class Alloc,
     typename To = std::invoke_result_t<C, From>>
-  auto operator()(C &&convert, const std::vector<From, Alloc<From>> &from) const noexcept
+  auto operator()(C &&convert,
+    const std::vector<From, Alloc<From>> &from) const noexcept
     -> std::vector<To, Alloc<To>> {
     std::vector<std::invoke_result_t<C, From>> result;
     result.reserve(from.size());
@@ -119,7 +121,8 @@ struct _wrapped_element {
 
 template <typename Iter, typename Format>
 struct _wrapped_iterator {
-  using value_type = _wrapped_element<std::decay_t<decltype(*std::declval<Iter>())>, Format>;
+  using value_type =
+    _wrapped_element<std::decay_t<decltype(*std::declval<Iter>())>, Format>;
 
   Iter i;
   Format format;
@@ -140,21 +143,27 @@ struct _wrapped_iterator {
 };
 
 template <typename FormatString, typename Element>
-constexpr auto
-  _format(std::false_type, FormatString fmt_string, const Element &e, fmt::format_context &ctx) {
+constexpr auto _format(std::false_type,
+  FormatString fmt_string,
+  const Element &e,
+  fmt::format_context &ctx) {
   return fmt::format_to(ctx.out(), fmt_string(), e);
 }
 
 template <typename FormatString, typename Element>
-constexpr auto
-  _format(std::true_type, FormatString fmt_string, const Element &e, fmt::format_context &ctx) {
+constexpr auto _format(std::true_type,
+  FormatString fmt_string,
+  const Element &e,
+  fmt::format_context &ctx) {
   return fmt_string(e, ctx);
 }
 
 template <typename Range, typename Char, typename FmtStr>
-constexpr auto join(const Range &rng, std::basic_string_view<Char> delim, FmtStr fmt_string) {
+constexpr auto join(const Range &rng,
+  std::basic_string_view<Char> delim,
+  FmtStr fmt_string) {
   const auto formatter = [fmt_string](const auto &e, fmt::format_context &ctx) {
-    return _format(std::is_invocable<decltype(fmt_string), decltype(e), decltype(ctx)>{},
+    return _format(std::is_invocable<FmtStr, decltype(e), decltype(ctx)>{},
       fmt_string,
       e,
       ctx);
@@ -165,14 +174,16 @@ constexpr auto join(const Range &rng, std::basic_string_view<Char> delim, FmtStr
 }
 
 template <typename Range, typename Char, size_t N, typename FmtStr>
-constexpr auto join(const Range &rng, const Char (&delim)[N], FmtStr fmt_string) {
+constexpr auto
+  join(const Range &rng, const Char (&delim)[N], FmtStr fmt_string) {
   return join(rng, std::basic_string_view<Char>(delim), fmt_string);
 }
 
 // todo: error for non-path strings
 auto to_std_paths(const auto &strings)
   -> tl::expected<std::vector<std::filesystem::path>, std::string> {
-  tl::expected<std::vector<std::filesystem::path>, std::string> result{tl::in_place};
+  tl::expected<std::vector<std::filesystem::path>, std::string> result{
+    tl::in_place};
   result->reserve(strings.size());
   std::error_code ec{};
   for (const auto &s : strings) {
@@ -183,26 +194,30 @@ auto to_std_paths(const auto &strings)
   return result;
 }
 
-inline bool is_subpath(const std::filesystem::path &path, const std::filesystem::path &base) {
-  const auto mismatch_pair = std::mismatch(path.begin(), path.end(), base.begin(), base.end());
+inline bool is_subpath(const std::filesystem::path &path,
+  const std::filesystem::path &base) {
+  const auto mismatch_pair =
+    std::mismatch(path.begin(), path.end(), base.begin(), base.end());
   return mismatch_pair.second == base.end();
 };
 
 struct foldl_t {
   template <typename Callable, typename Result, typename Container>
-  constexpr auto operator()(Callable &&op, Result &&initial, Container &&container) const
-    -> std::decay_t<Result> {
+  constexpr auto operator()(Callable &&op,
+    Result &&initial,
+    Container &&container) const -> std::decay_t<Result> {
     auto _op = std::forward<Callable>(op);
     auto _res = std::forward<Result>(initial);
-    for (auto &&e : std::forward<Container>(container)) {
-      _res = _op(std::move(_res), std::forward<decltype(e)>(e));
+    for (auto &&elem : std::forward<Container>(container)) {
+      _res = _op(std::move(_res), std::forward<decltype(elem)>(elem));
     }
     return _res;
   }
 
   template <typename Callable, typename Result>
   constexpr auto operator()(Callable &&op, Result &&initial) const noexcept {
-    return [op = std::forward<Callable>(op), initial = std::forward<Result>(initial)](
+    return [op = std::forward<Callable>(op),
+             initial = std::forward<Result>(initial)](
              auto &&container) mutable -> decltype(auto) {
       return foldl_t{}(std::forward<Callable>(op),
         std::forward<Result>(initial),
@@ -221,6 +236,26 @@ struct to_tuple<List<T...>> {
 
 template <typename List>
 using to_tuple_t = typename to_tuple<List>::type;
+
+// refactorme: better interface (cmp is ambiguous)
+template <typename K, typename T>
+tl::expected<std::unordered_map<K, T>, std::string> merge_with_conflicts_check(
+  std::unordered_map<K, T> first,
+  std::unordered_map<K, T> second,
+  auto cmp) {
+  for (auto node = second.begin(); node != second.end();) {
+    auto &&[k, v] = *node;
+    const auto found = first.find(k);
+    if (found == first.cend()) {
+      first.insert(second.extract(node++));
+      continue;
+    }
+    if (tl::expected res = cmp(k, v, found->second); !res)
+      return tl::unexpected(std::move(res).error());
+    ++node;
+  }
+  return {std::move(first)};
+};
 
 } // namespace util
 
