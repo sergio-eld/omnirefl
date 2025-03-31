@@ -64,11 +64,12 @@ struct func_signature {
   std::vector<function_signature_arg> args;
 };
 
-// todo: remove
-struct context;
-
 namespace matches {
 
+// todo:
+//   Support reflecting fields of 'non-reflectable' types, i.e. unnamed structs,
+//   local types (and in-cpp types for target mode). This can be done by
+//   `decltype(ReflectableT::NonReflectableField)`.
 struct reflected_type_data {
   type_definition_data definition_data;
   std::vector<struct_field_data> fields;
@@ -120,7 +121,7 @@ struct reflected_type {
 // only needed for inplace mode
 struct reflected_indexed_type {
   // todo: remove. `binding_tag` is implementation-specific
-  constexpr static const char binding_tag[] = "reflected_type_index";
+  constexpr static const char binding_tag[] = "reflected_indexed_type";
 
   // todo: this should be deducible from the ASTMatchers' expression
   using node_type = clang::ClassTemplateSpecializationDecl;
@@ -131,7 +132,7 @@ struct reflected_indexed_type {
       unless(isInStdNamespace()),
       hasAncestor(namespaceDecl(hasName("omni"))),
       hasAncestor(namespaceDecl(hasName("detail"))),
-      hasName("_type_index"),
+      hasName("_reflected_indexed_type"),
       isTemplateInstantiation(),
       isDefinition()
       //
@@ -139,14 +140,19 @@ struct reflected_indexed_type {
   }
 
   struct result {
-    std::pair<size_t /*type_index*/, reflected_type_data> matched_type;
+    // refactorme:
+    //   use std::variant with `non-reflectable` type
+    std::optional<std::pair<size_t /*type_index*/, reflected_type_data>>
+      matched_type;
     std::optional<std::string> nm_qual_type;
 
     std::unordered_map<std::string, reflected_type_data>
       matched_type_dependencies;
     // todo:
     //   maybe add support for private types, but it would require using
-    //   includes
+    //   includes. upd: dependency types that are declared in non-public scope
+    //   should also be supported. At least there should be a reliable trait for
+    //   `is_reflected` or `reflectable`
   };
 
   static tl::expected<result, std::string> resolve(const node_type &node,

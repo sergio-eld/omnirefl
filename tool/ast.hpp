@@ -165,6 +165,9 @@ struct tu_pipeline {
                   }
 
                   tl::expected resolved_reflection_data =
+                    // refactorme:
+                    //   should accum be passed here as a const reference?
+                    //   Otherwise I have to capture it inside the transforms...
                     node_transform.resolve_node(*expected_node, *ast);
                   if (!resolved_reflection_data) {
                     return tl::unexpected(fmt::format(
@@ -203,8 +206,13 @@ struct tu_pipeline {
 
     MatchFinder finder;
     std::apply(
-      [&finder, &match_callback]<typename... Match, typename... T>(
-        const node_transform<Match, T...> &...) {
+      // refactorme:
+      //   repeating template args here is ugly and error prone. As of now I
+      //   don't see an alternative if I want to use `node_transform` as a
+      //   variadic lambda argument
+      [&finder, &match_callback]<typename... Match,
+        typename... Resolve,
+        typename... Fold>(const node_transform<Match, Resolve, Fold> &...) {
         (finder.addMatcher(
            // todo: TraverseKind from MatchNode ?
            // TK_AsIs is needed to include template instantiations

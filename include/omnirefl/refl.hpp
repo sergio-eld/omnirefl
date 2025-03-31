@@ -40,27 +40,12 @@ using nonstd::string_view;
 namespace omni {
 // todo: separate the functions below to a standalone header without any
 // includes
+//
+// refactorme: move `detail` into private scope of `reflected_call_t`
 namespace detail {
 namespace {
-// tag used to collect reflected types
-template <typename>
-struct _reflected_type {};
 
-// tag used to collect reflected implementation types
-template <typename>
-struct _reflected_impl {};
-
-// todo: remove #define
-// #define OMNI_INPLACE_REFLECTION
 #ifdef OMNI_INPLACE_REFLECTION
-// todo: investigate. For some reason I can't get rid of this function. If I
-// invoke the implementation directly inside the reflected_call_t::operator(),
-// everything breaks (default _reflected<T> is picked up instead of the
-// generated one)
-//
-// implementation will be generated for this function by omnirefl
-template <typename Impl, typename... Args>
-void _inplace_call_impl(Impl &&impl, Args &&...args);
 
 template <int Id>
 struct counter {
@@ -128,7 +113,16 @@ constexpr int unique_id(std::true_type) {
 
 // meta type to assign index to a type upon instantiation
 template <typename T, int Index = unique_id<T>()>
-struct _type_index {};
+struct _reflected_indexed_type {};
+#else
+
+// tag used in target mode to collect reflected types
+template <typename>
+struct _reflected_type {};
+
+// tag used in target mode to collect reflected implementation types
+template <typename>
+struct _reflected_impl {};
 
 #endif
 } // namespace
@@ -138,18 +132,20 @@ struct _type_index {};
 struct reflected_call_t {
   template <typename Impl, typename T, typename... Args>
   void operator()(Impl &&impl, T &&t, Args &&...args) const {
-    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
     using type = typename std::decay<T>::type;
-    (void)detail::_reflected_type<type>{};
 #ifdef OMNI_INPLACE_REFLECTION
-    // todo: detect that it has not been invoked in a header file: forced
-    // include may break the order of index instantiations (as long as
-    // inplace-mode includes headers of reflected types).
-    (void)detail::_type_index<type>{};
-    detail::_inplace_call_impl(std::forward<Impl>(impl),
-      std::forward<T>(t),
-      std::forward<Args>(args)...);
+    // testme: use inside inline non-template function defined in a header file
+    // testme: use inside a template function defined in a header file
+    //
+    //   forced include may break the order of index instantiations (as long as
+    //   inplace-mode includes headers of reflected types).
+    (void)detail::_reflected_indexed_type<type>{};
+#  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
+    std::forward<Impl>(impl)(std::forward<T>(t), std::forward<Args>(args)...);
+#  endif
 #else
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    (void)detail::_reflected_type<type>{};
     _call_impl(std::forward<Impl>(impl),
       std::forward<T>(t),
       std::forward<Args>(args)...);
@@ -376,6 +372,9 @@ constexpr reflected_binding<T> reflected(T &t) noexcept {
 
 } // namespace omni
 
+// refactorme:
+//   exposition should be generated as part of packaging the tool, otherwise I
+//   won't be able to keep it up to date.
 #ifdef OMNI_ENABLE_EXPOSITION
 
 #  include <tuple>

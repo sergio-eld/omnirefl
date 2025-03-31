@@ -1,7 +1,6 @@
 #include "tool/reflection.hpp"
 
 #include "tool/util.hpp"
-#include "clang/ASTMatchers/ASTMatchers.h"
 
 #include <fmt/core.h>
 #include <tl/expected.hpp>
@@ -28,6 +27,7 @@
 #include <cassert>
 #include <cstddef>
 #include <numeric>
+#include <optional>
 #include <stack>
 #include <string>
 #include <string_view>
@@ -472,30 +472,39 @@ auto reflected_indexed_type::resolve(const node_type &node,
   const clang::CXXRecordDecl &reflected_type_decl =
     *reflected_type.getAsCXXRecordDecl();
 
+  // fixme:
+  //   for unnamed it will give a long string as
+  //   `unnamed struct at /path/to/source.cpp:23:42
   const std::string nm_qual_type =
     reflected_type_decl.getQualifiedNameAsString();
 
-  // todo: is empty possible?
-  if (!nm_qual_type.empty() && resolved_types.contains(nm_qual_type))
+  const type_definition_data reflected_definition =
+    ::resolve_definition(reflected_type_decl, ast.getSourceManager());
+
+  using td_flags = type_definition_flags;
+  // todo: non-public type
+  const bool can_be_forward_declared =
+    !(td_flags::local & reflected_definition.definition_flags);
+
+  // unique index for a type is supposed to be evaluated only once within a
+  // translation unit. If the type can't be forward-declared, that means it
+  // also couldn't be before. So no sense in checking the `resolved_types`
+  //
+  // fixme: do not use string name to identify the type
+  if (can_be_forward_declared && resolved_types.contains(nm_qual_type))
     return {};
 
-  // refactorme: this variable is mutable in the middle of the scope
-  auto reflectable_data =
-    ::recursively_collect_reflectable_types(reflected_type_decl,
-      resolved_types);
-
-  // testme: test with unnamed/local struct
-  const auto matched_type_decl = std::find(reflectable_data.cbegin(),
-    reflectable_data.cend(),
-    &reflected_type_decl);
-  if (reflectable_data.cend() == matched_type_decl) {
-    // todo:
-    //   what if parent node was not resolved? (i.e. an std type or fundamental)
-  }
+  // testme: reflected_call with non-reflectable type (i.e. std::) as a
+  // reflected type testme: test with unnamed/local struct testme: non-local
+  // unnamed type testme: test indexed reflection when indexed type is a field
+  // in another (possibly, also indexed) reflected type
 
   std::unordered_map<std::string, reflected_type_data> reflected_types;
 
-  for (const clang::CXXRecordDecl *_rdecl : reflectable_data) {
+  // refactorme: use map transform
+  for (const clang::CXXRecordDecl *_rdecl :
+    ::recursively_collect_reflectable_types(reflected_type_decl,
+      resolved_types)) {
     const clang::CXXRecordDecl &rdecl = *_rdecl;
     const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
 
@@ -514,7 +523,7 @@ auto reflected_indexed_type::resolve(const node_type &node,
     if (print_debug && reflected_types.contains(nm_qual_type))
       fmt::println("DEBUG: WARNING! {} already resolved", nm_qual_type);
 
-    // fixme: what about unnamed/local types?
+    // fixme: do not use string name to identify the type
     reflected_types[nm_qual_type] = {
       .definition_data = resolve_definition(rdecl, ast.getSourceManager()),
       .fields = ::resolve_struct_fields(rdecl.fields()),
@@ -522,14 +531,19 @@ auto reflected_indexed_type::resolve(const node_type &node,
   }
 
   // refactorme: UGLEEE BEATCH
-  // fixme: what about unnamed, huh?
+  // fixme: do not use string name to identify the type
   auto matched_type = reflected_types.find(nm_qual_type);
-  assert(reflected_types.cend() != matched_type);
-  auto extracted = reflected_types.extract(matched_type);
   return result{
-    .matched_type = {reflected_type_index, std::move(extracted).mapped()},
-    // fixme: unnamed type
-    .nm_qual_type = nm_qual_type,
+    .matched_type = reflected_types.cend() != matched_type
+    ? [reflected_type_index](auto extracted) -> decltype(result::matched_type) {
+      return std::pair{reflected_type_index, std::move(extracted).mapped()};
+    }(reflected_types.extract(matched_type))
+    : std::nullopt,
+    .nm_qual_type = [&nm_qual_type](td_flags f) -> std::optional<std::string> {
+      if (td_flags::local & f || td_flags::unnamed & f)
+        return std::nullopt;
+      return {std::move(nm_qual_type)};
+    }(reflected_definition.definition_flags),
     .matched_type_dependencies = std::move(reflected_types),
   };
 }

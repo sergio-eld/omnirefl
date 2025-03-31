@@ -67,10 +67,6 @@ struct inplace_mode_reflection_data {
 tl::expected<target_mode_reflection_data, std::string>
   prepare_input(tool::refl::context ctx, tool::cli::target_mode) noexcept;
 
-// todo: remove?
-tl::expected<target_mode_reflection_data, std::string>
-  prepare_input(tool::refl::context ctx, tool::cli::inplace_mode) noexcept;
-
 struct options {
   // todo: options
   // - formatting
