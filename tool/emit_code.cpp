@@ -1,14 +1,10 @@
 #include "tool/emit_code.hpp"
 
-#include "fmt/base.h"
-#include "fmt/format.h"
-#include "fmt/ranges.h"
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
 
 #include <algorithm>
-#include <stack>
 #include <string_view>
 
 namespace {
@@ -78,11 +74,11 @@ struct _reflected<{type_tag} {type_name}, T> {{
 {field_names}
   >;
 
-  constexpr reflected_binding<type> operator()(type &t) const noexcept {{
+  constexpr reflected_binding<type, fields_t> operator()(type &t) const noexcept {{
     return {{t}};
   }}
 
-  constexpr reflected_binding<const type> operator()(const type &t) const noexcept {{
+  constexpr reflected_binding<const type, fields_t> operator()(const type &t) const noexcept {{
     return {{t}};
   }}
 }};)",
@@ -117,11 +113,13 @@ struct _indexed_reflected<{index}> {{
 {field_names}
   >;
 
+  // fixme: `reflected_binding<T>` is not defined
   template <typename T>
   constexpr reflected_binding<T> operator()(T &t) const noexcept {{
     return {{t}};
   }}
 
+  // fixme: `reflected_binding<T>` is not defined
   template <typename T>
   constexpr reflected_binding<const T> operator()(const T &t) const noexcept {{
     return {{t}};
@@ -141,8 +139,11 @@ auto fmt_forward_declaration(const codegen::reflected_type &t,
   fmt::context &ctx) {
   std::vector<std::string_view> namespaces;
   std::string_view name = t.name;
+  for (size_t pos = name.find("::"); pos != name.npos; pos = name.find("::")) {
+    namespaces.emplace_back(name.substr(0, pos));
+    name = name.substr(pos + 2);
+  }
 
-  // todo: implement
   return fmt::format_to(ctx.out(),
     "{open_namespaces}\n{tag} {name};\n{close_namespaces}",
     fmt::arg("open_namespaces",
@@ -150,7 +151,7 @@ auto fmt_forward_declaration(const codegen::reflected_type &t,
     fmt::arg("tag", t.is_class ? "class" : "struct"),
     fmt::arg("name", name),
     fmt::arg("close_namespaces",
-      util::join(namespaces, "\n", [] { return "}}"; })));
+      util::join(namespaces, "\n", [] { return "}} // namespace {}"; })));
 }
 
 auto fmt_reflected_call(const tool::refl::func_signature &func_sig,
@@ -455,17 +456,21 @@ tl::expected<void, std::string> codegen::emit_inplace_reflection_header_file(
 #include <utility>
 
 namespace omni {{
+
+template <typename, typename>
+struct reflected_binding;
+
 namespace detail {{
 namespace {{
+
+template <typename T, typename>
+struct _reflected;
 
 // fixme: this shows a warning
 template <typename Impl, typename... Args>
 void _inplace_call_impl(Impl &&impl, Args &&...args) {{
   std::forward<Impl>(impl)(std::forward<Args>(args)...);
 }}
-
-template <typename T, typename = T>
-struct _reflected;
 
 #ifndef OMNI_DEFINE_NAME_FUNC
 // macro for static member function definition to

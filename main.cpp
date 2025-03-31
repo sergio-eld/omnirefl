@@ -7,8 +7,6 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
-#include "fmt/base.h"
-#include "fmt/format.h"
 #include "tool/ast.hpp"
 #include "tool/cli.hpp"
 #include "tool/emit_code.hpp"

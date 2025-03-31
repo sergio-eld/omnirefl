@@ -342,6 +342,7 @@ template <typename T>
 struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>:
     std::true_type {};
 
+// refactorme: default template arguments are not good for forward declarations
 // reflected binding is needed to hold a reference to the reflected object
 template <typename T, typename = typename reflected_t<T>::fields_t>
 struct reflected_binding;
