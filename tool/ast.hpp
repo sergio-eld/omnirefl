@@ -57,19 +57,23 @@ struct node_transform {
   // template arg and is not known at this point
   FoldResult fold_result;
 
-  static_assert(requires(const Match &m) {
-    typename Match::node_type;
-    { Match::binding_tag } -> std::convertible_to<std::string_view>;
-    // todo: validate node_type from `m()` invocation
-    m();
-  });
+  // fixme:
+  //   ResolveNode must be invocable with:
+  //   (const node_type&, const clang::ASTUnit&, const Typename& resolved)
+  //
+  // static_assert(requires(const Match &m) {
+  //   typename Match::node_type;
+  //   { Match::binding_tag } -> std::convertible_to<std::string_view>;
+  //   // todo: validate node_type from `m()` invocation
+  //   m();
+  // });
 
-  static_assert(requires(const ResolveNode &resolve,
-    const typename Match::node_type &n,
-    const clang::ASTUnit &ast) {
-    tl::expected{resolve(n, ast)};
-    { resolve(n, ast).error() } -> std::convertible_to<std::string>;
-  });
+  // static_assert(requires(const ResolveNode &resolve,
+  //   const typename Match::node_type &n,
+  //   const clang::ASTUnit &ast) {
+  //   tl::expected{resolve(n, ast)};
+  //   { resolve(n, ast).error() } -> std::convertible_to<std::string>;
+  // });
 };
 
 template <typename T, template <typename...> class Template>
@@ -90,10 +94,19 @@ struct tu_pipeline {
   const clang::tooling::CompilationDatabase &compilation_db;
   const cli::verbosity_level verbosity;
 
+  // refactorme:
+  //   this doesn't seem to be necessary to
+  //   'run transforms on a translation unit'.
+  //   It is more a side effect of the leaking (through encapsulation) clang
+  //   tooling
+  // todo: remind meself why I need it here...
   const Mode &mode;
 
   std::tuple<NodeTransforms...> transforms;
 
+  // refactorme:
+  //   I could have ASTUnit as an input instead of `src`
+  //   Also, why would I necessarilly need `Accum` here?
   template <typename Accum>
   tl::expected<Accum, std::string> operator()(Accum _accum,
     const std::filesystem::path &src) const noexcept {
@@ -165,20 +178,17 @@ struct tu_pipeline {
                   }
 
                   tl::expected resolved_reflection_data =
-                    // refactorme:
-                    //   should accum be passed here as a const reference?
-                    //   Otherwise I have to capture it inside the transforms...
-                    node_transform.resolve_node(*expected_node, *ast);
+                    node_transform.resolve_node(*expected_node, *ast, *accum);
                   if (!resolved_reflection_data) {
                     return tl::unexpected(fmt::format(
                       "Error: failed resolving reflection data for tag {}: {}",
                       str_tag,
                       std::move(resolved_reflection_data).error()));
                   }
+
                   tl::expected updated_accum =
                     node_transform.fold_result(std::move(*accum),
                       std::move(resolved_reflection_data).value());
-
                   if (!updated_accum) {
                     fatal_error = true;
                     return tl::unexpected(fmt::format(
@@ -186,6 +196,7 @@ struct tu_pipeline {
                       str_tag,
                       std::move(updated_accum).error()));
                   }
+
                   *accum = std::move(updated_accum).value();
 
                   return {};

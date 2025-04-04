@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
 project(omnirefl LANGUAGES CXX C VERSION 0.0.1)
 
 # todo: what if I just define 20 globally instead?
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 include(cmake/clean_build.cmake)
@@ -25,9 +25,8 @@ message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
 
 option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
-# todo: options:
-# - enable benchmarks
-option(ENABLE_TESTING "Enable benchmarks" OFF)
+
+option(ENABLE_BENCH "Enable benchmarks" OFF)
 message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
 include(FetchContent)
@@ -68,22 +67,23 @@ add_subdirectory(lib/string-view-lite EXCLUDE_FROM_ALL)
 set(FMT_INSTALL OFF)
 add_subdirectory(lib/fmt EXCLUDE_FROM_ALL)
 
-find_package(Python COMPONENTS Interpreter REQUIRED)
-set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
-set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
-add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
-    # ad hoc, since the script needs write permissions for some reason,
-    # which prevents setting `ro` mount for source in docker
-    COMMAND ${CMAKE_COMMAND} -E copy_directory 
-        "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml"
-        "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml"
-
-    COMMAND Python::Interpreter
-        "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml/tools/amalgamate.py"
-        "${RYML_AMALGAMATED_HEADER}"
-    COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
-    VERBATIM)
-add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
+# todo: enable when the tool is ready and default implementation is needed
+# find_package(Python COMPONENTS Interpreter REQUIRED)
+# set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
+# set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
+# add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
+#     # ad hoc, since the script needs write permissions for some reason,
+#     # which prevents setting `ro` mount for source in docker
+#     COMMAND ${CMAKE_COMMAND} -E copy_directory 
+#         "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml"
+#         "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml"
+# 
+#     COMMAND Python::Interpreter
+#         "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml/tools/amalgamate.py"
+#         "${RYML_AMALGAMATED_HEADER}"
+#     COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
+#     VERBATIM)
+# add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
 
 # this library will be automatically linked to a reflected target
 add_library(refl INTERFACE)
@@ -92,10 +92,10 @@ target_sources(refl INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/refl.hpp>)
 target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${RYML_INCLUDE_DIR}/../> # /include/ryml -> include/
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    # fixme: this is needed because of 3rd party libs. Proper installation might be needed, 
-    #   however this would require version tracking...
+    # fixme:
+    #   This is needed because of 3rd party libs.
+    #   Proper installation might be needed, however this would require version tracking...
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME}
     )
 target_link_libraries(refl INTERFACE
@@ -111,27 +111,29 @@ add_library(omni::refl ALIAS refl)
 
 # for unit testing
 add_library(tool.cli STATIC tool/cli.cpp)
-target_include_directories(tool.cli 
-    PRIVATE ${LLVM_INCLUDE_DIRS}
-    PUBLIC ${PROJECT_SOURCE_DIR} 
-)
+target_include_directories(tool.cli PUBLIC ${PROJECT_SOURCE_DIR})
 target_link_libraries(tool.cli 
-    # for llvm::cl
-    PRIVATE CLI11::CLI11 fmt::fmt LLVMOption
-    PUBLIC tl::expected
-)
+    PRIVATE CLI11::CLI11 fmt::fmt
+    PUBLIC tl::expected)
 set_target_properties(tool.cli PROPERTIES CXX_STANDARD 20)
 add_static_compile_options(tool.cli)
 
 # todo: implement as clang plugin
 add_executable(tool 
     main.cpp
+    # todo: tool/ast.h -> tool/ast/???.h
     tool/ast.cpp
-    tool/reflection.cpp
-    tool/emit_code.cpp)
+    tool/ast/util.cpp
+    tool/header_mode/emit_code.cpp
+    tool/header_mode/header_mode.cpp
+    tool/source_mode/emit_code.cpp
+    tool/source_mode/source_mode.cpp
+)
 # fixme: this is supposed to reduce compilation time for fmt...
 # target_precompile_headers(tool PRIVATE fmt/format.h)
-add_dependencies(tool amalgamate_ryml)
+
+# todo: enable when the tool is ready, to provide default implementation
+# add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
     CXX_STANDARD 20
@@ -173,7 +175,7 @@ if (ENABLE_PACKAGE)
     # todo: dependencies on 3rd party should be optional, so should be the default implementation
     install(DIRECTORY
         # todo: proper way to include the dependency (with copyright, etc)
-        "${RYML_INCLUDE_DIR}/../"
+        # "${RYML_INCLUDE_DIR}/../"
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/expected/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/variant/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/optional/include/
@@ -199,7 +201,6 @@ if (ENABLE_PACKAGE)
         INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
     # todo: make sure `omni::tool` target is available regardless of the cmake build type!
-    # fixme: apt remove gives warning `/usr/lib/cmake` is not empty
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
@@ -211,7 +212,6 @@ if (ENABLE_PACKAGE)
         ${CLANG_RESOURCE_DIR}/include
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
 
-    # todo: what's in the binary dir...?
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/tests
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")

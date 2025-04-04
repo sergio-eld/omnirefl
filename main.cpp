@@ -7,11 +7,8 @@
 // #include "refl/..." // - reflection related code
 // #include "plugin/..." // - plugin related code
 
-#include "fmt/format.h"
 #include "tool/ast.hpp"
 #include "tool/cli.hpp"
-#include "tool/emit_code.hpp"
-#include "tool/reflection.hpp"
 #include "tool/util.hpp"
 
 #include <clang/Tooling/CompilationDatabase.h>
@@ -21,13 +18,11 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <tuple>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -129,6 +124,49 @@ tl::expected<tl::monostate, std::string> run_pipeline(
   const cli::options &cli,
   const std::vector<std::filesystem::path> &sources,
   const clang::tooling::CompilationDatabase &compilation_db) {
+  // todo: use this for tu_pipeline
+  // tool::node_transform{
+  //   .match_node = matches::reflected_type{},
+  //   .resolve_node = //
+  //   [&resolved_types = std::as_const(resolved_types),
+  //     verbosity =
+  //       cli.verbosity](const matches::reflected_type::node_type &n,
+  //     const clang::ASTUnit &ast)
+  //     -> tl::expected<typename matches::reflected_type::result,
+  //       std::string> {
+  //     return matches::reflected_type::resolve(n,
+  //       ast,
+  //       resolved_types,
+  //       cli::print_debug(verbosity));
+  //   },
+  //   .fold_result = //
+  //   [verbosity = cli.verbosity](reflection_data _accum,
+  //     matches::reflected_type::result r)
+  //     -> tl::expected<reflection_data, std::string> {
+  //     tl::expected<reflection_data, std::string> accum{std::move(_accum)};
+
+  //     if (cli::verbosity_level::parsed_types & verbosity)
+  //       print(r);
+
+  //     // todo: populate when implemented/if needed
+  //     (void)accum->refl_includes;
+
+  //     for (auto &&[name, data] : r.matched_type_dependencies) {
+  //       // todo: merge with conflicts check
+  //       accum->reflected_types.emplace(
+  //         to_reflected_type(std::move(name), std::move(data)));
+  //     }
+
+  //     if (r.matched_type) {
+  //       auto &&[name, data] = *r.matched_type;
+  //       accum->reflected_types.emplace(
+  //         to_reflected_type(std::move(name), std::move(data)));
+  //     }
+
+  //     return accum;
+  //   },
+  // },
+
   // for (const auto &[src, n_processing] : util::indexed(src_files)) {
   //   tl::expected ast = parse_ast(src, n_processing + 1);
   //   if (!ast) {
@@ -225,258 +263,6 @@ tl::expected<tl::monostate, std::string> run_pipeline(
   return tl::unexpected(std::string("target mode not implemented"));
 }
 
-// refactorme: reduce conversions, reuse data
-auto to_reflected_type(std::string name,
-  tool::refl::matches::reflected_type_data data) -> codegen::reflected_type {
-  return {
-    .name = std::move(name),
-    .fields = std::move(data.fields),
-    .is_class = data.definition_data.is_class,
-  };
-};
-
-void print(const tool::refl::matches::reflected_type::result &r) {
-  if (r.matched_type)
-    fmt::println("matched reflected type {}", r.matched_type->first);
-
-  if (!r.matched_type_dependencies.empty()) {
-    fmt::println("matched reflected dependency type {}",
-      util::join(r.matched_type_dependencies,
-        "\n",
-        [](const auto &k_val, fmt::context &ctx) {
-          const auto &[name, _] = k_val;
-          return fmt::format_to(ctx.out(), "{}", name);
-        }));
-  }
-};
-
-void print(const tool::refl::matches::reflected_indexed_type::result &r) {
-  if (r.matched_type) {
-    const auto &[index, data] = *r.matched_type;
-    fmt::println("matched indexed reflected type {}:{}",
-      index,
-      r.nm_qual_type.value_or("(unnamed)"));
-  }
-
-  if (!r.matched_type_dependencies.empty()) {
-    fmt::println("matched reflected dependency type {}",
-      util::join(r.matched_type_dependencies,
-        "\n",
-        [](const auto &k_val, fmt::context &ctx) {
-          const auto &[name, _] = k_val;
-          return fmt::format_to(ctx.out(), "{}", name);
-        }));
-  }
-};
-
-tl::expected<tl::monostate, std::string> run_pipeline(
-  const cli::inplace_mode &mode,
-  const cli::options &cli,
-  const std::vector<std::filesystem::path> &sources,
-  // todo: get rid of compilation_db
-  const clang::tooling::CompilationDatabase &compilation_db) {
-  namespace matches = tool::refl::matches;
-
-  using reflection_data = codegen::inplace_mode_reflection_data;
-
-  // refactorme: resolved types can only be shared within a single TU, otherwise
-  // may violate ODR.
-  std::unordered_set<std::string> resolved_types;
-
-  const tool::tu_pipeline run_pipeline{
-    .resource_dir = cli.resource_dir,
-    .compilation_db = compilation_db,
-    .verbosity = cli.verbosity,
-    .mode = mode,
-
-    .transforms =
-      // todo: move this to target-mode transforms
-    std::tuple{
-      // fixme:
-      //   remove `reflected_type`. I confused myself...
-      //   `reflected_indexed_type` is enough. Otherwise types will be
-      //   captured twice
-      tool::node_transform{
-        .match_node = matches::reflected_type{},
-        .resolve_node = //
-        [&resolved_types = std::as_const(resolved_types),
-          verbosity =
-            cli.verbosity](const matches::reflected_type::node_type &n,
-          const clang::ASTUnit &ast)
-          -> tl::expected<typename matches::reflected_type::result,
-            std::string> {
-          return matches::reflected_type::resolve(n,
-            ast,
-            resolved_types,
-            cli::print_debug(verbosity));
-        },
-        .fold_result = //
-        [verbosity = cli.verbosity](reflection_data _accum,
-          matches::reflected_type::result r)
-          -> tl::expected<reflection_data, std::string> {
-          tl::expected<reflection_data, std::string> accum{std::move(_accum)};
-
-          if (cli::verbosity_level::parsed_types & verbosity)
-            print(r);
-
-          // todo: populate when implemented/if needed
-          (void)accum->refl_includes;
-
-          for (auto &&[name, data] : r.matched_type_dependencies) {
-            // todo: merge with conflicts check
-            accum->reflected_types.emplace(
-              to_reflected_type(std::move(name), std::move(data)));
-          }
-
-          if (r.matched_type) {
-            auto &&[name, data] = *r.matched_type;
-            accum->reflected_types.emplace(
-              to_reflected_type(std::move(name), std::move(data)));
-          }
-
-          return accum;
-        },
-      },
-
-      tool::node_transform{
-        .match_node = matches::reflected_indexed_type{},
-        .resolve_node = //
-        [&resolved_types = std::as_const(resolved_types),
-          verbosity =
-            cli.verbosity](const matches::reflected_indexed_type::node_type &n,
-          const clang::ASTUnit &ast)
-          -> tl::expected<typename matches::reflected_indexed_type::result,
-            std::string> {
-          return matches::reflected_indexed_type::resolve(n,
-            ast,
-            resolved_types,
-            cli::print_debug(verbosity));
-        },
-        .fold_result = //
-        [verbosity = cli.verbosity](reflection_data _accum,
-          matches::reflected_indexed_type::result r)
-          -> tl::expected<reflection_data, std::string> {
-          tl::expected<reflection_data, std::string> accum{std::move(_accum)};
-
-          if (cli::verbosity_level::parsed_types & verbosity)
-            print(r);
-
-          // todo: populate when implemented/if needed
-          (void)accum->refl_includes;
-
-          for (auto &&[name, data] : r.matched_type_dependencies) {
-            // todo: merge with conflicts check
-            accum->reflected_types.emplace(
-              to_reflected_type(std::move(name), std::move(data)));
-          }
-
-          if (!r.matched_type)
-            return accum;
-
-          auto &&[index, data] = *r.matched_type;
-          using td_flags = tool::refl::type_definition_flags;
-
-          // todo: non-public definitions
-          if (td_flags::local & data.definition_data.definition_flags
-            // fixme:
-            //   for now it is easier to have unnamed types indexed.
-            //   There are a lot of situations which can or can't be handled
-            //   using decltype(). For example, decltype(Struct::field) is
-            //   possible, but handling all the cases for that is not
-            //   practical
-            || td_flags::unnamed & data.definition_data.definition_flags) {
-            // fixme:
-            //   error if index is not unique. Or idk if it is possible to
-            //   detect more than one instantiations of reflected indexed type
-            //   within a single TU. Maybe I need to enforce it in the 'front
-            //   end' somehow
-            accum->reflected_indexed_types[index] =
-              // refactorme: use map transform
-              [](std::vector<tool::refl::struct_field_data> fields) {
-                std::vector<std::string> r;
-                r.reserve(fields.size());
-                for (auto &&f : fields)
-                  r.emplace_back(std::move(f.name));
-                return r;
-              }(std::move(data.fields));
-
-            return accum;
-          }
-
-          if (!r.nm_qual_type) {
-            return tl::unexpected(fmt::format(
-              "FAILED_ASSERT: invariant violation. "
-              "indexed type {} is expected to have a name at this point",
-              index));
-          }
-          accum->reflected_types.emplace(
-            to_reflected_type(std::move(r.nm_qual_type).value(),
-              std::move(data)));
-
-          return accum;
-        },
-      },
-    },
-  };
-
-  std::unordered_map<std::filesystem::path, reflection_data> reflected_sources;
-  for (const auto &[src, n_processing] : util::indexed(sources)) {
-    if (cli::verbosity_level::info & cli.verbosity) {
-      fmt::println("[{}/{}] running in-place mode for file: {}\t\r",
-        n_processing + 1,
-        sources.size(),
-        src.string());
-    }
-
-    tl::expected tu_reflected_data = run_pipeline(reflection_data{}, src);
-    if (!tu_reflected_data) {
-      if (cli::print_debug(cli.verbosity)) {
-        fmt::println("DEBUG: error running pipeline for file {}: {}",
-          src.string(),
-          tu_reflected_data.error());
-      }
-      // handle errors
-      continue;
-    }
-    reflected_sources[src] = std::move(tu_reflected_data).value();
-  }
-
-  for (const auto &[key_val, n_processing] : util::indexed(reflected_sources)) {
-    const auto &[src, reflection_data] = key_val;
-    const std::filesystem::path output_file =
-      mode.output_dir / src.stem().replace_extension(".hpp");
-    if (cli::verbosity_level::info & cli.verbosity) {
-      fmt::println("Generating reflection header [{}/{}]: {} -> {}",
-        n_processing + 1,
-        reflected_sources.size(),
-        src.string(),
-        output_file.string());
-    }
-
-    std::ofstream f{output_file, std::ios::binary};
-    if (const auto res = codegen::emit_inplace_reflection_header_file(
-          {
-            // todo: options
-          },
-          f,
-          reflection_data);
-      !res) {
-      // refactorme: I didn't stop on errors for when running pipelines. But
-      // stop here -> wasting everything else...
-      return tl::unexpected(
-        fmt::format("Error generating reflection header {}: {}",
-          output_file.string(),
-          res.error()));
-    };
-
-    if (cli::verbosity_level::info & cli.verbosity) {
-      fmt::println("Successfully generated {}", output_file.string());
-    }
-  }
-
-  return {};
-}
-
 } // namespace
 
 // allowing to configure specific things:
@@ -565,15 +351,16 @@ int main(int argc, char **argv) {
           return fmt::format_to(ctx.out(), "{}", p.string());
         }));
 
-  const auto success = std::visit(
-    [&](const auto &mode) {
-      return run_pipeline(mode, *cli, src_files, *compilation_db);
-    },
-    cli->mode);
-  if (!success) {
-    std::cerr << fmt::format("{}\n", success.error());
-    return -1;
-  }
+  // fixme:
+  // const auto success = std::visit(
+  //   [&](const auto &mode) {
+  //     return run_pipeline(mode, *cli, src_files, *compilation_db);
+  //   },
+  //   cli->mode);
+  // if (!success) {
+  //   std::cerr << fmt::format("{}\n", success.error());
+  //   return -1;
+  // }
   // todo: logging?
   return 0;
 }
