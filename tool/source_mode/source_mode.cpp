@@ -1,13 +1,17 @@
 
 #include "tool/source_mode.h"
+#include "fmt/base.h"
+#include "tool/cli.hpp"
+#include "tool/source_mode/transforms.h"
 
+#include "tool/ast.hpp"
 #include "tool/ast/util.h"
 #include "tool/reflection.hpp"
-#include "tool/source_mode/transforms.h"
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
 #include <tl/expected.hpp>
+#include <type_traits>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -15,309 +19,342 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated"
-#include <clang/AST/ASTDumper.h>
-#include <clang/AST/ASTImporter.h>
 #include <clang/AST/DeclBase.h>
-#include <clang/Basic/Diagnostic.h>
-#include <clang/Basic/FileManager.h>
-#include <clang/Basic/LangOptions.h>
-#include <clang/Frontend/ASTUnit.h>
-#include <clang/Frontend/CompilerInstance.h>
-#include <clang/Frontend/PrecompiledPreamble.h>
-#include <clang/Serialization/PCHContainerOperations.h>
 #pragma GCC diagnostic pop
 
-#include <algorithm>
 #include <cassert>
-#include <cstddef>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
-namespace {}
+namespace {
+using namespace tool::source_mode;
+namespace refl = tool::refl;
+
+[[maybe_unused]] bool is_cpp_file(const std::filesystem::path &filename) {
+  const auto &ext = filename.extension();
+  return ".cpp" == ext || ".cxx" == ext || ".c" == ext;
+}
+
+// refactorme: use map transform
+std::map<tool::refl::type_id, match::reflected_type_data>
+  collect_dependency_types(const std::set<tool::refl::type_id> &resolved_types,
+    const clang::SourceManager &sm,
+    // todo: not only `CXXRecordDecl`
+    const clang::CXXRecordDecl &reflected_type_decl) {
+  std::map<tool::refl::type_id, match::reflected_type_data> dependency_types;
+
+  for (const clang::CXXRecordDecl *_rdecl :
+    util::ast::recursively_collect_dependency_types(reflected_type_decl,
+      resolved_types)) {
+    const clang::CXXRecordDecl &rdecl = *_rdecl;
+    const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
+
+    // todo: do not use nm_qual_type to uniquely identify the type
+    dependency_types[nm_qual_type] = {
+      .definition = util::ast::resolve_definition(rdecl, sm),
+      .fields = util::ast::resolve_struct_fields(rdecl.fields()),
+    };
+  }
+
+  return dependency_types;
+}
+
+void print_type_dependencies(
+  const std::map<refl::type_id, match::reflected_type_data> &types) {
+  fmt::println("{}",
+    util::join(types, "\n", [](const auto &id_data_pair, fmt::context &ctx) {
+      const auto &[id, data] = id_data_pair;
+      return fmt::format_to(ctx.out(),
+        "resolved as dependency type {}:{}",
+        id,
+        data.definition.nm_qual_type.value_or("(unnamed)"));
+    }));
+}
+
+auto fold_resolved(transforms::tu_data _accum,
+  match::reflected_type::result _result) noexcept
+  -> tl::expected<transforms::tu_data, std::string> {
+  return std::visit(
+    [&]<typename Result>(Result &&result) {
+      const tool::cli::verbosity_level verbosity = _accum._verbosity;
+      tl::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
+      // todo:
+      //   check for confilcts and inconcistencies. Note: within a single TU,
+      //   makes sense to check for tool-related expectations (asserts). AST
+      //   build errors would be detected way before this code
+
+      // refactorme: use pattern matcher
+      using result_type = std::decay_t<Result>;
+      if constexpr (!std::is_same_v<match::already_reflected, result_type>) {
+        if (tool::cli::verbosity_level::parsed_types & verbosity) {
+          ::print_type_dependencies(result.type_dependencies);
+
+          if constexpr (std::is_same_v<match::reflectable, result_type>) {
+            fmt::println("resolved type {}:{}",
+              result.id,
+              *result.reflected_type.definition.nm_qual_type);
+          }
+        }
+
+        for (auto &&[id, data] : result.type_dependencies) {
+          // todo: checks for conflicts
+          accum->reflected_dependency_types[id] = std::move(data);
+          accum->resolved_types.emplace(std::move(id));
+        }
+
+        if constexpr (std::is_same_v<match::reflectable, result_type>) {
+          // todo: checks for conflicts
+          accum->reflected_types[result.id] = std::move(result.reflected_type);
+          accum->resolved_types.emplace(std::move(result.id));
+        }
+      }
+
+      return accum;
+    },
+    std::move(_result));
+}
+
+auto fold_resolved(transforms::tu_data _accum,
+  match::reflected_impl::result result) noexcept
+  -> tl::expected<transforms::tu_data, std::string> {
+  tl::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
+  // todo: check for conflicts
+
+  accum->reflected_impls[result.id] = std::move(result.definition_data);
+  accum->resolved_types.emplace(std::move(result.id));
+  return accum;
+}
+
+auto fold_resolved(transforms::tu_data _accum,
+  match::reflected_call::result result) noexcept
+  -> tl::expected<transforms::tu_data, std::string> {
+  tl::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
+
+  accum->reflected_calls.emplace_back(std::move(result.call_signature));
+  accum->includes.merge(std::move(result.includes));
+  accum->std_includes.merge(std::move(result.std_includes));
+
+  return accum;
+}
+
+} // namespace
 
 namespace tool {
+
 tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
   const cli::source_mode &mode,
   const cli::options &cli,
   const std::vector<std::filesystem::path> &sources,
   const clang::tooling::CompilationDatabase &compilation_db) noexcept {
-  // todo: use this for tu_pipeline
-  // tool::node_transform{
-  //   .match_node = matches::reflected_type{},
-  //   .resolve_node = //
-  //   [&resolved_types = std::as_const(resolved_types),
-  //     verbosity =
-  //       cli.verbosity](const matches::reflected_type::node_type &n,
-  //     const clang::ASTUnit &ast)
-  //     -> tl::expected<typename matches::reflected_type::result,
-  //       std::string> {
-  //     return matches::reflected_type::resolve(n,
-  //       ast,
-  //       resolved_types,
-  //       cli::print_debug(verbosity));
-  //   },
-  //   .fold_result = //
-  //   [verbosity = cli.verbosity](reflection_data _accum,
-  //     matches::reflected_type::result r)
-  //     -> tl::expected<reflection_data, std::string> {
-  //     tl::expected<reflection_data, std::string> accum{std::move(_accum)};
+  const tu_pipeline run_pipeline{
+    .resource_dir = cli.resource_dir,
+    .compilation_db = compilation_db,
+    .verbosity = cli.verbosity,
+    .mode = mode,
 
-  //     if (cli::verbosity_level::parsed_types & verbosity)
-  //       print(r);
+    .transforms =
+      []<typename... Match>(Match... m) {
+        return std::tuple{node_transform{
+          .match_node = m,
+          .resolve_node = transforms::resolve_reflected_node<Match>,
+          .fold_result = transforms::fold_resolved_types,
+        }...};
+      }(match::reflected_type{},
+        match::reflected_impl{},
+        match::reflected_call{}),
+  };
 
-  //     // todo: populate when implemented/if needed
-  //     (void)accum->refl_includes;
+  std::map<std::filesystem::path, transforms::tu_data>
+    accum_reflected_data_by_source;
+  for (const auto &[src, n_processing] : util::indexed(sources)) {
+    if (cli::verbosity_level::info & cli.verbosity) {
+      fmt::println("[{}/{}] running source mode for file: {}\t\r",
+        n_processing + 1,
+        sources.size(),
+        src.string());
+    }
+    tl::expected tu_reflected_data = run_pipeline(
+      transforms::tu_data{
+        // todo:
+        //   reuse resolved types from other TUs. As of now just check for
+        //   conflicts when merging later
+        .resolved_types = {},
+        ._verbosity = cli.verbosity,
+      },
+      src);
+    if (!tu_reflected_data) {
+      if (cli::print_debug(cli.verbosity)) {
+        fmt::println("DEBUG: error running pipeline for file {}: {}",
+          src.string(),
+          tu_reflected_data.error());
+      }
 
-  //     for (auto &&[name, data] : r.matched_type_dependencies) {
-  //       // todo: merge with conflicts check
-  //       accum->reflected_types.emplace(
-  //         to_reflected_type(std::move(name), std::move(data)));
-  //     }
+      return tl::unexpected(
+        fmt::format("{}: AST transform failed with error: {}",
+          src.string(),
+          std::move(tu_reflected_data).error()));
+    }
+    accum_reflected_data_by_source[src] = std::move(tu_reflected_data).value();
+  }
 
-  //     if (r.matched_type) {
-  //       auto &&[name, data] = *r.matched_type;
-  //       accum->reflected_types.emplace(
-  //         to_reflected_type(std::move(name), std::move(data)));
-  //     }
+  // todo: merge everything
+  const std::filesystem::path output_file = mode.output_dir / mode.output_file;
+  const auto output =
+    codegen::prepare_data(std::move(accum_reflected_data_by_source));
+  if (!output) {
+    return tl::unexpected(
+      fmt::format("{}: failed to prepare codegen data with error: {}",
+        output_file.string(),
+        std::move(output).error()));
+  }
 
-  //     return accum;
-  //   },
-  // },
+  std::ofstream f{output_file, std::ios::binary};
+  if (const auto res = codegen::emit_reflection_cpp_file({}, f, *output);
+    !res) {
+    return tl::unexpected(
+      fmt::format("{}: failed to generate source file with error: {}",
+        output_file.string(),
+        std::move(output).error()));
+  };
 
-  // for (const auto &[src, n_processing] : util::indexed(src_files)) {
-  //   tl::expected ast = parse_ast(src, n_processing + 1);
-  //   if (!ast) {
-  //     llvm::errs() << ast.error();
-  //     return -1;
-  //   }
+  if (cli::verbosity_level::info & cli.verbosity) {
+    fmt::println("Successfully generated {}", output_file.string());
+  }
 
-  //   using ast_match = std::variant<
-  //     // refactorme: should this run only in the `inplace-reflection` mode?
-  //     tool::refl::matches::reflected_indexed_type,
-
-  //     tool::refl::matches::reflected_type,
-  //     tool::refl::matches::reflected_impl,
-  //     tool::refl::matches::reflected_call,
-
-  //     tool::refl::matches::_debug_templ_spec_decl>;
-  //   tl::expected matches = tool::match_ast_nodes( //
-  //     std::type_identity<ast_match>{},
-  //     **ast,
-
-  //     // refactorme: pass verbosity
-  //     tool::cli::print_debug(cli->verbosity));
-  //   if (!matches) {
-  //     llvm::errs() << matches.error();
-  //     return -1;
-  //   }
-
-  //   for (const ast_match &m : *matches) {
-  //     tl::expected ctx_delta = //
-  //       tool::refl::resolve_matched_node(m,
-  //         **ast,
-  //         ctx,
-  //         // refactorme: pass verbosity
-  //         tool::cli::print_debug(cli->verbosity));
-
-  //     if (!ctx_delta) {
-  //       errors.emplace_back(std::move(ctx_delta).error());
-  //       continue;
-  //     }
-
-  //     tl::expected updated = tool::refl::update(std::move(ctx), //
-  //       std::move(ctx_delta).value(),
-  //       // refactorme: pass verbosity
-  //       tool::cli::print_debug(cli->verbosity));
-
-  //     if (!updated) {
-  //       std::cerr //
-  //         << fmt::format("Error updating context: {}",
-  //              std::move(updated).error());
-  //       return -1;
-  //     }
-
-  //     ctx = std::move(updated).value();
-  //   }
-
-  //   // todo: errors, add flag to stop on errors
-  //   if (!errors.empty()) {
-  //     std::cerr //
-  //       << fmt::format("Errors while matching nodes: {}",
-  //            fmt::join(errors, ", "));
-  //     return -1;
-  //   }
-
-  // }
-  // auto validated_reflection_data = codegen::prepare_input(std::move(ctx),
-  // mode); if (!validated_reflection_data) {
-  //   return tl::unexpected(
-  //     std::pair{fmt::format("Error while validating data: {}",
-  //                 std::move(validated_reflection_data).error()),
-  //       -1});
-  // }
-
-  // // todo: validation?
-  // const std::filesystem::path output_file = mode.output_dir /
-  // mode.output_file;
-
-  // if (cli::verbosity_level::info & cli->verbosity)
-  //   fmt::println("Generating reflection file: {}", output_file.string());
-
-  // std::ofstream f{output_file, std::ios::binary};
-  // if (const auto res = codegen::emit_reflection_cpp_file(
-  //       {
-  //         // todo: options
-  //       },
-  //       f,
-  //       *validated_reflection_data);
-  //   !res) {
-  //   return tl::unexpected(std::pair{res.error(), -1});
-  // };
-
-  // return fmt::format("Successfully generated {}.", output_file.string());
-
-  // todo: implement
-  return tl::unexpected(std::string("target mode not implemented"));
+  return {};
 }
-} // namespace tool
 
-// fixme: remove, implement
-#ifdef _IMPLEMENTED
-namespace tool::refl::matches {
+namespace source_mode {
 
-auto reflected_type::resolve(const node_type &node,
+auto match::reflected_type::resolve(const node_type &node,
   const clang::ASTUnit &ast,
-  const std::unordered_set<std::string> &resolved_types,
-  bool print_debug) -> tl::expected<result, std::string> {
-  // Reflected type is detected from `omni::detail::_reflected_type<T>`
-  // specialization.
+  const std::set<refl::type_id> &resolved_types,
+  [[maybe_unused]] bool print_debug) noexcept
+  -> tl::expected<result, std::string> {
+  using namespace refl;
+
+  // omni::detail::_reflected_type<T>
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  tl::expected _template_arg_0_type =
+  tl::expected _reflected_type =
     util::ast::get_template_type_arg(template_decl, 0);
-  if (!_template_arg_0_type)
-    return tl::unexpected(std::move(_template_arg_0_type).error());
-  const clang::Type &template_arg_0_type = **_template_arg_0_type;
-  // fixme: what about fundamental types?
-  //  Fundamental types can be caught by the 'front end' (by predefined
-  //  specializations)
-  //  I think I just need to skip them. Also need to write a test that involves
-  //  fundamental or non-user defined types. However, I think it is a rather
-  //  complex question whether I should allow it or not.
-  if (!template_arg_0_type.isStructureOrClassType()) {
+  if (!_reflected_type)
+    return tl::unexpected(std::move(_reflected_type).error());
+  const clang::Type &reflected_type = **_reflected_type;
+
+  if (reflected_type.isFundamentalType()) {
+    return non_reflectable{
+      .id = reflected_type
+        // fixme:
+        //   I don't think it does what I need - (namespace-qualified typename)
+        .getTypeClassName(),
+      .definition = std::nullopt,
+      .type_dependencies = {},
+    };
+  }
+
+  // fixme: handle unions, C-arrays, (maybe) pointers
+  if (!reflected_type.isStructureOrClassType()) {
     return tl::unexpected(fmt::format("unsupported type {} in {}",
-      // fixme: `getTypeClassName` doesn't do what I thought it does
-      template_arg_0_type.getTypeClassName(),
+      // fixme:
+      //   I don't think it does what I need - (namespace-qualified typename)
+      reflected_type.getTypeClassName(),
       template_decl.getName()));
   }
 
   const clang::CXXRecordDecl &reflected_type_decl =
-    *template_arg_0_type.getAsCXXRecordDecl();
-  // todo: `hasDefinition`
-  //   at this point (as of this writing) forward declarations are not allowed.
-  //   however, with inplace mode I can check at the end of TU
-
-  const std::string reflected_type_nm_qual_typename =
+    *reflected_type.getAsCXXRecordDecl();
+  const std::string nm_qual_type =
     reflected_type_decl.getQualifiedNameAsString();
-  if (resolved_types.contains(reflected_type_nm_qual_typename))
-    return {};
 
-  // refactorme: this variable is mutable in the middle of the scope
-  auto reflectable_data =
-    util::ast::recursively_collect_dependency_types(reflected_type_decl,
-      resolved_types);
-
-  std::unordered_map<std::string, reflected_type_data> reflected_types;
-
-  for (const clang::CXXRecordDecl *_rdecl : reflectable_data) {
-    const clang::CXXRecordDecl &rdecl = *_rdecl;
-    const std::string nm_qual_type = rdecl.getQualifiedNameAsString();
-
-    assert(!rdecl.isInStdNamespace()
-      && "`recursively_collect_reflectable_types` is "
-           "not supposed to return std type");
-    assert(!resolved_types.contains(nm_qual_type)
-      && "`recursively_collect_reflectable_types` is "
-           "not supposed to return resolved types");
-
-    if (print_debug && nm_qual_type.empty())
-      fmt::println("DEBUG: empty namespace-qualified type resolved.");
-
-    // fixme: what about unnamed/local types?
-    reflected_types[nm_qual_type] = {
-      .definition_data =
-        util::ast::resolve_definition(rdecl, ast.getSourceManager()),
-      .fields = util::ast::resolve_struct_fields(rdecl.fields()),
+  // todo: do not use nm_qual_type to uniquely identify the type
+  if (resolved_types.contains(nm_qual_type)) {
+    return already_reflected{
+      .id = nm_qual_type,
     };
   }
 
-  // refactorme: UGLEEE BEATCH
-  auto matched_type = reflected_types.find(reflected_type_nm_qual_typename);
-  return result{
-    .matched_type = reflected_types.cend() != matched_type
-    ? [](auto extracted) -> decltype(result::matched_type) {
-      return std::pair{std::move(extracted).key(),
-        std::move(extracted).mapped()};
-    }(reflected_types.extract(matched_type))
-    : std::nullopt,
-    .matched_type_dependencies = std::move(reflected_types),
+  // todo: `hasDefinition`
+  //   at this point (as of this writing) forward declarations are not allowed.
+  //   however, with inplace mode I can check at the end of TU
+  if (!reflected_type_decl.hasDefinition()) {
+    return tl::unexpected(
+      fmt::format("forward declarations are not allowed: {}", nm_qual_type));
+  }
+
+  // fixme: non_reflectable
+
+  return reflectable{
+    // todo: do not use nm_qual_type to uniquely identify the type
+    .id = nm_qual_type,
+    .reflected_type =
+      {
+        .definition = util::ast::resolve_definition(reflected_type_decl,
+          ast.getSourceManager()),
+        .fields =
+          util::ast::resolve_struct_fields(reflected_type_decl.fields()),
+      },
+    .type_dependencies = ::collect_dependency_types(resolved_types,
+      ast.getSourceManager(),
+      reflected_type_decl),
   };
 }
 
-auto reflected_impl::resolve(const node_type &node,
+auto match::reflected_impl::resolve(const node_type &node,
   const clang::ASTUnit &ast,
-  const std::unordered_set<std::string> &resolved_types,
-  [[maybe_unused]] bool print_debug) -> tl::expected<result, std::string> {
+  const std::set<refl::type_id> &resolved_types,
+  [[maybe_unused]] bool print_debug) noexcept
+  -> tl::expected<result, std::string> {
   using namespace tool::refl;
 
-  // todo: comment about template signature
+  // omni::detail::_reflected_impl<T>
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  tl::expected _template_arg_0 =
+  tl::expected _reflected_type =
     util::ast::get_template_type_arg(template_decl, 0);
-  if (!_template_arg_0)
-    return tl::unexpected(std::move(_template_arg_0).error());
-  const clang::Type &template_arg_0 = **_template_arg_0;
+  if (!_reflected_type)
+    return tl::unexpected(std::move(_reflected_type).error());
+  const clang::Type &reflected_type = **_reflected_type;
 
   // todo:
   //   `hasDefinition` - at this point (as of this writing) forward declarations
   //   are not allowed.
-  if (!template_arg_0.isStructureOrClassType()) {
+  if (!reflected_type.isStructureOrClassType()) {
     const std::string_view detail_struct_name = template_decl.getName();
     return tl::unexpected(fmt::format("unsupported type {} in {}",
       // fixme: `getTypeClassName` doesn't do what I thought it does
-      template_arg_0.getTypeClassName(),
+      reflected_type.getTypeClassName(),
       detail_struct_name));
   }
 
   // type declaration of <T>
   const clang::CXXRecordDecl &reflected_type_decl =
-    *template_arg_0.getAsCXXRecordDecl();
-  // as of this writing there's a "fixme" to remove `std::string`, but it is not
-  // clear whether a new type will be used or another function should be called
+    *reflected_type.getAsCXXRecordDecl();
+
   std::string nm_qual_type = reflected_type_decl.getQualifiedNameAsString();
   if (resolved_types.contains(nm_qual_type))
     return {};
 
   return result{
-    .callable_nm_qual_type = std::move(nm_qual_type),
-    .callable_definition_data =
-      util::ast::resolve_definition(reflected_type_decl,
-        ast.getSourceManager()),
+    // todo: do not use nm_qual_type to uniquely identify the type
+    .id = nm_qual_type,
+    .definition_data = util::ast::resolve_definition(reflected_type_decl,
+      ast.getSourceManager()),
   };
 }
 
-auto reflected_call::resolve(const node_type &node,
-  const clang::ASTUnit &ast,
-  [[maybe_unused]] const std::unordered_set<std::string> &resolved_types,
-  [[maybe_unused]] bool print_debug) -> tl::expected<result, std::string> {
+auto match::reflected_call::resolve(const node_type &node,
+  const clang::ASTUnit &ast) noexcept -> tl::expected<result, std::string> {
   using namespace tool::refl;
 
   const static auto printing_policy = [] {
     clang::PrintingPolicy p{{}};
-    // todo: do I need to supress the tag here?
-    // It is actually needed in template specialization
+    // todo:
+    //   do I need to supress the tag here? It is actually needed in template
+    //   specialization
     p.SuppressTagKeyword = true;
     p.SuppressScope = false;
     p.PrintCanonicalTypes = true;
@@ -329,7 +366,8 @@ auto reflected_call::resolve(const node_type &node,
 
   func_signature call_signature;
   call_signature.args.reserve(refl_call_decl.parameters().size());
-  std::set<std::filesystem::path> std_includes, includes;
+  std::set<std::filesystem::path> std_includes;
+  std::set<std::filesystem::path> includes;
 
   for (const clang::ParmVarDecl *parm_decl : refl_call_decl.parameters()) {
     const clang::QualType _qtype = parm_decl->getType(); //< keep alive
@@ -362,11 +400,8 @@ auto reflected_call::resolve(const node_type &node,
           .ref_type = reference_type::ref_none,
         };
       }(_qtype);
-    // todo: validate that the type is not a forward declaration,
-    //   since they are not supported at this point
 
     call_signature.args.push_back({
-      // refactorme: use `type` (why? I forgot...)
       .nm_qual_type = clang::QualType::getAsString(
         [](clang::SplitQualType q) {
           q.Quals.removeCVRQualifiers();
@@ -377,11 +412,15 @@ auto reflected_call::resolve(const node_type &node,
       .ref_type = ref_type,
     });
 
-    // fixme: what about unions, built-in arrays? their dependency types'
-    // headers must be also included
+    // fixme:
+    //   what about unions, built-in arrays? their dependency types' headers
+    //   must be also included
     if (!type.isStructureOrClassType())
       continue;
 
+    // refactorme:
+    //   (see refactorme for `match::reflected_impl`). This duplication can and
+    //   should be avoided
     const clang::CXXRecordDecl &rd = *type.getAsCXXRecordDecl();
     auto definition = util::ast::resolve_definition(rd, ast.getSourceManager());
     rd.isInStdNamespace()
@@ -395,6 +434,31 @@ auto reflected_call::resolve(const node_type &node,
     .includes = std::move(includes),
   };
 }
+
+auto transforms::fold_resolved_types(tu_data accum,
+  match_result_variant<match::reflected_type,
+    match::reflected_impl,
+    match::reflected_call> result) noexcept
+  -> tl::expected<tu_data, std::string> {
+  return std::visit(
+    [&]<typename R>(R &&resolved) {
+      return ::fold_resolved(std::move(accum), std::forward<R>(resolved));
+    },
+    std::move(result));
+}
+
+auto codegen::prepare_data(std::map<std::filesystem::path, transforms::tu_data>
+    reflection_data_by_source) noexcept
+  -> tl::expected<reflection_data, std::string> {
+  // todo: implement
+  return tl::unexpected("prepare_data not implemented");
+}
+
+} // namespace source_mode
+} // namespace tool
+
+// fixme: remove, implement
+#ifdef _IMPLEMENTED
 
 auto _debug_templ_spec_decl::resolve(const node_type &node,
   const clang::ASTUnit &ast,

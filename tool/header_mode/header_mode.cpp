@@ -53,7 +53,7 @@ void print_type_dependencies(const List<match::type_dependency, T...> &types) {
       "\n",
       [](const match::type_dependency &d, fmt::context &ctx) {
         return fmt::format_to(ctx.out(),
-          "",
+          "resolved as dependency type {}:{}",
           d.id,
           d.reflected_data.definition.nm_qual_type.value_or("(unnamed)"));
       }));
@@ -225,16 +225,17 @@ auto match::reflected_indexed_type::resolve(const node_type &node,
   const std::string nm_qual_type =
     reflected_type_decl.getQualifiedNameAsString();
 
+  // todo: do not use nm_qual_type to uniquely identify the type
+  if (resolved_types.contains(nm_qual_type)) {
+    return already_reflected{
+      .id = nm_qual_type,
+    };
+  }
+
   if (!reflected_type_decl.hasDefinition()) {
     return tl::unexpected(
       fmt::format("forward declarations are not allowed: {}", nm_qual_type));
   }
-
-  // todo: do not use nm_qual_type to uniquely identify the type
-  if (resolved_types.contains(nm_qual_type))
-    return already_reflected{
-      .id = nm_qual_type,
-    };
 
   // fixme: non_reflectable
 

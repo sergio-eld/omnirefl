@@ -49,18 +49,6 @@ struct type_dependency {
   }
 };
 
-// When reflecting a type (indexed), result can be:
-// - non_reflectable:
-//   - fundamental types
-//   - std types or 3rd party, but typically will have dependent types
-//   - ???
-//
-// - already_resolved:
-//   Type (and all dependent types) have been already resolved
-//
-// - reflected
-//   Type has been successfully resolved.
-
 struct reflectable {
   refl::type_id id;
 
@@ -69,6 +57,7 @@ struct reflectable {
   size_t index;
   reflected_type_data reflected_data;
 
+  // refactorme: do I need set? Why not just use `std::map<type_id, reflected_type_data>`
   std::set<type_dependency, std::less<>> type_dependencies;
 };
 
@@ -77,7 +66,7 @@ struct already_reflected {
 };
 
 /**
- * Type can't be reflected:
+ * Type that itself can't be reflected, but has reflectable type dependencies:
  *  - fundamental types
  *  - std types or 3rd party, but typically will have dependent types
  *  - ???
@@ -90,6 +79,7 @@ struct non_reflectable {
   size_t index;
   std::optional<refl::type_definition_data> definition;
 
+  // refactorme: do I need the set?
   std::set<type_dependency, std::less<>> type_dependencies;
 };
 

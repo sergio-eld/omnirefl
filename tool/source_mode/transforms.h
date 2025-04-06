@@ -1,5 +1,6 @@
 #pragma once
 
+#include "tool/cli.hpp"
 #include "tool/reflection.hpp"
 
 #include <tl/expected.hpp>
@@ -22,27 +23,48 @@
 namespace tool::source_mode {
 namespace match {
 
+struct function_signature_arg {
+  // fully namespace-qualified type
+  std::string nm_qual_type;
+  bool is_const : 1;
+  refl::reference_type ref_type;
+};
+
+struct func_signature {
+  std::vector<function_signature_arg> args;
+};
+
 // todo: support reflection of non-reflectable dependency types
 struct reflected_type_data {
-  refl::type_definition_flags definition_data;
+  refl::type_definition_data definition;
   std::vector<refl::struct_field_data> fields;
 };
 
-// todo:
-//   do I need to add a specialization based on `mode`? For inplace mode headers
-//   are not needed
-//
+struct reflectable {
+  refl::type_id id;
+
+  reflected_type_data reflected_type;
+  std::map<refl::type_id, reflected_type_data> type_dependencies;
+};
+
+struct already_reflected {
+  refl::type_id id;
+};
+
+struct non_reflectable {
+  refl::type_id id;
+  std::optional<reflected_type_data> definition;
+  std::map<refl::type_id, reflected_type_data> type_dependencies;
+};
+
 // types reflected via instantiation of a designated template struct
 struct reflected_type {
-  // todo: remove. `binding_tag` is implementation-specific
   constexpr static const char binding_tag[] = "reflected_type";
-
-  // todo: this should be deducible from the ASTMatchers' expression
   using node_type = clang::ClassTemplateSpecializationDecl;
+
   auto operator()() const noexcept {
     using namespace clang::ast_matchers;
 
-    // matching `omni::detail::_reflected_type<T>`
     return classTemplateSpecializationDecl( //
       unless(isInStdNamespace()),
       hasAncestor(namespaceDecl(hasName("omni"))),
@@ -54,34 +76,19 @@ struct reflected_type {
     );
   }
 
-  struct result {
-    // nullopt, if data has been already reflected, or if it is a
-    // non-reflectable type: for example, std::tuple<T...> itself can't be
-    // reflected, but types `T...` can.
-    std::optional<std::pair<std::string /*nm_qual_type*/, reflected_type_data>>
-      matched_type;
-    std::unordered_map<std::string, reflected_type_data>
-      matched_type_dependencies;
-  };
-
-  static tl::expected<result, std::string> resolve(const node_type &node,
+  using result = std::variant<reflectable, already_reflected, non_reflectable>;
+  static auto resolve(const node_type &node,
     const clang::ASTUnit &ast,
     const std::set<refl::type_id> &resolved_types,
-    bool print_debug = false);
+    bool print_debug = false) noexcept -> tl::expected<result, std::string>;
 };
 
-// todo:
+// refactorme:
 //   consider removing this separate tag and just use `reflected_call`. having
 //   those as separate introduces possible inconsistency: reflected_call without
 //   reflected_impl doesn't make any sense
-//
-// implementation types reflected via instantiation of a designated template
-// struct
 struct reflected_impl {
-  // todo: remove. `binding_tag` is implementation-specific
   constexpr static const char binding_tag[] = "reflected_impl";
-
-  // todo: this should be deducible from the ASTMatchers' expression
   using node_type = clang::ClassTemplateSpecializationDecl;
 
   auto operator()() const noexcept {
@@ -99,23 +106,18 @@ struct reflected_impl {
   }
 
   struct result {
-    // namespace-qualified type of the callable type
-    std::string callable_nm_qual_type;
-    refl::type_definition_flags callable_definition_data;
+    refl::type_id id;
+    refl::type_definition_data definition_data;
   };
 
-  static tl::expected<result, std::string> resolve(const node_type &node,
+  static auto resolve(const node_type &node,
     const clang::ASTUnit &ast,
     const std::set<refl::type_id> &resolved_types,
-    bool print_debug = false);
+    bool print_debug = false) noexcept -> tl::expected<result, std::string>;
 };
 
-// invocations
-// only needed for target mode
 struct reflected_call {
   constexpr static const char binding_tag[] = "matched_reflected_call";
-
-  // todo: this should be deducible from the ASTMatchers' expression
   using node_type = clang::CXXMethodDecl;
 
   auto operator()() const noexcept {
@@ -129,45 +131,86 @@ struct reflected_call {
   }
 
   struct result {
-    refl::func_signature call_signature;
+    func_signature call_signature;
     std::set<std::filesystem::path> std_includes;
     std::set<std::filesystem::path> includes;
   };
 
-  static tl::expected<result, std::string> resolve(const node_type &node,
-    const clang::ASTUnit &ast,
-    const std::set<refl::type_id> &resolved_types,
-    bool print_debug = false);
+  static auto resolve(const node_type &node, const clang::ASTUnit &ast) noexcept
+    -> tl::expected<result, std::string>;
 };
+
 } // namespace match
+
+namespace transforms {
+
+// accumulated translation unit data
+struct tu_data {
+  // caching
+  std::set<refl::type_id> resolved_types;
+
+  std::map<refl::type_id, match::reflected_type_data> reflected_types = {};
+  std::map<refl::type_id, match::reflected_type_data>
+    reflected_dependency_types = {};
+  std::map<refl::type_id, refl::type_definition_data> reflected_impls = {};
+
+  std::vector<match::func_signature> reflected_calls = {};
+
+  // detected from 'other' args of `reflected_call`
+  std::set<std::filesystem::path> std_includes = {};
+  std::set<std::filesystem::path> includes = {};
+
+  // todo: forward declarations to be resolved (in the next TUs)
+
+  cli::verbosity_level _verbosity;
+};
+
+template <typename Match>
+auto resolve_reflected_node(const typename Match::node_type &n,
+  const clang::ASTUnit &ast,
+  const tu_data &tu_data) noexcept
+  -> tl::expected<typename Match::result, std::string> {
+  if constexpr (std::is_same_v<match::reflected_call, Match>) {
+    return Match::resolve(n, ast);
+  } else {
+    return Match::resolve(n,
+      ast,
+      tu_data.resolved_types,
+      cli::print_debug(tu_data._verbosity));
+  }
+}
+
+template <typename... Matches>
+using match_result_variant = std::variant<typename Matches::result...>;
+
+auto fold_resolved_types(tu_data accum,
+  match_result_variant<match::reflected_type,
+    match::reflected_impl,
+    match::reflected_call> result) noexcept
+  -> tl::expected<tu_data, std::string>;
+
+} // namespace transforms
 
 namespace codegen {
 
 // used to generate `omni::reflected_t<reflected_type>` specializations
-struct reflected_type {
+struct reflected_specialization_data {
   // fully namespace-qualified type
-  std::string name;
+  std::string nm_qual_type;
 
   // list of public fields
   std::vector<tool::refl::struct_field_data> fields;
 
-  // todo: use enum from `TagTypeKind::`, but what about `Enum`?
-  // `reflected_type::field_names` shouldn't be 'reused'
+  // todo: enum
   bool is_class;
 
-  struct _cmp {
-    bool operator()(const reflected_type &lhs,
-      const reflected_type &rhs) const noexcept {
-      // types are unique
-      return lhs.name < rhs.name;
-    }
-  };
+  friend bool operator<(const reflected_specialization_data &lhs,
+    const reflected_specialization_data &rhs) noexcept {
+    return lhs.nm_qual_type < rhs.nm_qual_type;
+  }
 };
-// todo: consider reusing data types from `reflection.hpp`
-// this struct can and should be used for standalone unit testing (without
-// actually building and ast or parsing a source file)
-struct target_mode_reflection_data {
-  // todo: profile and optimize (std::set -> std::vector)
+
+struct reflection_data {
   // list of unique header paths (non-reflection)
   std::set<std::string> includes;
 
@@ -178,25 +221,25 @@ struct target_mode_reflection_data {
   std::set<std::string> refl_impl_includes;
 
   // list of unique reflected types
-  std::set<reflected_type, typename reflected_type::_cmp> reflected_types;
+  std::set<reflected_specialization_data> reflected_types;
 
   // list of unique reflected call function signatures
-  std::vector<tool::refl::func_signature> reflected_calls;
+  std::vector<match::func_signature> reflected_calls;
 };
 
-// fixme:
-// tl::expected<target_mode_reflection_data, std::string>
-//   prepare_input(tool::refl::context ctx, tool::cli::target_mode) noexcept;
+tl::expected<reflection_data, std::string> prepare_data(
+  std::map<std::filesystem::path, transforms::tu_data>
+    reflection_data_by_source) noexcept;
 
 struct options {
-  // todo: options
+  // todo:
   // - formatting
   // - annotating
 };
 
 tl::expected<void, std::string> emit_reflection_cpp_file(options,
   std::ostream &os,
-  const target_mode_reflection_data &data);
+  const reflection_data &data);
 
 } // namespace codegen
 } // namespace tool::source_mode
