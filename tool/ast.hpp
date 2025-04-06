@@ -27,7 +27,7 @@
 namespace tool {
 // todo: add continious benchmarking to CI before optimizing this
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
-  parse_ast_from_source(const cli::target_mode &,
+  parse_ast_from_source(const cli::source_mode &,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     // refactorme: pass command-line args
@@ -35,7 +35,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
 
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
-  parse_ast_from_source(const cli::inplace_mode &,
+  parse_ast_from_source(const cli::header_mode &,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     // refactorme: pass command-line args

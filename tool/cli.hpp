@@ -55,12 +55,12 @@ the tool should be invoked with workdir == CMAKE_BINARY_DIR
 // ./tool [p]--exclude=false [p][<source>...] [p]-o=reflected_<target_name>.cpp
 //   [p]--output_dir=<workdir> --compilation-db=<workdir>
 //   --resource-dir=<deduced>
-struct target_mode {
+struct source_mode {
   std::filesystem::path output_file;
   std::filesystem::path output_dir;
 };
 
-struct inplace_mode {
+struct header_mode {
   std::filesystem::path output_dir;
 };
 
@@ -115,7 +115,7 @@ inline constexpr bool print_debug(verbosity_level v) noexcept {
 }
 
 struct options {
-  std::variant<target_mode, inplace_mode> mode;
+  std::variant<source_mode, header_mode> mode;
 
   // list of .cpp paths
   std::vector<std::filesystem::path> sources;

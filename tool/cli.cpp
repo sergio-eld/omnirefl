@@ -5,8 +5,6 @@
 
 #include <CLI/CLI.hpp>
 #include <CLI/Error.hpp>
-#include <fmt/base.h>
-#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -89,8 +87,8 @@ std::string tool::cli::to_string(const options &o) {
   std::string mode = std::visit(
     [](const auto &_m) -> std::string {
       using mode_type = std::decay_t<decltype(_m)>;
-      if constexpr (std::is_same_v<target_mode, mode_type>) {
-        const target_mode &m = _m;
+      if constexpr (std::is_same_v<source_mode, mode_type>) {
+        const source_mode &m = _m;
         return fmt::format(
           R"(target-mode,
 --output-file={},
@@ -98,7 +96,7 @@ std::string tool::cli::to_string(const options &o) {
           m.output_file.string(),
           m.output_dir.string());
       } else {
-        const inplace_mode &m = _m;
+        const header_mode &m = _m;
         return fmt::format(
           R"(inplace-mode,
 --output-dir={})",
@@ -274,10 +272,10 @@ Inplace Mode:
   using cl_flags_type = decltype(options::cl_flags);
   return options{
     .mode = cli_in_place_mode //
-      ? mode_type{inplace_mode{
+      ? mode_type{header_mode{
           .output_dir = std::move(cli_output_dir),
         }}
-      : mode_type{target_mode{
+      : mode_type{source_mode{
           .output_file = std::move(cli_output_file),
           .output_dir = std::move(cli_output_dir),
         }},
@@ -304,14 +302,14 @@ tl::expected<tool::cli::options, std::string> tool::cli::evaluate_defaults(
   std::visit(
     [](auto &_m) {
       using mode_type = std::decay_t<decltype(_m)>;
-      if constexpr (std::is_same_v<target_mode, mode_type>) {
-        target_mode &m = _m;
+      if constexpr (std::is_same_v<source_mode, mode_type>) {
+        source_mode &m = _m;
         if (m.output_dir.empty())
           m.output_dir = std::filesystem::current_path();
         if (m.output_file.empty())
           m.output_file = "reflected.cpp";
       } else {
-        inplace_mode &m = _m;
+        header_mode &m = _m;
         m.output_dir = std::filesystem::current_path();
       }
     },

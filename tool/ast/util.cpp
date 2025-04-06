@@ -1,6 +1,7 @@
 
 #include "tool/ast/util.h"
 
+#include "tool/reflection.hpp"
 #include "tool/util.hpp"
 
 #pragma GCC diagnostic push
@@ -21,6 +22,7 @@
 
 namespace {
 
+// refactorme: reflect in code instead of writing the comment below.
 // types of interest for recursive reflection:
 //   - value_type: std containers, std wrappers, std::optional
 //   - key_type: std containers
@@ -91,32 +93,33 @@ tool::refl::type_definition_data util::ast::resolve_definition(
 }
 
 std::vector<tool::refl::struct_field_data> util::ast::resolve_struct_fields(
-  const auto &fields_range) noexcept {
+  clang::RecordDecl::field_range fields_range) noexcept {
   std::vector<tool::refl::struct_field_data> r;
   for (const clang::FieldDecl *fd : fields_range) {
     // todo:
-    // logging for skipped fields, since we are not reporting them
-    // as errors todo: checks that would prevent the field from being
-    // reflected (uniouns, bitfields, what else?)
+    //   logging for skipped fields, since we are not reporting them as errors
+    //
+    // todo:
+    //   checks that would prevent the field from being reflected (uniouns,
+    //   bitfields, what else?)
 
     // todo:
-    // consider supporting non-public types with selecting based on
-    // a typename, like `fields(specific_typename)`
+    //   consider supporting non-public types with selecting based on a
+    //   typename, like `fields(specific_typename)`
     if (clang::AccessSpecifier::AS_public != fd->getAccess())
       continue;
     r.push_back({
       .name = fd->getNameAsString(),
-      // .nm_qual_type = fd->getQualifiedNameAsString(),
     });
   }
   return r;
 }
 
+// testme: struct with a tuple type field
 std::vector<const clang::CXXRecordDecl *>
   util::ast::recursively_collect_dependency_types(
     const clang::CXXRecordDecl &root,
-    const auto &resolved_types) noexcept {
-  // refactorme:
+    const std::set<tool::refl::type_id> &resolved_types) noexcept {
   std::set<const clang::CXXRecordDecl *> visited;
   std::stack<const clang::CXXRecordDecl *> to_visit;
   to_visit.push(&root);
@@ -135,11 +138,12 @@ std::vector<const clang::CXXRecordDecl *>
 
     // not generating reflection info for std types, at least for now, at least
     // here...
+    //
     // refactorme: ambiguous control flow/logic
     if (!cur->isInStdNamespace())
       visited.emplace(cur);
 
-    // we allow recursive reflection via certain member typedefs
+    // allow recursive reflection via certain member typedefs
     for (const member_typedef_decl &md : util::filtered(
            [](const member_typedef_decl &m) -> bool {
              const static std::set<std::string_view> aliases{{
@@ -185,7 +189,7 @@ std::vector<const clang::CXXRecordDecl *>
       }
     }
 
-    // fixme: just collect the types.
+    // fixme: just collect the types: determine reflectable later?
     for (const clang::FieldDecl *fd : cur->fields()) {
       if (clang::AccessSpecifier::AS_public != fd->getAccess()
         // todo: other checks that would prevent the field from being
@@ -198,7 +202,6 @@ std::vector<const clang::CXXRecordDecl *>
       if (!qt->isStructureOrClassType())
         continue;
 
-      // testme: struct with a tuple type field
       // todo: support only non-static fields
       to_visit.push(qt->getAsCXXRecordDecl());
     }

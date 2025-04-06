@@ -101,8 +101,8 @@ void configure_compiler_invocation(const Mode &m,
     p.PCHWithHdrStop = false;
     p.PCHWithHdrStopCreate = false;
 
-    if constexpr (std::is_same_v<Mode, tool::cli::inplace_mode>) {
-      const tool::cli::inplace_mode &mode = m;
+    if constexpr (std::is_same_v<Mode, tool::cli::header_mode>) {
+      const tool::cli::header_mode &mode = m;
       constexpr std::string_view k_omni_macro = "OMNI_INPLACE_REFLECTION";
 
       const auto omni_defined = std::find_if(p.Macros.begin(),
@@ -142,7 +142,7 @@ void configure_compiler_invocation(const Mode &m,
         }));
       }
     } else {
-      static_assert(std::is_same_v<Mode, tool::cli::target_mode>);
+      static_assert(std::is_same_v<Mode, tool::cli::source_mode>);
       (void)m;
       (void)verbosity;
     }
@@ -218,7 +218,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
 } // namespace
 
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
-  tool::parse_ast_from_source(const cli::target_mode &m,
+  tool::parse_ast_from_source(const cli::source_mode &m,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     const clang::tooling::CompilationDatabase &db,
@@ -227,7 +227,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
 }
 
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
-  tool::parse_ast_from_source(const cli::inplace_mode &m,
+  tool::parse_ast_from_source(const cli::header_mode &m,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     const clang::tooling::CompilationDatabase &db,

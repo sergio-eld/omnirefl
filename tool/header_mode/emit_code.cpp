@@ -1,14 +1,33 @@
 
-#include "fmt/base.h"
 #include "tool/header_mode/transforms.h"
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
 
 namespace {
+
 using namespace tool::header_mode;
 
 auto fmt_reflected_field(std::string_view field_name,
+  fmt::format_context &ctx) {
+  return fmt::format_to(ctx.out(),
+    // ad hoc: manual offset
+    R"(  struct {field_name}_t {{
+    OMNI_DEFINE_NAME_FUNC("{field_name}")
+    constexpr static auto get_value(const type &t) noexcept
+      -> const decltype(t.{field_name})& {{
+      return t.{field_name};
+    }}
+
+    template <typename V>
+    static void set_value(type &t, V &&v) {{
+      t.{field_name} = std::forward<V>(v);
+    }}
+  }} constexpr static {field_name}{{}};)",
+    fmt::arg("field_name", field_name));
+}
+
+auto fmt_indexed_reflected_field(std::string_view field_name,
   fmt::format_context &ctx) {
   return fmt::format_to(ctx.out(),
     // ad hoc: manual offset
@@ -75,27 +94,25 @@ auto fmt_indexed_specialization(size_t index,
 struct _indexed_reflected<{index}> {{
 
   // fields meta types declarations
-{reflected_fields}
+{indexed_reflected_fields}
 
   using fields_t = std::tuple<
 {field_names}
   >;
 
-  // fixme: `reflected_binding<T>` is not defined
   template <typename T>
   constexpr reflected_binding<T, fields_t> operator()(T &t) const noexcept {{
     return {{t}};
   }}
 
-  // fixme: `reflected_binding<T>` is not defined
   template <typename T>
   constexpr reflected_binding<const T, fields_t> operator()(const T &t) const noexcept {{
     return {{t}};
   }}
 }};)",
     fmt::arg("index", index),
-    fmt::arg("reflected_fields", //
-      util::join(field_names, "\n\n", fmt_reflected_field)),
+    fmt::arg("indexed_reflected_fields", //
+      util::join(field_names, "\n\n", fmt_indexed_reflected_field)),
     fmt::arg("field_names",
       util::join(field_names,
         ",\n",
@@ -137,7 +154,6 @@ tl::expected<void, std::string> codegen::emit_reflection_header_file(options,
 
 // Forward declarations of reflected types
 {forward_declarations}
-
 
 // todo: 
 //   these headers might show as unused.
@@ -181,11 +197,11 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
       util::join(data.forward_declarable_types,
         "\n\n",
         ::fmt_forward_declaration)),
-    fmt::arg("reflected_types_specializations",
+    fmt::arg("forward_declaration_specializations",
       util::join(data.forward_declarable_types,
         "\n\n",
         ::fmt_forward_declaration_specialization)),
-    fmt::arg("indexed_types_specializations",
+    fmt::arg("indexed_specializations",
       util::join(data.reflected_indexed_types,
         "\n\n",
         [](const auto &key_val, fmt::context &ctx) {
@@ -194,7 +210,6 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
         })));
 
   return {};
-
-  return tl::unexpected("not implemented");
 }
+
 } // namespace tool::header_mode

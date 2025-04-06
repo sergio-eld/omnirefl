@@ -122,6 +122,7 @@ struct reflected_indexed_type {
 } // namespace match
 
 namespace transforms {
+
 // accumulated tu data
 struct tu_data {
   // caching
@@ -133,12 +134,7 @@ struct tu_data {
 
   // reflected as dependency types: member fields, template parameters, member
   // typedefs and types
-  std::set<match::reflected_type_data> type_dependencies{};
-
-  // todo: put here dependency types that can't be forward-declared
-  // ... but why?
-  // std::map<refl::type_id/*parent*/, match::reflected_type_data>
-  //   non_forward_declarable_dependencies;
+  std::map<refl::type_id, match::reflected_type_data> type_dependencies{};
 
   cli::verbosity_level _verbosity;
 };
@@ -181,9 +177,7 @@ struct reflection_data {
     reflected_indexed_types;
 };
 
-struct options {
-  // todo: ??
-};
+struct options {};
 
 tl::expected<reflection_data, std::string> prepare_data(
   header_mode::transforms::tu_data data);

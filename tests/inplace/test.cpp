@@ -9,9 +9,9 @@
 #include <vector>
 
 namespace example {
-struct in_cpp_person {
-  std::string name;
-  int age;
+struct in_cpp_struct {
+  std::string in_cpp_field_0;
+  int in_cpp_field_1;
 };
 } // namespace example
 
@@ -28,10 +28,10 @@ struct print_field_names_simple_t {
 } // namespace example_impl
 
 TEST(print_names, in_header_struct) {
-  const example::in_header_person p{};
+  const example::in_header_struct p{};
   const static std::vector<std::string> expected{
-    "name",
-    "age",
+    "in_header_field_0",
+    "in_header_field_1",
   };
   std::vector<std::string> result;
   omni::reflected_call(example_impl::print_field_names_simple, p, result);
@@ -39,10 +39,10 @@ TEST(print_names, in_header_struct) {
 }
 
 TEST(print_names, in_cpp_struct) {
-  const example::in_cpp_person p{};
+  const example::in_cpp_struct p{};
   const static std::vector<std::string> expected{
-    "name",
-    "age",
+    "in_cpp_field_0",
+    "in_cpp_field_1",
   };
   std::vector<std::string> result;
   omni::reflected_call(example_impl::print_field_names_simple, p, result);
@@ -51,12 +51,12 @@ TEST(print_names, in_cpp_struct) {
 
 TEST(print_names, in_cpp_local_unnamed_struct) {
   struct {
-    std::string name;
-    int age;
+    std::string in_cpp_local_unnamed_field_0;
+    int in_cpp_local_unnamed_field_1;
   } p{};
   const static std::vector<std::string> expected{
-    "name",
-    "age",
+    "in_cpp_local_unnamed_field_0",
+    "in_cpp_local_unnamed_field_1",
   };
   std::vector<std::string> result;
   omni::reflected_call(example_impl::print_field_names_simple, p, result);

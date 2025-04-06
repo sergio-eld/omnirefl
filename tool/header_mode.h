@@ -14,8 +14,18 @@ class CompilationDatabase;
 
 namespace tool::header_mode {
 
+// refactorme:
+//   1. inverse dependencies with `cli`.
+//      `run_pipeline` is the 'primary' interface function that defines its own
+//      parameters. `cli` just exposes them, so `cli.h` should be the one
+//      including this header
+//
+//   2. group options.
+//      - config: (resource_dir). 
+//      - input: sources, output dir, compilation_db
+//
 tl::expected<tl::monostate, std::string> run_pipeline(
-  const cli::inplace_mode &mode,
+  const cli::header_mode &mode,
   const cli::options &cli,
   // refactorme:
   //   one source + flags + 'cache'

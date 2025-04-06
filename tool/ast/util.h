@@ -9,12 +9,14 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated"
+#include <clang/AST/Decl.h>
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/DeclTemplate.h>
 #pragma GCC diagnostic pop
 
 #include <tl/expected.hpp>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -29,7 +31,7 @@ tool::refl::type_definition_data resolve_definition(
   const clang::SourceManager &sm) noexcept;
 
 std::vector<tool::refl::struct_field_data> resolve_struct_fields(
-  const auto &fields_range) noexcept;
+  clang::RecordDecl::field_range fields_range) noexcept;
 
 /**
  * refactorme:
@@ -47,7 +49,7 @@ std::vector<tool::refl::struct_field_data> resolve_struct_fields(
  */
 std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   const clang::CXXRecordDecl &root,
-  const auto &resolved_types) noexcept;
+  const std::set<tool::refl::type_id> &resolved_types) noexcept;
 
 tl::expected<clang::Type const *, std::string> get_template_type_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,

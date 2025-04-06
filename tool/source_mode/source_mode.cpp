@@ -1,43 +1,191 @@
+
+#include "tool/source_mode.h"
+
+#include "tool/ast/util.h"
+#include "tool/reflection.hpp"
 #include "tool/source_mode/transforms.h"
+#include "tool/util.hpp"
+
+#include <fmt/core.h>
+#include <tl/expected.hpp>
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#include <clang/AST/ASTDumper.h>
+#include <clang/AST/ASTImporter.h>
+#include <clang/AST/DeclBase.h>
+#include <clang/Basic/Diagnostic.h>
+#include <clang/Basic/FileManager.h>
+#include <clang/Basic/LangOptions.h>
+#include <clang/Frontend/ASTUnit.h>
+#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/PrecompiledPreamble.h>
+#include <clang/Serialization/PCHContainerOperations.h>
+#pragma GCC diagnostic pop
+
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace {}
+
+namespace tool {
+tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
+  const cli::source_mode &mode,
+  const cli::options &cli,
+  const std::vector<std::filesystem::path> &sources,
+  const clang::tooling::CompilationDatabase &compilation_db) noexcept {
+  // todo: use this for tu_pipeline
+  // tool::node_transform{
+  //   .match_node = matches::reflected_type{},
+  //   .resolve_node = //
+  //   [&resolved_types = std::as_const(resolved_types),
+  //     verbosity =
+  //       cli.verbosity](const matches::reflected_type::node_type &n,
+  //     const clang::ASTUnit &ast)
+  //     -> tl::expected<typename matches::reflected_type::result,
+  //       std::string> {
+  //     return matches::reflected_type::resolve(n,
+  //       ast,
+  //       resolved_types,
+  //       cli::print_debug(verbosity));
+  //   },
+  //   .fold_result = //
+  //   [verbosity = cli.verbosity](reflection_data _accum,
+  //     matches::reflected_type::result r)
+  //     -> tl::expected<reflection_data, std::string> {
+  //     tl::expected<reflection_data, std::string> accum{std::move(_accum)};
+
+  //     if (cli::verbosity_level::parsed_types & verbosity)
+  //       print(r);
+
+  //     // todo: populate when implemented/if needed
+  //     (void)accum->refl_includes;
+
+  //     for (auto &&[name, data] : r.matched_type_dependencies) {
+  //       // todo: merge with conflicts check
+  //       accum->reflected_types.emplace(
+  //         to_reflected_type(std::move(name), std::move(data)));
+  //     }
+
+  //     if (r.matched_type) {
+  //       auto &&[name, data] = *r.matched_type;
+  //       accum->reflected_types.emplace(
+  //         to_reflected_type(std::move(name), std::move(data)));
+  //     }
+
+  //     return accum;
+  //   },
+  // },
+
+  // for (const auto &[src, n_processing] : util::indexed(src_files)) {
+  //   tl::expected ast = parse_ast(src, n_processing + 1);
+  //   if (!ast) {
+  //     llvm::errs() << ast.error();
+  //     return -1;
+  //   }
+
+  //   using ast_match = std::variant<
+  //     // refactorme: should this run only in the `inplace-reflection` mode?
+  //     tool::refl::matches::reflected_indexed_type,
+
+  //     tool::refl::matches::reflected_type,
+  //     tool::refl::matches::reflected_impl,
+  //     tool::refl::matches::reflected_call,
+
+  //     tool::refl::matches::_debug_templ_spec_decl>;
+  //   tl::expected matches = tool::match_ast_nodes( //
+  //     std::type_identity<ast_match>{},
+  //     **ast,
+
+  //     // refactorme: pass verbosity
+  //     tool::cli::print_debug(cli->verbosity));
+  //   if (!matches) {
+  //     llvm::errs() << matches.error();
+  //     return -1;
+  //   }
+
+  //   for (const ast_match &m : *matches) {
+  //     tl::expected ctx_delta = //
+  //       tool::refl::resolve_matched_node(m,
+  //         **ast,
+  //         ctx,
+  //         // refactorme: pass verbosity
+  //         tool::cli::print_debug(cli->verbosity));
+
+  //     if (!ctx_delta) {
+  //       errors.emplace_back(std::move(ctx_delta).error());
+  //       continue;
+  //     }
+
+  //     tl::expected updated = tool::refl::update(std::move(ctx), //
+  //       std::move(ctx_delta).value(),
+  //       // refactorme: pass verbosity
+  //       tool::cli::print_debug(cli->verbosity));
+
+  //     if (!updated) {
+  //       std::cerr //
+  //         << fmt::format("Error updating context: {}",
+  //              std::move(updated).error());
+  //       return -1;
+  //     }
+
+  //     ctx = std::move(updated).value();
+  //   }
+
+  //   // todo: errors, add flag to stop on errors
+  //   if (!errors.empty()) {
+  //     std::cerr //
+  //       << fmt::format("Errors while matching nodes: {}",
+  //            fmt::join(errors, ", "));
+  //     return -1;
+  //   }
+
+  // }
+  // auto validated_reflection_data = codegen::prepare_input(std::move(ctx),
+  // mode); if (!validated_reflection_data) {
+  //   return tl::unexpected(
+  //     std::pair{fmt::format("Error while validating data: {}",
+  //                 std::move(validated_reflection_data).error()),
+  //       -1});
+  // }
+
+  // // todo: validation?
+  // const std::filesystem::path output_file = mode.output_dir /
+  // mode.output_file;
+
+  // if (cli::verbosity_level::info & cli->verbosity)
+  //   fmt::println("Generating reflection file: {}", output_file.string());
+
+  // std::ofstream f{output_file, std::ios::binary};
+  // if (const auto res = codegen::emit_reflection_cpp_file(
+  //       {
+  //         // todo: options
+  //       },
+  //       f,
+  //       *validated_reflection_data);
+  //   !res) {
+  //   return tl::unexpected(std::pair{res.error(), -1});
+  // };
+
+  // return fmt::format("Successfully generated {}.", output_file.string());
+
+  // todo: implement
+  return tl::unexpected(std::string("target mode not implemented"));
+}
+} // namespace tool
 
 // fixme: remove, implement
 #ifdef _IMPLEMENTED
-
-#  include "tool/reflection.hpp"
-
-#  include "tool/ast/util.h"
-#  include "tool/util.hpp"
-
-#  include <fmt/core.h>
-#  include <tl/expected.hpp>
-
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wunused-variable"
-#  pragma GCC diagnostic ignored "-Wunused-parameter"
-#  pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
-#  pragma GCC diagnostic ignored "-Wunused-parameter"
-#  pragma GCC diagnostic ignored "-Wdeprecated"
-#  include <clang/AST/ASTDumper.h>
-#  include <clang/AST/ASTImporter.h>
-#  include <clang/AST/DeclBase.h>
-#  include <clang/Basic/Diagnostic.h>
-#  include <clang/Basic/FileManager.h>
-#  include <clang/Basic/LangOptions.h>
-#  include <clang/Frontend/ASTUnit.h>
-#  include <clang/Frontend/CompilerInstance.h>
-#  include <clang/Frontend/PrecompiledPreamble.h>
-#  include <clang/Serialization/PCHContainerOperations.h>
-#  pragma GCC diagnostic pop
-
-#  include <algorithm>
-#  include <cassert>
-#  include <cstddef>
-#  include <optional>
-#  include <string>
-#  include <string_view>
-#  include <utility>
-#  include <vector>
-
 namespace tool::refl::matches {
 
 auto reflected_type::resolve(const node_type &node,

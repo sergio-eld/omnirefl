@@ -68,12 +68,13 @@ std::vector<std::string> fields_as_strings(
 
   return r;
 }
+
 } // namespace
 
 namespace tool {
 
 tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
-  const cli::inplace_mode &mode,
+  const cli::header_mode &mode,
   const cli::options &cli,
   const std::vector<std::filesystem::path> &sources,
   const clang::tooling::CompilationDatabase &compilation_db) {
@@ -282,15 +283,16 @@ auto transforms::fold_indexed_type_result(tu_data _accum,
             result.id);
         }
 
-        if (const auto found = accum->indexed_types.find(result.index);
-          accum->indexed_types.cend() != found) {
-          const auto &[_, existing] = *found;
-          const auto &[type_id, existing_reflected] = existing;
-          // fixme:
-          // return tl::unexpected(fmt::format(
-          //   "detected index {} conflict for types (existing) {}:{} and
-          //   (resolved) {}", result.index, existing_id, result.id));
-        }
+        // fixme:
+        // if (const auto found = accum->indexed_types.find(result.index);
+        //   accum->indexed_types.cend() != found) {
+        //   const auto &[_, existing] = *found;
+        //   const auto &[type_id, existing_reflected] = existing;
+        //
+        //   return tl::unexpected(fmt::format(
+        //     "detected index {} conflict for types (existing) {}:{} and
+        //     (resolved) {}", result.index, existing_id, result.id));
+        // }
 
         accum->indexed_types[result.index] = {result.id,
           std::move(result.reflected_data)};
@@ -309,11 +311,11 @@ auto transforms::fold_indexed_type_result(tu_data _accum,
         while (!_result.type_dependencies.empty()) {
           auto _extracted = _result.type_dependencies.extract(
             _result.type_dependencies.begin());
-          // todo: is this correct?
           type_dependency &&d = std::move(_extracted.value());
-          accum->type_dependencies.emplace(std::move(d).reflected_data);
-          // todo: error? or debug log if already resolved, but it shouldn't be
-          // possible
+          accum->type_dependencies[d.id] = std::move(d).reflected_data;
+          // todo:
+          //   error? or debug log if already resolved, but it shouldn't be
+          //   possible
           accum->resolved_types.emplace(d.id);
         }
       }
@@ -372,8 +374,7 @@ auto codegen::prepare_data(transforms::tu_data data)
   while (!data.type_dependencies.empty()) {
     auto extracted =
       data.type_dependencies.extract(data.type_dependencies.begin());
-    // todo: is this correct?
-    match::reflected_type_data &&t = std::move(extracted.value());
+    match::reflected_type_data &&t = std::move(extracted.mapped());
     if (is_forward_declarable(t)) {
       assert(
         t.definition.nm_qual_type && "unnamed type can't be forward declared");

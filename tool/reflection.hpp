@@ -7,8 +7,7 @@
 
 namespace tool::refl {
 
-// todo: benchmark, then use hash
-// unique type identifier
+// todo: benchmark, then use hash unique type identifier
 using type_id = std::string;
 
 enum type_definition_flags {
@@ -33,7 +32,7 @@ struct type_definition_data {
 
   type_definition_flags definition_flags;
 
-  // todo: should be enum
+  // refactorme: should be enum
   // - fundamental
   // - array
   // - struct
@@ -44,9 +43,6 @@ struct type_definition_data {
 
 struct struct_field_data {
   std::string name;
-  // todo:
-  //   add new data when needed. As of now, only field names are needed for
-  //   implementation. Let's not overcomplicate
 };
 
 // todo: only needed for tu-mode (former 'target' mode)
