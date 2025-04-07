@@ -1,6 +1,5 @@
 
 #include "tool/source_mode.h"
-#include "fmt/base.h"
 #include "tool/cli.hpp"
 #include "tool/source_mode/transforms.h"
 
@@ -10,6 +9,7 @@
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
+#include <iterator>
 #include <tl/expected.hpp>
 #include <type_traits>
 
@@ -103,7 +103,7 @@ auto fold_resolved(transforms::tu_data _accum,
 
         for (auto &&[id, data] : result.type_dependencies) {
           // todo: checks for conflicts
-          accum->reflected_dependency_types[id] = std::move(data);
+          accum->reflected_type_dependencies[id] = std::move(data);
           accum->resolved_types.emplace(std::move(id));
         }
 
@@ -205,7 +205,8 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
   // todo: merge everything
   const std::filesystem::path output_file = mode.output_dir / mode.output_file;
   const auto output =
-    codegen::prepare_data(std::move(accum_reflected_data_by_source));
+    codegen::prepare_data(std::move(accum_reflected_data_by_source),
+      cli.verbosity);
   if (!output) {
     return tl::unexpected(
       fmt::format("{}: failed to prepare codegen data with error: {}",
@@ -413,18 +414,18 @@ auto match::reflected_call::resolve(const node_type &node,
     });
 
     // fixme:
-    //   what about unions, built-in arrays? their dependency types' headers
-    //   must be also included
+    //   what about unions, built-in arrays?
+    //   their dependency types' headers must be also included
     if (!type.isStructureOrClassType())
       continue;
 
     // refactorme:
-    //   (see refactorme for `match::reflected_impl`). This duplication can and
-    //   should be avoided
+    //   (see refactorme for `match::reflected_impl`).
+    //   This duplication can and should be avoided
     const clang::CXXRecordDecl &rd = *type.getAsCXXRecordDecl();
     auto definition = util::ast::resolve_definition(rd, ast.getSourceManager());
     rd.isInStdNamespace()
-      ? std_includes.emplace(std::move(definition.source_file))
+      ? std_includes.emplace(std::move(definition.source_file).stem())
       : includes.emplace(std::move(definition.source_file));
   }
 
@@ -448,157 +449,152 @@ auto transforms::fold_resolved_types(tu_data accum,
 }
 
 auto codegen::prepare_data(std::map<std::filesystem::path, transforms::tu_data>
-    reflection_data_by_source) noexcept
+                             reflection_data_by_source,
+  cli::verbosity_level verbosity) noexcept
   -> tl::expected<reflection_data, std::string> {
-  // todo: implement
-  return tl::unexpected("prepare_data not implemented");
+  const auto check_definition_requirements =
+    [](const refl::type_id &id, const refl::type_definition_data &data)
+    -> tl::expected<void, std::string> {
+    if (::is_cpp_file(data.source_file)) {
+      return tl::unexpected(fmt::format(
+        "source mode does not support types defined in .cpp files: {}:{} defined in {}",
+        id,
+        data.nm_qual_type.value_or("unnamed"),
+        data.source_file.string()));
+    }
+
+    using td_flags = refl::type_definition_flags;
+    if ((td_flags::local & data.definition_flags) || !data.nm_qual_type) {
+      return tl::unexpected(fmt::format(
+        "source mode does not support local or unnamed types: {}:{} defined in {}",
+        id,
+        data.nm_qual_type.value_or("unnamed"),
+        data.source_file.string()));
+    }
+    return {};
+  };
+
+  // todo:
+  //   Here is the place to check for conficts, for missing definitions of
+  //   forward declarations, for types defined in sources, local or unnamed
+  //   types...
+
+  std::set<reflected_specialization_data> reflected_types;
+  std::set<std::filesystem::path> refl_includes;
+  std::set<std::filesystem::path> refl_impl_includes;
+  std::set<std::filesystem::path> includes;
+  std::set<std::filesystem::path> std_includes;
+  std::vector<match::func_signature> reflected_calls;
+
+  // todo:
+  //   consider (as an option) not failing the tool's invocation, but generating
+  //   `static_assert(false, error_msg)`. It could also help to allow generating
+  //   the code with fields which types can't be reflected, but it is ok unless
+  //   their reflection is requested
+  std::vector<std::string> errors;
+  for (auto &[src, tu_data] : reflection_data_by_source) {
+    if (cli::verbosity_level::parsed_types & verbosity)
+      fmt::println("reflected types in {}:", src.string());
+
+    for (const auto &[id, refl_data] : tu_data.reflected_types) {
+      if (auto res = check_definition_requirements(id, refl_data.definition);
+        !res) {
+        errors.emplace_back(std::move(res).error());
+        continue;
+      }
+    }
+
+    // todo:
+    //   for types, reflected as dependencies, the rules are not that strict (?
+    //   can be unnamed/local - specialization via `decltype()`)
+    for (const auto &[id, refl_data] : tu_data.reflected_type_dependencies) {
+      if (auto res = check_definition_requirements(id, refl_data.definition);
+        !res) {
+        errors.emplace_back(std::move(res).error());
+        continue;
+      }
+    }
+
+    for (auto &&[id, refl_data] : [&] {
+           auto d = std::move(tu_data.reflected_types);
+           d.merge(std::move(tu_data.reflected_type_dependencies));
+           return d;
+         }()) {
+      if (cli::verbosity_level::parsed_types & verbosity) {
+        fmt::println("reflected type {}:{}",
+          id,
+          *refl_data.definition.nm_qual_type);
+      }
+
+      refl_includes.emplace(refl_data.definition.source_file);
+      reflected_types.emplace(reflected_specialization_data{
+        .nm_qual_type = std::move(refl_data.definition.nm_qual_type).value(),
+        .fields = std::move(refl_data.fields),
+        .is_class = refl_data.definition.is_class,
+      });
+    }
+
+    for (auto &&[id, definition] : tu_data.reflected_impls) {
+      if (cli::verbosity_level::parsed_types & verbosity) {
+        fmt::println("reflected implementation {}:{}",
+          id,
+          *definition.nm_qual_type);
+      }
+
+      if (auto res = check_definition_requirements(id, definition); !res) {
+        errors.emplace_back(std::move(res).error());
+        continue;
+      }
+
+      refl_impl_includes.emplace(std::move(definition.source_file));
+    }
+
+    for (auto &&f : tu_data.reflected_calls) {
+      reflected_calls.emplace_back(std::move(f));
+    }
+
+    includes.merge(std::move(tu_data.includes));
+    std_includes.merge(std::move(tu_data.std_includes));
+  }
+
+  const auto unique_calls = [](std::vector<match::func_signature> calls)
+    -> std::vector<match::func_signature> {
+    std::set<match::func_signature,
+      decltype([](const match::func_signature &lhs,
+                 const match::func_signature &rhs) -> bool {
+        return std::lexicographical_compare(lhs.args.begin(),
+          lhs.args.end(),
+          rhs.args.begin(),
+          rhs.args.end(),
+          [](const match::function_signature_arg &a,
+            const match::function_signature_arg &b) {
+            if (a.nm_qual_type != b.nm_qual_type) {
+              return a.nm_qual_type < b.nm_qual_type;
+            }
+            if (a.is_const != b.is_const) {
+              // Non-const is considered less than const
+              return !a.is_const && b.is_const;
+            }
+            return a.ref_type < b.ref_type;
+          });
+      })>
+      s;
+    for (auto &&c : calls)
+      s.emplace(std::move(c));
+
+    return {std::make_move_iterator(s.begin()),
+      std::make_move_iterator(s.end())};
+  };
+
+  return codegen::reflection_data{
+    .includes = std::move(includes),
+    .std_includes = std::move(std_includes),
+    .refl_includes = std::move(refl_includes),
+    .refl_impl_includes = std::move(refl_impl_includes),
+    .reflected_types = std::move(reflected_types),
+    .reflected_calls = unique_calls(std::move(reflected_calls)),
+  };
 }
 
 } // namespace source_mode
 } // namespace tool
-
-// fixme: remove, implement
-#ifdef _IMPLEMENTED
-
-auto _debug_templ_spec_decl::resolve(const node_type &node,
-  const clang::ASTUnit &ast,
-  [[maybe_unused]] const std::unordered_set<std::string> &resolved_types,
-  bool print_debug) -> tl::expected<result, std::string> {
-  using namespace tool::refl;
-  if (!print_debug)
-    return {};
-
-  const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  const std::string_view detail_struct_name = template_decl.getName();
-  fmt::println("debug: ClassTemplateSpecializationDecl: {}",
-    detail_struct_name);
-  std::string buf;
-  llvm::raw_string_ostream os{buf};
-  clang::ASTDumper dmp{os, ast.getASTContext(), false};
-  dmp.SetTraversalKind(clang::TK_AsIs);
-  dmp.Visit(&template_decl);
-  fmt::print("debug: ASTDump: {}\n", buf);
-  return {};
-}
-
-} // namespace tool::refl::matches
-
-// todo: remove
-tl::expected<tool::refl::context, std::string> //
-  tool::refl::update(tool::refl::context _current,
-    tool::refl::context delta,
-    bool a_print_debug) noexcept {
-  tl::expected<tool::refl::context, std::string> r{std::move(_current)};
-  // if (a_print_debug) {
-  //   fmt::println("debug: current:");
-  //   ::print_debug(*r);
-  //   fmt::println("debug: delta:");
-  //   ::print_debug(delta);
-  // }
-
-  if (tl::expected merged = util::merge_with_conflicts_check(
-        std::move(r->definitions),
-        std::move(delta.definitions),
-        [](std::string_view qual_typename,
-          const type_definition_data &lhs,
-          const type_definition_data &rhs) -> tl::expected<void, std::string> {
-          if (lhs.source_file != rhs.source_file) {
-            return tl::unexpected(fmt::format(
-              "found different locations for type {} definition: {}, {}",
-              qual_typename,
-              lhs.source_file.string(),
-              rhs.source_file.string()));
-          }
-          if (lhs.definition_flags != rhs.definition_flags) {
-            return tl::unexpected(fmt::format(
-              "found different definition flags for type {} definition: {}, {}",
-              qual_typename,
-              // todo: stringify
-              int(lhs.definition_flags),
-              int(rhs.definition_flags)));
-          }
-          return {};
-        })) {
-    r->definitions = std::move(merged).value();
-  } else
-    return tl::unexpected(std::move(merged).error());
-
-  // fixme:
-  // if (tl::expected merged =
-  //       merge_with_conflicts_check(std::move(r->reflected_types),
-  //         std::move(delta.reflected_types),
-  //         [](std::string_view qual_typename,
-  //           const std::vector<struct_field_data> &lhs,
-  //           const std::vector<struct_field_data> &rhs)
-  //           -> tl::expected<void, std::string> {
-  //           // fixme: wtf is happening here? how is it possible? what was I
-  //           // thinking?
-  //           if (!std::equal(lhs.cbegin(),
-  //                 lhs.cend(),
-  //                 rhs.cbegin(),
-  //                 [](const struct_field_data &lhs, const struct_field_data
-  //                 &rhs)
-  //                   -> bool { return lhs.nm_qual_type == rhs.nm_qual_type;
-  //                   })) {
-  //             // todo: print detailed info on fields that differ
-  //             return tl::unexpected(
-  //               fmt::format("found different data member types for type {}",
-  //                 qual_typename));
-  //           }
-  //           return {};
-  //         })) {
-  //   r->reflected_types = std::move(merged).value();
-  // } else
-  //   return tl::unexpected(std::move(merged).error());
-
-  r->reflected_implementations.merge(
-    std::move(delta.reflected_implementations));
-
-  r->reflected_calls.reserve(
-    r->reflected_calls.size() + delta.reflected_calls.size());
-  r->reflected_calls.insert(r->reflected_calls.end(),
-    std::make_move_iterator(delta.reflected_calls.begin()),
-    std::make_move_iterator(delta.reflected_calls.end()));
-
-  r->std_includes.merge(std::move(delta.std_includes));
-  if (tl::expected merged =
-        util::merge_with_conflicts_check(std::move(r->detected_indexed_types),
-          std::move(delta.detected_indexed_types),
-          [](const size_t type_index,
-            std::string_view lhs,
-            std::string_view rhs) -> tl::expected<void, std::string> {
-            return tl::unexpected(
-              fmt::format("confict for detected type index {}, types: {}, {}",
-                type_index,
-                lhs,
-                rhs));
-          })) {
-    r->detected_indexed_types = std::move(merged).value();
-  } else {
-    return tl::unexpected(std::move(merged).error());
-  }
-
-  if (tl::expected merged =
-        util::merge_with_conflicts_check(std::move(r->reflected_indexed_types),
-          std::move(delta.reflected_indexed_types),
-          [](const int type_index, const auto &, const auto &)
-            -> tl::expected<void, std::string> {
-            // todo:
-            //   is it possible to identify those? `detected_indexed_types` will
-            //   show the info. However, would be more useful to print detailed
-            //   standard diagnostics
-            return tl::unexpected(
-              fmt::format("confict for type index {}", type_index));
-          })) {
-    r->reflected_indexed_types = std::move(merged).value();
-  } else {
-    return tl::unexpected(std::move(merged).error());
-  }
-
-  // if (a_print_debug) {
-  //   fmt::println("debug: current updated:");
-  //   ::print_debug(*r);
-  // }
-  return r;
-};
-#endif //

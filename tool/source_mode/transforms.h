@@ -151,7 +151,7 @@ struct tu_data {
 
   std::map<refl::type_id, match::reflected_type_data> reflected_types = {};
   std::map<refl::type_id, match::reflected_type_data>
-    reflected_dependency_types = {};
+    reflected_type_dependencies = {};
   std::map<refl::type_id, refl::type_definition_data> reflected_impls = {};
 
   std::vector<match::func_signature> reflected_calls = {};
@@ -212,13 +212,14 @@ struct reflected_specialization_data {
 
 struct reflection_data {
   // list of unique header paths (non-reflection)
-  std::set<std::string> includes;
+  std::set<std::filesystem::path> includes;
+  std::set<std::filesystem::path> std_includes;
 
   // list of unique header paths or reflected types' headers
   std::set<std::filesystem::path> refl_includes;
 
   // list of unique header paths or reflected implementations' headers
-  std::set<std::string> refl_impl_includes;
+  std::set<std::filesystem::path> refl_impl_includes;
 
   // list of unique reflected types
   std::set<reflected_specialization_data> reflected_types;
@@ -229,7 +230,8 @@ struct reflection_data {
 
 tl::expected<reflection_data, std::string> prepare_data(
   std::map<std::filesystem::path, transforms::tu_data>
-    reflection_data_by_source) noexcept;
+    reflection_data_by_source,
+  cli::verbosity_level) noexcept;
 
 struct options {
   // todo:

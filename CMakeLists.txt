@@ -244,8 +244,8 @@ if (ENABLE_TESTING)
     endif()
 
     # refactorme: separate directory
-    add_executable(test.cli tool/tests/cli.cpp)
-    set_target_properties(test.cli PROPERTIES CXX_STANDARD 20)
+    # add_executable(test.cli tool/tests/cli.cpp)
+    # set_target_properties(test.cli PROPERTIES CXX_STANDARD 20)
     # todo: implement
     # target_link_libraries(test.cli PRIVATE tool.cli GTest::GTest GTest::Main)
     # add_test(NAME test.cli COMMAND test.cli)
