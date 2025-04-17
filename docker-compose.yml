@@ -178,5 +178,6 @@ services:
         ; cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
         ; cmake --build . -j $$nproc
         ; ctest . -V
+        ; exit $$LASTEXITCODE
         ;}
 
