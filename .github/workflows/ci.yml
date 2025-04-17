@@ -122,7 +122,7 @@ jobs:
       # todo: upload artifacts. If before merged, upload only if failed
 
   test-windows:
-    runs-on: windows-latest
+    runs-on: windows-2019
     needs: build-package
     strategy:
       fail-fast: false
