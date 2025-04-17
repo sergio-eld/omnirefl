@@ -101,7 +101,7 @@ constexpr int unique_id(std::false_type) {
 template <typename T, int Id>
 constexpr int unique_id(std::true_type);
 
-template <typename T, int Id = {}>
+template <typename T, int Id = int{}>
 constexpr int unique_id() {
   return unique_id<T, Id>(counter<Id>::exists(Id));
 }

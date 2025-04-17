@@ -44,12 +44,20 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 message(STATUS "CLANG_INCLUDE_DIRS: ${CLANG_INCLUDE_DIRS}")
 message(STATUS "LLVM_INCLUDE_DIRS: ${LLVM_INCLUDE_DIRS}")
-file(GLOB CLANG_RESOURCE_DIR "${CLANG_INCLUDE_DIRS}/../lib/clang/*/include")
-if (CLANG_RESOURCE_DIR)
+
+foreach(dir ${CLANG_INCLUDE_DIRS})
+  message(STATUS "Looking for Clang resource dir in: ${dir}/../")
+  file(GLOB CLANG_RESOURCE_DIR_CANDIDATE "${dir}/../lib/clang/*/include")
+  if(CLANG_RESOURCE_DIR_CANDIDATE)
+    list(GET CLANG_RESOURCE_DIR_CANDIDATE 0 CLANG_RESOURCE_DIR)
     get_filename_component(CLANG_RESOURCE_DIR "${CLANG_RESOURCE_DIR}/../" ABSOLUTE)
     message(STATUS "CLANG_RESOURCE_DIR: ${CLANG_RESOURCE_DIR}")
-else()
-    message(FATAL_ERROR "Failed to detect Clang resource dir")
+    break()
+  endif()
+endforeach()
+
+if(NOT CLANG_RESOURCE_DIR)
+  message(FATAL_ERROR "Failed to detect Clang resource dir")
 endif()
 
 # todo: use find_package or FetchContent
@@ -217,7 +225,7 @@ if (ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
     
     # this is hardly needed for an alpine build
-    install(IMPORTED_RUNTIME_ARTIFACTS tool)
+    # install(IMPORTED_RUNTIME_ARTIFACTS tool)
 
     set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGE_CONTACT "sergey.kolesnik.ld@gmail.com")
@@ -235,12 +243,22 @@ endif()
 # todo: disable for cross compilation, since it requires running the compiled binary
 if (ENABLE_TESTING)
     enable_testing()
-    find_package(GTest CONFIG REQUIRED)
+    find_package(GTest CONFIG QUIET)
     if (NOT TARGET GTest::GTest)
-        add_library(GTest::GTest ALIAS GTest::gtest)
-    endif()
-    if (NOT TARGET GTest::Main)
-        add_library(GTest::Main ALIAS GTest::gtest_main)
+        include(FetchContent)
+
+        set(INSTALL_GTEST OFF  CACHE BOOL "" FORCE)   # libgtest / gtest_main
+        set(INSTALL_GMOCK OFF  CACHE BOOL "" FORCE)   # libgmock / gmock_main
+        set(gtest_build_tests OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG v1.15.2
+        )
+        # For Windows: Prevent overriding the parent project's compiler/linker settings
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+        add_library(GTest::GTest ALIAS gtest)
     endif()
 
     # refactorme: separate directory

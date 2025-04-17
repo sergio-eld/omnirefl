@@ -6,7 +6,6 @@
 
 #include <filesystem>
 #include <string>
-#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -199,7 +198,7 @@ inline bool is_subpath(const std::filesystem::path &path,
   const auto mismatch_pair =
     std::mismatch(path.begin(), path.end(), base.begin(), base.end());
   return mismatch_pair.second == base.end();
-};
+}
 
 struct foldl_t {
   template <typename Callable, typename Result, typename Container>
@@ -238,11 +237,11 @@ template <typename List>
 using to_tuple_t = typename to_tuple<List>::type;
 
 // refactorme: better interface (cmp is ambiguous)
-template <typename K, typename T>
+template <typename K, typename T, typename Cmp>
 tl::expected<std::unordered_map<K, T>, std::string> merge_with_conflicts_check(
   std::unordered_map<K, T> first,
   std::unordered_map<K, T> second,
-  auto cmp) {
+  Cmp cmp) {
   for (auto node = second.begin(); node != second.end();) {
     auto &&[k, v] = *node;
     const auto found = first.find(k);
@@ -255,7 +254,7 @@ tl::expected<std::unordered_map<K, T>, std::string> merge_with_conflicts_check(
     ++node;
   }
   return {std::move(first)};
-};
+}
 
 } // namespace util
 

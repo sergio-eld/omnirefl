@@ -167,7 +167,7 @@ function(reflected_target TARGET_NAME)
                 OBJECT_DEPENDS "${GENERATED_HEADER}")
 
             if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-                set(FORCE_INCLUDE_FLAG "/FI\"${GENERATED_HEADER}\"")
+                set(FORCE_INCLUDE_FLAG "/FI" "${GENERATED_HEADER}")
             else()
                 set(FORCE_INCLUDE_FLAG "-include" "${GENERATED_HEADER}")
             endif()
