@@ -61,7 +61,7 @@ function(reflected_target TARGET_NAME)
         PRINT_INFO
         # todo: I am not sure this arg makes sense here
         # EXCLUDE_SOURCES
-        INPLACE_MODE)
+        HEADER_MODE)
     set(ONE_VALUE_ARGS OUTPUT_DIR)
     set(MULTI_VALUE_ARGS SOURCES)
     cmake_parse_arguments(ARG 
@@ -78,10 +78,10 @@ function(reflected_target TARGET_NAME)
     endif()
 
     message(STATUS "${TOOL_NAME}: reflected target `${TARGET_NAME}`")
-    if (ARG_INPLACE_MODE)
-        message(STATUS "${TOOL_NAME}: selected inplace-mode for target ${TARGET_NAME}")
+    if (ARG_HEADER_MODE)
+        message(STATUS "${TOOL_NAME}: selected header-mode for target ${TARGET_NAME}")
     else()
-        message(STATUS "${TOOL_NAME}: selected target-mode for target ${TARGET_NAME}")
+        message(STATUS "${TOOL_NAME}: selected source-mode for target ${TARGET_NAME}")
     endif()
 
     if (ARG_PRINT_INFO)
@@ -109,7 +109,7 @@ function(reflected_target TARGET_NAME)
     get_target_sources(${TARGET_NAME} REFL_TARGET_SOURCES)
     if (ARG_SOURCES)
         # todo: for each source the full path is needed,
-        # because for inplace-mode we need to force include
+        # because for header-mode we need to force include
         # the generated reflected header: ${output_dir}/{file_name}.hpp
         # At this point we already have REFL_TARGET_SOURCES evaluated
     endif()
@@ -124,8 +124,8 @@ function(reflected_target TARGET_NAME)
         message(FATAL_ERROR "${TOOL_NAME}: resource dir \"${TOOL_RESOURCE_DIR}\" for bundled headers not found")
     endif()
 
-    if (ARG_INPLACE_MODE)
-        set(ARG_REFL_MODE "--inplace-mode")
+    if (ARG_HEADER_MODE)
+        set(ARG_REFL_MODE "--header-mode")
         set(ARG_OUTPUT_FILE "")
     else()
         set(ARG_REFL_MODE "")
@@ -151,7 +151,7 @@ function(reflected_target TARGET_NAME)
         COMMENT "Running ${TOOL_NAME} for ${TARGET_NAME}"
         VERBATIM)
 
-    if (ARG_INPLACE_MODE)
+    if (ARG_HEADER_MODE)
         set(GENERATED_HEADERS)
         foreach(_SRC ${REFL_TARGET_SOURCES})
             get_filename_component(FILE_NAME "${_SRC}" NAME_WE)
@@ -183,7 +183,7 @@ function(reflected_target TARGET_NAME)
                 COMPILE_OPTIONS "${CURRENT_FLAGS}")
         endforeach()
 
-        target_compile_definitions(${TARGET_NAME} PRIVATE OMNI_INPLACE_REFLECTION)
+        target_compile_definitions(${TARGET_NAME} PRIVATE OMNI_HEADER_REFLECTION)
 
         add_custom_command(OUTPUT ${GENERATED_HEADERS}
             COMMAND omni::tool ${${TARGET_NAME}_OMNI_ARGS}

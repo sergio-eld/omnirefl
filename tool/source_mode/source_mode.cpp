@@ -281,7 +281,7 @@ auto match::reflected_type::resolve(const node_type &node,
 
   // todo: `hasDefinition`
   //   at this point (as of this writing) forward declarations are not allowed.
-  //   however, with inplace mode I can check at the end of TU
+  //   however, with header mode I can check at the end of TU
   if (!reflected_type_decl.hasDefinition()) {
     return tl::unexpected(
       fmt::format("forward declarations are not allowed: {}", nm_qual_type));

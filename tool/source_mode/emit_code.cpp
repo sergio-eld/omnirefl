@@ -145,10 +145,10 @@ void omni::reflected_call_t::_call_impl(
 
 namespace tool::source_mode {
 
-// tl::expected<codegen::target_mode_reflection_data, std::string>
+// tl::expected<codegen::source_mode_reflection_data, std::string>
 //   codegen::prepare_input(tool::refl::context ctx,
-//     tool::cli::target_mode mode) noexcept {
-//   tl::expected<target_mode_reflection_data, std::string> r{tl::in_place};
+//     tool::cli::source_mode mode) noexcept {
+//   tl::expected<source_mode_reflection_data, std::string> r{tl::in_place};
 //
 //   r->includes = {std::make_move_iterator(ctx.std_includes.begin()),
 //     std::make_move_iterator(ctx.std_includes.end())};
@@ -161,7 +161,7 @@ namespace tool::source_mode {
 //
 //     const auto &[_, definition] = *_definition;
 //     // fixme:
-//     // if (std::holds_alternative<tool::cli::target_mode>(mode)) {
+//     // if (std::holds_alternative<tool::cli::source_mode>(mode)) {
 //     //   using td_flags = tool::refl::type_definition_flags;
 //     //   // todo: consider validating the flags beforehand, so all the info
 //     can

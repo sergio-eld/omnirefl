@@ -3,7 +3,7 @@ set(TEST_NAME test.${DIR_NAME})
 
 add_executable(${TEST_NAME} test.cpp)
 set_target_properties(${TEST_NAME} PROPERTIES CXX_STANDARD 14)
-reflected_target(${TEST_NAME} PRINT_INFO PRINT_DEBUG INPLACE_MODE)
+reflected_target(${TEST_NAME} PRINT_INFO PRINT_DEBUG HEADER_MODE)
 target_link_libraries(${TEST_NAME} PRIVATE GTest::gtest)
 
 add_test(NAME ${TEST_NAME}.run_omni

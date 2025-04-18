@@ -1,7 +1,7 @@
 get_filename_component(DIR_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
 set(TEST_NAME test.${DIR_NAME})
 
-# todo: add inplace-mode test
+# todo: add header-mode test
 
 add_executable(${TEST_NAME} test.cpp)
 set_target_properties(${TEST_NAME} PROPERTIES CXX_STANDARD 14)

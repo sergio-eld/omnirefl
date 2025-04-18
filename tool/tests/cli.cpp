@@ -25,7 +25,7 @@ namespace {
 //             return false;
 //           else {
 //             using type = std::decay_t<decltype(lhs)>;
-//             if constexpr (std::is_same_v<target_mode, type>) {
+//             if constexpr (std::is_same_v<source_mode, type>) {
 //               return std::tie(lhs.exclude,
 //                        lhs.sources,
 //                        lhs.output_file,
@@ -34,7 +34,7 @@ namespace {
 //                   rhs.sources,
 //                   rhs.output_file,
 //                   rhs.output_dir);
-//             } else if constexpr (std::is_same_v<inplace_mode, type>) {
+//             } else if constexpr (std::is_same_v<header_mode, type>) {
 //               return std::tie(lhs.sources, lhs.output_dir)
 //                 == std::tie(rhs.sources, rhs.output_dir);
 //             } else {
@@ -105,9 +105,9 @@ namespace {
 //   // expected_opt.print_debug);
 //
 //   // // Validate mode-specific options
-//   // if (std::holds_alternative<target_mode>(expected_opt.mode)) {
-//   //   const auto &exp_tm = std::get<target_mode>(expected_opt.mode);
-//   //   const auto *act_tm = std::get_if<target_mode>(&actual_opt.mode);
+//   // if (std::holds_alternative<source_mode>(expected_opt.mode)) {
+//   //   const auto &exp_tm = std::get<source_mode>(expected_opt.mode);
+//   //   const auto *act_tm = std::get_if<source_mode>(&actual_opt.mode);
 //   //   ASSERT_NE(act_tm, nullptr) << "Expected target mode";
 //
 //   //   EXPECT_EQ(act_tm->exclude, exp_tm.exclude);
@@ -115,9 +115,9 @@ namespace {
 //   //   EXPECT_EQ(act_tm->output_dir, exp_tm.output_dir);
 //   //   EXPECT_EQ(act_tm->sources, exp_tm.sources);
 //   // } else {
-//   //   const auto &exp_im = std::get<inplace_mode>(expected_opt.mode);
-//   //   const auto *act_im = std::get_if<inplace_mode>(&actual_opt.mode);
-//   //   ASSERT_NE(act_im, nullptr) << "Expected inplace mode";
+//   //   const auto &exp_im = std::get<header_mode>(expected_opt.mode);
+//   //   const auto *act_im = std::get_if<header_mode>(&actual_opt.mode);
+//   //   ASSERT_NE(act_im, nullptr) << "Expected header mode";
 //
 //   //   EXPECT_EQ(act_im->output_dir, exp_im.output_dir);
 //   //   EXPECT_EQ(act_im->sources, exp_im.sources);
@@ -137,7 +137,7 @@ namespace {
 //       .expected =
 //         options{
 //           .mode =
-//             target_mode{
+//             source_mode{
 //               .exclude = false,
 //               .sources = {},
 //               .output_file = "out.cpp",
@@ -154,7 +154,7 @@ namespace {
 //             "src2.cpp",
 //             "--resource-dir=/clang",
 //             "-p=build"},
-//   options{.mode = target_mode{.exclude = true,
+//   options{.mode = source_mode{.exclude = true,
 //             .sources = {"src1.cpp",
 //             "src2.cpp"}, .output_file =
 //             "out.cpp", .output_dir = "."},
@@ -162,15 +162,15 @@ namespace {
 //     .resource_dir = "/clang",
 //     .print_debug = false}},
 
-// // Valid inplace mode cases
-// test_case{{"--inplace-mode", "src.cpp", "--resource-dir=/clang"},
-//   options{.mode = inplace_mode{.sources = {"src.cpp"}, .output_dir =
+// // Valid header mode cases
+// test_case{{"--header-mode", "src.cpp", "--resource-dir=/clang"},
+//   options{.mode = header_mode{.sources = {"src.cpp"}, .output_dir =
 //   "."},
 //     .compilation_db_path = ".",
 //     .resource_dir = "/clang",
 //     .print_debug = false}},
-// test_case{{"--inplace-mode", "--output-dir=gen", "src.cpp", "-p=build"},
-//   options{.mode = inplace_mode{.sources = {"src.cpp"}, .output_dir =
+// test_case{{"--header-mode", "--output-dir=gen", "src.cpp", "-p=build"},
+//   options{.mode = header_mode{.sources = {"src.cpp"}, .output_dir =
 //   "gen"},
 //     .compilation_db_path = "build",
 //     .resource_dir = "/clang",
@@ -179,13 +179,13 @@ namespace {
 // // Error cases
 // test_case{{"--resource-dir=/clang"},
 //   "Target mode requires output file (-o)"},
-// test_case{{"--inplace-mode", "-o=out.cpp"},
-//   "Target mode option -o used with --inplace-mode"},
-// test_case{{"--inplace-mode"}, "Inplace mode requires source files"},
-// test_case{{"-o=out.cpp", "--resource-dir=/clang", "--inplace-mode"},
-//   "Target mode option -o used with --inplace-mode"},
-// test_case{{"--exclude", "-o=out.cpp", "--inplace-mode"},
-//   "Target mode option -o used with --inplace-mode"},
+// test_case{{"--header-mode", "-o=out.cpp"},
+//   "Target mode option -o used with --header-mode"},
+// test_case{{"--header-mode"}, "Header mode requires source files"},
+// test_case{{"-o=out.cpp", "--resource-dir=/clang", "--header-mode"},
+//   "Target mode option -o used with --header-mode"},
+// test_case{{"--exclude", "-o=out.cpp", "--header-mode"},
+//   "Target mode option -o used with --header-mode"},
 // test_case{{"--resource-dir=clang", "-p"},
 //   "Option -p is missing required argument"}
 // ));

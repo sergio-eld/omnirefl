@@ -13,13 +13,13 @@ namespace tool::cli {
 todo: consolidate cli options for different modes
 
 currently, there are 2 modes (in progress):
-- target_mode:
+- source_mode:
 
   for given 'cmake target' generates a .cpp file contaning implementations of
 reflected calls, including necessary reflection types. Compiled translation unit
 will be linked to the provided cmake target via a defined cmake function.
 
-- inplace_mode:
+- header_mode:
 
   for a given .cpp file generates a .hpp header file containing implementations
 of reflected calls, including the necessary reflection types. This header will
@@ -34,7 +34,7 @@ workdir
   - resource_dir: '--resource-dir' path to the tool's bundled headers (todo:
 should be defaultable)
 
-- target mode (default): '--target-mode'
+- target mode (default): '--source-mode'
   - output_file: '-o' name of the .cpp file containing generated implementations
 of reflected calls (defaults to reflected_<target_name>.cpp)
   - output_dir: (todo) (defaults to workdir)
@@ -44,7 +44,7 @@ of reflected calls (defaults to reflected_<target_name>.cpp)
     - excluded_paths: list of C++ sources or folders to exclude. All the other
 sources of the cmake target will be reflected
 
-- inplace mode: '--inplace-mode'
+- header mode: '--header-mode'
   - output_dir: (todo) name of the folder to write the generated headers.
   - source_paths: list of .cpp files to generate reflection for
 

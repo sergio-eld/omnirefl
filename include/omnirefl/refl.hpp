@@ -45,7 +45,7 @@ namespace omni {
 namespace detail {
 namespace {
 
-#ifdef OMNI_INPLACE_REFLECTION
+#ifdef OMNI_HEADER_REFLECTION
 
 template <int Id>
 struct counter {
@@ -133,12 +133,12 @@ struct reflected_call_t {
   template <typename Impl, typename T, typename... Args>
   void operator()(Impl &&impl, T &&t, Args &&...args) const {
     using type = typename std::decay<T>::type;
-#ifdef OMNI_INPLACE_REFLECTION
+#ifdef OMNI_HEADER_REFLECTION
     // testme: use inside inline non-template function defined in a header file
     // testme: use inside a template function defined in a header file
     //
     //   forced include may break the order of index instantiations (as long as
-    //   inplace-mode includes headers of reflected types).
+    //   header-mode includes headers of reflected types).
     (void)detail::_reflected_indexed_type<type>{};
 #  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
     std::forward<Impl>(impl)(std::forward<T>(t), std::forward<Args>(args)...);
@@ -153,7 +153,7 @@ struct reflected_call_t {
   }
 
   private:
-#ifndef OMNI_INPLACE_REFLECTION
+#ifndef OMNI_HEADER_REFLECTION
   // implementation will be generated for this function by omnirefl
   template <typename Impl, typename... Args>
   static void _call_impl(Impl &&impl, Args &&...args);
@@ -163,14 +163,14 @@ struct reflected_call_t {
 namespace detail {
 namespace {
 
-#ifdef OMNI_INPLACE_REFLECTION
-// Used in inplace-mode to generate specializatioin for indexed types (local
+#ifdef OMNI_HEADER_REFLECTION
+// Used in header-mode to generate specializatioin for indexed types (local
 // structs, unnamed)
 template <int>
 struct _indexed_reflected;
 
 // Instantiations by named non-local types will be caught by the generated
-// partial specializations of `_reflected<T>` like for target-mode. This will
+// partial specializations of `_reflected<T>` like for source-mode. This will
 // prevent from calling `unique_id<T>()` and not increment the counter.
 //
 // For unnamed and/or local types, the default specialization will be selected,

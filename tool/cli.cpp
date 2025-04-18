@@ -90,7 +90,7 @@ std::string tool::cli::to_string(const options &o) {
       if constexpr (std::is_same_v<source_mode, mode_type>) {
         const source_mode &m = _m;
         return fmt::format(
-          R"(target-mode,
+          R"(source-mode,
 --output-file={},
 --output-dir={})",
           m.output_file.string(),
@@ -98,7 +98,7 @@ std::string tool::cli::to_string(const options &o) {
       } else {
         const header_mode &m = _m;
         return fmt::format(
-          R"(inplace-mode,
+          R"(header-mode,
 --output-dir={})",
           m.output_dir.string());
       }
@@ -143,24 +143,29 @@ tl::expected<tool::cli::options, std::pair<std::string, int>>
     R"(
 C++ reflection code generator that operates in two modes:
 
-Target Mode (default):
+Source Mode (default):
   Generates a single .cpp file containing reflected call implementations for a 
   list of .cpp sources. Compiled object file needs to be linked to the resulting binary.
 
-Inplace Mode:
+Header Mode:
   Generates .hpp header files containing reflected call implementations for 
-  given .cpp files. Headers are must be implicitly included at the start of each 
+  given .cpp files. Headers be implicitly included at the start of each 
   translation unit.
-  WARNING: Uses friend injection, which is not guaranteed to work by the C++ Standard.
+  WARNING: Uses compile time counters via friend injection, which is not guaranteed
+           by the C++ Standard to be consistent between compiler implementations.
 )"};
 
-  // tool [--inplace-mode] [--target=<target_name>] [--compilation-db=<dir>]
+  // tool [--header-mode] [--target=<target_name>] [--compilation-db=<dir>]
   // [sources...] [-o,--out-file=<file>] [--output-dir=<dir>]
   bool cli_in_place_mode = false;
-  const auto &opt_inplace_mode =
-    app.add_flag("--inplace-mode", cli_in_place_mode)
-      ->description("Use Inplace Mode");
+  const auto &opt_header_mode =
+    app.add_flag("--header-mode", cli_in_place_mode)
+      ->description("Use Header Mode");
 
+  // refactorme:
+  //   this doesn't make sense here, since the list of sources is fetched from a
+  //   cmake target, and here we don't assume any cmake or compilation
+  //   database...
   bool cli_exclude_sources = false;
   // todo: it should always go before `sources`
   app.add_flag("--exclude",
@@ -250,7 +255,7 @@ Inplace Mode:
       cli_output_file,
       "Filename for generated reflection implementation.")
     ->type_name("PATH")
-    ->excludes(opt_inplace_mode);
+    ->excludes(opt_header_mode);
 
   std::filesystem::path cli_resource_dir;
   app
