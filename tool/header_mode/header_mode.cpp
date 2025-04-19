@@ -1,5 +1,6 @@
 
 #include "tool/header_mode.h"
+#include "fmt/format.h"
 #include "tool/header_mode/transforms.h"
 
 #include "tool/ast.hpp"
@@ -138,7 +139,26 @@ tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
       continue;
     }
 
+    {
+      std::error_code ec;
+      std::filesystem::create_directories(output_file.parent_path(), ec);
+      if (ec) {
+        errors.emplace_back(fmt::format("failed to create directory {}:{}",
+          output_file.parent_path().string(),
+          ec.message()));
+        return tl::unexpected(fmt::format("Errors occurred: {}",
+          util::join(errors, "\n", [] { return "{}"; })));
+      }
+    }
+
     std::ofstream f{output_file, std::ios::binary};
+    if (!f) {
+      errors.emplace_back(fmt::format("failed to open file {} for writing",
+        output_file.string()));
+      return tl::unexpected(fmt::format("Errors occurred: {}",
+        util::join(errors, "\n", [] { return "{}"; })));
+    }
+
     if (const auto res = codegen::emit_reflection_header_file({}, f, *output);
       !res) {
       errors.emplace_back(
@@ -175,8 +195,8 @@ namespace header_mode {
 //   reflected_call with non-reflectable types (fundamental, unions, C-array)
 //
 // testme:
-//   test indexed reflection when indexed type is a field in another (possibly,
-//   also indexed) reflected type
+//   test indexed reflection when indexed type is a field in another
+//   (possibly, also indexed) reflected type
 auto match::reflected_indexed_type::resolve(const node_type &node,
   const clang::ASTUnit &ast,
   const std::set<refl::type_id> &resolved_types,
@@ -203,7 +223,8 @@ auto match::reflected_indexed_type::resolve(const node_type &node,
     return non_reflectable{
       .id = reflected_type
         // fixme:
-        //   I don't think it does what I need - (namespace-qualified typename)
+        //   I don't think it does what I need - (namespace-qualified
+        //   typename)
         .getTypeClassName(),
       .index = type_index,
       .definition = std::nullopt,
@@ -388,9 +409,9 @@ auto codegen::prepare_data(transforms::tu_data data)
     }
 
     // todo:
-    //   implement reflection for type dependencies or report an error. I think
-    //   all of the type dependencies (at least member fields) can be reflected
-    //   via `decltype(T::field)`
+    //   implement reflection for type dependencies or report an error. I
+    //   think all of the type dependencies (at least member fields) can be
+    //   reflected via `decltype(T::field)`
     if (cli::verbosity_level::parsed_types & verbosity) {
       // fixme: type_id
       fmt::println("Skipping non-forward declarable dependency type {}",

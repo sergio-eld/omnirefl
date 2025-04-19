@@ -306,16 +306,14 @@ tl::expected<tool::cli::options, std::string> tool::cli::evaluate_defaults(
   // .mode
   std::visit(
     [](auto &_m) {
+      if (_m.output_dir.empty())
+        _m.output_dir = std::filesystem::current_path();
+
       using mode_type = std::decay_t<decltype(_m)>;
       if constexpr (std::is_same_v<source_mode, mode_type>) {
         source_mode &m = _m;
-        if (m.output_dir.empty())
-          m.output_dir = std::filesystem::current_path();
         if (m.output_file.empty())
           m.output_file = "reflected.cpp";
-      } else {
-        header_mode &m = _m;
-        m.output_dir = std::filesystem::current_path();
       }
     },
     o.mode);

@@ -9,9 +9,7 @@
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
-#include <iterator>
 #include <tl/expected.hpp>
-#include <type_traits>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -24,10 +22,12 @@
 
 #include <cassert>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -214,7 +214,22 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
         std::move(output).error()));
   }
 
+  {
+    std::error_code ec;
+    std::filesystem::create_directories(output_file.parent_path(), ec);
+    if (ec) {
+      return tl::unexpected(fmt::format("failed to create directory {}:{}",
+        output_file.parent_path().string(),
+        ec.message()));
+    }
+  }
+
   std::ofstream f{output_file, std::ios::binary};
+  if (!f) {
+    return tl::unexpected(
+      fmt::format("failed to open file {} for writing", output_file.string()));
+  }
+
   if (const auto res = codegen::emit_reflection_cpp_file({}, f, *output);
     !res) {
     return tl::unexpected(
@@ -479,6 +494,7 @@ auto codegen::prepare_data(std::map<std::filesystem::path, transforms::tu_data>
   //   forward declarations, for types defined in sources, local or unnamed
   //   types...
 
+  // fixme: headers get repeated in includes, impl_includes and includes
   std::set<reflected_specialization_data> reflected_types;
   std::set<std::filesystem::path> refl_includes;
   std::set<std::filesystem::path> refl_impl_includes;

@@ -148,6 +148,17 @@ auto fold_indexed_type_result(tu_data _accum,
 
 namespace codegen {
 
+/*
+ * fixme:
+ *   struct type {
+ *     struct nested {
+ *       // this struct can't be forward-declared, but specialization can be
+ *     };
+ *   };
+ *
+ *   template <typename T>
+ *   struct _reflected<struct type::nested, T> { ... };
+ */
 struct forward_declarable {
   std::string nm_qual_type;
   std::vector<std::string> fields;

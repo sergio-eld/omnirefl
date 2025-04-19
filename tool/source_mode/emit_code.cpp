@@ -145,96 +145,6 @@ void omni::reflected_call_t::_call_impl(
 
 namespace tool::source_mode {
 
-// tl::expected<codegen::source_mode_reflection_data, std::string>
-//   codegen::prepare_input(tool::refl::context ctx,
-//     tool::cli::source_mode mode) noexcept {
-//   tl::expected<source_mode_reflection_data, std::string> r{tl::in_place};
-//
-//   r->includes = {std::make_move_iterator(ctx.std_includes.begin()),
-//     std::make_move_iterator(ctx.std_includes.end())};
-//
-//   for (const auto &[nm_qual_type, fields] : ctx.reflected_types) {
-//     const auto _definition = ctx.definitions.find(nm_qual_type);
-//     if (_definition == ctx.definitions.cend())
-//       return tl::unexpected(
-//         fmt::format("no definition for reflected type {}", nm_qual_type));
-//
-//     const auto &[_, definition] = *_definition;
-//     // fixme:
-//     // if (std::holds_alternative<tool::cli::source_mode>(mode)) {
-//     //   using td_flags = tool::refl::type_definition_flags;
-//     //   // todo: consider validating the flags beforehand, so all the info
-//     can
-//     //   be
-//     //   // reported at once.
-//     //   if (td_flags::local & definition.definition_flags)
-//     //     // todo: additional info
-//     //     return tl::unexpected(
-//     //       fmt::format("local types are not supported in target mode: {}",
-//     //         nm_qual_type));
-//
-//     //   if (::is_cpp_file(definition.source_file)) {
-//     //     return tl::unexpected(fmt::format(
-//     //       "types defined in .cpp are not supported in target mode: {}",
-//     //       nm_qual_type));
-//     //   }
-//     // }
-//
-//     r->refl_includes.emplace(definition.source_file);
-//     // r->reflected_types.insert({
-//     //   .name = nm_qual_type,
-//     //   .field_names = //
-//     //   // refactorme: use util transform
-//     //   [](const std::vector<tool::refl::struct_field_data> &fields)
-//     //     -> std::vector<std::string> {
-//     //     std::vector<std::string> r;
-//     //     r.reserve(fields.size());
-//     //     std::transform(fields.cbegin(),
-//     //       fields.cend(),
-//     //       std::back_inserter(r),
-//     //       [](const tool::refl::struct_field_data &fd) { return fd.name;
-//     });
-//     //     return r;
-//     //   }(fields),
-//     //   .is_class = definition.is_class,
-//     // });
-//   }
-//
-//   for (const auto &nm_qual_type : ctx.reflected_implementations) {
-//     const auto definition = ctx.definitions.find(nm_qual_type);
-//     if (definition == ctx.definitions.cend())
-//       return tl::unexpected(
-//         fmt::format("no definition for reflected implementation type {}",
-//           nm_qual_type));
-//     const auto &sf = definition->second.source_file;
-//     if (!r->refl_includes.contains(sf))
-//       r->refl_impl_includes.emplace(sf.string());
-//   }
-//
-//   std::set unique_func_signatures{
-//     std::make_move_iterator(ctx.reflected_calls.begin()),
-//     std::make_move_iterator(ctx.reflected_calls.end()),
-//     [](const tool::refl::func_signature &lhs,
-//       const tool::refl::func_signature &rhs) -> bool {
-//       // because c++ std is UGLEEEEEEE
-//       return std::lexicographical_compare(lhs.args.cbegin(),
-//         lhs.args.cend(),
-//         rhs.args.cbegin(),
-//         rhs.args.cend(),
-//         [](const tool::refl::function_signature_arg &lhs,
-//           const tool::refl::function_signature_arg &rhs) -> bool {
-//           return std::tie(lhs.nm_qual_type, lhs.is_const, lhs.ref_type)
-//             < std::tie(rhs.nm_qual_type, rhs.is_const, rhs.ref_type);
-//         });
-//     }};
-//
-//   r->reflected_calls =
-//   {std::make_move_iterator(unique_func_signatures.begin()),
-//     std::make_move_iterator(unique_func_signatures.end())};
-//
-//   return r;
-// }
-
 // todo: proper implementation for offset formatting of elements in 'join'
 // todo: remove as many included headers as possible
 // todo: optionally print the omnirefl command with args that was used
@@ -270,10 +180,6 @@ tl::expected<void, std::string> codegen::emit_reflection_cpp_file(options,
 
 // Standard Library headers
 {std_headers}
-
-#include <tuple>
-#include <type_traits>
-#include <utility>
 
 namespace omni {{
 namespace detail {{
