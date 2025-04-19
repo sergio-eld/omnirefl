@@ -1,4 +1,5 @@
 #include "tool/ast.hpp"
+#include "tool/cli.hpp"
 #include "tool/util.hpp"
 
 #pragma GCC diagnostic push
@@ -13,63 +14,20 @@
 #include <clang/Tooling/Tooling.h>
 #pragma GCC diagnostic pop
 
-#include <fmt/base.h>
+#include <fmt/core.h>
 
+#include <algorithm>
 #include <string_view>
 
-tl::expected<std::vector<std::filesystem::path>, std::string> tool::filter_db_sources_t::operator()(
-  args a,
-  std::vector<std::filesystem::path> db_sources) const noexcept {
-  db_sources = util::sorted(std::less{},
-    util::filtered([](const std::filesystem::path &p) -> bool { return !p.empty(); },
-      std::move(db_sources)));
-  a.specified_sources = util::sorted(std::less{}, std::move(a.specified_sources));
-  a.excluded_folders = util::sorted(std::less{}, std::move(a.excluded_folders));
-
-  // as of now (just because I say so) `specified_sources` take precedense over `excluded_folders`
-  if (!a.specified_sources.empty()) {
-    // todo: validate that all the specified_sources are found within db_sources,
-    // error otherwise
-
-    return {tl::in_place, std::move(a.specified_sources)};
-  }
-
-  db_sources = util::filtered(
-    [&excluded = a.excluded_folders](const std::filesystem::path &db_path) {
-      for (const std::filesystem::path &e : excluded) {
-        if (util::is_subpath(db_path, e))
-          return true;
-      }
-      return false;
-    },
-    std::move(db_sources));
-
-  if (db_sources.empty())
-    return tl::unexpected("no sources for reflection provided");
-  return {tl::in_place, std::move(db_sources)};
-
-  // todo: this might be considered if `allow_missing_sources` option is introduced that allows a
-  // specified source to be missing from the db sources if (!a.specified_sources.empty()) {
-  //   std::vector<std::filesystem::path> intersected;
-  //   intersected.reserve(a.specified_sources.size());
-  //   std::set_intersection(a.specified_sources.cbegin(),
-  //     a.specified_sources.cend(),
-  //     result->cbegin(),
-  //     result->cend(),
-  //     std::back_inserter(intersected));
-  //   result.emplace(std::move(intersected));
-  // }
-  // _filtered = util::filtered(
-  //   std::move(_filtered));
-}
-
 namespace {
-void configure_compiler_invocation(bool a_print_debug,
+template <typename Mode>
+void configure_compiler_invocation(const Mode &m,
+  tool::cli::verbosity_level verbosity,
   const std::string_view &resource_dir,
   clang::CompilerInvocation &ci) {
-  // for some reason this doesn't have any effect if set up here, unlike the paths'
-  // modifications below
-  // c.getHeaderSearchOpts().ResourceDir = resource_dir.getValue();
+  // for some reason this doesn't have any effect if set up here, unlike the
+  // paths' modifications below c.getHeaderSearchOpts().ResourceDir =
+  // resource_dir.getValue();
 
   ci.getHeaderSearchOpts().AddPath(
     // todo: path from cli, since it is architecture dependent
@@ -79,7 +37,8 @@ void configure_compiler_invocation(bool a_print_debug,
     /*IsFramework=*/false,
     /*IgnoreSysRoot=*/false);
 
-  ci.getHeaderSearchOpts().AddPath(fmt::format("{}/include/c++/v1", resource_dir),
+  ci.getHeaderSearchOpts().AddPath(
+    fmt::format("{}/include/c++/v1", resource_dir),
     clang::frontend::IncludeDirGroup::System,
     // I have no idea what are these parameters
     /*IsFramework=*/false,
@@ -90,7 +49,7 @@ void configure_compiler_invocation(bool a_print_debug,
     ci.getHeaderSearchOpts().UserEntries.rbegin() + 2,
     ci.getHeaderSearchOpts().UserEntries.rend());
 
-  if (a_print_debug) {
+  if (tool::cli::print_debug(verbosity)) {
     for (const auto &h : ci.getHeaderSearchOpts().UserEntries) {
       fmt::println(
         "debug: user header: {header},"
@@ -102,7 +61,8 @@ void configure_compiler_invocation(bool a_print_debug,
     }
 
     for (const auto &h : ci.getHeaderSearchOpts().SystemHeaderPrefixes) {
-      fmt::println("debug: system header prefix: {prefix}", fmt::arg("prefix", h.Prefix));
+      fmt::println("debug: system header prefix: {prefix}",
+        fmt::arg("prefix", h.Prefix));
     }
   }
 
@@ -110,8 +70,8 @@ void configure_compiler_invocation(bool a_print_debug,
 
   // createInvocationFromCommandLine sets DisableFree.
   ci.getFrontendOpts().DisableFree = false;
-  // todo: ifdef based on clang version, otherwise these code results in compilation errors
-  // ci.getLangOpts()->CommentOpts.ParseAllComments = true;
+  // todo: ifdef based on clang version, otherwise these code results in
+  // compilation errors ci.getLangOpts()->CommentOpts.ParseAllComments = true;
   // ci.getLangOpts()->RetainCommentsFromSystemHeaders = true;
 
   [](auto &diag) {
@@ -131,47 +91,96 @@ void configure_compiler_invocation(bool a_print_debug,
     output.ModuleDependencyOutputDir.clear();
   }(ci.getDependencyOutputOpts());
 
-  [](auto &preproc) {
+  [&m, verbosity](clang::PreprocessorOptions &p) {
     // Disable any pch generation/usage operations. Since serialized preamble
     // format is unstable, using an incompatible one might result in
     // unexpected behaviours, including crashes.
-    preproc.ImplicitPCHInclude.clear();
-    preproc.PrecompiledPreambleBytes = {0, false};
-    preproc.PCHThroughHeader.clear();
-    preproc.PCHWithHdrStop = false;
-    preproc.PCHWithHdrStopCreate = false;
+    p.ImplicitPCHInclude.clear();
+    p.PrecompiledPreambleBytes = {0, false};
+    p.PCHThroughHeader.clear();
+    p.PCHWithHdrStop = false;
+    p.PCHWithHdrStopCreate = false;
+
+    if constexpr (std::is_same_v<Mode, tool::cli::header_mode>) {
+      const tool::cli::header_mode &mode = m;
+      constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
+
+      const auto omni_defined = std::find_if(p.Macros.begin(),
+        p.Macros.end(),
+        [k_omni_macro](const auto &macro_def) {
+          const auto &[macro, is_undef] = macro_def;
+          return macro == k_omni_macro;
+        });
+
+      if (p.Macros.cend() == omni_defined)
+        p.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
+      else {
+        auto &[_, is_undef] = *omni_defined;
+        // todo: warning if `true == is_undef`?
+        is_undef = false;
+      }
+
+      // removing force-included reflection header that is being generated
+      p.Includes = util::filtered(
+        [&output_dir = mode.output_dir](const std::string &s) -> bool {
+          // todo: should I remove the exact path?
+          return util::is_subpath(s, output_dir);
+        },
+        std::move(p.Includes));
+
+      if (tool::cli::print_debug(verbosity)) {
+        fmt::println("{}",
+          util::join(p.Macros, "\n", [](const auto &pair, fmt::context &ctx) {
+            const auto &[macro, is_undef] = pair;
+            return fmt::format_to(ctx.out(),
+              "DEBUG: #{} {}",
+              is_undef ? "undef" : "define",
+              macro);
+          }));
+        fmt::println("{}", util::join(p.Includes, "\n", [] {
+          return "DEBUG: #include \"{}\"";
+        }));
+      }
+    } else {
+      static_assert(std::is_same_v<Mode, tool::cli::source_mode>);
+      (void)m;
+      (void)verbosity;
+    }
   }(ci.getPreprocessorOpts());
 }
-} // namespace
 
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> tool::parse_ast_from_source(
-  const std::filesystem::path &resource_dir,
-  const std::filesystem::path &source,
-  // refactorme: pass command-line args
-  const clang::tooling::CompilationDatabase &db,
-  bool print_debug) {
+template <typename Mode>
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+  parse_ast_from_source(const Mode &mode,
+    const std::filesystem::path &resource_dir,
+    const std::filesystem::path &source,
+    // refactorme: pass command-line args
+    const clang::tooling::CompilationDatabase &db,
+    tool::cli::verbosity_level verbosity) noexcept {
   using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
   struct: clang::tooling::ToolAction {
     result_t m_result = tl::unexpected("unexpected: tool was not invoked");
     std::string_view m_resource_dir;
-    bool print_debug;
+    const Mode *mode;
+    tool::cli::verbosity_level verbosity;
 
-    // as of now this ad hoc is only needed because ClangTool initializes the args for
-    // LoadFromCompilerInvocation
+    // as of now this ad hoc is only needed because ClangTool initializes the
+    // args for LoadFromCompilerInvocation
     bool runInvocation(std::shared_ptr<clang::CompilerInvocation> inv,
       clang::FileManager *files,
       std::shared_ptr<clang::PCHContainerOperations> pch_cont_ops,
       clang::DiagnosticConsumer *diag_cons) override {
-      configure_compiler_invocation(print_debug, m_resource_dir, *inv);
+      configure_compiler_invocation(*mode, verbosity, m_resource_dir, *inv);
 
       // todo: this should be sufficient, without ClangTool
       // parse AST
-      std::unique_ptr<clang::ASTUnit> ast = clang::ASTUnit::LoadFromCompilerInvocation(inv,
-        pch_cont_ops,
-        clang::CompilerInstance::createDiagnostics(&inv->getDiagnosticOpts(),
-          diag_cons,
-          /*ShouldOwnClient=*/false),
-        files);
+      std::unique_ptr<clang::ASTUnit> ast =
+        clang::ASTUnit::LoadFromCompilerInvocation(inv,
+          pch_cont_ops,
+          clang::CompilerInstance::createDiagnostics(&inv->getDiagnosticOpts(),
+            diag_cons,
+            /*ShouldOwnClient=*/false),
+          files);
 
       if (ast->getDiagnostics().hasUnrecoverableErrorOccurred()) {
         // todo: filename and diagnostics
@@ -185,7 +194,8 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> tool::parse_ast_from_
   } adapter{};
   auto str_resource_dir = resource_dir.string();
   adapter.m_resource_dir = str_resource_dir;
-  adapter.print_debug = print_debug;
+  adapter.mode = &mode;
+  adapter.verbosity = verbosity;
 
   clang::tooling::ClangTool tool(db, {source.string()});
 
@@ -193,9 +203,10 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> tool::parse_ast_from_
   // todo: try to set them in `configure_compiler_invocation`
   tool.appendArgumentsAdjuster(clang::tooling::getInsertArgumentAdjuster(
     {
-      {"-nostdinc++"}, // prevents from picking up on another compiler's C++ std libs
-      {"-resource-dir=" + str_resource_dir},
-      {"-fno-delayed-template-parsing"}, // it seems to not work thought
+      {"-nostdinc++"}, //< prevents from picking up on another compiler's C++
+                       //< std libs
+      {fmt::format("-resource-dir={}", str_resource_dir)},
+      {"-fno-delayed-template-parsing"}, //< it seems to not work thought
     },
     clang::tooling::ArgumentInsertPosition::BEGIN));
 
@@ -204,11 +215,33 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string> tool::parse_ast_from_
   return tl::unexpected("errors while invoking ClangTool::run");
 }
 
+} // namespace
+
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+  tool::parse_ast_from_source(const cli::source_mode &m,
+    const std::filesystem::path &resource_dir,
+    const std::filesystem::path &source,
+    const clang::tooling::CompilationDatabase &db,
+    cli::verbosity_level verbosity) noexcept {
+  return ::parse_ast_from_source(m, resource_dir, source, db, verbosity);
+}
+
+tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+  tool::parse_ast_from_source(const cli::header_mode &m,
+    const std::filesystem::path &resource_dir,
+    const std::filesystem::path &source,
+    const clang::tooling::CompilationDatabase &db,
+    cli::verbosity_level verbosity) noexcept {
+  return ::parse_ast_from_source(m, resource_dir, source, db, verbosity);
+}
+
 tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
-  tool::load_compilation_db(const std::filesystem::path &compilation_db_path) noexcept {
+  tool::load_compilation_db(
+    const std::filesystem::path &compilation_db_path) noexcept {
   std::string err;
-  auto ptr =
-    clang::tooling::CompilationDatabase::loadFromDirectory(compilation_db_path.string(), err);
+  auto ptr = clang::tooling::CompilationDatabase::loadFromDirectory(
+    compilation_db_path.string(),
+    err);
 
   if (!ptr)
     // todo: reference the path in the error

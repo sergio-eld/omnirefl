@@ -153,3 +153,31 @@ services:
           -V | tee /build/test/ubuntu-22/results.log \
         && apt remove -y omnirefl
 
+  test-windows:
+    image: sergioeld/test-install-windows
+    build:
+      context: .
+      dockerfile: test-install-windows.Dockerfile
+    volumes:
+      - ./build-alpine/windows/install:C:\install:ro
+    working_dir: C:/install
+    command:
+      - powershell
+      - -Command
+        |
+        & {
+        $$ErrorActionPreference = 'Stop'
+        ; mkdir 'C:/with space/' 
+        ; 7z x omnirefl* -o'C:/with space/'
+        ; cd 'C:/with space'
+        ; mv ./omnirefl* ./omnirefl
+        ; cp -r omnirefl/share/omnirefl/tests ./
+        ; ./omnirefl/bin/omnirefl.exe -h
+        ; mkdir tests/build
+        ; cd tests/build
+        ; cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
+        ; cmake --build . -j $$nproc
+        ; ctest . -V
+        ; exit $$LASTEXITCODE
+        ;}
+

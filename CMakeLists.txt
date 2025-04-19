@@ -2,33 +2,62 @@ cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
 
 project(omnirefl LANGUAGES CXX C VERSION 0.0.1)
 
-set(CMAKE_CXX_STANDARD 17)
+# todo: what if I just define 20 globally instead?
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 include(cmake/clean_build.cmake)
 include(cmake/target_link_static_crt.cmake)
+
+function(add_static_compile_options TARGET)
+    target_link_static_crt(${TARGET})
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${TARGET} PRIVATE -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections)
+        target_link_options(${TARGET} PRIVATE -Wl,--gc-sections)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+        target_compile_options(${TARGET} PRIVATE /GR- /GL)
+        target_link_options(${TARGET} PRIVATE /LTCG)
+    endif()
+endfunction()
 
 option(ENABLE_PACKAGE "Building the package" OFF)
 message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
 
 option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
-# todo: options:
-# - enable benchmarks
-option(ENABLE_TESTING "Enable benchmarks" OFF)
+
+option(ENABLE_BENCH "Enable benchmarks" OFF)
 message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
+include(FetchContent)
+FetchContent_Declare(
+    cli11_proj
+    QUIET
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG v2.3.2
+)
+FetchContent_MakeAvailable(cli11_proj)
+
+list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
 find_package(Clang REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 message(STATUS "CLANG_INCLUDE_DIRS: ${CLANG_INCLUDE_DIRS}")
 message(STATUS "LLVM_INCLUDE_DIRS: ${LLVM_INCLUDE_DIRS}")
-file(GLOB CLANG_RESOURCE_DIR "${CLANG_INCLUDE_DIRS}/../lib/clang/*/include")
-if (CLANG_RESOURCE_DIR)
+
+foreach(dir ${CLANG_INCLUDE_DIRS})
+  message(STATUS "Looking for Clang resource dir in: ${dir}/../")
+  file(GLOB CLANG_RESOURCE_DIR_CANDIDATE "${dir}/../lib/clang/*/include")
+  if(CLANG_RESOURCE_DIR_CANDIDATE)
+    list(GET CLANG_RESOURCE_DIR_CANDIDATE 0 CLANG_RESOURCE_DIR)
     get_filename_component(CLANG_RESOURCE_DIR "${CLANG_RESOURCE_DIR}/../" ABSOLUTE)
     message(STATUS "CLANG_RESOURCE_DIR: ${CLANG_RESOURCE_DIR}")
-else()
-    message(FATAL_ERROR "Failed to detect Clang resource dir")
+    break()
+  endif()
+endforeach()
+
+if(NOT CLANG_RESOURCE_DIR)
+  message(FATAL_ERROR "Failed to detect Clang resource dir")
 endif()
 
 # todo: use find_package or FetchContent
@@ -46,22 +75,23 @@ add_subdirectory(lib/string-view-lite EXCLUDE_FROM_ALL)
 set(FMT_INSTALL OFF)
 add_subdirectory(lib/fmt EXCLUDE_FROM_ALL)
 
-find_package(Python COMPONENTS Interpreter REQUIRED)
-set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
-set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
-add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
-    # ad hoc, since the script needs write permissions for some reason,
-    # which prevents setting `ro` mount for source in docker
-    COMMAND ${CMAKE_COMMAND} -E copy_directory 
-        "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml"
-        "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml"
-
-    COMMAND Python::Interpreter
-        "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml/tools/amalgamate.py"
-        "${RYML_AMALGAMATED_HEADER}"
-    COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
-    VERBATIM)
-add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
+# todo: enable when the tool is ready and default implementation is needed
+# find_package(Python COMPONENTS Interpreter REQUIRED)
+# set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
+# set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
+# add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
+#     # ad hoc, since the script needs write permissions for some reason,
+#     # which prevents setting `ro` mount for source in docker
+#     COMMAND ${CMAKE_COMMAND} -E copy_directory 
+#         "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml"
+#         "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml"
+# 
+#     COMMAND Python::Interpreter
+#         "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml/tools/amalgamate.py"
+#         "${RYML_AMALGAMATED_HEADER}"
+#     COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
+#     VERBATIM)
+# add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
 
 # this library will be automatically linked to a reflected target
 add_library(refl INTERFACE)
@@ -70,10 +100,10 @@ target_sources(refl INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/refl.hpp>)
 target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${RYML_INCLUDE_DIR}/../> # /include/ryml -> include/
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    # fixme: this is needed because of 3rd party libs. Proper installation might be needed, 
-    #   however this would require version tracking...
+    # fixme:
+    #   This is needed because of 3rd party libs.
+    #   Proper installation might be needed, however this would require version tracking...
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/${PROJECT_NAME}
     )
 target_link_libraries(refl INTERFACE
@@ -87,14 +117,31 @@ target_link_libraries(refl INTERFACE
     )
 add_library(omni::refl ALIAS refl)
 
+# for unit testing
+add_library(tool.cli STATIC tool/cli.cpp)
+target_include_directories(tool.cli PUBLIC ${PROJECT_SOURCE_DIR})
+target_link_libraries(tool.cli 
+    PRIVATE CLI11::CLI11 fmt::fmt
+    PUBLIC tl::expected)
+set_target_properties(tool.cli PROPERTIES CXX_STANDARD 20)
+add_static_compile_options(tool.cli)
+
 # todo: implement as clang plugin
 add_executable(tool 
     main.cpp
-    tool/parse_cli.cpp
+    # todo: tool/ast.h -> tool/ast/???.h
     tool/ast.cpp
-    tool/reflection.cpp
-    tool/emit_code.cpp)
-add_dependencies(tool amalgamate_ryml)
+    tool/ast/util.cpp
+    tool/header_mode/emit_code.cpp
+    tool/header_mode/header_mode.cpp
+    tool/source_mode/emit_code.cpp
+    tool/source_mode/source_mode.cpp
+)
+# fixme: this is supposed to reduce compilation time for fmt...
+# target_precompile_headers(tool PRIVATE fmt/format.h)
+
+# todo: enable when the tool is ready, to provide default implementation
+# add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
     CXX_STANDARD 20
@@ -107,19 +154,13 @@ target_include_directories(tool PRIVATE
 )
 # todo: (not here) figure out how to get rid of zlib dependency for clang
 target_link_libraries(tool PRIVATE
+    tool.cli
     # clangAST
     # clangASTMatchers
     clangTooling # todo: get rid of this
     tl::expected
     fmt::fmt)
-target_link_static_crt(tool)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(tool PRIVATE -fno-rtti -fvisibility=hidden -fdata-sections -ffunction-sections)
-    target_link_options(tool PRIVATE -Wl,--gc-sections)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(tool PRIVATE /GR- /GL)
-    target_link_options(tool PRIVATE /LTCG)
-endif()
+add_static_compile_options(tool)
 add_executable(omni::tool ALIAS tool)
 
 if (ENABLE_PACKAGE)
@@ -142,7 +183,7 @@ if (ENABLE_PACKAGE)
     # todo: dependencies on 3rd party should be optional, so should be the default implementation
     install(DIRECTORY
         # todo: proper way to include the dependency (with copyright, etc)
-        "${RYML_INCLUDE_DIR}/../"
+        # "${RYML_INCLUDE_DIR}/../"
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/expected/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/variant/include/
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/optional/include/
@@ -168,7 +209,6 @@ if (ENABLE_PACKAGE)
         INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
     # todo: make sure `omni::tool` target is available regardless of the cmake build type!
-    # fixme: apt remove gives warning `/usr/lib/cmake` is not empty
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
@@ -180,13 +220,12 @@ if (ENABLE_PACKAGE)
         ${CLANG_RESOURCE_DIR}/include
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
 
-    # todo: what's in the binary dir...?
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/tests
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
     
     # this is hardly needed for an alpine build
-    install(IMPORTED_RUNTIME_ARTIFACTS tool)
+    # install(IMPORTED_RUNTIME_ARTIFACTS tool)
 
     set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGE_CONTACT "sergey.kolesnik.ld@gmail.com")
@@ -203,9 +242,35 @@ endif()
 
 # todo: disable for cross compilation, since it requires running the compiled binary
 if (ENABLE_TESTING)
-    # todo: benchmarks
     enable_testing()
-    find_package(GTest CONFIG REQUIRED)
+    find_package(GTest CONFIG QUIET)
+    if (NOT TARGET GTest::GTest)
+        include(FetchContent)
+
+        set(INSTALL_GTEST OFF  CACHE BOOL "" FORCE)   # libgtest / gtest_main
+        set(INSTALL_GMOCK OFF  CACHE BOOL "" FORCE)   # libgmock / gmock_main
+        set(gtest_build_tests OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG v1.15.2
+        )
+        # For Windows: Prevent overriding the parent project's compiler/linker settings
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+        add_library(GTest::GTest ALIAS gtest)
+    endif()
+
+    # refactorme: separate directory
+    # add_executable(test.cli tool/tests/cli.cpp)
+    # set_target_properties(test.cli PROPERTIES CXX_STANDARD 20)
+    # todo: implement
+    # target_link_libraries(test.cli PRIVATE tool.cli GTest::GTest GTest::Main)
+    # add_test(NAME test.cli COMMAND test.cli)
+
+    add_executable(sb.cli tool/tests/sb_cli.cpp)
+    target_link_libraries(sb.cli PRIVATE tool.cli)
+
     # todo: (also) test this in a sub project where `omni::tool` has been installed 
     #   and found by `find_package`
     # todo: profile build times for reflected targets.
@@ -233,7 +298,6 @@ if (ENABLE_BENCH)
         CXX_STANDARD 20)
     target_link_libraries(generate_structs fmt::fmt)
 
-    # todo: generate files using generate_structs
     # todo: do I need it as a custom_target? Maybe custom_command instead
     add_custom_target(bench.structs_100.generate
         COMMAND generate_structs 100 ./bench structs_100.h test_structs_100.cpp
@@ -273,6 +337,7 @@ if (ENABLE_BENCH)
         clangTooling # todo: get rid of this
         tl::expected
         fmt::fmt)
+
     # fixme: pass as runtime arguments, or as relative paths (mapped volumes have different paths)
     target_compile_definitions(bench.parse_ast PRIVATE
         DB_PATH="${CMAKE_CURRENT_BINARY_DIR}"
