@@ -1,5 +1,5 @@
 # list(JOIN <list> <glue> <output variable>) since 3.12
-cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 if (NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF")
     message(STATUS "omnirefl: Forcing `CMAKE_EXPORT_COMPILE_COMMNADS=1")
@@ -159,23 +159,27 @@ function(reflected_target target)
                 OBJECT_DEPENDS "${generated_header}")
 
             if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-                set(FORCE_INCLUDE_FLAG "/FI" "${generated_header}")
+                set(force_include_flag "/FI" "${generated_header}")
             else()
-                set(FORCE_INCLUDE_FLAG "-include" "${generated_header}")
+                set(force_include_flag "-include" "${generated_header}")
             endif()
             message(STATUS "${tool_name}: For target ${target} "
-                "forcing include '${FORCE_INCLUDE_FLAG}'")
+                "forcing include '${force_include_flag}'")
 
-            get_source_file_property(CURRENT_FLAGS ${_src} COMPILE_OPTIONS)
-            if (NOT CURRENT_FLAGS)
-                set(CURRENT_FLAGS "")
+            get_source_file_property(current_flags ${_src} COMPILE_OPTIONS)
+            if (NOT current_flags)
+                set(current_flags "")
             endif()
-            list(APPEND CURRENT_FLAGS ${FORCE_INCLUDE_FLAG})
+            list(APPEND current_flags ${force_include_flag})
+            set(force_include_property "${file_name}_FORCE_INCLUDE")
+            set_target_properties(${target} PROPERTIES ${force_include_property} "${current_flags}")
             # fixme:
             #   this will cause conflicts if other targets use this source file for compilation 
             #   (with different flags, options, etc)
-            set_source_files_properties(${_src} PROPERTIES
-                COMPILE_OPTIONS "${CURRENT_FLAGS}")
+            set_source_files_properties(${_src} 
+                PROPERTIES 
+                COMPILE_OPTIONS $<TARGET_PROPERTY:${force_include_property}>
+            )
         endforeach()
 
         target_compile_definitions(${target} PRIVATE OMNI_HEADER_REFLECTION)
