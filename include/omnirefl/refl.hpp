@@ -114,6 +114,7 @@ constexpr int unique_id(std::true_type) {
 // meta type to assign index to a type upon instantiation
 template <typename T, int Index = unique_id<T>()>
 struct _reflected_indexed_type {};
+
 #else
 
 // tag used in target mode to collect reflected types
@@ -169,6 +170,12 @@ namespace {
 template <int>
 struct _indexed_reflected;
 
+// fixme:
+//   this will not work for non-forward-declarable 'dependent' types (if I
+//   decide to index them), because as of this writing only the `reflected_call`
+//   is allowed to invoke the `unique_id`, and recursive `reflected_call`s are
+//   not allowed
+//
 // Instantiations by named non-local types will be caught by the generated
 // partial specializations of `_reflected<T>` like for source-mode. This will
 // prevent from calling `unique_id<T>()` and not increment the counter.
@@ -178,13 +185,26 @@ struct _indexed_reflected;
 template <typename T, typename = T>
 struct _reflected: _indexed_reflected<unique_id<T>()> {};
 
+// `std::true_type` specializations will be generated for reflected types to be
+// picked up by SFINAE
+template <int Index>
+struct _is_indexed_reflected: std::false_type {};
+
+// Specializations for forward-declarable types will generated to be picked up
+// by SFINAE.
+template <typename T, typename = T>
+struct _is_reflected: _is_indexed_reflected<unique_id<T>()> {};
+
 #else
 // Specializations, containing reflection interface for T will be generated.
 // Default argument is used to delay template instantiaton by partial
 // specialization.
 template <typename T, typename = T>
 struct _reflected;
-#endif
+
+template <typename T, typename = T>
+struct _is_reflected;
+#endif // OMNI_HEADER_REFLECTION
 
 } // namespace
 } // namespace detail
@@ -201,9 +221,15 @@ struct _reflected;
    }
  };
  ```
+ * IMPORTANT: do not instantiate outside of a reflected context.
  */
 template <typename T>
 using reflected_t = detail::_reflected<typename std::decay<T>::type>;
+
+// todo: implement the check in tool
+/// (!!!) do not instantiate this outside of a reflected context
+template <typename T, typename = T>
+struct is_reflected: std::false_type {};
 
 namespace detail {
 namespace {
@@ -328,15 +354,16 @@ struct variant_field {
   }
 };
 
-// todo: implement the check in tool
+// fixme:
+//   this causes problems in header-mode. Need another mechanism, not based on
+//   calling the `reflected_t` since it will trigger the type index evaluation
+//   by `unique_id`.
+//   A possible approach: generate `is_reflected` specializations
 /// (!!!) do not instantiate this outside of a reflected context
-template <typename, typename = void>
-struct is_reflected: std::false_type {};
-
-/// (!!!) do not instantiate this outside of a reflected context
-template <typename T>
-struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>:
-    std::true_type {};
+/// todo: use the tool's pass to detect the invalid usage
+// template <typename T>
+// struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>:
+//     std::true_type {};
 
 // refactorme: default template arguments are not good for forward declarations
 // reflected binding is needed to hold a reference to the reflected object

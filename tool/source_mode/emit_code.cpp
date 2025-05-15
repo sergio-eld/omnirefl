@@ -1,6 +1,5 @@
-#include "fmt/base.h"
-#include "tool/source_mode/transforms.h"
 
+#include "tool/source_mode/transforms.h"
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
@@ -83,6 +82,21 @@ struct _reflected<{type_tag} {type_name}, T> {{
             field.name);
         })));
 };
+
+auto fmt_is_reflected_specialization(
+  const codegen::reflected_specialization_data &refl_type,
+  fmt::context &ctx) {
+  using namespace std::string_view_literals;
+
+  return fmt::format_to(ctx.out(),
+    R"(template <typename T>
+struct _is_reflected<{type_tag} {type_name}, T> : std::true_type {{
+  static_assert(std::is_same<{type_tag} {type_name}, T>::value,
+    "omnirefl: unexpected types mismatch, try regenerating");
+}};)",
+    fmt::arg("type_tag", refl_type.is_class ? "class"sv : "struct"sv),
+    fmt::arg("type_name", refl_type.nm_qual_type));
+}
 
 auto fmt_reflected_call(const match::func_signature &func_sig,
   fmt::context &ctx) {
@@ -195,6 +209,8 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
 // Generated specializations for types' reflection
 {reflected_types_specializations}
 
+{is_reflected_specialization}
+
 }} // namespace
 }} // namespace detail
 }} // namespace omni
@@ -211,6 +227,10 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
     fmt::arg("std_headers", util::join(std_includes, "\n", ::fmt_std_include)),
     fmt::arg("reflected_types_specializations",
       util::join(data.reflected_types, "\n\n", ::fmt_reflected_specialization)),
+    fmt::arg("is_reflected_specialization",
+      util::join(data.reflected_types,
+        "\n\n",
+        ::fmt_is_reflected_specialization)),
     fmt::arg("reflected_calls",
       util::join(data.reflected_calls, "\n\n", ::fmt_reflected_call))
     //
