@@ -5,6 +5,7 @@
 #include <fmt/core.h>
 
 #include <filesystem>
+#include <optional>
 
 #ifndef DB_PATH
 #  error "DB_PATH not set"
@@ -44,7 +45,8 @@ void bm_parse_ast_using_compilation_db(benchmark::State &state) {
     auto res = tool::parse_ast_from_source(tool::cli::source_mode{},
       resource_dir,
       cpp_path,
-      **compilation_db);
+      **compilation_db,
+      std::nullopt);
     if (!res) {
       state.SkipWithError(
         fmt::format("Failed to parse AST of {}", cpp_path.string()).c_str());
@@ -83,7 +85,8 @@ void bm_parse_ast_direct(benchmark::State &state) {
     auto res = tool::parse_ast_from_source(tool::cli::source_mode{},
       resource_dir,
       cpp_path,
-      **compilation_db);
+      **compilation_db,
+      std::nullopt);
     if (!res) {
       state.SkipWithError(
         fmt::format("Failed to parse AST of {}", cpp_path.string()).c_str());
