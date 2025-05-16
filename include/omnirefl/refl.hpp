@@ -226,7 +226,7 @@ struct _is_reflected;
 template <typename T>
 using reflected_t = detail::_reflected<typename std::decay<T>::type>;
 
-// todo: implement the check in tool
+/// todo: use the tool's pass to detect the invalid usage
 /// (!!!) do not instantiate this outside of a reflected context
 template <typename T, typename = T>
 struct is_reflected: std::false_type {};
@@ -353,17 +353,6 @@ struct variant_field {
       v._v);
   }
 };
-
-// fixme:
-//   this causes problems in header-mode. Need another mechanism, not based on
-//   calling the `reflected_t` since it will trigger the type index evaluation
-//   by `unique_id`.
-//   A possible approach: generate `is_reflected` specializations
-/// (!!!) do not instantiate this outside of a reflected context
-/// todo: use the tool's pass to detect the invalid usage
-// template <typename T>
-// struct is_reflected<T, detail::void_t<decltype(sizeof(reflected_t<T>))>>:
-//     std::true_type {};
 
 // refactorme: default template arguments are not good for forward declarations
 // reflected binding is needed to hold a reference to the reflected object
