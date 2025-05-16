@@ -2,6 +2,7 @@
 
 #include "tool/cli.hpp"
 #include "tool/util.hpp"
+#include <optional>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -32,6 +33,9 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::filesystem::path &source,
     // refactorme: pass command-line args
     const clang::tooling::CompilationDatabase &db,
+    // to disambiguate the input file if db contains several entries for
+    // diffenet targets
+    const std::optional<std::filesystem::path> &output_file,
     tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
 
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
@@ -40,6 +44,9 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::filesystem::path &source,
     // refactorme: pass command-line args
     const clang::tooling::CompilationDatabase &db,
+    // to disambiguate the input file if db contains several entries for
+    // diffenet targets
+    const std::optional<std::filesystem::path> &output_file,
     tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
 
 tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
@@ -116,6 +123,7 @@ struct tu_pipeline {
       // todo: continious benchmark before
       // todo: remove dependency on compilation_db, pass flags direclty
       compilation_db,
+      /*output_file=*/std::nullopt, //< fixme: pass the file
       verbosity);
     if (!ast) {
       return tl::unexpected(fmt::format("Error parsing AST of file {}: {}",

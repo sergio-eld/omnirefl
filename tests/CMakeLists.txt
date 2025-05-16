@@ -80,7 +80,7 @@ endfunction()
 #   - fix `reflected_target` function:
 #     setting forced include for a source file used by other targets will cause a conflict
 #   - nested struct serialization for header-mode
-add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/simple MODES SOURCE)
+add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/simple MODES SOURCE HEADER)
 add_subdirectory(multitarget)
 add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/inplace MODES HEADER)
 # todo: add test for failure

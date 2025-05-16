@@ -131,12 +131,13 @@ struct wrestler {
   std::string catchphrase{};
   std::vector<championship> titles{};
 
-  class info {
-    public:
-    std::string ring_name;
-    std::string signature_move;
-    int debut_year;
-  } info{};
+  // fixme: implement support in header-mode
+  // class info {
+  //   public:
+  //   std::string ring_name;
+  //   std::string signature_move;
+  //   int debut_year;
+  // } info{};
   // todo: add support for an unnamed nested struct (specialization is possible via
   // `decltype(std::declval<person>().unnamed_nested)`
 };
@@ -145,4 +146,5 @@ struct settable {
   std::string str;
   int i;
 };
+
 } // namespace example_types

@@ -71,6 +71,10 @@ struct compilation_db_entry {
   // `compile_commands.json`, otherwise `options::sources` will be used for
   // fetching compilation commands.
   bool filter_paths;
+
+  // fixme:
+  //   add output_file for disambiguation in db if several cmake targets use the
+  //   same source file
 };
 
 struct compilation_target {

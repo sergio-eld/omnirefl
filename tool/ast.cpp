@@ -1,6 +1,8 @@
 #include "tool/ast.hpp"
+#include "fmt/base.h"
 #include "tool/cli.hpp"
 #include "tool/util.hpp"
+#include <memory>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -156,13 +158,20 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::filesystem::path &source,
     // refactorme: pass command-line args
     const clang::tooling::CompilationDatabase &db,
+    const std::optional<std::filesystem::path> &output_path,
     tool::cli::verbosity_level verbosity) noexcept {
   using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
   struct: clang::tooling::ToolAction {
     result_t m_result = tl::unexpected("unexpected: tool was not invoked");
     std::string_view m_resource_dir;
     const Mode *mode;
-    tool::cli::verbosity_level verbosity;
+    tool::cli::verbosity_level m_verbosity;
+
+    // ClangTool may find several entries for the provided `source` in the
+    // compilation database, and will run the tool for each one. I don't need
+    // that. So, either wait for the specified file, or select the first one if
+    // none was specified
+    const std::filesystem::path *m_output_path = nullptr;
 
     // as of now this ad hoc is only needed because ClangTool initializes the
     // args for LoadFromCompilerInvocation
@@ -170,7 +179,35 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
       clang::FileManager *files,
       std::shared_ptr<clang::PCHContainerOperations> pch_cont_ops,
       clang::DiagnosticConsumer *diag_cons) override {
-      configure_compiler_invocation(*mode, verbosity, m_resource_dir, *inv);
+      configure_compiler_invocation(*mode, m_verbosity, m_resource_dir, *inv);
+
+      // Skip duplicate compile-commands created when several CMake targets
+      // share this source file.
+      const std::filesystem::path output_file =
+        inv->getFrontendOpts().OutputFile;
+
+      if (m_output_path) {
+        // Run only the entry whose object-file path matches m_output_file.
+        if (output_file != *m_output_path) {
+          if (tool::cli::verbosity_level::info & m_verbosity) {
+            fmt::println(
+              "INFO: Skipping invocation for mismatched output file.\nExpected: {}\nInvoked: {}\n",
+              m_output_path->string(),
+              output_file.string());
+          }
+          return true;
+        }
+      } else {
+        // Run only first successfult source.
+        if (m_result) {
+          if (tool::cli::verbosity_level::info & m_verbosity) {
+            fmt::println(
+              "INFO: Skipping invocation for duplicate entry. \nInvoked: {}\n",
+              output_file.string());
+          }
+          return true;
+        }
+      }
 
       // todo: this should be sufficient, without ClangTool
       // parse AST
@@ -182,7 +219,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
             /*ShouldOwnClient=*/false),
           files);
 
-      if (ast->getDiagnostics().hasUnrecoverableErrorOccurred()) {
+      if (!ast || ast->getDiagnostics().hasUnrecoverableErrorOccurred()) {
         // todo: filename and diagnostics
         m_result = tl::unexpected(std::string("failed to parse AST"));
         return false;
@@ -192,10 +229,13 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
       return true;
     }
   } adapter{};
+
   auto str_resource_dir = resource_dir.string();
   adapter.m_resource_dir = str_resource_dir;
   adapter.mode = &mode;
-  adapter.verbosity = verbosity;
+  adapter.m_verbosity = verbosity;
+  if (output_path)
+    adapter.m_output_path = std::addressof(*output_path);
 
   clang::tooling::ClangTool tool(db, {source.string()});
 
@@ -210,7 +250,8 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     },
     clang::tooling::ArgumentInsertPosition::BEGIN));
 
-  if (0 == tool.run(&adapter))
+  const int run_resutl = tool.run(&adapter);
+  if (!adapter.m_result || 0 == run_resutl)
     return std::move(adapter.m_result);
   return tl::unexpected("errors while invoking ClangTool::run");
 }
@@ -222,8 +263,14 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     const clang::tooling::CompilationDatabase &db,
+    const std::optional<std::filesystem::path> &output_path,
     cli::verbosity_level verbosity) noexcept {
-  return ::parse_ast_from_source(m, resource_dir, source, db, verbosity);
+  return ::parse_ast_from_source(m,
+    resource_dir,
+    source,
+    db,
+    output_path,
+    verbosity);
 }
 
 tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
@@ -231,8 +278,14 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
     const clang::tooling::CompilationDatabase &db,
+    const std::optional<std::filesystem::path> &output_path,
     cli::verbosity_level verbosity) noexcept {
-  return ::parse_ast_from_source(m, resource_dir, source, db, verbosity);
+  return ::parse_ast_from_source(m,
+    resource_dir,
+    source,
+    db,
+    output_path,
+    verbosity);
 }
 
 tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>

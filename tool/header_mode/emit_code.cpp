@@ -84,6 +84,21 @@ struct _reflected<{type_tag} {type_name}, T> {{
     })));
 }
 
+auto fmt_forward_declaration_is_reflected_specialization(
+  const codegen::forward_declarable &refl_type,
+  fmt::context &ctx) {
+  using namespace std::string_view_literals;
+
+  return fmt::format_to(ctx.out(),
+    R"(template <typename T>
+struct _is_reflected<{type_tag} {type_name}, T> : std::true_type {{
+  static_assert(std::is_same<{type_tag} {type_name}, T>::value,
+    "omnirefl: unexpected types mismatch, try regenerating");
+}};)",
+    fmt::arg("type_tag", refl_type.is_class ? "class"sv : "struct"sv),
+    fmt::arg("type_name", refl_type.nm_qual_type));
+}
+
 auto fmt_indexed_specialization(size_t index,
   const std::vector<std::string> &field_names,
   fmt::context &ctx) {
@@ -118,6 +133,21 @@ struct _indexed_reflected<{index}> {{
         ",\n",
         // ad hoc: manual offset
         [] { return "    {}_t"; })));
+}
+
+// todo: implement
+//   note: `is_reflected` is only allowed to be called inside `reflected_call`.
+//   in the reflected context the unique type id has already been generated.
+//   note: it implies forbidden recursive `reflected_call` invocations... It
+//   would require to check that the user implementation classes do not make
+//   that call, which is practically impossible
+auto fmt_is_indexed_reflected_specializations(size_t index, fmt::context &ctx) {
+  using namespace std::string_view_literals;
+
+  return fmt::format_to(ctx.out(),
+    R"(template <>
+struct _is_indexed_reflected<{index}> : std::true_type {{}};)",
+    fmt::arg("index", index));
 }
 
 auto fmt_forward_declaration(const codegen::forward_declarable &t,
@@ -176,6 +206,12 @@ struct _indexed_reflected;
 template <typename T, typename>
 struct _reflected;
 
+template <int Index>
+struct _is_indexed_reflected;
+
+template <typename, typename>
+struct _is_reflected;
+
 // macro for static member function definition to
 // to reduce boilerplate ... in a boilerplate
 #  define OMNI_DEFINE_NAME_FUNC(STR) \
@@ -186,6 +222,10 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
 
 // Generated reflection specializations for indexed types
 {indexed_specializations}
+
+{is_indexed_reflected_specializations}
+
+{forward_declaration_is_reflected_specialization}
 
 }} // namespace
 }} // namespace detail
@@ -207,7 +247,18 @@ constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] {{ return ST
         [](const auto &key_val, fmt::context &ctx) {
           const auto &[index, fields] = key_val;
           return ::fmt_indexed_specialization(index, fields, ctx);
-        })));
+        })),
+    fmt::arg("is_indexed_reflected_specializations",
+      util::join(data.reflected_indexed_types,
+        "\n\n",
+        [](const auto &key_val, fmt::context &ctx) {
+          const auto &[index, fields] = key_val;
+          return ::fmt_is_indexed_reflected_specializations(index, ctx);
+        })),
+    fmt::arg("forward_declaration_is_reflected_specialization",
+      util::join(data.forward_declarable_types,
+        "\n\n",
+        ::fmt_forward_declaration_is_reflected_specialization)));
 
   return {};
 }
