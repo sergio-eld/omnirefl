@@ -171,6 +171,8 @@ function(reflected_target target)
                 set(current_flags "")
             endif()
             list(APPEND current_flags ${force_include_flag})
+
+            # fixme: file_name is not enough. Better to calculate hash from the full path
             set(force_include_property "${file_name}_FORCE_INCLUDE")
             set_target_properties(${target} PROPERTIES ${force_include_property} "${current_flags}")
             # fixme:
