@@ -3,8 +3,6 @@
 #include "tool/cli.hpp"
 #include "tool/reflection.hpp"
 
-#include <tl/expected.hpp>
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -15,6 +13,7 @@
 #include <clang/Frontend/ASTUnit.h>
 #pragma GCC diagnostic pop
 
+#include <expected>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -80,7 +79,7 @@ struct reflected_type {
   static auto resolve(const node_type &node,
     const clang::ASTUnit &ast,
     const std::set<refl::type_id> &resolved_types,
-    bool print_debug = false) noexcept -> tl::expected<result, std::string>;
+    bool print_debug = false) noexcept -> std::expected<result, std::string>;
 };
 
 // refactorme:
@@ -113,7 +112,7 @@ struct reflected_impl {
   static auto resolve(const node_type &node,
     const clang::ASTUnit &ast,
     const std::set<refl::type_id> &resolved_types,
-    bool print_debug = false) noexcept -> tl::expected<result, std::string>;
+    bool print_debug = false) noexcept -> std::expected<result, std::string>;
 };
 
 struct reflected_call {
@@ -137,7 +136,7 @@ struct reflected_call {
   };
 
   static auto resolve(const node_type &node, const clang::ASTUnit &ast) noexcept
-    -> tl::expected<result, std::string>;
+    -> std::expected<result, std::string>;
 };
 
 } // namespace match
@@ -169,7 +168,7 @@ template <typename Match>
 auto resolve_reflected_node(const typename Match::node_type &n,
   const clang::ASTUnit &ast,
   const tu_data &tu_data) noexcept
-  -> tl::expected<typename Match::result, std::string> {
+  -> std::expected<typename Match::result, std::string> {
   if constexpr (std::is_same_v<match::reflected_call, Match>) {
     return Match::resolve(n, ast);
   } else {
@@ -187,7 +186,7 @@ auto fold_resolved_types(tu_data accum,
   match_result_variant<match::reflected_type,
     match::reflected_impl,
     match::reflected_call> result) noexcept
-  -> tl::expected<tu_data, std::string>;
+  -> std::expected<tu_data, std::string>;
 
 } // namespace transforms
 
@@ -228,7 +227,7 @@ struct reflection_data {
   std::vector<match::func_signature> reflected_calls;
 };
 
-tl::expected<reflection_data, std::string> prepare_data(
+std::expected<reflection_data, std::string> prepare_data(
   std::map<std::filesystem::path, transforms::tu_data>
     reflection_data_by_source,
   cli::verbosity_level) noexcept;
@@ -239,7 +238,7 @@ struct options {
   // - annotating
 };
 
-tl::expected<void, std::string> emit_reflection_cpp_file(options,
+std::expected<void, std::string> emit_reflection_cpp_file(options,
   std::ostream &os,
   const reflection_data &data);
 

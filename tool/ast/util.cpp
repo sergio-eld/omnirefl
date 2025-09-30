@@ -16,6 +16,7 @@
 #include <clang/Basic/SourceManager.h>
 #pragma GCC diagnostic pop
 
+#include <expected>
 #include <numeric>
 #include <set>
 #include <stack>
@@ -211,14 +212,14 @@ std::vector<const clang::CXXRecordDecl *>
   return {visited.begin(), visited.end()};
 }
 
-tl::expected<clang::Type const *, std::string> util::ast::get_template_type_arg(
+std::expected<clang::Type const *, std::string> util::ast::get_template_type_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   size_t n) noexcept {
   const auto &template_args_list = template_decl.getTemplateArgs();
 
   if (template_args_list.size() < n) {
     const std::string_view detail_struct_name = template_decl.getName();
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("invalid template signature for internal omnirefl type {}",
         detail_struct_name));
   }
@@ -226,7 +227,7 @@ tl::expected<clang::Type const *, std::string> util::ast::get_template_type_arg(
   const clang::TemplateArgument &arg = template_args_list.get(n);
   if (clang::TemplateArgument::ArgKind::Type != arg.getKind()) {
     const std::string_view detail_struct_name = template_decl.getName();
-    return tl::unexpected(fmt::format("non-type template argument `{}` of {}",
+    return std::unexpected(fmt::format("non-type template argument `{}` of {}",
       n,
       detail_struct_name));
   }
@@ -234,14 +235,14 @@ tl::expected<clang::Type const *, std::string> util::ast::get_template_type_arg(
   return arg.getAsType().getTypePtr();
 }
 
-tl::expected<int, std::string> util::ast::get_template_value_arg(
+std::expected<int, std::string> util::ast::get_template_value_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   size_t n) noexcept {
   const auto &template_args_list = template_decl.getTemplateArgs();
 
   if (template_args_list.size() < n) {
     const std::string_view detail_struct_name = template_decl.getName();
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("invalid template signature for internal omnirefl type {}",
         detail_struct_name));
   }
@@ -249,7 +250,7 @@ tl::expected<int, std::string> util::ast::get_template_value_arg(
   const clang::TemplateArgument &arg = template_args_list.get(n);
   if (clang::TemplateArgument::ArgKind::Integral != arg.getKind()) {
     const std::string_view detail_struct_name = template_decl.getName();
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("non-integral template argument `{}` of {}",
         n,
         detail_struct_name));

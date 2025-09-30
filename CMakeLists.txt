@@ -2,8 +2,7 @@ cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
 
 project(omnirefl LANGUAGES CXX C VERSION 0.0.1)
 
-# todo: what if I just define 20 globally instead?
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 include(cmake/clean_build.cmake)
@@ -121,9 +120,7 @@ add_library(omni::refl ALIAS refl)
 add_library(tool.cli STATIC tool/cli.cpp)
 target_include_directories(tool.cli PUBLIC ${PROJECT_SOURCE_DIR})
 target_link_libraries(tool.cli 
-    PRIVATE CLI11::CLI11 fmt::fmt
-    PUBLIC tl::expected)
-set_target_properties(tool.cli PROPERTIES CXX_STANDARD 20)
+    PRIVATE CLI11::CLI11 fmt::fmt)
 add_static_compile_options(tool.cli)
 
 # todo: implement as clang plugin
@@ -144,7 +141,6 @@ add_executable(tool
 # add_dependencies(tool amalgamate_ryml)
 set_target_properties(tool PROPERTIES 
     OUTPUT_NAME ${PROJECT_NAME}
-    CXX_STANDARD 20
     INTERPROCEDURAL_OPTIMIZATION ON
     ENABLE_EXPORTS OFF)
 target_include_directories(tool PRIVATE 
@@ -158,7 +154,6 @@ target_link_libraries(tool PRIVATE
     # clangAST
     # clangASTMatchers
     clangTooling # todo: get rid of this
-    tl::expected
     fmt::fmt)
 add_static_compile_options(tool)
 add_executable(omni::tool ALIAS tool)
@@ -263,7 +258,6 @@ if (ENABLE_TESTING)
 
     # refactorme: separate directory
     # add_executable(test.cli tool/tests/cli.cpp)
-    # set_target_properties(test.cli PROPERTIES CXX_STANDARD 20)
     # todo: implement
     # target_link_libraries(test.cli PRIVATE tool.cli GTest::GTest GTest::Main)
     # add_test(NAME test.cli COMMAND test.cli)
@@ -293,9 +287,6 @@ if (ENABLE_BENCH)
 
     # macro bench
     add_executable(generate_structs generate_structs.cpp)
-    set_target_properties(generate_structs
-        PROPERTIES 
-        CXX_STANDARD 20)
     target_link_libraries(generate_structs fmt::fmt)
 
     # todo: do I need it as a custom_target? Maybe custom_command instead
@@ -326,7 +317,6 @@ if (ENABLE_BENCH)
     # todo: it should depend on byproduct and not trigger the generation every time
     add_dependencies(bench.parse_ast bench.structs_100.generate)
     set_target_properties(bench.parse_ast PROPERTIES 
-        CXX_STANDARD 20
         INTERPROCEDURAL_OPTIMIZATION ON
         ENABLE_EXPORTS OFF)
     target_include_directories(bench.parse_ast PRIVATE 
@@ -335,7 +325,6 @@ if (ENABLE_BENCH)
         ${PROJECT_SOURCE_DIR})
     target_link_libraries(bench.parse_ast PRIVATE benchmark::benchmark
         clangTooling # todo: get rid of this
-        tl::expected
         fmt::fmt)
 
     # fixme: pass as runtime arguments, or as relative paths (mapped volumes have different paths)

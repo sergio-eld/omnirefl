@@ -13,6 +13,7 @@
 #include <clang/Frontend/ASTUnit.h>
 #pragma GCC diagnostic pop
 
+#include <expected>
 #include <optional>
 #include <set>
 #include <variant>
@@ -106,7 +107,7 @@ struct reflected_indexed_type {
   static auto resolve(const node_type &node,
     const clang::ASTUnit &ast,
     const std::set<refl::type_id> &resolved_types,
-    bool print_debug = false) -> tl::expected<result, std::string>;
+    bool print_debug = false) -> std::expected<result, std::string>;
 };
 
 } // namespace match
@@ -133,7 +134,7 @@ inline auto resolve_indexed_type_node(
   const match::reflected_indexed_type::node_type &n,
   const clang::ASTUnit &ast,
   const tu_data &tu_data)
-  -> tl::expected<typename match::reflected_indexed_type::result, std::string> {
+  -> std::expected<typename match::reflected_indexed_type::result, std::string> {
   return match::reflected_indexed_type::resolve(n,
     ast,
     tu_data.resolved_types,
@@ -142,7 +143,7 @@ inline auto resolve_indexed_type_node(
 
 auto fold_indexed_type_result(tu_data _accum,
   match::reflected_indexed_type::result _result)
-  -> tl::expected<tu_data, std::string>;
+  -> std::expected<tu_data, std::string>;
 
 } // namespace transforms
 
@@ -180,10 +181,10 @@ struct reflection_data {
 
 struct options {};
 
-tl::expected<reflection_data, std::string> prepare_data(
+std::expected<reflection_data, std::string> prepare_data(
   header_mode::transforms::tu_data data);
 
-tl::expected<void, std::string> emit_reflection_header_file(options,
+std::expected<void, std::string> emit_reflection_header_file(options,
   std::ostream &os,
   const reflection_data &data);
 

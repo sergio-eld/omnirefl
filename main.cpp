@@ -16,9 +16,9 @@
 #include <clang/Tooling/CompilationDatabase.h>
 
 #include <fmt/core.h>
-#include <tl/expected.hpp>
 
 #include <algorithm>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -31,7 +31,7 @@
 namespace {
 namespace cli = tool::cli;
 
-tl::expected<std::vector<std::filesystem::path>, std::string>
+std::expected<std::vector<std::filesystem::path>, std::string>
   reflected_sources_from_compilation_db(
     const clang::tooling::CompilationDatabase &compilation_db,
     bool exclude,
@@ -42,9 +42,9 @@ tl::expected<std::vector<std::filesystem::path>, std::string>
       [](const std::filesystem::path &p) -> bool { return p.empty(); },
       std::move(sources)));
 
-  tl::expected db_sources = util::to_std_paths(compilation_db.getAllFiles());
+  std::expected db_sources = util::to_std_paths(compilation_db.getAllFiles());
   if (!db_sources)
-    return tl::unexpected(std::move(db_sources).error());
+    return std::unexpected(std::move(db_sources).error());
 
   if (exclude) {
     fmt::println("DEBUG: using sources to filter compilation DB files.");
@@ -83,7 +83,7 @@ tl::expected<std::vector<std::filesystem::path>, std::string>
   if (not_found_in_db.empty())
     return {std::move(sources)};
 
-  return tl::unexpected<std::string>(fmt::format("[{}]",
+  return std::unexpected<std::string>(fmt::format("[{}]",
     util::join(not_found_in_db,
       ",\n",
       [](const std::filesystem::path &p, fmt::context &ctx) {
@@ -127,7 +127,7 @@ cli::options normalize_paths(cli::options o) noexcept {
 // - output to file
 // - what else
 int main(int argc, char **argv) {
-  tl::expected cli = cli::parse(argc, argv);
+  std::expected cli = cli::parse(argc, argv);
   if (!cli) {
     const auto &[msg, code] = cli.error();
     (0 == code ? std::cout : std::cerr) << msg << '\n';
@@ -150,9 +150,9 @@ int main(int argc, char **argv) {
   // todo:
   //   when implementing extracting compile commands, for in-place mode remove
   //   generated includes
-  const tl::expected sources = std::visit(
+  const std::expected sources = std::visit(
     [&sources = cli->sources](const auto &_v)
-      -> tl::expected<
+      -> std::expected<
         // fixme: ad hoc until the pipeline depends on CompilationDatabase
         std::pair<std::vector<std::filesystem::path>,
           std::unique_ptr<clang::tooling::CompilationDatabase>>,
@@ -161,29 +161,29 @@ int main(int argc, char **argv) {
       if constexpr (!std::is_same_v<cli::compilation_db_entry, type>) {
         // todo:
         //   support direct compilation options (without compile_commands.json)
-        return tl::unexpected(
+        return std::unexpected(
           fmt::format("Only compile_commands.json is supported.\n"));
       } else {
         const cli::compilation_db_entry &cli_compilation_db = _v;
         // todo: make const after removing the usage in the actual pipeline
-        /*const*/ tl::expected compilation_db =
+        /*const*/ std::expected compilation_db =
           tool::load_compilation_db(cli_compilation_db.path);
         if (!compilation_db) {
-          return tl::unexpected(
+          return std::unexpected(
             fmt::format("Error loading compilation DB \"{}\": \"{}\".\n",
               compilation_db.error(),
               cli_compilation_db.path.string()));
         }
 
-        tl::expected result =
+        std::expected result =
           ::reflected_sources_from_compilation_db(**compilation_db,
             cli_compilation_db.filter_paths,
             sources);
         if (!result)
-          return tl::unexpected(std::move(result).error());
+          return std::unexpected(std::move(result).error());
 
         // fixme: exclude generated reflected files!!
-        return {tl::in_place,
+        return std::pair{
           std::move(result).value(),
           std::move(compilation_db).value()};
       }

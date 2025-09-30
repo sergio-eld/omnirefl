@@ -1,12 +1,12 @@
 #include "tool/cli.hpp"
 
-#include "tl/expected.hpp"
 #include "tool/util.hpp"
 
 #include <CLI/CLI.hpp>
 #include <CLI/Error.hpp>
 
 #include <algorithm>
+#include <expected>
 #include <filesystem>
 #include <sstream>
 #include <tuple>
@@ -72,15 +72,15 @@ std::string tool::cli::to_string(verbosity_level v) noexcept {
   return fmt::format("{}", fmt::join(values, "|"));
 }
 
-tl::expected<tool::cli::verbosity_level, tl::monostate> tool::cli::from_string(
-  std::string_view s) noexcept {
+std::expected<tool::cli::verbosity_level, std::monostate>
+  tool::cli::from_string(std::string_view s) noexcept {
   const auto found = std::find_if(::map_str_verbosity.cbegin(),
     ::map_str_verbosity.cend(),
     [s](const auto &p) { return p.first == s; });
   if (found != ::map_str_verbosity.cend())
     return found->second;
 
-  return tl::unexpected(tl::monostate());
+  return std::unexpected(std::monostate());
 }
 
 std::string tool::cli::to_string(const options &o) {
@@ -137,7 +137,7 @@ sources=[{sources}],
     fmt::arg("verbosity_level", to_string(o.verbosity)));
 }
 
-tl::expected<tool::cli::options, std::pair<std::string, int>>
+std::expected<tool::cli::options, std::pair<std::string, int>>
   tool::cli::parse(int argc, const char *const *argv) noexcept {
   CLI::App app{
     R"(
@@ -270,7 +270,7 @@ Header Mode:
     // ad hoc wrapper
     std::stringstream ss;
     const auto code = app.exit(e, ss, ss);
-    return tl::unexpected(std::pair{std::move(ss).str(), code});
+    return std::unexpected(std::pair{std::move(ss).str(), code});
   }
 
   using mode_type = decltype(options::mode);
@@ -296,7 +296,7 @@ Header Mode:
   };
 }
 
-tl::expected<tool::cli::options, std::string> tool::cli::evaluate_defaults(
+std::expected<tool::cli::options, std::string> tool::cli::evaluate_defaults(
   options o) noexcept {
   // todo: evaluate (resource dir, whatever...)
   if (!o.resource_dir.empty()) {

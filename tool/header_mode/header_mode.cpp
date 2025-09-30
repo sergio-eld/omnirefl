@@ -12,6 +12,7 @@
 #include <clang/Tooling/CompilationDatabase.h>
 #include <fmt/core.h>
 
+#include <expected>
 #include <fstream>
 #include <utility>
 
@@ -74,7 +75,7 @@ std::vector<std::string> fields_as_strings(
 
 namespace tool {
 
-tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
+std::expected<std::monostate, std::string> header_mode::run_pipeline(
   const cli::header_mode &mode,
   const cli::options &cli,
   const std::vector<std::filesystem::path> &sources,
@@ -104,7 +105,7 @@ tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
         src.string());
     }
 
-    tl::expected tu_reflected_data = run_pipeline(
+    std::expected tu_reflected_data = run_pipeline(
       transforms::tu_data{
         ._verbosity = cli.verbosity,
       },
@@ -146,7 +147,7 @@ tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
         errors.emplace_back(fmt::format("failed to create directory {}:{}",
           output_file.parent_path().string(),
           ec.message()));
-        return tl::unexpected(fmt::format("Errors occurred: {}",
+        return std::unexpected(fmt::format("Errors occurred: {}",
           util::join(errors, "\n", [] { return "{}"; })));
       }
     }
@@ -155,7 +156,7 @@ tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
     if (!f) {
       errors.emplace_back(fmt::format("failed to open file {} for writing",
         output_file.string()));
-      return tl::unexpected(fmt::format("Errors occurred: {}",
+      return std::unexpected(fmt::format("Errors occurred: {}",
         util::join(errors, "\n", [] { return "{}"; })));
     }
 
@@ -174,7 +175,7 @@ tl::expected<tl::monostate, std::string> header_mode::run_pipeline(
   }
 
   if (!errors.empty()) {
-    return tl::unexpected(fmt::format("Errors occurred: {}",
+    return std::unexpected(fmt::format("Errors occurred: {}",
       util::join(errors, "\n", [] { return "{}"; })));
   }
 
@@ -200,21 +201,21 @@ namespace header_mode {
 auto match::reflected_indexed_type::resolve(const node_type &node,
   const clang::ASTUnit &ast,
   const std::set<refl::type_id> &resolved_types,
-  [[maybe_unused]] bool print_debug) -> tl::expected<result, std::string> {
+  [[maybe_unused]] bool print_debug) -> std::expected<result, std::string> {
   using namespace refl;
 
   // omni::detail::_reflected_indexed_type<typename reflected_type, int
   // type_index>
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  tl::expected _reflected_type =
+  std::expected _reflected_type =
     util::ast::get_template_type_arg(template_decl, 0);
   if (!_reflected_type)
-    return tl::unexpected(std::move(_reflected_type).error());
+    return std::unexpected(std::move(_reflected_type).error());
 
-  tl::expected _type_index =
+  std::expected _type_index =
     util::ast::get_template_value_arg(template_decl, 1);
   if (!_type_index)
-    return tl::unexpected(std::move(_type_index).error());
+    return std::unexpected(std::move(_type_index).error());
 
   const clang::Type &reflected_type = **_reflected_type;
   const size_t type_index = *_type_index;
@@ -234,7 +235,7 @@ auto match::reflected_indexed_type::resolve(const node_type &node,
 
   // fixme: handle unions, C-arrays, (maybe) pointers
   if (!reflected_type.isStructureOrClassType()) {
-    return tl::unexpected(fmt::format("unsupported type {} in {}",
+    return std::unexpected(fmt::format("unsupported type {} in {}",
       // fixme:
       //   I don't think it does what I need - (namespace-qualified typename)
       reflected_type.getTypeClassName(),
@@ -254,7 +255,7 @@ auto match::reflected_indexed_type::resolve(const node_type &node,
   }
 
   if (!reflected_type_decl.hasDefinition()) {
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("forward declarations are not allowed: {}", nm_qual_type));
   }
 
@@ -278,13 +279,13 @@ auto match::reflected_indexed_type::resolve(const node_type &node,
 
 auto transforms::fold_indexed_type_result(tu_data _accum,
   match::reflected_indexed_type::result _result)
-  -> tl::expected<tu_data, std::string> {
-  tl::expected<tu_data, std::string> accum{std::move(_accum)};
+  -> std::expected<tu_data, std::string> {
+  std::expected<tu_data, std::string> accum{std::move(_accum)};
 
   // refactorme: use pattern matcher
   return std::visit(
     [verbosity = _accum._verbosity, &accum](
-      auto &&_result) -> tl::expected<tu_data, std::string> {
+      auto &&_result) -> std::expected<tu_data, std::string> {
       using namespace match;
       using result_t = std::decay_t<decltype(_result)>;
 
@@ -311,7 +312,7 @@ auto transforms::fold_indexed_type_result(tu_data _accum,
         //   const auto &[_, existing] = *found;
         //   const auto &[type_id, existing_reflected] = existing;
         //
-        //   return tl::unexpected(fmt::format(
+        //   return std::unexpected(fmt::format(
         //     "detected index {} conflict for types (existing) {}:{} and
         //     (resolved) {}", result.index, existing_id, result.id));
         // }
@@ -348,7 +349,7 @@ auto transforms::fold_indexed_type_result(tu_data _accum,
 }
 
 auto codegen::prepare_data(transforms::tu_data data)
-  -> tl::expected<reflection_data, std::string> {
+  -> std::expected<reflection_data, std::string> {
   const auto is_forward_declarable =
     [](const match::reflected_type_data &reflected) -> bool {
     using td_flags = refl::type_definition_flags;

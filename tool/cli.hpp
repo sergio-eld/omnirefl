@@ -1,7 +1,6 @@
 #pragma once
 
-#include <tl/expected.hpp>
-
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <type_traits>
@@ -111,7 +110,7 @@ struct is_bit_flag<verbosity_level>: std::true_type {};
 
 // todo: from_string
 std::string to_string(verbosity_level v) noexcept;
-tl::expected<verbosity_level, tl::monostate> from_string(
+std::expected<verbosity_level, std::monostate> from_string(
   std::string_view) noexcept;
 
 inline constexpr bool print_debug(verbosity_level v) noexcept {
@@ -156,16 +155,16 @@ struct options_old {
   bool print_debug;
 };
 
-tl::expected<options_old, std::string> parse_old(int argc,
+std::expected<options_old, std::string> parse_old(int argc,
   char **argv) noexcept;
 
-tl::expected<options, std::pair<std::string, int>> parse(int argc,
+std::expected<options, std::pair<std::string, int>> parse(int argc,
   const char *const *argv) noexcept;
 
 // todo: do I need this as a standalone function? As of this writing it is used
 // to remove observable side effects from `parse` (like resource_dir and workdir
 // evaluation) for testability
-tl::expected<options, std::string> evaluate_defaults(options o) noexcept;
+std::expected<options, std::string> evaluate_defaults(options o) noexcept;
 
 // todo:
 } // namespace tool::cli

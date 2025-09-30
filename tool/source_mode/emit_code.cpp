@@ -4,6 +4,7 @@
 
 #include <fmt/core.h>
 
+#include <expected>
 #include <string_view>
 
 namespace {
@@ -167,7 +168,7 @@ namespace tool::source_mode {
 // for instance, a reflection data struct can be a template, thus avoiding
 // the need for header inclusion until instantiations
 
-tl::expected<void, std::string> codegen::emit_reflection_cpp_file(options,
+std::expected<void, std::string> codegen::emit_reflection_cpp_file(options,
   std::ostream &os,
   const reflection_data &data) {
   using namespace std::string_view_literals;
