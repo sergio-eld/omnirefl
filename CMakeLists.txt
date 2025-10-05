@@ -74,24 +74,6 @@ add_subdirectory(lib/string-view-lite EXCLUDE_FROM_ALL)
 set(FMT_INSTALL OFF)
 add_subdirectory(lib/fmt EXCLUDE_FROM_ALL)
 
-# todo: enable when the tool is ready and default implementation is needed
-# find_package(Python COMPONENTS Interpreter REQUIRED)
-# set(RYML_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include/ryml)
-# set(RYML_AMALGAMATED_HEADER "${RYML_INCLUDE_DIR}/ryml.hpp")
-# add_custom_command(OUTPUT "${RYML_AMALGAMATED_HEADER}"
-#     # ad hoc, since the script needs write permissions for some reason,
-#     # which prevents setting `ro` mount for source in docker
-#     COMMAND ${CMAKE_COMMAND} -E copy_directory 
-#         "${CMAKE_CURRENT_SOURCE_DIR}/lib/rapidyaml"
-#         "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml"
-# 
-#     COMMAND Python::Interpreter
-#         "${CMAKE_CURRENT_BINARY_DIR}/rapidyaml/tools/amalgamate.py"
-#         "${RYML_AMALGAMATED_HEADER}"
-#     COMMENT "Amalgamate ryml.hpp to: ${RYML_AMALGAMATED_HEADER}"
-#     VERBATIM)
-# add_custom_target(amalgamate_ryml DEPENDS ${RYML_AMALGAMATED_HEADER})
-
 # this library will be automatically linked to a reflected target
 add_library(refl INTERFACE)
 target_sources(refl INTERFACE
@@ -276,6 +258,25 @@ if (ENABLE_TESTING)
 
     # todo: 
     # - (?) install the package locally (install dir within the project root)
+
+    add_executable(sb.ast sandbox/ast.cpp)
+    set_target_properties(sb.ast PROPERTIES 
+        INTERPROCEDURAL_OPTIMIZATION ON
+        ENABLE_EXPORTS OFF)
+    target_include_directories(sb.ast PRIVATE 
+        ${CLANG_INCLUDE_DIRS} 
+        ${LLVM_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}
+    )
+    # todo: (not here) figure out how to get rid of zlib dependency for clang
+    target_link_libraries(sb.ast PRIVATE
+        CLI11::CLI11
+        fmt::fmt
+        # clangAST
+        # clangASTMatchers
+        clangTooling # todo: get rid of this
+    )
+    add_static_compile_options(sb.ast)
 endif()
 
 if (ENABLE_BENCH)

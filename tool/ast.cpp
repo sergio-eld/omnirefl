@@ -2,6 +2,7 @@
 #include "tool/cli.hpp"
 #include "tool/util.hpp"
 
+#include <concepts>
 #include <memory>
 
 #pragma GCC diagnostic push
@@ -23,6 +24,8 @@
 #include <string_view>
 
 namespace {
+
+// reactorme: there's actally no need for this function to be a template
 template <typename Mode>
 void configure_compiler_invocation(const Mode &m,
   tool::cli::verbosity_level verbosity,
@@ -104,7 +107,7 @@ void configure_compiler_invocation(const Mode &m,
     p.PCHWithHdrStop = false;
     p.PCHWithHdrStopCreate = false;
 
-    if constexpr (std::is_same_v<Mode, tool::cli::header_mode>) {
+    if constexpr (std::same_as<tool::cli::header_mode, Mode>) {
       const tool::cli::header_mode &mode = m;
       constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
 
@@ -145,7 +148,7 @@ void configure_compiler_invocation(const Mode &m,
         }));
       }
     } else {
-      static_assert(std::is_same_v<Mode, tool::cli::source_mode>);
+      static_assert(std::same_as<tool::cli::source_mode, Mode>);
       (void)m;
       (void)verbosity;
     }

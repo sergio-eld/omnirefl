@@ -2,7 +2,6 @@
 
 #include "tool/cli.hpp"
 #include "tool/util.hpp"
-#include <optional>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -20,6 +19,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -92,6 +92,19 @@ struct is_of_template<Template<T...>, Template>: std::true_type {};
 template <typename T, template <typename...> class Template>
 concept of_template = requires { is_of_template<T, Template>{}; };
 
+
+/*
+ * refactorme: core pipeline should be as simple as:
+ *
+ * [(source, [flags], [opts])]
+ * | compiler_invocation -> ast
+ * | fold(context, matchers_by_mode[mode]) -> context
+ * | generator_by_mode[mode]
+ *
+ */
+
+// refactorme: modular design. it should be easy to do in-place composition
+// instead of forcing 'complex logic' upon a user
 template <typename Mode, typename... NodeTransforms>
 struct tu_pipeline {
   static_assert((of_template<NodeTransforms, node_transform> && ...));

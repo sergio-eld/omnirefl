@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <expected>
 #include <filesystem>
+#include <ranges>
 #include <sstream>
 #include <tuple>
 
@@ -15,7 +16,7 @@
 
 namespace {
 
-constexpr std::array map_str_verbosity = [] {
+constexpr std::array map_str_verbosity = std::invoke([] {
   using _p = std::pair<std::string_view, tool::cli::verbosity_level>;
   std::array m{
     _p{"debug", tool::cli::verbosity_level::debug},
@@ -23,11 +24,10 @@ constexpr std::array map_str_verbosity = [] {
     _p{"input", tool::cli::verbosity_level::input},
     _p{"parsed_types", tool::cli::verbosity_level::parsed_types},
   };
-  std::sort(m.begin(), m.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.first < rhs.first;
-  });
+  std::ranges::sort(m,
+    [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
   return m;
-}();
+});
 
 template <typename Key, typename Val, size_t N>
 consteval std::array<std::pair<Val, Key>, N> inverted(
@@ -161,18 +161,6 @@ Header Mode:
   const auto &opt_header_mode =
     app.add_flag("--header-mode", cli_in_place_mode)
       ->description("Use Header Mode");
-
-  // refactorme:
-  //   this doesn't make sense here, since the list of sources is fetched from a
-  //   cmake target, and here we don't assume any cmake or compilation
-  //   database...
-  bool cli_exclude_sources = false;
-  // todo: it should always go before `sources`
-  app.add_flag("--exclude",
-    cli_exclude_sources,
-    "If set, `sources` will be excluded from the set of "
-    "`compile_commands.json` source files, otherwise `sources` will be used for"
-    "fetching compilation commands.");
 
   std::vector<std::filesystem::path> cli_sources;
   app

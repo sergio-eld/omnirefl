@@ -122,6 +122,8 @@ cli::options normalize_paths(cli::options o) noexcept {
 
 } // namespace
 
+// todo: 3rd mode: dump yaml
+
 // allowing to configure specific things:
 // - matchers
 // - output to file
