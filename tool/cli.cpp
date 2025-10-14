@@ -1,5 +1,4 @@
 #include "tool/cli.hpp"
-
 #include "tool/util.hpp"
 
 #include <CLI/CLI.hpp>
@@ -110,9 +109,7 @@ std::string tool::cli::to_string(const options &o) {
       using type = std::decay_t<decltype(_v)>;
       if constexpr (std::is_same_v<compilation_db_entry, type>) {
         const compilation_db_entry &v = _v;
-        return fmt::format("--compilation-db={},\n--exclude={}",
-          v.path.string(),
-          v.filter_paths);
+        return fmt::format("--compilation-db={},", v.path.string());
       } else {
         const std::vector<std::string> &v = _v;
         return fmt::format("--cl-flags=[{}]", fmt::join(v, " "));
@@ -276,7 +273,6 @@ Header Mode:
     .cl_flags = !opt_compilation_db->empty() //
       ? cl_flags_type{compilation_db_entry{
           .path = std::move(cli_compilation_db_dir),
-          .filter_paths = cli_exclude_sources,
         }}
       : cl_flags_type{std::move(cli_cl_flags)},
     .resource_dir = std::move(cli_resource_dir),

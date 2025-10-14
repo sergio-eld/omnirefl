@@ -77,7 +77,8 @@ void configure_compiler_invocation(const Mode &m,
   // createInvocationFromCommandLine sets DisableFree.
   ci.getFrontendOpts().DisableFree = false;
   // todo: ifdef based on clang version, otherwise these code results in
-  // compilation errors ci.getLangOpts()->CommentOpts.ParseAllComments = true;
+  // compilation errors
+  // ci.getLangOpts()->CommentOpts.ParseAllComments = true;
   // ci.getLangOpts()->RetainCommentsFromSystemHeaders = true;
 
   [](auto &diag) {

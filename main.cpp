@@ -34,7 +34,6 @@ namespace cli = tool::cli;
 std::expected<std::vector<std::filesystem::path>, std::string>
   reflected_sources_from_compilation_db(
     const clang::tooling::CompilationDatabase &compilation_db,
-    bool exclude,
     std::vector<std::filesystem::path> sources) noexcept {
   // refactorme: move this to normalizing?
   sources = util::sorted(std::less{},
@@ -45,23 +44,6 @@ std::expected<std::vector<std::filesystem::path>, std::string>
   std::expected db_sources = util::to_std_paths(compilation_db.getAllFiles());
   if (!db_sources)
     return std::unexpected(std::move(db_sources).error());
-
-  if (exclude) {
-    fmt::println("DEBUG: using sources to filter compilation DB files.");
-    // todo: benchmark and compare with set_difference
-    return {util::filtered(
-      [&excluded = std::as_const(sources)](
-        const std::filesystem::path &db_path) -> bool {
-        for (const std::filesystem::path &e : excluded) {
-          if (util::is_subpath(db_path.lexically_normal(),
-                std::filesystem::absolute(e).lexically_normal())) {
-            return true;
-          }
-        }
-        return false;
-      },
-      std::move(db_sources).value())};
-  }
 
   if (sources.empty())
     return {std::move(db_sources).value()};
@@ -179,7 +161,6 @@ int main(int argc, char **argv) {
 
         std::expected result =
           ::reflected_sources_from_compilation_db(**compilation_db,
-            cli_compilation_db.filter_paths,
             sources);
         if (!result)
           return std::unexpected(std::move(result).error());

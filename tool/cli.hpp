@@ -66,11 +66,6 @@ struct header_mode {
 struct compilation_db_entry {
   std::filesystem::path path;
 
-  // if `true`, `options::sources` will be excluded from the set of
-  // `compile_commands.json`, otherwise `options::sources` will be used for
-  // fetching compilation commands.
-  bool filter_paths;
-
   // fixme:
   //   add output_file for disambiguation in db if several cmake targets use the
   //   same source file
