@@ -22,6 +22,7 @@
 #include <clang/Tooling/CompilationDatabase.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
 #include <llvm/Option/Option.h>
@@ -45,6 +46,21 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+namespace util {
+
+struct concat_t {
+  template <typename T, typename... TT>
+  std::vector<T> operator()(std::vector<T> lhs, std::vector<TT>... rhs) const {
+    size_t rhs_size = 0;
+    ((rhs_size += rhs.size()), ...);
+    lhs.reserve(lhs.size() + rhs_size);
+    (std::move(rhs.begin(), rhs.end(), std::back_inserter(lhs)), ...);
+    return lhs;
+  }
+} constexpr const concat{};
+
+} // namespace util
 
 namespace {
 
@@ -376,6 +392,20 @@ Dump yaml:
 }
 
 } // namespace cli
+
+/// configure ast-related compiler invocation parameters
+struct compiler_invocation_from_args_t {
+  // note: struct is used to hide `args` from global scope
+  struct args {
+    const fs::path &resource_dir;
+    clang::DiagnosticsEngine &diag;
+    const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager;
+  };
+
+  std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
+    operator()(const source_file &sf, args a) const noexcept;
+} constexpr const compiler_invocation_from_args{};
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -392,277 +422,63 @@ int main(int argc, char **argv) {
     .WorkingDir = fs::current_path().parent_path(),
   });
 
-  // must outlive the ast
-  const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
-    llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
-    llvm::IntrusiveRefCntPtr diag =
-      new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
-        diag_opts,
-        new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
-    return diag;
-  });
-
   // loading the ast
-  for (const auto &[source, flags] : cli_args->sources) {
-    fmt::println("input flags: [{}]",
-      util::join(flags, "\n", [] { return "{}"; }));
+  for (size_t n_processing = 0; const source_file &sf : cli_args->sources) {
+    // must outlive the ast
+    const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
+      llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
+      llvm::IntrusiveRefCntPtr diag =
+        new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
+          diag_opts,
+          new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
+      return diag;
+    });
 
-    std::shared_ptr compiler_invocation =
-      std::make_shared<clang::CompilerInvocation>();
+    fmt::println("[{}/{}] running {mode} mode for file: {file}\t\r",
+      ++n_processing,
+      cli_args->sources.size(),
+      fmt::arg("mode", cli::to_string(cli_args->mode)),
+      fmt::arg("file", sf.path.string()));
 
-    // const std::unique_ptr driver = clang::driver::newd
-
-    // translating flags to CompilerInvocation
-    {
-      std::vector<const char *> cli_ref;
-      cli_ref.reserve(flags.size());
-      std::ranges::transform(flags,
-        std::back_inserter(cli_ref),
-        [](std::string_view s) { return s.data(); });
-
-      namespace options = clang::driver::options;
-
-      // -- only flags related to ast creation
-      // single-value / boolean flags (last-wins or toggles)
-      constexpr std::array k_single_value_ids = {
-        // -- toggles
-        // options::OPT_nostdinc, //< ignored, used by the tool
-        // options::OPT_nostdincxx, //< ignored, used by the tool
-        // options::OPT_nostdlibinc, //< ignored, used by the tool
-        options::OPT_fms_extensions,
-        options::OPT_fno_ms_extensions,
-        options::OPT_fmodules,
-        options::OPT_fno_modules,
-        options::OPT_fborland_extensions,
-        options::OPT_fno_borland_extensions,
-        options::OPT_fgnu_keywords,
-        options::OPT_fno_gnu_keywords,
-        options::OPT_fms_compatibility,
-        options::OPT_fno_ms_compatibility,
-
-        // -- single-value
-        options::OPT_std_EQ, // -std=<...>
-        options::OPT_x, // -x <lang>
-        options::OPT_target, // --target=<triple>
-        options::OPT_isysroot, // -isysroot <dir>
-        options::OPT_resource_dir, // -resource-dir <dir>
-        options::OPT_fmodules_cache_path, // -fmodules-cache-path <dir>
-      };
-
-      // repeatable, multi-value flags (accumulate all occurrences)
-      constexpr std::array k_multi_value_ids = {
-        // -- preprocessor
-        options::OPT_D, // -DNAME[=VAL]
-        options::OPT__SLASH_D, // /DNAME[=VAL]
-        options::OPT_U, // -UNAME
-        options::OPT__SLASH_U, // /UNAME
-        options::OPT_include, // -include <file>
-        options::OPT__SLASH_FI, // /FI <file>
-
-        // -- header search
-        options::OPT_I, // -I <dir>
-        options::OPT__SLASH_I, // /I <dir>
-        options::OPT_isystem, // -isystem <dir>
-        options::OPT_isystem_after, // -isystem-after <dir>
-        options::OPT_idirafter, // -idirafter <dir>
-        options::OPT_iquote, // -iquote <dir>
-        options::OPT_iprefix, // -iprefix <prefix>
-        options::OPT_iwithprefix, // -iwithprefix <dir>
-        options::OPT_iwithprefixbefore, // -iwithprefixbefore <dir>
-        options::OPT_F, // -F <dir>
-        options::OPT_iframework, // -iframework <dir>
-        options::OPT_iframeworkwithsysroot, // -iframeworkwithsysroot <dir>
-
-        // -- modules
-        options::OPT_fmodule_map_file, // -fmodule-map-file=<path>
-        options::OPT_fmodule_file, // -fmodule-file=<path>
-      };
-
-      unsigned missing_arg, missing_arg_c;
-
-      // ad hoc: this allows to translate to cc1 options (i.e. msvc -> cc1)
-      llvm::opt::InputArgList argList =
-        clang::driver::getDriverOptTable().ParseArgs(
-          llvm::ArrayRef(cli_ref.data(), cli_ref.data() + cli_ref.size()),
-          missing_arg,
-          missing_arg_c);
-
-      if (missing_arg != missing_arg_c) {
-        std::cerr << fmt::format(
-          "Error: Missing argument for option at index {}\n",
-          missing_arg);
-        continue;
-      }
-
-      std::vector<std::string> cc1_args{
-        "omnirefl",
-        source.generic_string(),
-        "-fsyntax-only", //< AST only
-        "-nostdinc++", //< prevents from picking up on another compiler's C++
-                       //< std libs
-        fmt::format("-resource-dir={}",
-          cli_args->resource_dir.generic_string()),
-      };
-
-      // handle single-value options
-      std::ranges::for_each(
-        k_single_value_ids | std::views::transform([&argList](options::ID o) {
-          return argList.getLastArgNoClaim(o);
-        }) | std::views::filter([](llvm::opt::Arg *a) { return nullptr != a; }),
-        [&cc1_args](const llvm::opt::Arg *a) {
-          const llvm::opt::Option &opt = a->getOption().getUnaliasedOption();
-          cc1_args.emplace_back(opt.getPrefixedName().str()) += a->getValue();
-        });
-
-      // Handle multi-value options
-      std::ranges::for_each(argList.getArgs()
-          | std::views::filter([&k_multi_value_ids](const llvm::opt::Arg *a) {
-              return std::ranges::contains(k_multi_value_ids,
-                a->getOption().getID());
-            }),
-        [&cc1_args](const llvm::opt::Arg *a) {
-          const llvm::opt::Option &opt = a->getOption().getUnaliasedOption();
-          cc1_args.emplace_back(opt.getPrefixedName().str());
-          for (const auto &v : a->getValues()) {
-            cc1_args.emplace_back(v);
-          }
-        });
-
-      if (argList.getLastArgNoClaim(options::OPT_x) == nullptr) {
-        constexpr std::array k_cpp_extensions = std::invoke([] {
-          std::array a = std::to_array<std::string_view>({
-            ".cpp",
-            ".cxx",
-            ".cc",
-            ".cp",
-            ".hpp",
-            ".hxx",
-            ".hh",
-          });
-          std::ranges::sort(a);
-          return a;
-        });
-
-        std::string ext = source.extension().generic_string();
-        std::ranges::transform(ext, ext.begin(), [](unsigned char c) {
-          return static_cast<char>(std::tolower(c));
-        });
-
-        cc1_args.push_back("-x");
-        cc1_args.push_back(
-          std::ranges::contains(k_cpp_extensions, ext) ? "c++" : "c");
-      }
-
-      const std::string target_triple = std::invoke([&] {
-        if (const auto *a = argList.getLastArgNoClaim(options::OPT_target))
-          return llvm::Triple::normalize(a->getValue());
-        return llvm::sys::getProcessTriple();
+    std::expected compiler_invocation = compiler_invocation_from_args(sf,
+      {
+        .resource_dir = cli_args->resource_dir,
+        .diag = *diag,
+        .file_manager = file_manager,
       });
 
-      std::vector<const char *> cc1_args_ref;
-      cc1_args_ref.reserve(cc1_args.size());
-      std::ranges::transform(cc1_args,
-        std::back_inserter(cc1_args_ref),
-        [](std::string_view s) { return s.data(); });
-
-      // ad hoc: this is a heavy-weight solution just to get proper argument
-      // translations (for other compilers' commands) and to resolve system
-      // include paths...
-      clang::driver::Driver driver("omnirefl",
-        target_triple,
-        *diag,
-        "omnirefl reflection tool");
-      driver.setCheckInputsExist(false);
-
-      const std::unique_ptr<clang::driver::Compilation> compilation(
-        driver.BuildCompilation(llvm::ArrayRef(cc1_args_ref.data(),
-          cc1_args_ref.data() + cc1_args_ref.size())));
-
-      if (!compilation || compilation->getJobs().empty()) {
-        std::cerr << fmt::format("Failed to build compilatioin for: {}.\n",
-          source.generic_string());
-        continue;
-      }
-
-      // todo: compiler_invocation from `compilation` or its driver
-
-      fmt::println("used cc1 flags: [{}]",
-        util::join(compilation->getJobs().begin()->getArguments(), "\n", [] {
-          return "{}";
-        }));
-
-      if (!clang::CompilerInvocation::CreateFromArgs(*compiler_invocation,
-            compilation->getJobs().begin()->getArguments(),
-            *diag)) {
-        llvm::errs() << "Failed to create CompilerInvocation for: " << source
-                     << "\n";
-        continue;
-      }
+    if (!compiler_invocation) {
+      std::cerr << compiler_invocation.error() << "\n";
+      continue;
     }
 
     {
-      clang::HeaderSearchOptions &o =
-        compiler_invocation->getHeaderSearchOpts();
-      // own libc++ includes are bundled
-      o.UseStandardCXXIncludes = false;
-      o.ResourceDir = cli_args->resource_dir.generic_string();
-
-      o.AddPath(
-        // todo: this should be configured at compile time
-        (cli_args->resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
-          .generic_string(),
-        clang::frontend::IncludeDirGroup::CXXSystem,
-        // todo: I have no idea what are these parameters. comment
-        /*IsFramework=*/false,
-        /*IgnoreSysRoot=*/false);
-
-      // todo: this should be configured at compile time
-      o.AddPath((cli_args->resource_dir / "include/c++/v1").generic_string(),
-        clang::frontend::IncludeDirGroup::CXXSystem,
-        // todo: I have no idea what are these parameters. comment
-        /*IsFramework=*/false,
-        /*IgnoreSysRoot=*/false);
-
-      // ad hoc: C++ headers must be included before C's
-      std::rotate(o.UserEntries.rbegin(),
-        o.UserEntries.rbegin() + 2,
-        o.UserEntries.rend());
-    }
-
-    {
-      clang::LangOptions &o = compiler_invocation->getLangOpts();
+      clang::LangOptions &lo = (*compiler_invocation)->getLangOpts();
       // todo: investigate how to properly parse comments
-      o.CommentOpts.ParseAllComments = true;
+      lo.CommentOpts.ParseAllComments = true;
     }
 
+    // -- todo: this is mode-related, make a map or something
     {
-      clang::PreprocessorOptions &p =
-        compiler_invocation->getPreprocessorOpts();
-
-      // Disable any pch generation/usage operations. Since serialized
-      // preamble format is unstable, using an incompatible one might result
-      // in unexpected behaviours, including crashes.
-      p.ImplicitPCHInclude.clear();
-      p.PrecompiledPreambleBytes = {0, false};
-      p.PCHThroughHeader.clear();
-      p.PCHWithHdrStop = false;
-      p.PCHWithHdrStopCreate = false;
+      clang::PreprocessorOptions &po =
+        (*compiler_invocation)->getPreprocessorOpts();
 
       constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
 
-      if (const auto omni_defined = std::ranges::find_if(p.Macros,
+      if (const auto omni_defined = std::ranges::find_if(po.Macros,
             [k_omni_macro](const auto &macro_def) {
               const auto &[macro, is_undef] = macro_def;
               return macro == k_omni_macro;
             });
-        p.Macros.cend() == omni_defined) {
-        p.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
+        po.Macros.cend() == omni_defined) {
+        po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
       } else {
         auto &[_, is_undef] = *omni_defined;
         // todo: warning if `true == is_undef`?
         is_undef = false;
       }
 
+      // fixme:
       // removing force-included reflection header that is being generated
       // p.Includes = util::filtered(
       //   [&output_dir = mode.output_dir](const std::string &s) -> bool {
@@ -672,7 +488,7 @@ int main(int argc, char **argv) {
       //   std::move(p.Includes));
 
       fmt::println("{}",
-        util::join(p.Macros, "\n", [](const auto &pair, fmt::context &ctx) {
+        util::join(po.Macros, "\n", [](const auto &pair, fmt::context &ctx) {
           const auto &[macro, is_undef] = pair;
           return fmt::format_to(ctx.out(),
             "DEBUG: #{} {}",
@@ -680,23 +496,283 @@ int main(int argc, char **argv) {
             macro);
         }));
       fmt::println("{}",
-        util::join(p.Includes, "\n", [] { return "DEBUG: #include \"{}\""; }));
+        util::join(po.Includes, "\n", [] { return "DEBUG: #include \"{}\""; }));
     }
 
-    // todo: how about creating the ast context directly (without ast unit
+    // todo: how about creating the ast context directly (without clang::ASTUnit
     // helper)
     const std::unique_ptr ast =
-      clang::ASTUnit::LoadFromCompilerInvocation(compiler_invocation,
+      clang::ASTUnit::LoadFromCompilerInvocation(*compiler_invocation,
         std::make_shared<clang::PCHContainerOperations>(),
         diag,
         file_manager.get());
 
     if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
       std::cerr << fmt::format("Failed to build AST Unit for: {}.\n",
-        source.generic_string());
+        sf.path.generic_string());
       continue;
     }
   }
 
   return 0;
 }
+
+namespace {
+
+std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
+  const std::vector<std::string> &flags) {
+  std::vector<const char *> cli_ref;
+  cli_ref.reserve(flags.size());
+  std::ranges::transform(flags,
+    std::back_inserter(cli_ref),
+    [](std::string_view s) { return s.data(); });
+
+  unsigned missing_arg, missing_arg_c;
+
+  // ad hoc: this allows to translate to cc1 options (i.e. msvc -> cc1)
+  llvm::opt::InputArgList argList =
+    clang::driver::getDriverOptTable().ParseArgs(
+      llvm::ArrayRef(cli_ref.data(), cli_ref.data() + cli_ref.size()),
+      missing_arg,
+      missing_arg_c);
+
+  if (missing_arg != missing_arg_c) {
+    return std::unexpected(
+      fmt::format("Error: Missing argument for option at index {}\n",
+        missing_arg));
+  }
+  return argList;
+}
+
+/// leave only the args needed for ast parsing
+std::vector<std::string> filter_ast_related_args(
+  const llvm::opt::InputArgList &args) {
+  namespace options = clang::driver::options;
+
+  // -- only flags related to ast creation
+  // single-value / boolean flags (last-wins or toggles)
+  constexpr std::array k_single_value_ids = {
+    // -- toggles
+    // options::OPT_nostdinc, //< ignored, used by the tool
+    // options::OPT_nostdincxx, //< ignored, used by the tool
+    // options::OPT_nostdlibinc, //< ignored, used by the tool
+    options::OPT_fms_extensions,
+    options::OPT_fno_ms_extensions,
+    options::OPT_fmodules,
+    options::OPT_fno_modules,
+    options::OPT_fborland_extensions,
+    options::OPT_fno_borland_extensions,
+    options::OPT_fgnu_keywords,
+    options::OPT_fno_gnu_keywords,
+    options::OPT_fms_compatibility,
+    options::OPT_fno_ms_compatibility,
+
+    // -- single-value
+    options::OPT_std_EQ, // -std=<...>
+    options::OPT_x, // -x <lang>
+    options::OPT_target, // --target=<triple>
+    options::OPT_isysroot, // -isysroot <dir>
+    options::OPT_resource_dir, // -resource-dir <dir>
+    options::OPT_fmodules_cache_path, // -fmodules-cache-path <dir>
+  };
+
+  // repeatable, multi-value flags (accumulate all occurrences)
+  constexpr std::array k_multi_value_ids = {
+    // -- preprocessor
+    options::OPT_D, // -DNAME[=VAL]
+    options::OPT__SLASH_D, // /DNAME[=VAL]
+    options::OPT_U, // -UNAME
+    options::OPT__SLASH_U, // /UNAME
+    options::OPT_include, // -include <file>
+    options::OPT__SLASH_FI, // /FI <file>
+
+    // -- header search
+    options::OPT_I, // -I <dir>
+    options::OPT__SLASH_I, // /I <dir>
+    options::OPT_isystem, // -isystem <dir>
+    options::OPT_isystem_after, // -isystem-after <dir>
+    options::OPT_idirafter, // -idirafter <dir>
+    options::OPT_iquote, // -iquote <dir>
+    options::OPT_iprefix, // -iprefix <prefix>
+    options::OPT_iwithprefix, // -iwithprefix <dir>
+    options::OPT_iwithprefixbefore, // -iwithprefixbefore <dir>
+    options::OPT_F, // -F <dir>
+    options::OPT_iframework, // -iframework <dir>
+    options::OPT_iframeworkwithsysroot, // -iframeworkwithsysroot <dir>
+
+    // -- modules
+    options::OPT_fmodule_map_file, // -fmodule-map-file=<path>
+    options::OPT_fmodule_file, // -fmodule-file=<path>
+  };
+
+  std::vector<std::string> result;
+  // handle single-value options
+  std::ranges::for_each(
+    k_single_value_ids | std::views::transform([&args](options::ID o) {
+      return args.getLastArgNoClaim(o);
+    }) | std::views::filter([](llvm::opt::Arg *a) { return nullptr != a; }),
+    [&result](const llvm::opt::Arg *a) {
+      const llvm::opt::Option &opt = a->getOption().getUnaliasedOption();
+      result.emplace_back(opt.getPrefixedName().str()) += a->getValue();
+    });
+
+  // Handle multi-value options
+  std::ranges::for_each(args.getArgs()
+      | std::views::filter([&k_multi_value_ids](const llvm::opt::Arg *a) {
+          return std::ranges::contains(k_multi_value_ids,
+            a->getOption().getID());
+        }),
+    [&result](const llvm::opt::Arg *a) {
+      const llvm::opt::Option &opt = a->getOption().getUnaliasedOption();
+      result.emplace_back(opt.getPrefixedName().str());
+      for (const auto &v : a->getValues()) {
+        result.emplace_back(v);
+      }
+    });
+
+  return result;
+}
+
+std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
+  compiler_invocation_from_args_t::operator()(const source_file &sf,
+    args a) const noexcept {
+  namespace options = clang::driver::options;
+
+  const auto to_vector_of_raw_pointers =
+    [](const std::vector<std::string> &v) -> std::vector<const char *> {
+    std::vector<const char *> result;
+    result.reserve(v.size());
+    std::ranges::transform(v,
+      std::back_inserter(result),
+      [](const std::string &s) { return s.c_str(); });
+    return result;
+  };
+
+  const auto &[source, flags] = sf;
+  fmt::println("input flags: [{}]",
+    util::join(flags, "\n", [] { return "{}"; }));
+
+  std::expected argList = parse_driver_args(flags);
+
+  if (!argList)
+    return std::unexpected(argList.error());
+
+  std::vector cc1_args =
+    // ad hoc: need to append these, since as of now the actual Driver is used
+    // for parsing and configuration. There are only 2 things (I think) I
+    // actually need (but forced to use the Driver):
+    // 1. Map non-clang args to cc1 format
+    // 2. Resolve system include paths (non-std)
+    util::concat(
+      std::vector<std::string>{
+        "omnirefl",
+        source.generic_string(),
+        "-fsyntax-only", //< AST only
+        "-nostdinc++", //< prevents from picking up on another compiler's C++
+                       //< std libs
+        fmt::format("-resource-dir={}", a.resource_dir.generic_string()),
+      },
+      filter_ast_related_args(*argList));
+
+  // ad hoc: this is a heavy-weight solution just to get proper argument
+  // translations (for other compilers' commands) and to resolve system
+  // include paths...
+  // {
+  const std::string target_triple = std::invoke([&] {
+    if (const auto *a = argList->getLastArgNoClaim(options::OPT_target))
+      return llvm::Triple::normalize(a->getValue());
+    return llvm::sys::getProcessTriple();
+  });
+
+  clang::driver::Driver driver("omnirefl",
+    target_triple,
+    a.diag,
+    "omnirefl reflection tool");
+  driver.setCheckInputsExist(false);
+
+  const std::vector cc1_args_ref = to_vector_of_raw_pointers(cc1_args);
+  const std::unique_ptr<clang::driver::Compilation> compilation(
+    driver.BuildCompilation(llvm::ArrayRef(cc1_args_ref.data(),
+      cc1_args_ref.data() + cc1_args_ref.size())));
+
+  if (!compilation || compilation->getJobs().empty()) {
+    return std::unexpected(
+      fmt::format("Failed to build compilatioin for: {}.\n",
+        source.generic_string()));
+  }
+
+  const auto &compilation_args = compilation->getJobs().begin()->getArguments();
+  // ad hoc: driver.BuildCompilation will populate the list with a lot of
+  // unrelate parameters.
+  // fixme: cc1_args is empty after filtering
+  // cc1_args = filter_ast_related_args(
+  //   {compilation_args.begin(), compilation_args.end()});
+  // }
+
+  // fixme: these args also need to be filtered!
+  fmt::println("using cc1 args: [{}]",
+    // util::join(cc1_args, "\n", [] { return "{}"; }));
+    util::join(compilation_args, "\n", [] { return "{}"; }));
+
+  std::shared_ptr compiler_invocation =
+    std::make_shared<clang::CompilerInvocation>();
+
+  {
+    const std::vector cc1_args_ref = to_vector_of_raw_pointers(cc1_args);
+    if (!clang::CompilerInvocation::CreateFromArgs(*compiler_invocation,
+          // fixme: cc1_args is empty after filtering
+          // {cc1_args_ref.data(), cc1_args_ref.data() + cc1_args_ref.size()},
+          compilation_args,
+          a.diag)) {
+      return std::unexpected(
+        fmt::format("Failed to create CompilerInvocation for: {}.",
+          source.generic_string()));
+    }
+  }
+
+  {
+    clang::HeaderSearchOptions &o = compiler_invocation->getHeaderSearchOpts();
+
+    // own libc++ includes are bundled
+    o.UseStandardCXXIncludes = false;
+    o.ResourceDir = a.resource_dir.generic_string();
+
+    o.AddPath(
+      // todo: this should be configured at compile time
+      (a.resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
+        .generic_string(),
+      clang::frontend::IncludeDirGroup::CXXSystem,
+      // todo: I have no idea what are these parameters. comment
+      /*IsFramework=*/false,
+      /*IgnoreSysRoot=*/false);
+
+    // todo: this should be configured at compile time
+    o.AddPath((a.resource_dir / "include/c++/v1").generic_string(),
+      clang::frontend::IncludeDirGroup::CXXSystem,
+      // todo: I have no idea what are these parameters. comment
+      /*IsFramework=*/false,
+      /*IgnoreSysRoot=*/false);
+
+    // ad hoc: C++ headers must be included before C's
+    std::rotate(o.UserEntries.rbegin(),
+      o.UserEntries.rbegin() + 2,
+      o.UserEntries.rend());
+  }
+
+  {
+    clang::PreprocessorOptions &p = compiler_invocation->getPreprocessorOpts();
+
+    // Disable any pch generation/usage operations. Since serialized
+    // preamble format is unstable, using an incompatible one might result
+    // in unexpected behaviours, including crashes.
+    p.ImplicitPCHInclude.clear();
+    p.PrecompiledPreambleBytes = {0, false};
+    p.PCHThroughHeader.clear();
+    p.PCHWithHdrStop = false;
+    p.PCHWithHdrStopCreate = false;
+  }
+
+  return compiler_invocation;
+}
+
+} // namespace
