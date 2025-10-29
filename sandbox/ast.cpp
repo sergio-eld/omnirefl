@@ -38,7 +38,6 @@
 #include <CLI/Validators.hpp>
 
 #include <algorithm>
-#include <concepts>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -46,6 +45,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <stack>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -256,7 +256,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
         Accum &accum;
         R reduce;
 
-        std::string_view binding_tag = binding_tag;
+        std::string_view binding_tag;
 
         void run(const MatchFinder::MatchResult &result) override {
           const std::map nodeById = result.Nodes.getMap();
@@ -276,14 +276,18 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
           accum = reduce(std::move(accum), *node);
         }
 
-        _callback(const matcher_t &m, Accum &a, const R &r)
+        _callback(const matcher_t &m,
+          Accum &a,
+          const R &r,
+          std::string_view binding_tag)
             : matcher(m)
             , accum(a)
-            , reduce(r) {
+            , reduce(r)
+            , binding_tag(binding_tag) {
         }
       };
 
-      return _callback(bound_matcher, accum, rule.reduce);
+      return _callback(bound_matcher, accum, rule.reduce, binding_tag);
     };
 
   // MatchFinder doesn't own the callbacks, so they need to outlive the finder.
@@ -302,7 +306,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
 
 } // namespace ast
 
-namespace type_data {
+namespace meta {
 
 // todo: benchmark, then use hash unique type identifier
 using type_id = std::string;
@@ -333,7 +337,7 @@ struct type_definition {
 struct struct_data {
   /// protected and private are not supported now (too complicated)
   std::vector<std::string> public_fields;
-  std::set<type_id> type_dependencies;
+  // std::set<type_id> type_dependencies;
 
   enum {
     is_struct,
@@ -342,7 +346,43 @@ struct struct_data {
   } type;
 };
 
-} // namespace type_data
+struct function_signature_arg {
+  // fully namespace-qualified type
+  std::string nm_qual_type;
+  bool is_const : 1;
+  reference_type ref_type;
+};
+
+struct func_signature {
+  std::vector<function_signature_arg> args;
+};
+
+struct reflectable {
+  type_id id;
+
+  std::variant<struct_data> data;
+  type_definition definition;
+};
+
+struct already_reflected {
+  type_id id;
+};
+
+struct non_reflectable {
+  type_id id;
+};
+
+struct resolved_reflected_type {
+  std::variant<reflectable, non_reflectable, already_reflected> type;
+  std::vector<reflectable> dependencies;
+};
+
+std::expected<resolved_reflected_type, std::string> resolve_reflected_type_node(
+  const clang::ClassTemplateSpecializationDecl &decl,
+  const clang::ASTUnit &ast,
+  const std::set<type_id> &resolved_types);
+
+} // namespace meta
 
 } // namespace
 
@@ -455,7 +495,18 @@ int main(int argc, char **argv) {
 
     using namespace clang::ast_matchers;
 
-    struct context {};
+    struct context {
+      struct reflected_struct {
+        meta::struct_data data;
+        meta::type_definition definition;
+      };
+
+      std::map<meta::type_id, reflected_struct> reflected_structs;
+
+      std::set<meta::type_id> resolved_types;
+      std::vector<std::string> errors;
+    };
+
     context ctx = ast::reduce_matches(*ast,
       context{},
 
@@ -468,7 +519,26 @@ int main(int argc, char **argv) {
           isTemplateInstantiation(),
           isDefinition()),
         .reduce =
-          [](context a, const clang::ClassTemplateSpecializationDecl &) {
+          [&ast = *ast](context a,
+            const clang::ClassTemplateSpecializationDecl &decl) {
+            std::expected resolved =
+              meta::resolve_reflected_type_node(decl, ast, a.resolved_types);
+            if (!resolved) {
+              a.errors.emplace_back(std::move(resolved).error());
+              return a;
+            }
+
+            std::visit(
+              [&a]<typename T>(T t) {
+                if constexpr (std::same_as<meta::reflectable, T>) {
+                  meta::reflectable &r = t;
+                  // a.reflected_structs[r.id] = r.data
+                  // todo: implement
+                }
+                // todo: other cases
+              },
+              std::move(resolved->type));
+
             // todo: implement
             return a;
           },
@@ -967,6 +1037,338 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
   }
 
   return compiler_invocation;
+}
+
+// todo: use expected
+std::string get_declaration_source_file(const clang::Decl &d,
+  const clang::SourceManager &sm) noexcept {
+  const auto loc = d.getLocation();
+  if (!loc.isValid())
+    return "";
+
+  const auto pm = sm.getPresumedLoc(loc);
+  if (!pm.isValid())
+    return "";
+
+  std::string filename = pm.getFilename();
+  return filename;
+}
+
+std::expected<clang::Type const *, std::string> get_template_type_arg(
+  const clang::ClassTemplateSpecializationDecl &template_decl,
+  size_t n) noexcept {
+  const auto &template_args_list = template_decl.getTemplateArgs();
+
+  if (template_args_list.size() < n) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return std::unexpected(
+      fmt::format("invalid template signature for internal omnirefl type {}",
+        detail_struct_name));
+  }
+
+  const clang::TemplateArgument &arg = template_args_list.get(n);
+  if (clang::TemplateArgument::ArgKind::Type != arg.getKind()) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return std::unexpected(fmt::format("non-type template argument `{}` of {}",
+      n,
+      detail_struct_name));
+  }
+
+  return arg.getAsType().getTypePtr();
+}
+
+std::expected<int, std::string> get_template_value_arg(
+  const clang::ClassTemplateSpecializationDecl &template_decl,
+  size_t n) noexcept {
+  const auto &template_args_list = template_decl.getTemplateArgs();
+
+  if (template_args_list.size() < n) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return std::unexpected(
+      fmt::format("invalid template signature for internal omnirefl type {}",
+        detail_struct_name));
+  }
+
+  const clang::TemplateArgument &arg = template_args_list.get(n);
+  if (clang::TemplateArgument::ArgKind::Integral != arg.getKind()) {
+    const std::string_view detail_struct_name = template_decl.getName();
+    return std::unexpected(
+      fmt::format("non-integral template argument `{}` of {}",
+        n,
+        detail_struct_name));
+  }
+
+  return arg.getAsIntegral().getExtValue();
+}
+
+meta::type_definition resolve_definition(const clang::CXXRecordDecl &rd,
+  const clang::SourceManager &sm) noexcept {
+  std::string source_file = get_declaration_source_file(rd, sm);
+  using td_flags = decltype(meta::type_definition::definition_flags);
+  const td_flags td_local = rd.isLocalClass() //
+    ? meta::type_definition::local
+    : meta::type_definition::none;
+  const td_flags td_non_public = td_flags::none; //< todo:
+
+  return {
+    .source_file = std::move(source_file),
+    .nm_qual_type = rd.getQualifiedNameAsString(),
+    // refactorme: enable bitwise operations
+    .definition_flags = td_flags(td_local | td_non_public),
+  };
+}
+
+std::vector<std::string> public_field_names(
+  clang::RecordDecl::field_range fields) noexcept {
+  std::vector<std::string> r;
+  std::ranges::transform(fields
+      | std::views::filter([](const clang::FieldDecl *fd) {
+          // todo:
+          //   consider logging for skipped fields, since we are not reporting
+          //   them as errors
+          return clang::AccessSpecifier::AS_public == fd->getAccess();
+        }),
+    std::back_inserter(r),
+    [](const clang::FieldDecl *fd) { return fd->getNameAsString(); });
+
+  return r;
+}
+
+// refactorme: reflect in code instead of writing the comment below.
+//
+// types of interest for recursive reflection:
+//   - value_type: std containers, std wrappers, std::optional
+//   - key_type: std containers
+//   - type: std::reference_wrapper
+struct member_typedef_decl {
+  std::string_view name;
+  clang::QualType qual_type;
+};
+
+std::vector<member_typedef_decl> member_typedefs(
+  const clang::RecordDecl &rd) noexcept {
+  // todo: use `filter`
+  std::vector<member_typedef_decl> r;
+  r.reserve(std::accumulate(rd.decls_begin(),
+    rd.decls_end(),
+    size_t(0),
+    [](size_t s, const clang::Decl *d) -> size_t {
+      const clang::Decl::Kind k = d->getKind();
+      return s + (clang::Decl::TypeAlias == k || clang::Decl::Typedef == k);
+    }));
+
+  for (const clang::Decl *_d : rd.decls()) {
+    const clang::Decl::Kind k = _d->getKind();
+    if (clang::Decl::TypeAlias != k && clang::Decl::Typedef != k)
+      continue;
+
+    const auto &d = *llvm::cast<clang::TypedefNameDecl>(_d);
+    r.push_back({
+      .name = d.getName(),
+      .qual_type = d.getUnderlyingType(),
+    });
+  }
+  return r;
+};
+
+// testme: struct with a tuple type field
+std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
+  const clang::CXXRecordDecl &root,
+  const std::set<meta::type_id> &resolved_types) noexcept {
+  std::set<const clang::CXXRecordDecl *> visited;
+  std::stack<const clang::CXXRecordDecl *> to_visit;
+  to_visit.push(&root);
+
+  while (!to_visit.empty()) {
+    const clang::CXXRecordDecl *cur = to_visit.top();
+    to_visit.pop();
+
+    // todo: remove
+    const std::string _debug_nm_qual_type = cur->getQualifiedNameAsString();
+    if (visited.contains(cur)
+      // todo: continious benchmark before optimization (lookup by string)
+      || resolved_types.contains(cur->getQualifiedNameAsString())) {
+      continue;
+    }
+
+    // not generating reflection info for std types, at least for now, at least
+    // here...
+    //
+    // refactorme: ambiguous control flow/logic
+    if (!cur->isInStdNamespace())
+      visited.emplace(cur);
+
+    // allow recursive reflection via certain member typedefs
+    for (const member_typedef_decl &md : util::filtered(
+           [](const member_typedef_decl &m) -> bool {
+             const static std::set<std::string_view> aliases{{
+               "key_type",
+               "value_type",
+               "value",
+             }};
+             return !aliases.contains(m.name);
+           },
+           member_typedefs(*cur))) {
+      if (md.qual_type->isStructureOrClassType())
+        to_visit.push(md.qual_type->getAsCXXRecordDecl());
+    }
+    // fixme: what about unions, built-in arrays?
+
+    // ad hoc solution:
+    //   in c++ code template trait types can be used, but I don't know if it is
+    //   possible to get from parsed ast.
+    //   I could, however, capture such types in `omni::detail`...
+    if (clang::Decl::ClassTemplateSpecialization == cur->getKind() &&
+        [](std::string_view name) -> bool { //
+          return "tuple" == name || "variant" == name;
+        }(cur->getName())) {
+      const auto arg_list =
+        clang::cast<clang::ClassTemplateSpecializationDecl>(cur)
+          ->getTemplateInstantiationArgs()
+          .asArray();
+      if (1 != arg_list.size()
+        || clang::TemplateArgument::Pack != arg_list.front().getKind()) {
+        // todo: log? this should not happen
+      } else {
+        for (const clang::TemplateArgument &t_arg :
+          arg_list.front().getPackAsArray()) {
+          // not a type pack
+          // todo: is this possible though? should log?
+          if (clang::TemplateArgument::Type != t_arg.getKind())
+            break;
+
+          const clang::QualType qt = t_arg.getAsType();
+          if (qt->isStructureOrClassType())
+            to_visit.push(qt->getAsCXXRecordDecl());
+        }
+      }
+    }
+
+    // fixme: just collect the types: determine reflectable later?
+    for (const clang::FieldDecl *fd : cur->fields()) {
+      if (clang::AccessSpecifier::AS_public != fd->getAccess()
+        // todo: other checks that would prevent the field from being
+        // reflected (uniouns, bitfields, what else?)
+        || fd->isUnnamedBitField())
+        continue;
+
+      const clang::QualType qt = fd->getType();
+      // fixme: what about unions, built-in arrays?
+      if (!qt->isStructureOrClassType())
+        continue;
+
+      // todo: support only non-static fields
+      to_visit.push(qt->getAsCXXRecordDecl());
+    }
+  }
+
+  visited.erase(&root);
+  return {visited.begin(), visited.end()};
+}
+
+auto meta::resolve_reflected_type_node(
+  const clang::ClassTemplateSpecializationDecl &template_decl,
+  const clang::ASTUnit &ast,
+  const std::set<type_id> &resolved_types)
+  -> std::expected<resolved_reflected_type, std::string> {
+  // todo: assert template signature
+  // omni::detail::_reflected_type<T>
+  std::expected _reflected_type = get_template_type_arg(template_decl, 0);
+  if (!_reflected_type)
+    return std::unexpected(std::move(_reflected_type).error());
+
+  const clang::Type &reflected_type = **_reflected_type;
+
+  if (reflected_type.isFundamentalType()) {
+    return resolved_reflected_type{
+      .type =
+        non_reflectable{
+          .id = reflected_type
+            // fixme: I don't think it does what I
+            // need (namespace-qualified typename)
+            .getTypeClassName(),
+        },
+      .dependencies = {},
+    };
+  }
+
+  // fixme: handle unions, C-arrays, (maybe) pointers
+  if (!reflected_type.isStructureOrClassType()) {
+    return std::unexpected(fmt::format("unsupported type {} in {}",
+      // fixme:
+      //   I don't think it does what I need (namespace-qualified typename)
+      reflected_type.getTypeClassName(),
+      template_decl.getName()));
+  }
+
+  const clang::CXXRecordDecl &reflected_type_decl =
+    *reflected_type.getAsCXXRecordDecl();
+  const std::string nm_qual_type =
+    reflected_type_decl.getQualifiedNameAsString();
+
+  // todo: do not use nm_qual_type to uniquely identify the type
+  if (resolved_types.contains(nm_qual_type)) {
+    return resolved_reflected_type{
+      .type =
+        already_reflected{
+          .id = nm_qual_type,
+        },
+      .dependencies = {},
+    };
+  }
+
+  // todo: forward declarations may be supported in source mode
+  if (!reflected_type_decl.hasDefinition()) {
+    return std::unexpected(
+      fmt::format("forward declarations are not allowed: {}", nm_qual_type));
+  }
+
+  std::vector<meta::reflectable> dependencies;
+  std::ranges::transform(
+    recursively_collect_dependency_types(reflected_type_decl, resolved_types),
+    std::back_inserter(dependencies),
+    [&sm = ast.getSourceManager()](
+      const clang::CXXRecordDecl *rd) -> meta::reflectable {
+      return {
+        .id = rd->getQualifiedNameAsString(),
+        .data =
+          meta::struct_data{
+            .public_fields = public_field_names(rd->fields()),
+
+            // fixme: other enums
+            .type = rd->isStruct() //
+              ? meta::struct_data::is_struct
+              : meta::struct_data::is_class,
+          },
+        .definition = resolve_definition(*rd, sm),
+      };
+    });
+
+  if (reflected_type_decl.isInStdNamespace()) {
+    return resolved_reflected_type{
+      .type = non_reflectable{.id = nm_qual_type},
+      .dependencies = std::move(dependencies),
+    };
+  }
+
+  return resolved_reflected_type{
+    .type =
+      reflectable{
+        // todo: do not use nm_qual_type to uniquely identify the type
+        .id = nm_qual_type,
+        .data =
+          struct_data{
+            .public_fields = public_field_names(reflected_type_decl.fields()),
+            // fixme: other enums
+            .type = reflected_type_decl.isStruct() //
+              ? meta::struct_data::is_struct
+              : meta::struct_data::is_class,
+          },
+        .definition =
+          resolve_definition(reflected_type_decl, ast.getSourceManager()),
+      },
+    .dependencies = std::move(dependencies),
+  };
 }
 
 } // namespace
