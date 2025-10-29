@@ -92,7 +92,6 @@ struct is_of_template<Template<T...>, Template>: std::true_type {};
 template <typename T, template <typename...> class Template>
 concept of_template = requires { is_of_template<T, Template>{}; };
 
-
 /*
  * refactorme: core pipeline should be as simple as:
  *
@@ -146,18 +145,20 @@ struct tu_pipeline {
 
     using fetch_transform = std::variant<const NodeTransforms *...> (*)(
       const std::tuple<NodeTransforms...> &);
-    static const auto k_transform_by_tag_map =
+
+    static const std::map k_transform_by_tag_map = std::invoke(
       []<size_t... I>(std::index_sequence<I...>,
         std::type_identity<NodeTransforms>...)
-      -> std::map<std::string_view, fetch_transform> {
-      return {{std::string_view{NodeTransforms::match_node_type::binding_tag},
-        static_cast<fetch_transform>(
-          [](const std::tuple<NodeTransforms...> &t)
-            -> std::variant<const NodeTransforms *...> {
-            return std::addressof(std::get<I>(t));
-          })}...};
-    }(std::index_sequence_for<NodeTransforms...>(),
-        std::type_identity<NodeTransforms>{}...);
+        -> std::map<std::string_view, fetch_transform> {
+        return {{std::string_view{NodeTransforms::match_node_type::binding_tag},
+          static_cast<fetch_transform>(
+            [](const std::tuple<NodeTransforms...> &t)
+              -> std::variant<const NodeTransforms *...> {
+              return std::addressof(std::get<I>(t));
+            })}...};
+      },
+      std::index_sequence_for<NodeTransforms...>(),
+      std::type_identity<NodeTransforms>{}...);
 
     std::expected<Accum, std::string> accum{std::move(_accum)};
     // adapter

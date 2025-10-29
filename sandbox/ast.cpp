@@ -7,6 +7,10 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/ASTTypeTraits.h>
+#include <clang/ASTMatchers/ASTMatchFinder.h>
+#include <clang/ASTMatchers/ASTMatchers.h>
+#include <clang/ASTMatchers/ASTMatchersInternal.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Basic/FileManager.h>
@@ -34,6 +38,7 @@
 #include <CLI/Validators.hpp>
 
 #include <algorithm>
+#include <concepts>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -43,6 +48,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -94,12 +100,12 @@ constexpr std::string_view to_string(const T &v) {
   return "unknown";
 }
 
-// compilation flags
+/// compilation flags
 struct cl_flags {
   std::vector<std::string> values;
 };
 
-// compile_commands.json
+/// compile_commands.json
 struct json_cl_db {
   fs::path path;
 };
@@ -107,11 +113,12 @@ struct json_cl_db {
 struct cli_source_file {
   fs::path path;
 
-  // deduplicate if compilation_db contains several commands for one file
+  /// used to deduplicate if compilation_db contains several commands for one
+  /// file
   std::string output_substr;
 };
 
-// CLI11 uses ADL to specialize parsing cli args to custom types
+/// CLI11 uses ADL to specialize parsing cli args to custom types
 bool lexical_cast(const std::string &arg, cli_source_file &src) {
   std::ranges::view auto v_parts = std::views::split(arg, ':')
     | std::views::transform([](const auto &s) { return std::string_view(s); });
@@ -175,6 +182,321 @@ resource_dir:{resource_dir})",
 }
 
 std::expected<options, std::pair<int, std::string>> parse(int argc,
+  const char *const *argv) noexcept;
+
+} // namespace cli
+
+/// configure ast-related compiler invocation parameters
+struct compiler_invocation_from_args_t {
+  // note: struct is used to hide `args` from global scope
+  struct args {
+    const fs::path &resource_dir;
+    clang::DiagnosticsEngine &diag;
+    const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager;
+  };
+
+  std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
+    operator()(const source_file &sf, args a) const noexcept;
+} constexpr const compiler_invocation_from_args{};
+
+namespace ast {
+
+template <typename Match, typename Node>
+struct pattern_t {
+  std::type_identity<Node> node_type;
+  Match match;
+};
+
+template <typename Node, typename... Filter>
+constexpr auto pattern(
+  const clang::ast_matchers::internal::VariadicAllOfMatcher<Node> &m,
+  Filter... f) {
+  return pattern_t{
+    .node_type = std::type_identity<Node>{},
+    .match = m(f...),
+  };
+}
+
+template <typename Node, typename Base, typename... Filter>
+constexpr auto pattern(
+  const clang::ast_matchers::internal::VariadicDynCastAllOfMatcher<Base, Node>
+    &m,
+  Filter... f) {
+  return pattern_t{
+    .node_type = std::type_identity<Node>{},
+    .match = m(f...),
+  };
+}
+
+template <typename Match, typename Node, typename Reduce>
+struct rule {
+  pattern_t<Match, Node> pattern;
+  Reduce reduce;
+  clang::TraversalKind traversal_kind = clang::TraversalKind::TK_AsIs;
+};
+
+// todo: use concept `of_template<rule>`
+template <typename Accum, typename... Rule>
+Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
+                                          // a mutable ASTContext&. SMH...
+  Accum a,
+  Rule... rule) {
+  using namespace clang::ast_matchers;
+  constexpr std::string_view binding_tag = "binding_tag";
+
+  constexpr auto callback_from_rule = //
+    [binding_tag]<typename M, typename N, typename R>(Accum &accum,
+      const ast::rule<M, N, R> &rule) {
+      const auto bound_matcher =
+        traverse(rule.traversal_kind, rule.pattern.match.bind(binding_tag));
+      using matcher_t = decltype(bound_matcher);
+
+      struct _callback: MatchFinder::MatchCallback {
+        matcher_t matcher;
+        Accum &accum;
+        R reduce;
+
+        std::string_view binding_tag = binding_tag;
+
+        void run(const MatchFinder::MatchResult &result) override {
+          const std::map nodeById = result.Nodes.getMap();
+          const auto found = nodeById.find(binding_tag);
+          if (nodeById.end() == found) {
+            std::cerr << "DEBUG: Match::Callback false-fired.\n";
+            return;
+          }
+
+          const auto *node = found->second.get<N>();
+          if (!node) {
+            std::cerr
+              << "DEBUG: Matc::Callback: Node of invalid type matched.\n";
+            return;
+          }
+
+          accum = reduce(std::move(accum), *node);
+        }
+
+        _callback(const matcher_t &m, Accum &a, const R &r)
+            : matcher(m)
+            , accum(a)
+            , reduce(r) {
+        }
+      };
+
+      return _callback(bound_matcher, accum, rule.reduce);
+    };
+
+  // MatchFinder doesn't own the callbacks, so they need to outlive the finder.
+  std::tuple callbacks{callback_from_rule(a, rule)...};
+
+  MatchFinder finder;
+  std::apply(
+    [&finder](auto &...callback) {
+      (finder.addMatcher(callback.matcher, &callback), ...);
+    },
+    callbacks);
+  finder.matchAST(ast.getASTContext());
+
+  return a;
+}
+
+} // namespace ast
+
+namespace type_data {
+
+// todo: benchmark, then use hash unique type identifier
+using type_id = std::string;
+
+enum reference_type {
+  ref_none,
+  ref_lval,
+  ref_rval,
+};
+
+struct type_definition {
+  std::filesystem::path source_file;
+
+  /// nullopt for unnamed types
+  std::optional<std::string> nm_qual_type;
+
+  enum {
+    none = 0x0,
+
+    /// in global scope is not visible as public
+    non_public = 0x1 << 0,
+
+    /// definition within a scope
+    local = 0x1 << 1,
+  } definition_flags;
+};
+
+struct struct_data {
+  /// protected and private are not supported now (too complicated)
+  std::vector<std::string> public_fields;
+  std::set<type_id> type_dependencies;
+
+  enum {
+    is_struct,
+    is_class,
+    is_union,
+  } type;
+};
+
+} // namespace type_data
+
+} // namespace
+
+int main(int argc, char **argv) {
+  const std::expected cli_args = cli::parse(argc, argv);
+  if (!cli_args) {
+    const auto &[code, error] = cli_args.error();
+    std::cerr << error << '\n';
+    return code;
+  }
+
+  fmt::println("args:\n{}", to_string(*cli_args));
+
+  const llvm::IntrusiveRefCntPtr file_manager = new clang::FileManager({
+    .WorkingDir = fs::current_path().parent_path(),
+  });
+
+  // loading the ast
+  for (size_t n_processing = 0; const source_file &sf : cli_args->sources) {
+    // note: diag to AST is 1:1, has to be recreated each time...
+    // must outlive the ast
+    const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
+      llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
+      llvm::IntrusiveRefCntPtr diag =
+        new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
+          diag_opts,
+          new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
+      return diag;
+    });
+
+    fmt::println("[{}/{}] running {mode} mode for file: {file}\t\r",
+      ++n_processing,
+      cli_args->sources.size(),
+      fmt::arg("mode", cli::to_string(cli_args->mode)),
+      fmt::arg("file", sf.path.string()));
+
+    std::expected compiler_invocation = compiler_invocation_from_args(sf,
+      {
+        .resource_dir = cli_args->resource_dir,
+        .diag = *diag,
+        .file_manager = file_manager,
+      });
+
+    if (!compiler_invocation) {
+      std::cerr << compiler_invocation.error() << "\n";
+      continue;
+    }
+
+    // -- todo: this is mode-related, make a map or something
+    {
+      clang::LangOptions &lo = (*compiler_invocation)->getLangOpts();
+      // todo: investigate how to properly parse comments
+      lo.CommentOpts.ParseAllComments = true;
+    }
+
+    // -- todo: this is mode-related, make a map or something
+    {
+      clang::PreprocessorOptions &po =
+        (*compiler_invocation)->getPreprocessorOpts();
+
+      constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
+
+      if (const auto omni_defined = std::ranges::find_if(po.Macros,
+            [k_omni_macro](const auto &macro_def) {
+              const auto &[macro, is_undef] = macro_def;
+              return macro == k_omni_macro;
+            });
+        po.Macros.cend() == omni_defined) {
+        po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
+      } else {
+        auto &[_, is_undef] = *omni_defined;
+        // todo: warning if `true == is_undef`?
+        is_undef = false;
+      }
+
+      // fixme:
+      // removing force-included reflection header that is being generated
+      // p.Includes = util::filtered(
+      //   [&output_dir = mode.output_dir](const std::string &s) -> bool {
+      //     // todo: should I remove the exact path?
+      //     return util::is_subpath(s, output_dir);
+      //   },
+      //   std::move(p.Includes));
+
+      fmt::println("{}",
+        util::join(po.Macros, "\n", [](const auto &pair, fmt::context &ctx) {
+          const auto &[macro, is_undef] = pair;
+          return fmt::format_to(ctx.out(),
+            "DEBUG: #{} {}",
+            is_undef ? "undef" : "define",
+            macro);
+        }));
+      fmt::println("{}",
+        util::join(po.Includes, "\n", [] { return "DEBUG: #include \"{}\""; }));
+    }
+
+    // todo: how about creating the ast context directly (without clang::ASTUnit
+    // helper)
+    const std::unique_ptr ast =
+      clang::ASTUnit::LoadFromCompilerInvocation(*compiler_invocation,
+        std::make_shared<clang::PCHContainerOperations>(),
+        diag,
+        file_manager.get());
+
+    if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
+      std::cerr << fmt::format("Failed to build AST Unit for: {}.\n",
+        sf.path.generic_string());
+      continue;
+    }
+
+    using namespace clang::ast_matchers;
+
+    struct context {};
+    context ctx = ast::reduce_matches(*ast,
+      context{},
+
+      ast::rule{
+        .pattern = ast::pattern(classTemplateSpecializationDecl,
+          unless(isInStdNamespace()),
+          hasAncestor(namespaceDecl(hasName("omni"))),
+          hasAncestor(namespaceDecl(hasName("detail"))),
+          hasName("_reflected_type"),
+          isTemplateInstantiation(),
+          isDefinition()),
+        .reduce =
+          [](context a, const clang::ClassTemplateSpecializationDecl &) {
+            // todo: implement
+            return a;
+          },
+      },
+
+      ast::rule{
+        .pattern = ast::pattern(cxxMethodDecl,
+          unless(isInStdNamespace()),
+          hasAncestor(namespaceDecl(hasName("omni"))),
+          hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
+          isTemplateInstantiation(),
+          hasName("_call_impl")),
+        .reduce =
+          [](context a, const clang::CXXMethodDecl &) {
+            // todo: implement
+            return a;
+          },
+      });
+
+    // todo: generate file/files
+  }
+
+  return 0;
+}
+
+namespace {
+
+std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
   const char *const *argv) noexcept {
   CLI::App app{
     R"(
@@ -304,8 +626,8 @@ Dump yaml:
         std::string err;
         std::unique_ptr loaded =
           // todo: this is an inconsistent cli interface. one can pass any
-          // 'existing' file which is actually not a `compile_commands.json` but
-          // still load `compile_commands.json`
+          // 'existing' file which is actually not a `compile_commands.json`
+          // but still load `compile_commands.json`
           clang::tooling::CompilationDatabase::loadFromDirectory(
             db_path.parent_path().generic_string(),
             err);
@@ -390,134 +712,6 @@ Dump yaml:
     .mode = cli_mode,
   };
 }
-
-} // namespace cli
-
-/// configure ast-related compiler invocation parameters
-struct compiler_invocation_from_args_t {
-  // note: struct is used to hide `args` from global scope
-  struct args {
-    const fs::path &resource_dir;
-    clang::DiagnosticsEngine &diag;
-    const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager;
-  };
-
-  std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
-    operator()(const source_file &sf, args a) const noexcept;
-} constexpr const compiler_invocation_from_args{};
-
-} // namespace
-
-int main(int argc, char **argv) {
-  const std::expected cli_args = cli::parse(argc, argv);
-  if (!cli_args) {
-    const auto &[code, error] = cli_args.error();
-    std::cerr << error << '\n';
-    return code;
-  }
-
-  fmt::println("args:\n{}", to_string(*cli_args));
-
-  const llvm::IntrusiveRefCntPtr file_manager = new clang::FileManager({
-    .WorkingDir = fs::current_path().parent_path(),
-  });
-
-  // loading the ast
-  for (size_t n_processing = 0; const source_file &sf : cli_args->sources) {
-    // must outlive the ast
-    const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
-      llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
-      llvm::IntrusiveRefCntPtr diag =
-        new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
-          diag_opts,
-          new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
-      return diag;
-    });
-
-    fmt::println("[{}/{}] running {mode} mode for file: {file}\t\r",
-      ++n_processing,
-      cli_args->sources.size(),
-      fmt::arg("mode", cli::to_string(cli_args->mode)),
-      fmt::arg("file", sf.path.string()));
-
-    std::expected compiler_invocation = compiler_invocation_from_args(sf,
-      {
-        .resource_dir = cli_args->resource_dir,
-        .diag = *diag,
-        .file_manager = file_manager,
-      });
-
-    if (!compiler_invocation) {
-      std::cerr << compiler_invocation.error() << "\n";
-      continue;
-    }
-
-    {
-      clang::LangOptions &lo = (*compiler_invocation)->getLangOpts();
-      // todo: investigate how to properly parse comments
-      lo.CommentOpts.ParseAllComments = true;
-    }
-
-    // -- todo: this is mode-related, make a map or something
-    {
-      clang::PreprocessorOptions &po =
-        (*compiler_invocation)->getPreprocessorOpts();
-
-      constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
-
-      if (const auto omni_defined = std::ranges::find_if(po.Macros,
-            [k_omni_macro](const auto &macro_def) {
-              const auto &[macro, is_undef] = macro_def;
-              return macro == k_omni_macro;
-            });
-        po.Macros.cend() == omni_defined) {
-        po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
-      } else {
-        auto &[_, is_undef] = *omni_defined;
-        // todo: warning if `true == is_undef`?
-        is_undef = false;
-      }
-
-      // fixme:
-      // removing force-included reflection header that is being generated
-      // p.Includes = util::filtered(
-      //   [&output_dir = mode.output_dir](const std::string &s) -> bool {
-      //     // todo: should I remove the exact path?
-      //     return util::is_subpath(s, output_dir);
-      //   },
-      //   std::move(p.Includes));
-
-      fmt::println("{}",
-        util::join(po.Macros, "\n", [](const auto &pair, fmt::context &ctx) {
-          const auto &[macro, is_undef] = pair;
-          return fmt::format_to(ctx.out(),
-            "DEBUG: #{} {}",
-            is_undef ? "undef" : "define",
-            macro);
-        }));
-      fmt::println("{}",
-        util::join(po.Includes, "\n", [] { return "DEBUG: #include \"{}\""; }));
-    }
-
-    // todo: how about creating the ast context directly (without clang::ASTUnit
-    // helper)
-    const std::unique_ptr ast =
-      clang::ASTUnit::LoadFromCompilerInvocation(*compiler_invocation,
-        std::make_shared<clang::PCHContainerOperations>(),
-        diag,
-        file_manager.get());
-
-    if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
-      std::cerr << fmt::format("Failed to build AST Unit for: {}.\n",
-        sf.path.generic_string());
-      continue;
-    }
-  }
-
-  return 0;
-}
-
-namespace {
 
 std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
   const std::vector<std::string> &flags) {
