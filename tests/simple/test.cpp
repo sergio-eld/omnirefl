@@ -86,27 +86,69 @@ struct {
 
 } // namespace test_util
 
-template <typename ReflectedImpl, typename T>
-void test_reflected_call(const ReflectedImpl &impl,
-  const std::pair<T, std::vector<std::string>> &tc) {
-  const auto &input = tc.first;
-  const auto &expected = tc.second;
+struct {
+  // generic fallback:
+  // let gtest handle anything that has operator== and PrintTo/<<
+  template <typename T>
+  void operator()(const T &lhs, const T &rhs) const {
+    EXPECT_EQ(lhs, rhs);
+  }
 
-  std::vector<std::string> result;
-  omni::reflected_call(impl, input, result);
-  EXPECT_EQ(expected, result);
+  void operator()(const example_impl::print_type_info_t::result &lhs,
+    const example_impl::print_type_info_t::result &rhs) const {
+    EXPECT_EQ(lhs.name, rhs.name);
+    EXPECT_EQ(lhs.namespaces, rhs.namespaces);
+  }
+
+  void operator()(const example_impl::print_enum_type_info_t::result &lhs,
+    const example_impl::print_enum_type_info_t::result &rhs) const {
+    (*this)(lhs.type_info, rhs.type_info);
+    EXPECT_EQ(lhs.names, rhs.names);
+  }
+} const gtest_cmp_eq{};
+
+template <typename E, typename ReflectedImpl, typename T, typename... Args>
+void test_reflected_call(const E &expected,
+  const ReflectedImpl &impl,
+  const T &t,
+  Args &&...args) {
+  gtest_cmp_eq(expected,
+    omni::reflected_call(impl, t, std::forward<Args>(args)...));
 }
 
-// todo: implement
-// todo: investigate if `[](const auto&)` fails. This suite is expected to
-// compile for C++11
+template <typename Expected, typename T, typename... Args>
+auto test_case(Expected e, T t, Args &&...args) {
+  struct _test_case {
+    Expected expected;
+    T reflected_type;
+    std::tuple<Args...> args;
+  };
+
+  return _test_case{
+    std::move(e),
+    std::move(t),
+    std::make_tuple(std::forward<Args>(args)...),
+  };
+}
+
+// todo: interface should allow:
+// - specify COMMON for each test case inputs
+// - specify a list of input paramters
+// so that cases = COMMON * (test_case...) -> run_test(COMMON * test_case),
+// run_test(COMMON * test_case), ...
+//
+// todo: expand test_case.args...
 #define INSTANTIATE_REFLECTION_SUITE(SUITE_NAME, IMPL_OBJ, INPUTS) \
   struct SUITE_NAME: \
       ::testing::TestWithParam< \
         test_util::variant_element_t<decltype(INPUTS)>> {}; \
   TEST_P(SUITE_NAME, reflected_call) { \
     mpark::visit( \
-      [](const auto &test_case) { test_reflected_call(IMPL_OBJ, test_case); }, \
+      [](const auto &test_case) { \
+        test_reflected_call(test_case.expected, \
+          IMPL_OBJ, \
+          test_case.reflected_type); \
+      }, \
       GetParam()); \
   } \
   INSTANTIATE_TEST_SUITE_P(reflection_suite, \
@@ -122,8 +164,8 @@ TEST(print_names, simple) {
       "name",
       "title",
     };
-    std::vector<std::string> result;
-    omni::reflected_call(example_impl::print_field_names_simple, v, result);
+    const std::vector<std::string> result =
+      omni::reflected_call(example_impl::print_field_names_simple, v);
     EXPECT_EQ(expected, result);
   }
 
@@ -136,8 +178,8 @@ TEST(print_names, simple) {
       "titles",
       "info",
     };
-    std::vector<std::string> result;
-    omni::reflected_call(example_impl::print_field_names_simple, v, result);
+    const std::vector<std::string> result =
+      omni::reflected_call(example_impl::print_field_names_simple, v);
     EXPECT_EQ(expected, result);
   }
 }
@@ -147,14 +189,15 @@ INSTANTIATE_REFLECTION_SUITE(print_field_names_recursive,
   example_impl::print_field_names_recursive,
   //> INPUTS
   std::make_tuple( //
-    std::make_pair(example_types::championship{},
+    test_case(
       std::vector<std::string>{
         "name",
         "title",
-      })
+      },
+      example_types::championship{})
 
       ,
-    std::make_pair(example_types::wrestler{},
+    test_case(
       std::vector<std::string>{
         "name",
         "age",
@@ -169,45 +212,123 @@ INSTANTIATE_REFLECTION_SUITE(print_field_names_recursive,
         "info.ring_name",
         "info.signature_move",
         "info.debut_year",
-      })
+      },
+      example_types::wrestler{})
 
     // reflects member_sub (member field)
     ,
-    std::make_pair(example_types::with_member{},
+    test_case(
       std::vector<std::string>{
         "member",
         "member.ms_str",
         "member.ms_int",
-      })
+      },
+      example_types::with_member{})
 
     // reflects vec_elem (vector::value_type)
     ,
-    std::make_pair(example_types::with_vec{},
+    test_case(
       std::vector<std::string>{
         "vec",
         "vec[].ve_str",
-      })
+      },
+      example_types::with_vec{})
 
     // reflects map_key (map::key_type)
     ,
-    std::make_pair(example_types::with_map_key{},
+    test_case(
       std::vector<std::string>{
         "mp",
-      })
+      },
+      example_types::with_map_key{})
 
     // reflects tuple_elem (std::tuple element)
     ,
-    std::make_pair(example_types::with_tuple{},
+    test_case(
       std::vector<std::string>{
         "tp",
-      })
+      },
+      example_types::with_tuple{})
 
     // reflects variant_elem (std::variant alternative)
     ,
-    std::make_pair(example_types::with_variant{},
+    test_case(
       std::vector<std::string>{
         "vr",
-      })
+      },
+      example_types::with_variant{})
+    //< INPUTS
+    ));
+
+INSTANTIATE_REFLECTION_SUITE(print_enum_type_info_suite,
+  example_impl::print_enum_type_info,
+  //> INPUTS
+  std::make_tuple(
+    // namespace-scope unscoped enum
+    test_case( //
+      example_impl::print_enum_type_info_t::result{
+        /*.type_info=*/{
+          /*.name=*/"ring_style",
+          /*.namespaces=*/{"example_types"},
+        },
+        /*.names =*/
+        {
+          "rs_technical",
+          "rs_high_flying",
+          "rs_power",
+        },
+      },
+      example_types::ring_style{})
+
+    // namespace-scope scoped enum
+    ,
+    test_case( //
+      example_impl::print_enum_type_info_t::result{
+        /*.type_info=*/{
+          /*.name=*/"brand",
+          /*.namespaces=*/{"example_types"},
+        },
+        /*.names =*/
+        {
+          "raw",
+          "smackdown",
+          "nxt",
+        },
+      },
+      example_types::brand{})
+
+    // dependency unscoped enum
+    ,
+    test_case( //
+      example_impl::print_enum_type_info_t::result{
+        /*.type_info=*/{
+          /*.name=*/"title_rank",
+          /*.namespaces=*/{"example_types", "dependency"},
+        },
+        /*.names =*/
+        {
+          "tr_midcard",
+          "tr_main_event",
+        },
+      },
+      example_types::dependency::title_rank{})
+
+    // dependency scoped enum
+    ,
+    test_case( //
+      example_impl::print_enum_type_info_t::result{
+        /*.type_info=*/{
+          /*.name=*/"promotion",
+          /*.namespaces=*/{"example_types", "dependency"},
+        },
+        /*.names =*/
+        {
+          "wwe",
+          "aew",
+          "njpw",
+        },
+      },
+      example_types::dependency::promotion{})
     //< INPUTS
     ));
 

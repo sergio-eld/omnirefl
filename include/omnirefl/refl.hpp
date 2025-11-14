@@ -132,7 +132,7 @@ struct _reflected_impl {};
 /// class to invoke a callable implementation object
 struct reflected_call_t {
   template <typename Impl, typename T, typename... Args>
-  void operator()(Impl &&impl, T &&t, Args &&...args) const {
+  auto operator()(Impl &&impl, T &&t, Args &&...args) const {
     using type = typename std::decay<T>::type;
 #ifdef OMNI_HEADER_REFLECTION
     // testme: use inside inline non-template function defined in a header file
@@ -142,12 +142,13 @@ struct reflected_call_t {
     //   header-mode includes headers of reflected types).
     (void)detail::_reflected_indexed_type<type>{};
 #  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
-    std::forward<Impl>(impl)(std::forward<T>(t), std::forward<Args>(args)...);
+    return std::forward<Impl>(
+      impl)(std::forward<T>(t), std::forward<Args>(args)...);
 #  endif
 #else
     (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
     (void)detail::_reflected_type<type>{};
-    _call_impl(std::forward<Impl>(impl),
+    return _call_impl(std::forward<Impl>(impl),
       std::forward<T>(t),
       std::forward<Args>(args)...);
 #endif
@@ -157,7 +158,8 @@ struct reflected_call_t {
 #ifndef OMNI_HEADER_REFLECTION
   // implementation will be generated for this function by omnirefl
   template <typename Impl, typename... Args>
-  static void _call_impl(Impl &&impl, Args &&...args);
+  static auto _call_impl(Impl &&impl, Args &&...args)
+    -> decltype(std::declval<Impl>()(std::declval<Args>()...));
 #endif
 } const reflected_call{};
 
@@ -404,7 +406,7 @@ struct _exposition {
 
 #  ifndef OMNI_DEFINE_NAME_FUNC
 #    define OMNI_DEFINE_NAME_FUNC(STR) \
-      constexpr static auto name() noexcept -> const char(&)[sizeof(STR)] { \
+      constexpr static auto name() noexcept -> const char (&)[sizeof(STR)] { \
         return STR; \
       }
 #  endif

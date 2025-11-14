@@ -10,23 +10,66 @@
 #include <vector>
 
 namespace example_impl {
+
+// todo: non-reflectable types as arguments (std::tuple, std::vector, etc.)
+
+struct print_type_info_t {
+  struct result {
+    std::string name;
+    std::vector<std::string> namespaces;
+  };
+
+  template <typename T>
+  result operator()(const T &) const {
+    // todo: implement
+    //
+    // const auto& namespaces = omni::reflected(t).namespaces;
+    // return {
+    // .name = omni::reflected(t).type_name,
+    // .namespaces = {namespaces.begin(), namespaces.end()},
+    // };
+    return {};
+  }
+} const static print_type_info{};
+
+struct print_enum_type_info_t {
+  struct result {
+    print_type_info_t::result type_info;
+    std::vector<std::string> names;
+  };
+
+  template <typename T,
+    typename = typename std::enable_if<std::is_enum<T>::value>::type>
+  result operator()(const T &t) const {
+    return {
+      /*type_info=*/print_type_info(t),
+      /*names=*/{}, //< todo: implement
+    };
+  }
+} const print_enum_type_info{};
+
 struct print_field_names_simple_t {
   template <typename T>
-  void operator()(const T &t, std::vector<std::string> &out) const {
+  std::vector<std::string> operator()(const T &t) const {
     const auto fields = omni::reflected(t).fields;
+    std::vector<std::string> out;
     out.reserve(fields.size());
     for (const auto &f : fields)
       out.emplace_back(std::string(f.name));
+
+    return out;
   }
 } const static print_field_names_simple{};
 
 struct print_field_names_recursive_t {
   template <typename T>
-  void operator()(const T &t, std::vector<std::string> &out) const {
+  std::vector<std::string> operator()(const T &t) const {
     namespace pm = pattern_matching;
 
     const auto fields = omni::reflected(t).fields;
+    std::vector<std::string> out;
     out.reserve(fields.size());
+
     for (const auto &f : fields) {
       out.emplace_back(f.name);
       f
@@ -54,9 +97,12 @@ struct print_field_names_recursive_t {
           }),
           pm::m_any([](const auto &) { /*no-op*/ }));
     }
+
+    return out;
   }
 } const static print_field_names_recursive{};
 
+// todo: return vector
 struct print_field_values_recursive_t {
   template <typename T>
   void operator()(const T &t, std::vector<std::string> &out) const {
@@ -103,6 +149,8 @@ struct print_field_values_recursive_t {
 
 // naive implementation, does not support containers
 struct simple_from_map_t {
+  // todo: modify with type_identity<T> as a reflected type. It may be not
+  // default-constructible
   template <typename T>
   void operator()(T &to,
     const std::map<std::string, std::string> &from) const noexcept {
@@ -122,6 +170,7 @@ struct simple_from_map_t {
     }
   }
 } const static simple_from_map{};
+
 } // namespace example_impl
 
 namespace example_types {
@@ -150,6 +199,42 @@ struct wrestler {
 struct settable {
   std::string str;
   int i;
+};
+
+enum ring_style {
+  rs_technical,
+  rs_high_flying,
+  rs_power,
+};
+
+enum class brand {
+  raw,
+  smackdown,
+  nxt,
+};
+
+struct enum_holder {
+  enum alignment {
+    face,
+    heel,
+    tweener,
+  };
+
+  enum class status {
+    active,
+    injured,
+    retired,
+  };
+
+  alignment current_alignment{};
+  status current_status{};
+};
+
+struct with_unnamed_enum_member {
+  enum {
+    flag_a,
+    flag_b,
+  } flags{};
 };
 
 // -- Types reflected as dependencies
@@ -184,6 +269,17 @@ struct alias_type {
   std::string at_str;
 };
 
+enum title_rank {
+  tr_midcard,
+  tr_main_event,
+};
+
+enum class promotion {
+  wwe,
+  aew,
+  njpw,
+};
+
 } // namespace dependency
 
 struct with_member {
@@ -210,6 +306,14 @@ struct with_variant {
 
 struct with_alias {
   using type = dependency::alias_type;
+};
+
+struct with_enum_dependency_unscoped {
+  dependency::title_rank rank;
+};
+
+struct with_enum_dependency_scoped {
+  dependency::promotion company;
 };
 
 } // namespace example_types
