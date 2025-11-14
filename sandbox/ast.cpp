@@ -49,11 +49,17 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
 
 namespace util {
+
+template <std::ranges::range R>
+constexpr auto indexed(R &&r, size_t start = 0) {
+  return std::views::zip(std::views::iota(start), std::forward<R>(r));
+}
 
 struct concat_t {
   template <typename T, typename... TT>
@@ -199,6 +205,7 @@ struct compiler_invocation_from_args_t {
     operator()(const source_file &sf, args a) const noexcept;
 } constexpr const compiler_invocation_from_args{};
 
+// todo: this is a candidate for reusability (in a separate header)
 namespace ast {
 
 template <typename Match, typename Node>
@@ -368,21 +375,34 @@ struct already_reflected {
   type_id id;
 };
 
+// todo: store the type info, since only a limited set of non_relfectable types
+// are supported, i.e.: std::tuple<A, B, C>, std::variant<A, B, C>,
+// std::vector<A>, ...
 struct non_reflectable {
   type_id id;
 };
 
+// refactorme: better name, now it differs in only one letter with the function
 struct resolved_reflected_type {
   std::variant<reflectable, non_reflectable, already_reflected> type;
   std::vector<reflectable> dependencies;
 };
 
-std::expected<resolved_reflected_type, std::string> resolve_reflected_type_node(
+std::expected<resolved_reflected_type, std::string> resolve_reflected_type(
   const clang::ClassTemplateSpecializationDecl &decl,
   const clang::ASTUnit &ast,
   const std::set<type_id> &resolved_types);
 
 } // namespace meta
+
+namespace render {
+
+// todo: here goes formatters implementations for the meta types:
+// - debug (dump to ostream)
+// - yaml
+// - reflected specialization
+
+} // namespace render
 
 } // namespace
 
@@ -401,7 +421,7 @@ int main(int argc, char **argv) {
   });
 
   // loading the ast
-  for (size_t n_processing = 0; const source_file &sf : cli_args->sources) {
+  for (const auto &[n_processing, sf] : util::indexed(cli_args->sources, 1)) {
     // note: diag to AST is 1:1, has to be recreated each time...
     // must outlive the ast
     const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
@@ -414,7 +434,7 @@ int main(int argc, char **argv) {
     });
 
     fmt::println("[{}/{}] running {mode} mode for file: {file}\t\r",
-      ++n_processing,
+      n_processing,
       cli_args->sources.size(),
       fmt::arg("mode", cli::to_string(cli_args->mode)),
       fmt::arg("file", sf.path.string()));
@@ -443,20 +463,21 @@ int main(int argc, char **argv) {
       clang::PreprocessorOptions &po =
         (*compiler_invocation)->getPreprocessorOpts();
 
-      constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
+      // fixme: only for header mode
+      // constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
 
-      if (const auto omni_defined = std::ranges::find_if(po.Macros,
-            [k_omni_macro](const auto &macro_def) {
-              const auto &[macro, is_undef] = macro_def;
-              return macro == k_omni_macro;
-            });
-        po.Macros.cend() == omni_defined) {
-        po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
-      } else {
-        auto &[_, is_undef] = *omni_defined;
-        // todo: warning if `true == is_undef`?
-        is_undef = false;
-      }
+      // if (const auto omni_defined = std::ranges::find_if(po.Macros,
+      //       [k_omni_macro](const auto &macro_def) {
+      //         const auto &[macro, is_undef] = macro_def;
+      //         return macro == k_omni_macro;
+      //       });
+      //   po.Macros.cend() == omni_defined) {
+      //   po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
+      // } else {
+      //   auto &[_, is_undef] = *omni_defined;
+      //   // todo: warning if `true == is_undef`?
+      //   is_undef = false;
+      // }
 
       // fixme:
       // removing force-included reflection header that is being generated
@@ -479,8 +500,9 @@ int main(int argc, char **argv) {
         util::join(po.Includes, "\n", [] { return "DEBUG: #include \"{}\""; }));
     }
 
-    // todo: how about creating the ast context directly (without clang::ASTUnit
-    // helper)
+    // fixme: no matches detected. Investigate if it is caused by ast or by
+    // reduce todo: how about creating the ast context directly (without
+    // clang::ASTUnit helper)
     const std::unique_ptr ast =
       clang::ASTUnit::LoadFromCompilerInvocation(*compiler_invocation,
         std::make_shared<clang::PCHContainerOperations>(),
@@ -496,14 +518,11 @@ int main(int argc, char **argv) {
     using namespace clang::ast_matchers;
 
     struct context {
-      struct reflected_struct {
-        meta::struct_data data;
-        meta::type_definition definition;
-      };
-
-      std::map<meta::type_id, reflected_struct> reflected_structs;
+      std::vector<meta::reflectable> reflected;
+      // todo: enums
 
       std::set<meta::type_id> resolved_types;
+      std::set<meta::type_id> resolved_as_dependent;
       std::vector<std::string> errors;
     };
 
@@ -522,7 +541,7 @@ int main(int argc, char **argv) {
           [&ast = *ast](context a,
             const clang::ClassTemplateSpecializationDecl &decl) {
             std::expected resolved =
-              meta::resolve_reflected_type_node(decl, ast, a.resolved_types);
+              meta::resolve_reflected_type(decl, ast, a.resolved_types);
             if (!resolved) {
               a.errors.emplace_back(std::move(resolved).error());
               return a;
@@ -532,14 +551,27 @@ int main(int argc, char **argv) {
               [&a]<typename T>(T t) {
                 if constexpr (std::same_as<meta::reflectable, T>) {
                   meta::reflectable &r = t;
-                  // a.reflected_structs[r.id] = r.data
-                  // todo: implement
+                  a.resolved_types.emplace(r.id);
+                  a.reflected.emplace_back(std::move(r));
+                } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                  // todo:
+                  // Only a limited set of T in _relfected_type<T> is
+                  // supported, and it should be reported as error diagnostics
+                } else {
+                  static_assert(std::same_as<meta::already_reflected, T>);
+                  // todo: log for info?
                 }
-                // todo: other cases
               },
               std::move(resolved->type));
 
-            // todo: implement
+            std::ranges::transform(resolved->dependencies,
+              std::inserter(a.resolved_as_dependent,
+                a.resolved_as_dependent.end()),
+              [](const meta::reflectable &r) { return r.id; });
+
+            a.reflected = util::concat(std::move(a.reflected),
+              std::move(resolved->dependencies));
+
             return a;
           },
       },
@@ -559,6 +591,12 @@ int main(int argc, char **argv) {
       });
 
     // todo: generate file/files
+    // todo: render to &ostream (file/console/whatever OS wants)
+    for (const meta::reflectable &r : ctx.reflected) {
+      fmt::println("reflected type{}: {}",
+        ctx.resolved_as_dependent.contains(r.id) ? " (as dependency)" : "",
+        r.definition.nm_qual_type.value_or("unnamed"));
+    }
   }
 
   return 0;
@@ -695,7 +733,8 @@ Dump yaml:
           std::string> {
         std::string err;
         std::unique_ptr loaded =
-          // todo: this is an inconsistent cli interface. one can pass any
+          // fixme:
+          // this is an inconsistent cli interface. one can pass any
           // 'existing' file which is actually not a `compile_commands.json`
           // but still load `compile_commands.json`
           clang::tooling::CompilationDatabase::loadFromDirectory(
@@ -1266,7 +1305,7 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   return {visited.begin(), visited.end()};
 }
 
-auto meta::resolve_reflected_type_node(
+auto meta::resolve_reflected_type(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   const clang::ASTUnit &ast,
   const std::set<type_id> &resolved_types)

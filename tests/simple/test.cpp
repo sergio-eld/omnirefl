@@ -1,17 +1,119 @@
 #include "structs.h"
 
-#include <omnirefl/refl.hpp>
-
 #include <gtest/gtest.h>
 
+#include <mpark/variant.hpp>
+#include <omnirefl/refl.hpp>
+
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
-// fixme: it seems that cmake doesn't pick up the changes that happen in an included header file. it
-// makes sence, since only the .cpp files are tracked by cmake. There needs to be some solution,
-// i.e.:
-// - collect the headers via the tool and track them (too complex, roi low, not robust)
-// - force the tool rerunning each time the .cpp file needs recompilation (is it even possible?)
+// fixme: it seems that cmake doesn't pick up the changes that happen in an
+// included header file. it makes sence, since only the .cpp files are tracked
+// by cmake. There needs to be some solution, i.e.:
+// - collect the headers via the tool and track them (too complex, roi low, not
+// robust)
+// - force the tool rerunning each time the .cpp file needs recompilation (is it
+// even possible?)
+
+// todo: !!! diagnostics for failed reflection run due to compilation errors
+namespace {
+
+namespace test_util {
+
+template <class...>
+struct disjunction: std::false_type {};
+
+template <class B1>
+struct disjunction<B1>: B1 {};
+
+template <class B1, class... Bn>
+struct disjunction<B1, Bn...>:
+    std::conditional<bool(B1::value), B1, disjunction<Bn...>>::type {};
+
+template <template <typename...> class List, typename T, typename... Ts>
+struct unique {
+  using type = T;
+};
+
+template <template <typename...> class List,
+  typename... Ts,
+  typename U,
+  typename... Us>
+struct unique<List, List<Ts...>, U, Us...>:
+    std::conditional<disjunction<std::is_same<U, Ts>...>::value,
+      unique<List, List<Ts...>, Us...>,
+      unique<List, List<Ts..., U>, Us...>>::type {};
+
+template <typename... T>
+using unique_variant =
+  typename unique<mpark::variant, mpark::variant<>, T...>::type;
+
+template <typename FunctionType>
+struct return_type;
+
+template <typename R, typename... T>
+struct return_type<R(T...)> {
+  using type = R;
+};
+
+template <typename>
+struct variant_from_tuple;
+
+template <typename... T>
+struct variant_from_tuple<std::tuple<T...>> {
+  using type = unique_variant<T...>;
+};
+
+template <typename Tuple>
+using variant_element_t = typename variant_from_tuple<Tuple>::type;
+
+struct {
+  template <typename Tuple, size_t... I>
+  static std::array<variant_element_t<Tuple>, sizeof...(I)> _impl(Tuple t,
+    std::integer_sequence<std::size_t, I...>) {
+    return {std::move(std::get<I>(t))...};
+  }
+
+  template <typename Tuple>
+  auto operator()(Tuple tuple) const {
+    return _impl(std::forward<Tuple>(tuple),
+      std::make_integer_sequence<std::size_t, std::tuple_size<Tuple>{}>{});
+  }
+} const tuple_to_variant_array{};
+
+} // namespace test_util
+
+template <typename ReflectedImpl, typename T>
+void test_reflected_call(const ReflectedImpl &impl,
+  const std::pair<T, std::vector<std::string>> &tc) {
+  const auto &input = tc.first;
+  const auto &expected = tc.second;
+
+  std::vector<std::string> result;
+  omni::reflected_call(impl, input, result);
+  EXPECT_EQ(expected, result);
+}
+
+// todo: implement
+// todo: investigate if `[](const auto&)` fails. This suite is expected to
+// compile for C++11
+#define INSTANTIATE_REFLECTION_SUITE(SUITE_NAME, IMPL_OBJ, INPUTS) \
+  struct SUITE_NAME: \
+      ::testing::TestWithParam< \
+        test_util::variant_element_t<decltype(INPUTS)>> {}; \
+  TEST_P(SUITE_NAME, reflected_call) { \
+    mpark::visit( \
+      [](const auto &test_case) { test_reflected_call(IMPL_OBJ, test_case); }, \
+      GetParam()); \
+  } \
+  INSTANTIATE_TEST_SUITE_P(reflection_suite, \
+    SUITE_NAME, \
+    ::testing::ValuesIn(test_util::tuple_to_variant_array(INPUTS)))
+
+// todo: special test for type alias reflected as a dependency
 
 TEST(print_names, simple) {
   {
@@ -32,7 +134,7 @@ TEST(print_names, simple) {
       "age",
       "catchphrase",
       "titles",
-      // "info", //< fixme: add suport in header-mode
+      "info",
     };
     std::vector<std::string> result;
     omni::reflected_call(example_impl::print_field_names_simple, v, result);
@@ -40,28 +142,76 @@ TEST(print_names, simple) {
   }
 }
 
-TEST(print_names, recursive) {
-  const example_types::wrestler v{};
-  const static std::vector<std::string> expected{
-    "name",
-    "age",
-    "catchphrase",
+// todo: remove repetition, 'deduce' suite name from the reflection impl object
+INSTANTIATE_REFLECTION_SUITE(print_field_names_recursive,
+  example_impl::print_field_names_recursive,
+  //> INPUTS
+  std::make_tuple( //
+    std::make_pair(example_types::championship{},
+      std::vector<std::string>{
+        "name",
+        "title",
+      })
 
-    "titles",
-    "titles[].name",
-    "titles[].title",
+      ,
+    std::make_pair(example_types::wrestler{},
+      std::vector<std::string>{
+        "name",
+        "age",
+        "catchphrase",
 
-    // fixme: add suport in header-mode
-    // "info",
-    // "info.ring_name",
-    // "info.signature_move",
-    // "info.debut_year",
-  };
-  std::vector<std::string> result;
-  omni::reflected_call(example_impl::print_field_names_recursive, v, result);
-  EXPECT_EQ(expected, result);
-}
+        "titles",
+        "titles[].name",
+        "titles[].title",
 
+        // fixme: add suport in header-mode
+        "info",
+        "info.ring_name",
+        "info.signature_move",
+        "info.debut_year",
+      })
+
+    // reflects member_sub (member field)
+    ,
+    std::make_pair(example_types::with_member{},
+      std::vector<std::string>{
+        "member",
+        "member.ms_str",
+        "member.ms_int",
+      })
+
+    // reflects vec_elem (vector::value_type)
+    ,
+    std::make_pair(example_types::with_vec{},
+      std::vector<std::string>{
+        "vec",
+        "vec[].ve_str",
+      })
+
+    // reflects map_key (map::key_type)
+    ,
+    std::make_pair(example_types::with_map_key{},
+      std::vector<std::string>{
+        "mp",
+      })
+
+    // reflects tuple_elem (std::tuple element)
+    ,
+    std::make_pair(example_types::with_tuple{},
+      std::vector<std::string>{
+        "tp",
+      })
+
+    // reflects variant_elem (std::variant alternative)
+    ,
+    std::make_pair(example_types::with_variant{},
+      std::vector<std::string>{
+        "vr",
+      })
+    //< INPUTS
+    ));
+
+// refactorme: use INSTANTIATE_REFLECTION_SUITE
 TEST(print_values, recursive) {
   const example_types::wrestler v{
     "John Cena",
@@ -76,13 +226,13 @@ TEST(print_values, recursive) {
       {"Money in the Bank", "1-time winner"},
       {"Tag Team Championship", "4-time champion"},
     },
-    // fixme: implement support in header-mode
+
     /*info=*/
-    // {
-    //   "John Cena",
-    //   "Attitude Adjustment",
-    //   2002,
-    // },
+    {
+      "John Cena",
+      "Attitude Adjustment",
+      2002,
+    },
   };
 
   const static std::vector<std::string> expected{
@@ -105,11 +255,10 @@ TEST(print_values, recursive) {
     "titles[5].name: \"Tag Team Championship\"",
     "titles[5].title: \"4-time champion\"",
 
-    // fixme: add support in header-mode
     // nested info fields
-    // "info.ring_name: \"John Cena\"",
-    // "info.signature_move: \"Attitude Adjustment\"",
-    // "info.debut_year: 2002",
+    "info.ring_name: \"John Cena\"",
+    "info.signature_move: \"Attitude Adjustment\"",
+    "info.debut_year: 2002",
   };
 
   std::vector<std::string> result;
@@ -128,6 +277,8 @@ TEST(modify_fields, simple) {
   EXPECT_EQ(std::to_string(output.i), value("i"));
   EXPECT_EQ(output.str, value("str"));
 }
+
+} // namespace
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
