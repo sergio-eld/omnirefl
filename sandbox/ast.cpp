@@ -9,6 +9,7 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/ASTTypeTraits.h>
 #include <clang/AST/Decl.h>
+#include <clang/AST/DeclCXX.h>
 #include <clang/AST/Type.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -320,6 +321,15 @@ namespace meta {
 // todo: benchmark, then use hash unique type identifier
 using type_id = std::string;
 
+struct nm_qual_type {
+  /// nullopt for unnamed types
+  std::optional<std::string> name;
+
+  /// chain of namespaces. may start with empty string if declared in anonymous
+  /// namespace
+  std::vector<std::string> namespaces;
+};
+
 enum reference_type {
   ref_none,
   ref_lval,
@@ -329,12 +339,7 @@ enum reference_type {
 struct type_definition {
   std::filesystem::path source_file;
 
-  /// nullopt for unnamed types
-  std::optional<std::string> type_name;
-
-  /// chain of namespaces. may start with empty string if declared in anonymous
-  /// namespace
-  std::vector<std::string> namespaces;
+  nm_qual_type type_name;
 
   enum {
     none = 0x0,
@@ -350,7 +355,6 @@ struct type_definition {
 struct struct_data {
   /// protected and private are not supported now (too complicated)
   std::vector<std::string> public_fields;
-  // std::set<type_id> type_dependencies;
 
   enum {
     is_struct,
@@ -366,13 +370,19 @@ struct enum_data {
 
 struct function_signature_arg {
   // fully namespace-qualified type
-  std::string nm_qual_type;
+  nm_qual_type type_name;
   bool is_const : 1;
   reference_type ref_type;
 };
 
 struct func_signature {
   std::vector<function_signature_arg> args;
+  function_signature_arg return_type;
+
+  // MISSING:
+  // - pointer depth (T*, T**)
+  // - qualifiers on pointee (const T*)
+  // - arrays / function pointers / etc.
 };
 
 struct reflectable {
@@ -394,15 +404,25 @@ struct non_reflectable {
 };
 
 // refactorme: better name, now it differs in only one letter with the function
-struct resolved_reflected_type {
+struct reflected_type_info {
   std::variant<reflectable, non_reflectable, already_reflected> type;
   std::vector<reflectable> dependencies;
 };
 
-std::expected<resolved_reflected_type, std::string> resolve_reflected_type(
+std::expected<reflected_type_info, std::string> resolve_reflected_type(
   const clang::ClassTemplateSpecializationDecl &decl,
   const clang::ASTUnit &ast,
   const std::set<type_id> &resolved_types);
+
+struct reflected_call_info {
+  func_signature f_sig;
+  std::set<fs::path> includes;
+  std::set<fs::path> std_includes;
+};
+
+std::expected<reflected_call_info, std::string> resolve_reflected_call(
+  const clang::CXXMethodDecl &decl,
+  const clang::ASTUnit &ast);
 
 } // namespace meta
 
@@ -537,80 +557,90 @@ int main(int argc, char **argv) {
       std::vector<std::string> errors;
     };
 
-    context ctx =
-      ast::reduce_matches(*ast,
-        context{},
+    context ctx = ast::reduce_matches(*ast,
+      context{},
 
-        ast::rule{
-          .pattern = ast::pattern(classTemplateSpecializationDecl,
-            unless(isInStdNamespace()),
-            hasAncestor(namespaceDecl(hasName("omni"))),
-            hasAncestor(namespaceDecl(hasName("detail"))),
-            hasName("_reflected_type"),
-            isTemplateInstantiation(),
-            isDefinition()),
-          .reduce =
-            [&ast = *ast](context a,
-              const clang::ClassTemplateSpecializationDecl &decl) {
-              std::expected resolved =
-                meta::resolve_reflected_type(decl, ast, a.resolved_types);
-              if (!resolved) {
-                a.errors.emplace_back(std::move(resolved).error());
-                return a;
-              }
-
-              std::visit(
-                [&a]<typename T>(T t) {
-                  if constexpr (std::same_as<meta::reflectable, T>) {
-                    meta::reflectable &r = t;
-                    a.resolved_types.emplace(r.id);
-                    a.reflected.emplace_back(std::move(r));
-                  } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                    // todo:
-                    // Only a limited set of T in _relfected_type<T> is
-                    // supported, and it should be reported as error diagnostics
-                  } else {
-                    static_assert(std::same_as<meta::already_reflected, T>);
-                    // todo: log for info?
-                  }
-                },
-                std::move(resolved->type));
-
-              std::ranges::transform(resolved->dependencies,
-                std::inserter(a.resolved_as_dependent,
-                  a.resolved_as_dependent.end()),
-                [](const meta::reflectable &r) { return r.id; });
-
-              a.reflected = util::concat(std::move(a.reflected),
-                std::move(resolved->dependencies));
-
+      ast::rule{
+        .pattern = ast::pattern(classTemplateSpecializationDecl,
+          unless(isInStdNamespace()),
+          hasAncestor(namespaceDecl(hasName("omni"))),
+          hasAncestor(namespaceDecl(hasName("detail"))),
+          hasName("_reflected_type"),
+          isTemplateInstantiation(),
+          isDefinition()),
+        .reduce =
+          [&ast = *ast](context a,
+            const clang::ClassTemplateSpecializationDecl &decl) {
+            std::expected resolved =
+              meta::resolve_reflected_type(decl, ast, a.resolved_types);
+            if (!resolved) {
+              a.errors.emplace_back(std::move(resolved).error());
               return a;
-            },
-        },
+            }
 
-        // note: `_call_impl` is not needed for header mode, so it is disabled
-        // by preprocessor
-        ast::rule{
-          .pattern = ast::pattern(cxxMethodDecl,
-            unless(isInStdNamespace()),
-            hasAncestor(namespaceDecl(hasName("omni"))),
-            hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
-            isTemplateInstantiation(),
-            hasName("_call_impl")),
-          .reduce =
-            [](context a, const clang::CXXMethodDecl &) {
-              // todo: implement
+            std::visit(
+              [&a]<typename T>(T t) {
+                if constexpr (std::same_as<meta::reflectable, T>) {
+                  meta::reflectable &r = t;
+                  a.resolved_types.emplace(r.id);
+                  a.reflected.emplace_back(std::move(r));
+                } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                  // todo:
+                  // Only a limited set of T in _relfected_type<T> is
+                  // supported, and it should be reported as error diagnostics
+                } else {
+                  static_assert(std::same_as<meta::already_reflected, T>);
+                  // todo: log for info?
+                }
+              },
+              std::move(resolved->type));
+
+            std::ranges::transform(resolved->dependencies,
+              std::inserter(a.resolved_as_dependent,
+                a.resolved_as_dependent.end()),
+              [](const meta::reflectable &r) { return r.id; });
+
+            a.reflected = util::concat(std::move(a.reflected),
+              std::move(resolved->dependencies));
+
+            return a;
+          },
+      },
+
+      // note: `_call_impl` is not needed for header mode, so it is disabled
+      // by preprocessor
+      ast::rule{
+        .pattern = ast::pattern(cxxMethodDecl,
+          unless(isInStdNamespace()),
+          hasAncestor(namespaceDecl(hasName("omni"))),
+          hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
+          isTemplateInstantiation(),
+          hasName("_call_impl")),
+        .reduce =
+          [&ast = *ast](context a, const clang::CXXMethodDecl &call_decl) {
+            std::expected resolved =
+              meta::resolve_reflected_call(call_decl, ast);
+            if (!resolved) {
+              a.errors.emplace_back(std::move(resolved).error());
               return a;
-            },
-        });
+            }
+            // todo: implement
+            return a;
+          },
+      });
 
-    // todo: generate file/files
-    // todo: render to &ostream (file/console/whatever OS wants)
     for (const meta::reflectable &r : ctx.reflected) {
+      std::vector nm_qual_type = r.definition.type_name.namespaces;
+      nm_qual_type.emplace_back(
+        r.definition.type_name.name.value_or("unnamed"));
+
       fmt::println("reflected type{}: {}",
         ctx.resolved_as_dependent.contains(r.id) ? " (as dependency)" : "",
-        r.definition.type_name.value_or("unnamed"));
+        fmt::join(nm_qual_type, "::"));
     }
+
+    // todo: render to &ostream (file/console/whatever OS wants)
+    // todo: generate file/files
   }
 
   return 0;
@@ -1154,6 +1184,32 @@ std::expected<int, std::string> get_template_value_arg(
   return arg.getAsIntegral().getExtValue();
 }
 
+meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
+  return {
+    .name =
+      std::invoke([id = td.getIdentifier()] -> std::optional<std::string> {
+        if (id)
+          return id->getName().str();
+        return std::nullopt;
+      }),
+    .namespaces = std::invoke([&decl_ctx = *td.getDeclContext()] {
+      std::vector<std::string> result;
+
+      const clang::DeclContext *dc = &decl_ctx;
+      while (!llvm::isa<clang::TranslationUnitDecl>(dc)) {
+        if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc)) {
+          result.emplace_back(
+            ns->isAnonymousNamespace() ? "" : ns->getName().str());
+        }
+        dc = dc->getParent();
+      }
+
+      std::ranges::reverse(result);
+      return result;
+    }),
+  };
+}
+
 meta::type_definition resolve_definition(const clang::TagDecl &td,
   const clang::SourceManager &sm) noexcept {
   const clang::DeclContext &decl_ctx = *td.getDeclContext();
@@ -1168,27 +1224,7 @@ meta::type_definition resolve_definition(const clang::TagDecl &td,
 
   return {
     .source_file = get_declaration_source_file(td, sm),
-    .type_name =
-      std::invoke([id = td.getIdentifier()] -> std::optional<std::string> {
-        if (id)
-          return id->getName().str();
-        return std::nullopt;
-      }),
-    .namespaces = std::invoke([&decl_ctx] {
-      std::vector<std::string> result;
-      const clang::DeclContext *dc = &decl_ctx;
-
-      while (!llvm::isa<clang::TranslationUnitDecl>(dc)) {
-        if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc)) {
-          result.emplace_back(
-            ns->isAnonymousNamespace() ? "" : ns->getName().str());
-        }
-        dc = dc->getParent();
-      }
-
-      std::ranges::reverse(result);
-      return result;
-    }),
+    .type_name = resolve_nm_qual_type(td),
     // refactorme: enable bitwise operations
     .definition_flags = td_flags(td_local | td_non_public),
   };
@@ -1247,7 +1283,6 @@ std::vector<member_typedef_decl> member_typedefs(
   return r;
 };
 
-// testme: struct with a tuple type field
 std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   const clang::CXXRecordDecl &root,
   const std::set<meta::type_id> &resolved_types) noexcept {
@@ -1290,7 +1325,7 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
     }
     // fixme: what about unions, built-in arrays?
 
-    // ad hoc solution:
+    // refactorme: ad hoc solution:
     //   in c++ code template trait types can be used, but I don't know if it is
     //   possible to get from parsed ast.
     //   I could, however, capture such types in `omni::detail`...
@@ -1346,7 +1381,7 @@ auto meta::resolve_reflected_type(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   const clang::ASTUnit &ast,
   const std::set<type_id> &resolved_types)
-  -> std::expected<resolved_reflected_type, std::string> {
+  -> std::expected<reflected_type_info, std::string> {
   // todo: assert template signature
   // omni::detail::_reflected_type<T>
   std::expected _reflected_type = get_template_type_arg(template_decl, 0);
@@ -1356,7 +1391,7 @@ auto meta::resolve_reflected_type(
   const clang::Type &reflected_type = **_reflected_type;
 
   if (reflected_type.isFundamentalType()) {
-    return resolved_reflected_type{
+    return reflected_type_info{
       .type =
         non_reflectable{
           .id = reflected_type
@@ -1372,7 +1407,7 @@ auto meta::resolve_reflected_type(
     const clang::EnumDecl &ed =
       *clang::cast<clang::EnumType>(reflected_type).getDecl();
 
-    return resolved_reflected_type{
+    return reflected_type_info{
       .type =
         reflectable{
           .id = reflected_type
@@ -1415,7 +1450,7 @@ auto meta::resolve_reflected_type(
 
   // todo: do not use nm_qual_type to uniquely identify the type
   if (resolved_types.contains(nm_qual_type)) {
-    return resolved_reflected_type{
+    return reflected_type_info{
       .type =
         already_reflected{
           .id = nm_qual_type,
@@ -1452,13 +1487,13 @@ auto meta::resolve_reflected_type(
     });
 
   if (reflected_type_decl.isInStdNamespace()) {
-    return resolved_reflected_type{
+    return reflected_type_info{
       .type = non_reflectable{.id = nm_qual_type},
       .dependencies = std::move(dependencies),
     };
   }
 
-  return resolved_reflected_type{
+  return reflected_type_info{
     .type =
       reflectable{
         // todo: do not use nm_qual_type to uniquely identify the type
@@ -1475,6 +1510,135 @@ auto meta::resolve_reflected_type(
           resolve_definition(reflected_type_decl, ast.getSourceManager()),
       },
     .dependencies = std::move(dependencies),
+  };
+}
+
+auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
+  const clang::ASTUnit &ast)
+  -> std::expected<reflected_call_info, std::string> {
+  static constexpr auto to_func_arg =
+    [](clang::QualType q) -> meta::function_signature_arg {
+    const clang::QualType base_q =
+      q->isLValueReferenceType() || q->isRValueReferenceType()
+      ? q->getPointeeType()
+      : q;
+
+    // refactorme: I want a monadic 'ternary' operation to avoid creating
+    // lvalues:
+    //    .type_name = value_or(base_q->getAsTagDecl(), resolve_nm_qual_type,
+    //      meta::nm_qual_type{})
+    const clang::TagDecl *tag = base_q->getAsTagDecl();
+    return {
+      .type_name = tag 
+        ? resolve_nm_qual_type(*tag)
+        : meta::nm_qual_type{
+          .name = base_q.getAsString(), //< no don't need printing policy for fundamental
+          .namespaces = {}, //< fundamental type doesn't have namespace
+        },
+      .is_const = base_q.isConstQualified(),
+      .ref_type = q->isLValueReferenceType() //
+        ? reference_type::ref_lval
+        : q->isRValueReferenceType() //
+          ? reference_type::ref_rval
+          : reference_type::ref_none,
+    };
+  };
+
+  constexpr auto needs_include = [](clang::QualType q) -> bool {
+    if (q.isNull())
+      return false;
+
+    // Strip lvalue/rvalue reference
+    clang::QualType base_q =
+      q->isLValueReferenceType() || q->isRValueReferenceType()
+      ? q->getPointeeType()
+      : q;
+
+    if (base_q.isNull())
+      return false;
+
+    const clang::Type *ty = base_q.getTypePtrOrNull();
+    if (!ty)
+      return false;
+
+    // Only structure/class types participate in include deduction
+    if (!ty->isStructureOrClassType())
+      return false;
+
+    const auto *rd = ty->getAsCXXRecordDecl();
+    if (!rd)
+      return false;
+
+    // We only care if there is a usable definition
+    return rd->getDefinition() != nullptr;
+  };
+
+  struct include_info {
+    fs::path include;
+    bool is_std;
+  };
+
+  // refactorme: remove intermediate allocations.
+  // ```
+  // concat(params, return_val)
+  //  | filter(needs_include)
+  //  | transform(to_include)
+  //  | partition
+  // ```
+  std::vector<include_info> all_includes;
+  std::ranges::transform(
+    std::views::iota(std::size_t{0}, cd.parameters().size() + 1)
+      | std::views::transform([&cd](std::size_t i) -> clang::QualType {
+          return 0 == i //
+            ? cd.getReturnType()
+            : cd.parameters()[i - 1]->getType();
+        })
+      | std::views::filter(needs_include),
+    std::back_inserter(all_includes),
+    [&sm = ast.getSourceManager()](clang::QualType q) -> include_info {
+      // todo: I'm not sure this is correct
+      const clang::QualType base_q =
+        q->isLValueReferenceType() || q->isRValueReferenceType()
+        ? q->getPointeeType()
+        : q;
+
+      const clang::Type *ty = base_q.getTypePtrOrNull();
+      const clang::CXXRecordDecl &rd = *ty->getAsCXXRecordDecl();
+      const clang::CXXRecordDecl &def = *rd.getDefinition();
+
+      // fixme: I only need the source_file, not the whole definition
+      const auto def_info = resolve_definition(def, sm);
+      const bool is_std = rd.isInStdNamespace();
+
+      return {
+        .include = is_std ? def_info.source_file.stem() : def_info.source_file,
+        .is_std = is_std,
+      };
+    });
+
+  std::set<fs::path> includes;
+  std::set<fs::path> std_includes;
+
+  for (auto &&info : all_includes)
+    (info.is_std ? std_includes : includes).insert(std::move(info.include));
+
+  return reflected_call_info{
+    .f_sig =
+      {
+        .args = std::invoke([&cd] {
+          std::vector<function_signature_arg> args;
+          args.reserve(cd.parameters().size());
+          std::ranges::transform(cd.parameters()
+              | std::views::transform(
+                [](const clang::ParmVarDecl *pd) { return pd->getType(); }),
+            std::back_inserter(args),
+            to_func_arg);
+          return args;
+        }),
+        .return_type = to_func_arg(cd.getReturnType()),
+      },
+    .includes = std::move(includes),
+    .std_includes = std::move(std_includes),
   };
 }
 
