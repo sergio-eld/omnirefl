@@ -97,7 +97,7 @@ std::expected<std::monostate, std::string> header_mode::run_pipeline(
   };
 
   std::vector<std::string> errors;
-  for (const auto &[src, n_processing] : util::indexed(sources)) {
+  for (const auto &[src, n_processing] : util::indexed_ugly(sources)) {
     if (cli::verbosity_level::info & cli.verbosity) {
       fmt::println("[{}/{}] running header mode for file: {}\t\r",
         n_processing + 1,

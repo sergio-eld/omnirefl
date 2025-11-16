@@ -171,7 +171,7 @@ std::expected<std::monostate, std::string> source_mode::run_pipeline(
 
   std::map<std::filesystem::path, transforms::tu_data>
     accum_reflected_data_by_source;
-  for (const auto &[src, n_processing] : util::indexed(sources)) {
+  for (const auto &[src, n_processing] : util::indexed_ugly(sources)) {
     if (cli::verbosity_level::info & cli.verbosity) {
       fmt::println("[{}/{}] running source mode for file: {}\t\r",
         n_processing + 1,

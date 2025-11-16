@@ -73,7 +73,7 @@ struct filtered_t {
 } constexpr const inline filtered{};
 
 template <typename Container>
-constexpr auto indexed(Container &&c) noexcept {
+constexpr auto indexed_ugle(Container &&c) noexcept {
   using iterator_type = decltype(std::begin(c));
   using reference_type = decltype(*std::begin(c));
   struct _ref {

@@ -17,6 +17,7 @@
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Basic/FileManager.h>
+#include <clang/Basic/SourceLocation.h>
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
 #include <clang/Driver/Job.h>
@@ -41,19 +42,59 @@
 #include <CLI/Validators.hpp>
 
 #include <algorithm>
+#include <concepts>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <functional>
+#include <iostream>
 #include <iterator>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <ranges>
+#include <sstream>
 #include <stack>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+template <typename T, typename Formatter>
+struct use_fmt {
+  const T &value;
+  Formatter fmt;
+};
+
+template <typename T, typename Formatter>
+struct std::formatter<use_fmt<T, Formatter>> {
+  /// holds parsed {:specs} for strings – width, alignment, etc.
+  mutable std::formatter<std::string_view> _base;
+
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext &ctx) {
+    /// delegate parsing of {:specs} to the string formatter
+    return _base.parse(ctx);
+  }
+
+  template <typename FormatContext>
+    requires std::invocable<Formatter, const T &, FormatContext &>
+  constexpr auto format(const use_fmt<T, Formatter> &wrapped,
+    FormatContext &ctx) const {
+    return wrapped.fmt(wrapped.value, ctx);
+  }
+
+  template <typename FormatContext>
+    requires std::invocable<Formatter, const T &>
+    && std::convertible_to<std::invoke_result_t<Formatter, const T &>,
+      std::basic_string_view<typename FormatContext::char_type>>
+  constexpr auto format(const use_fmt<T, Formatter> &wrapped,
+    FormatContext &ctx) const {
+    return _base.format(wrapped.fmt(wrapped.value), ctx);
+  }
+};
 
 namespace fs = std::filesystem;
 
@@ -175,6 +216,7 @@ constexpr std::array str_by<options::mode_t> = std::invoke([] {
 
 std::string to_string(const options &o) {
   // todo: consider printing flags
+  // refactorme: use std::format
   return fmt::format(R"(mode:{mode}
 sources:[{sources}]
 out:{out}
@@ -336,10 +378,17 @@ enum reference_type {
   ref_rval,
 };
 
-struct type_definition {
+struct source_location {
   std::filesystem::path source_file;
+  std::uint32_t line;
+  std::uint32_t column;
+};
 
+// refactorme: source_file and location should be separated into
+// `struct source_location`
+struct type_definition {
   nm_qual_type type_name;
+  source_location location;
 
   enum {
     none = 0x0,
@@ -418,6 +467,10 @@ struct reflected_call_info {
   func_signature f_sig;
   std::set<fs::path> includes;
   std::set<fs::path> std_includes;
+
+  // source_location call_location; //< fixme: with current matching rule, the
+  // actual call site can't be determined. CXXMethodDecl is matched, which is
+  // the instantiation, not the call expression...
 };
 
 std::expected<reflected_call_info, std::string> resolve_reflected_call(
@@ -425,6 +478,194 @@ std::expected<reflected_call_info, std::string> resolve_reflected_call(
   const clang::ASTUnit &ast);
 
 } // namespace meta
+
+namespace render {
+
+// result is valid for reflection rendering only for named types
+std::string nm_qualified_name(const meta::nm_qual_type &t) {
+  std::string out;
+  for (const std::size_t i :
+    std::views::iota(std::size_t(0), t.namespaces.size() + 1)) {
+    const std::string_view elem = i < t.namespaces.size() //
+      ? t.namespaces[i]
+      : (t.name ? std::string_view(*t.name) : "(unnamed)");
+
+    0 == i //
+      ? std::format_to(std::back_inserter(out), "{}", elem)
+      : std::format_to(std::back_inserter(out), "::{}", elem);
+  }
+  return out;
+}
+
+std::string_view ref_suffix(meta::reference_type r) {
+  switch (r) {
+  case meta::ref_lval:
+    return "&";
+  case meta::ref_rval:
+    return "&&";
+  default:
+    return "";
+  }
+}
+
+struct log {
+  std::set<meta::type_id> dependencies;
+
+  static std::string flags(int flags) {
+    // refactorme: ranges
+    std::string out;
+
+    if (flags & meta::type_definition::non_public) {
+      if (!out.empty())
+        out += " | ";
+      out += "non_public";
+    }
+
+    if (flags & meta::type_definition::local) {
+      if (!out.empty())
+        out += " | ";
+      out += "local";
+    }
+
+    return out;
+  }
+
+  static std::string format_arg(const meta::function_signature_arg &a) {
+    std::string s;
+
+    if (a.is_const)
+      s += "const ";
+
+    s += nm_qualified_name(a.type_name);
+    s += ref_suffix(a.ref_type);
+
+    return s;
+  }
+
+  static std::string format_signature(const meta::func_signature &f) {
+    std::string result = "(";
+    for (const auto &[i, a] : util::indexed(f.args)) {
+      0 == i
+        ? std::format_to(std::back_inserter(result), "{}", format_arg(a))
+        : std::format_to(std::back_inserter(result), ",\n    {}", format_arg(a));
+    }
+    result +=
+      ")"
+      "\n    -> ";
+    result += format_arg(f.return_type);
+    return result;
+  }
+
+  static auto format_location(const meta::source_location &d) {
+    return std::format("{}:{}:{}",
+      d.source_file.generic_string(),
+      d.line,
+      d.column);
+  }
+
+  static auto format_definition(const meta::type_definition &d) {
+    return std::format(
+      "declared at: {}{}"
+      "\n  {}",
+      format_location(d.location),
+      std::invoke([f = flags(d.definition_flags)] {
+        return f.empty() ? std::format("") : std::format("\n  [{}]", f);
+      }),
+
+      nm_qualified_name(d.type_name));
+  }
+
+  auto operator()(const meta::struct_data &d) const {
+    const char *kind = d.type == meta::struct_data::is_struct //
+      ? "struct"
+      : d.type == meta::struct_data::is_class //
+        ? "class"
+        : "union";
+
+    if (d.public_fields.empty())
+      return std::format("{} {{}}", kind);
+
+    std::string fields;
+    for (std::size_t i = 0; i < d.public_fields.size(); ++i) {
+      if (i > 0)
+        fields += ", ";
+      fields += d.public_fields[i];
+    }
+
+    return std::format("{} {{ {} }}", kind, fields);
+  }
+
+  auto operator()(const meta::enum_data &d) const {
+    const std::string_view kind = d.is_scoped //
+      ? "enum class"
+      : "enum";
+
+    if (d.enumerators.empty())
+      return std::format("{} {{}}", kind);
+
+    std::string enums;
+    for (std::size_t i = 0; i < d.enumerators.size(); ++i) {
+      if (i > 0)
+        enums += ", ";
+      enums += d.enumerators[i];
+    }
+
+    return std::format("{} {{ {} }}", kind, enums);
+  }
+
+  auto operator()(const meta::reflectable &d) const {
+    return std::format(
+      "reflected type{}:"
+      "\n  {}"
+      "\n  {}",
+      (dependencies.contains(d.id) ? " (as dependency)" : ""),
+      format_definition(d.definition),
+      std::visit(*this, d.data));
+  }
+
+  auto operator()(const meta::reflected_call_info &d) const {
+    std::string includes;
+    if (d.includes.empty()) {
+      includes = "none";
+    } else {
+      for (auto it = d.includes.begin(); it != d.includes.end(); ++it) {
+        if (it != d.includes.begin())
+          includes += ", ";
+        includes += it->generic_string();
+      }
+    }
+
+    std::string std_includes;
+    if (d.std_includes.empty()) {
+      std_includes = "none";
+    } else {
+      for (auto it = d.std_includes.begin(); it != d.std_includes.end(); ++it) {
+        if (it != d.std_includes.begin())
+          std_includes += ", ";
+        // assume these are header names (no <> here, just raw stem/path)
+        std_includes += it->generic_string();
+      }
+    }
+
+    return std::format(
+      "reflected call:"
+      // "\n  called at: {}"
+      "\n  signature: {}"
+      "\n  includes: [{}]"
+      "\n  std includes: [{}]",
+      // format_location(d.call_location), //< fixme: can't know call_location
+      // now
+      format_signature(d.f_sig),
+      includes,
+      std_includes);
+  }
+};
+
+struct reflection {
+  // todo: implement
+};
+
+} // namespace render
 
 namespace render {
 
@@ -550,6 +791,7 @@ int main(int argc, char **argv) {
 
     struct context {
       std::vector<meta::reflectable> reflected;
+      std::vector<meta::reflected_call_info> calls;
       // todo: enums
 
       std::set<meta::type_id> resolved_types;
@@ -624,24 +866,32 @@ int main(int argc, char **argv) {
               a.errors.emplace_back(std::move(resolved).error());
               return a;
             }
-            // todo: implement
+            a.calls.emplace_back(std::move(*resolved));
             return a;
           },
       });
 
-    for (const meta::reflectable &r : ctx.reflected) {
-      std::vector nm_qual_type = r.definition.type_name.namespaces;
-      nm_qual_type.emplace_back(
-        r.definition.type_name.name.value_or("unnamed"));
+    const render::log print_log{.dependencies = ctx.resolved_as_dependent};
+    std::cout << "types:\n";
+    // refactorme: I need `join_with` for range
+    for (const auto &[i, r] : util::indexed(ctx.reflected)) {
+      std::cout << (0 == i //
+          ? std::format("{}", use_fmt{r, print_log})
+          : std::format("\n\n{}", use_fmt{r, print_log}));
+    }
 
-      fmt::println("reflected type{}: {}",
-        ctx.resolved_as_dependent.contains(r.id) ? " (as dependency)" : "",
-        fmt::join(nm_qual_type, "::"));
+    std::cout << "\n\n\ncalls:\n";
+    // refactorme: I need `join_with` for range
+    for (const auto &[i, r] : util::indexed(ctx.calls)) {
+      std::cout << (0 == i //
+          ? std::format("{}", use_fmt{r, print_log})
+          : std::format("\n\n{}", use_fmt{r, print_log}));
     }
 
     // todo: render to &ostream (file/console/whatever OS wants)
     // todo: generate file/files
   }
+  std::cout << "\n\ndone.\n";
 
   return 0;
 }
@@ -1222,9 +1472,15 @@ meta::type_definition resolve_definition(const clang::TagDecl &td,
 
   const td_flags td_non_public = td_flags::none; //< todo:
 
+  const clang::SourceLocation loc = td.getLocation();
   return {
-    .source_file = get_declaration_source_file(td, sm),
     .type_name = resolve_nm_qual_type(td),
+    .location =
+      {
+        .source_file = get_declaration_source_file(td, sm),
+        .line = sm.getSpellingLineNumber(loc),
+        .column = sm.getSpellingColumnNumber(loc),
+      },
     // refactorme: enable bitwise operations
     .definition_flags = td_flags(td_local | td_non_public),
   };
@@ -1523,18 +1779,35 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
       ? q->getPointeeType()
       : q;
 
-    // refactorme: I want a monadic 'ternary' operation to avoid creating
-    // lvalues:
-    //    .type_name = value_or(base_q->getAsTagDecl(), resolve_nm_qual_type,
-    //      meta::nm_qual_type{})
     const clang::TagDecl *tag = base_q->getAsTagDecl();
+
     return {
-      .type_name = tag 
-        ? resolve_nm_qual_type(*tag)
-        : meta::nm_qual_type{
-          .name = base_q.getAsString(), //< no don't need printing policy for fundamental
-          .namespaces = {}, //< fundamental type doesn't have namespace
-        },
+      .type_name = !tag
+        // no tag -> fundamental / alias. No namespaces needed.
+        ? meta::nm_qual_type{
+             // keeps template args for specs, OK for fundamentals
+            .name       = base_q.getAsString(),
+            .namespaces = {},
+          }
+        : llvm::isa<clang::ClassTemplateSpecializationDecl>(tag)
+          // ad hoc: for template specializations just use the printing policy.
+          // For _call_impl in source mode this is sufficient. For reflecting
+          // template specializations you’d need real namespaces.
+          ? meta::nm_qual_type{
+              .name = base_q.getAsString(std::invoke([] {
+                clang::PrintingPolicy p{{}};
+
+                p.SuppressTagKeyword   = true;
+                p.SuppressScope        = false;
+                p.PrintCanonicalTypes  = true;
+
+                return p;
+              })),
+              .namespaces = {},
+            }
+          // non-template struct/class/enum – use proper qualified name
+          : resolve_nm_qual_type(*tag),
+
       .is_const = base_q.isConstQualified(),
       .ref_type = q->isLValueReferenceType() //
         ? reference_type::ref_lval
@@ -1611,7 +1884,9 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
       const bool is_std = rd.isInStdNamespace();
 
       return {
-        .include = is_std ? def_info.source_file.stem() : def_info.source_file,
+        .include = is_std //
+          ? def_info.location.source_file.stem()
+          : def_info.location.source_file,
         .is_std = is_std,
       };
     });
