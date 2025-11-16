@@ -1,8 +1,4 @@
 
-// todo: remove this crap
-#include "tool/util.hpp"
-#include <variant>
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -63,9 +59,21 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace util {
+
+template <typename T>
+concept string_view_like = requires(const T &v) {
+  { v.data() } -> std::convertible_to<const char *>;
+  { v.size() } -> std::convertible_to<std::size_t>;
+};
+
+template <string_view_like T>
+constexpr auto to_string_view(const T &v) noexcept {
+  return std::basic_string_view{v.data(), v.size()};
+}
 
 template <std::ranges::range R>
 constexpr auto indexed(R &&r, size_t start = 0) {
@@ -83,14 +91,29 @@ struct concat_t {
   }
 } constexpr const concat{};
 
+// todo: extend formatting context (padding, what else?)
+// todo: do I need a way to combine the adaptors? each of them should serve
+// (exactly?) one purpose:
+// - custom format
+// - for range:
+//   - element format (achievable now via std::views)
+//   - joining with delim (implemented by join)
+//   - ???
 template <typename T, typename Formatter>
 struct use_fmt {
   const T &value;
   Formatter fmt;
 };
 
-template <std::ranges::view R, typename Formatter>
+// refactorme:
+// consider this api:
+// util::joined{ .rng = includes, .fmt = "#include <{}>", .delim = '\n', }
+// .fmt defaults to "{}"
+
+template <std::ranges::viewable_range R, typename Formatter>
 struct joined {
+  // fixme: for some reason I need to do `| std::views::all` for regular
+  // containers
   const R &rng;
   Formatter delim; //< (?) compile-time string or lambda
 };
@@ -246,22 +269,29 @@ constexpr std::array str_by<options::mode_t> = std::invoke([] {
   return map;
 });
 
-std::string to_string(const options &o) {
+std::string format_options(const options &o) {
   // todo: consider printing flags
-  // refactorme: use std::format
-  return fmt::format(R"(mode:{mode}
-sources:[{sources}]
-out:{out}
-resource_dir:{resource_dir})",
-    fmt::arg("mode", to_string(o.mode)),
-    fmt::arg("sources",
-      util::join(o.sources,
-        ",\n",
-        [](const source_file &s, fmt::context &ctx) {
-          return fmt::format_to(ctx.out(), "{}", s.path.string());
-        })),
-    fmt::arg("out", o.out.generic_string()),
-    fmt::arg("resource_dir", o.resource_dir.generic_string()));
+  return std::format(
+    "mode:{}"
+    "\nsources:[{}]"
+    "\nout:{}"
+    "\nresource_dir:{}",
+    // 0:
+    to_string(o.mode),
+
+    // 1:
+    util::joined{
+      .rng = o.sources | std::views::transform([](const source_file &s) {
+        return s.path.generic_string();
+      }),
+      .delim = ",\n",
+    },
+
+    // 2:
+    o.out.generic_string(),
+
+    // 3:
+    o.resource_dir.generic_string());
 }
 
 std::expected<options, std::pair<int, std::string>> parse(int argc,
@@ -696,61 +726,26 @@ struct reflection {
 
   static auto format_struct(const meta::nm_qual_type &t,
     const meta::struct_data &d) noexcept -> std::string {
-    // format_struct is only called for named, non-anonymous types
     assert(t.name && "format_struct expects named, non-anonymous type");
 
-    std::string out;
-
-    // todo: add missing
-    // - namespaces (return std::array of const char*)
-    // - (conveniense) namespace_qualified_name (or better name, fitting to the
-    // clang/standard doc design)
-    std::format_to(std::back_inserter(out),
+    // todo:
+    // - `.fields()` returns all the fields,
+    // - `.mutable_field()` returns only mutable fields
+    return std::format(
       "template <typename T>"
       "\nstruct _reflected<{0} {1}, T> {{"
       "\n  static_assert(std::is_same<{0} {1}, T>::value,"
       "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
       "\n  using type = T;"
-      "\n  OMNI_DEFINE_NAME_FUNC(\"{2}\")",
-      d.type == meta::struct_data::is_class //
-        ? "class"
-        : d.type == meta::struct_data::is_union //
-          ? "union"
-          : "struct",
-      nm_qualified_name(t),
-      *t.name);
-
-    // Per-field meta structs
-    for (const auto &[idx, name] : util::indexed(d.public_fields)) {
-      std::format_to(std::back_inserter(out),
-        "\n  struct {0}_t {{"
-        "\n    OMNI_DEFINE_NAME_FUNC(\"{0}\")"
-        "\n    constexpr static std::size_t index() noexcept {{ return {1}; }}"
-        "\n    constexpr static auto get_value(const type &t) noexcept"
-        "\n      -> const decltype(t.{0})& {{"
-        "\n      return t.{0};"
-        "\n    }}"
-        "\n"
-        "\n    template <typename V>"
-        "\n    static void set_value(type &t, V &&v) {{"
-        "\n      t.{0} = std::forward<V>(v);"
-        "\n    }}"
-        "\n  }} constexpr static {0}{{}};",
-        name,
-        idx);
-    }
-
-    // fields_t alias
-    std::format_to(std::back_inserter(out),
+      "\n  constexpr static auto name() noexcept"
+      "\n    -> const char(&)[sizeof({0})] {{ "
+      "\n    return \"{0}\";"
+      "\n  }}"
+      "\n"
+      "\n{3}"
       "\n"
       "\n  using fields_t ="
-      "\n    std::tuple<{}>;",
-      util::joined{
-        .rng = d.public_fields | std::views::all,
-        .delim = ",\n",
-      });
-
-    std::format_to(std::back_inserter(out),
+      "\n    std::tuple<{4}>;"
       "\n"
       "\n  constexpr reflected_binding<type, fields_t>"
       "\n  operator()(type &t) const noexcept {{"
@@ -761,9 +756,57 @@ struct reflection {
       "\n  operator()(const type &t) const noexcept {{"
       "\n    return {{t}};"
       "\n  }}"
-      "\n}};");
+      "\n}};",
+      // 0:
+      d.type == meta::struct_data::is_class //
+        ? "class"
+        : d.type == meta::struct_data::is_union //
+          ? "union"
+          : "struct",
 
-    return out;
+      // 1:
+      nm_qualified_name(t),
+
+      // 2:
+      *t.name,
+
+      // 3:
+      util::joined{
+        .rng = util::indexed(d.public_fields)
+          | std::views::transform([](const auto &p) {
+              const auto &[idx, name] = p;
+              return std::format(
+                "\n  struct {0}_t {{"
+                "\n    constexpr static auto name() noexcept"
+                "\n      -> const char(&)[sizeof({0})] {{ "
+                "\n      return \"{0}\";"
+                "\n    }}"
+                "\n"
+                "\n    constexpr static std::size_t index() noexcept {{ return {1}; }}"
+                "\n"
+                "\n    constexpr static auto get_value(const type &t) noexcept"
+                "\n      -> const decltype(t.{0})& {{"
+                "\n      return t.{0};"
+                "\n    }}"
+                "\n"
+                "\n    template <typename V>"
+                "\n    static void set_value(type &t, V &&v) {{"
+                "\n      t.{0} = std::forward<V>(v);"
+                "\n    }}"
+                "\n  }} constexpr static {0}{{}};",
+                name,
+                idx);
+            }),
+        .delim = "\n",
+      },
+
+      // 4:
+      util::joined{
+        .rng = d.public_fields | std::views::transform([](std::string_view f) {
+          return std::format("      {}", f);
+        }),
+        .delim = ",\n",
+      });
   }
 
   static auto format_enum(const meta::nm_qual_type &t,
@@ -772,37 +815,37 @@ struct reflection {
 
     return std::format(
       "template <typename T>"
-      "\nstruct _reflected<{0} {1}, T> {{"
-      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\nstruct _reflected<enum {0}, T> {{"
+      "\n  static_assert(std::is_same<enum {0}, T>::value,"
       "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
       "\n  using type = T;"
-      "\n  OMNI_DEFINE_NAME_FUNC(\"{2}\")"
       "\n"
-      "\n  constexpr static bool is_scoped() {{ return {3}; }}"
+      "\n  constexpr static auto name() noexcept"
+      "\n    -> const char(&)[sizeof(\"{1}\")] {{"
+      "\n    return \"{1}\";"
+      "\n  }}"
       "\n"
       "\n  constexpr static auto enumerators() noexcept"
-      "\n    -> std::array<std::pair<type, const char*>, {4}> {{"
-      "\n{5}"
+      "\n    -> std::array<std::pair<type, const char*>, {2}> {{"
+      "\n      return {3};"
       "\n    }};"
       "\n}};",
+
       // 0:
-      d.is_scoped ? "enum class" : "enum",
-      // 1:
       nm_qualified_name(t),
-      // 2:
+
+      // 1:
       *t.name,
-      // 3:
-      d.is_scoped ? "true" : "false",
-      // 4:
+
+      // 2:
       d.enumerators.size(),
-      // 5:
+
+      // 3:
       util::joined{
         .rng = d.enumerators | std::views::transform([](std::string_view e) {
-          return std::format(
-            "      {{ static_cast<type>(type::{0}), \"{0}\" }}",
-            e);
+          return std::format("      {{ type::{0}, \"{0}\" }}", e);
         }),
-        .delim = "\n",
+        .delim = ",\n",
       });
   }
 
@@ -855,7 +898,10 @@ int main(int argc, char **argv) {
     return code;
   }
 
-  fmt::println("args:\n{}", to_string(*cli_args));
+  std::cout << std::format(
+    "\nargs:"
+    "\n{}",
+    format_options(*cli_args));
 
   const llvm::IntrusiveRefCntPtr file_manager = new clang::FileManager({
     .WorkingDir = fs::current_path().parent_path(),
@@ -904,11 +950,11 @@ int main(int argc, char **argv) {
       return diag;
     });
 
-    fmt::println("[{}/{}] running {mode} mode for file: {file}\t\r",
+    std::cout << std::format("[{}/{}] running {} mode for file: {}\t\r",
       n_processing,
       cli_args->sources.size(),
-      fmt::arg("mode", cli::to_string(cli_args->mode)),
-      fmt::arg("file", source_file.path.string()));
+      cli::to_string(cli_args->mode),
+      source_file.path.string());
 
     std::expected compiler_invocation =
       compiler_invocation_from_args(source_file,
@@ -994,7 +1040,7 @@ int main(int argc, char **argv) {
         file_manager.get());
 
     if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
-      std::cerr << fmt::format("Failed to build AST Unit for: {}.\n",
+      std::cout << std::format("[error] Failed to build AST Unit for: {}.\n",
         source_file.path.generic_string());
       continue;
     }
@@ -1146,6 +1192,25 @@ int main(int argc, char **argv) {
           && !std::holds_alternative<meta::enum_data>(rhs.data);
       });
 
+    const std::set includes = std::ranges::fold_left(ctx.calls,
+      std::ranges::fold_left(ctx.reflected,
+        std::set<fs::path>{},
+        [](auto acc, const meta::reflectable &r) {
+          acc.insert(r.definition.location.source_file);
+          return acc;
+        }),
+      [](auto acc, const meta::reflected_call_info &c) {
+        acc.insert(c.includes.begin(), c.includes.end());
+        return acc;
+      });
+
+    const std::set std_includes = std::ranges::fold_left(ctx.calls,
+      std::set<fs::path>{},
+      [](auto acc, const meta::reflected_call_info &c) {
+        acc.insert(c.std_includes.begin(), c.std_includes.end());
+        return acc;
+      });
+
     const fs::path out = std::invoke([&o = cli_args->out] {
       // ad hoc to disable fs exception throwing
       [[maybe_unused]] std::error_code ec;
@@ -1181,14 +1246,61 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    // todo: write header
     const render::reflection render_reflection{
       .dependencies = ctx.dependencies,
     };
-    std::format_to(std::ostreambuf_iterator(out_file),
-      "// -- reflected types --------"
-      "\n{}"
-      "// -- reflected calls --------",
+
+    // todo:
+    // for `includes` I may want to remove base path, make it relative to the
+    // project dir.
+    //
+    // todo: do I need to print a list of sources and their flags?
+    // todo: write meta
+    // todo: write calls
+
+    std::format_to(std::ostreambuf_iterator<char>(out_file),
+      "// This file was generated by the omnirefl tool on {0:%F %T}."
+      "\n// Do not modify the contents of this file."
+      "\n"
+      "\n// -- headers --------"
+      "\n{1}"
+      "\n\n{2}"
+      "\n\n#include <omnirefl/refl.hpp>" //< refactorme: should be configurable
+                                         // via preprocessor
+      "\n\nnamespace omni {{"
+      "\nnamespace detail {{"
+      "\nnamespace {{"
+      "\n\n// -- reflected types --------"
+      "\n{3}"
+      "\n\n}} // namespace"
+      "\n\n// -- reflected calls --------"
+      // todo: calls
+      "\n\n}} // namespace detail"
+      "\n\n}} // namespace omni",
+
+      // 0:
+      std::invoke([] {
+        using namespace std::chrono;
+        return floor<seconds>(system_clock::now());
+      }),
+
+      // 1:
+      util::joined{
+        .rng = includes | std::views::transform([](const fs::path &p) {
+          return std::format("#include \"{}\"", p.generic_string());
+        }),
+        .delim = "\n",
+      },
+
+      // 2:
+      util::joined{
+        .rng = std_includes | std::views::transform([](const fs::path &p) {
+          return std::format("#include <{}>", p.generic_string());
+        }),
+        .delim = "\n",
+      },
+
+      // 3:
       util::joined{
         .rng = ctx.reflected | std::views::transform(render_reflection),
         .delim = "\n\n",
@@ -1196,6 +1308,8 @@ int main(int argc, char **argv) {
 
   } else {
     // todo: header mode
+    std::cout << "[error] header mode is not implemented\n";
+    return -1;
   }
 
   std::cout << "\n[info] done.\n";
@@ -1276,6 +1390,7 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
     flags = std::vector(v.begin(), v.end());
   }
 
+  // refactorme: use ranges
   // Validation here
   app.callback([&] {
     // -- check sources
@@ -1293,19 +1408,23 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
             std::move(s.output_substr).substr(0, s.output_substr.size() - 1);
       });
 
-      std::ranges::view auto invalid_sources = cli_sources
-        | std::views::filter(
-          [](const cli_source_file &s) -> bool { return !fs::exists(s.path); });
+      std::vector<fs::path> invalid_sources;
+      std::ranges::transform(cli_sources
+          | std::views::filter([](const cli_source_file &s) -> bool {
+              return !fs::exists(s.path);
+            }),
+        std::back_inserter(invalid_sources),
+        [](const cli_source_file &s) { return s.path; });
 
       if (!invalid_sources.empty()) {
         throw CLI::ValidationError("Non-existent sources:",
-          fmt::format("[{}]",
-            util::join(
-              std::vector(invalid_sources.begin(), invalid_sources.end()),
-              ", ",
-              [](const cli_source_file &s, fmt::context &ctx) {
-                return fmt::format_to(ctx.out(), "{}", s.path.string());
-              })));
+          std::format("[{}]",
+            util::joined{
+              .rng = invalid_sources
+                | std::views::transform(
+                  [](const fs::path &p) { return p.generic_string(); }),
+              .delim = ", ",
+            }));
       }
     }
 
@@ -1387,23 +1506,24 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
         }
 
         accum.invalid.emplace_back(s.path,
-          fmt::format("failed to resolve from {} commands by substring `{}`",
+          std::format("failed to resolve from {} commands by substring `{}`",
             commands.size(),
             s.output_substr));
         return accum;
       });
 
-    if (!invalid.empty())
+    if (!invalid.empty()) {
       throw CLI::ValidationError(
         "Failed to resolve sources from compilation db",
-        fmt::format("[{}]",
-          util::join(invalid, ",\n", [](const auto &pair, fmt::context &ctx) {
-            const auto &[path, reason] = pair;
-            return fmt::format_to(ctx.out(),
-              "{}: {}",
-              path.generic_string(),
-              reason);
-          })));
+        std::format("[{}]",
+          util::joined{
+            .rng = invalid | std::views::transform([](const auto &pair) {
+              const auto &[path, reason] = pair;
+              return std::format("{}: {}", path.generic_string(), reason);
+            }),
+            .delim = ",\n",
+          }));
+    }
 
     cli_sources_with_flags = std::move(files);
   });
@@ -1443,7 +1563,7 @@ std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
 
   if (missing_arg != missing_arg_c) {
     return std::unexpected(
-      fmt::format("Error: Missing argument for option at index {}\n",
+      std::format("Error: Missing argument for option at index {}\n",
         missing_arg));
   }
   return argList;
@@ -1554,8 +1674,14 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
   };
 
   const auto &[source, flags] = sf;
-  fmt::println("input flags: [{}]",
-    util::join(flags, "\n", [] { return "{}"; }));
+
+  std::cout << std::format(
+    "[info] input flags:"
+    "\n  [{}]\n",
+    util::joined{
+      .rng = flags | std::views::all,
+      .delim = "\n  ",
+    });
 
   std::expected argList = parse_driver_args(flags);
 
@@ -1575,7 +1701,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
         "-fsyntax-only", //< AST only
         "-nostdinc++", //< prevents from picking up on another compiler's C++
                        //< std libs
-        fmt::format("-resource-dir={}", a.resource_dir.generic_string()),
+        std::format("-resource-dir={}", a.resource_dir.generic_string()),
       },
       filter_ast_related_args(*argList));
 
@@ -1602,7 +1728,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
 
   if (!compilation || compilation->getJobs().empty()) {
     return std::unexpected(
-      fmt::format("Failed to build compilatioin for: {}.\n",
+      std::format("Failed to build compilatioin for: {}.\n",
         source.generic_string()));
   }
 
@@ -1615,9 +1741,13 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
   // }
 
   // fixme: these args also need to be filtered!
-  fmt::println("using cc1 args: [{}]",
-    // util::join(cc1_args, "\n", [] { return "{}"; }));
-    util::join(compilation_args, "\n", [] { return "{}"; }));
+  std::cout << std::format(
+    "[info] using cc1 args:"
+    "\n  [{}]\n",
+    util::joined{
+      .rng = compilation_args | std::views::all,
+      .delim = "\n  ",
+    });
 
   std::shared_ptr compiler_invocation =
     std::make_shared<clang::CompilerInvocation>();
@@ -1630,7 +1760,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
           compilation_args,
           a.diag)) {
       return std::unexpected(
-        fmt::format("Failed to create CompilerInvocation for: {}.",
+        std::format("Failed to create CompilerInvocation for: {}.",
           source.generic_string()));
     }
   }
@@ -1703,14 +1833,14 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
   if (template_args_list.size() < n) {
     const std::string_view detail_struct_name = template_decl.getName();
     return std::unexpected(
-      fmt::format("invalid template signature for internal omnirefl type {}",
+      std::format("invalid template signature for internal omnirefl type {}",
         detail_struct_name));
   }
 
   const clang::TemplateArgument &arg = template_args_list.get(n);
   if (clang::TemplateArgument::ArgKind::Type != arg.getKind()) {
     const std::string_view detail_struct_name = template_decl.getName();
-    return std::unexpected(fmt::format("non-type template argument `{}` of {}",
+    return std::unexpected(std::format("non-type template argument `{}` of {}",
       n,
       detail_struct_name));
   }
@@ -1718,7 +1848,8 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
   return arg.getAsType().getTypePtr();
 }
 
-std::expected<int, std::string> get_template_value_arg(
+// todo: remove maybe_unused when header mode is implemented (indexed calls)
+[[maybe_unused]] std::expected<int, std::string> get_template_value_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   size_t n) noexcept {
   const auto &template_args_list = template_decl.getTemplateArgs();
@@ -1726,7 +1857,7 @@ std::expected<int, std::string> get_template_value_arg(
   if (template_args_list.size() < n) {
     const std::string_view detail_struct_name = template_decl.getName();
     return std::unexpected(
-      fmt::format("invalid template signature for internal omnirefl type {}",
+      std::format("invalid template signature for internal omnirefl type {}",
         detail_struct_name));
   }
 
@@ -1734,7 +1865,7 @@ std::expected<int, std::string> get_template_value_arg(
   if (clang::TemplateArgument::ArgKind::Integral != arg.getKind()) {
     const std::string_view detail_struct_name = template_decl.getName();
     return std::unexpected(
-      fmt::format("non-integral template argument `{}` of {}",
+      std::format("non-integral template argument `{}` of {}",
         n,
         detail_struct_name));
   }
@@ -1874,19 +2005,21 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
       visited.emplace(cur);
 
     // allow recursive reflection via certain member typedefs
-    for (const member_typedef_decl &md : util::filtered(
-           [](const member_typedef_decl &m) -> bool {
-             const static std::set<std::string_view> aliases{{
-               "key_type",
-               "value_type",
-               "value",
-             }};
-             return !aliases.contains(m.name);
-           },
-           member_typedefs(*cur))) {
-      if (md.qual_type->isStructureOrClassType())
-        to_visit.push(md.qual_type->getAsCXXRecordDecl());
-    }
+    std::ranges::for_each(member_typedefs(*cur)
+        | std::views::filter([](const member_typedef_decl &m) {
+            static const std::set<std::string_view> aliases{
+              "key_type",
+              "value_type",
+              "value",
+            };
+            return aliases.contains(m.name)
+              && m.qual_type->isStructureOrClassType();
+          })
+        | std::views::transform([](const member_typedef_decl &m) {
+            return m.qual_type->getAsCXXRecordDecl();
+          }),
+      [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
+
     // fixme: what about unions, built-in arrays?
 
     // refactorme: ad hoc solution:
@@ -1941,6 +2074,8 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   return {visited.begin(), visited.end()};
 }
 
+// fixme: `mpark::variant` is picked up as a type, not as a template
+// specialization
 auto meta::resolve_reflected_type(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   const clang::ASTUnit &ast,
@@ -2000,11 +2135,11 @@ auto meta::resolve_reflected_type(
 
   // fixme: handle unions, C-arrays, (maybe) pointers
   if (!reflected_type.isStructureOrClassType()) {
-    return std::unexpected(fmt::format("unsupported type {} in {}",
+    return std::unexpected(std::format("unsupported type {} in {}",
       // fixme:
       //   I don't think it does what I need (namespace-qualified typename)
       reflected_type.getTypeClassName(),
-      template_decl.getName()));
+      util::to_string_view(template_decl.getName())));
   }
 
   const clang::CXXRecordDecl &reflected_type_decl =
@@ -2026,7 +2161,7 @@ auto meta::resolve_reflected_type(
   // todo: forward declarations may be supported in source mode
   if (!reflected_type_decl.hasDefinition()) {
     return std::unexpected(
-      fmt::format("forward declarations are not allowed: {}", nm_qual_type));
+      std::format("forward declarations are not allowed: {}", nm_qual_type));
   }
 
   std::vector<meta::reflectable> dependencies;
