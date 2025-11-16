@@ -797,17 +797,11 @@ struct reflection {
       d.enumerators.size(),
       // 5:
       util::joined{
-        .rng = util::indexed(d.enumerators)
-          | std::views::transform([&d](const auto &p) {
-              const auto &[idx, name] = p;
-              return std::format(
-                "      // {0}"
-                "\n      {{ static_cast<type>({1}{2}), \"{3}\" }}",
-                idx,
-                d.is_scoped ? "type::" : "",
-                name,
-                name);
-            }),
+        .rng = d.enumerators | std::views::transform([](std::string_view e) {
+          return std::format(
+            "      {{ static_cast<type>(type::{0}), \"{0}\" }}",
+            e);
+        }),
         .delim = "\n",
       });
   }
@@ -874,6 +868,10 @@ int main(int argc, char **argv) {
     std::set<meta::type_id> resolved_types;
     std::set<meta::type_id> resolved_as_dependent;
     std::vector<std::string> errors;
+
+    // to generate deps file for cmake, so it can rerun the tool upon changes to
+    // those headers
+    std::set<fs::path> includes_deps;
   };
 
   // refactorme: `struct source_file` already binds fs::path and flags. I should
@@ -962,21 +960,33 @@ int main(int argc, char **argv) {
       //   },
       //   std::move(p.Includes));
 
-      fmt::println("{}",
-        util::join(po.Macros, "\n", [](const auto &pair, fmt::context &ctx) {
-          const auto &[macro, is_undef] = pair;
-          return fmt::format_to(ctx.out(),
-            "DEBUG: #{} {}",
-            is_undef ? "undef" : "define",
-            macro);
-        }));
-      fmt::println("{}",
-        util::join(po.Includes, "\n", [] { return "DEBUG: #include \"{}\""; }));
+      std::cout << (po.Macros.empty()
+          ? std::string()
+          : std::format("{}",
+              util::joined{
+                .rng = po.Macros | std::views::transform([](const auto &pair) {
+                  const auto &[macro, is_undef] = pair;
+                  return std::format("[debug] preprocessor #{} {}",
+                    is_undef ? "undef" : "define",
+                    macro);
+                }),
+                .delim = "\n",
+              }));
+
+      std::cout << (po.Includes.empty()
+          ? std::string()
+          : std::format("{}",
+              util::joined{
+                .rng = po.Includes | std::views::transform([](const auto &inc) {
+                  return std::format("[debug] preprocessor #include \"{}\"",
+                    inc);
+                }),
+                .delim = "\n",
+              }));
     }
 
-    // fixme: no matches detected. Investigate if it is caused by ast or by
-    // reduce todo: how about creating the ast context directly (without
-    // clang::ASTUnit helper)
+    // todo: how about creating the ast context directly (without clang::ASTUnit
+    // helper)
     const std::unique_ptr ast =
       clang::ASTUnit::LoadFromCompilerInvocation(*compiler_invocation,
         std::make_shared<clang::PCHContainerOperations>(),
@@ -1092,39 +1102,61 @@ int main(int argc, char **argv) {
     struct render_context {
       std::vector<meta::reflectable> reflected;
       std::vector<meta::reflected_call_info> calls;
+
+      std::set<meta::type_id> dependencies;
     };
 
-    const render_context ctx =
-      std::ranges::fold_left(std::move(ctx_by_source_file),
-        render_context{},
-        [](render_context a, auto &&key_val) -> render_context {
-          auto &&[path, ctx] = key_val;
+    // refactorme: const ctx = ctx_by_source_file | fold_left | sort (need pipe
+    // adaptors)
+    render_context ctx = std::ranges::fold_left(std::move(ctx_by_source_file),
+      render_context{},
+      [](render_context a, auto &&key_val) -> render_context {
+        auto &&[path, ctx] = key_val;
 
-          // todo: skip errors here, or filter/partition before folding? errors
-          // should be conditionally ignorable (user may provide
-          // --ignore-errors=N)
-          if (!ctx.errors.empty())
-            return a;
-
-          a.reflected =
-            util::concat(std::move(a.reflected), std::move(ctx.reflected));
-
-          a.calls = util::concat(std::move(a.calls), std::move(ctx.calls));
-
+        // todo: skip errors here, or filter/partition before folding? errors
+        // should be conditionally ignorable (user may provide
+        // --ignore-errors=N)
+        if (!ctx.errors.empty())
           return a;
-        });
+
+        a.reflected =
+          util::concat(std::move(a.reflected), std::move(ctx.reflected));
+
+        a.calls = util::concat(std::move(a.calls), std::move(ctx.calls));
+
+        // todo: implement later. The logic is somewhat complex. If a type is
+        // reflected as dependency in file 1, but not as dependency in file 2,
+        // it should not be considered 'a dependency' in the overall shared
+        // context. But for information it might be useful to output which .cpp
+        // file it was detected and if as a dependency... a.dependencies = {};
+
+        return a;
+      });
+
+    std::ranges::sort(ctx.reflected,
+      [](const meta::reflectable &lhs, const meta::reflectable &rhs) -> bool {
+        static_assert(
+          std::same_as<std::variant<meta::struct_data, meta::enum_data>,
+            decltype(lhs.data)>);
+        // refactorme: if std::variant .data contains more then two types, this
+        // must be modified (cleaner)
+
+        // as of now enums first
+        return std::holds_alternative<meta::enum_data>(lhs.data)
+          && !std::holds_alternative<meta::enum_data>(rhs.data);
+      });
 
     const fs::path out = std::invoke([&o = cli_args->out] {
       // ad hoc to disable fs exception throwing
       [[maybe_unused]] std::error_code ec;
       return fs::exists(o, ec) //
-        ? (fs::is_directory(o, ec) //
-              ? fs::path(o) / "source_mode_reflected.cpp"
-              : o)
-        : (o.has_extension() //< non-existent path without extension is
-                             // considered a file
-              ? o
-              : fs::path(o) / "source_mode_reflected.cpp");
+        ? fs::is_directory(o, ec) //
+          ? fs::path(o) / "source_mode_reflected.cpp"
+          : o
+        // non-existent path without extension is considered a file
+        : o.has_extension() //
+          ? o
+          : fs::path(o) / "source_mode_reflected.cpp";
     });
 
     std::error_code ec;
@@ -1142,14 +1174,25 @@ int main(int argc, char **argv) {
     std::cout << std::format("\n[info] creating source mode reflection: {}",
       out.generic_string());
 
-    std::ofstream f{out, std::ios::binary};
-    if (!f) {
+    std::ofstream out_file{out, std::ios::binary};
+    if (!out_file) {
       std::cout << std::format("\n[error] failed to open file {} for writing",
         out.generic_string());
       return -1;
     }
 
     // todo: write header
+    const render::reflection render_reflection{
+      .dependencies = ctx.dependencies,
+    };
+    std::format_to(std::ostreambuf_iterator(out_file),
+      "// -- reflected types --------"
+      "\n{}"
+      "// -- reflected calls --------",
+      util::joined{
+        .rng = ctx.reflected | std::views::transform(render_reflection),
+        .delim = "\n\n",
+      });
 
   } else {
     // todo: header mode
