@@ -1,5 +1,7 @@
 
+// todo: remove this crap
 #include "tool/util.hpp"
+#include <variant>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -47,6 +49,7 @@
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -61,42 +64,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-template <typename T, typename Formatter>
-struct use_fmt {
-  const T &value;
-  Formatter fmt;
-};
-
-template <typename T, typename Formatter>
-struct std::formatter<use_fmt<T, Formatter>> {
-  /// holds parsed {:specs} for strings – width, alignment, etc.
-  mutable std::formatter<std::string_view> _base;
-
-  template <typename ParseContext>
-  constexpr auto parse(ParseContext &ctx) {
-    /// delegate parsing of {:specs} to the string formatter
-    return _base.parse(ctx);
-  }
-
-  template <typename FormatContext>
-    requires std::invocable<Formatter, const T &, FormatContext &>
-  constexpr auto format(const use_fmt<T, Formatter> &wrapped,
-    FormatContext &ctx) const {
-    return wrapped.fmt(wrapped.value, ctx);
-  }
-
-  template <typename FormatContext>
-    requires std::invocable<Formatter, const T &>
-    && std::convertible_to<std::invoke_result_t<Formatter, const T &>,
-      std::basic_string_view<typename FormatContext::char_type>>
-  constexpr auto format(const use_fmt<T, Formatter> &wrapped,
-    FormatContext &ctx) const {
-    return _base.format(wrapped.fmt(wrapped.value), ctx);
-  }
-};
-
-namespace fs = std::filesystem;
 
 namespace util {
 
@@ -116,7 +83,72 @@ struct concat_t {
   }
 } constexpr const concat{};
 
+template <typename T, typename Formatter>
+struct use_fmt {
+  const T &value;
+  Formatter fmt;
+};
+
+template <std::ranges::view R, typename Formatter>
+struct joined {
+  const R &rng;
+  Formatter delim; //< (?) compile-time string or lambda
+};
+
 } // namespace util
+
+template <typename T, typename Formatter>
+struct std::formatter<util::use_fmt<T, Formatter>> {
+  /// holds parsed {:specs} for strings – width, alignment, etc.
+  mutable std::formatter<std::string_view> _base;
+
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext &ctx) {
+    /// delegate parsing of {:specs} to the string formatter
+    return _base.parse(ctx);
+  }
+
+  template <typename FormatContext>
+    requires std::invocable<Formatter, const T &, FormatContext &>
+  constexpr auto format(const util::use_fmt<T, Formatter> &wrapped,
+    FormatContext &ctx) const {
+    return wrapped.fmt(wrapped.value, ctx);
+  }
+
+  template <typename FormatContext>
+    requires std::invocable<Formatter, const T &>
+    && std::convertible_to<std::invoke_result_t<Formatter, const T &>,
+      std::basic_string_view<typename FormatContext::char_type>>
+  constexpr auto format(const util::use_fmt<T, Formatter> &wrapped,
+    FormatContext &ctx) const {
+    return _base.format(wrapped.fmt(wrapped.value), ctx);
+  }
+};
+
+template <std::ranges::view R, typename S>
+struct std::formatter<util::joined<R, S>> {
+  mutable std::formatter<std::string_view> _base;
+
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext &ctx) {
+    return _base.parse(ctx);
+  }
+
+  template <typename FormatContext>
+  constexpr auto format(const util::joined<R, S> &j, FormatContext &ctx) const {
+    std::string result;
+
+    for (const auto &[idx, val] : util::indexed(j.rng)) {
+      (0 == idx)
+        ? std::format_to(std::back_inserter(result), "{}", val)
+        : std::format_to(std::back_inserter(result), "{}{}", j.delim, val);
+    }
+
+    return _base.format(result, ctx);
+  }
+};
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -481,7 +513,15 @@ std::expected<reflected_call_info, std::string> resolve_reflected_call(
 
 namespace render {
 
-// result is valid for reflection rendering only for named types
+auto format_location(const meta::source_location &d) {
+  return std::format("{}:{}:{}",
+    d.source_file.generic_string(),
+    d.line,
+    d.column);
+}
+
+// refactorme: move help funcitoins below, leave only the call signatures for
+// 'main' result is valid for reflection rendering only for named types
 std::string nm_qualified_name(const meta::nm_qual_type &t) {
   std::string out;
   for (const std::size_t i :
@@ -509,7 +549,7 @@ std::string_view ref_suffix(meta::reference_type r) {
 }
 
 struct log {
-  std::set<meta::type_id> dependencies;
+  const std::set<meta::type_id> &dependencies;
 
   static std::string flags(int flags) {
     // refactorme: ranges
@@ -543,24 +583,14 @@ struct log {
   }
 
   static std::string format_signature(const meta::func_signature &f) {
-    std::string result = "(";
-    for (const auto &[i, a] : util::indexed(f.args)) {
-      0 == i
-        ? std::format_to(std::back_inserter(result), "{}", format_arg(a))
-        : std::format_to(std::back_inserter(result), ",\n    {}", format_arg(a));
-    }
-    result +=
-      ")"
-      "\n    -> ";
-    result += format_arg(f.return_type);
-    return result;
-  }
-
-  static auto format_location(const meta::source_location &d) {
-    return std::format("{}:{}:{}",
-      d.source_file.generic_string(),
-      d.line,
-      d.column);
+    return std::format(
+      "({})"
+      "\n    -> {}",
+      util::joined{
+        .rng = f.args | std::views::transform(format_arg),
+        .delim = ",\n    ",
+      },
+      format_arg(f.return_type));
   }
 
   static auto format_definition(const meta::type_definition &d) {
@@ -662,17 +692,162 @@ struct log {
 };
 
 struct reflection {
-  // todo: implement
+  const std::set<meta::type_id> &dependencies;
+
+  static auto format_struct(const meta::nm_qual_type &t,
+    const meta::struct_data &d) noexcept -> std::string {
+    // format_struct is only called for named, non-anonymous types
+    assert(t.name && "format_struct expects named, non-anonymous type");
+
+    std::string out;
+
+    // todo: add missing
+    // - namespaces (return std::array of const char*)
+    // - (conveniense) namespace_qualified_name (or better name, fitting to the
+    // clang/standard doc design)
+    std::format_to(std::back_inserter(out),
+      "template <typename T>"
+      "\nstruct _reflected<{0} {1}, T> {{"
+      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+      "\n  using type = T;"
+      "\n  OMNI_DEFINE_NAME_FUNC(\"{2}\")",
+      d.type == meta::struct_data::is_class //
+        ? "class"
+        : d.type == meta::struct_data::is_union //
+          ? "union"
+          : "struct",
+      nm_qualified_name(t),
+      *t.name);
+
+    // Per-field meta structs
+    for (const auto &[idx, name] : util::indexed(d.public_fields)) {
+      std::format_to(std::back_inserter(out),
+        "\n  struct {0}_t {{"
+        "\n    OMNI_DEFINE_NAME_FUNC(\"{0}\")"
+        "\n    constexpr static std::size_t index() noexcept {{ return {1}; }}"
+        "\n    constexpr static auto get_value(const type &t) noexcept"
+        "\n      -> const decltype(t.{0})& {{"
+        "\n      return t.{0};"
+        "\n    }}"
+        "\n"
+        "\n    template <typename V>"
+        "\n    static void set_value(type &t, V &&v) {{"
+        "\n      t.{0} = std::forward<V>(v);"
+        "\n    }}"
+        "\n  }} constexpr static {0}{{}};",
+        name,
+        idx);
+    }
+
+    // fields_t alias
+    std::format_to(std::back_inserter(out),
+      "\n"
+      "\n  using fields_t ="
+      "\n    std::tuple<{}>;",
+      util::joined{
+        .rng = d.public_fields | std::views::all,
+        .delim = ",\n",
+      });
+
+    std::format_to(std::back_inserter(out),
+      "\n"
+      "\n  constexpr reflected_binding<type, fields_t>"
+      "\n  operator()(type &t) const noexcept {{"
+      "\n    return {{t}};"
+      "\n  }}"
+      "\n"
+      "\n  constexpr reflected_binding<const type, fields_t>"
+      "\n  operator()(const type &t) const noexcept {{"
+      "\n    return {{t}};"
+      "\n  }}"
+      "\n}};");
+
+    return out;
+  }
+
+  static auto format_enum(const meta::nm_qual_type &t,
+    const meta::enum_data &d) noexcept {
+    assert(t.name && "format_enum expects named, non-anonymous enum");
+
+    return std::format(
+      "template <typename T>"
+      "\nstruct _reflected<{0} {1}, T> {{"
+      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+      "\n  using type = T;"
+      "\n  OMNI_DEFINE_NAME_FUNC(\"{2}\")"
+      "\n"
+      "\n  constexpr static bool is_scoped() {{ return {3}; }}"
+      "\n"
+      "\n  constexpr static auto enumerators() noexcept"
+      "\n    -> std::array<std::pair<type, const char*>, {4}> {{"
+      "\n{5}"
+      "\n    }};"
+      "\n}};",
+      // 0:
+      d.is_scoped ? "enum class" : "enum",
+      // 1:
+      nm_qualified_name(t),
+      // 2:
+      *t.name,
+      // 3:
+      d.is_scoped ? "true" : "false",
+      // 4:
+      d.enumerators.size(),
+      // 5:
+      util::joined{
+        .rng = util::indexed(d.enumerators)
+          | std::views::transform([&d](const auto &p) {
+              const auto &[idx, name] = p;
+              return std::format(
+                "      // {0}"
+                "\n      {{ static_cast<type>({1}{2}), \"{3}\" }}",
+                idx,
+                d.is_scoped ? "type::" : "",
+                name,
+                name);
+            }),
+        .delim = "\n",
+      });
+  }
+
+  // todo: format_call
+
+  auto operator()(const meta::reflectable &r) const noexcept {
+    return std::format(
+      "// {0}{1}"
+      "\n// declared at: {2}"
+      "\n{3}",
+
+      // 0:
+      dependencies.contains(r.id) //
+        ? "(as dependency) "
+        : "",
+
+      // 1: refactorme: visit/matching
+      std::holds_alternative<meta::struct_data>(r.data) //
+        ? "tag type"
+        : "enum",
+
+      // 2:
+      format_location(r.definition.location),
+
+      // 3:
+      std::visit(
+        [&tn = r.definition.type_name]<typename Meta>(const Meta &d) {
+          if constexpr (std::same_as<meta::struct_data, Meta>)
+            return format_struct(tn, d);
+          else {
+            static_assert(std::same_as<meta::enum_data, Meta>);
+            return format_enum(tn, d);
+          }
+        },
+        r.data));
+  }
 };
 
-} // namespace render
-
-namespace render {
-
-// todo: here goes formatters implementations for the meta types:
-// - debug (dump to ostream)
-// - yaml
-// - reflected specialization
+// todo: yaml dump
 
 } // namespace render
 
@@ -692,8 +867,34 @@ int main(int argc, char **argv) {
     .WorkingDir = fs::current_path().parent_path(),
   });
 
+  struct context {
+    std::vector<meta::reflectable> reflected;
+    std::vector<meta::reflected_call_info> calls;
+
+    std::set<meta::type_id> resolved_types;
+    std::set<meta::type_id> resolved_as_dependent;
+    std::vector<std::string> errors;
+  };
+
+  // refactorme: `struct source_file` already binds fs::path and flags. I should
+  // just preprocess the list by filtering and logging conflicts.
+  //
+  // note: as of now, for 'source mode' contexts are merged to emit a single
+  // .cpp, but for 'header mode' a different header file
+  std::vector<
+    // todo: think about a case when one source is compiled
+    // several times with different flags (enabling
+    // different things with preprocessor). I should allow
+    // _explicitly_ only things I can account for.
+    std::pair<fs::path, context>>
+    ctx_by_source_file;
+
+  // todo: I should map the `sources` into a vector of `context or error`
   // loading the ast
-  for (const auto &[n_processing, sf] : util::indexed(cli_args->sources, 1)) {
+  for (const auto &[n_processing, source_file] :
+    util::indexed(cli_args->sources, 1)) {
+    // refactorme: cleanup the ast creation
+
     // note: diag to AST is 1:1, has to be recreated each time...
     // must outlive the ast
     const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
@@ -709,14 +910,15 @@ int main(int argc, char **argv) {
       n_processing,
       cli_args->sources.size(),
       fmt::arg("mode", cli::to_string(cli_args->mode)),
-      fmt::arg("file", sf.path.string()));
+      fmt::arg("file", source_file.path.string()));
 
-    std::expected compiler_invocation = compiler_invocation_from_args(sf,
-      {
-        .resource_dir = cli_args->resource_dir,
-        .diag = *diag,
-        .file_manager = file_manager,
-      });
+    std::expected compiler_invocation =
+      compiler_invocation_from_args(source_file,
+        {
+          .resource_dir = cli_args->resource_dir,
+          .diag = *diag,
+          .file_manager = file_manager,
+        });
 
     if (!compiler_invocation) {
       std::cerr << compiler_invocation.error() << "\n";
@@ -783,115 +985,177 @@ int main(int argc, char **argv) {
 
     if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
       std::cerr << fmt::format("Failed to build AST Unit for: {}.\n",
-        sf.path.generic_string());
+        source_file.path.generic_string());
       continue;
     }
 
     using namespace clang::ast_matchers;
 
-    struct context {
-      std::vector<meta::reflectable> reflected;
-      std::vector<meta::reflected_call_info> calls;
-      // todo: enums
+    std::back_inserter(ctx_by_source_file) = std::pair{
+      source_file.path,
+      ast::reduce_matches(*ast,
+        context{},
 
-      std::set<meta::type_id> resolved_types;
-      std::set<meta::type_id> resolved_as_dependent;
-      std::vector<std::string> errors;
+        ast::rule{
+          .pattern = ast::pattern(classTemplateSpecializationDecl,
+            unless(isInStdNamespace()),
+            hasAncestor(namespaceDecl(hasName("omni"))),
+            hasAncestor(namespaceDecl(hasName("detail"))),
+            hasName("_reflected_type"),
+            isTemplateInstantiation(),
+            isDefinition()),
+          .reduce =
+            [&ast = *ast](context a,
+              const clang::ClassTemplateSpecializationDecl &decl) {
+              std::expected resolved =
+                meta::resolve_reflected_type(decl, ast, a.resolved_types);
+              if (!resolved) {
+                a.errors.emplace_back(std::move(resolved).error());
+                return a;
+              }
+
+              std::visit(
+                [&a]<typename T>(T t) {
+                  if constexpr (std::same_as<meta::reflectable, T>) {
+                    meta::reflectable &r = t;
+                    a.resolved_types.emplace(r.id);
+                    a.reflected.emplace_back(std::move(r));
+                  } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                    // todo:
+                    // Only a limited set of T in _relfected_type<T> is
+                    // supported, and it should be reported as error diagnostics
+                  } else {
+                    static_assert(std::same_as<meta::already_reflected, T>);
+                    // todo: log for info?
+                  }
+                },
+                std::move(resolved->type));
+
+              std::ranges::transform(resolved->dependencies,
+                std::inserter(a.resolved_as_dependent,
+                  a.resolved_as_dependent.end()),
+                [](const meta::reflectable &r) { return r.id; });
+
+              a.reflected = util::concat(std::move(a.reflected),
+                std::move(resolved->dependencies));
+
+              return a;
+            },
+        },
+
+        // note: `_call_impl` is not needed for header mode, so it is disabled
+        // by preprocessor
+        ast::rule{
+          .pattern = ast::pattern(cxxMethodDecl,
+            unless(isInStdNamespace()),
+            hasAncestor(namespaceDecl(hasName("omni"))),
+            hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
+            isTemplateInstantiation(),
+            hasName("_call_impl")),
+          .reduce =
+            [&ast = *ast](context a, const clang::CXXMethodDecl &call_decl) {
+              std::expected resolved =
+                meta::resolve_reflected_call(call_decl, ast);
+              if (!resolved) {
+                a.errors.emplace_back(std::move(resolved).error());
+                return a;
+              }
+              a.calls.emplace_back(std::move(*resolved));
+              return a;
+            },
+        }),
     };
 
-    context ctx = ast::reduce_matches(*ast,
-      context{},
-
-      ast::rule{
-        .pattern = ast::pattern(classTemplateSpecializationDecl,
-          unless(isInStdNamespace()),
-          hasAncestor(namespaceDecl(hasName("omni"))),
-          hasAncestor(namespaceDecl(hasName("detail"))),
-          hasName("_reflected_type"),
-          isTemplateInstantiation(),
-          isDefinition()),
-        .reduce =
-          [&ast = *ast](context a,
-            const clang::ClassTemplateSpecializationDecl &decl) {
-            std::expected resolved =
-              meta::resolve_reflected_type(decl, ast, a.resolved_types);
-            if (!resolved) {
-              a.errors.emplace_back(std::move(resolved).error());
-              return a;
-            }
-
-            std::visit(
-              [&a]<typename T>(T t) {
-                if constexpr (std::same_as<meta::reflectable, T>) {
-                  meta::reflectable &r = t;
-                  a.resolved_types.emplace(r.id);
-                  a.reflected.emplace_back(std::move(r));
-                } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                  // todo:
-                  // Only a limited set of T in _relfected_type<T> is
-                  // supported, and it should be reported as error diagnostics
-                } else {
-                  static_assert(std::same_as<meta::already_reflected, T>);
-                  // todo: log for info?
-                }
-              },
-              std::move(resolved->type));
-
-            std::ranges::transform(resolved->dependencies,
-              std::inserter(a.resolved_as_dependent,
-                a.resolved_as_dependent.end()),
-              [](const meta::reflectable &r) { return r.id; });
-
-            a.reflected = util::concat(std::move(a.reflected),
-              std::move(resolved->dependencies));
-
-            return a;
-          },
+    // todo: render to &ostream (file/console/whatever OS wants)
+    // refactorme: block with conditional logging:
+    // - cl1 flags
+    // - reflected types
+    const context &ctx = ctx_by_source_file.back().second;
+    const render::log print_log{.dependencies = ctx.resolved_as_dependent};
+    std::cout << std::format(
+      "\n\n[info] -- types --------\n{}"
+      "\n\n[info] -- calls --------\n{}",
+      util::joined{
+        .rng = ctx.reflected | std::views::transform(print_log),
+        .delim = "\n\n",
       },
-
-      // note: `_call_impl` is not needed for header mode, so it is disabled
-      // by preprocessor
-      ast::rule{
-        .pattern = ast::pattern(cxxMethodDecl,
-          unless(isInStdNamespace()),
-          hasAncestor(namespaceDecl(hasName("omni"))),
-          hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
-          isTemplateInstantiation(),
-          hasName("_call_impl")),
-        .reduce =
-          [&ast = *ast](context a, const clang::CXXMethodDecl &call_decl) {
-            std::expected resolved =
-              meta::resolve_reflected_call(call_decl, ast);
-            if (!resolved) {
-              a.errors.emplace_back(std::move(resolved).error());
-              return a;
-            }
-            a.calls.emplace_back(std::move(*resolved));
-            return a;
-          },
+      util::joined{
+        .rng = ctx.calls | std::views::transform(print_log),
+        .delim = "\n\n",
       });
 
-    const render::log print_log{.dependencies = ctx.resolved_as_dependent};
-    std::cout << "types:\n";
-    // refactorme: I need `join_with` for range
-    for (const auto &[i, r] : util::indexed(ctx.reflected)) {
-      std::cout << (0 == i //
-          ? std::format("{}", use_fmt{r, print_log})
-          : std::format("\n\n{}", use_fmt{r, print_log}));
-    }
-
-    std::cout << "\n\n\ncalls:\n";
-    // refactorme: I need `join_with` for range
-    for (const auto &[i, r] : util::indexed(ctx.calls)) {
-      std::cout << (0 == i //
-          ? std::format("{}", use_fmt{r, print_log})
-          : std::format("\n\n{}", use_fmt{r, print_log}));
-    }
-
-    // todo: render to &ostream (file/console/whatever OS wants)
     // todo: generate file/files
   }
-  std::cout << "\n\ndone.\n";
+
+  std::cout << "\n[info] -- generating files --------";
+  if (cli::options::source == cli_args->mode) {
+    struct render_context {
+      std::vector<meta::reflectable> reflected;
+      std::vector<meta::reflected_call_info> calls;
+    };
+
+    const render_context ctx =
+      std::ranges::fold_left(std::move(ctx_by_source_file),
+        render_context{},
+        [](render_context a, auto &&key_val) -> render_context {
+          auto &&[path, ctx] = key_val;
+
+          // todo: skip errors here, or filter/partition before folding? errors
+          // should be conditionally ignorable (user may provide
+          // --ignore-errors=N)
+          if (!ctx.errors.empty())
+            return a;
+
+          a.reflected =
+            util::concat(std::move(a.reflected), std::move(ctx.reflected));
+
+          a.calls = util::concat(std::move(a.calls), std::move(ctx.calls));
+
+          return a;
+        });
+
+    const fs::path out = std::invoke([&o = cli_args->out] {
+      // ad hoc to disable fs exception throwing
+      [[maybe_unused]] std::error_code ec;
+      return fs::exists(o, ec) //
+        ? (fs::is_directory(o, ec) //
+              ? fs::path(o) / "source_mode_reflected.cpp"
+              : o)
+        : (o.has_extension() //< non-existent path without extension is
+                             // considered a file
+              ? o
+              : fs::path(o) / "source_mode_reflected.cpp");
+    });
+
+    std::error_code ec;
+    fs::create_directories(out.parent_path(), ec);
+    if (ec) {
+      std::cout << std::format(
+        "\n[error] {}."
+        "\n  invalid output directory: {}",
+        ec.message(),
+        out.parent_path().generic_string());
+
+      return -1;
+    }
+
+    std::cout << std::format("\n[info] creating source mode reflection: {}",
+      out.generic_string());
+
+    std::ofstream f{out, std::ios::binary};
+    if (!f) {
+      std::cout << std::format("\n[error] failed to open file {} for writing",
+        out.generic_string());
+      return -1;
+    }
+
+    // todo: write header
+
+  } else {
+    // todo: header mode
+  }
+
+  std::cout << "\n[info] done.\n";
 
   return 0;
 }
@@ -900,24 +1164,25 @@ namespace {
 
 std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
   const char *const *argv) noexcept {
+  // refactorme: app description and cli parameters should be at the start of
+  // the file for clear undestanding, before 'main'
   CLI::App app{
-    R"(
-C++ reflection code generator that operates in three modes:
-
-Source Mode (default):
-  Generates a single .cpp file containing reflected call implementations for a 
-  list of .cpp sources. Compiled object file needs to be linked to the resulting binary.
-
-Header Mode:
-  Generates .hpp header files containing reflected call implementations for 
-  given .cpp files. Headers must be implicitly included at the start of each 
-  translation unit.
-  WARNING: Uses compile time counters via friend injection, which is not guaranteed
-           by the C++ Standard to be consistent between compiler implementations.
-
-Dump yaml:
-  todo: explain
-)"};
+    "\nC++ reflection code generator that operates in three modes:"
+    "\n"
+    "\nSource Mode (default):"
+    "\n  Generates a single .cpp file containing reflected call implementations for a"
+    "\n  list of .cpp sources. Compiled object file needs to be linked to the resulting binary."
+    "\n"
+    "\nHeader Mode:"
+    "\n  Generates .hpp header files containing reflected call implementations for"
+    "\n  given .cpp files. Headers must be implicitly included at the start of each"
+    "\n  translation unit."
+    "\n  WARNING: Uses compile time counters via friend injection, which is not guaranteed"
+    "\n           by the C++ Standard to be consistent between compiler implementations."
+    "\n"
+    "\nDump yaml:"
+    "\n  todo: explain",
+  };
 
   fs::path cli_resource_dir;
   // todo: resolve from installation. Should have cmake generating based on
