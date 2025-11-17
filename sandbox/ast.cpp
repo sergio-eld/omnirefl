@@ -1,4 +1,5 @@
 
+#include "llvm/Support/Casting.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -1915,24 +1916,41 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
 
   return {
     .name = std::invoke([&td] -> std::optional<std::string> {
-      if (const clang::IdentifierInfo *id = td.getIdentifier(); !id)
+      const clang::IdentifierInfo *id = td.getIdentifier();
+      if (!id)
         return std::nullopt;
 
-      const unsigned qual_flags =
-        0; //< "no qualifiers" (not const, not volatile, not restrict).
-      return clang::QualType{td.getTypeForDecl(), qual_flags}.getAsString(
-        std::invoke([] {
-          // ad hoc: for template specializations just use the printing policy.
-          // For _call_impl in source mode this is sufficient. For reflecting
-          // template specializations you’d need real namespaces.
-          clang::PrintingPolicy p{{}};
+      // "no qualifiers" (not const, not volatile, not restrict).
+      const unsigned qual_flags = 0;
+      std::string name =
+        // fixme:
+        // ad hoc: for template specializations use the printing
+        // policy to render <template args> properly. For _call_impl in source
+        // mode this is sufficient.
+        !llvm::isa<clang::ClassTemplateSpecializationDecl>(td)
+        ? id->getName().str()
+        : clang::QualType{td.getTypeForDecl(), qual_flags}.getAsString(
+            std::invoke([] {
+              clang::PrintingPolicy p{{}};
 
-          p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
-          p.SuppressScope = true; //< no namespaces or enclosing records
-          p.PrintCanonicalTypes = true;
+              p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
+              p.SuppressScope =
+                false; //< namespaces or enclosing records for <template args>
+              p.PrintCanonicalTypes = true;
 
-          return p;
-        }));
+              return p;
+            }));
+
+      // ad hoc: (see above) for template specializations strip all scopes to
+      // the left of the last '::' before '<', keeping template args intact.
+      if (const auto lt = name.find('<'); std::string::npos != lt) {
+        if (const auto scope = name.rfind("::", lt);
+          scope != std::string::npos) {
+          name.erase(0, scope + 2);
+        }
+      }
+
+      return name;
     }),
     .namespaces = std::move(namespaces),
     .enclosing_records = std::move(enclosing_records),
