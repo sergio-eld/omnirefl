@@ -1,5 +1,4 @@
 
-#include "llvm/Support/Casting.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -76,6 +75,7 @@ constexpr auto to_string_view(const T &v) noexcept {
   return std::basic_string_view{v.data(), v.size()};
 }
 
+// fixme: I think this is not entirely correct
 template <std::ranges::range R>
 constexpr auto indexed(R &&r, size_t start = 0) {
   return std::views::zip(std::views::iota(start), std::forward<R>(r));
@@ -581,6 +581,18 @@ std::string_view ref_suffix(meta::reference_type r) {
   }
 }
 
+std::string format_arg(const meta::function_signature_arg &a) {
+  std::string s;
+
+  if (a.is_const)
+    s += "const ";
+
+  s += format_nm_qual_type(a.type_name);
+  s += ref_suffix(a.ref_type);
+
+  return s;
+}
+
 struct log {
   const std::set<meta::type_id> &dependencies;
 
@@ -601,18 +613,6 @@ struct log {
     }
 
     return out;
-  }
-
-  static std::string format_arg(const meta::function_signature_arg &a) {
-    std::string s;
-
-    if (a.is_const)
-      s += "const ";
-
-    s += format_nm_qual_type(a.type_name);
-    s += ref_suffix(a.ref_type);
-
-    return s;
   }
 
   static std::string format_signature(const meta::func_signature &f) {
@@ -716,8 +716,9 @@ struct log {
       "\n  signature: {}"
       "\n  includes: [{}]"
       "\n  std includes: [{}]",
-      // format_location(d.call_location), //< fixme: can't know call_location
-      // now
+
+      // fixme: can't know call_location now
+      // format_location(d.call_location),
       format_signature(d.f_sig),
       includes,
       std_includes);
@@ -821,7 +822,7 @@ struct reflection {
 
       // 3:
       d.public_fields.empty()
-        ? std::string("\n// no reflectable fields detected")
+        ? std::string("\n  // no reflectable fields detected")
         : std::format("\n{}",
             util::joined{
               .rng = util::indexed(d.public_fields)
@@ -861,7 +862,51 @@ struct reflection {
       });
   }
 
-  // todo: format_call
+  auto operator()(const meta::reflected_call_info &c) const noexcept {
+    // fixme: doesn't work with util::joined{.rnd = indexed | filter | transform
+    std::vector<std::string> args_to_call;
+    std::ranges::transform(util::indexed(c.f_sig.args)
+        | std::views::filter([](const auto &p) {
+            const auto &[idx, _] = p;
+            return 0 != idx; //< skip Impl
+          }),
+      std::back_inserter(args_to_call),
+      [](const auto &p) {
+        const auto &[idx, arg] = p;
+        return !arg.is_const && meta::reference_type::ref_rval == arg.ref_type
+          ? std::format("std::move(_{})", idx)
+          : std::format("_{}", idx);
+      });
+
+    return std::format(
+      "template <>"
+      "\nauto omni::reflected_call_t::_call_impl("
+      "\n  {0})"
+      "\n  -> {1} {{"
+      "\n  return _impl({2});"
+      "\n}}",
+
+      // 0: parameters (Impl + call args)
+      util::joined{
+        .rng = util::indexed(c.f_sig.args)
+          | std::views::transform([](const auto &p) {
+              const auto &[idx, arg] = p;
+              return std::format("{} {}",
+                format_arg(arg),
+                0 == idx ? "_impl" : std::format("_{}", idx));
+            }),
+        .delim = ",\n  ",
+      },
+
+      // 1: return type
+      format_arg(c.f_sig.return_type),
+
+      // 2: arguments passed to _impl (skip Impl, handle && move)
+      util::joined{
+        .rng = args_to_call | std::views::all,
+        .delim = ", ",
+      });
+  }
 
   auto operator()(const meta::reflectable &r) const noexcept {
     return std::format(
@@ -1285,10 +1330,10 @@ int main(int argc, char **argv) {
       "\n\n// -- reflected types --------"
       "\n{3}"
       "\n\n}} // namespace"
-      "\n\n// -- reflected calls --------"
-      // todo: calls
       "\n\n}} // namespace detail"
-      "\n\n}} // namespace omni",
+      "\n\n}} // namespace omni"
+      "\n\n// -- reflected calls --------"
+      "\n{4}",
 
       // 0:
       std::invoke([] {
@@ -1316,8 +1361,13 @@ int main(int argc, char **argv) {
       util::joined{
         .rng = ctx.reflected | std::views::transform(render_reflection),
         .delim = "\n\n",
-      });
+      },
 
+      // 4:
+      util::joined{
+        .rng = ctx.calls | std::views::transform(render_reflection),
+        .delim = "\n\n",
+      });
   } else {
     // todo: header mode
     std::cout << "[error] header mode is not implemented\n";
