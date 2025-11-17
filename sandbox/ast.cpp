@@ -882,8 +882,8 @@ struct reflection {
       "template <>"
       "\nauto omni::reflected_call_t::_call_impl("
       "\n  {0})"
-      "\n  -> {1} {{"
-      "\n  return _impl({2});"
+      "\n  -> decltype(_impl({1})) {{"
+      "\n  return _impl({1});"
       "\n}}",
 
       // 0: parameters (Impl + call args)
@@ -898,10 +898,7 @@ struct reflection {
         .delim = ",\n  ",
       },
 
-      // 1: return type
-      format_arg(c.f_sig.return_type),
-
-      // 2: arguments passed to _impl (skip Impl, handle && move)
+      // 1:
       util::joined{
         .rng = args_to_call | std::views::all,
         .delim = ", ",
@@ -1330,8 +1327,8 @@ int main(int argc, char **argv) {
       "\n\n// -- reflected types --------"
       "\n{3}"
       "\n\n}} // namespace"
-      "\n\n}} // namespace detail"
-      "\n\n}} // namespace omni"
+      "\n}} // namespace detail"
+      "\n}} // namespace omni"
       "\n\n// -- reflected calls --------"
       "\n{4}",
 
@@ -1944,8 +1941,15 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
       const clang::DeclContext *dc = &decl_ctx;
       while (!llvm::isa<clang::TranslationUnitDecl>(dc)) {
         if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc)) {
-          namespaces.emplace_back(
-            ns->isAnonymousNamespace() ? "" : ns->getName().str());
+          if (ns->isAnonymousNamespace()) {
+            namespaces.emplace_back("");
+          } else if (ns->isStdNamespace() && ns->getName().starts_with("__")) {
+            // fixme:
+            // ad hoc: skip implementation-detail namespaces inside std (e.g.
+            // std::__1) do nothing
+          } else {
+            namespaces.emplace_back(ns->getName().str());
+          }
         } else if (const auto *rec = llvm::dyn_cast<clang::RecordDecl>(dc)) {
           const clang::IdentifierInfo *id = rec->getIdentifier();
 
