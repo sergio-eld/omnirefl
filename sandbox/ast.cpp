@@ -432,6 +432,9 @@ struct nm_qual_type {
   /// chain of namespaces. may start with empty string if declared in anonymous
   /// namespace
   std::vector<std::string> namespaces;
+
+  /// non-empty for nested types `struct foo { struct bar{}; };`
+  std::vector<std::string> enclosing_records;
 };
 
 enum reference_type {
@@ -542,6 +545,9 @@ std::expected<reflected_call_info, std::string> resolve_reflected_call(
 } // namespace meta
 
 namespace render {
+// refactorme:
+// move help funcitoins below, leave only the call signatures for 'main' result
+// is valid for reflection rendering only for named types
 
 auto format_location(const meta::source_location &d) {
   return std::format("{}:{}:{}",
@@ -550,21 +556,17 @@ auto format_location(const meta::source_location &d) {
     d.column);
 }
 
-// refactorme: move help funcitoins below, leave only the call signatures for
-// 'main' result is valid for reflection rendering only for named types
-std::string nm_qualified_name(const meta::nm_qual_type &t) {
-  std::string out;
-  for (const std::size_t i :
-    std::views::iota(std::size_t(0), t.namespaces.size() + 1)) {
-    const std::string_view elem = i < t.namespaces.size() //
-      ? t.namespaces[i]
-      : (t.name ? std::string_view(*t.name) : "(unnamed)");
+std::string format_nm_qual_type(const meta::nm_qual_type &t) {
+  // refactorme: implement concat as view
+  const std::vector elems = util::concat(t.namespaces,
+    t.enclosing_records,
+    std::vector{t.name.value_or("(unnamed)")});
 
-    0 == i //
-      ? std::format_to(std::back_inserter(out), "{}", elem)
-      : std::format_to(std::back_inserter(out), "::{}", elem);
-  }
-  return out;
+  return std::format("{}",
+    util::joined{
+      .rng = elems | std::views::all,
+      .delim = "::",
+    });
 }
 
 std::string_view ref_suffix(meta::reference_type r) {
@@ -606,7 +608,7 @@ struct log {
     if (a.is_const)
       s += "const ";
 
-    s += nm_qualified_name(a.type_name);
+    s += format_nm_qual_type(a.type_name);
     s += ref_suffix(a.ref_type);
 
     return s;
@@ -632,7 +634,7 @@ struct log {
         return f.empty() ? std::format("") : std::format("\n  [{}]", f);
       }),
 
-      nm_qualified_name(d.type_name));
+      format_nm_qual_type(d.type_name));
   }
 
   auto operator()(const meta::struct_data &d) const {
@@ -724,91 +726,6 @@ struct log {
 struct reflection {
   const std::set<meta::type_id> &dependencies;
 
-  static auto format_struct(const meta::nm_qual_type &t,
-    const meta::struct_data &d) noexcept -> std::string {
-    assert(t.name && "format_struct expects named, non-anonymous type");
-
-    // todo:
-    // - `.fields()` returns all the fields,
-    // - `.mutable_field()` returns only mutable fields
-    return std::format(
-      "template <typename T>"
-      "\nstruct _reflected<{0} {1}, T> {{"
-      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
-      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
-      "\n  using type = T;"
-      "\n  constexpr static auto name() noexcept"
-      "\n    -> const char(&)[sizeof({0})] {{ "
-      "\n    return \"{0}\";"
-      "\n  }}"
-      "\n"
-      "\n{3}"
-      "\n"
-      "\n  using fields_t ="
-      "\n    std::tuple<{4}>;"
-      "\n"
-      "\n  constexpr reflected_binding<type, fields_t>"
-      "\n  operator()(type &t) const noexcept {{"
-      "\n    return {{t}};"
-      "\n  }}"
-      "\n"
-      "\n  constexpr reflected_binding<const type, fields_t>"
-      "\n  operator()(const type &t) const noexcept {{"
-      "\n    return {{t}};"
-      "\n  }}"
-      "\n}};",
-      // 0:
-      d.type == meta::struct_data::is_class //
-        ? "class"
-        : d.type == meta::struct_data::is_union //
-          ? "union"
-          : "struct",
-
-      // 1:
-      nm_qualified_name(t),
-
-      // 2:
-      *t.name,
-
-      // 3:
-      util::joined{
-        .rng = util::indexed(d.public_fields)
-          | std::views::transform([](const auto &p) {
-              const auto &[idx, name] = p;
-              return std::format(
-                "\n  struct {0}_t {{"
-                "\n    constexpr static auto name() noexcept"
-                "\n      -> const char(&)[sizeof({0})] {{ "
-                "\n      return \"{0}\";"
-                "\n    }}"
-                "\n"
-                "\n    constexpr static std::size_t index() noexcept {{ return {1}; }}"
-                "\n"
-                "\n    constexpr static auto get_value(const type &t) noexcept"
-                "\n      -> const decltype(t.{0})& {{"
-                "\n      return t.{0};"
-                "\n    }}"
-                "\n"
-                "\n    template <typename V>"
-                "\n    static void set_value(type &t, V &&v) {{"
-                "\n      t.{0} = std::forward<V>(v);"
-                "\n    }}"
-                "\n  }} constexpr static {0}{{}};",
-                name,
-                idx);
-            }),
-        .delim = "\n",
-      },
-
-      // 4:
-      util::joined{
-        .rng = d.public_fields | std::views::transform([](std::string_view f) {
-          return std::format("      {}", f);
-        }),
-        .delim = ",\n",
-      });
-  }
-
   static auto format_enum(const meta::nm_qual_type &t,
     const meta::enum_data &d) noexcept {
     assert(t.name && "format_enum expects named, non-anonymous enum");
@@ -818,6 +735,7 @@ struct reflection {
       "\nstruct _reflected<enum {0}, T> {{"
       "\n  static_assert(std::is_same<enum {0}, T>::value,"
       "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+      "\n"
       "\n  using type = T;"
       "\n"
       "\n  constexpr static auto name() noexcept"
@@ -827,12 +745,14 @@ struct reflection {
       "\n"
       "\n  constexpr static auto enumerators() noexcept"
       "\n    -> std::array<std::pair<type, const char*>, {2}> {{"
-      "\n      return {3};"
-      "\n    }};"
+      "\n      return {{"
+      "\n        {3},"
+      "\n      }};"
+      "\n    }}"
       "\n}};",
 
       // 0:
-      nm_qualified_name(t),
+      format_nm_qual_type(t),
 
       // 1:
       *t.name,
@@ -843,9 +763,100 @@ struct reflection {
       // 3:
       util::joined{
         .rng = d.enumerators | std::views::transform([](std::string_view e) {
-          return std::format("      {{ type::{0}, \"{0}\" }}", e);
+          return std::format("{{type::{0}, \"{0}\"}}", e);
         }),
-        .delim = ",\n",
+        .delim = ",\n        ",
+      });
+  }
+
+  static auto format_struct(const meta::nm_qual_type &t,
+    const meta::struct_data &d) noexcept -> std::string {
+    assert(t.name && "format_struct expects named, non-anonymous type");
+
+    // todo:
+    // - `.fields` -> returns all the fields
+    // - `.mutable_fields` -> returns only mutable fields
+    return std::format(
+      "template <typename T>"
+      "\nstruct _reflected<{0} {1}, T> {{"
+      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+      "\n"
+      "\n  using type = T;"
+      "\n"
+      "\n  constexpr static auto name() noexcept"
+      "\n    -> const char(&)[sizeof(\"{2}\")] {{"
+      "\n    return \"{2}\";"
+      "\n  }}"
+      "\n"
+      "{3}"
+      "\n"
+      "\n  using fields_t ="
+      "\n    std::tuple<{4}>;"
+      "\n"
+      "\n  constexpr reflected_binding<type, fields_t>"
+      "\n    operator()(type &t) const noexcept {{"
+      "\n    return {{t}};"
+      "\n  }}"
+      "\n"
+      "\n  constexpr reflected_binding<const type, fields_t>"
+      "\n    operator()(const type &t) const noexcept {{"
+      "\n    return {{t}};"
+      "\n  }}"
+      "\n}};",
+
+      // 0:
+      d.type == meta::struct_data::is_class //
+        ? "class"
+        : d.type == meta::struct_data::is_union //
+          ? "union"
+          : "struct",
+
+      // 1:
+      format_nm_qual_type(t),
+
+      // 2:
+      *t.name,
+
+      // 3:
+      d.public_fields.empty()
+        ? std::string("\n// no reflectable fields detected")
+        : std::format("\n{}",
+            util::joined{
+              .rng = util::indexed(d.public_fields)
+                | std::views::transform([](const auto &p) {
+                    const auto &[idx, name] = p;
+                    return std::format(
+                      "  struct {0}_t {{"
+                      "\n    constexpr static std::size_t index() noexcept {{ return {1}; }}"
+                      "\n"
+                      "\n    constexpr static auto name() noexcept"
+                      "\n      -> const char(&)[sizeof(\"{0}\")] {{"
+                      "\n      return \"{0}\";"
+                      "\n    }}"
+                      "\n"
+                      "\n    constexpr static auto get_value(const type &t) noexcept"
+                      "\n      -> const decltype(t.{0})& {{"
+                      "\n      return t.{0};"
+                      "\n    }}"
+                      "\n"
+                      "\n    template <typename V>"
+                      "\n    static void set_value(type &t, V &&v) {{"
+                      "\n      t.{0} = std::forward<V>(v);"
+                      "\n    }}"
+                      "\n  }};",
+                      name,
+                      idx);
+                  }),
+              .delim = "\n\n",
+            }),
+
+      // 4:
+      util::joined{
+        .rng = d.public_fields | std::views::transform([](std::string_view f) {
+          return std::format("{}_t", f);
+        }),
+        .delim = "\n,      ",
       });
   }
 
@@ -1874,28 +1885,57 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
 }
 
 meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
-  return {
-    .name =
-      std::invoke([id = td.getIdentifier()] -> std::optional<std::string> {
-        if (id)
-          return id->getName().str();
-        return std::nullopt;
-      }),
-    .namespaces = std::invoke([&decl_ctx = *td.getDeclContext()] {
-      std::vector<std::string> result;
+  auto [namespaces, enclosing_records] =
+    std::invoke([&decl_ctx = *td.getDeclContext()] {
+      std::array<std::vector<std::string>, 2> result{};
+      auto &&[namespaces, enclosing_records] = result;
 
       const clang::DeclContext *dc = &decl_ctx;
       while (!llvm::isa<clang::TranslationUnitDecl>(dc)) {
         if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc)) {
-          result.emplace_back(
+          namespaces.emplace_back(
             ns->isAnonymousNamespace() ? "" : ns->getName().str());
+        } else if (const auto *rec = llvm::dyn_cast<clang::RecordDecl>(dc)) {
+          const clang::IdentifierInfo *id = rec->getIdentifier();
+
+          // fixme:
+          // std::optional for enclosing records to specifically signal unnamed
+          // records. I need to get back this later, because rendering this is
+          // probably more difficult...
+          enclosing_records.emplace_back(id ? id->getName().str() : "");
         }
+
         dc = dc->getParent();
       }
 
-      std::ranges::reverse(result);
+      std::ranges::reverse(namespaces);
+      std::ranges::reverse(enclosing_records);
       return result;
+    });
+
+  return {
+    .name = std::invoke([&td] -> std::optional<std::string> {
+      if (const clang::IdentifierInfo *id = td.getIdentifier(); !id)
+        return std::nullopt;
+
+      const unsigned qual_flags =
+        0; //< "no qualifiers" (not const, not volatile, not restrict).
+      return clang::QualType{td.getTypeForDecl(), qual_flags}.getAsString(
+        std::invoke([] {
+          // ad hoc: for template specializations just use the printing policy.
+          // For _call_impl in source mode this is sufficient. For reflecting
+          // template specializations you’d need real namespaces.
+          clang::PrintingPolicy p{{}};
+
+          p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
+          p.SuppressScope = true; //< no namespaces or enclosing records
+          p.PrintCanonicalTypes = true;
+
+          return p;
+        }));
     }),
+    .namespaces = std::move(namespaces),
+    .enclosing_records = std::move(enclosing_records),
   };
 }
 
@@ -2074,8 +2114,12 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   return {visited.begin(), visited.end()};
 }
 
-// fixme: `mpark::variant` is picked up as a type, not as a template
-// specialization
+// fixme:
+// `mpark::variant` is picked up as a type, not as a template specialization
+//
+// fixme:
+// nested `wrestler::info` in `example_types` namespace is rendered as
+// `example_types::info`
 auto meta::resolve_reflected_type(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   const clang::ASTUnit &ast,
@@ -2222,34 +2266,19 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
       ? q->getPointeeType()
       : q;
 
+    // refactorme: I want a .value_or monadic function for pointers to avoid
+    // lvalues
     const clang::TagDecl *tag = base_q->getAsTagDecl();
-
     return {
-      .type_name = !tag
+      .type_name = tag
+        ? resolve_nm_qual_type(*tag)
         // no tag -> fundamental / alias. No namespaces needed.
-        ? meta::nm_qual_type{
+        : meta::nm_qual_type{
              // keeps template args for specs, OK for fundamentals
-            .name       = base_q.getAsString(),
+            .name = base_q.getAsString(),
             .namespaces = {},
-          }
-        : llvm::isa<clang::ClassTemplateSpecializationDecl>(tag)
-          // ad hoc: for template specializations just use the printing policy.
-          // For _call_impl in source mode this is sufficient. For reflecting
-          // template specializations you’d need real namespaces.
-          ? meta::nm_qual_type{
-              .name = base_q.getAsString(std::invoke([] {
-                clang::PrintingPolicy p{{}};
-
-                p.SuppressTagKeyword   = true;
-                p.SuppressScope        = false;
-                p.PrintCanonicalTypes  = true;
-
-                return p;
-              })),
-              .namespaces = {},
-            }
-          // non-template struct/class/enum – use proper qualified name
-          : resolve_nm_qual_type(*tag),
+            .enclosing_records = {},
+          },
 
       .is_const = base_q.isConstQualified(),
       .ref_type = q->isLValueReferenceType() //
@@ -2312,7 +2341,7 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
       | std::views::filter(needs_include),
     std::back_inserter(all_includes),
     [&sm = ast.getSourceManager()](clang::QualType q) -> include_info {
-      // todo: I'm not sure this is correct
+      // todo: I'm not sure this is correct or even needed
       const clang::QualType base_q =
         q->isLValueReferenceType() || q->isRValueReferenceType()
         ? q->getPointeeType()
@@ -2322,7 +2351,7 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
       const clang::CXXRecordDecl &rd = *ty->getAsCXXRecordDecl();
       const clang::CXXRecordDecl &def = *rd.getDefinition();
 
-      // fixme: I only need the source_file, not the whole definition
+      // refactorme: I only need the source_file, not the whole definition
       const auto def_info = resolve_definition(def, sm);
       const bool is_std = rd.isInStdNamespace();
 
