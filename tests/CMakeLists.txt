@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl_tests LANGUAGES CXX)
 
@@ -52,6 +52,32 @@ FetchContent_MakeAvailable(tl_expected
     tl_optional
     mpark_variant
     pattern_matching)
+
+add_library(std_compat INTERFACE)
+target_link_libraries(std_compat INTERFACE
+    tl::expected
+    tl::optional
+    mpark_variant
+    eld::pattern_matching)
+
+add_executable(test.common common/test.cpp)
+target_link_libraries(test.common PRIVATE GTest::GTest std_compat)
+omni_reflected_target(test.common)
+
+add_test(NAME test.common.run_omni
+    COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t test.common.omni)
+
+add_test(NAME test.common.build
+    COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t test.common)
+
+add_test(NAME test.common
+    COMMAND test.common)
+
+set_tests_properties(test.common.build PROPERTIES
+    DEPENDS test.common.run_omni)
+
+set_tests_properties(test.common PROPERTIES
+    DEPENDS test.common.build)
 
 # fixme: enable 
 # function(add_reflection_test TEST_SOURCE_DIR)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <eld/pattern_matching.hpp>
 #include <mpark/variant.hpp>
 #include <omnirefl/refl.hpp>
@@ -8,6 +9,11 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+
+// fixme: remove. this is for debugging
+namespace example_types {
+struct wrestler;
+}
 
 namespace example_impl {
 
@@ -78,21 +84,16 @@ struct print_field_names_recursive_t {
             // !!! nested type in vector is expected to be a struct for this
             // example
             using nested_type = typename std::decay_t<decltype(v)>::value_type;
-            std::vector<std::string> sub;
+
             // ad hoc. as of this writing calling `.fields` is only possible on
             // a reflected_binding, which requires a reference. todo: add
             // similar method, like `omni::reflected_t<nested_type>::fields`
             static const nested_type ad_hoc_dummy{};
-            sub.reserve(omni::reflected(ad_hoc_dummy).fields.size());
-            (*this)(ad_hoc_dummy, sub);
-            for (const auto &s : sub)
+            for (const auto &s : (*this)(ad_hoc_dummy))
               out.emplace_back(std::string(f.name) + "[]." + s);
           }),
           pm::m_if<omni::is_reflected>([&](const auto &v) {
-            std::vector<std::string> sub;
-            sub.reserve(omni::reflected(v).fields.size());
-            (*this)(v, sub);
-            for (const auto &s : sub)
+            for (const auto &s : (*this)(v))
               out.emplace_back(std::string(f.name) + "." + s);
           }),
           pm::m_any([](const auto &) { /*no-op*/ }));
@@ -174,6 +175,7 @@ struct simple_from_map_t {
 } // namespace example_impl
 
 namespace example_types {
+
 struct championship {
   std::string name;
   std::string title;
@@ -186,7 +188,7 @@ struct wrestler {
   std::vector<championship> titles{};
 
   // fixme: implement support in header-mode
-  class info {
+  class info_t {
     public:
     std::string ring_name;
     std::string signature_move;

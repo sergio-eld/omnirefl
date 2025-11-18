@@ -166,6 +166,7 @@ struct reflected_call_t {
 namespace detail {
 namespace {
 
+// refactorme: this is a very confusing and ugle shite
 #ifdef OMNI_HEADER_REFLECTION
 // Used in header-mode to generate specializatioin for indexed types (local
 // structs, unnamed)
@@ -229,9 +230,10 @@ template <typename T>
 using reflected_t = detail::_reflected<typename std::decay<T>::type>;
 
 /// todo: use the tool's pass to detect the invalid usage
+/// do not add specializations
 /// (!!!) do not instantiate this outside of a reflected context
-template <typename T, typename = T>
-struct is_reflected: std::false_type {};
+template <typename T, typename = void>
+struct is_reflected;
 
 namespace detail {
 namespace {
@@ -242,6 +244,7 @@ struct make_void {
 
 template <typename... Ts>
 using void_t = typename make_void<Ts...>::type;
+
 } // namespace
 } // namespace detail
 
@@ -385,6 +388,9 @@ struct reflected_binding<T, std::tuple<Fields...>> {
 /// is not called outside of the reflected implementation
 template <typename T>
 constexpr reflected_binding<T> reflected(T &t) noexcept {
+  // todo: error text or remove this and use sfinae?
+  static_assert(is_reflected<T>::value,
+    "omni::reflected(obj) must be called only in a reflected context for reflected type");
   return {t};
 }
 

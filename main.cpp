@@ -858,7 +858,7 @@ struct reflection {
         .rng = d.public_fields | std::views::transform([](std::string_view f) {
           return std::format("{}_t", f);
         }),
-        .delim = "\n,      ",
+        .delim = ",\n      ",
       });
   }
 
@@ -987,6 +987,7 @@ int main(int argc, char **argv) {
     std::pair<fs::path, context>>
     ctx_by_source_file;
 
+  std::cout << '\n';
   // todo: I should map the `sources` into a vector of `context or error`
   // loading the ast
   for (const auto &[n_processing, source_file] :
@@ -1062,7 +1063,7 @@ int main(int argc, char **argv) {
 
       std::cout << (po.Macros.empty()
           ? std::string()
-          : std::format("{}",
+          : std::format("\n{}",
               util::joined{
                 .rng = po.Macros | std::views::transform([](const auto &pair) {
                   const auto &[macro, is_undef] = pair;
@@ -1075,7 +1076,7 @@ int main(int argc, char **argv) {
 
       std::cout << (po.Includes.empty()
           ? std::string()
-          : std::format("{}",
+          : std::format("\n{}",
               util::joined{
                 .rng = po.Includes | std::views::transform([](const auto &inc) {
                   return std::format("[debug] preprocessor #include \"{}\"",
@@ -1094,7 +1095,7 @@ int main(int argc, char **argv) {
         file_manager.get());
 
     if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
-      std::cout << std::format("[error] Failed to build AST Unit for: {}.\n",
+      std::cout << std::format("\n[error] Failed to build AST Unit for: {}.\n",
         source_file.path.generic_string());
       continue;
     }
@@ -1317,19 +1318,34 @@ int main(int argc, char **argv) {
       "\n// Do not modify the contents of this file."
       "\n"
       "\n// -- headers --------"
+      // refactorme: should be configurable via preprocessor
+      "\n#include <omnirefl/refl.hpp>"
+      "\n"
       "\n{1}"
-      "\n\n{2}"
-      "\n\n#include <omnirefl/refl.hpp>" //< refactorme: should be configurable
-                                         // via preprocessor
-      "\n\nnamespace omni {{"
+      "\n"
+      "\n{2}"
+      "\n"
+      "\nnamespace omni {{"
       "\nnamespace detail {{"
       "\nnamespace {{"
-      "\n\n// -- reflected types --------"
+      "\n"
+      "\n// -- reflected types --------"
       "\n{3}"
-      "\n\n}} // namespace"
+      "\n"
+      "\n}} // namespace"
       "\n}} // namespace detail"
       "\n}} // namespace omni"
-      "\n\n// -- reflected calls --------"
+      "\n"
+      "\ntemplate <typename T, typename>"
+      "\nstruct omni::is_reflected : std::false_type {{}};"
+      "\n"
+      "\ntemplate <typename T>"
+      "\nstruct omni::is_reflected<"
+      "\n    T,"
+      "\n    omni::detail::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
+      "\n> : std::true_type {{}};"
+      "\n"
+      "\n// -- reflected calls --------"
       "\n{4}",
 
       // 0:
@@ -1367,7 +1383,7 @@ int main(int argc, char **argv) {
       });
   } else {
     // todo: header mode
-    std::cout << "[error] header mode is not implemented\n";
+    std::cout << "\n[error] header mode is not implemented\n";
     return -1;
   }
 
@@ -1735,7 +1751,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
   const auto &[source, flags] = sf;
 
   std::cout << std::format(
-    "[info] input flags:"
+    "\n[info] input flags:"
     "\n  [{}]\n",
     util::joined{
       .rng = flags | std::views::all,
@@ -1801,7 +1817,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
 
   // fixme: these args also need to be filtered!
   std::cout << std::format(
-    "[info] using cc1 args:"
+    "\n[info] using cc1 args:"
     "\n  [{}]\n",
     util::joined{
       .rng = compilation_args | std::views::all,
