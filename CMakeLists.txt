@@ -105,13 +105,21 @@ add_library(refl INTERFACE)
 add_library(omni::refl ALIAS refl)
 
 target_sources(refl INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.hpp>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/refl.hpp>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/reflected_call.hpp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/reflected_call.hpp>
+
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/reflected_scope.hpp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/reflected_scope.hpp>)
 
 target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
+# -- Sandbox/Exposition --------
+# Standalone sandbox executable demonstrating the reflection frontend
+# and generated metadata (for experimentation and documentation only).
+add_executable(sb.exposition exposition.cpp)
+target_link_libraries(sb.exposition omni::refl)
 
 # -- Testing / packaging setup --------
 if(ENABLE_TESTING OR ENABLE_PACKAGE)

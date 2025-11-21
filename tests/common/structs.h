@@ -1,9 +1,8 @@
 #pragma once
 
-#include <concepts>
 #include <eld/pattern_matching.hpp>
 #include <mpark/variant.hpp>
-#include <omnirefl/refl.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <map>
 #include <string>
