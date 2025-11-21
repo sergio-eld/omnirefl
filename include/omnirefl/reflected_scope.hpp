@@ -7,6 +7,8 @@
 #include <utility>
 
 #if defined(__cpp_lib_variant) && __cpp_lib_variant >= 201606
+#  define OMNI_HAS_STD_VARIANT
+
 #  include <variant>
 #endif
 
@@ -35,6 +37,14 @@ struct visit<std::variant> {
 
 namespace detail {
 namespace {
+
+template <template <typename...> class Variant, typename... T>
+struct _tuple_to_array {
+  template <typename... U>
+  constexpr std::array<Variant<T...>, sizeof...(T)> operator()(U &&...u) const {
+    return {{Variant<T...>{std::forward<U>(u)}...}};
+  }
+};
 
 template <std::size_t...>
 struct index_sequence {};
@@ -168,6 +178,8 @@ struct reflected_mem_binding {
   constexpr const type &set_value(V &&v) {
     return Meta::set_value(bound, std::forward<V>(v));
   }
+
+  constexpr explicit reflected_mem_binding(Tagged &b): bound(b) {}
 };
 
 // reflection for struct | class | union types
@@ -186,12 +198,12 @@ struct reflected_tagged_t final:
   using meta::fields; //< yields std::tuple of fields' meta types
 
   // fixme: auto without trailing return is C++14
-  static constexpr auto fields(const T &t) noexcept {
+  static constexpr auto fields(const type &t) noexcept {
     return _fields(t);
   }
 
   // fixme: auto without trailing return is C++14
-  static constexpr auto fields(T &t) noexcept {
+  static constexpr auto fields(type &t) noexcept {
     return _fields(t);
   }
 
@@ -218,33 +230,13 @@ struct reflected_tagged_t final:
 };
 
 template <typename T>
-struct reflected_binding<reflected_tagged_t, T>:
-    private detail::_reflected<typename std::decay<T>::type> {
-  T &bound;
-
-  using meta = typename reflected_tagged_t<T>::meta;
-  using typename meta::type;
-
-  operator const type &() const {
-    return bound;
-  }
-
-  // todo: do I need `value` and/or `set_value`? For fields that is incidental
-  // due to possibility of having bit fields
-
-  constexpr auto fields() const {
-    return meta::fields(bound);
-  }
-};
-
-template <typename T>
 struct reflected_enum_t final:
     detail::_reflected<typename std::decay<T>::type> {
-  static_assert(std::is_enum<T>::value, "Type is not a enum");
+  using meta = detail::_reflected<typename std::decay<T>::type>;
   static_assert(is_reflected<T>::value,
     "Type was not reflected (Calling outside a reflected scope?)");
+  static_assert(std::is_enum<typename meta::type>::value, "Type is not a enum");
 
-  using meta = detail::_reflected<typename std::decay<T>::type>;
   static_assert(reflected_entity::enumeration == meta::entity(),
     "Inconcistent reflection");
 
@@ -254,25 +246,100 @@ struct reflected_enum_t final:
 };
 
 template <typename T>
+using reflected_t = typename std::conditional<reflected_entity::tagged
+    == detail::_reflected<typename std::decay<T>::type>::entity(),
+  reflected_tagged_t<T>,
+  reflected_enum_t<T>>::type;
+
+template <typename T>
+struct reflected_binding<reflected_tagged_t, T>:
+    private detail::_reflected<typename std::decay<T>::type> {
+  using meta = typename reflected_tagged_t<T>::meta;
+
+  using typename meta::type; //< unqualified type
+  using meta::name; //< static constexpr const char(&[N]) name()`
+  using meta::fields; //< yields std::tuple of fields' meta types
+
+  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+    std::false_type,
+    std::true_type>::type;
+
+  using storage_t = typename std::conditional<owning::value,
+    type, //< own a value
+    T //< hold a reference (T is U& / const U&)
+    >::type;
+
+  storage_t bound;
+
+  operator const type &() const {
+    return bound;
+  }
+
+  constexpr auto fields() const {
+    return meta::fields(bound);
+  }
+
+  // non-owning: T is an lvalue reference (U& / const U&)
+  template <typename U,
+    typename std::enable_if<!owning::value
+        && std::is_convertible<U &, T>::value,
+      int>::type = 0>
+  constexpr explicit reflected_binding(U &u) noexcept: bound(u) {}
+
+  // owning: T is a value type (U / const U)
+  template <typename U,
+    typename std::enable_if<owning::value
+        && std::is_constructible<type, U &&>::value,
+      int>::type = 0>
+  constexpr explicit reflected_binding(U &&u) noexcept(
+    std::is_nothrow_move_constructible<type>::value)
+      : bound(std::forward<U>(u)) {}
+};
+
+template <typename T>
 struct reflected_binding<reflected_enum_t, T>:
     private detail::_reflected<typename std::decay<T>::type> {
-  T &bound;
+  using meta = typename reflected_enum_t<T>::meta;
 
-  using meta = typename reflected_tagged_t<T>::meta;
-  using typename meta::type;
+  using typename meta::type; //< unqualified enum type
+  using meta::name; //< static constexpr const char(&)[N] name()
+  using meta::enumerators; //< yields std::array of pair<type, const char*>
+
+  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+    std::false_type,
+    std::true_type>::type;
+
+  using storage_t = typename std::conditional<owning::value,
+    type, //< own a value
+    T //< hold a reference (T is U& / const U&)
+    >::type;
+
+  storage_t bound;
+
+  operator const type &() const {
+    return bound;
+  }
 
   constexpr auto enumerators() const {
     return meta::enumerators();
   }
+
+  // non-owning: T is an lvalue reference (U& / const U&)
+  template <typename U,
+    typename std::enable_if<!owning::value
+        && std::is_convertible<U &, T>::value,
+      int>::type = 0>
+  constexpr explicit reflected_binding(U &u) noexcept: bound(u) {}
+
+  // owning: T is a value type (U / const U)
+  template <typename U,
+    typename std::enable_if<owning::value
+        && std::is_constructible<type, U &&>::value,
+      int>::type = 0>
+  constexpr explicit reflected_binding(U &&u) noexcept(
+    std::is_nothrow_move_constructible<type>::value)
+      : bound(std::forward<U>(u)) {}
 };
-
-template <typename T>
-using reflected_t = typename std::conditional<reflected_entity::tagged
-    == detail::_reflected<T>::entity(),
-  reflected_tagged_t<T>,
-  reflected_enum_t<T>>::type;
-
-// lvalue versions (todo: proper wording)
 
 template <typename T>
 constexpr auto reflected_tagged() -> reflected_tagged_t<T> {
@@ -280,47 +347,101 @@ constexpr auto reflected_tagged() -> reflected_tagged_t<T> {
 }
 
 template <typename T>
-constexpr auto reflected_tagged(T &t)
-  -> reflected_binding<reflected_tagged_t, T> {
-  return {t};
-}
-
-template <typename T>
 constexpr auto reflected_enum() -> reflected_enum_t<T> {
   return {};
 }
 
-// todo: Do I actually need a reflected_binding<reflected_enum_t, T> for enum?
-// As of now I don't see a reason for it or a use case
-template <typename T>
-constexpr auto reflected_enum(T &t) -> reflected_binding<reflected_enum_t, T> {
-  return {t};
-}
-
-// polymorphic lvalue accessors
 template <typename T>
 constexpr auto reflected() -> reflected_t<T> {
   return {};
 }
 
+// ------------ lvalue + rvalue bindings ------------
+
+// tagged: lvalues → binding on T&
 template <typename T>
-constexpr auto reflected(T &t) -> reflected_binding<reflected_t, T> {
-  return {t};
+constexpr auto reflected_tagged(T &t)
+  -> reflected_binding<reflected_tagged_t, T &> {
+  return reflected_binding<reflected_tagged_t, T &>{t};
 }
 
-// utility
+// tagged: prvalues/xvalues → owning binding on decayed T
+template <typename T>
+constexpr auto reflected_tagged(T &&t) ->
+  typename std::enable_if<!std::is_lvalue_reference<T>::value,
+    reflected_binding<reflected_tagged_t, typename std::decay<T>::type>>::type {
+  using U = typename std::decay<T>::type;
+  return reflected_binding<reflected_tagged_t, U>{std::forward<T>(t)};
+}
 
-// todo: forward-friendly
+// enum: lvalues
+template <typename T>
+constexpr auto reflected_enum(T &t)
+  -> reflected_binding<reflected_enum_t, T &> {
+  return reflected_binding<reflected_enum_t, T &>{t};
+}
+
+// enum: prvalues/xvalues
+template <typename T>
+constexpr auto reflected_enum(T &&t) ->
+  typename std::enable_if<!std::is_lvalue_reference<T>::value,
+    reflected_binding<reflected_enum_t, typename std::decay<T>::type>>::type {
+  using U = typename std::decay<T>::type;
+  return reflected_binding<reflected_enum_t, U>{std::forward<T>(t)};
+}
+
+// polymorphic: lvalues
+template <typename T>
+constexpr auto reflected(T &t) ->
+  typename std::conditional<reflected_entity::tagged
+      == reflected_t<T>::entity(),
+    reflected_binding<reflected_tagged_t, T &>,
+    reflected_binding<reflected_enum_t, T &>>::type {
+  return typename std::conditional<reflected_entity::tagged
+      == reflected_t<T>::entity(),
+    reflected_binding<reflected_tagged_t, T &>,
+    reflected_binding<reflected_enum_t, T &>>::type(t);
+}
+
+// polymorphic: prvalues/xvalues
+template <typename T>
+constexpr auto reflected(
+  T &&t) -> typename std::enable_if<!std::is_lvalue_reference<T>::value,
+  typename std::conditional<reflected_entity::tagged
+      == reflected_t<T>::entity(),
+    reflected_binding<reflected_tagged_t, typename std::decay<T>::type>,
+    reflected_binding<reflected_enum_t, typename std::decay<T>::type>>::type>::
+  type {
+  using U = typename std::decay<T>::type;
+
+  return typename std::conditional<reflected_entity::tagged
+      == reflected_t<U>::entity(),
+    reflected_binding<reflected_tagged_t, U>,
+    reflected_binding<reflected_enum_t, U>>::type(std::forward<T>(t));
+}
+
+// -- utility -------------------
+
 template <template <typename...> class Variant, typename... T>
 constexpr std::array<Variant<T...>, sizeof...(T)> tuple_to_array(
   std::tuple<T...> t) {
-  // fixme: auto lambda argument is C++14
-  return detail::apply(
-    [](auto... t) -> std::array<Variant<T...>, sizeof...(T)> {
-      return {std::move(t)...};
+  return detail::apply(detail::_tuple_to_array<Variant, T...>{}, std::move(t));
+}
+
+#ifdef OMNI_HAS_STD_VARIANT
+
+template <typename... T>
+constexpr std::array<std::variant<T...>, sizeof...(T)> tuple_to_array(
+  std::tuple<T...> t) {
+  return std::apply(
+    [](auto &&...elems) {
+      return std::array<std::variant<T...>, sizeof...(T)>{
+        std::variant<T...>{std::forward<decltype(elems)>(elems)}...};
     },
     std::move(t));
 }
+
+#endif
 
 struct type_info_t {
   const char *name; //< refactorme: I need std::string_view-like type for this

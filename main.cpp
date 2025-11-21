@@ -805,7 +805,7 @@ struct reflection {
       "\n  using fields_t ="
       "\n    std::tuple<{4}>;"
       "\n"
-      "\n  static contexpr fields_t fields() noexcept {{ return {{}}; }}"
+      "\n  static constexpr fields_t fields() noexcept {{ return {{}}; }}"
       "\n}};",
 
       // 0:
@@ -1325,7 +1325,8 @@ int main(int argc, char **argv) {
       "\n"
       "\n// -- headers --------"
       // refactorme: should be configurable via preprocessor
-      "\n#include <omnirefl/refl.hpp>"
+      "\n#include <omnirefl/reflected_scope.hpp>"
+      "\n#include <omnirefl/reflected_call.hpp>" //< todo: do I need it here?
       "\n"
       "\n{1}"
       "\n"

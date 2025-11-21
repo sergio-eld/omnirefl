@@ -1,13 +1,19 @@
 #pragma once
 
-#include <eld/pattern_matching.hpp>
-#include <mpark/variant.hpp>
+// #include <eld/pattern_matching.hpp>
+// #include <mpark/variant.hpp>
 #include <omnirefl/reflected_scope.hpp>
 
 #include <map>
 #include <string>
 #include <type_traits>
 #include <vector>
+
+// todo: maybe add support for
+// std::string_view field_name =
+//   reflected_call(field_name_as_string, &struct::name);
+//
+// but I think it might be already achievable
 
 // fixme: remove. this is for debugging
 namespace example_types {
@@ -66,110 +72,118 @@ struct print_field_names_simple_t {
   }
 } const static print_field_names_simple{};
 
-struct print_field_names_recursive_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    namespace pm = pattern_matching;
+// fixme: enable after refining
+// struct print_field_names_recursive_t {
+//   template <typename T>
+//   std::vector<std::string> operator()(const T &t) const {
+//     namespace pm = pattern_matching;
+//
+//     const auto fields = omni::reflected(t).fields;
+//     std::vector<std::string> out;
+//     out.reserve(fields.size());
+//
+//     for (const auto &f : fields) {
+//       out.emplace_back(f.name);
+//       f
+//         | pm::matched_in_place( //
+//           pm::m_is<std::vector>([&](const auto &v) {
+//             // !!! nested type in vector is expected to be a struct for this
+//             // example
+//             using nested_type = typename
+//             std::decay_t<decltype(v)>::value_type;
+//
+//             // ad hoc. as of this writing calling `.fields` is only possible
+//             on
+//             // a reflected_binding, which requires a reference. todo: add
+//             // similar method, like `omni::reflected_t<nested_type>::fields`
+//             static const nested_type ad_hoc_dummy{};
+//             for (const auto &s : (*this)(ad_hoc_dummy))
+//               out.emplace_back(std::string(f.name) + "[]." + s);
+//           }),
+//           pm::m_if<omni::is_reflected>([&](const auto &v) {
+//             for (const auto &s : (*this)(v))
+//               out.emplace_back(std::string(f.name) + "." + s);
+//           }),
+//           pm::m_any([](const auto &) { /*no-op*/ }));
+//     }
+//
+//     return out;
+//   }
+// } const static print_field_names_recursive{};
 
-    const auto fields = omni::reflected(t).fields;
-    std::vector<std::string> out;
-    out.reserve(fields.size());
-
-    for (const auto &f : fields) {
-      out.emplace_back(f.name);
-      f
-        | pm::matched_in_place( //
-          pm::m_is<std::vector>([&](const auto &v) {
-            // !!! nested type in vector is expected to be a struct for this
-            // example
-            using nested_type = typename std::decay_t<decltype(v)>::value_type;
-
-            // ad hoc. as of this writing calling `.fields` is only possible on
-            // a reflected_binding, which requires a reference. todo: add
-            // similar method, like `omni::reflected_t<nested_type>::fields`
-            static const nested_type ad_hoc_dummy{};
-            for (const auto &s : (*this)(ad_hoc_dummy))
-              out.emplace_back(std::string(f.name) + "[]." + s);
-          }),
-          pm::m_if<omni::is_reflected>([&](const auto &v) {
-            for (const auto &s : (*this)(v))
-              out.emplace_back(std::string(f.name) + "." + s);
-          }),
-          pm::m_any([](const auto &) { /*no-op*/ }));
-    }
-
-    return out;
-  }
-} const static print_field_names_recursive{};
-
+// fixme: enable after refining
 // todo: return vector
-struct print_field_values_recursive_t {
-  template <typename T>
-  void operator()(const T &t, std::vector<std::string> &out) const {
-    namespace pm = pattern_matching;
-    for (auto f : omni::reflected(t).fields) {
-      f
-        | pm::matched_in_place( //
-          pm::m_if<std::is_fundamental>([&](const auto &v) { //
-            out.emplace_back(std::string(f.name) + ": " + std::to_string(v));
-          }),
-          pm::m_is<std::basic_string>([&](const auto &v) { //
-            out.emplace_back(std::string(f.name) + ": \"" + v + "\"");
-          }),
-          pm::m_is<std::vector>([&](const auto &v) {
-            // !!! nested type in vector is expected to be a struct for this
-            // example
-            using nested_type = typename std::decay_t<decltype(v)>::value_type;
-            std::vector<std::string> sub;
-            // ad hoc. as of this writing calling `.fields` is only possible on
-            // a reflected_binding, which requires a reference. todo: add
-            // similar method, like `omni::reflected_t<nested_type>::fields`
-            static const nested_type ad_hoc_dummy{};
-            sub.reserve(omni::reflected(ad_hoc_dummy).fields.size());
-            for (size_t i = 0; i < v.size(); ++i) {
-              (*this)(v[i], sub);
-              for (const auto &s : sub) {
-                out.emplace_back(
-                  std::string(f.name) + "[" + std::to_string(i) + "]." + s);
-              }
-              sub.clear();
-            }
-          }),
-          pm::m_if<omni::is_reflected>([&](const auto &v) {
-            std::vector<std::string> sub;
-            sub.reserve(omni::reflected(v).fields.size());
-            (*this)(v, sub);
-            for (const auto &s : sub)
-              out.emplace_back(std::string(f.name) + "." + s);
-          }),
-          pm::m_any([](const auto &) { /*no-op*/ }));
-    }
-  }
-} const static print_field_values_recursive{};
+// struct print_field_values_recursive_t {
+//   template <typename T>
+//   void operator()(const T &t, std::vector<std::string> &out) const {
+//     namespace pm = pattern_matching;
+//     for (auto f : omni::reflected(t).fields) {
+//       f
+//         | pm::matched_in_place( //
+//           pm::m_if<std::is_fundamental>([&](const auto &v) { //
+//             out.emplace_back(std::string(f.name) + ": " + std::to_string(v));
+//           }),
+//           pm::m_is<std::basic_string>([&](const auto &v) { //
+//             out.emplace_back(std::string(f.name) + ": \"" + v + "\"");
+//           }),
+//           pm::m_is<std::vector>([&](const auto &v) {
+//             // !!! nested type in vector is expected to be a struct for this
+//             // example
+//             using nested_type = typename
+//             std::decay_t<decltype(v)>::value_type; std::vector<std::string>
+//             sub;
+//             // ad hoc. as of this writing calling `.fields` is only possible
+//             on
+//             // a reflected_binding, which requires a reference. todo: add
+//             // similar method, like `omni::reflected_t<nested_type>::fields`
+//             static const nested_type ad_hoc_dummy{};
+//             sub.reserve(omni::reflected(ad_hoc_dummy).fields.size());
+//             for (size_t i = 0; i < v.size(); ++i) {
+//               (*this)(v[i], sub);
+//               for (const auto &s : sub) {
+//                 out.emplace_back(
+//                   std::string(f.name) + "[" + std::to_string(i) + "]." + s);
+//               }
+//               sub.clear();
+//             }
+//           }),
+//           pm::m_if<omni::is_reflected>([&](const auto &v) {
+//             std::vector<std::string> sub;
+//             sub.reserve(omni::reflected(v).fields.size());
+//             (*this)(v, sub);
+//             for (const auto &s : sub)
+//               out.emplace_back(std::string(f.name) + "." + s);
+//           }),
+//           pm::m_any([](const auto &) { /*no-op*/ }));
+//     }
+//   }
+// } const static print_field_values_recursive{};
 
+// fixme: enable after refining
 // naive implementation, does not support containers
-struct simple_from_map_t {
-  // todo: modify with type_identity<T> as a reflected type. It may be not
-  // default-constructible
-  template <typename T>
-  void operator()(T &to,
-    const std::map<std::string, std::string> &from) const noexcept {
-    namespace pm = pattern_matching;
-    for (auto f : omni::reflected(to).fields) {
-      const auto it = from.find(std::string(f.name));
-      if (it == from.cend())
-        continue;
-      f
-        | pm::matched_in_place(
-          [&](const int &, const omni::setter<int> &set_value) {
-            set_value(std::stoi(it->second));
-          },
-          [&](const std::string &, const omni::setter<std::string> &set_value) {
-            set_value(it->second);
-          });
-    }
-  }
-} const static simple_from_map{};
+// struct simple_from_map_t {
+//   // todo: modify with type_identity<T> as a reflected type. It may be not
+//   // default-constructible
+//   template <typename T>
+//   void operator()(T &to,
+//     const std::map<std::string, std::string> &from) const noexcept {
+//     namespace pm = pattern_matching;
+//     for (auto f : omni::reflected(to).fields) {
+//       const auto it = from.find(std::string(f.name));
+//       if (it == from.cend())
+//         continue;
+//       f
+//         | pm::matched_in_place(
+//           [&](const int &, const omni::setter<int> &set_value) {
+//             set_value(std::stoi(it->second));
+//           },
+//           [&](const std::string &, const omni::setter<std::string>
+//           &set_value) {
+//             set_value(it->second);
+//           });
+//     }
+//   }
+// } const static simple_from_map{};
 
 } // namespace example_impl
 
@@ -299,11 +313,12 @@ struct with_tuple {
   std::tuple<dependency::tuple_elem, int> tp;
 };
 
+// fixme: enable after refining
 // fixme: for some reason this picks up `mpark::variant` as a dependency type,
 // but it is not a type - it is a template
-struct with_variant {
-  mpark::variant<dependency::variant_elem, int> vr;
-};
+// struct with_variant {
+//   mpark::variant<dependency::variant_elem, int> vr;
+// };
 
 struct with_alias {
   using type = dependency::alias_type;

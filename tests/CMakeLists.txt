@@ -60,7 +60,7 @@ target_link_libraries(std_compat INTERFACE
     mpark_variant
     eld::pattern_matching)
 
-add_executable(test.common common/test.cpp)
+add_executable(test.common common/test_main.cpp common/test.cpp common/interface_test.cpp)
 target_link_libraries(test.common PRIVATE GTest::GTest std_compat)
 omni_reflected_target(test.common)
 
