@@ -164,6 +164,7 @@ struct reflected_mem_binding {
 
   // type of Tagged::member
   using type = decltype(Meta::value(std::declval<Tagged>()));
+  using meta = Meta;
 
   constexpr const type &value() const noexcept {
     return Meta::value(bound);
@@ -176,8 +177,8 @@ struct reflected_mem_binding {
   // todo: if field is a pointer, need to return by value
   // todo: enable_if is_mutable
   template <typename V>
-  constexpr const type &set_value(V &&v) {
-    return Meta::set_value(bound, std::forward<V>(v));
+  constexpr void set_value(V &&v) {
+    Meta::set_value(bound, std::forward<V>(v));
   }
 
   constexpr explicit reflected_mem_binding(Tagged &b): bound(b) {}
@@ -277,6 +278,10 @@ struct reflected_binding<reflected_tagged_t, T>:
 
   operator const type &() const {
     return bound;
+  }
+
+  constexpr auto fields() {
+    return reflected_tagged_t<type>::fields(bound);
   }
 
   constexpr auto fields() const {

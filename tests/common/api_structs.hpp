@@ -443,4 +443,135 @@ struct tagged_type_field_values_reflected_own_t {
 
 } // namespace field_value_read
 
+namespace field_value_write {
+
+struct assign_fields {
+  tagged_type_t expected;
+
+  template <typename... FieldBinding>
+  void operator()(FieldBinding... b) const {
+    int dummy[] = {0, (assign_one(b), 0)...};
+    (void)dummy;
+  }
+
+  private:
+  // int field
+  template <typename FieldBinding>
+  typename std::enable_if<
+    std::is_same<int,
+      typename std::decay<typename FieldBinding::type>::type>::value,
+    void>::type
+    assign_one(FieldBinding b) const {
+    b.set_value(expected.first);
+  }
+
+  // std::string field
+  template <typename FieldBinding>
+  typename std::enable_if<
+    std::is_same<std::string,
+      typename std::decay<typename FieldBinding::type>::type>::value,
+    void>::type
+    assign_one(FieldBinding b) const {
+    b.set_value(expected.second);
+  }
+};
+
+// tagged: omni::reflected_tagged_t<T>::fields(t)  (non-owning)
+struct tagged_type_field_write_reflected_tagged_t_t {
+  template <typename T>
+  void operator()(T &t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    compat::apply(assign_fields{expected},
+      omni::reflected_tagged_t<T>::fields(t));
+  }
+} const static tagged_type_field_write_reflected_tagged_t{};
+
+// tagged: omni::reflected_tagged<T>().fields(t)  (non-owning)
+struct tagged_type_field_write_reflected_tagged_fn_t {
+  template <typename T>
+  void operator()(T &t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    compat::apply(assign_fields{expected},
+      omni::reflected_tagged<T>().fields(t));
+  }
+} const static tagged_type_field_write_reflected_tagged_fn{};
+
+// tagged: omni::reflected_tagged(t).fields()  (non-owning binding)
+struct tagged_type_field_write_reflected_tagged_lv_t {
+  template <typename T>
+  void operator()(T &t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    auto binding = omni::reflected_tagged(t);
+    compat::apply(assign_fields{expected}, binding.fields());
+  }
+} const static tagged_type_field_write_reflected_tagged_lv{};
+
+// tagged: omni::reflected_t<T>::fields(t)  (non-owning)
+struct tagged_type_field_write_reflected_t_t {
+  template <typename T>
+  void operator()(T &t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    compat::apply(assign_fields{expected}, omni::reflected_t<T>::fields(t));
+  }
+} const static tagged_type_field_write_reflected_t{};
+
+// tagged: omni::reflected<T>().fields(t)  (non-owning)
+struct tagged_type_field_write_reflected_fn_t2 {
+  template <typename T>
+  void operator()(T &t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    compat::apply(assign_fields{expected}, omni::reflected<T>().fields(t));
+  }
+} const static tagged_type_field_write_reflected_fn2{};
+
+// tagged: omni::reflected(t).fields()  (non-owning binding)
+struct tagged_type_field_write_reflected_lv_t2 {
+  template <typename T>
+  void operator()(T &t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    auto binding = omni::reflected(t);
+    compat::apply(assign_fields{expected}, binding.fields());
+  }
+} const static tagged_type_field_write_reflected_lv2{};
+
+// tagged: omni::reflected_tagged(T{...}).fields()  (owning binding)
+struct tagged_type_field_write_reflected_tagged_own_t {
+  template <typename T>
+  T operator()(T t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return t;
+
+    auto owning_binding = omni::reflected_tagged(std::move(t));
+    compat::apply(assign_fields{expected}, owning_binding.fields());
+    return std::move(owning_binding.bound);
+  }
+} const static tagged_type_field_write_reflected_tagged_own{};
+
+// tagged: omni::reflected(T{...}).fields()  (owning binding, polymorphic)
+struct tagged_type_field_write_reflected_own_t {
+  template <typename T>
+  T operator()(T t, const tagged_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return t;
+
+    auto owning_binding = omni::reflected(std::move(t));
+    compat::apply(assign_fields{expected}, owning_binding.fields());
+    return std::move(owning_binding.bound);
+  }
+} const static tagged_type_field_write_reflected_own{};
+
+} // namespace field_value_write
+
 } // namespace interface_test

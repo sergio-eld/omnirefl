@@ -198,3 +198,87 @@ TEST(tagged_type_t, field_value_read) {
     omni::reflected_call(fv::tagged_type_field_values_reflected_own,
       tagged_type_t{k_input}));
 }
+
+TEST(tagged_type_t, field_value_write) {
+  using interface_test::tagged_type_t;
+  namespace fw = interface_test::field_value_write;
+
+#define EXPECT_EQ_FIELDS(lhs, rhs) \
+  do { \
+    EXPECT_EQ((lhs).first, (rhs).first); \
+    EXPECT_EQ((lhs).second, (rhs).second); \
+  } while (false)
+
+  // note: mutation tests do not cover const or reference-to-const fields.
+  static const tagged_type_t k_expected{47, "You can't see me"};
+
+  // via type: reflected_tagged_t<T>::fields(t)  (non-owning)
+  {
+    tagged_type_t value{};
+    omni::reflected_call(fw::tagged_type_field_write_reflected_tagged_t,
+      value,
+      k_expected);
+    EXPECT_EQ_FIELDS(k_expected, value);
+  }
+
+  // via type: reflected_tagged<T>().fields(t)  (non-owning)
+  {
+    tagged_type_t value{};
+    omni::reflected_call(fw::tagged_type_field_write_reflected_tagged_fn,
+      value,
+      k_expected);
+    EXPECT_EQ_FIELDS(k_expected, value);
+  }
+
+  // via binding: reflected_tagged(t).fields()  (non-owning)
+  {
+    tagged_type_t value{};
+    omni::reflected_call(fw::tagged_type_field_write_reflected_tagged_lv,
+      value,
+      k_expected);
+    EXPECT_EQ_FIELDS(k_expected, value);
+  }
+
+  // via type: reflected_t<T>::fields(t)  (non-owning)
+  {
+    tagged_type_t value{};
+    omni::reflected_call(fw::tagged_type_field_write_reflected_t,
+      value,
+      k_expected);
+    EXPECT_EQ_FIELDS(k_expected, value);
+  }
+
+  // via type: reflected<T>().fields(t)  (non-owning)
+  {
+    tagged_type_t value{};
+    omni::reflected_call(fw::tagged_type_field_write_reflected_fn2,
+      value,
+      k_expected);
+    EXPECT_EQ_FIELDS(k_expected, value);
+  }
+
+  // via binding: reflected(t).fields()  (non-owning)
+  {
+    tagged_type_t value{};
+    omni::reflected_call(fw::tagged_type_field_write_reflected_lv2,
+      value,
+      k_expected);
+    EXPECT_EQ_FIELDS(k_expected, value);
+  }
+
+  // owning / prvalue cases
+
+  // tagged: omni::reflected_tagged(T{...}).fields()
+  EXPECT_EQ_FIELDS(k_expected,
+    omni::reflected_call(fw::tagged_type_field_write_reflected_tagged_own,
+      tagged_type_t{},
+      k_expected));
+
+  // polymorphic: omni::reflected(T{...}).fields()
+  EXPECT_EQ_FIELDS(k_expected,
+    omni::reflected_call(fw::tagged_type_field_write_reflected_own,
+      tagged_type_t{},
+      k_expected));
+
+#undef EXPECT_EQ_FIELDS
+}
