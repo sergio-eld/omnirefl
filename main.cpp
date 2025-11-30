@@ -1,4 +1,10 @@
 
+#pragma push_macro("_FORTIFY_SOURCE")
+#ifdef _FORTIFY_SOURCE
+#  undef _FORTIFY_SOURCE
+#endif
+#define _FORTIFY_SOURCE 0
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -34,6 +40,8 @@
 #include <llvm/Option/Option.h>
 #include <llvm/TargetParser/Host.h>
 #pragma GCC diagnostic pop
+
+#pragma pop_macro("_FORTIFY_SOURCE")
 
 #include <CLI/CLI.hpp>
 #include <CLI/Error.hpp>
@@ -398,8 +406,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
             : matcher(m)
             , accum(a)
             , reduce(r)
-            , binding_tag(binding_tag) {
-        }
+            , binding_tag(binding_tag) {}
       };
 
       return _callback(bound_matcher, accum, rule.reduce, binding_tag);
@@ -744,7 +751,6 @@ struct reflection {
       "\n    return omni::reflected_entity::enumeration;"
       "\n  }}"
       "\n"
-      "\n"
       "\n  constexpr static auto name() noexcept"
       "\n    -> const char(&)[sizeof(\"{1}\")] {{"
       "\n    return \"{1}\";"
@@ -752,9 +758,9 @@ struct reflection {
       "\n"
       "\n  constexpr static auto enumerators() noexcept"
       "\n    -> std::array<std::pair<type, const char*>, {2}> {{"
-      "\n      return {{"
+      "\n      return {{{{"
       "\n        {3},"
-      "\n      }};"
+      "\n      }}}};"
       "\n    }}"
       "\n}};",
 
@@ -1330,6 +1336,8 @@ int main(int argc, char **argv) {
       "\n"
       "\n{1}"
       "\n"
+      "\n#include <array>" //< refactorme: ad hoc for enumerators(). No need to
+                           // include if no enums
       "\n{2}"
       "\n"
       "\nnamespace omni {{"

@@ -57,13 +57,14 @@ struct _make_integer_sequence {
 
 template <class T, T N, T... integers>
 struct _make_integer_sequence<T, N, N, integers...> {
-  using type = std::integer_sequence<T, integers...>;
+  using type = index_sequence<integers...>;
 };
 
 template <std::size_t N>
-using make_index_sequence = _make_integer_sequence<std::size_t, 0, N>::type;
+using make_index_sequence =
+  typename _make_integer_sequence<std::size_t, 0, N>::type;
 
-// todo: move to `compat.hpp`?
+// drop-in apply for C++11 (tuple + index_sequence)
 template <typename Visit, typename Tuple, std::size_t... I>
 constexpr auto apply(Visit &&v, Tuple &&t, index_sequence<I...>)
   -> decltype(std::forward<Visit>(v)(std::get<I>(std::forward<Tuple>(t))...)) {
@@ -164,11 +165,11 @@ struct reflected_mem_binding {
   // type of Tagged::member
   using type = decltype(Meta::value(std::declval<Tagged>()));
 
-  constexpr const type &value() noexcept {
+  constexpr const type &value() const noexcept {
     return Meta::value(bound);
   }
 
-  constexpr operator const type &() noexcept {
+  constexpr operator const type &() const noexcept {
     return value();
   }
 
@@ -194,20 +195,10 @@ struct reflected_tagged_t final:
     "Inconcistent reflection");
 
   using typename meta::type; //< yields T
+  using typename meta::fields_t; //< yields std::tuple<...>
+
   using meta::name; //< static constexpr const char(&[N]) name()`
   using meta::fields; //< yields std::tuple of fields' meta types
-
-  // fixme: auto without trailing return is C++14
-  static constexpr auto fields(const type &t) noexcept {
-    return _fields(t);
-  }
-
-  // fixme: auto without trailing return is C++14
-  static constexpr auto fields(type &t) noexcept {
-    return _fields(t);
-  }
-
-  // todo: mutable_fields(T &t) and mutable_fields(const T &t)
 
   private:
   template <typename _T>
@@ -227,6 +218,19 @@ struct reflected_tagged_t final:
   static constexpr auto _fields(_T &t) noexcept {
     return detail::apply(_bind_fields_metadata<_T>{t}, meta::fields());
   }
+
+  public:
+  // fixme: auto without trailing return is C++14
+  static constexpr auto fields(const type &t) noexcept {
+    return _fields(t);
+  }
+
+  // fixme: auto without trailing return is C++14
+  static constexpr auto fields(type &t) noexcept {
+    return _fields(t);
+  }
+
+  // todo: mutable_fields(T &t) and mutable_fields(const T &t)
 };
 
 template <typename T>
@@ -276,7 +280,7 @@ struct reflected_binding<reflected_tagged_t, T>:
   }
 
   constexpr auto fields() const {
-    return meta::fields(bound);
+    return reflected_tagged_t<type>::fields(bound);
   }
 
   // non-owning: T is an lvalue reference (U& / const U&)

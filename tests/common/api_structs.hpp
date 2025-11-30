@@ -1,8 +1,19 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <omnirefl/reflected_scope.hpp>
+
+#if __cplusplus >= 201703L
+namespace compat {
+using std::apply;
+}
+#else
+namespace test_support {
+using omni::detail::apply;
+}
+#endif
 
 namespace interface_test {
 
@@ -263,5 +274,173 @@ struct enum_type_enumerators_reflected_lv_t {
 } const static enum_type_enumerators_reflected_lv{};
 
 } // namespace enumerators
+
+namespace fields {
+
+// `auto` in labmda support only since C++14
+// visit meta::fields() -> std::vector<std::string> of field names
+struct fields_visitor {
+  template <typename... Field>
+  std::vector<std::string> operator()(const Field &...) const {
+    return std::vector<std::string>{Field::name()...};
+  }
+};
+
+// tagged: omni::reflected_tagged_t<T>::fields()
+struct tagged_type_fields_reflected_tagged_t_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(fields_visitor{},
+      omni::reflected_tagged_t<T>::fields());
+  }
+} const static tagged_type_fields_reflected_tagged_t{};
+
+// tagged: omni::reflected_tagged<T>().fields()
+struct tagged_type_fields_reflected_tagged_fn_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(fields_visitor{},
+      omni::reflected_tagged<T>().fields());
+  }
+} const static tagged_type_fields_reflected_tagged_fn{};
+
+// tagged: omni::reflected_t<T>::fields()
+struct tagged_type_fields_reflected_t_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(fields_visitor{}, omni::reflected_t<T>::fields());
+  }
+} const static tagged_type_fields_reflected_t{};
+
+// tagged: omni::reflected<T>().fields()
+struct tagged_type_fields_reflected_fn2_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(fields_visitor{}, omni::reflected<T>().fields());
+  }
+} const static tagged_type_fields_reflected_fn2{};
+
+} // namespace fields
+
+namespace field_value_read {
+
+struct field_values_visitor {
+  template <typename V>
+  static typename std::enable_if<std::is_integral<V>::value, std::string>::type
+    to_string_value(const V &v) {
+    return std::to_string(v);
+  }
+
+  static std::string to_string_value(const std::string &v) {
+    return v;
+  }
+
+  template <typename... Binding>
+  std::vector<std::string> operator()(Binding... b) const {
+    return std::vector<std::string>{to_string_value(b.value())...};
+  }
+};
+
+// tagged: omni::reflected_tagged_t<T>::fields(t)
+struct tagged_type_field_values_reflected_tagged_t_t {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(field_values_visitor{},
+      omni::reflected_tagged_t<T>::fields(t));
+  }
+} const static tagged_type_field_values_reflected_tagged_t{};
+
+// tagged: omni::reflected_tagged<T>().fields(t)
+struct tagged_type_field_values_reflected_tagged_fn_t {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(field_values_visitor{},
+      omni::reflected_tagged<T>().fields(t));
+  }
+} const static tagged_type_field_values_reflected_tagged_fn{};
+
+// tagged: omni::reflected_tagged(t).fields()  (non-owning binding)
+struct tagged_type_field_values_reflected_tagged_lv_t {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+
+    auto binding = omni::reflected_tagged(t);
+    return compat::apply(field_values_visitor{}, binding.fields());
+  }
+} const static tagged_type_field_values_reflected_tagged_lv{};
+
+// tagged: omni::reflected_t<T>::fields(t)
+struct tagged_type_field_values_reflected_t_t {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(field_values_visitor{},
+      omni::reflected_t<T>::fields(t));
+  }
+} const static tagged_type_field_values_reflected_t{};
+
+// tagged: omni::reflected<T>().fields(t)
+struct tagged_type_field_values_reflected_fn_t2 {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return compat::apply(field_values_visitor{},
+      omni::reflected<T>().fields(t));
+  }
+} const static tagged_type_field_values_reflected_fn2{};
+
+// tagged: omni::reflected(t).fields()  (non-owning binding)
+struct tagged_type_field_values_reflected_lv_t2 {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+
+    auto binding = omni::reflected(t);
+    return compat::apply(field_values_visitor{}, binding.fields());
+  }
+} const static tagged_type_field_values_reflected_lv2{};
+
+// tagged: omni::reflected_tagged(T(t)).fields()  (owning binding)
+struct tagged_type_field_values_reflected_tagged_own_t {
+  template <typename T>
+  std::vector<std::string> operator()(T t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+
+    auto owning_binding = omni::reflected_tagged(std::move(t));
+    return compat::apply(field_values_visitor{}, owning_binding.fields());
+  }
+} const static tagged_type_field_values_reflected_tagged_own{};
+
+// tagged: omni::reflected(T(t)).fields()  (owning binding, polymorphic)
+struct tagged_type_field_values_reflected_own_t {
+  template <typename T>
+  std::vector<std::string> operator()(T t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+
+    auto owning_binding = omni::reflected(std::move(t));
+    return compat::apply(field_values_visitor{}, owning_binding.fields());
+  }
+} const static tagged_type_field_values_reflected_own{};
+
+} // namespace field_value_read
 
 } // namespace interface_test
