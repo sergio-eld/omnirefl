@@ -43,6 +43,7 @@ TEST(type_identity, tagged_type_t) {
     ti::tagged_type_name_reflected_lv);
 }
 
+
 TEST(type_identity, enum_type_t) {
   using interface_test::enum_type_t;
   namespace ti = interface_test::type_identity;
@@ -64,4 +65,31 @@ TEST(type_identity, enum_type_t) {
 
   // omni::reflected(e).name()
   values_test<enum_type_t>("enum_type_t", ti::enum_type_name_reflected_lv);
+}
+
+
+TEST(enumerators, enum_type_t) {
+  using interface_test::enum_type_t;
+  namespace en = interface_test::enumerators;
+
+  // omni::reflected_enum_t<T>::enumerators()
+  values_test<enum_type_t>("zero,one",
+    en::enum_type_enumerators_reflected_enum_t);
+
+  // omni::reflected_enum<T>().enumerators()
+  values_test<enum_type_t>("zero,one",
+    en::enum_type_enumerators_reflected_enum_fn);
+
+  // omni::reflected_enum(e).enumerators()
+  values_test<enum_type_t>("zero,one",
+    en::enum_type_enumerators_reflected_enum_lv);
+
+  // omni::reflected_t<T>::enumerators()
+  values_test<enum_type_t>("zero,one", en::enum_type_enumerators_reflected_t);
+
+  // omni::reflected<T>().enumerators()
+  values_test<enum_type_t>("zero,one", en::enum_type_enumerators_reflected_fn);
+
+  // omni::reflected(e).enumerators()
+  values_test<enum_type_t>("zero,one", en::enum_type_enumerators_reflected_lv);
 }

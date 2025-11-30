@@ -139,4 +139,129 @@ struct enum_type_name_reflected_lv_t {
 } const static enum_type_name_reflected_lv{};
 
 } // namespace type_identity
+
+namespace enumerators {
+
+// enum: omni::reflected_enum_t<T>::enumerators()
+struct enum_type_enumerators_reflected_enum_t_t {
+  template <typename T>
+  std::string operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return "not reflected";
+
+    auto es = omni::reflected_enum_t<T>::enumerators();
+    std::string result;
+    bool first = true;
+    for (const auto &p : es) {
+      if (!first)
+        result += ',';
+      result += p.second;
+      first = false;
+    }
+    return result;
+  }
+} const static enum_type_enumerators_reflected_enum_t{};
+
+// enum: omni::reflected_enum<T>().enumerators()
+struct enum_type_enumerators_reflected_enum_fn_t {
+  template <typename T>
+  std::string operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return "not reflected";
+
+    auto es = omni::reflected_enum<T>().enumerators();
+    std::string result;
+    bool first = true;
+    for (const auto &p : es) {
+      if (!first)
+        result += ',';
+      result += p.second;
+      first = false;
+    }
+    return result;
+  }
+} const static enum_type_enumerators_reflected_enum_fn{};
+
+// enum: omni::reflected_enum(e).enumerators()
+struct enum_type_enumerators_reflected_enum_lv_t {
+  template <typename T>
+  std::string operator()(T &&e) const {
+    if (!omni::is_reflected<T>::value)
+      return "not reflected";
+
+    auto es = omni::reflected_enum(std::forward<T>(e)).enumerators();
+    std::string result;
+    bool first = true;
+    for (const auto &p : es) {
+      if (!first)
+        result += ',';
+      result += p.second;
+      first = false;
+    }
+    return result;
+  }
+} const static enum_type_enumerators_reflected_enum_lv{};
+
+// enum: omni::reflected_t<T>::enumerators()
+struct enum_type_enumerators_reflected_t_t {
+  template <typename T>
+  std::string operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return "not reflected";
+
+    auto es = omni::reflected_t<T>::enumerators();
+    std::string result;
+    bool first = true;
+    for (const auto &p : es) {
+      if (!first)
+        result += ',';
+      result += p.second;
+      first = false;
+    }
+    return result;
+  }
+} const static enum_type_enumerators_reflected_t{};
+
+// enum: omni::reflected<T>().enumerators()
+struct enum_type_enumerators_reflected_fn_t {
+  template <typename T>
+  std::string operator()(const T &) const {
+    if (!omni::is_reflected<T>::value)
+      return "not reflected";
+
+    auto es = omni::reflected<T>().enumerators();
+    std::string result;
+    bool first = true;
+    for (const auto &p : es) {
+      if (!first)
+        result += ',';
+      result += p.second;
+      first = false;
+    }
+    return result;
+  }
+} const static enum_type_enumerators_reflected_fn{};
+
+// enum: omni::reflected(e).enumerators()
+struct enum_type_enumerators_reflected_lv_t {
+  template <typename T>
+  std::string operator()(T &&e) const {
+    if (!omni::is_reflected<T>::value)
+      return "not reflected";
+
+    auto es = omni::reflected(std::forward<T>(e)).enumerators();
+    std::string result;
+    bool first = true;
+    for (const auto &p : es) {
+      if (!first)
+        result += ',';
+      result += p.second;
+      first = false;
+    }
+    return result;
+  }
+} const static enum_type_enumerators_reflected_lv{};
+
+} // namespace enumerators
+
 } // namespace interface_test
