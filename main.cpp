@@ -970,7 +970,7 @@ int main(int argc, char **argv) {
     format_options(*cli_args));
 
   const llvm::IntrusiveRefCntPtr file_manager = new clang::FileManager({
-    .WorkingDir = fs::current_path().parent_path(),
+    .WorkingDir = fs::current_path().parent_path().generic_string(),
   });
 
   struct context {
@@ -1461,7 +1461,7 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
   app
     .add_option("-o,--out", cli_out, "output directory (may contain filename)")
     ->type_name("PATH")
-    ->default_val(fs::current_path());
+    ->default_val(fs::current_path().generic_string());
 
   std::optional<fs::path> cli_comp_db = std::nullopt;
   app.add_option("--comp-db", cli_comp_db, "Path to compile_commands.json")

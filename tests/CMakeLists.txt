@@ -15,16 +15,16 @@ if(NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
 
-find_package(GTest QUIET)
-if(NOT TARGET GTest::GTest)
-    FetchContent_Declare(googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.15.2)
+# Do not let googletest install itself when we run "cmake --install" / CPack
+set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
+set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.15.2)
 
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
-    add_library(GTest::GTest ALIAS gtest)
-endif()
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+add_library(GTest::GTest ALIAS gtest)
 
 # std-compat utility
 set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)

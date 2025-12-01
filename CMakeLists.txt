@@ -142,8 +142,8 @@ if(ENABLE_PACKAGE)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-    install(FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/refl.hpp
+    install(DIRECTORY
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
 
     # Bundle Clang builtin headers for the tool.
@@ -179,12 +179,32 @@ if(ENABLE_PACKAGE)
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/reflected_target.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
+    # Debian architecture: required because Alpine has no dpkg to auto-detect.
+    if(NOT CPACK_DEBIAN_PACKAGE_ARCHITECTURE)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7" OR
+               CMAKE_SYSTEM_PROCESSOR MATCHES "armv7l")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "armhf")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "armv6")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "armel")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "i[3-6]86")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "i386")
+        else()
+            message(WARNING
+                "Unknown Debian architecture for ${CMAKE_SYSTEM_PROCESSOR}; "
+                "defaulting to amd64. Override CPACK_DEBIAN_PACKAGE_ARCHITECTURE "
+                "if this is wrong.")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+        endif()
+    endif()
+
     set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGE_CONTACT "sergey.kolesnik.ld@gmail.com")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sergei Kolesnik")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-
-    # Fully-static build on Alpine: no shared libs to scan for dependencies.
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS NO)
 
     include(CPack)

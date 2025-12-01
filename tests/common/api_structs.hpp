@@ -10,7 +10,7 @@ namespace compat {
 using std::apply;
 }
 #else
-namespace test_support {
+namespace compat {
 using omni::detail::apply;
 }
 #endif

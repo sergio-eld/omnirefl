@@ -27,20 +27,6 @@ RUN mkdir -p /tmp/cmake \
     && ninja install \
     && rm -rf /tmp/cmake /tmp/cmake.tar.gz
 
-# Build and install GoogleTest
-ARG GTEST_VERSION=1.14.0
-ADD https://github.com/google/googletest/archive/refs/tags/v$GTEST_VERSION.tar.gz /tmp/gtest.tar.gz
-RUN mkdir -p /tmp/gtest \
-    && tar -zxf /tmp/gtest.tar.gz -C /tmp/gtest --strip-components=1 \
-    && cd /tmp/gtest \
-    && cmake -GNinja -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DBUILD_GMOCK=OFF \
-        -Dgtest_build_tests=OFF \
-        -Dgmock_build_tests=OFF \
-    && cmake --build . --target install -j$(nproc) \
-    && rm -rf /tmp/gtest /tmp/gtest.tar.gz
-
 # todo: build latest neovim from source?
 
 FROM ubuntu:$UBUNTU_VERSION AS final
@@ -55,6 +41,7 @@ RUN apt update \
     && apt install -y \
         build-essential \
         g++ \
+        git \
         neovim \
         ninja-build \
     && apt clean -y \
