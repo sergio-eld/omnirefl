@@ -329,6 +329,10 @@ struct reflected_binding<reflected_enum_t, T>:
     return bound;
   }
 
+  constexpr auto enumerators() {
+    return meta::enumerators();
+  }
+
   constexpr auto enumerators() const {
     return meta::enumerators();
   }

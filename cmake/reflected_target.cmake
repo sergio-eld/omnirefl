@@ -71,6 +71,7 @@ function(omni_reflected_target target)
 
     _omni_get_target_sources(${target} _all_sources)
 
+    # fixme: path/to/src.cpp:path/to/output/from/compile_db
     set(_refl_sources)
     foreach(src IN LISTS _all_sources)
         if(src MATCHES "\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$")
@@ -92,12 +93,18 @@ function(omni_reflected_target target)
     message(STATUS "omnirefl: selected source-mode for target ${target}")
     message(STATUS "omnirefl: output file for target ${target}: ${_generated}")
 
+    # quote sources only for the command-line
+    set(_refl_sources_quoted)
+    foreach(src IN LISTS _refl_sources)
+        list(APPEND _refl_sources_quoted "\"${src}\"")
+    endforeach()
+
     set(_omni_args
         --mode=source
         --resource-dir "${omnirefl_RESOURCE_DIR}"
         --comp-db "${_comp_db}"
         -o "${_generated}"
-        -s ${_refl_sources}
+        -s ${_refl_sources_quoted}
     )
 
     add_custom_command(OUTPUT "${_generated}"

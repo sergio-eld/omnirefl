@@ -234,15 +234,90 @@ struct cli_source_file {
 
 /// CLI11 uses ADL to specialize parsing cli args to custom types
 bool lexical_cast(const std::string &arg, cli_source_file &src) {
-  std::ranges::view auto v_parts = std::views::split(arg, ':')
-    | std::views::transform([](const auto &s) { return std::string_view(s); });
-  const std::vector parts(v_parts.begin(), v_parts.end());
-  if (2 < parts.size() || parts.front().empty())
+  std::string_view sv = arg;
+  if (sv.empty())
     return false;
 
-  src.path = parts.front();
-  src.output_substr = 2 == parts.size() ? parts.back() : "";
+  // case 1: unquoted (simpler) – handle first.
+  if ('"' != sv.front()) {
+    auto v_parts = sv | std::views::split(':')
+      | std::views::transform(
+        [](auto &&subrng) { return std::string_view(subrng); });
 
+    const std::vector parts(v_parts.begin(), v_parts.end());
+
+    // Valid only if 1 or 2 parts.
+    if (parts.empty() || 2 < parts.size())
+      return false;
+
+    // Path before ':' must not be empty.
+    if (parts.front().empty())
+      return false;
+
+    src.path = fs::path(parts.front());
+    src.output_substr =
+      (2 == parts.size()) ? std::string(parts.back()) : std::string{};
+    return true;
+  }
+
+  // case 2: starts with '"' → quoted logic.
+  std::ranges::view auto view = sv | std::views::split('"')
+    | std::views::transform(
+      [](auto &&subrng) { return std::string_view(subrng); })
+    | std::views::filter([](std::string_view s) { return !s.empty(); });
+
+  const std::vector parts(view.begin(), view.end());
+
+  if (parts.empty() || 3 < parts.size())
+    return false;
+
+  if (1 == parts.size()) {
+    // `"path"`
+    // Reject empty quoted path: ""...
+    if (2 <= sv.size() && '"' == sv[1])
+      return false;
+
+    src.path = fs::path(parts[0]);
+    src.output_substr.clear();
+    return true;
+  }
+
+  if (2 == parts.size()) {
+    // `"path":out` -> [path, :out]
+    const auto &p0 = parts[0];
+    const auto &p1 = parts[1];
+
+    if (p0.empty())
+      return false;
+
+    if (p1.empty())
+      return false;
+
+    if (':' != p1.front())
+      return false;
+
+    // second "path" (after ':') must not be empty
+    if (1 == p1.size())
+      return false;
+
+    src.path = fs::path(p0);
+    src.output_substr.assign(p1.substr(1)); // after ':'
+    return true;
+  }
+
+  // 3 == parts.size(): `"path":"out"` -> [path, :, out]
+  const auto &p0 = parts[0];
+  const auto &p1 = parts[1];
+  const auto &p2 = parts[2];
+
+  if (p0.empty() || p2.empty())
+    return false;
+
+  if (!(1 == p1.size() && ':' == p1.front()))
+    return false;
+
+  src.path = fs::path(p0);
+  src.output_substr.assign(p2);
   return true;
 }
 
@@ -1748,6 +1823,7 @@ std::vector<std::string> filter_ast_related_args(
   return result;
 }
 
+// refactorme: this is an ugly shite
 std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
   compiler_invocation_from_args_t::operator()(const source_file &sf,
     args a) const noexcept {
@@ -1773,40 +1849,95 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
       .delim = "\n  ",
     });
 
-  std::expected argList = parse_driver_args(flags);
+  const std::expected arg_list = parse_driver_args(flags);
+  if (!arg_list)
+    return std::unexpected(arg_list.error());
 
-  if (!argList)
-    return std::unexpected(argList.error());
+  enum class toolchain_kind { msvc, generic };
 
-  std::vector cc1_args =
-    // ad hoc: need to append these, since as of now the actual Driver is used
-    // for parsing and configuration. There are only 2 things (I think) I
-    // actually need (but forced to use the Driver):
-    // 1. Map non-clang args to cc1 format
-    // 2. Resolve system include paths (non-std)
-    util::concat(
-      std::vector<std::string>{
-        "omnirefl",
-        source.generic_string(),
-        "-fsyntax-only", //< AST only
-        "-nostdinc++", //< prevents from picking up on another compiler's C++
-                       //< std libs
-        std::format("-resource-dir={}", a.resource_dir.generic_string()),
-      },
-      filter_ast_related_args(*argList));
+  const auto toolchain = std::invoke([&]() {
+    const bool has_driver_mode_cl = std::invoke([&]() {
+      if (auto *dm = arg_list->getLastArgNoClaim(options::OPT_driver_mode))
+        return std::string_view(dm->getValue()) == "cl";
+      return false;
+    });
+
+    const bool prog_looks_cl = std::invoke([&]() {
+      if (flags.empty())
+        return false;
+      std::string_view prog = flags.front();
+      return prog.ends_with("cl.exe")
+        || prog.find("clang-cl") != std::string_view::npos;
+    });
+
+    const bool has_msvc_style_opts =
+      arg_list->hasArgNoClaim(options::OPT__SLASH_Fo)
+      || arg_list->hasArgNoClaim(options::OPT__SLASH_EH);
+
+    if (has_driver_mode_cl || prog_looks_cl || has_msvc_style_opts)
+      return toolchain_kind::msvc;
+    return toolchain_kind::generic;
+  });
+
+  const std::string target_triple = std::invoke([&]() {
+    if (const auto *opt = arg_list->getLastArgNoClaim(options::OPT_target))
+      return llvm::Triple::normalize(opt->getValue());
+    return llvm::sys::getProcessTriple();
+  });
+
+  const std::string driver_triple = std::invoke([&]() {
+    llvm::Triple triple(target_triple);
+    if (toolchain_kind::msvc == toolchain) {
+      triple.setOS(llvm::Triple::Win32);
+      triple.setEnvironment(llvm::Triple::MSVC);
+    }
+    return triple.str();
+  });
+
+  const std::vector<std::string> external_includes = std::invoke([&]() {
+    std::vector<std::string> dirs;
+    dirs.reserve(flags.size());
+    for (const std::string &f : flags) {
+      std::string_view sv(f);
+      constexpr std::string_view p1 = "-external:I";
+      constexpr std::string_view p2 = "/external:I";
+      if (sv.starts_with(p1))
+        dirs.emplace_back(sv.substr(p1.size()));
+      else if (sv.starts_with(p2))
+        dirs.emplace_back(sv.substr(p2.size()));
+    }
+    return dirs;
+  });
+
+  const std::vector<std::string> cc1_args = std::invoke([&]() {
+    std::vector<std::string> base{
+      "omnirefl",
+      source.generic_string(),
+      "-fsyntax-only", //< AST only
+      std::format("-resource-dir={}", a.resource_dir.generic_string()),
+    };
+
+    if (toolchain != toolchain_kind::msvc)
+      base.emplace_back("-nostdinc++"); //< prevents from picking up on another
+                                        // compiler's C++ < std libs
+
+    base = util::concat(std::move(base), filter_ast_related_args(*arg_list));
+
+    for (const std::string &dir : external_includes) {
+      base.emplace_back("-I");
+      base.emplace_back(dir);
+    }
+
+    return base;
+  });
 
   // ad hoc: this is a heavy-weight solution just to get proper argument
   // translations (for other compilers' commands) and to resolve system
   // include paths...
-  // {
-  const std::string target_triple = std::invoke([&] {
-    if (const auto *a = argList->getLastArgNoClaim(options::OPT_target))
-      return llvm::Triple::normalize(a->getValue());
-    return llvm::sys::getProcessTriple();
-  });
-
-  clang::driver::Driver driver("omnirefl",
-    target_triple,
+  clang::driver::Driver driver(toolchain_kind::msvc == toolchain //
+      ? "clang-cl"
+      : "clang",
+    driver_triple,
     a.diag,
     "omnirefl reflection tool");
   driver.setCheckInputsExist(false);
@@ -1843,10 +1974,12 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
     std::make_shared<clang::CompilerInvocation>();
 
   {
-    const std::vector cc1_args_ref = to_vector_of_raw_pointers(cc1_args);
+    const std::vector cc1_args_ref2 = to_vector_of_raw_pointers(cc1_args);
+    (void)cc1_args_ref2;
     if (!clang::CompilerInvocation::CreateFromArgs(*compiler_invocation,
           // fixme: cc1_args is empty after filtering
-          // {cc1_args_ref.data(), cc1_args_ref.data() + cc1_args_ref.size()},
+          // {cc1_args_ref2.data(), cc1_args_ref2.data() +
+          // cc1_args_ref2.size()},
           compilation_args,
           a.diag)) {
       return std::unexpected(
@@ -1859,7 +1992,8 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
     clang::HeaderSearchOptions &o = compiler_invocation->getHeaderSearchOpts();
 
     // own libc++ includes are bundled
-    o.UseStandardCXXIncludes = false;
+    if (toolchain != toolchain_kind::msvc)
+      o.UseStandardCXXIncludes = false;
     o.ResourceDir = a.resource_dir.generic_string();
 
     o.AddPath(

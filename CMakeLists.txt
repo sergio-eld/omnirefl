@@ -179,6 +179,7 @@ if(ENABLE_PACKAGE)
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/reflected_target.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
+    # fixme: do not print message when building for windows
     # Debian architecture: required because Alpine has no dpkg to auto-detect.
     if(NOT CPACK_DEBIAN_PACKAGE_ARCHITECTURE)
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
