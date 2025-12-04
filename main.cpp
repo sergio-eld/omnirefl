@@ -568,7 +568,7 @@ struct enum_data {
 struct function_signature_arg {
   // fully namespace-qualified type
   nm_qual_type type_name;
-  bool is_const : 1;
+  bool is_const;
   reference_type ref_type;
 };
 
@@ -679,7 +679,7 @@ struct log {
   const std::set<meta::type_id> &dependencies;
 
   static std::string flags(int flags) {
-    // refactorme: ranges
+    // todo: return std::format + util::joined
     std::string out;
 
     if (flags & meta::type_definition::non_public) {
@@ -1189,80 +1189,85 @@ int main(int argc, char **argv) {
 
     using namespace clang::ast_matchers;
 
-    std::back_inserter(ctx_by_source_file) = std::pair{
-      source_file.path,
-      ast::reduce_matches(*ast,
-        context{},
+    std::back_inserter(ctx_by_source_file) = //
+      std::pair{
+        source_file.path,
+        // refactorme: how hard would it be to have an std::views-compatible
+        // operations here??
+        ast::reduce_matches(*ast,
+          context{},
 
-        ast::rule{
-          .pattern = ast::pattern(classTemplateSpecializationDecl,
-            unless(isInStdNamespace()),
-            hasAncestor(namespaceDecl(hasName("omni"))),
-            hasAncestor(namespaceDecl(hasName("detail"))),
-            hasName("_reflected_type"),
-            isTemplateInstantiation(),
-            isDefinition()),
-          .reduce =
-            [&ast = *ast](context a,
-              const clang::ClassTemplateSpecializationDecl &decl) {
-              std::expected resolved =
-                meta::resolve_reflected_type(decl, ast, a.resolved_types);
-              if (!resolved) {
-                a.errors.emplace_back(std::move(resolved).error());
+          ast::rule{
+            .pattern = ast::pattern(classTemplateSpecializationDecl,
+              unless(isInStdNamespace()),
+              hasAncestor(namespaceDecl(hasName("omni"))),
+              hasAncestor(namespaceDecl(hasName("detail"))),
+              hasName("_reflected_type"),
+              isTemplateInstantiation(),
+              isDefinition()),
+            .reduce =
+              [&ast = *ast](context a,
+                const clang::ClassTemplateSpecializationDecl &decl) {
+                std::expected resolved =
+                  meta::resolve_reflected_type(decl, ast, a.resolved_types);
+                if (!resolved) {
+                  a.errors.emplace_back(std::move(resolved).error());
+                  return a;
+                }
+
+                std::visit(
+                  [&a]<typename T>(T t) {
+                    if constexpr (std::same_as<meta::reflectable, T>) {
+                      meta::reflectable &r = t;
+                      a.resolved_types.emplace(r.id);
+                      a.reflected.emplace_back(std::move(r));
+                    } else if constexpr (std::same_as<meta::non_reflectable,
+                                           T>) {
+                      // todo:
+                      // Only a limited set of T in _relfected_type<T> is
+                      // supported, and it should be reported as error
+                      // diagnostics
+                    } else {
+                      static_assert(std::same_as<meta::already_reflected, T>);
+                      // todo: log for info?
+                    }
+                  },
+                  std::move(resolved->type));
+
+                std::ranges::transform(resolved->dependencies,
+                  std::inserter(a.resolved_as_dependent,
+                    a.resolved_as_dependent.end()),
+                  [](const meta::reflectable &r) { return r.id; });
+
+                a.reflected = util::concat(std::move(a.reflected),
+                  std::move(resolved->dependencies));
+
                 return a;
-              }
+              },
+          },
 
-              std::visit(
-                [&a]<typename T>(T t) {
-                  if constexpr (std::same_as<meta::reflectable, T>) {
-                    meta::reflectable &r = t;
-                    a.resolved_types.emplace(r.id);
-                    a.reflected.emplace_back(std::move(r));
-                  } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                    // todo:
-                    // Only a limited set of T in _relfected_type<T> is
-                    // supported, and it should be reported as error diagnostics
-                  } else {
-                    static_assert(std::same_as<meta::already_reflected, T>);
-                    // todo: log for info?
-                  }
-                },
-                std::move(resolved->type));
-
-              std::ranges::transform(resolved->dependencies,
-                std::inserter(a.resolved_as_dependent,
-                  a.resolved_as_dependent.end()),
-                [](const meta::reflectable &r) { return r.id; });
-
-              a.reflected = util::concat(std::move(a.reflected),
-                std::move(resolved->dependencies));
-
-              return a;
-            },
-        },
-
-        // note: `_call_impl` is not needed for header mode, so it is disabled
-        // by preprocessor
-        ast::rule{
-          .pattern = ast::pattern(cxxMethodDecl,
-            unless(isInStdNamespace()),
-            hasAncestor(namespaceDecl(hasName("omni"))),
-            hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
-            isTemplateInstantiation(),
-            hasName("_call_impl")),
-          .reduce =
-            [&ast = *ast](context a, const clang::CXXMethodDecl &call_decl) {
-              std::expected resolved =
-                meta::resolve_reflected_call(call_decl, ast);
-              if (!resolved) {
-                a.errors.emplace_back(std::move(resolved).error());
+          // note: `_call_impl` is not needed for header mode, so it is disabled
+          // by preprocessor
+          ast::rule{
+            .pattern = ast::pattern(cxxMethodDecl,
+              unless(isInStdNamespace()),
+              hasAncestor(namespaceDecl(hasName("omni"))),
+              hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
+              isTemplateInstantiation(),
+              hasName("_call_impl")),
+            .reduce =
+              [&ast = *ast](context a, const clang::CXXMethodDecl &call_decl) {
+                std::expected resolved =
+                  meta::resolve_reflected_call(call_decl, ast);
+                if (!resolved) {
+                  a.errors.emplace_back(std::move(resolved).error());
+                  return a;
+                }
+                a.calls.emplace_back(std::move(*resolved));
                 return a;
-              }
-              a.calls.emplace_back(std::move(*resolved));
-              return a;
-            },
-        }),
-    };
+              },
+          }),
+      };
 
     // todo: render to &ostream (file/console/whatever OS wants)
     // refactorme: block with conditional logging:
@@ -1281,11 +1286,10 @@ int main(int argc, char **argv) {
         .rng = ctx.calls | std::views::transform(print_log),
         .delim = "\n\n",
       });
-
-    // todo: generate file/files
   }
 
   std::cout << "\n[info] -- generating files --------";
+
   if (cli::options::source == cli_args->mode) {
     struct render_context {
       std::vector<meta::reflectable> reflected;
@@ -1321,18 +1325,102 @@ int main(int argc, char **argv) {
         return a;
       });
 
+    // -- Collapse duplicate types --------
+    static constexpr auto tie_source_location = [](const meta::reflectable &r) {
+      return std::tie(r.definition.location.source_file,
+        r.definition.location.line,
+        r.definition.location.column);
+    };
+
     std::ranges::sort(ctx.reflected,
       [](const meta::reflectable &lhs, const meta::reflectable &rhs) -> bool {
+        // refactorme: if std::variant .data contains more then two types, this
+        // must be modified (cleaner)
         static_assert(
           std::same_as<std::variant<meta::struct_data, meta::enum_data>,
             decltype(lhs.data)>);
-        // refactorme: if std::variant .data contains more then two types, this
-        // must be modified (cleaner)
 
-        // as of now enums first
-        return std::holds_alternative<meta::enum_data>(lhs.data)
-          && !std::holds_alternative<meta::enum_data>(rhs.data);
+        if (lhs.data.index() != rhs.data.index()) {
+          return std::holds_alternative<meta::enum_data>(lhs.data)
+            && !std::holds_alternative<meta::enum_data>(rhs.data);
+        }
+
+        return tie_source_location(lhs) < tie_source_location(rhs);
       });
+
+    ctx.reflected = std::ranges::fold_left(std::move(ctx.reflected)
+        | std::views::chunk_by( //
+          [](const meta::reflectable &lhs,
+            const meta::reflectable &rhs) -> bool {
+            return tie_source_location(lhs) == tie_source_location(rhs);
+          })
+        | std::views::transform(
+          [](auto group) -> std::expected<meta::reflectable, std::string> {
+            // note:
+            // this can happen, for example, if 2 different .cpp were
+            // including the same header file but with different preprocessor,
+            // selecting different type definition for different .cpp
+
+            // todo: check odr based on cli-flag condition
+            return *std::ranges::begin(group);
+          }),
+      std::vector<meta::reflectable>{},
+      [](auto a, std::expected<meta::reflectable, std::string> v) {
+        if (v) {
+          a.emplace_back(std::move(*v));
+          return a;
+        }
+        std::cerr << std::format("[error] ODR violation detected: {}\n",
+          v.error());
+        return a;
+      });
+
+    // -- collapse duplacate calls --------
+    static constexpr auto tie_func_arg =
+      [](const meta::function_signature_arg &a) {
+        return std::tie(a.type_name.namespaces,
+          a.type_name.enclosing_records,
+          a.type_name.name,
+          a.is_const,
+          a.ref_type);
+      };
+
+    std::ranges::sort(ctx.calls,
+      [](const meta::reflected_call_info &lhs,
+        const meta::reflected_call_info &rhs) -> bool {
+        return std::ranges::lexicographical_compare(lhs.f_sig.args,
+          rhs.f_sig.args,
+          [](const auto &l, const auto &r) {
+            return tie_func_arg(l) < tie_func_arg(r);
+          });
+      });
+
+    ctx.calls = std::ranges::fold_left(std::move(ctx.calls)
+        | std::views::chunk_by( //
+          [](const meta::reflected_call_info &lhs,
+            const meta::reflected_call_info &rhs) -> bool {
+            return std::ranges::equal(lhs.f_sig.args,
+              rhs.f_sig.args,
+              [](const auto &l, const auto &r) {
+                return tie_func_arg(l) == tie_func_arg(r);
+              });
+          })
+        | std::views::transform([](auto group) -> meta::reflected_call_info {
+            return *std::ranges::begin(group);
+          }),
+      std::vector<meta::reflected_call_info>{},
+      [](auto a, meta::reflected_call_info v) {
+        a.emplace_back(std::move(v));
+        return a;
+      });
+
+    // !! compare source loacations first!
+    // fixme: collapse identical types. Use chunk_by, for each group do a
+    // transform: if all the elements are the same, collapse it to one, collect
+    // locations. If they are not the same, transform to unexpected with error
+    // string referencing locations and what is different: for simplicity is
+    // equal if the same namespace + same type + same field names and order.
+    // Comparing type of each field is not practical performance-wise
 
     const std::set includes = std::ranges::fold_left(ctx.calls,
       std::ranges::fold_left(ctx.reflected,
@@ -1353,18 +1441,19 @@ int main(int argc, char **argv) {
         return acc;
       });
 
-    const fs::path out = std::invoke([&o = cli_args->out] {
-      // ad hoc to disable fs exception throwing
-      [[maybe_unused]] std::error_code ec;
-      return fs::exists(o, ec) //
-        ? fs::is_directory(o, ec) //
-          ? fs::path(o) / "source_mode_reflected.cpp"
-          : o
-        // non-existent path without extension is considered a file
-        : o.has_extension() //
-          ? o
-          : fs::path(o) / "source_mode_reflected.cpp";
-    });
+    const fs::path out = //
+      std::invoke([&o = cli_args->out] {
+        // ad hoc to disable fs exception throwing
+        [[maybe_unused]] std::error_code ec;
+        return fs::exists(o, ec) //
+          ? fs::is_directory(o, ec) //
+            ? fs::path(o) / "source_mode_reflected.cpp"
+            : o
+          // non-existent path without extension is considered a file
+          : o.has_extension() //
+            ? o
+            : fs::path(o) / "source_mode_reflected.cpp";
+      });
 
     std::error_code ec;
     fs::create_directories(out.parent_path(), ec);
