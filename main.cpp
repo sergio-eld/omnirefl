@@ -912,25 +912,25 @@ struct reflection {
                     const auto &[idx, name] = p;
                     return std::format(
                       "  struct {0}_t {{"
-                      "\n"
                       "\n    static constexpr omni::reflected_entity entity() noexcept {{ "
                       "\n      return omni::reflected_entity::member;"
                       "\n    }}"
                       "\n"
-                      "\n    constexpr static std::size_t index() noexcept {{ return {1}; }}"
+                      "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
                       "\n"
-                      "\n    constexpr static auto name() noexcept"
+                      "\n    static constexpr auto name() noexcept"
                       "\n      -> const char(&)[sizeof(\"{0}\")] {{"
                       "\n      return \"{0}\";"
                       "\n    }}"
                       "\n"
-                      "\n    constexpr static auto value(const type &t) noexcept"
+                      "\n    template <typename _T>"
+                      "\n    static constexpr auto value(const _T &t) noexcept"
                       "\n      -> const decltype(t.{0})& {{"
                       "\n      return t.{0};"
                       "\n    }}"
                       "\n"
-                      "\n    template <typename V>"
-                      "\n    static void set_value(type &t, V &&v) {{"
+                      "\n    template <typename _T, typename V>"
+                      "\n    static constexpr void set_value(_T &t, V &&v) {{"
                       "\n      t.{0} = std::forward<V>(v);"
                       "\n    }}"
                       "\n  }};",
@@ -949,7 +949,8 @@ struct reflection {
       });
   }
 
-  auto operator()(const meta::reflected_call_info &c) const noexcept {
+  static std::string format_reflected_call(
+    const meta::reflected_call_info &c) noexcept {
     // fixme: doesn't work with util::joined{.rnd = indexed | filter | transform
     std::vector<std::string> args_to_call;
     std::ranges::transform(util::indexed(c.f_sig.args)
@@ -990,6 +991,10 @@ struct reflection {
         .rng = args_to_call | std::views::all,
         .delim = ", ",
       });
+  }
+
+  auto operator()(const meta::reflected_call_info &c) const noexcept {
+    return format_reflected_call(c);
   }
 
   auto operator()(const meta::reflectable &r) const noexcept {

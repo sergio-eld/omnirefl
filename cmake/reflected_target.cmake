@@ -67,6 +67,16 @@ function(omni_reflected_target target)
         return()
     endif()
 
+    # OBJECT libraries are not supported (would cause multiple definition
+    # of explicit _call_impl specializations when their objects are reused).
+    get_target_property(target_type ${target} TYPE)
+    if(target_type STREQUAL "OBJECT_LIBRARY")
+        message(SEND_ERROR
+            "omnirefl: target ${target} is an OBJECT library, which is not supported. "
+            "Use a STATIC library or an EXECUTABLE instead.")
+        return()
+    endif()
+
     set_target_properties(${target} PROPERTIES _OMNIREFL_PROCESSED TRUE)
 
     _omni_get_target_sources(${target} _all_sources)
@@ -79,6 +89,7 @@ function(omni_reflected_target target)
         endif()
     endforeach()
 
+    # todo: do I actually care?
     if(NOT _refl_sources)
         message(SEND_ERROR
             "omnirefl: no C/C++ source or header files found for target ${target}")
@@ -114,7 +125,7 @@ function(omni_reflected_target target)
         DEPENDS ${_refl_sources}
         VERBATIM)
 
-    # Manual regeneration target: always reruns the tool when built.
+    # manual regeneration target: always reruns the tool when built.
     add_custom_target(${target}.omni
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
         COMMAND omni::tool ${_omni_args}
@@ -122,7 +133,7 @@ function(omni_reflected_target target)
         VERBATIM)
 
     # fixme: remove this line, since it runs .omni unconditionally.
-    # But for now it is simpler for me to debug on header changes 
+    # but for now it is simpler for me to debug on header changes 
     add_dependencies(${target} ${target}.omni)
     target_sources(${target} PRIVATE "${_generated}")
     target_link_libraries(${target} PRIVATE omni::refl)

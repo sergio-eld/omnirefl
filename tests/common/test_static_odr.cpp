@@ -3,9 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <omnirefl/reflected_call.hpp>
-
-TEST(odr_test, inside_test_main_cpp) {
+// note: this will not be picked up by gtest...
+TEST(odr_test, inside_test_static_odr_cpp) {
   static const odr_test::input k_input{815,
     "oceanic",
     {
@@ -24,10 +23,9 @@ TEST(odr_test, inside_test_main_cpp) {
   EXPECT_EQ(k_expected,
     omni::reflected_call(odr_test::get_field_name_values, k_input));
   EXPECT_EQ(k_expected, odr_test::in_header_call(k_input));
-  EXPECT_EQ(k_expected, odr_test::get_field_name_values_from(k_input));
 }
 
-int main(int argc, char **argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+std::vector<std::string> odr_test::get_field_name_values_from(
+  const odr_test::input &i) {
+  return odr_test::in_header_call(i);
 }

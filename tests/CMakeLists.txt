@@ -60,8 +60,12 @@ target_link_libraries(std_compat INTERFACE
     mpark_variant
     eld::pattern_matching)
 
+add_library(test.common.static_odr STATIC common/test_static_odr.cpp)
+target_link_libraries(test.common.static_odr PRIVATE GTest::GTest std_compat)
+omni_reflected_target(test.common.static_odr)
+
 add_executable(test.common common/test_main.cpp common/test.cpp common/interface_test.cpp)
-target_link_libraries(test.common PRIVATE GTest::GTest std_compat)
+target_link_libraries(test.common PRIVATE GTest::GTest std_compat test.common.static_odr)
 omni_reflected_target(test.common)
 
 add_test(NAME test.common.run_omni

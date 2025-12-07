@@ -5,16 +5,6 @@
 
 #include <omnirefl/reflected_scope.hpp>
 
-#if __cplusplus >= 201703L
-namespace compat {
-using std::apply;
-}
-#else
-namespace compat {
-using omni::detail::apply;
-}
-#endif
-
 namespace interface_test {
 
 struct tagged_type_t {
@@ -292,7 +282,7 @@ struct tagged_type_fields_reflected_tagged_t_t {
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(fields_visitor{},
+    return omni::compat::apply(fields_visitor{},
       omni::reflected_tagged_t<T>::fields());
   }
 } const static tagged_type_fields_reflected_tagged_t{};
@@ -303,7 +293,7 @@ struct tagged_type_fields_reflected_tagged_fn_t {
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(fields_visitor{},
+    return omni::compat::apply(fields_visitor{},
       omni::reflected_tagged<T>().fields());
   }
 } const static tagged_type_fields_reflected_tagged_fn{};
@@ -314,7 +304,8 @@ struct tagged_type_fields_reflected_t_t {
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(fields_visitor{}, omni::reflected_t<T>::fields());
+    return omni::compat::apply(fields_visitor{},
+      omni::reflected_t<T>::fields());
   }
 } const static tagged_type_fields_reflected_t{};
 
@@ -324,7 +315,7 @@ struct tagged_type_fields_reflected_fn2_t {
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(fields_visitor{}, omni::reflected<T>().fields());
+    return omni::compat::apply(fields_visitor{}, omni::reflected<T>().fields());
   }
 } const static tagged_type_fields_reflected_fn2{};
 
@@ -355,7 +346,7 @@ struct tagged_type_field_values_reflected_tagged_t_t {
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(field_values_visitor{},
+    return omni::compat::apply(field_values_visitor{},
       omni::reflected_tagged_t<T>::fields(t));
   }
 } const static tagged_type_field_values_reflected_tagged_t{};
@@ -366,7 +357,7 @@ struct tagged_type_field_values_reflected_tagged_fn_t {
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(field_values_visitor{},
+    return omni::compat::apply(field_values_visitor{},
       omni::reflected_tagged<T>().fields(t));
   }
 } const static tagged_type_field_values_reflected_tagged_fn{};
@@ -379,7 +370,7 @@ struct tagged_type_field_values_reflected_tagged_lv_t {
       return std::vector<std::string>();
 
     auto binding = omni::reflected_tagged(t);
-    return compat::apply(field_values_visitor{}, binding.fields());
+    return omni::compat::apply(field_values_visitor{}, binding.fields());
   }
 } const static tagged_type_field_values_reflected_tagged_lv{};
 
@@ -389,7 +380,7 @@ struct tagged_type_field_values_reflected_t_t {
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(field_values_visitor{},
+    return omni::compat::apply(field_values_visitor{},
       omni::reflected_t<T>::fields(t));
   }
 } const static tagged_type_field_values_reflected_t{};
@@ -400,7 +391,7 @@ struct tagged_type_field_values_reflected_fn_t2 {
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return compat::apply(field_values_visitor{},
+    return omni::compat::apply(field_values_visitor{},
       omni::reflected<T>().fields(t));
   }
 } const static tagged_type_field_values_reflected_fn2{};
@@ -413,7 +404,7 @@ struct tagged_type_field_values_reflected_lv_t2 {
       return std::vector<std::string>();
 
     auto binding = omni::reflected(t);
-    return compat::apply(field_values_visitor{}, binding.fields());
+    return omni::compat::apply(field_values_visitor{}, binding.fields());
   }
 } const static tagged_type_field_values_reflected_lv2{};
 
@@ -425,7 +416,7 @@ struct tagged_type_field_values_reflected_tagged_own_t {
       return std::vector<std::string>();
 
     auto owning_binding = omni::reflected_tagged(std::move(t));
-    return compat::apply(field_values_visitor{}, owning_binding.fields());
+    return omni::compat::apply(field_values_visitor{}, owning_binding.fields());
   }
 } const static tagged_type_field_values_reflected_tagged_own{};
 
@@ -437,7 +428,7 @@ struct tagged_type_field_values_reflected_own_t {
       return std::vector<std::string>();
 
     auto owning_binding = omni::reflected(std::move(t));
-    return compat::apply(field_values_visitor{}, owning_binding.fields());
+    return omni::compat::apply(field_values_visitor{}, owning_binding.fields());
   }
 } const static tagged_type_field_values_reflected_own{};
 
@@ -483,7 +474,7 @@ struct tagged_type_field_write_reflected_tagged_t_t {
     if (!omni::is_reflected<T>::value)
       return;
 
-    compat::apply(assign_fields{expected},
+    omni::compat::apply(assign_fields{expected},
       omni::reflected_tagged_t<T>::fields(t));
   }
 } const static tagged_type_field_write_reflected_tagged_t{};
@@ -495,7 +486,7 @@ struct tagged_type_field_write_reflected_tagged_fn_t {
     if (!omni::is_reflected<T>::value)
       return;
 
-    compat::apply(assign_fields{expected},
+    omni::compat::apply(assign_fields{expected},
       omni::reflected_tagged<T>().fields(t));
   }
 } const static tagged_type_field_write_reflected_tagged_fn{};
@@ -508,7 +499,7 @@ struct tagged_type_field_write_reflected_tagged_lv_t {
       return;
 
     auto binding = omni::reflected_tagged(t);
-    compat::apply(assign_fields{expected}, binding.fields());
+    omni::compat::apply(assign_fields{expected}, binding.fields());
   }
 } const static tagged_type_field_write_reflected_tagged_lv{};
 
@@ -519,7 +510,8 @@ struct tagged_type_field_write_reflected_t_t {
     if (!omni::is_reflected<T>::value)
       return;
 
-    compat::apply(assign_fields{expected}, omni::reflected_t<T>::fields(t));
+    omni::compat::apply(assign_fields{expected},
+      omni::reflected_t<T>::fields(t));
   }
 } const static tagged_type_field_write_reflected_t{};
 
@@ -530,7 +522,8 @@ struct tagged_type_field_write_reflected_fn_t2 {
     if (!omni::is_reflected<T>::value)
       return;
 
-    compat::apply(assign_fields{expected}, omni::reflected<T>().fields(t));
+    omni::compat::apply(assign_fields{expected},
+      omni::reflected<T>().fields(t));
   }
 } const static tagged_type_field_write_reflected_fn2{};
 
@@ -542,7 +535,7 @@ struct tagged_type_field_write_reflected_lv_t2 {
       return;
 
     auto binding = omni::reflected(t);
-    compat::apply(assign_fields{expected}, binding.fields());
+    omni::compat::apply(assign_fields{expected}, binding.fields());
   }
 } const static tagged_type_field_write_reflected_lv2{};
 
@@ -554,7 +547,7 @@ struct tagged_type_field_write_reflected_tagged_own_t {
       return t;
 
     auto owning_binding = omni::reflected_tagged(std::move(t));
-    compat::apply(assign_fields{expected}, owning_binding.fields());
+    omni::compat::apply(assign_fields{expected}, owning_binding.fields());
     return std::move(owning_binding.bound);
   }
 } const static tagged_type_field_write_reflected_tagged_own{};
@@ -567,11 +560,14 @@ struct tagged_type_field_write_reflected_own_t {
       return t;
 
     auto owning_binding = omni::reflected(std::move(t));
-    compat::apply(assign_fields{expected}, owning_binding.fields());
+    omni::compat::apply(assign_fields{expected}, owning_binding.fields());
     return std::move(owning_binding.bound);
   }
 } const static tagged_type_field_write_reflected_own{};
 
 } // namespace field_value_write
+
+// todo: implement
+namespace fields_for_loop {} // namespace fields_for_loop
 
 } // namespace interface_test
