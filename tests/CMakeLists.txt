@@ -53,6 +53,7 @@ FetchContent_MakeAvailable(tl_expected
     mpark_variant
     pattern_matching)
 
+# todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
 add_library(std_compat INTERFACE)
 target_link_libraries(std_compat INTERFACE
     tl::expected
@@ -64,7 +65,11 @@ add_library(test.common.static_odr STATIC common/test_static_odr.cpp)
 target_link_libraries(test.common.static_odr PRIVATE GTest::GTest std_compat)
 omni_reflected_target(test.common.static_odr)
 
-add_executable(test.common common/test_main.cpp common/test.cpp common/interface_test.cpp)
+add_executable(test.common common/test_main.cpp
+    common/dependent_types_test.cpp 
+    common/interface_test.cpp
+    # common/example_test.cpp #< fixme
+)
 target_link_libraries(test.common PRIVATE GTest::GTest std_compat test.common.static_odr)
 omni_reflected_target(test.common)
 

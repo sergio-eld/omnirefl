@@ -101,6 +101,14 @@ using detail::void_t;
 
 #if defined(__cpp_lib_transformation_trait_aliases) \
   && __cpp_lib_transformation_trait_aliases >= 201304
+using std::conditional_t;
+#else
+template <bool B, class T, class F>
+using conditional_t = typename std::conditional<B, T, F>::type;
+#endif
+
+#if defined(__cpp_lib_transformation_trait_aliases) \
+  && __cpp_lib_transformation_trait_aliases >= 201304
 using std::decay_t;
 #else
 template <typename T>
@@ -194,6 +202,12 @@ struct _is_reflected;
 } // namespace
 } // namespace detail
 
+enum class reflected_entity {
+  tagged, // struct | class | union
+  member, // tagged.field
+  enumeration, // enum | enum class
+};
+
 // todo: what about field pointer? `reflected_field<T::name>` is a valid
 // use-case, to get a string "name" for example
 
@@ -205,16 +219,24 @@ struct _is_reflected;
 template <typename T, typename = void>
 struct is_reflected;
 
-enum class reflected_entity {
-  tagged, // struct | class | union
-  member, // tagged.field
-  enumeration, // enum | enum class
-};
-
 template <typename T,
   typename Meta = detail::_reflected<compat::decay_t<T>>,
   reflected_entity = Meta::entity()>
 struct reflected_t;
+
+// struct | class | union
+template <typename T>
+using reflected_tagged_t = reflected_t<T,
+  detail::_reflected<compat::decay_t<T>>,
+  reflected_entity::tagged>;
+
+template <typename T>
+using reflected_enum_t = reflected_t<T,
+  detail::_reflected<compat::decay_t<T>>,
+  reflected_entity::enumeration>;
+
+template <typename T, reflected_entity = reflected_t<T>::entity()>
+struct reflected_binding;
 
 template <typename T>
 struct mem_binding {
@@ -450,21 +472,15 @@ struct reflected_t<T,
 };
 
 template <typename T>
-using reflected_tagged_t = reflected_t<T,
-  detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::tagged>;
-
-template <typename T>
 struct reflected_t<T,
   detail::_reflected<compat::decay_t<T>>,
   reflected_entity::enumeration> {
   using type = compat::decay_t<T>;
   using meta = detail::_reflected<type>;
 
-  static_assert(is_reflected<T>::value,
+  static_assert(std::is_enum<type>::value, "Type is not a enum");
+  static_assert(is_reflected<type>::value,
     "Type was not reflected (Calling outside a reflected scope?)");
-
-  static_assert(std::is_enum<typename meta::type>::value, "Type is not a enum");
 
   static_assert(reflected_entity::enumeration == meta::entity(),
     "Inconcistent reflection");
@@ -483,15 +499,6 @@ struct reflected_t<T,
     return meta::enumerators();
   }
 };
-
-// struct | class | union
-template <typename T>
-using reflected_enum_t = reflected_t<T,
-  detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::enumeration>;
-
-template <typename T, reflected_entity = reflected_t<T>::entity()>
-struct reflected_binding;
 
 template <typename T>
 struct reflected_binding<T, reflected_entity::tagged> {
@@ -606,50 +613,35 @@ constexpr auto reflected_enum() -> reflected_enum_t<T> {
   return {};
 }
 
-// ------------ lvalue + rvalue bindings ------------
-
-// tagged: lvalues → binding on T&
-template <typename T>
-constexpr auto reflected_tagged(T &t)
-  -> reflected_binding<T &, reflected_entity::tagged> {
-  return reflected_binding<T &, reflected_entity::tagged>(t);
-}
-
-// tagged: prvalues/xvalues → owning binding on decayed T
-template <typename T>
-constexpr auto reflected_tagged(T &&t) ->
-  typename std::enable_if<!std::is_lvalue_reference<T>::value,
-    reflected_binding<compat::decay_t<T>, reflected_entity::tagged>>::type {
-  return reflected_binding<compat::decay_t<T>, reflected_entity::tagged>(
+template <typename T,
+  typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
+    T, //< lvalues: keep reference (and const)
+    compat::decay_t<T> //< rvalues: owning, decayed
+    >>
+constexpr auto reflected_tagged(T &&t)
+  -> reflected_binding<Binding, reflected_entity::tagged> {
+  return reflected_binding<Binding, reflected_entity::tagged>(
     std::forward<T>(t));
 }
 
-// enum: lvalues
-template <typename T>
-constexpr auto reflected_enum(T &t)
-  -> reflected_binding<T &, reflected_entity::enumeration> {
-  return reflected_binding<T &, reflected_entity::enumeration>(t);
-}
-
-// enum: prvalues/xvalues
-template <typename T>
-constexpr auto reflected_enum(
-  T &&t) -> typename std::enable_if<!std::is_lvalue_reference<T>::value,
-  reflected_binding<compat::decay_t<T>, reflected_entity::enumeration>>::type {
-  return reflected_binding<compat::decay_t<T>, reflected_entity::enumeration>(
+template <typename T,
+  typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
+    T, //< lvalues: keep reference (and const)
+    compat::decay_t<T> //< rvalues: owning, decayed
+    >>
+constexpr auto reflected_enum(T &&t)
+  -> reflected_binding<Binding, reflected_entity::enumeration> {
+  return reflected_binding<Binding, reflected_entity::enumeration>(
     std::forward<T>(t));
 }
 
-// polymorphic: lvalues
-template <typename T>
-constexpr reflected_binding<T &> reflected(T &t) {
-  return reflected_binding<T &>(t);
-}
-
-// polymorphic: prvalues/xvalues
-template <typename T>
-constexpr auto reflected(T &&t) -> reflected_binding<compat::decay_t<T>> {
-  return reflected_binding<compat::decay_t<T>>(std::forward<T>(t));
+template <typename T,
+  typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
+    T, //< lvalues: keep reference (and const)
+    compat::decay_t<T> //< rvalues: owning, decayed
+    >>
+constexpr reflected_binding<Binding> reflected(T &&t) {
+  return reflected_binding<Binding>(std::forward<T>(t));
 }
 
 // -- utility -------------------

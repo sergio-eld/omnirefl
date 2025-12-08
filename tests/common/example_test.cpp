@@ -1,13 +1,13 @@
-#include "structs.h"
+
+#include "structs.h" //< todo: move to a separate file
+
+#include <omnirefl/reflected_call.hpp>
 
 #include <gtest/gtest.h>
 #include <mpark/variant.hpp>
-#include <omnirefl/reflected_call.hpp>
 
-#include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 // fixme: it seems that cmake doesn't pick up the changes that happen in an
 // included header file. it makes sence, since only the .cpp files are tracked
@@ -145,32 +145,32 @@ auto test_case(Expected e, T t, Args &&...args) {
     SUITE_NAME, \
     ::testing::ValuesIn(test_util::tuple_to_variant_array(INPUTS)))
 
-// TEST(print_names, simple) {
-//   {
-//     const example_types::championship v{};
-//     const static std::vector<std::string> expected{
-//       "name",
-//       "title",
-//     };
-//     const std::vector<std::string> result =
-//       omni::reflected_call(example_impl::print_field_names_simple, v);
-//     EXPECT_EQ(expected, result);
-//   }
-//
-//   {
-//     const example_types::wrestler v{};
-//     const static std::vector<std::string> expected{
-//       "name",
-//       "age",
-//       "catchphrase",
-//       "titles",
-//       "info",
-//     };
-//     const std::vector<std::string> result =
-//       omni::reflected_call(example_impl::print_field_names_simple, v);
-//     EXPECT_EQ(expected, result);
-//   }
-// }
+TEST(print_names, simple) {
+  {
+    const example_types::championship v{};
+    const static std::vector<std::string> expected{
+      "name",
+      "title",
+    };
+    const std::vector<std::string> result =
+      omni::reflected_call(example_impl::print_field_names_simple, v);
+    EXPECT_EQ(expected, result);
+  }
+
+  {
+    const example_types::wrestler v{};
+    const static std::vector<std::string> expected{
+      "name",
+      "age",
+      "catchphrase",
+      "titles",
+      "info",
+    };
+    const std::vector<std::string> result =
+      omni::reflected_call(example_impl::print_field_names_simple, v);
+    EXPECT_EQ(expected, result);
+  }
+}
 
 // todo: remove repetition, 'deduce' suite name from the reflection impl object
 // INSTANTIATE_REFLECTION_SUITE(print_field_names_recursive,

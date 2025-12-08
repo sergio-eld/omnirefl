@@ -62,7 +62,7 @@ struct print_enum_type_info_t {
 struct print_field_names_simple_t {
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    const auto fields = omni::reflected(t).fields;
+    const auto fields = omni::reflected(t).fields();
     std::vector<std::string> out;
     out.reserve(fields.size());
     for (const auto &f : fields)

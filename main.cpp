@@ -460,13 +460,13 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
           const std::map nodeById = result.Nodes.getMap();
           const auto found = nodeById.find(binding_tag);
           if (nodeById.end() == found) {
-            std::cerr << "DEBUG: Match::Callback false-fired.\n";
+            llvm::errs() << "DEBUG: Match::Callback false-fired.\n";
             return;
           }
 
           const auto *node = found->second.get<N>();
           if (!node) {
-            std::cerr
+            llvm::errs()
               << "DEBUG: Matc::Callback: Node of invalid type matched.\n";
             return;
           }
@@ -1040,11 +1040,11 @@ int main(int argc, char **argv) {
   const std::expected cli_args = cli::parse(argc, argv);
   if (!cli_args) {
     const auto &[code, error] = cli_args.error();
-    std::cerr << error << '\n';
+    llvm::errs() << error << '\n';
     return code;
   }
 
-  std::cout << std::format(
+  llvm::errs() << std::format(
     "\nargs:"
     "\n{}",
     format_options(*cli_args));
@@ -1079,7 +1079,7 @@ int main(int argc, char **argv) {
     std::pair<fs::path, context>>
     ctx_by_source_file;
 
-  std::cout << '\n';
+  llvm::errs() << '\n';
   // todo: I should map the `sources` into a vector of `context or error`
   // loading the ast
   for (const auto &[n_processing, source_file] :
@@ -1097,7 +1097,7 @@ int main(int argc, char **argv) {
       return diag;
     });
 
-    std::cout << std::format("[{}/{}] running {} mode for file: {}\t\r",
+    llvm::errs() << std::format("[{}/{}] running {} mode for file: {}\t\r",
       n_processing,
       cli_args->sources.size(),
       cli::to_string(cli_args->mode),
@@ -1112,7 +1112,7 @@ int main(int argc, char **argv) {
         });
 
     if (!compiler_invocation) {
-      std::cerr << compiler_invocation.error() << "\n";
+      llvm::errs() << compiler_invocation.error() << "\n";
       continue;
     }
 
@@ -1153,9 +1153,10 @@ int main(int argc, char **argv) {
       //   },
       //   std::move(p.Includes));
 
-      std::cout << (po.Macros.empty()
+      // refactorme: use single `<<` call
+      llvm::errs() << (po.Macros.empty()
           ? std::string()
-          : std::format("\n{}",
+          : std::format("\n{}\n",
               util::joined{
                 .rng = po.Macros | std::views::transform([](const auto &pair) {
                   const auto &[macro, is_undef] = pair;
@@ -1166,9 +1167,9 @@ int main(int argc, char **argv) {
                 .delim = "\n",
               }));
 
-      std::cout << (po.Includes.empty()
+      llvm::errs() << (po.Includes.empty()
           ? std::string()
-          : std::format("\n{}",
+          : std::format("{}\n",
               util::joined{
                 .rng = po.Includes | std::views::transform([](const auto &inc) {
                   return std::format("[debug] preprocessor #include \"{}\"",
@@ -1187,7 +1188,8 @@ int main(int argc, char **argv) {
         file_manager.get());
 
     if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
-      std::cout << std::format("\n[error] Failed to build AST Unit for: {}.\n",
+      llvm::errs() << std::format(
+        "\n[error] Failed to build AST Unit for: {}.\n",
         source_file.path.generic_string());
       continue;
     }
@@ -1280,7 +1282,7 @@ int main(int argc, char **argv) {
     // - reflected types
     const context &ctx = ctx_by_source_file.back().second;
     const render::log print_log{.dependencies = ctx.resolved_as_dependent};
-    std::cout << std::format(
+    llvm::errs() << std::format(
       "\n\n[info] -- types --------\n{}"
       "\n\n[info] -- calls --------\n{}",
       util::joined{
@@ -1293,7 +1295,7 @@ int main(int argc, char **argv) {
       });
   }
 
-  std::cout << "\n[info] -- generating files --------";
+  llvm::errs() << "\n[info] -- generating files --------";
 
   if (cli::options::source == cli_args->mode) {
     struct render_context {
@@ -1375,7 +1377,7 @@ int main(int argc, char **argv) {
           a.emplace_back(std::move(*v));
           return a;
         }
-        std::cerr << std::format("[error] ODR violation detected: {}\n",
+        llvm::errs() << std::format("[error] ODR violation detected: {}\n",
           v.error());
         return a;
       });
@@ -1463,7 +1465,7 @@ int main(int argc, char **argv) {
     std::error_code ec;
     fs::create_directories(out.parent_path(), ec);
     if (ec) {
-      std::cout << std::format(
+      llvm::errs() << std::format(
         "\n[error] {}."
         "\n  invalid output directory: {}",
         ec.message(),
@@ -1472,12 +1474,13 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    std::cout << std::format("\n[info] creating source mode reflection: {}",
+    llvm::errs() << std::format("\n[info] creating source mode reflection: {}",
       out.generic_string());
 
     std::ofstream out_file{out, std::ios::binary};
     if (!out_file) {
-      std::cout << std::format("\n[error] failed to open file {} for writing",
+      llvm::errs() << std::format(
+        "\n[error] failed to open file {} for writing",
         out.generic_string());
       return -1;
     }
@@ -1567,11 +1570,11 @@ int main(int argc, char **argv) {
       });
   } else {
     // todo: header mode
-    std::cout << "\n[error] header mode is not implemented\n";
+    llvm::errs() << "\n[error] header mode is not implemented\n";
     return -1;
   }
 
-  std::cout << "\n[info] done.\n";
+  llvm::errs() << "\n[info] done.\n";
 
   return 0;
 }
@@ -1935,7 +1938,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
 
   const auto &[source, flags] = sf;
 
-  std::cout << std::format(
+  llvm::errs() << std::format(
     "\n[info] input flags:"
     "\n  [{}]\n",
     util::joined{
@@ -2056,7 +2059,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
   // }
 
   // fixme: these args also need to be filtered!
-  std::cout << std::format(
+  llvm::errs() << std::format(
     "\n[info] using cc1 args:"
     "\n  [{}]\n",
     util::joined{
@@ -2380,8 +2383,9 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
         | std::views::filter([](const member_typedef_decl &m) {
             static const std::set<std::string_view> aliases{
               "key_type",
-              "value_type",
+              "type",
               "value",
+              "value_type",
             };
             return aliases.contains(m.name)
               && m.qual_type->isStructureOrClassType();
