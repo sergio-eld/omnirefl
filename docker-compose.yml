@@ -86,73 +86,57 @@ services:
         mkdir -p /build/install &&
         mv *.zip /build/install/
 
-  # todo: can I have a matrix for 18, 20, 22?
-  test-ubuntu-18:
-    image: sergioeld/test-install-ubuntu-18
+  # [18, 20, 22] [gcc, clang]
+  test-ubuntu:
+    image: sergioeld/test-install-ubuntu-$UBUNTU_VERSION-$COMPILER
     build:
       context: .
       dockerfile: test-install-ubuntu.Dockerfile
-      args: 
-        - UBUNTU_VERSION=18.04
+      args:
+        UBUNTU_VERSION: $UBUNTU_VERSION
+        COMPILER: $COMPILER
     volumes:
       - ./build-alpine/linux/install:/install:ro
+      - ./build:/build
     working_dir: /install
-    entrypoint: ['/bin/bash', '-c']
-    command:
+    entrypoint:
+      - /bin/bash
+      - -euxc
       - |
-        apt install ./omnirefl*.deb &&
-        mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-18 &&
-        ctest . --parallel --output-junit /build/test/ubuntu-18/results.xml \
-          -V | tee /build/test/ubuntu-18/results.log \
-        && apt remove -y omnirefl
+        apt install ./omnirefl*.deb
 
-  test-ubuntu-20:
-    image: sergioeld/test-install-ubuntu-20
-    build:
-      context: .
-      dockerfile: test-install-ubuntu.Dockerfile
-      args: 
-        - UBUNTU_VERSION=20.04
-    volumes:
-      - ./build-alpine/linux/install:/install:ro
-    working_dir: /install
-    entrypoint: ['/bin/bash', '-c']
-    command:
-      - |
-        apt install ./omnirefl*.deb &&
-        mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-20 &&
-        ctest . --parallel --output-junit /build/test/ubuntu-20/results.xml \
-          -V | tee /build/test/ubuntu-20/results.log \
-        && apt remove -y omnirefl
+        case $COMPILER in
+          gcc)
+            export CC=gcc
+            export CXX=g++
+            ;;
+          clang)
+            export CC=clang
+            export CXX=clang++
+            ;;
+          mingw)
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            ;;
+          *)
+            echo "Unsupported COMPILER='$COMPILER'" >&2
+            exit 1
+            ;;
+        esac
 
-  test-ubuntu-22:
-    image: sergioeld/test-install-ubuntu-22
-    build:
-      context: .
-      dockerfile: test-install-ubuntu.Dockerfile
-      args: 
-        - UBUNTU_VERSION=22.04
-    volumes:
-      - ./build-alpine/linux/install:/install:ro
-    working_dir: /install
-    entrypoint: ['/bin/bash', '-c']
-    command:
-      - |
-        apt install ./omnirefl*.deb &&
-        mkdir -p /tmp/test/build && cd /tmp/test/build
+        mkdir -p /tmp/test/build 
+        cd /tmp/test/build
         cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-22 &&
-        ctest . --parallel --output-junit /build/test/ubuntu-22/results.xml \
-          -V | tee /build/test/ubuntu-22/results.log \
-        && apt remove -y omnirefl
+        cmake .. -GNinja
 
+        mkdir -p /build/test
+        ctest . --parallel \
+          --output-junit /build/test/ubuntu-$UBUNTU_VERSION-$COMPILER-results.xml \
+          -V | tee /build/test/ubuntu-$UBUNTU_VERSION-$COMPILER-results.log
+
+        apt remove -y omnirefl
+
+  # todo: mingw, clang, msvc clang
   test-windows:
     image: sergioeld/test-install-windows
     build:
@@ -160,6 +144,7 @@ services:
       dockerfile: test-install-windows.Dockerfile
     volumes:
       - ./build-alpine/windows/install:C:\install:ro
+      - ./build:C:\build
     working_dir: C:/install
     command:
       - powershell
@@ -177,7 +162,8 @@ services:
         ; cd tests/build
         ; cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
         ; cmake --build . -j $$nproc
-        ; ctest . -V
+        ; mkdir C:/build/test
+        ; ctest . --output-junit C:/build/test/windows-results.xml -V | tee C:/build/test/windows-results.log
         ; exit $$LASTEXITCODE
         ;}
 

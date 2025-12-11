@@ -2609,8 +2609,7 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
         ? resolve_nm_qual_type(*tag)
         // no tag -> fundamental / alias. No namespaces needed.
         : meta::nm_qual_type{
-             // keeps template args for specs, OK for fundamentals
-            .name = base_q.getAsString(),
+            .name = base_q.getCanonicalType().getAsString(),
             .namespaces = {},
             .enclosing_records = {},
           },
@@ -2628,8 +2627,8 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
     if (q.isNull())
       return false;
 
-    // Strip lvalue/rvalue reference
-    clang::QualType base_q =
+    // strip lvalue/rvalue reference
+    const clang::QualType base_q =
       q->isLValueReferenceType() || q->isRValueReferenceType()
       ? q->getPointeeType()
       : q;
@@ -2650,7 +2649,7 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
       return false;
 
     // We only care if there is a usable definition
-    return rd->getDefinition() != nullptr;
+    return nullptr != rd->getDefinition();
   };
 
   struct include_info {

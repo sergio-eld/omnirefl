@@ -24,7 +24,9 @@ RUN apt update \
     && if [ "$COMPILER" = "clang" ]; then \
            apt install -y clang; \
        elif [ "$COMPILER" = "mingw" ]; then \
-           apt install -y mingw-w64; \
+           apt install -y mingw-w64 g++-mingw-w64-x86-64; \
+           update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix; \
+           update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix; \
        fi \
     && apt clean -y \
     && rm -rf /var/lib/apt/lists/*
@@ -54,12 +56,14 @@ ADD https://github.com/google/googletest/archive/refs/tags/v${GTEST_VERSION}.tar
 
 RUN set -eux; \
     if [ "$COMPILER" = "gcc" ]; then \
-        CC=gcc; CXX=g++; \
+        CC=gcc; CXX=g++; EXTRA_CMAKE_FLAGS=""; \
     elif [ "$COMPILER" = "clang" ]; then \
-        CC=clang; CXX=clang++; \
+        CC=clang; CXX=clang++; EXTRA_CMAKE_FLAGS=""; \
     elif [ "$COMPILER" = "mingw" ]; then \
-        CC=x86_64-w64-mingw32-gcc; \
-        CXX=x86_64-w64-mingw32-g++; \
+        # Use POSIX-threaded MinGW so std::mutex/std::condition_variable exist
+        CC=x86_64-w64-mingw32-gcc-posix; \
+        CXX=x86_64-w64-mingw32-g++-posix; \
+        EXTRA_CMAKE_FLAGS="-DCMAKE_SYSTEM_NAME=Windows -Dgtest_disable_pthreads=ON"; \
     else \
         echo "Unsupported COMPILER '$COMPILER' (expected gcc|clang|mingw)"; \
         exit 1; \
@@ -70,6 +74,7 @@ RUN set -eux; \
         -G Ninja \
         -DCMAKE_C_COMPILER="$CC" \
         -DCMAKE_CXX_COMPILER="$CXX" \
+        $EXTRA_CMAKE_FLAGS \
         -DBUILD_GTEST=ON \
         -DBUILD_GMOCK=ON \
         -DBUILD_SHARED_LIBS=OFF \
@@ -99,7 +104,9 @@ RUN set -eux; \
     if [ "$COMPILER" = "clang" ]; then \
         apt install -y clang; \
     elif [ "$COMPILER" = "mingw" ]; then \
-        apt install -y mingw-w64; \
+        apt install -y mingw-w64 g++-mingw-w64-x86-64; \
+        update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix; \
+        update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix; \
     fi; \
     apt clean -y; \
     rm -rf /var/lib/apt/lists/*

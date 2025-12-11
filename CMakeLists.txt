@@ -122,7 +122,14 @@ add_executable(sb.exposition exposition.cpp)
 target_link_libraries(sb.exposition omni::refl)
 
 # -- Testing / packaging setup --------
-if(ENABLE_TESTING OR ENABLE_PACKAGE)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+    if(ENABLE_TESTING)
+        message(STATUS
+            "Testing during build is disabled for cross compilation "
+            "(host: ${CMAKE_HOST_SYSTEM_NAME}, target: ${CMAKE_SYSTEM_NAME})"
+        )
+    endif()
+elseif(ENABLE_TESTING OR ENABLE_PACKAGE)
     enable_testing()
 
     # Tests in the subdir are packaged and expect to work with `find_package(omnirefl)`.

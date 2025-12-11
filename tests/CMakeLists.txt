@@ -21,8 +21,7 @@ set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 find_package(GTest QUIET)
 if (TARGET GTest::GTest)
     message(STATUS "GTest: found via find_package(), using existing GTest::GTest target")
-endif()
-if (NOT TARGET GTest::GTest)
+else()
     message(STATUS "GTest: not found via find_package(), fetching googletest with FetchContent")
 
     # do not let googletest install itself when run "cmake --install" / CPack
@@ -64,6 +63,7 @@ FetchContent_Declare(mpark_variant
 
 FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant)
 
+# todo: C++ version matrix should go here. Determine which versions current compiler supports
 # todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
 add_library(std_compat INTERFACE)
 target_link_libraries(std_compat INTERFACE
@@ -82,6 +82,7 @@ add_executable(test.common common/test_main.cpp
     # common/example_test.cpp #< fixme
 )
 
+#fixme: this results in a lot of tool reruns triggered...
 target_link_libraries(test.common PRIVATE GTest::GTest std_compat test.common.static_odr)
 omni_reflected_target(test.common)
 
