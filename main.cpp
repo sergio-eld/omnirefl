@@ -663,7 +663,7 @@ std::string_view ref_suffix(meta::reference_type r) {
   }
 }
 
-std::string format_arg(const meta::function_signature_arg &a) {
+std::string format_funcion_arg(const meta::function_signature_arg &a) {
   std::string s;
 
   if (a.is_const)
@@ -697,15 +697,15 @@ struct log {
     return out;
   }
 
-  static std::string format_signature(const meta::func_signature &f) {
+  static std::string format_funcion_signature(const meta::func_signature &f) {
     return std::format(
       "({})"
       "\n    -> {}",
       util::joined{
-        .rng = f.args | std::views::transform(format_arg),
+        .rng = f.args | std::views::transform(format_funcion_arg),
         .delim = ",\n    ",
       },
-      format_arg(f.return_type));
+      format_funcion_arg(f.return_type));
   }
 
   static auto format_definition(const meta::type_definition &d) {
@@ -801,7 +801,7 @@ struct log {
 
       // fixme: can't know call_location now
       // format_location(d.call_location),
-      format_signature(d.f_sig),
+      format_funcion_signature(d.f_sig),
       includes,
       std_includes);
   }
@@ -980,7 +980,7 @@ struct reflection {
           | std::views::transform([](const auto &p) {
               const auto &[idx, arg] = p;
               return std::format("{} {}",
-                format_arg(arg),
+                format_funcion_arg(arg),
                 0 == idx ? "_impl" : std::format("_{}", idx));
             }),
         .delim = ",\n  ",
@@ -1113,6 +1113,7 @@ int main(int argc, char **argv) {
 
     if (!compiler_invocation) {
       llvm::errs() << compiler_invocation.error() << "\n";
+      // fixme: increment and/or collect error
       continue;
     }
 
@@ -1191,6 +1192,7 @@ int main(int argc, char **argv) {
       llvm::errs() << std::format(
         "\n[error] Failed to build AST Unit for: {}.\n",
         source_file.path.generic_string());
+      // fixme: increment and/or collect error
       continue;
     }
 
@@ -1228,8 +1230,7 @@ int main(int argc, char **argv) {
                       meta::reflectable &r = t;
                       a.resolved_types.emplace(r.id);
                       a.reflected.emplace_back(std::move(r));
-                    } else if constexpr (std::same_as<meta::non_reflectable,
-                                           T>) {
+                    } else if constexpr (std::same_as<meta::non_reflectable, T>) {
                       // todo:
                       // Only a limited set of T in _relfected_type<T> is
                       // supported, and it should be reported as error
