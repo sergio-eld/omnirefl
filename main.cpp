@@ -1,4 +1,5 @@
 
+#include <sys/types.h>
 #pragma push_macro("_FORTIFY_SOURCE")
 #ifdef _FORTIFY_SOURCE
 #  undef _FORTIFY_SOURCE
@@ -70,6 +71,8 @@
 #include <variant>
 #include <vector>
 
+namespace fs = std::filesystem;
+
 namespace util {
 
 template <typename T>
@@ -99,6 +102,13 @@ struct concat_t {
     return lhs;
   }
 } constexpr const concat{};
+
+bool is_subpath(const std::filesystem::path &path,
+  const std::filesystem::path &base) {
+  const auto mismatch_pair =
+    std::mismatch(path.begin(), path.end(), base.begin(), base.end());
+  return mismatch_pair.second == base.end();
+}
 
 // todo: extend formatting context (padding, what else?)
 // todo: do I need a way to combine the adaptors? each of them should serve
@@ -179,8 +189,6 @@ struct std::formatter<util::joined<R, S>> {
     return _base.format(result, ctx);
   }
 };
-
-namespace fs = std::filesystem;
 
 namespace {
 
@@ -384,18 +392,6 @@ std::expected<options, std::pair<int, std::string>> parse(int argc,
 } // namespace cli
 
 /// configure ast-related compiler invocation parameters
-struct compiler_invocation_from_args_t {
-  // note: struct is used to hide `args` from global scope
-  struct args {
-    const fs::path &resource_dir;
-    clang::DiagnosticsEngine &diag;
-    const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager;
-  };
-
-  std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
-    operator()(const source_file &sf, args a) const noexcept;
-} constexpr const compiler_invocation_from_args{};
-
 // todo: this is a candidate for reusability (in a separate header)
 namespace ast {
 
@@ -443,8 +439,8 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
   constexpr std::string_view binding_tag = "binding_tag";
 
   constexpr auto callback_from_rule = //
-    [binding_tag]<typename M, typename N, typename R>(Accum &accum,
-      const ast::rule<M, N, R> &rule) {
+    [binding_tag]<typename Match, typename Node, typename Reduce>(Accum &accum,
+      const ast::rule<Match, Node, Reduce> &rule) {
       const auto bound_matcher =
         traverse(rule.traversal_kind, rule.pattern.match.bind(binding_tag));
       using matcher_t = decltype(bound_matcher);
@@ -452,7 +448,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
       struct _callback: MatchFinder::MatchCallback {
         matcher_t matcher;
         Accum &accum;
-        R reduce;
+        Reduce reduce;
 
         std::string_view binding_tag;
 
@@ -464,7 +460,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
             return;
           }
 
-          const auto *node = found->second.get<N>();
+          const auto *node = found->second.get<Node>();
           if (!node) {
             llvm::errs()
               << "DEBUG: Matc::Callback: Node of invalid type matched.\n";
@@ -476,7 +472,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
 
         _callback(const matcher_t &m,
           Accum &a,
-          const R &r,
+          const Reduce &r,
           std::string_view binding_tag)
             : matcher(m)
             , accum(a)
@@ -1034,6 +1030,122 @@ struct reflection {
 
 } // namespace render
 
+namespace pipeline {
+
+struct src_file_context {
+  std::vector<meta::reflectable> reflected;
+  std::vector<meta::reflected_call_info> calls;
+
+  std::set<meta::type_id> resolved_types;
+  std::set<meta::type_id> resolved_as_dependent;
+  std::vector<std::string> errors;
+
+  // to generate deps file for cmake, so it can rerun the tool upon changes to
+  // those headers
+  std::set<fs::path> includes_deps;
+};
+
+struct with_compiler_invocation {
+  std::shared_ptr<clang::CompilerInvocation> ci;
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diag;
+};
+
+std::expected<with_compiler_invocation, std::string> to_compiler_invocation(
+  const source_file &sf,
+  const fs::path &resource_dir) noexcept;
+
+with_compiler_invocation configure_compiler_invocation(
+  with_compiler_invocation wci,
+  const cli::options &cli_args) noexcept {
+  // -- todo: this is mode-related, make a map or something
+  {
+    clang::LangOptions &lo = wci.ci->getLangOpts();
+    // todo: investigate how to properly parse comments
+    lo.CommentOpts.ParseAllComments = true;
+  }
+
+  // -- todo: this is mode-related, make a map or something
+  {
+    clang::PreprocessorOptions &po = wci.ci->getPreprocessorOpts();
+
+    if (cli::options::header == cli_args.mode) {
+      constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
+
+      if (const auto omni_defined = std::ranges::find_if(po.Macros,
+            [k_omni_macro](const auto &macro_def) {
+              const auto &[macro, is_undef] = macro_def;
+              return macro == k_omni_macro;
+            });
+        po.Macros.cend() == omni_defined) {
+        // enable for the tool
+        po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
+      } else {
+        auto &[_, is_undef] = *omni_defined;
+        // todo: warning if `true == is_undef`?
+        is_undef = false;
+      }
+
+      // removing force-included reflection header that is being generated
+      std::erase_if(po.Includes,
+        [&output_dir = cli_args.out](const std::string &s) -> bool {
+          // todo: should I remove the exact path?
+          return util::is_subpath(s, output_dir);
+        });
+    }
+
+    // refactorme: use single `<<` call
+    llvm::errs() << (po.Macros.empty()
+        ? std::string()
+        : std::format("\n{}\n",
+            util::joined{
+              .rng = po.Macros | std::views::transform([](const auto &pair) {
+                const auto &[macro, is_undef] = pair;
+                return std::format("[debug] preprocessor #{} {}",
+                  is_undef ? "undef" : "define",
+                  macro);
+              }),
+              .delim = "\n",
+            }));
+
+    llvm::errs() << (po.Includes.empty()
+        ? std::string()
+        : std::format("{}\n",
+            util::joined{
+              .rng = po.Includes | std::views::transform([](const auto &inc) {
+                return std::format("[debug] preprocessor #include \"{}\"", inc);
+              }),
+              .delim = "\n",
+            }));
+  }
+
+  return wci;
+}
+
+struct with_ast {
+  std::unique_ptr<clang::ASTUnit> ast;
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diag;
+};
+
+std::expected<with_ast, std::string> to_ast(with_compiler_invocation wci,
+  const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager) {
+  // todo: how about creating the ast context directly (without
+  // clang::ASTUnit helper)
+  std::unique_ptr ast = clang::ASTUnit::LoadFromCompilerInvocation(wci.ci,
+    std::make_shared<clang::PCHContainerOperations>(),
+    wci.diag,
+    file_manager.get());
+
+  if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
+    return std::unexpected("Failed to build AST Unit.");
+
+  return with_ast{
+    .ast = std::move(ast),
+    .diag = std::move(wci.diag),
+  };
+}
+
+} // namespace pipeline
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1053,19 +1165,6 @@ int main(int argc, char **argv) {
     .WorkingDir = fs::current_path().parent_path().generic_string(),
   });
 
-  struct context {
-    std::vector<meta::reflectable> reflected;
-    std::vector<meta::reflected_call_info> calls;
-
-    std::set<meta::type_id> resolved_types;
-    std::set<meta::type_id> resolved_as_dependent;
-    std::vector<std::string> errors;
-
-    // to generate deps file for cmake, so it can rerun the tool upon changes to
-    // those headers
-    std::set<fs::path> includes_deps;
-  };
-
   // refactorme: `struct source_file` already binds fs::path and flags. I should
   // just preprocess the list by filtering and logging conflicts.
   //
@@ -1076,26 +1175,17 @@ int main(int argc, char **argv) {
     // several times with different flags (enabling
     // different things with preprocessor). I should allow
     // _explicitly_ only things I can account for.
-    std::pair<fs::path, context>>
+    std::pair<fs::path, pipeline::src_file_context>>
     ctx_by_source_file;
 
   llvm::errs() << '\n';
   // todo: I should map the `sources` into a vector of `context or error`
   // loading the ast
-  for (const auto &[n_processing, source_file] :
+
+  static const size_t k_max_errors = 2; //< todo: configure in cli
+  for (size_t errors = 0; const auto &[n_processing, source_file] :
     util::indexed(cli_args->sources, 1)) {
     // refactorme: cleanup the ast creation
-
-    // note: diag to AST is 1:1, has to be recreated each time...
-    // must outlive the ast
-    const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
-      llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
-      llvm::IntrusiveRefCntPtr diag =
-        new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
-          diag_opts,
-          new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
-      return diag;
-    });
 
     llvm::errs() << std::format("[{}/{}] running {} mode for file: {}\t\r",
       n_processing,
@@ -1103,97 +1193,28 @@ int main(int argc, char **argv) {
       cli::to_string(cli_args->mode),
       source_file.path.string());
 
-    std::expected compiler_invocation =
-      compiler_invocation_from_args(source_file,
-        {
-          .resource_dir = cli_args->resource_dir,
-          .diag = *diag,
-          .file_manager = file_manager,
+    const std::expected ast =
+      pipeline::to_compiler_invocation(source_file, cli_args->resource_dir)
+        .transform(
+          [&cli_args = *cli_args](pipeline::with_compiler_invocation wci) {
+            return pipeline::configure_compiler_invocation(std::move(wci),
+              cli_args);
+          })
+        .and_then([&file_manager](pipeline::with_compiler_invocation wci) {
+          return pipeline::to_ast(std::move(wci), file_manager);
         });
 
-    if (!compiler_invocation) {
-      llvm::errs() << compiler_invocation.error() << "\n";
-      // fixme: increment and/or collect error
-      continue;
-    }
-
-    // -- todo: this is mode-related, make a map or something
-    {
-      clang::LangOptions &lo = (*compiler_invocation)->getLangOpts();
-      // todo: investigate how to properly parse comments
-      lo.CommentOpts.ParseAllComments = true;
-    }
-
-    // -- todo: this is mode-related, make a map or something
-    {
-      clang::PreprocessorOptions &po =
-        (*compiler_invocation)->getPreprocessorOpts();
-
-      // fixme: only for header mode
-      // constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
-
-      // if (const auto omni_defined = std::ranges::find_if(po.Macros,
-      //       [k_omni_macro](const auto &macro_def) {
-      //         const auto &[macro, is_undef] = macro_def;
-      //         return macro == k_omni_macro;
-      //       });
-      //   po.Macros.cend() == omni_defined) {
-      //   po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
-      // } else {
-      //   auto &[_, is_undef] = *omni_defined;
-      //   // todo: warning if `true == is_undef`?
-      //   is_undef = false;
-      // }
-
-      // fixme:
-      // removing force-included reflection header that is being generated
-      // p.Includes = util::filtered(
-      //   [&output_dir = mode.output_dir](const std::string &s) -> bool {
-      //     // todo: should I remove the exact path?
-      //     return util::is_subpath(s, output_dir);
-      //   },
-      //   std::move(p.Includes));
-
-      // refactorme: use single `<<` call
-      llvm::errs() << (po.Macros.empty()
-          ? std::string()
-          : std::format("\n{}\n",
-              util::joined{
-                .rng = po.Macros | std::views::transform([](const auto &pair) {
-                  const auto &[macro, is_undef] = pair;
-                  return std::format("[debug] preprocessor #{} {}",
-                    is_undef ? "undef" : "define",
-                    macro);
-                }),
-                .delim = "\n",
-              }));
-
-      llvm::errs() << (po.Includes.empty()
-          ? std::string()
-          : std::format("{}\n",
-              util::joined{
-                .rng = po.Includes | std::views::transform([](const auto &inc) {
-                  return std::format("[debug] preprocessor #include \"{}\"",
-                    inc);
-                }),
-                .delim = "\n",
-              }));
-    }
-
-    // todo: how about creating the ast context directly (without clang::ASTUnit
-    // helper)
-    const std::unique_ptr ast =
-      clang::ASTUnit::LoadFromCompilerInvocation(*compiler_invocation,
-        std::make_shared<clang::PCHContainerOperations>(),
-        diag,
-        file_manager.get());
-
-    if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred()) {
+    if (!ast) {
       llvm::errs() << std::format(
-        "\n[error] Failed to build AST Unit for: {}.\n",
-        source_file.path.generic_string());
-      // fixme: increment and/or collect error
-      continue;
+        "\n[error] Failed to process {} with error: {}",
+        source_file.path.string(),
+        ast.error());
+
+      // refactorme:
+      if (k_max_errors > ++errors)
+        continue;
+      else
+        break;
     }
 
     using namespace clang::ast_matchers;
@@ -1203,8 +1224,8 @@ int main(int argc, char **argv) {
         source_file.path,
         // refactorme: how hard would it be to have an std::views-compatible
         // operations here??
-        ast::reduce_matches(*ast,
-          context{},
+        ast::reduce_matches(*ast->ast,
+          pipeline::src_file_context{},
 
           ast::rule{
             .pattern = ast::pattern(classTemplateSpecializationDecl,
@@ -1215,7 +1236,7 @@ int main(int argc, char **argv) {
               isTemplateInstantiation(),
               isDefinition()),
             .reduce =
-              [&ast = *ast](context a,
+              [&ast = *ast->ast](pipeline::src_file_context a,
                 const clang::ClassTemplateSpecializationDecl &decl) {
                 std::expected resolved =
                   meta::resolve_reflected_type(decl, ast, a.resolved_types);
@@ -1230,7 +1251,8 @@ int main(int argc, char **argv) {
                       meta::reflectable &r = t;
                       a.resolved_types.emplace(r.id);
                       a.reflected.emplace_back(std::move(r));
-                    } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                    } else if constexpr (std::same_as<meta::non_reflectable,
+                                           T>) {
                       // todo:
                       // Only a limited set of T in _relfected_type<T> is
                       // supported, and it should be reported as error
@@ -1254,8 +1276,8 @@ int main(int argc, char **argv) {
               },
           },
 
-          // note: `_call_impl` is not needed for header mode, so it is disabled
-          // by preprocessor
+          // note: `_call_impl` is not needed for header mode, so it is
+          // disabled by preprocessor
           ast::rule{
             .pattern = ast::pattern(cxxMethodDecl,
               unless(isInStdNamespace()),
@@ -1264,7 +1286,8 @@ int main(int argc, char **argv) {
               isTemplateInstantiation(),
               hasName("_call_impl")),
             .reduce =
-              [&ast = *ast](context a, const clang::CXXMethodDecl &call_decl) {
+              [&ast = *ast->ast](pipeline::src_file_context a,
+                const clang::CXXMethodDecl &call_decl) {
                 std::expected resolved =
                   meta::resolve_reflected_call(call_decl, ast);
                 if (!resolved) {
@@ -1281,7 +1304,7 @@ int main(int argc, char **argv) {
     // refactorme: block with conditional logging:
     // - cl1 flags
     // - reflected types
-    const context &ctx = ctx_by_source_file.back().second;
+    const pipeline::src_file_context &ctx = ctx_by_source_file.back().second;
     const render::log print_log{.dependencies = ctx.resolved_as_dependent};
     llvm::errs() << std::format(
       "\n\n[info] -- types --------\n{}"
@@ -1306,8 +1329,8 @@ int main(int argc, char **argv) {
       std::set<meta::type_id> dependencies;
     };
 
-    // refactorme: const ctx = ctx_by_source_file | fold_left | sort (need pipe
-    // adaptors)
+    // refactorme: const ctx = ctx_by_source_file | fold_left | sort (need
+    // pipe adaptors)
     render_context ctx = std::ranges::fold_left(std::move(ctx_by_source_file),
       render_context{},
       [](render_context a, auto &&key_val) -> render_context {
@@ -1327,8 +1350,9 @@ int main(int argc, char **argv) {
         // todo: implement later. The logic is somewhat complex. If a type is
         // reflected as dependency in file 1, but not as dependency in file 2,
         // it should not be considered 'a dependency' in the overall shared
-        // context. But for information it might be useful to output which .cpp
-        // file it was detected and if as a dependency... a.dependencies = {};
+        // context. But for information it might be useful to output which
+        // .cpp file it was detected and if as a dependency... a.dependencies
+        // = {};
 
         return a;
       });
@@ -1342,8 +1366,8 @@ int main(int argc, char **argv) {
 
     std::ranges::sort(ctx.reflected,
       [](const meta::reflectable &lhs, const meta::reflectable &rhs) -> bool {
-        // refactorme: if std::variant .data contains more then two types, this
-        // must be modified (cleaner)
+        // refactorme: if std::variant .data contains more then two types,
+        // this must be modified (cleaner)
         static_assert(
           std::same_as<std::variant<meta::struct_data, meta::enum_data>,
             decltype(lhs.data)>);
@@ -1424,11 +1448,12 @@ int main(int argc, char **argv) {
 
     // !! compare source loacations first!
     // fixme: collapse identical types. Use chunk_by, for each group do a
-    // transform: if all the elements are the same, collapse it to one, collect
-    // locations. If they are not the same, transform to unexpected with error
-    // string referencing locations and what is different: for simplicity is
-    // equal if the same namespace + same type + same field names and order.
-    // Comparing type of each field is not practical performance-wise
+    // transform: if all the elements are the same, collapse it to one,
+    // collect locations. If they are not the same, transform to unexpected
+    // with error string referencing locations and what is different: for
+    // simplicity is equal if the same namespace + same type + same field
+    // names and order. Comparing type of each field is not practical
+    // performance-wise
 
     const std::set includes = std::ranges::fold_left(ctx.calls,
       std::ranges::fold_left(ctx.reflected,
@@ -1509,7 +1534,8 @@ int main(int argc, char **argv) {
       "\n"
       "\n{1}"
       "\n"
-      "\n#include <array>" //< refactorme: ad hoc for enumerators(). No need to
+      "\n#include <array>" //< refactorme: ad hoc for enumerators(). No need
+                           // to
                            // include if no enums
       "\n{2}"
       "\n"
@@ -1581,11 +1607,10 @@ int main(int argc, char **argv) {
 }
 
 namespace {
-
 std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
   const char *const *argv) noexcept {
-  // refactorme: app description and cli parameters should be at the start of
-  // the file for clear undestanding, before 'main'
+  // refactorme: app description and cli parameters should be at the start
+  // of the file for clear undestanding, before 'main'
   CLI::App app{
     "\nC++ reflection code generator that operates in three modes:"
     "\n"
@@ -1922,10 +1947,21 @@ std::vector<std::string> filter_ast_related_args(
 }
 
 // refactorme: this is an ugly shite
-std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
-  compiler_invocation_from_args_t::operator()(const source_file &sf,
-    args a) const noexcept {
+auto pipeline::to_compiler_invocation(const source_file &sf,
+  const fs::path &resource_dir) noexcept
+  -> std::expected<with_compiler_invocation, std::string> {
   namespace options = clang::driver::options;
+
+  // note: diag to AST is 1:1, has to be recreated each time...
+  // must outlive the ast
+  const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
+    llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
+    llvm::IntrusiveRefCntPtr diag =
+      new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
+        diag_opts,
+        new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
+    return diag;
+  });
 
   const auto to_vector_of_raw_pointers =
     [](const std::vector<std::string> &v) -> std::vector<const char *> {
@@ -2012,7 +2048,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
       "omnirefl",
       source.generic_string(),
       "-fsyntax-only", //< AST only
-      std::format("-resource-dir={}", a.resource_dir.generic_string()),
+      std::format("-resource-dir={}", resource_dir.generic_string()),
     };
 
     if (toolchain != toolchain_kind::msvc)
@@ -2036,7 +2072,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
       ? "clang-cl"
       : "clang",
     driver_triple,
-    a.diag,
+    *diag,
     "omnirefl reflection tool");
   driver.setCheckInputsExist(false);
 
@@ -2079,10 +2115,8 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
           // {cc1_args_ref2.data(), cc1_args_ref2.data() +
           // cc1_args_ref2.size()},
           compilation_args,
-          a.diag)) {
-      return std::unexpected(
-        std::format("Failed to create CompilerInvocation for: {}.",
-          source.generic_string()));
+          *diag)) {
+      return std::unexpected("Failed to create CompilerInvocation.");
     }
   }
 
@@ -2092,11 +2126,11 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
     // own libc++ includes are bundled
     if (toolchain != toolchain_kind::msvc)
       o.UseStandardCXXIncludes = false;
-    o.ResourceDir = a.resource_dir.generic_string();
+    o.ResourceDir = resource_dir.generic_string();
 
     o.AddPath(
       // todo: this should be configured at compile time
-      (a.resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
+      (resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
         .generic_string(),
       clang::frontend::IncludeDirGroup::CXXSystem,
       // todo: I have no idea what are these parameters. comment
@@ -2104,7 +2138,7 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
       /*IgnoreSysRoot=*/false);
 
     // todo: this should be configured at compile time
-    o.AddPath((a.resource_dir / "include/c++/v1").generic_string(),
+    o.AddPath((resource_dir / "include/c++/v1").generic_string(),
       clang::frontend::IncludeDirGroup::CXXSystem,
       // todo: I have no idea what are these parameters. comment
       /*IsFramework=*/false,
@@ -2129,7 +2163,10 @@ std::expected<std::shared_ptr<clang::CompilerInvocation>, std::string>
     p.PCHWithHdrStopCreate = false;
   }
 
-  return compiler_invocation;
+  return with_compiler_invocation{
+    .ci = std::move(compiler_invocation),
+    .diag = std::move(diag),
+  };
 }
 
 // todo: use expected
@@ -2217,9 +2254,9 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
           const clang::IdentifierInfo *id = rec->getIdentifier();
 
           // fixme:
-          // std::optional for enclosing records to specifically signal unnamed
-          // records. I need to get back this later, because rendering this is
-          // probably more difficult...
+          // std::optional for enclosing records to specifically signal
+          // unnamed records. I need to get back this later, because rendering
+          // this is probably more difficult...
           enclosing_records.emplace_back(id ? id->getName().str() : "");
         }
 
@@ -2242,8 +2279,8 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
       std::string name =
         // fixme:
         // ad hoc: for template specializations use the printing
-        // policy to render <template args> properly. For _call_impl in source
-        // mode this is sufficient.
+        // policy to render <template args> properly. For _call_impl in
+        // source mode this is sufficient.
         !llvm::isa<clang::ClassTemplateSpecializationDecl>(td)
         ? id->getName().str()
         : clang::QualType{td.getTypeForDecl(), qual_flags}.getAsString(
@@ -2251,15 +2288,16 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
               clang::PrintingPolicy p{{}};
 
               p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
-              p.SuppressScope =
-                false; //< namespaces or enclosing records for <template args>
+              p.SuppressScope = false; //< namespaces or enclosing records
+                                       // for <template args>
               p.PrintCanonicalTypes = true;
 
               return p;
             }));
 
-      // ad hoc: (see above) for template specializations strip all scopes to
-      // the left of the last '::' before '<', keeping template args intact.
+      // ad hoc: (see above) for template specializations strip all scopes
+      // to the left of the last '::' before '<', keeping template args
+      // intact.
       if (const auto lt = name.find('<'); std::string::npos != lt) {
         if (const auto scope = name.rfind("::", lt);
           scope != std::string::npos) {
@@ -2306,8 +2344,8 @@ std::vector<std::string> public_field_names(
   std::ranges::transform(fields
       | std::views::filter([](const clang::FieldDecl *fd) {
           // todo:
-          //   consider logging for skipped fields, since we are not reporting
-          //   them as errors
+          //   consider logging for skipped fields, since we are not
+          //   reporting them as errors
           return clang::AccessSpecifier::AS_public == fd->getAccess();
         }),
     std::back_inserter(r),
@@ -2372,8 +2410,8 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
       continue;
     }
 
-    // not generating reflection info for std types, at least for now, at least
-    // here...
+    // not generating reflection info for std types, at least for now, at
+    // least here...
     //
     // refactorme: ambiguous control flow/logic
     if (!cur->isInStdNamespace())
@@ -2399,9 +2437,9 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
     // fixme: what about unions, built-in arrays?
 
     // refactorme: ad hoc solution:
-    //   in c++ code template trait types can be used, but I don't know if it is
-    //   possible to get from parsed ast.
-    //   I could, however, capture such types in `omni::detail`...
+    //   in c++ code template trait types can be used, but I don't know if
+    //   it is possible to get from parsed ast. I could, however, capture
+    //   such types in `omni::detail`...
     if (clang::Decl::ClassTemplateSpecialization == cur->getKind() &&
         [](std::string_view name) -> bool { //
           return "tuple" == name || "variant" == name;
@@ -2432,7 +2470,7 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
     for (const clang::FieldDecl *fd : cur->fields()) {
       if (clang::AccessSpecifier::AS_public != fd->getAccess()
         // todo: other checks that would prevent the field from being
-        // reflected (uniouns, bitfields, what else?)
+
         || fd->isUnnamedBitField())
         continue;
 
