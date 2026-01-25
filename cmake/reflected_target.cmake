@@ -107,7 +107,10 @@ function(omni_reflected_target target)
     # quote sources only for the command-line
     set(_refl_sources_quoted)
     foreach(src IN LISTS _refl_sources)
-        list(APPEND _refl_sources_quoted "\"${src}\"")
+        set(_source "\"${src}\":\"${target}.dir\"")
+        list(APPEND _refl_sources_quoted ${_source})
+
+        message(VERBOSE "omnirefl: for target ${target} selected source: ${_source}")
     endforeach()
 
     set(_omni_args

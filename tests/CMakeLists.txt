@@ -63,7 +63,6 @@ FetchContent_Declare(mpark_variant
 
 FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant)
 
-# todo: C++ version matrix should go here. Determine which versions current compiler supports
 # todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
 add_library(std_compat INTERFACE)
 target_link_libraries(std_compat INTERFACE
@@ -72,37 +71,61 @@ target_link_libraries(std_compat INTERFACE
     mpark_variant
 )
 
-add_library(test.common.static_odr STATIC common/test_static_odr.cpp)
-target_link_libraries(test.common.static_odr PRIVATE GTest::GTest std_compat)
-omni_reflected_target(test.common.static_odr)
+# Enumerate supported C++ standard levels (>=11) and build targets prefixed with cpp_<N>.
+set(_supported_cpp_standards "")
+foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
+    if(_f MATCHES "^cxx_std_([0-9]+)$")
+        set(_n "${CMAKE_MATCH_1}")
 
-add_executable(test.common common/test_main.cpp
-    common/dependent_types_test.cpp 
-    common/interface_test.cpp
-    # common/example_test.cpp #< fixme
-)
+        # Exclude legacy 98/03 (they are numerically >= 11), keep 11+ "year-style" standards.
+        if(_n GREATER_EQUAL 11 AND _n LESS 90)
+            list(APPEND _supported_cpp_standards "${_n}")
+        endif()
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES _supported_cpp_standards)
+list(SORT _supported_cpp_standards)
 
-#fixme: this results in a lot of tool reruns triggered...
-target_link_libraries(test.common PRIVATE GTest::GTest std_compat test.common.static_odr)
-omni_reflected_target(test.common)
+message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
 
-add_test(NAME test.common.run_omni
-    COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t test.common.omni)
+foreach(cpp_standard IN LISTS _supported_cpp_standards)
+    set(cpp_prefix "cpp_${cpp_standard}")
 
-add_test(NAME test.common.build
-    COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t test.common)
+    set(_static_odr_tgt "${cpp_prefix}.test.common.static_odr")
+    add_library(${_static_odr_tgt} STATIC common/test_static_odr.cpp)
+    target_compile_features(${_static_odr_tgt} PRIVATE cxx_std_${cpp_standard})
+    target_compile_definitions(${_static_odr_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
+    target_link_libraries(${_static_odr_tgt} PRIVATE GTest::GTest std_compat)
+    omni_reflected_target(${_static_odr_tgt})
 
-set_tests_properties(test.common.build PROPERTIES
-    DEPENDS test.common.run_omni)
+    set(_test_common_tgt "${cpp_prefix}.test.common")
+    add_executable(${_test_common_tgt}
+        common/test_main.cpp
+        common/dependent_types_test.cpp
+        common/interface_test.cpp
+        # common/example_test.cpp #< fixme
+    )
+    target_compile_features(${_test_common_tgt} PRIVATE cxx_std_${cpp_standard})
+    target_compile_definitions(${_test_common_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
+    target_link_libraries(${_test_common_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
+    omni_reflected_target(${_test_common_tgt})
 
-# When cross-compiling we can build but not execute the test binary.
-if (CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
-    add_test(NAME test.common
-        COMMAND test.common)
+    # fixme: the tool need to optimized by tracking the dependencies. 
+    # As of now, .build will rerun the .run_omni, so will the actual test. 
+    # With the std version matrix it WASTES a lot of time to run all of the tests...
+    add_test(NAME "${cpp_prefix}.test.common.run_omni"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}.omni")
 
-    set_tests_properties(test.common PROPERTIES
-        DEPENDS test.common.build)
-endif()
+    add_test(NAME "${cpp_prefix}.test.common.build"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}")
+
+    set_tests_properties("${cpp_prefix}.test.common.build" PROPERTIES DEPENDS "${cpp_prefix}.test.common.run_omni")
+
+    if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+        add_test(NAME "${cpp_prefix}.test.common" COMMAND ${_test_common_tgt})
+        set_tests_properties("${cpp_prefix}.test.common" PROPERTIES DEPENDS "${cpp_prefix}.test.common.build")
+    endif()
+endforeach()
 
 # fixme: enable 
 # function(add_reflection_test TEST_SOURCE_DIR)

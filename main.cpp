@@ -1,5 +1,4 @@
 
-#include <sys/types.h>
 #pragma push_macro("_FORTIFY_SOURCE")
 #ifdef _FORTIFY_SOURCE
 #  undef _FORTIFY_SOURCE
@@ -1055,8 +1054,8 @@ std::expected<with_compiler_invocation, std::string> to_compiler_invocation(
   const fs::path &resource_dir) noexcept;
 
 with_compiler_invocation configure_compiler_invocation(
-  with_compiler_invocation wci,
-  const cli::options &cli_args) noexcept {
+  const cli::options &cli_args,
+  with_compiler_invocation wci) noexcept {
   // -- todo: this is mode-related, make a map or something
   {
     clang::LangOptions &lo = wci.ci->getLangOpts();
@@ -1126,8 +1125,9 @@ struct with_ast {
   llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diag;
 };
 
-std::expected<with_ast, std::string> to_ast(with_compiler_invocation wci,
-  const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager) {
+std::expected<with_ast, std::string> to_ast(
+  const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager,
+  with_compiler_invocation wci) {
   // todo: how about creating the ast context directly (without
   // clang::ASTUnit helper)
   std::unique_ptr ast = clang::ASTUnit::LoadFromCompilerInvocation(wci.ci,
@@ -1142,6 +1142,82 @@ std::expected<with_ast, std::string> to_ast(with_compiler_invocation wci,
     .ast = std::move(ast),
     .diag = std::move(wci.diag),
   };
+}
+
+src_file_context collect_matches(with_ast wast) {
+  using namespace clang::ast_matchers;
+
+  return ast::reduce_matches(*wast.ast,
+    pipeline::src_file_context{},
+    ast::rule{
+      .pattern = ast::pattern(classTemplateSpecializationDecl,
+        unless(isInStdNamespace()),
+        hasAncestor(namespaceDecl(hasName("omni"))),
+        hasAncestor(namespaceDecl(hasName("detail"))),
+        hasName("_reflected_type"),
+        isTemplateInstantiation(),
+        isDefinition()),
+      .reduce =
+        [&ast = *wast.ast](pipeline::src_file_context a,
+          const clang::ClassTemplateSpecializationDecl &decl) {
+          std::expected resolved =
+            meta::resolve_reflected_type(decl, ast, a.resolved_types);
+          if (!resolved) {
+            a.errors.emplace_back(std::move(resolved).error());
+            return a;
+          }
+
+          std::visit(
+            [&a]<typename T>(T t) {
+              if constexpr (std::same_as<meta::reflectable, T>) {
+                meta::reflectable &r = t;
+                a.resolved_types.emplace(r.id);
+                a.reflected.emplace_back(std::move(r));
+              } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                // todo:
+                // Only a limited set of T in _relfected_type<T> is
+                // supported, and it should be reported as error
+                // diagnostics
+              } else {
+                static_assert(std::same_as<meta::already_reflected, T>);
+                // todo: log for info?
+              }
+            },
+            std::move(resolved->type));
+
+          std::ranges::transform(resolved->dependencies,
+            std::inserter(a.resolved_as_dependent,
+              a.resolved_as_dependent.end()),
+            [](const meta::reflectable &r) { return r.id; });
+
+          a.reflected = util::concat(std::move(a.reflected),
+            std::move(resolved->dependencies));
+
+          return a;
+        },
+    },
+
+    // note: `_call_impl` is not needed for header mode, so it is
+    // disabled by preprocessor
+    ast::rule{
+      .pattern = ast::pattern(cxxMethodDecl,
+        unless(isInStdNamespace()),
+        hasAncestor(namespaceDecl(hasName("omni"))),
+        hasAncestor(cxxRecordDecl(hasName("reflected_call_t"))),
+        isTemplateInstantiation(),
+        hasName("_call_impl")),
+      .reduce =
+        [&ast = *wast.ast](pipeline::src_file_context a,
+          const clang::CXXMethodDecl &call_decl) {
+          std::expected resolved = meta::resolve_reflected_call(call_decl, ast);
+          if (!resolved) {
+            a.errors.emplace_back(std::move(resolved).error());
+            return a;
+          }
+          a.calls.emplace_back(std::move(*resolved));
+          return a;
+        },
+    });
 }
 
 } // namespace pipeline
@@ -1183,6 +1259,59 @@ int main(int argc, char **argv) {
   // loading the ast
 
   static const size_t k_max_errors = 2; //< todo: configure in cli
+
+  {
+    const auto process_source = //
+      [&cli_args = *cli_args, &file_manager](const source_file &sf) {
+        const std::string filename = sf.path.string();
+        return pipeline::to_compiler_invocation(sf, cli_args.resource_dir)
+          .transform(std::bind_front(pipeline::configure_compiler_invocation,
+            std::cref(cli_args)))
+          .and_then(std::bind_front(pipeline::to_ast, std::cref(file_manager)))
+          .transform( //
+            [&path = sf.path](pipeline::with_ast wast)
+              -> std::pair<fs::path, pipeline::src_file_context> {
+              return {
+                path,
+                pipeline::collect_matches(std::move(wast)),
+              };
+            })
+          .transform_error([filename = sf.path.string()](std::string error) {
+            return std::format("Failed to process '{}' with error: {}",
+              filename,
+              std::move(error));
+          });
+      };
+
+    size_t errors = 0;
+    auto processed_sources = util::indexed(cli_args->sources, 1)
+      | std::views::transform(
+        [&cli_args = *cli_args](
+          const auto &indexed_src) -> const source_file & {
+          const auto &[n_processing, source_file] = indexed_src;
+
+          llvm::errs() << std::format(
+            "[{}/{}] running {} mode for file: {}\t\r",
+            n_processing,
+            cli_args.sources.size(),
+            cli::to_string(cli_args.mode),
+            source_file.path.string());
+
+          return source_file;
+        })
+      | std::views::transform(process_source)
+      | std::views::take_while([&errors](const auto &result) -> bool {
+          return result
+            || (llvm::errs() << std::format("[error] {}", result.error()),
+              k_max_errors > ++errors);
+        })
+      | std::views::filter([](const auto &e) { return e.has_value(); })
+      | std::views::transform([](auto e) { return *std::move(e); });
+
+    std::ranges::move(processed_sources,
+      std::back_inserter(ctx_by_source_file));
+  }
+
   for (size_t errors = 0; const auto &[n_processing, source_file] :
     util::indexed(cli_args->sources, 1)) {
     // refactorme: cleanup the ast creation
@@ -1197,11 +1326,11 @@ int main(int argc, char **argv) {
       pipeline::to_compiler_invocation(source_file, cli_args->resource_dir)
         .transform(
           [&cli_args = *cli_args](pipeline::with_compiler_invocation wci) {
-            return pipeline::configure_compiler_invocation(std::move(wci),
-              cli_args);
+            return pipeline::configure_compiler_invocation(cli_args,
+              std::move(wci));
           })
         .and_then([&file_manager](pipeline::with_compiler_invocation wci) {
-          return pipeline::to_ast(std::move(wci), file_manager);
+          return pipeline::to_ast(file_manager, std::move(wci));
         });
 
     if (!ast) {

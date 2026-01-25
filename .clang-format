@@ -1,5 +1,6 @@
 ﻿---
 BasedOnStyle: LLVM
+
 AccessModifierOffset: '0'
 AlignAfterOpenBracket: DontAlign
 AlignConsecutiveAssignments: 'false'
