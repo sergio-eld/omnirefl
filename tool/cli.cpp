@@ -1,13 +1,13 @@
 #include "tool/cli.hpp"
-
-#include "tl/expected.hpp"
 #include "tool/util.hpp"
 
 #include <CLI/CLI.hpp>
 #include <CLI/Error.hpp>
 
 #include <algorithm>
+#include <expected>
 #include <filesystem>
+#include <ranges>
 #include <sstream>
 #include <tuple>
 
@@ -15,7 +15,7 @@
 
 namespace {
 
-constexpr std::array map_str_verbosity = [] {
+constexpr std::array map_str_verbosity = std::invoke([] {
   using _p = std::pair<std::string_view, tool::cli::verbosity_level>;
   std::array m{
     _p{"debug", tool::cli::verbosity_level::debug},
@@ -23,11 +23,10 @@ constexpr std::array map_str_verbosity = [] {
     _p{"input", tool::cli::verbosity_level::input},
     _p{"parsed_types", tool::cli::verbosity_level::parsed_types},
   };
-  std::sort(m.begin(), m.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.first < rhs.first;
-  });
+  std::ranges::sort(m,
+    [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
   return m;
-}();
+});
 
 template <typename Key, typename Val, size_t N>
 consteval std::array<std::pair<Val, Key>, N> inverted(
@@ -72,15 +71,15 @@ std::string tool::cli::to_string(verbosity_level v) noexcept {
   return fmt::format("{}", fmt::join(values, "|"));
 }
 
-tl::expected<tool::cli::verbosity_level, tl::monostate> tool::cli::from_string(
-  std::string_view s) noexcept {
+std::expected<tool::cli::verbosity_level, std::monostate>
+  tool::cli::from_string(std::string_view s) noexcept {
   const auto found = std::find_if(::map_str_verbosity.cbegin(),
     ::map_str_verbosity.cend(),
     [s](const auto &p) { return p.first == s; });
   if (found != ::map_str_verbosity.cend())
     return found->second;
 
-  return tl::unexpected(tl::monostate());
+  return std::unexpected(std::monostate());
 }
 
 std::string tool::cli::to_string(const options &o) {
@@ -110,9 +109,7 @@ std::string tool::cli::to_string(const options &o) {
       using type = std::decay_t<decltype(_v)>;
       if constexpr (std::is_same_v<compilation_db_entry, type>) {
         const compilation_db_entry &v = _v;
-        return fmt::format("--compilation-db={},\n--exclude={}",
-          v.path.string(),
-          v.filter_paths);
+        return fmt::format("--compilation-db={},", v.path.string());
       } else {
         const std::vector<std::string> &v = _v;
         return fmt::format("--cl-flags=[{}]", fmt::join(v, " "));
@@ -137,7 +134,7 @@ sources=[{sources}],
     fmt::arg("verbosity_level", to_string(o.verbosity)));
 }
 
-tl::expected<tool::cli::options, std::pair<std::string, int>>
+std::expected<tool::cli::options, std::pair<std::string, int>>
   tool::cli::parse(int argc, const char *const *argv) noexcept {
   CLI::App app{
     R"(
@@ -161,18 +158,6 @@ Header Mode:
   const auto &opt_header_mode =
     app.add_flag("--header-mode", cli_in_place_mode)
       ->description("Use Header Mode");
-
-  // refactorme:
-  //   this doesn't make sense here, since the list of sources is fetched from a
-  //   cmake target, and here we don't assume any cmake or compilation
-  //   database...
-  bool cli_exclude_sources = false;
-  // todo: it should always go before `sources`
-  app.add_flag("--exclude",
-    cli_exclude_sources,
-    "If set, `sources` will be excluded from the set of "
-    "`compile_commands.json` source files, otherwise `sources` will be used for"
-    "fetching compilation commands.");
 
   std::vector<std::filesystem::path> cli_sources;
   app
@@ -270,7 +255,7 @@ Header Mode:
     // ad hoc wrapper
     std::stringstream ss;
     const auto code = app.exit(e, ss, ss);
-    return tl::unexpected(std::pair{std::move(ss).str(), code});
+    return std::unexpected(std::pair{std::move(ss).str(), code});
   }
 
   using mode_type = decltype(options::mode);
@@ -288,7 +273,6 @@ Header Mode:
     .cl_flags = !opt_compilation_db->empty() //
       ? cl_flags_type{compilation_db_entry{
           .path = std::move(cli_compilation_db_dir),
-          .filter_paths = cli_exclude_sources,
         }}
       : cl_flags_type{std::move(cli_cl_flags)},
     .resource_dir = std::move(cli_resource_dir),
@@ -296,7 +280,7 @@ Header Mode:
   };
 }
 
-tl::expected<tool::cli::options, std::string> tool::cli::evaluate_defaults(
+std::expected<tool::cli::options, std::string> tool::cli::evaluate_defaults(
   options o) noexcept {
   // todo: evaluate (resource dir, whatever...)
   if (!o.resource_dir.empty()) {

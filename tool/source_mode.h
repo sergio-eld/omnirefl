@@ -5,8 +5,7 @@
 //   is the one which defines which parameters it uses
 #include "tool/cli.hpp"
 
-#include <tl/expected.hpp>
-
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -17,7 +16,7 @@ class CompilationDatabase;
 
 namespace tool::source_mode {
 
-tl::expected<tl::monostate, std::string> run_pipeline(
+std::expected<std::monostate, std::string> run_pipeline(
   const cli::source_mode &mode,
   const cli::options &cli,
   const std::vector<std::filesystem::path> &sources,

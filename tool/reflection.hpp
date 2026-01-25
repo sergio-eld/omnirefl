@@ -64,7 +64,7 @@ namespace match {
 //
 //   struct result {};
 //   // todo: can I avoid having the same signature?
-//   static tl::expected<result, std::string> resolve(const node_type &node,
+//   static std::expected<result, std::string> resolve(const node_type &node,
 //     const clang::ASTUnit &ast,
 //     const std::unordered_set<std::string> &resolved_types,
 //     bool print_debug = false);

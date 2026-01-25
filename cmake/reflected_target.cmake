@@ -1,206 +1,144 @@
-# list(JOIN <list> <glue> <output variable>) since 3.12
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
-if (NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF")
-    message(STATUS "omnirefl: Forcing `CMAKE_EXPORT_COMPILE_COMMNADS=1")
-    set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile commands" FORCE)
+if(NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF"
+        AND NOT CMAKE_EXPORT_COMPILE_COMMANDS)
+    message(STATUS "omnirefl: Forcing CMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON
+        CACHE BOOL "Export compile commands" FORCE)
 endif()
 
-function(get_target_sources TARGET_NAME OUT_SOURCES)
-    if (NOT TARGET ${TARGET_NAME})
-        message(SEND_ERROR "${TARGET_NAME} is not a valid CMake Target")
+# -- Reflection tool sanity checks --------
+macro(_omni_checkhealth)
+    if(NOT TARGET omni::tool)
+        message(FATAL_ERROR
+            "omnirefl: omni::tool target not found. Use find_package(omnirefl).")
     endif()
-    get_target_property(TARGET_SOURCES ${TARGET_NAME} SOURCES)
-    if (NOT TARGET_SOURCES)
+
+    if(NOT omnirefl_RESOURCE_DIR)
+        message(FATAL_ERROR "omnirefl: omnirefl_RESOURCE_DIR is not set.")
+    endif()
+
+    if(NOT EXISTS "${omnirefl_RESOURCE_DIR}")
+        message(FATAL_ERROR
+            "omnirefl: resource dir \"${omnirefl_RESOURCE_DIR}\" not found.")
+    endif()
+endmacro()
+
+# -- Target sources helper --------
+function(_omni_get_target_sources target_name out_sources)
+    if(NOT TARGET ${target_name})
+        message(SEND_ERROR "${target_name} is not a valid CMake target")
         return()
     endif()
 
-    set(ABS_PATHS)
-    foreach(_src ${TARGET_SOURCES})
-        get_filename_component(ABS_PATH "${_src}" ABSOLUTE)
-        list(APPEND ABS_PATHS "${ABS_PATH}")
+    get_target_property(target_sources ${target_name} SOURCES)
+    if(NOT target_sources)
+        set(${out_sources} "" PARENT_SCOPE)
+        return()
+    endif()
+
+    set(abs_paths)
+    foreach(src IN LISTS target_sources)
+        get_filename_component(abs_path "${src}" ABSOLUTE)
+        list(APPEND abs_paths "${abs_path}")
     endforeach()
-    set(${OUT_SOURCES} ${ABS_PATHS} PARENT_SCOPE)
+
+    set(${out_sources} ${abs_paths} PARENT_SCOPE)
 endfunction()
 
-# todo: add args
-# - documentation:
-#   - mention that omni::refl is linked privately
-# - list of cpp files (to run only on the subset)
-function(reflected_target target)
-    set(tool_name omnirefl)
+# -- Reflected target helper (default: source mode) --------
+function(omni_reflected_target target)
+    _omni_checkhealth()
 
-    if (NOT TARGET omni::tool)
-        message(SEND_ERROR "Reflection instrument has not been detected."
-            " Use `find_package(${tool_name})`.")
-        return()
-    endif()
-
-    if (NOT TARGET ${target})
+    if(NOT TARGET ${target})
         message(SEND_ERROR "${target} is not a valid CMake target")
-    endif()
-
-    # Prevent calling twice on a single target
-    get_target_property(already_reflected ${target} _OMNIREFL_PROCESSED)
-    if (already_reflected)
-        message(SEND_ERROR 
-            "`reflected_target` called multiple times for target ${target}.")
         return()
     endif()
+
+    get_target_property(already_reflected ${target} _OMNIREFL_PROCESSED)
+    if(already_reflected)
+        message(SEND_ERROR
+            "omnirefl: omni_reflected_target called multiple times for target ${target}.")
+        return()
+    endif()
+
+    if(target MATCHES "^omni::(refl|tool)$")
+        message(SEND_ERROR "omnirefl: cannot run reflection on ${target}")
+        return()
+    endif()
+
+    # OBJECT libraries are not supported (would cause multiple definition
+    # of explicit _call_impl specializations when their objects are reused).
+    get_target_property(target_type ${target} TYPE)
+    if(target_type STREQUAL "OBJECT_LIBRARY")
+        message(SEND_ERROR
+            "omnirefl: target ${target} is an OBJECT library, which is not supported. "
+            "Use a STATIC library or an EXECUTABLE instead.")
+        return()
+    endif()
+
     set_target_properties(${target} PROPERTIES _OMNIREFL_PROCESSED TRUE)
 
-    # Prevent calling on omni::refl or omni::tool
-    if (target MATCHES "^omni::(refl|tool)$")
-        message(SEND_ERROR "Cannot run reflection on ${target}")
+    _omni_get_target_sources(${target} _all_sources)
+
+    # fixme: path/to/src.cpp:path/to/output/from/compile_db
+    set(_refl_sources)
+    foreach(src IN LISTS _all_sources)
+        if(src MATCHES "\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$")
+            list(APPEND _refl_sources "${src}")
+        endif()
+    endforeach()
+
+    # todo: do I actually care?
+    if(NOT _refl_sources)
+        message(SEND_ERROR
+            "omnirefl: no C/C++ source or header files found for target ${target}")
         return()
     endif()
 
-    set(OPTIONS 
-        PRINT_DEBUG
-        PRINT_INFO
-        HEADER_MODE)
-    set(ONE_VALUE_ARGS OUTPUT_DIR)
-    set(MULTI_VALUE_ARGS)
-    cmake_parse_arguments(ARG 
-        "${OPTIONS}" 
-        "${ONE_VALUE_ARGS}"
-        "${MULTI_VALUE_ARGS}" 
-        ${ARGN})
+    set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}/omni_${target}")
+    set(_generated "${_out_dir}/reflected_${target}_source_mode.cpp")
+    set(_comp_db "${CMAKE_BINARY_DIR}/compile_commands.json")
 
-    if (ARG_PRINT_DEBUG)
-        set(ARG_PRINT_DEBUG "--debug")
-        message(STATUS "${tool_name}: debug output enabled for target ${target}")
-    else()
-        set(ARG_PRINT_DEBUG "")
-    endif()
+    message(STATUS "omnirefl: reflected target `${target}`")
+    message(STATUS "omnirefl: selected source-mode for target ${target}")
+    message(STATUS "omnirefl: output file for target ${target}: ${_generated}")
 
-    # refactorme: pretty print block of text for reflected target
-    message(STATUS "${tool_name}: reflected target `${target}`")
-    if (ARG_HEADER_MODE)
-        message(STATUS "${tool_name}: selected header-mode for target ${target}")
-    else()
-        message(STATUS "${tool_name}: selected source-mode for target ${target}")
-    endif()
+    # quote sources only for the command-line
+    set(_refl_sources_quoted)
+    foreach(src IN LISTS _refl_sources)
+        set(_source "\"${src}\":\"${target}.dir\"")
+        list(APPEND _refl_sources_quoted ${_source})
 
-    if (ARG_PRINT_INFO)
-        set(ARG_PRINT_INFO "--info")
-        message(STATUS "${tool_name}: info output enabled for target ${target}")
-    else()
-        set(ARG_PRINT_INFO "")
-    endif()
-
-    if (ARG_EXCLUDE_SOURCES)
-        set(ARG_EXCLUDE_SOURCES "--exclude")
-        message(STATUS "${tool_name}: excluding specified sources for target ${target}")
-    else()
-        set(ARG_EXCLUDE_SOURCES "")
-    endif()
-
-    if (ARG_OUTPUT_DIR)
-        # todo: validation
-    else()
-        set(ARG_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/omni_${target}")
-    endif()
-
-    message(STATUS "${tool_name}: output dir for target ${target}: ${ARG_OUTPUT_DIR}")
-
-    get_target_sources(${target} refl_target_sources)
-
-    message(STATUS "${tool_name}: in target `${target}` reflected sources:")
-    foreach(_src ${refl_target_sources})
-        message(STATUS "${_src}")
+        message(VERBOSE "omnirefl: for target ${target} selected source: ${_source}")
     endforeach()
 
-    set(tool_resource_dir "${${tool_name}_RESOURCE_DIR}")
-    if (NOT EXISTS ${tool_resource_dir})
-        message(FATAL_ERROR "${tool_name}: resource dir \"${tool_resource_dir}\" for bundled headers not found")
-    endif()
-
-    if (ARG_HEADER_MODE)
-        set(ARG_REFL_MODE "--header-mode")
-        set(ARG_OUTPUT_FILE "")
-    else()
-        set(ARG_REFL_MODE "")
-        set(ARG_OUTPUT_FILE "--output-file=reflected_${target}.cpp")
-        set(generated_file "${ARG_OUTPUT_DIR}/reflected_${target}.cpp")
-    endif()
-
-    set(${target}_omni_args
-        "${ARG_PRINT_DEBUG}"
-        "${ARG_PRINT_INFO}"
-        "${ARG_REFL_MODE}"
-        "--resource-dir=${tool_resource_dir}"
-        # todo: ensure that compilation db is there
-        "--compilation-db=${CMAKE_BINARY_DIR}/"
-        "--output-dir=${ARG_OUTPUT_DIR}"
-        "${ARG_OUTPUT_FILE}"
-        ${refl_target_sources}
+    set(_omni_args
+        --mode=source
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --comp-db "${_comp_db}"
+        -o "${_generated}"
+        -s ${_refl_sources_quoted}
     )
 
-    # manually regenerate
-    add_custom_target(${target}.omni
-        COMMAND omni::tool ${${target}_omni_args}
-        COMMENT "Running ${tool_name} for ${target}"
+    add_custom_command(OUTPUT "${_generated}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
+        COMMAND omni::tool ${_omni_args}
+        COMMENT "Running omnirefl (source mode) for ${target}"
+        DEPENDS ${_refl_sources}
         VERBATIM)
 
-    if (ARG_HEADER_MODE)
-        set(generated_headers)
-        foreach(_src ${refl_target_sources})
-            get_filename_component(file_name "${_src}" NAME_WE)
-            set(generated_header "${ARG_OUTPUT_DIR}/${file_name}.hpp")
-            list(APPEND generated_headers ${generated_header})
+    # manual regeneration target: always reruns the tool when built.
+    add_custom_target(${target}.omni
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
+        COMMAND omni::tool ${_omni_args}
+        COMMENT "Running omnirefl (source mode) for ${target} [.omni]"
+        VERBATIM)
 
-            # todo: rerun the tool only on modified .cpp files:
-            # for example, if 2/10 files were modified, only 2 must be rerun.
-
-            # todo: check that non-reflected sources do not trigger rerun
-            # Ensure generated headers are tracked as build outputs
-            set_source_files_properties(${_src} PROPERTIES
-                OBJECT_DEPENDS "${generated_header}")
-
-            if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-                set(force_include_flag "/FI" "${generated_header}")
-            else()
-                set(force_include_flag "-include" "${generated_header}")
-            endif()
-            message(STATUS "${tool_name}: For target ${target} "
-                "forcing include '${force_include_flag}'")
-
-            get_source_file_property(current_flags ${_src} COMPILE_OPTIONS)
-            if (NOT current_flags)
-                set(current_flags "")
-            endif()
-            list(APPEND current_flags ${force_include_flag})
-
-            # fixme: file_name is not enough. Better to calculate hash from the full path
-            set(force_include_property "${file_name}_FORCE_INCLUDE")
-            set_target_properties(${target} PROPERTIES ${force_include_property} "${current_flags}")
-            # fixme:
-            #   this will cause conflicts if other targets use this source file for compilation 
-            #   (with different flags, options, etc)
-            set_source_files_properties(${_src} 
-                PROPERTIES 
-                COMPILE_OPTIONS $<TARGET_PROPERTY:${force_include_property}>
-            )
-        endforeach()
-
-        target_compile_definitions(${target} PRIVATE OMNI_HEADER_REFLECTION)
-
-        add_custom_command(OUTPUT ${generated_headers}
-            COMMAND omni::tool ${${target}_omni_args}
-            COMMENT "Running ${tool_name} for ${target}"
-            DEPENDS ${refl_target_sources}
-            VERBATIM)
-    else()
-        # todo: (?) should this rerun if generated file has been updated
-        # I have no idea how to implement it though...
-        add_custom_command(OUTPUT ${generated_file}
-            COMMAND omni::tool ${${target}_omni_args}
-            COMMENT "Running ${tool_name} for ${target}"
-            DEPENDS ${refl_target_sources}
-            VERBATIM)
-        target_sources(${target} PRIVATE ${generated_file})
-    endif()
-
+    # fixme: remove this line, since it runs .omni unconditionally.
+    # but for now it is simpler for me to debug on header changes 
+    add_dependencies(${target} ${target}.omni)
+    target_sources(${target} PRIVATE "${_generated}")
     target_link_libraries(${target} PRIVATE omni::refl)
-endfunction() 
+endfunction()
+

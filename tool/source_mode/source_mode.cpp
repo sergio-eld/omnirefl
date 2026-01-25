@@ -9,7 +9,6 @@
 #include "tool/util.hpp"
 
 #include <fmt/core.h>
-#include <tl/expected.hpp>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -21,6 +20,7 @@
 #pragma GCC diagnostic pop
 
 #include <cassert>
+#include <expected>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -78,11 +78,11 @@ void print_type_dependencies(
 
 auto fold_resolved(transforms::tu_data _accum,
   match::reflected_type::result _result) noexcept
-  -> tl::expected<transforms::tu_data, std::string> {
+  -> std::expected<transforms::tu_data, std::string> {
   return std::visit(
     [&]<typename Result>(Result &&result) {
       const tool::cli::verbosity_level verbosity = _accum._verbosity;
-      tl::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
+      std::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
       // todo:
       //   check for confilcts and inconcistencies. Note: within a single TU,
       //   makes sense to check for tool-related expectations (asserts). AST
@@ -121,8 +121,8 @@ auto fold_resolved(transforms::tu_data _accum,
 
 auto fold_resolved(transforms::tu_data _accum,
   match::reflected_impl::result result) noexcept
-  -> tl::expected<transforms::tu_data, std::string> {
-  tl::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
+  -> std::expected<transforms::tu_data, std::string> {
+  std::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
   // todo: check for conflicts
 
   accum->reflected_impls[result.id] = std::move(result.definition_data);
@@ -132,8 +132,8 @@ auto fold_resolved(transforms::tu_data _accum,
 
 auto fold_resolved(transforms::tu_data _accum,
   match::reflected_call::result result) noexcept
-  -> tl::expected<transforms::tu_data, std::string> {
-  tl::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
+  -> std::expected<transforms::tu_data, std::string> {
+  std::expected<transforms::tu_data, std::string> accum{std::move(_accum)};
 
   accum->reflected_calls.emplace_back(std::move(result.call_signature));
   accum->includes.merge(std::move(result.includes));
@@ -146,7 +146,7 @@ auto fold_resolved(transforms::tu_data _accum,
 
 namespace tool {
 
-tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
+std::expected<std::monostate, std::string> source_mode::run_pipeline(
   const cli::source_mode &mode,
   const cli::options &cli,
   const std::vector<std::filesystem::path> &sources,
@@ -171,14 +171,14 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
 
   std::map<std::filesystem::path, transforms::tu_data>
     accum_reflected_data_by_source;
-  for (const auto &[src, n_processing] : util::indexed(sources)) {
+  for (const auto &[src, n_processing] : util::indexed_ugly(sources)) {
     if (cli::verbosity_level::info & cli.verbosity) {
       fmt::println("[{}/{}] running source mode for file: {}\t\r",
         n_processing + 1,
         sources.size(),
         src.string());
     }
-    tl::expected tu_reflected_data = run_pipeline(
+    std::expected tu_reflected_data = run_pipeline(
       transforms::tu_data{
         // todo:
         //   reuse resolved types from other TUs. As of now just check for
@@ -194,7 +194,7 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
           tu_reflected_data.error());
       }
 
-      return tl::unexpected(
+      return std::unexpected(
         fmt::format("{}: AST transform failed with error: {}",
           src.string(),
           std::move(tu_reflected_data).error()));
@@ -208,7 +208,7 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
     codegen::prepare_data(std::move(accum_reflected_data_by_source),
       cli.verbosity);
   if (!output) {
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("{}: failed to prepare codegen data with error: {}",
         output_file.string(),
         std::move(output).error()));
@@ -218,7 +218,7 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
     std::error_code ec;
     std::filesystem::create_directories(output_file.parent_path(), ec);
     if (ec) {
-      return tl::unexpected(fmt::format("failed to create directory {}:{}",
+      return std::unexpected(fmt::format("failed to create directory {}:{}",
         output_file.parent_path().string(),
         ec.message()));
     }
@@ -226,13 +226,13 @@ tl::expected<tl::monostate, std::string> source_mode::run_pipeline(
 
   std::ofstream f{output_file, std::ios::binary};
   if (!f) {
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("failed to open file {} for writing", output_file.string()));
   }
 
   if (const auto res = codegen::emit_reflection_cpp_file({}, f, *output);
     !res) {
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("{}: failed to generate source file with error: {}",
         output_file.string(),
         std::move(output).error()));
@@ -251,15 +251,15 @@ auto match::reflected_type::resolve(const node_type &node,
   const clang::ASTUnit &ast,
   const std::set<refl::type_id> &resolved_types,
   [[maybe_unused]] bool print_debug) noexcept
-  -> tl::expected<result, std::string> {
+  -> std::expected<result, std::string> {
   using namespace refl;
 
   // omni::detail::_reflected_type<T>
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  tl::expected _reflected_type =
+  std::expected _reflected_type =
     util::ast::get_template_type_arg(template_decl, 0);
   if (!_reflected_type)
-    return tl::unexpected(std::move(_reflected_type).error());
+    return std::unexpected(std::move(_reflected_type).error());
   const clang::Type &reflected_type = **_reflected_type;
 
   if (reflected_type.isFundamentalType()) {
@@ -275,7 +275,7 @@ auto match::reflected_type::resolve(const node_type &node,
 
   // fixme: handle unions, C-arrays, (maybe) pointers
   if (!reflected_type.isStructureOrClassType()) {
-    return tl::unexpected(fmt::format("unsupported type {} in {}",
+    return std::unexpected(fmt::format("unsupported type {} in {}",
       // fixme:
       //   I don't think it does what I need - (namespace-qualified typename)
       reflected_type.getTypeClassName(),
@@ -298,7 +298,7 @@ auto match::reflected_type::resolve(const node_type &node,
   //   at this point (as of this writing) forward declarations are not allowed.
   //   however, with header mode I can check at the end of TU
   if (!reflected_type_decl.hasDefinition()) {
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("forward declarations are not allowed: {}", nm_qual_type));
   }
 
@@ -324,15 +324,15 @@ auto match::reflected_impl::resolve(const node_type &node,
   const clang::ASTUnit &ast,
   const std::set<refl::type_id> &resolved_types,
   [[maybe_unused]] bool print_debug) noexcept
-  -> tl::expected<result, std::string> {
+  -> std::expected<result, std::string> {
   using namespace tool::refl;
 
   // omni::detail::_reflected_impl<T>
   const clang::ClassTemplateSpecializationDecl &template_decl = node;
-  tl::expected _reflected_type =
+  std::expected _reflected_type =
     util::ast::get_template_type_arg(template_decl, 0);
   if (!_reflected_type)
-    return tl::unexpected(std::move(_reflected_type).error());
+    return std::unexpected(std::move(_reflected_type).error());
   const clang::Type &reflected_type = **_reflected_type;
 
   // todo:
@@ -340,7 +340,7 @@ auto match::reflected_impl::resolve(const node_type &node,
   //   are not allowed.
   if (!reflected_type.isStructureOrClassType()) {
     const std::string_view detail_struct_name = template_decl.getName();
-    return tl::unexpected(fmt::format("unsupported type {} in {}",
+    return std::unexpected(fmt::format("unsupported type {} in {}",
       // fixme: `getTypeClassName` doesn't do what I thought it does
       reflected_type.getTypeClassName(),
       detail_struct_name));
@@ -363,7 +363,7 @@ auto match::reflected_impl::resolve(const node_type &node,
 }
 
 auto match::reflected_call::resolve(const node_type &node,
-  const clang::ASTUnit &ast) noexcept -> tl::expected<result, std::string> {
+  const clang::ASTUnit &ast) noexcept -> std::expected<result, std::string> {
   using namespace tool::refl;
 
   const static auto printing_policy = [] {
@@ -455,7 +455,7 @@ auto transforms::fold_resolved_types(tu_data accum,
   match_result_variant<match::reflected_type,
     match::reflected_impl,
     match::reflected_call> result) noexcept
-  -> tl::expected<tu_data, std::string> {
+  -> std::expected<tu_data, std::string> {
   return std::visit(
     [&]<typename R>(R &&resolved) {
       return ::fold_resolved(std::move(accum), std::forward<R>(resolved));
@@ -466,12 +466,12 @@ auto transforms::fold_resolved_types(tu_data accum,
 auto codegen::prepare_data(std::map<std::filesystem::path, transforms::tu_data>
                              reflection_data_by_source,
   cli::verbosity_level verbosity) noexcept
-  -> tl::expected<reflection_data, std::string> {
+  -> std::expected<reflection_data, std::string> {
   const auto check_definition_requirements =
     [](const refl::type_id &id, const refl::type_definition_data &data)
-    -> tl::expected<void, std::string> {
+    -> std::expected<void, std::string> {
     if (::is_cpp_file(data.source_file)) {
-      return tl::unexpected(fmt::format(
+      return std::unexpected(fmt::format(
         "source mode does not support types defined in .cpp files: {}:{} defined in {}",
         id,
         data.nm_qual_type.value_or("unnamed"),
@@ -480,7 +480,7 @@ auto codegen::prepare_data(std::map<std::filesystem::path, transforms::tu_data>
 
     using td_flags = refl::type_definition_flags;
     if ((td_flags::local & data.definition_flags) || !data.nm_qual_type) {
-      return tl::unexpected(fmt::format(
+      return std::unexpected(fmt::format(
         "source mode does not support local or unnamed types: {}:{} defined in {}",
         id,
         data.nm_qual_type.value_or("unnamed"),

@@ -14,8 +14,7 @@
 #include <clang/AST/DeclTemplate.h>
 #pragma GCC diagnostic pop
 
-#include <tl/expected.hpp>
-
+#include <expected>
 #include <set>
 #include <string>
 #include <vector>
@@ -51,11 +50,11 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   const clang::CXXRecordDecl &root,
   const std::set<tool::refl::type_id> &resolved_types) noexcept;
 
-tl::expected<clang::Type const *, std::string> get_template_type_arg(
+std::expected<clang::Type const *, std::string> get_template_type_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   size_t n) noexcept;
 
-tl::expected<int, std::string> get_template_value_arg(
+std::expected<int, std::string> get_template_value_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   size_t n) noexcept;
 

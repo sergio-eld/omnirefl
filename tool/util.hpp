@@ -2,11 +2,13 @@
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
-#include <tl/expected.hpp>
 
+#include <algorithm>
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -71,7 +73,7 @@ struct filtered_t {
 } constexpr const inline filtered{};
 
 template <typename Container>
-constexpr auto indexed(Container &&c) noexcept {
+constexpr auto indexed_ugle(Container &&c) noexcept {
   using iterator_type = decltype(std::begin(c));
   using reference_type = decltype(*std::begin(c));
   struct _ref {
@@ -180,15 +182,15 @@ constexpr auto
 
 // todo: error for non-path strings
 auto to_std_paths(const auto &strings)
-  -> tl::expected<std::vector<std::filesystem::path>, std::string> {
-  tl::expected<std::vector<std::filesystem::path>, std::string> result{
-    tl::in_place};
+  -> std::expected<std::vector<std::filesystem::path>, std::string> {
+  std::expected<std::vector<std::filesystem::path>, std::string> result{
+    std::in_place};
   result->reserve(strings.size());
   std::error_code ec{};
   for (const auto &s : strings) {
     result->push_back(std::filesystem::absolute(s, ec).lexically_normal());
     if (ec)
-      return tl::unexpected("Invalid path `" + s + "`: " + ec.message());
+      return std::unexpected("Invalid path `" + s + "`: " + ec.message());
   }
   return result;
 }
@@ -238,7 +240,7 @@ using to_tuple_t = typename to_tuple<List>::type;
 
 // refactorme: better interface (cmp is ambiguous)
 template <typename K, typename T, typename Cmp>
-tl::expected<std::unordered_map<K, T>, std::string> merge_with_conflicts_check(
+std::expected<std::unordered_map<K, T>, std::string> merge_with_conflicts_check(
   std::unordered_map<K, T> first,
   std::unordered_map<K, T> second,
   Cmp cmp) {
@@ -249,8 +251,8 @@ tl::expected<std::unordered_map<K, T>, std::string> merge_with_conflicts_check(
       first.insert(second.extract(node++));
       continue;
     }
-    if (tl::expected res = cmp(k, v, found->second); !res)
-      return tl::unexpected(std::move(res).error());
+    if (std::expected res = cmp(k, v, found->second); !res)
+      return std::unexpected(std::move(res).error());
     ++node;
   }
   return {std::move(first)};

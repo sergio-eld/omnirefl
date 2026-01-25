@@ -4,6 +4,7 @@
 
 #include <fmt/core.h>
 
+#include <expected>
 #include <string_view>
 
 namespace {
@@ -109,7 +110,7 @@ void omni::reflected_call_t::_call_impl(
 }})",
     fmt::arg("params",
       util::join( //
-        util::indexed(func_sig.args),
+        util::indexed_ugly(func_sig.args),
         // ad hoc: manual offset
         ",\n  ",
         [](const auto &_param, fmt::context &ctx) {
@@ -141,7 +142,7 @@ void omni::reflected_call_t::_call_impl(
     fmt::arg("args",
       util::join(
         // todo: sliced(func_sig.args, 1)
-        util::indexed(func_sig.args),
+        util::indexed_ugly(func_sig.args),
         "",
         [](const auto &_arg, fmt::context &ctx) {
           const auto &[_, index] = _arg;
@@ -167,7 +168,7 @@ namespace tool::source_mode {
 // for instance, a reflection data struct can be a template, thus avoiding
 // the need for header inclusion until instantiations
 
-tl::expected<void, std::string> codegen::emit_reflection_cpp_file(options,
+std::expected<void, std::string> codegen::emit_reflection_cpp_file(options,
   std::ostream &os,
   const reflection_data &data) {
   using namespace std::string_view_literals;

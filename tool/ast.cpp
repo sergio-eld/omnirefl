@@ -1,7 +1,8 @@
 #include "tool/ast.hpp"
-#include "fmt/base.h"
 #include "tool/cli.hpp"
 #include "tool/util.hpp"
+
+#include <concepts>
 #include <memory>
 
 #pragma GCC diagnostic push
@@ -19,9 +20,12 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <expected>
 #include <string_view>
 
 namespace {
+
+// reactorme: there's actally no need for this function to be a template
 template <typename Mode>
 void configure_compiler_invocation(const Mode &m,
   tool::cli::verbosity_level verbosity,
@@ -73,7 +77,8 @@ void configure_compiler_invocation(const Mode &m,
   // createInvocationFromCommandLine sets DisableFree.
   ci.getFrontendOpts().DisableFree = false;
   // todo: ifdef based on clang version, otherwise these code results in
-  // compilation errors ci.getLangOpts()->CommentOpts.ParseAllComments = true;
+  // compilation errors
+  // ci.getLangOpts()->CommentOpts.ParseAllComments = true;
   // ci.getLangOpts()->RetainCommentsFromSystemHeaders = true;
 
   [](auto &diag) {
@@ -103,7 +108,7 @@ void configure_compiler_invocation(const Mode &m,
     p.PCHWithHdrStop = false;
     p.PCHWithHdrStopCreate = false;
 
-    if constexpr (std::is_same_v<Mode, tool::cli::header_mode>) {
+    if constexpr (std::same_as<tool::cli::header_mode, Mode>) {
       const tool::cli::header_mode &mode = m;
       constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
 
@@ -144,7 +149,7 @@ void configure_compiler_invocation(const Mode &m,
         }));
       }
     } else {
-      static_assert(std::is_same_v<Mode, tool::cli::source_mode>);
+      static_assert(std::same_as<tool::cli::source_mode, Mode>);
       (void)m;
       (void)verbosity;
     }
@@ -152,7 +157,7 @@ void configure_compiler_invocation(const Mode &m,
 }
 
 template <typename Mode>
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+std::expected<std::unique_ptr<clang::ASTUnit>, std::string>
   parse_ast_from_source(const Mode &mode,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
@@ -160,9 +165,9 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const clang::tooling::CompilationDatabase &db,
     const std::optional<std::filesystem::path> &output_path,
     tool::cli::verbosity_level verbosity) noexcept {
-  using result_t = tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
+  using result_t = std::expected<std::unique_ptr<clang::ASTUnit>, std::string>;
   struct: clang::tooling::ToolAction {
-    result_t m_result = tl::unexpected("unexpected: tool was not invoked");
+    result_t m_result = std::unexpected("unexpected: tool was not invoked");
     std::string_view m_resource_dir;
     const Mode *mode;
     tool::cli::verbosity_level m_verbosity;
@@ -221,7 +226,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
 
       if (!ast || ast->getDiagnostics().hasUnrecoverableErrorOccurred()) {
         // todo: filename and diagnostics
-        m_result = tl::unexpected(std::string("failed to parse AST"));
+        m_result = std::unexpected(std::string("failed to parse AST"));
         return false;
       }
 
@@ -253,12 +258,12 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
   const int run_resutl = tool.run(&adapter);
   if (!adapter.m_result || 0 == run_resutl)
     return std::move(adapter.m_result);
-  return tl::unexpected("errors while invoking ClangTool::run");
+  return std::unexpected("errors while invoking ClangTool::run");
 }
 
 } // namespace
 
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+std::expected<std::unique_ptr<clang::ASTUnit>, std::string>
   tool::parse_ast_from_source(const cli::source_mode &m,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
@@ -273,7 +278,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     verbosity);
 }
 
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+std::expected<std::unique_ptr<clang::ASTUnit>, std::string>
   tool::parse_ast_from_source(const cli::header_mode &m,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
@@ -288,7 +293,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     verbosity);
 }
 
-tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
+std::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
   tool::load_compilation_db(
     const std::filesystem::path &compilation_db_path) noexcept {
   std::string err;
@@ -298,9 +303,6 @@ tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
 
   if (!ptr)
     // todo: reference the path in the error
-    return tl::unexpected(std::move(err));
-  return {
-    tl::in_place,
-    std::move(ptr),
-  };
-};
+    return std::unexpected(std::move(err));
+  return ptr;
+}

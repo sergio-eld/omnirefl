@@ -4,6 +4,8 @@
 
 #include <fmt/core.h>
 
+#include <expected>
+
 namespace {
 
 using namespace tool::header_mode;
@@ -173,7 +175,7 @@ auto fmt_forward_declaration(const codegen::forward_declarable &t,
 
 namespace tool::header_mode {
 
-tl::expected<void, std::string> codegen::emit_reflection_header_file(options,
+std::expected<void, std::string> codegen::emit_reflection_header_file(options,
   std::ostream &os,
   const reflection_data &data) {
   using namespace std::string_view_literals;

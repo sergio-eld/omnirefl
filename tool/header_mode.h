@@ -2,8 +2,7 @@
 
 #include "tool/cli.hpp"
 
-#include <tl/expected.hpp>
-
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -24,7 +23,7 @@ namespace tool::header_mode {
 //      - config: (resource_dir). 
 //      - input: sources, output dir, compilation_db
 //
-tl::expected<tl::monostate, std::string> run_pipeline(
+std::expected<std::monostate, std::string> run_pipeline(
   const cli::header_mode &mode,
   const cli::options &cli,
   // refactorme:

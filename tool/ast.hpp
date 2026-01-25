@@ -2,7 +2,6 @@
 
 #include "tool/cli.hpp"
 #include "tool/util.hpp"
-#include <optional>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -16,10 +15,11 @@
 #pragma GCC diagnostic pop
 
 #include <fmt/core.h>
-#include <tl/expected.hpp>
 
+#include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -27,7 +27,7 @@
 
 namespace tool {
 // todo: add continious benchmarking to CI before optimizing this
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+std::expected<std::unique_ptr<clang::ASTUnit>, std::string>
   parse_ast_from_source(const cli::source_mode &,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
@@ -38,7 +38,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::optional<std::filesystem::path> &output_file,
     tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
 
-tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
+std::expected<std::unique_ptr<clang::ASTUnit>, std::string>
   parse_ast_from_source(const cli::header_mode &,
     const std::filesystem::path &resource_dir,
     const std::filesystem::path &source,
@@ -49,7 +49,7 @@ tl::expected<std::unique_ptr<clang::ASTUnit>, std::string>
     const std::optional<std::filesystem::path> &output_file,
     tool::cli::verbosity_level = tool::cli::verbosity_level::none) noexcept;
 
-tl::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
+std::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
   load_compilation_db(
     const std::filesystem::path &compilation_db_path) noexcept;
 
@@ -78,7 +78,7 @@ struct node_transform {
   // static_assert(requires(const ResolveNode &resolve,
   //   const typename Match::node_type &n,
   //   const clang::ASTUnit &ast) {
-  //   tl::expected{resolve(n, ast)};
+  //   std::expected{resolve(n, ast)};
   //   { resolve(n, ast).error() } -> std::convertible_to<std::string>;
   // });
 };
@@ -92,6 +92,18 @@ struct is_of_template<Template<T...>, Template>: std::true_type {};
 template <typename T, template <typename...> class Template>
 concept of_template = requires { is_of_template<T, Template>{}; };
 
+/*
+ * refactorme: core pipeline should be as simple as:
+ *
+ * [(source, [flags], [opts])]
+ * | compiler_invocation -> ast
+ * | fold(context, matchers_by_mode[mode]) -> context
+ * | generator_by_mode[mode]
+ *
+ */
+
+// refactorme: modular design. it should be easy to do in-place composition
+// instead of forcing 'complex logic' upon a user
 template <typename Mode, typename... NodeTransforms>
 struct tu_pipeline {
   static_assert((of_template<NodeTransforms, node_transform> && ...));
@@ -115,9 +127,9 @@ struct tu_pipeline {
   //   I could have ASTUnit as an input instead of `src`
   //   Also, why would I necessarilly need `Accum` here?
   template <typename Accum>
-  tl::expected<Accum, std::string> operator()(Accum _accum,
+  std::expected<Accum, std::string> operator()(Accum _accum,
     const std::filesystem::path &src) const noexcept {
-    tl::expected ast = tool::parse_ast_from_source(mode,
+    std::expected ast = tool::parse_ast_from_source(mode,
       resource_dir,
       src,
       // todo: continious benchmark before
@@ -126,27 +138,29 @@ struct tu_pipeline {
       /*output_file=*/std::nullopt, //< fixme: pass the file
       verbosity);
     if (!ast) {
-      return tl::unexpected(fmt::format("Error parsing AST of file {}: {}",
+      return std::unexpected(fmt::format("Error parsing AST of file {}: {}",
         src.string(),
         std::move(ast).error()));
     }
 
     using fetch_transform = std::variant<const NodeTransforms *...> (*)(
       const std::tuple<NodeTransforms...> &);
-    static const auto k_transform_by_tag_map =
+
+    static const std::map k_transform_by_tag_map = std::invoke(
       []<size_t... I>(std::index_sequence<I...>,
         std::type_identity<NodeTransforms>...)
-      -> std::map<std::string_view, fetch_transform> {
-      return {{std::string_view{NodeTransforms::match_node_type::binding_tag},
-        static_cast<fetch_transform>(
-          [](const std::tuple<NodeTransforms...> &t)
-            -> std::variant<const NodeTransforms *...> {
-            return std::addressof(std::get<I>(t));
-          })}...};
-    }(std::index_sequence_for<NodeTransforms...>(),
-        std::type_identity<NodeTransforms>{}...);
+        -> std::map<std::string_view, fetch_transform> {
+        return {{std::string_view{NodeTransforms::match_node_type::binding_tag},
+          static_cast<fetch_transform>(
+            [](const std::tuple<NodeTransforms...> &t)
+              -> std::variant<const NodeTransforms *...> {
+              return std::addressof(std::get<I>(t));
+            })}...};
+      },
+      std::index_sequence_for<NodeTransforms...>(),
+      std::type_identity<NodeTransforms>{}...);
 
-    tl::expected<Accum, std::string> accum{std::move(_accum)};
+    std::expected<Accum, std::string> accum{std::move(_accum)};
     // adapter
     using namespace clang::ast_matchers;
     struct: MatchFinder::MatchCallback {
@@ -170,36 +184,36 @@ struct tu_pipeline {
           if (cli::verbosity_level::parsed_types & _this->verbosity)
             fmt::println("matched tag {}", str_tag);
 
-          if (tl::expected resolved = std::visit(
+          if (std::expected resolved = std::visit(
                 [&]<typename Match, typename ResolveNode, typename FoldResult>(
                   const node_transform<Match, ResolveNode, FoldResult>
                     *_node_transform)
-                  -> tl::expected<tl::monostate, std::string> {
+                  -> std::expected<std::monostate, std::string> {
                   const node_transform<Match, ResolveNode, FoldResult>
                     &node_transform = *_node_transform;
                   const auto *expected_node =
                     node.template get<typename Match::node_type>();
                   if (!expected_node) {
-                    return tl::unexpected(
+                    return std::unexpected(
                       fmt::format("Error: unexpected node type for tag {}",
                         str_tag));
                   }
 
-                  tl::expected resolved_reflection_data =
+                  std::expected resolved_reflection_data =
                     node_transform.resolve_node(*expected_node, *ast, *accum);
                   if (!resolved_reflection_data) {
-                    return tl::unexpected(fmt::format(
+                    return std::unexpected(fmt::format(
                       "Error: failed resolving reflection data for tag {}: {}",
                       str_tag,
                       std::move(resolved_reflection_data).error()));
                   }
 
-                  tl::expected updated_accum =
+                  std::expected updated_accum =
                     node_transform.fold_result(std::move(*accum),
                       std::move(resolved_reflection_data).value());
                   if (!updated_accum) {
                     fatal_error = true;
-                    return tl::unexpected(fmt::format(
+                    return std::unexpected(fmt::format(
                       "Error: failed updating reflection data for tag {}: {}",
                       str_tag,
                       std::move(updated_accum).error()));
@@ -251,7 +265,7 @@ struct tu_pipeline {
     if (!match_callback.fatal_error)
       return accum;
 
-    return tl::unexpected(
+    return std::unexpected(
       fmt::format("{}", fmt::join(std::move(match_callback.errors), "\n")));
   }
 };

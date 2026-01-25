@@ -1,0 +1,135 @@
+#pragma once
+
+
+// todo: copyright and detailed explanation
+//
+// this header adds support for reflecting types via reflected_call
+
+#include <type_traits>
+#include <utility>
+
+namespace omni {
+
+// refactorme: move `detail` into private scope of `reflected_call_t`
+namespace detail {
+namespace {
+
+#ifdef OMNI_REFLECTED_INDEXED_CALLS
+
+template <int Id>
+struct counter {
+  struct generator {
+#  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wnon-template-friend"
+#  elif defined _MSC_VER
+#    pragma warning(push)
+#    pragma warning(disable : 4396)
+#  endif
+
+    // This does not compile on GCC < 11, and gives warning if not a template
+    // template <typename...>
+    friend constexpr bool generate(counter) {
+      return true;
+    }
+  };
+
+  // template <typename...>
+  friend constexpr bool generate(counter);
+
+#  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+#    pragma GCC diagnostic pop
+#  elif defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
+
+#  if defined _MSC_VER
+#    pragma warning(push)
+#    pragma warning(disable : 4514)
+#    pragma warning(disable : 4710)
+#  endif
+
+  template <typename Tag = counter, int I = (int)generate(Tag{})>
+  static constexpr std::true_type exists(int) {
+    return {};
+  }
+
+  static constexpr std::false_type exists(...) {
+    return generator(), std::false_type{};
+  }
+#  if defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
+};
+
+template <typename T, int Id>
+constexpr int unique_id(std::false_type) {
+  return Id;
+}
+
+template <typename T, int Id>
+constexpr int unique_id(std::true_type);
+
+template <typename T, int Id = int{}>
+constexpr int unique_id() {
+  return unique_id<T, Id>(counter<Id>::exists(Id));
+}
+
+template <typename T, int Id>
+constexpr int unique_id(std::true_type) {
+  return unique_id<T, Id + 1>();
+}
+
+// meta type to assign index to a type upon instantiation
+template <typename T, int Index = unique_id<T>()>
+struct _reflected_indexed_type {};
+
+#else
+
+// tag used in target mode to collect reflected types
+template <typename>
+struct _reflected_type {};
+
+// tag used in target mode to collect reflected implementation types
+template <typename>
+struct _reflected_impl {};
+
+#endif
+} // namespace
+} // namespace detail
+
+/// class to invoke a callable implementation object
+struct reflected_call_t {
+  template <typename Impl, typename T, typename... Args>
+  auto operator()(Impl &&impl, T &&t, Args &&...args) const {
+    using type = typename std::decay<T>::type;
+#ifdef OMNI_REFLECTED_INDEXED_CALLS
+    // testme: use inside inline non-template function defined in a header file
+    // testme: use inside a template function defined in a header file
+    //
+    //   forced include may break the order of index instantiations (as long as
+    //   header-mode includes headers of reflected types).
+    (void)detail::_reflected_indexed_type<type>{};
+#  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
+    return std::forward<Impl>(
+      impl)(std::forward<T>(t), std::forward<Args>(args)...);
+#  endif
+#else
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    (void)detail::_reflected_type<type>{};
+    return _call_impl(std::forward<Impl>(impl),
+      std::forward<T>(t),
+      std::forward<Args>(args)...);
+#endif
+  }
+
+  private:
+#ifndef OMNI_REFLECTED_INDEXED_CALLS
+  // implementation will be generated for this function by omnirefl
+  template <typename Impl, typename... Args>
+  static auto _call_impl(Impl &&impl, Args &&...args)
+    -> decltype(std::declval<Impl>()(std::declval<Args>()...));
+#endif
+} const reflected_call{};
+
+} // namespace omni

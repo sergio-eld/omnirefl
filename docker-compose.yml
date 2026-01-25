@@ -8,9 +8,9 @@ services:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
     working_dir: /build
-    entrypoint: ['/bin/ash', '-c']
-    # todo: debug symbols should be available
-    command: 
+    entrypoint:
+      - /bin/ash
+      - -euxc
       - |
         cmake /src -GNinja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -19,7 +19,16 @@ services:
           -DENABLE_BENCH=ON \
           -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
         cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
-        strip --strip-all omnirefl # set(CPACK_STRIP_FILES TRUE) doesn't work
+
+        # split debug info into separate file
+        mkdir -p symbols &&
+        objcopy --only-keep-debug omnirefl symbols/omnirefl.debug &&
+
+        # strip debug info from the main binary
+        strip --strip-unneeded omnirefl &&
+
+        # add link so debuggers can find the external debug file
+        objcopy --add-gnu-debuglink=symbols/omnirefl.debug omnirefl
 
   build-windows:
     image: sergioeld/omnirefl-build-alpine
@@ -30,10 +39,10 @@ services:
       - ./:/src:ro
       - ./build-alpine/windows:/build:rw
     working_dir: /build
-    entrypoint: ['/bin/ash', '-c']
-    # todo: debug symbols should be available
     # testing only possible in Windows container
-    command: 
+    entrypoint:
+      - /bin/ash
+      - -euxc
       - |
         CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ LDFLAGS=-static \
           cmake /src -GNinja \
@@ -42,117 +51,114 @@ services:
           -DENABLE_PACKAGE=ON \
           -DENABLE_TESTING=OFF \
           -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
-        cmake --build . -t omnirefl.exe -j$$(nproc) && # strip it before running tests 
-        strip --strip-all omnirefl.exe # set(CPACK_STRIP_FILES TRUE) doesn't work
+
+        cmake --build . -t omnirefl.exe -j$$(nproc) &&
+
+        # split debug info into separate file (PE/COFF)
+        mkdir -p symbols &&
+        x86_64-w64-mingw32-objcopy --only-keep-debug omnirefl.exe symbols/omnirefl.exe.debug &&
+
+        # strip debug info from the main binary
+        x86_64-w64-mingw32-strip --strip-unneeded omnirefl.exe &&
+
+        # add link so debuggers can find the external debug file
+        x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe
 
   build-tests-alpine:
     image: sergioeld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
-      - ./build-alpine/linux:/build:rw
+      - ./build-alpine/linux:/build:rw # ad hoc: must be rw for CTest (SMH)
+      - ./build-alpine/test:/test:rw
     working_dir: /build
-    entrypoint: ['/bin/ash', '-c']
-    command: 
+    entrypoint:
+      - /bin/ash
+      - -euxc
       - |
-        mkdir -p /build/test/alpine &&
-        ctest . --parallel --output-junit /build/test/alpine/results.xml \
-          -V | tee /build/test/alpine/results.log
+        ctest --parallel --output-junit alpine-results.xml -V | tee /test/alpine-results.log
+        cp alpine-results.xml /test/
 
   package-linux:
     image: sergioeld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
-      - ./build-alpine/linux:/build:rw
+      - ./build-alpine/linux:/build:rw # ad hoc: must be rw for CPack (SMH)
+      - ./build-alpine/linux/install:/install:rw
     working_dir: /build
-    entrypoint: ['/bin/ash', '-c']
-    # todo: specify a directory which is easy to upload as artifact
-    command: 
+    entrypoint:
+      - /bin/ash
+      - -euxc
       - |
-        cpack -G "DEB;TGZ" &&
-        mkdir -p /build/install &&
-        mv *.deb *.tar.gz /build/install/
+        mkdir -p /tmp/build
+        cpack -G "DEB;TGZ" -B /tmp/build
+        mv /tmp/build/*.deb /tmp/build/*.tar.gz /install/
 
   package-windows:
     image: sergioeld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
-      - ./build-alpine/windows:/build:rw
+      - ./build-alpine/windows:/build:rw # ad hoc: must be rw for CPack (SMH)
+      - ./build-alpine/windows/install:/install:rw
     working_dir: /build
-    entrypoint: ['/bin/ash', '-c']
-    # todo: specify a directory which is easy to upload as artifact
-    command: 
+    entrypoint:
+      - /bin/ash
+      - -euxc
       - |
-        cpack -G "ZIP" &&
-        mkdir -p /build/install &&
-        mv *.zip /build/install/
+        mkdir -p /tmp/build
+        cpack -G "ZIP" -B /tmp/build
+        mv /tmp/build/*.zip /install/
 
-  # todo: can I have a matrix for 18, 20, 22?
-  test-ubuntu-18:
-    image: sergioeld/test-install-ubuntu-18
+  # [18, 20, 22] [gcc, clang]
+  test-ubuntu:
+    image: sergioeld/test-install-ubuntu-$UBUNTU_VERSION-$COMPILER
     build:
       context: .
       dockerfile: test-install-ubuntu.Dockerfile
-      args: 
-        - UBUNTU_VERSION=18.04
+      args:
+        UBUNTU_VERSION: $UBUNTU_VERSION
+        COMPILER: $COMPILER
     volumes:
       - ./build-alpine/linux/install:/install:ro
-    working_dir: /install
-    entrypoint: ['/bin/bash', '-c']
-    command:
+      - ./build-alpine/test:/test:rw
+    working_dir: /tmp/build
+    entrypoint:
+      - /bin/bash
+      - -euxc
       - |
-        apt install ./omnirefl*.deb &&
-        mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-18 &&
-        ctest . --parallel --output-junit /build/test/ubuntu-18/results.xml \
-          -V | tee /build/test/ubuntu-18/results.log \
-        && apt remove -y omnirefl
+        apt install /install/omnirefl*.deb
 
-  test-ubuntu-20:
-    image: sergioeld/test-install-ubuntu-20
-    build:
-      context: .
-      dockerfile: test-install-ubuntu.Dockerfile
-      args: 
-        - UBUNTU_VERSION=20.04
-    volumes:
-      - ./build-alpine/linux/install:/install:ro
-    working_dir: /install
-    entrypoint: ['/bin/bash', '-c']
-    command:
-      - |
-        apt install ./omnirefl*.deb &&
-        mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-20 &&
-        ctest . --parallel --output-junit /build/test/ubuntu-20/results.xml \
-          -V | tee /build/test/ubuntu-20/results.log \
-        && apt remove -y omnirefl
+        case $COMPILER in
+          gcc)
+            export CC=gcc
+            export CXX=g++
+            ;;
+          clang)
+            export CC=clang
+            export CXX=clang++
+            ;;
+          mingw)
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            ;;
+          *)
+            echo "Unsupported COMPILER='$COMPILER'" >&2
+            exit 1
+            ;;
+        esac
 
-  test-ubuntu-22:
-    image: sergioeld/test-install-ubuntu-22
-    build:
-      context: .
-      dockerfile: test-install-ubuntu.Dockerfile
-      args: 
-        - UBUNTU_VERSION=22.04
-    volumes:
-      - ./build-alpine/linux/install:/install:ro
-    working_dir: /install
-    entrypoint: ['/bin/bash', '-c']
-    command:
-      - |
-        apt install ./omnirefl*.deb &&
-        mkdir -p /tmp/test/build && cd /tmp/test/build
-        cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja &&
-        mkdir -p /build/test/ubuntu-22 &&
-        ctest . --parallel --output-junit /build/test/ubuntu-22/results.xml \
-          -V | tee /build/test/ubuntu-22/results.log \
-        && apt remove -y omnirefl
+        PREFIX=ubuntu-$UBUNTU_VERSION-$COMPILER-results
 
+        cp -r /usr/share/omnirefl/tests/* ../
+        cmake .. -GNinja
+
+        # NOTE: --parallel will result in .xml not being generated, unlike in alpine container
+        ctest --output-junit result.xml \
+          -V 2>&1 | tee /test/$$PREFIX.log
+        cp result.xml /test/$$PREFIX.xml
+
+        apt remove -y omnirefl
+
+  # todo: mingw, clang, msvc clang
   test-windows:
     image: sergioeld/test-install-windows
     build:
@@ -160,24 +166,23 @@ services:
       dockerfile: test-install-windows.Dockerfile
     volumes:
       - ./build-alpine/windows/install:C:\install:ro
-    working_dir: C:/install
+      - ./build-alpine/test:C:\test:rw
+    working_dir: "C:/with space/build"
     command:
       - powershell
       - -Command
         |
         & {
         $$ErrorActionPreference = 'Stop'
-        ; mkdir 'C:/with space/' 
-        ; 7z x omnirefl* -o'C:/with space/'
+        ; 7z x C:/install/omnirefl* -o'C:/with space/'
         ; cd 'C:/with space'
         ; mv ./omnirefl* ./omnirefl
         ; cp -r omnirefl/share/omnirefl/tests ./
         ; ./omnirefl/bin/omnirefl.exe -h
-        ; mkdir tests/build
-        ; cd tests/build
-        ; cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
-        ; cmake --build . -j $$nproc
-        ; ctest . -V
+        ; cd 'C:/with space/build'
+        ; cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
+        ; cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+        ; ctest . --output-junit C:/test/windows-results.xml -V | tee C:/test/windows-results.log
         ; exit $$LASTEXITCODE
         ;}
 
