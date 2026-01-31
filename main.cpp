@@ -27,8 +27,11 @@
 #include <clang/Driver/Job.h>
 #include <clang/Driver/Options.h>
 #include <clang/Frontend/ASTUnit.h>
+#include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
+#include <clang/Frontend/FrontendActions.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
+#include <clang/Frontend/Utils.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <clang/Tooling/CompilationDatabase.h>
@@ -73,6 +76,10 @@
 namespace fs = std::filesystem;
 
 namespace util {
+
+template <typename T, typename R>
+concept viewable_range_of = std::ranges::viewable_range<R>
+  && requires(std::ranges::range_reference_t<R> v) { T{v}; };
 
 template <typename T>
 concept string_view_like = requires(const T &v) {
@@ -1039,6 +1046,66 @@ struct reflection {
   }
 };
 
+std::expected<fs::path, std::string> write_dependencies_file(
+  const fs::path &generated_cpp,
+  const util::viewable_range_of<fs::path> auto &includes) {
+  fs::path depfile = generated_cpp;
+  depfile.replace_extension(".d");
+
+  std::error_code ec;
+  if (auto parent = depfile.parent_path(); !parent.empty()) {
+    fs::create_directories(parent, ec);
+    if (ec) {
+      return std::unexpected(std::format("create_directories('{}'): {}",
+        depfile.string(),
+        ec.message()));
+    }
+  }
+
+  fs::path tmp = depfile;
+  tmp += ".tmp";
+
+  std::ofstream os(tmp, std::ios::out | std::ios::trunc);
+  if (!os)
+    return std::unexpected(std::format("open('{}')", depfile.string()));
+
+  const auto esc = [](std::string_view s) -> std::string {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+      if (c == ' ' || c == '\\' || c == '#')
+        out.push_back('\\');
+      out.push_back(c);
+    }
+    return out;
+  };
+
+  os << std::format("{}:{}\n",
+    esc(generated_cpp.string()),
+    std::ranges::empty(includes)
+      ? std::string{}
+      : std::format(" \\\n  {}\n",
+          util::joined{
+            .rng = includes | std::views::transform([&](const fs::path &p) {
+              return esc(p.string());
+            }),
+            .delim = " \\\n  ",
+          }));
+
+  os.close();
+  if (!os)
+    return std::unexpected(std::format("write/close('{}')", depfile.string()));
+
+  fs::rename(tmp, depfile, ec);
+  if (ec) {
+    fs::remove(tmp, ec);
+    return std::unexpected(
+      std::format("rename('{}'): {}", depfile.string(), ec.message()));
+  }
+
+  return depfile;
+}
+
 // todo: yaml dump
 
 } // namespace render
@@ -1057,7 +1124,7 @@ struct src_file_context {
 
   // to generate deps file for cmake, so it can rerun the tool upon changes to
   // those headers
-  std::set<fs::path> includes_deps{};
+  std::set<fs::path> includes_deps;
 };
 
 struct with_compiler_invocation {
@@ -1143,17 +1210,34 @@ struct with_ast {
   source_file sf;
   std::unique_ptr<clang::ASTUnit> ast;
   llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diag;
+
+  // will be populated during ASTUnit creation
+  std::set<fs::path> includes_deps;
 };
 
-std::expected<with_ast, std::string> to_ast(
-  const llvm::IntrusiveRefCntPtr<clang::FileManager> &file_manager,
+std::expected<with_ast, std::string> ast_from_compiler_invocation(
   with_compiler_invocation wci) {
-  // todo: how about creating the ast context directly (without
-  // clang::ASTUnit helper)
-  std::unique_ptr ast = clang::ASTUnit::LoadFromCompilerInvocation(wci.ci,
-    std::make_shared<clang::PCHContainerOperations>(),
-    wci.diag,
-    file_manager.get());
+  struct deps_collector_t final: clang::DependencyCollector {
+    bool needSystemDependencies() override {
+      return false;
+    }
+  } deps_collector;
+
+  struct action_t final: clang::SyntaxOnlyAction {
+    clang::DependencyCollector &dc;
+    explicit action_t(clang::DependencyCollector &dc): dc(dc) {}
+
+    bool BeginSourceFileAction(clang::CompilerInstance &CI) override {
+      dc.attachToPreprocessor(CI.getPreprocessor());
+      return clang::SyntaxOnlyAction::BeginSourceFileAction(CI);
+    }
+  } action{deps_collector};
+
+  std::unique_ptr<clang::ASTUnit> ast{
+    clang::ASTUnit::LoadFromCompilerInvocationAction(wci.ci,
+      std::make_shared<clang::PCHContainerOperations>(),
+      wci.diag,
+      &action)};
 
   if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
     return std::unexpected("Failed to build AST Unit.");
@@ -1162,6 +1246,14 @@ std::expected<with_ast, std::string> to_ast(
     .sf = std::move(wci.sf),
     .ast = std::move(ast),
     .diag = std::move(wci.diag),
+
+    // refactorme: use std::ranges::to<std::set>() when updated compiler
+    .includes_deps = std::ranges::fold_left(deps_collector.getDependencies(),
+      std::set<fs::path>{},
+      [](std::set<fs::path> acc, const std::string &file) {
+        acc.emplace(file);
+        return acc;
+      }),
   };
 }
 
@@ -1171,6 +1263,7 @@ src_file_context collect_matches(with_ast wast) {
   return ast::reduce_matches(*wast.ast,
     pipeline::src_file_context{
       .sf = std::move(wast.sf),
+      .includes_deps = std::move(wast.includes_deps),
     },
     ast::rule{
       .pattern = ast::pattern(classTemplateSpecializationDecl,
@@ -1273,6 +1366,7 @@ int main(int argc, char **argv) {
   // one generated)
   std::vector<pipeline::src_file_context> processed_sources = std::invoke([&] {
     static const size_t k_max_errors = 2; //< todo: configure in cli
+    //
     const auto compiler_invocation_for_source_file =
       [&resource_dir = cli_args->resource_dir](const source_file &sf) {
         return pipeline::compiler_invocation_for_source_file(sf, resource_dir);
@@ -1282,11 +1376,6 @@ int main(int argc, char **argv) {
       [&cli_args = *cli_args](pipeline::with_compiler_invocation wci) {
         return pipeline::configure_compiler_invocation(cli_args,
           std::move(wci));
-      };
-
-    const auto ast_from_compiler_invocation = //
-      [&file_manager](pipeline::with_compiler_invocation wci) {
-        return pipeline::to_ast(file_manager, std::move(wci));
       };
 
     const auto process_source = //
@@ -1300,7 +1389,7 @@ int main(int argc, char **argv) {
 
         return compiler_invocation_for_source_file(sf)
           .transform(configure_compiler_invocation)
-          .and_then(ast_from_compiler_invocation)
+          .and_then(pipeline::ast_from_compiler_invocation)
           .transform(pipeline::collect_matches)
           .transform_error([filename = sf.path.string()](std::string error) {
             return std::format("Failed to process '{}' with error: {}",
@@ -1313,7 +1402,8 @@ int main(int argc, char **argv) {
 
             llvm::errs() << std::format(
               "\n\n[info] -- types --------\n{}"
-              "\n\n[info] -- calls --------\n{}",
+              "\n\n[info] -- calls --------\n{}"
+              "\n\n[info] -- includes --------\n{}",
               util::joined{
                 .rng = ctx.reflected | std::views::transform(print_log),
                 .delim = "\n\n",
@@ -1321,6 +1411,12 @@ int main(int argc, char **argv) {
               util::joined{
                 .rng = ctx.calls | std::views::transform(print_log),
                 .delim = "\n\n",
+              },
+              util::joined{
+                .rng = ctx.includes_deps
+                  | std::views::transform(
+                    [](const fs::path &p) { return p.string(); }),
+                .delim = "\n",
               });
 
             return ctx;
@@ -1355,10 +1451,10 @@ int main(int argc, char **argv) {
       std::vector<meta::reflected_call_info> calls;
 
       std::set<meta::type_id> dependencies;
+
+      std::set<fs::path> includes_deps;
     };
 
-    // refactorme: const ctx = ctx_by_source_file | fold_left | sort (need
-    // pipe adaptors)
     render_context ctx = std::ranges::fold_left(std::move(processed_sources),
       render_context{},
       [](render_context a, pipeline::src_file_context ctx) -> render_context {
@@ -1372,6 +1468,9 @@ int main(int argc, char **argv) {
           util::concat(std::move(a.reflected), std::move(ctx.reflected));
 
         a.calls = util::concat(std::move(a.calls), std::move(ctx.calls));
+
+        std::ranges::move(ctx.includes_deps,
+          std::inserter(a.includes_deps, a.includes_deps.begin()));
 
         // todo: implement later. The logic is somewhat complex. If a type is
         // reflected as dependency in file 1, but not as dependency in file 2,
@@ -1621,6 +1720,26 @@ int main(int argc, char **argv) {
         .rng = ctx.calls | std::views::transform(render_reflection),
         .delim = "\n\n",
       });
+
+    if (cli_args->generate_dep_file) {
+      llvm::errs() << std::format("\n[debug] generating dep file for {}",
+        out.string());
+
+      std::expected dep_file_written =
+        render::write_dependencies_file(out, ctx.includes_deps)
+          .transform([](const fs::path &file) {
+            llvm::errs() << std::format("\n[info] written deps file {}",
+              file.string());
+            return file;
+          });
+
+      if (!dep_file_written) {
+        llvm::errs() << std::format(
+          "\n[error] error generating dep file for {}: {}",
+          out.string(),
+          dep_file_written.error());
+      }
+    }
   } else {
     // todo: header mode
     llvm::errs() << "\n[error] header mode is not implemented\n";
