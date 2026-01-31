@@ -1050,7 +1050,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
   const fs::path &generated_cpp,
   const util::viewable_range_of<fs::path> auto &includes) {
   fs::path depfile = generated_cpp;
-  depfile.replace_extension(".d");
+  depfile += ".d";
 
   std::error_code ec;
   if (auto parent = depfile.parent_path(); !parent.empty()) {
