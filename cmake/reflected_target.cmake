@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
+# Ninja-only: controls how CMake rewrites DEPFILE paths for Ninja rules
+if(CMAKE_GENERATOR MATCHES "Ninja" AND POLICY CMP0116)
+    cmake_policy(SET CMP0116 NEW)
+    message(VERBOSE "omnirefl: CMP0116=NEW (Ninja DEPFILE)")
+endif()
+
 if(NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF"
         AND NOT CMAKE_EXPORT_COMPILE_COMMANDS)
     message(STATUS "omnirefl: Forcing CMAKE_EXPORT_COMPILE_COMMANDS=ON")
@@ -98,11 +104,13 @@ function(omni_reflected_target target)
 
     set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}/omni_${target}")
     set(_generated "${_out_dir}/reflected_${target}_source_mode.cpp")
+    set(_depfile "${_generated}.d")
     set(_comp_db "${CMAKE_BINARY_DIR}/compile_commands.json")
 
     message(STATUS "omnirefl: reflected target `${target}`")
     message(STATUS "omnirefl: selected source-mode for target ${target}")
     message(STATUS "omnirefl: output file for target ${target}: ${_generated}")
+    message(STATUS "omnirefl: depfile for target ${target}: ${_depfile}")
 
     # quote sources only for the command-line
     set(_refl_sources_quoted)
@@ -121,23 +129,36 @@ function(omni_reflected_target target)
         -s ${_refl_sources_quoted}
     )
 
-    add_custom_command(OUTPUT "${_generated}"
+   add_custom_command(
+        OUTPUT "${_generated}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
         COMMAND omni::tool ${_omni_args}
-        COMMENT "Running omnirefl (source mode) for ${target}"
+        COMMENT "omnirefl: running (source mode) for ${target}"
         DEPENDS ${_refl_sources}
-        VERBATIM)
+        BYPRODUCTS "${_depfile}"
+        DEPFILE "${_depfile}"
+        VERBATIM
+    )
 
-    # manual regeneration target: always reruns the tool when built.
+    # Helper target: used to hook the generated OUTPUT edge into target build.
+    # CMake has no hidden-target concept; prefix to reduce clutter.
+    set(_gen_target "_gen.${target}.omni")
+    add_custom_target(${_gen_target} DEPENDS "${_generated}")
+    add_dependencies(${target} ${_gen_target})
+
+    # Manual regeneration target: always forces regeneration via the same OUTPUT edge.
+    set(_cfg_arg "")
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(_cfg_arg --config $<CONFIG>)
+    endif()
+
     add_custom_target(${target}.omni
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
-        COMMAND omni::tool ${_omni_args}
-        COMMENT "Running omnirefl (source mode) for ${target} [.omni]"
-        VERBATIM)
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${_generated}" "${_depfile}"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target ${_gen_target} ${_cfg_arg}
+        COMMENT "omnirefl: force-regenerate (source mode) for ${target} [.omni]"
+        VERBATIM
+    )
 
-    # fixme: remove this line, since it runs .omni unconditionally.
-    # but for now it is simpler for me to debug on header changes 
-    add_dependencies(${target} ${target}.omni)
     target_sources(${target} PRIVATE "${_generated}")
     target_link_libraries(${target} PRIVATE omni::refl)
 endfunction()
