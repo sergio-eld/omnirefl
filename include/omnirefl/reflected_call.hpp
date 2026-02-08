@@ -13,7 +13,7 @@ namespace omni {
 namespace detail {
 namespace {
 
-#ifdef OMNI_REFLECTED_INDEXED_CALLS
+#ifdef OMNI_HEADER_MODE
 
 template <int Id>
 struct counter {
@@ -104,8 +104,10 @@ struct reflected_call_t {
     -> decltype(std::declval<Impl &&>()(std::declval<T &&>(),
       std::declval<Args &&>()...)) {
     using type = typename std::decay<T>::type;
-#ifdef OMNI_REFLECTED_INDEXED_CALLS
+#ifdef OMNI_HEADER_MODE
     (void)detail::_reflected_indexed_type<type>{};
+
+    // todo: suppress missing return warning for tool invocation
 
     // ad hoc to prevent "compilation errors" during the omnirefl run
 #  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
@@ -122,7 +124,7 @@ struct reflected_call_t {
   }
 
   private:
-#ifndef OMNI_REFLECTED_INDEXED_CALLS
+#ifndef OMNI_HEADER_MODE
   // implementation will be generated for this function by omnirefl in source
   // mode
   template <typename Impl, typename... Args>

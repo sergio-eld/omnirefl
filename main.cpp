@@ -1,5 +1,4 @@
 
-#include "llvm/Support/raw_ostream.h"
 #pragma push_macro("_FORTIFY_SOURCE")
 #ifdef _FORTIFY_SOURCE
 #  undef _FORTIFY_SOURCE
@@ -584,6 +583,7 @@ struct type_definition {
   } definition_flags;
 };
 
+// todo: add info for template types
 struct struct_data {
   /// protected and private are not supported now (too complicated)
   std::vector<std::string> public_fields;
@@ -710,6 +710,82 @@ std::string format_funcion_arg(const meta::function_signature_arg &a) {
   s += ref_suffix(a.ref_type);
 
   return s;
+}
+
+std::string format_forward_declaration(const meta::reflectable &t) {
+  using namespace std::string_view_literals;
+
+  assert(t.definition.type_name.name);
+
+  std::vector<std::string> lines;
+
+  std::ranges::copy(t.definition.type_name.namespaces
+      | std::views::transform(
+        [](const std::string &n) { return std::format("namespace {} {{", n); }),
+    std::back_inserter(lines));
+
+  const std::string name = std::format("{}{}{}",
+    t.definition.type_name.enclosing_records //
+      | std::views::transform(
+        [](const std::string &s) -> std::string_view { return s; })
+      | std::views::join_with("::"sv) //
+      | util::fmt_fold,
+    t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
+    *t.definition.type_name.name);
+
+  const auto format_data_sum =
+    [&name]<typename... U>(const std::variant<U...> &data) -> std::string {
+    return std::visit(
+      [&]<typename T>(const T &data) -> std::string {
+        if constexpr (std::same_as<meta::enum_data, T>) {
+          return std::format("enum {}{};",
+            data.is_scoped ? "class " : "",
+            name);
+        } else {
+          static_assert(std::same_as<meta::struct_data, T>);
+          const meta::struct_data &struct_data = data;
+
+          // todo: render template (and partial specializations) forward
+          // declarations
+          return std::format("{} {};",
+            std::invoke([type = struct_data.type] {
+              switch (type) {
+              case meta::struct_data::is_struct:
+                return "struct"sv;
+              case meta::struct_data::is_class:
+                return "class"sv;
+              case meta::struct_data::is_union:
+                return "union"sv;
+              }
+              assert(false && "unreachable");
+              return "_unhandled_type"sv;
+            }),
+            name);
+        }
+      },
+      data);
+  };
+
+  std::ranges::copy(std::views::single(t) //
+      | std::views::transform([&](const meta::reflectable &r) -> std::string {
+          return std::format(
+            "// declared at: {}"
+            "\n{}",
+            format_location(r.definition.location),
+            format_data_sum(r.data));
+        }),
+    std::back_inserter(lines));
+
+  std::ranges::copy(t.definition.type_name.namespaces
+      | std::views::transform([](const std::string &n) {
+          return std::format("}} // namespace {}", n);
+        }),
+    std::back_inserter(lines));
+
+  return std::format("{}",
+    lines //
+      | std::views::join_with("\n"sv) //
+      | util::fmt_fold);
 }
 
 struct log {
@@ -1133,7 +1209,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
 
 namespace pipeline {
 
-struct src_file_context {
+struct source_file_context {
   source_file sf;
 
   std::vector<meta::reflectable> reflected{};
@@ -1304,7 +1380,7 @@ int main(int argc, char **argv) {
   llvm::errs() << '\n';
 
   size_t errors = 0; //< ad hoc for std::views::take_while
-  util::viewable_range_of<pipeline::src_file_context> auto
+  util::viewable_range_of<pipeline::source_file_context> auto
     processed_sources_view = //
     std::invoke([&] {
       static const size_t k_max_errors = 2; //< todo: configure in cli
@@ -1322,7 +1398,7 @@ int main(int argc, char **argv) {
         };
 
       static const auto collect_matches =
-        [](pipeline::with_ast wast) -> pipeline::src_file_context {
+        [](pipeline::with_ast wast) -> pipeline::source_file_context {
         using namespace clang::ast_matchers;
 
         // refactorme: refine the interface. Support non-verbose compasibility.
@@ -1330,7 +1406,7 @@ int main(int argc, char **argv) {
         // transformation chain, the result of which could later be partitioned
         // into [valid, errors]. Only valid require accumulation code.
         return ast::reduce_matches(*wast.ast,
-          pipeline::src_file_context{
+          pipeline::source_file_context{
             .sf = std::move(wast.sf),
             .includes_deps = std::move(wast.includes_deps),
           },
@@ -1345,7 +1421,7 @@ int main(int argc, char **argv) {
               isTemplateInstantiation(),
               isDefinition()),
             .reduce =
-              [&ast = *wast.ast](pipeline::src_file_context a,
+              [&ast = *wast.ast](pipeline::source_file_context a,
                 const clang::ClassTemplateSpecializationDecl &decl) {
                 std::expected resolved =
                   meta::resolve_reflected_type(decl, ast, a.resolved_types);
@@ -1396,7 +1472,7 @@ int main(int argc, char **argv) {
               isTemplateInstantiation(),
               isDefinition()),
             .reduce =
-              [&ast = *wast.ast](pipeline::src_file_context a,
+              [&ast = *wast.ast](pipeline::source_file_context a,
                 const clang::ClassTemplateSpecializationDecl &decl) {
                 std::expected resolved =
                   meta::resolve_reflected_indexed_type(decl,
@@ -1457,7 +1533,7 @@ int main(int argc, char **argv) {
               isTemplateInstantiation(),
               hasName("_call_impl")),
             .reduce =
-              [&ast = *wast.ast](pipeline::src_file_context a,
+              [&ast = *wast.ast](pipeline::source_file_context a,
                 const clang::CXXMethodDecl &call_decl) {
                 std::expected resolved =
                   meta::resolve_reflected_call(call_decl, ast);
@@ -1496,7 +1572,7 @@ int main(int argc, char **argv) {
                     filename,
                     std::move(error));
                 })
-              .transform([](pipeline::src_file_context ctx) {
+              .transform([](pipeline::source_file_context ctx) {
                 const render::log print_log{
                   .dependencies = ctx.resolved_as_dependent,
                   .index_by_type = std::ranges::fold_left(ctx.index_by_type,
@@ -1561,7 +1637,8 @@ int main(int argc, char **argv) {
     render_context ctx =
       std::ranges::fold_left(processed_sources_view | std::views::as_rvalue,
         render_context{},
-        [](render_context a, pipeline::src_file_context ctx) -> render_context {
+        [](render_context a,
+          pipeline::source_file_context ctx) -> render_context {
           // todo: skip errors here, or filter/partition before folding? errors
           // should be conditionally ignorable (user may provide
           // --ignore-errors=N)
@@ -1758,7 +1835,7 @@ int main(int argc, char **argv) {
       "\n// -- headers --------"
       // refactorme: should be configurable via preprocessor
       "\n#include <omnirefl/reflected_scope.hpp>"
-      "\n#include <omnirefl/reflected_call.hpp>" //< todo: do I need it here?
+      "\n#include <omnirefl/reflected_call.hpp>"
       "\n"
       "\n{1}"
       "\n"
@@ -1844,8 +1921,15 @@ int main(int argc, char **argv) {
     }
   } else {
     struct render_context {
+      source_file sf;
+
       std::vector<meta::reflectable> reflected;
       std::set<meta::type_id> dependencies;
+      std::map<meta::type_id, std::size_t> index_by_type;
+
+      // to generate deps file for cmake, so it can rerun the tool upon changes
+      // to those headers
+      std::set<fs::path> includes_deps;
     };
 
     // refactorme: std::ranges::to<std::vector>().front(); //< there's only one
@@ -1853,23 +1937,138 @@ int main(int argc, char **argv) {
     render_context ctx =
       std::ranges::fold_left(processed_sources_view | std::views::as_rvalue,
         render_context{},
-        [](render_context a, pipeline::src_file_context ctx) -> render_context {
+        [](render_context a,
+          pipeline::source_file_context ctx) -> render_context {
           // todo: skip errors here, or filter/partition before folding? errors
           // should be conditionally ignorable (user may provide
           // --ignore-errors=N)
           if (!ctx.errors.empty())
             return a;
 
+          a.sf = std::move(ctx.sf);
+
           std::ranges::move(ctx.reflected, std::back_inserter(a.reflected));
           std::ranges::move(ctx.resolved_as_dependent,
             std::inserter(a.dependencies, a.dependencies.begin()));
 
+          std::ranges::move(ctx.index_by_type,
+            std::inserter(a.index_by_type, a.index_by_type.begin()));
+
+          std::ranges::move(ctx.includes_deps,
+            std::inserter(a.includes_deps, a.includes_deps.begin()));
+
           return a;
         });
 
-    // todo: header mode
-    llvm::errs() << "\n[error] header mode is not implemented\n";
-    return -1;
+    // todo: validate the context for every reflected type can be generated.
+    // Non-forward-declarable non-indexed dependent types can't be reflected as
+    // of this writing -> should emit error.
+
+    const fs::path out = //
+      std::invoke([&o = cli_args->out, &sf = ctx.sf] {
+        // ad hoc to disable fs exception throwing
+        [[maybe_unused]] std::error_code ec;
+        return fs::is_directory(o, ec) //
+          ? fs::path(o)
+            / std::format("{}_omni_reflection_header.h", sf.path.string())
+          : o;
+      });
+
+    llvm::errs() << std::format("\n[info] creating header mode reflection: {}",
+      out.generic_string());
+
+    std::ofstream out_file{out, std::ios::binary};
+    if (!out_file) {
+      llvm::errs() << std::format(
+        "\n[error] failed to open file {} for writing",
+        out.generic_string());
+      return -1;
+    }
+
+    // refactorme: this atrocity is not readable at all.
+    const render::reflection render_reflection{
+      .dependencies = ctx.dependencies,
+    };
+
+    // todo: partition reflected into forward declarable and indexed
+
+    std::format_to(std::ostreambuf_iterator<char>(out_file),
+      "// This file was generated by the omnirefl tool on {0:%F %T}."
+      "\n// Do not modify the contents of this file."
+      "\n"
+      "\n#define OMNI_INCLUDED_GENERATED_REFLECTION_HEADER" //< must come before
+                                                            //omni headers
+      "\n"
+      // todo: can I _not_ inlcude these? at least not reflected_call.hpp
+      "\n#include <omnirefl/reflected_scope.hpp>"
+      "\n#include <omnirefl/reflected_call.hpp>"
+      // refactorme: ad hoc for enumerators(). No need to include if no enums
+      "\n#include <array>"
+      "\n"
+      "\n// -- forward declarable reflected types --------"
+      "\n{1}"
+      "\n" // todo: ^^^
+      "\nnamespace omni {{"
+      "\nnamespace detail {{"
+      "\nnamespace {{"
+      "\n"
+      "\n// -- reflected types --------"
+      "\n{2}"
+      "\n"
+      "\n// -- reflected indexed types --------"
+      "\n" // todo: ^^^
+      "\n}} // namespace"
+      "\n}} // namespace detail"
+      "\n}} // namespace omni"
+      "\n"
+      "\ntemplate <typename T, typename>"
+      "\nstruct omni::is_reflected : std::false_type {{}};"
+      "\n"
+      "\ntemplate <typename T>"
+      "\nstruct omni::is_reflected<"
+      "\n    T,"
+      "\n    omni::detail::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
+      "\n> : std::true_type {{}};"
+      "\n"
+      "\n",
+
+      // 0:
+      std::invoke([] {
+        using namespace std::chrono;
+        return floor<seconds>(system_clock::now());
+      }),
+
+      // 1:
+      ctx.reflected //
+        | std::views::transform(render::format_forward_declaration) //
+        | std::views::join_with("\n\n"sv) //
+        | util::fmt_fold,
+
+      // 2:
+      ctx.reflected //
+        | std::views::transform(render_reflection) //
+        | std::views::join_with("\n\n"sv) //
+        | util::fmt_fold);
+
+    if (cli_args->generate_dep_file) {
+      llvm::errs() << std::format("\n[debug] generating dep file for {}",
+        out.string());
+
+      std::expected dep_file_written =
+        render::write_dependencies_file(out, ctx.includes_deps)
+          .transform([](const fs::path &file) {
+            llvm::errs() << std::format("\n[info] written deps file {}",
+              file.string());
+            return file;
+          });
+
+      if (!dep_file_written) {
+        llvm::errs() << std::format(
+          "\n[error] error generating dep file for {}: {}",
+          out.string(),
+          dep_file_written.error());
+      }
+    }
   }
 
   llvm::errs() << "\n[info] done.\n";
