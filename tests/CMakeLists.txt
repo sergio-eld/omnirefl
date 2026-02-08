@@ -95,7 +95,12 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
         set(_static_odr_tgt "${mode_prefix}.test.common.static_odr")
         add_library(${_static_odr_tgt} STATIC common/test_static_odr.cpp)
-        target_compile_features(${_static_odr_tgt} PRIVATE cxx_std_${cpp_standard})
+        set_target_properties(${_static_odr_tgt} PROPERTIES
+            CXX_STANDARD ${cpp_standard}
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+        )
+
         target_compile_definitions(${_static_odr_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
         target_link_libraries(${_static_odr_tgt} PRIVATE GTest::GTest std_compat)
         omni_reflected_target(${_static_odr_tgt} MODE ${mode})
@@ -107,7 +112,13 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
             common/interface_test.cpp
             # common/example_test.cpp #< fixme
         )
-        target_compile_features(${_test_common_tgt} PRIVATE cxx_std_${cpp_standard})
+
+        set_target_properties(${_test_common_tgt} PROPERTIES
+            CXX_STANDARD ${cpp_standard}
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+        )
+
         target_compile_definitions(${_test_common_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
         target_link_libraries(${_test_common_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
         omni_reflected_target(${_test_common_tgt} MODE ${mode})

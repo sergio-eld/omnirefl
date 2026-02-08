@@ -78,6 +78,11 @@ using namespace std::string_view_literals;
 
 namespace util {
 
+constexpr auto to_string_view =
+  [](const std::convertible_to<std::string_view> auto &v) noexcept {
+    return std::string_view(v);
+  };
+
 const auto valid_only = //
   []<typename T, typename E>(
     const std::expected<T, E> &e) { return e.has_value(); };
@@ -95,17 +100,6 @@ const auto accum_back_inserter = //
 template <typename R, typename T>
 concept viewable_range_of = std::ranges::viewable_range<R>
   && requires(std::ranges::range_reference_t<R> v) { T{v}; };
-
-template <typename T>
-concept string_view_like = requires(const T &v) {
-  { v.data() } -> std::convertible_to<const char *>;
-  { v.size() } -> std::convertible_to<std::size_t>;
-};
-
-template <string_view_like T>
-constexpr auto to_string_view(const T &v) noexcept {
-  return std::basic_string_view{v.data(), v.size()};
-}
 
 template <std::ranges::range R, std::integral I = std::size_t>
   requires(std::ranges::viewable_range<R>
@@ -875,7 +869,7 @@ struct log {
     const std::string indexed = std::invoke([&]() -> std::string {
       const auto index = index_by_type.find(d.id);
       return index_by_type.cend() != index
-        ? std::format("(indexed: {})", index->second)
+        ? std::format(" (indexed: {})", index->second)
         : std::string{};
     });
 
@@ -1215,7 +1209,7 @@ struct source_file_context {
   std::vector<meta::reflectable> reflected{};
   std::vector<meta::reflected_call_info> calls{};
 
-  std::set<meta::type_id> resolved_types{};
+  std::set<meta::type_id> resolved_types{}; //< all resolved
   std::set<meta::type_id> resolved_as_dependent{};
   std::set<meta::type_id> non_reflectable_types{}; //< for debug or info
 
@@ -1423,6 +1417,7 @@ int main(int argc, char **argv) {
             .reduce =
               [&ast = *wast.ast](pipeline::source_file_context a,
                 const clang::ClassTemplateSpecializationDecl &decl) {
+                // fixme: marking types as resolved
                 std::expected resolved =
                   meta::resolve_reflected_type(decl, ast, a.resolved_types);
 
@@ -1485,11 +1480,11 @@ int main(int argc, char **argv) {
 
                         std::visit(
                           [&a, index]<typename T>(T t) {
+                            a.resolved_types.emplace(t.id);
                             a.index_by_type.emplace_back(t.id, index);
 
                             if constexpr (std::same_as<meta::reflectable, T>) {
                               meta::reflectable &r = t;
-                              a.resolved_types.emplace(r.id);
                               a.reflected.emplace_back(std::move(r));
                             } else if constexpr (std::same_as<
                                                    meta::non_reflectable,
@@ -1506,10 +1501,15 @@ int main(int argc, char **argv) {
                           },
                           std::move(resolved.type));
 
-                        std::ranges::transform(resolved.dependencies,
+                        std::ranges::copy(resolved.dependencies
+                            | std::views::transform(&meta::reflectable::id),
+                          std::inserter(a.resolved_types,
+                            a.resolved_types.begin()));
+
+                        std::ranges::copy(resolved.dependencies
+                            | std::views::transform(&meta::reflectable::id),
                           std::inserter(a.resolved_as_dependent,
-                            a.resolved_as_dependent.begin()),
-                          [](const meta::reflectable &r) { return r.id; });
+                            a.resolved_as_dependent.begin()));
 
                         std::ranges::move(resolved.dependencies,
                           std::back_inserter(a.reflected));
@@ -1556,7 +1556,7 @@ int main(int argc, char **argv) {
             const auto &[sf, idx] = indexed_src;
 
             llvm::errs() << std::format(
-              "[{}/{}] running {} mode for file: {}\t\r",
+              "\n[{}/{}] running {} mode for file: {}\t\r",
               idx,
               total_sources,
               cli::to_string(mode),
@@ -1997,7 +1997,7 @@ int main(int argc, char **argv) {
       "\n// Do not modify the contents of this file."
       "\n"
       "\n#define OMNI_INCLUDED_GENERATED_REFLECTION_HEADER" //< must come before
-                                                            //omni headers
+                                                            // omni headers
       "\n"
       // todo: can I _not_ inlcude these? at least not reflected_call.hpp
       "\n#include <omnirefl/reflected_scope.hpp>"
@@ -2867,6 +2867,7 @@ std::vector<member_typedef_decl> member_typedefs(
   return r;
 };
 
+// refactorme: ugleee body
 std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   const clang::CXXRecordDecl &root,
   const std::set<meta::type_id> &resolved_types) noexcept {
@@ -2878,19 +2879,31 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
     const clang::CXXRecordDecl *cur = to_visit.top();
     to_visit.pop();
 
-    // todo: remove
-    const std::string _debug_nm_qual_type = cur->getQualifiedNameAsString();
     if (visited.contains(cur)
       // todo: continious benchmark before optimization (lookup by string)
       || resolved_types.contains(cur->getQualifiedNameAsString())) {
       continue;
     }
 
-    // not generating reflection info for std types, at least for now, at
-    // least here...
+    // todo: remove code duplication
+    const bool specialized_template =
+      std::ranges::contains(
+        std::array{
+          clang::Decl::ClassTemplateSpecialization,
+          clang::Decl::ClassTemplatePartialSpecialization,
+        },
+        cur->getKind())
+      && std::ranges::contains(std::array{"tuple"sv, "variant"sv},
+        util::to_string_view(
+          clang::cast<clang::ClassTemplateSpecializationDecl>(cur)
+            ->getSpecializedTemplate()
+            ->getName()));
+
+    // not generating reflection info for std and 'special' types, at least for
+    // now, at least here...
     //
     // refactorme: ambiguous control flow/logic
-    if (!cur->isInStdNamespace())
+    if (!cur->isInStdNamespace() && !specialized_template)
       visited.emplace(cur);
 
     // allow recursive reflection via certain member typedefs
@@ -2916,10 +2929,7 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
     //   in c++ code template trait types can be used, but I don't know if
     //   it is possible to get from parsed ast. I could, however, capture
     //   such types in `omni::detail`...
-    if (clang::Decl::ClassTemplateSpecialization == cur->getKind() &&
-        [](std::string_view name) -> bool { //
-          return "tuple" == name || "variant" == name;
-        }(cur->getName())) {
+    if (specialized_template) {
       const auto arg_list =
         clang::cast<clang::ClassTemplateSpecializationDecl>(cur)
           ->getTemplateInstantiationArgs()
@@ -2940,6 +2950,8 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
             to_visit.push(qt->getAsCXXRecordDecl());
         }
       }
+
+      continue;
     }
 
     // fixme: just collect the types: determine reflectable later?
@@ -2964,9 +2976,6 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   return {visited.begin(), visited.end()};
 }
 
-// fixme:
-// `mpark::variant` is picked up as a type, not as a template specialization
-//
 // fixme:
 // nested `wrestler::info` in `example_types` namespace is rendered as
 // `example_types::info`
@@ -3079,7 +3088,21 @@ auto meta::resolve_reflected_type(
       };
     });
 
-  if (reflected_type_decl.isInStdNamespace()) {
+  // todo: remove code duplication
+  const bool specialized_template =
+    std::ranges::contains(
+      std::array{
+        clang::Decl::ClassTemplateSpecialization,
+        clang::Decl::ClassTemplatePartialSpecialization,
+      },
+      reflected_type_decl.getKind())
+    && std::ranges::contains(std::array{"tuple"sv, "variant"sv},
+      util::to_string_view(clang::cast<clang::ClassTemplateSpecializationDecl>(
+        &reflected_type_decl)
+          ->getSpecializedTemplate()
+          ->getName()));
+
+  if (reflected_type_decl.isInStdNamespace() || specialized_template) {
     return reflected_type_info{
       .type = non_reflectable{.id = nm_qual_type},
       .dependencies = std::move(dependencies),
