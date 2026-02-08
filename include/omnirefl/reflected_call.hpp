@@ -1,6 +1,5 @@
 #pragma once
 
-
 // todo: copyright and detailed explanation
 //
 // this header adds support for reflecting types via reflected_call
@@ -14,7 +13,7 @@ namespace omni {
 namespace detail {
 namespace {
 
-#ifdef OMNI_REFLECTED_INDEXED_CALLS
+#ifdef OMNI_HEADER_MODE
 
 template <int Id>
 struct counter {
@@ -80,17 +79,17 @@ constexpr int unique_id(std::true_type) {
   return unique_id<T, Id + 1>();
 }
 
-// meta type to assign index to a type upon instantiation
+// tag used in header mode to assign index to the type upon instantiation
 template <typename T, int Index = unique_id<T>()>
 struct _reflected_indexed_type {};
 
 #else
 
-// tag used in target mode to collect reflected types
+// tag used in source mode to collect reflected types
 template <typename>
 struct _reflected_type {};
 
-// tag used in target mode to collect reflected implementation types
+// tag used in source mode to collect reflected implementation types
 template <typename>
 struct _reflected_impl {};
 
@@ -101,18 +100,19 @@ struct _reflected_impl {};
 /// class to invoke a callable implementation object
 struct reflected_call_t {
   template <typename Impl, typename T, typename... Args>
-  auto operator()(Impl &&impl, T &&t, Args &&...args) const {
+  auto operator()(Impl &&impl, T &&t, Args &&...args) const
+    -> decltype(std::declval<Impl &&>()(std::declval<T &&>(),
+      std::declval<Args &&>()...)) {
     using type = typename std::decay<T>::type;
-#ifdef OMNI_REFLECTED_INDEXED_CALLS
-    // testme: use inside inline non-template function defined in a header file
-    // testme: use inside a template function defined in a header file
-    //
-    //   forced include may break the order of index instantiations (as long as
-    //   header-mode includes headers of reflected types).
+#ifdef OMNI_HEADER_MODE
     (void)detail::_reflected_indexed_type<type>{};
+
+    // todo: suppress missing return warning for tool invocation
+
+    // ad hoc to prevent "compilation errors" during the omnirefl run
 #  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
-    return std::forward<Impl>(
-      impl)(std::forward<T>(t), std::forward<Args>(args)...);
+    return std::forward<Impl>(impl)(std::forward<T>(t), //
+      std::forward<Args>(args)...);
 #  endif
 #else
     (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
@@ -124,11 +124,12 @@ struct reflected_call_t {
   }
 
   private:
-#ifndef OMNI_REFLECTED_INDEXED_CALLS
-  // implementation will be generated for this function by omnirefl
+#ifndef OMNI_HEADER_MODE
+  // implementation will be generated for this function by omnirefl in source
+  // mode
   template <typename Impl, typename... Args>
   static auto _call_impl(Impl &&impl, Args &&...args)
-    -> decltype(std::declval<Impl>()(std::declval<Args>()...));
+    -> decltype(std::declval<Impl &&>()(std::declval<Args &&>()...));
 #endif
 } const reflected_call{};
 

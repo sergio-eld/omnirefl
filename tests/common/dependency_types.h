@@ -11,10 +11,10 @@
 #include <tuple>
 #include <type_traits>
 
+#include <mpark/variant.hpp>
+
 #if defined(__cpp_lib_variant)
 #  include <variant>
-#else
-#  include <mpark/variant.hpp>
 #endif
 
 namespace omni {
@@ -221,5 +221,11 @@ struct template_dep_level_2 {
   omni::compat::variant<std::tuple<resolved::as_template_arg_layer_2>>
     var_field_2;
 };
+
+// explicit test of third-party variant
+struct mpark_template_dep_level_2 {
+  mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
+};
+
 
 } // namespace dependency_types

@@ -156,47 +156,38 @@ struct _tuple_to_array {
   }
 };
 
-// refactorme: this is a very confusing and ugle shite
 #ifdef OMNI_REFLECTED_INDEXED_CALLS
-// Used in header-mode to generate specializatioin for indexed types (local
-// structs, unnamed)
-template <int>
+//------------------------------------------------------------------------------
+// Indexed header-mode: local/unnamed type support
+//
+// Omnirefl records the integer index `N` that `unique_id<T>()` evaluates to
+// while parsing the AST. During the real compilation, `unique_id<T>()` yields
+// the same `N`, so `_indexed_reflected<unique_id<T>()>` selects the matching
+// generated `_indexed_reflected<N>` specialization directly.
+//
+// Limitation: if a reflected type `T` has member field types that are not
+// forward-declarable, those member types cannot be indexed and therefore will
+// not be available for reflection.
+//------------------------------------------------------------------------------
+
+// `N` is the index value observed for `unique_id<T>()` during the AST pre-run.
+template <int N>
 struct _indexed_reflected;
 
-// fixme:
-//   this will not work for non-forward-declarable 'dependent' types (if I
-//   decide to index them), because as of this writing only the `reflected_call`
-//   is allowed to invoke the `unique_id`, and recursive `reflected_call`s are
-//   not allowed
-//
-// Instantiations by named non-local types will be caught by the generated
-// partial specializations of `_reflected<T>` like for source-mode. This will
-// prevent from calling `unique_id<T>()` and not increment the counter.
-//
-// For unnamed and/or local types, the default specialization will be selected,
-// using generated `_indexed_reflected<N>` specialization.
+// Routes local/unnamed types through the indexed path.
 template <typename T, typename = T>
 struct _reflected: _indexed_reflected<unique_id<T>()> {};
-
-// `std::true_type` specializations will be generated for reflected types to be
-// picked up by SFINAE
-template <int Index>
-struct _is_indexed_reflected: std::false_type {};
-
-// Specializations for forward-declarable types will generated to be picked up
-// by SFINAE.
-template <typename T, typename = T>
-struct _is_reflected: _is_indexed_reflected<unique_id<T>()> {};
-
 #else
-// Specializations, containing reflection interface for T will be generated.
-// Default argument is used to delay template instantiaton by partial
-// specialization.
+//------------------------------------------------------------------------------
+// Source-mode frontend declaration
+//
+// In source-mode, the tool emits specializations of `_reflected<T>` (and
+// related traits) into the generated `.cpp`.
+//------------------------------------------------------------------------------
+
+// `= T` is kept for frontend compatibility with header-mode usage.
 template <typename T, typename = T>
 struct _reflected;
-
-template <typename T, typename = T>
-struct _is_reflected;
 #endif // OMNI_REFLECTED_INDEXED_CALLS
 
 } // namespace
@@ -391,7 +382,7 @@ struct reflected_mem_binding {
 
   // todo: enable_if is_mutable
   template <typename V>
-  constexpr auto set_value(V &&v) {
+  void set_value(V &&v) {
     Meta::set_value(owner, std::forward<V>(v));
   }
 
@@ -424,6 +415,25 @@ struct reflected_t<T,
   static_assert(reflected_entity::tagged == meta::entity(),
     "Inconcistent reflection");
 
+  private:
+  template <typename _T>
+  struct _bind_fields_metadata {
+    _T &t;
+
+    template <typename... FieldMeta>
+    constexpr auto operator()(FieldMeta...) const noexcept
+      -> std::tuple<reflected_mem_binding<_T, FieldMeta>...> {
+      return std::make_tuple(reflected_mem_binding<_T, FieldMeta>{t}...);
+    }
+  };
+
+  template <typename _T>
+  static constexpr auto _fields(_T &t) noexcept
+    -> decltype(compat::apply(_bind_fields_metadata<_T>{t}, meta::fields())) {
+    return compat::apply(_bind_fields_metadata<_T>{t}, meta::fields());
+  }
+
+  public:
   static constexpr const char *name() noexcept {
     return meta::name();
   }
@@ -434,38 +444,16 @@ struct reflected_t<T,
 
   using fields_t = typename meta::fields_t; //< yields std::tuple<...>
 
-  // todo: should be able to call `for (const auto &f: fields())`
-  // refactorme: mention std::tuple in code
   static constexpr fields_t fields() noexcept {
     return {};
   }
 
-  // fixme: auto without trailing return is C++14
-  static constexpr auto fields(const type &t) noexcept {
+  static constexpr auto fields(const type &t) noexcept -> decltype(_fields(t)) {
     return _fields(t);
   }
 
-  // fixme: auto without trailing return is C++14
-  static constexpr auto fields(type &t) noexcept {
+  static constexpr auto fields(type &t) noexcept -> decltype(_fields(t)) {
     return _fields(t);
-  }
-
-  private:
-  template <typename _T>
-  struct _bind_fields_metadata {
-    _T &t;
-
-    // fixme: auto without trailing return is C++14
-    template <typename... FieldMeta>
-    constexpr auto operator()(FieldMeta...) const noexcept {
-      return std::make_tuple(reflected_mem_binding<_T, FieldMeta>{t}...);
-    }
-  };
-
-  // fixme: auto without trailing return type is C++14
-  template <typename _T>
-  static constexpr auto _fields(_T &t) noexcept {
-    return compat::apply(_bind_fields_metadata<_T>{t}, meta::fields());
   }
 
   // todo: mutable_fields(T &t) and mutable_fields(const T &t)
@@ -493,9 +481,9 @@ struct reflected_t<T,
     return meta::entity();
   }
 
-  // fixme: C++11 requires trailing return with 'auto'
   // yields std::array of pair<type, const char*>
-  static constexpr auto enumerators() noexcept {
+  static constexpr auto enumerators() noexcept
+    -> decltype(meta::enumerators()) {
     return meta::enumerators();
   }
 };
@@ -524,11 +512,14 @@ struct reflected_binding<T, reflected_entity::tagged> {
     return bound;
   }
 
-  constexpr auto fields() {
+  // fixme: C++11 doesn't support constexpr here
+  auto fields()
+    -> decltype(reflected_tagged_t<type>::fields(std::declval<storage_t &>())) {
     return reflected_tagged_t<type>::fields(bound);
   }
 
-  constexpr auto fields() const {
+  constexpr auto fields() const -> decltype(reflected_tagged_t<type>::fields(
+    std::declval<const storage_t &>())) {
     return reflected_tagged_t<type>::fields(bound);
   }
 
@@ -573,11 +564,7 @@ struct reflected_binding<T, reflected_entity::enumeration> {
     return bound;
   }
 
-  constexpr auto enumerators() {
-    return meta::enumerators();
-  }
-
-  constexpr auto enumerators() const {
+  static constexpr auto enumerators() -> decltype(meta::enumerators()) {
     return meta::enumerators();
   }
 
@@ -673,23 +660,25 @@ struct type_info_t {
   // todo: namespaces?
 };
 
+// todo: do I even need this here?
 // convenience adapter to get type info from Variant of field bindings. Example:
 // for (auto f : omni::reflected(t).fields()) {
 // std::cout << omni::type_info(f).name << '\n'; //< Polymorphic access without
 // calling std::visit
 // }
-template <template <typename...> class Variant, typename... T>
-constexpr type_info_t type_info(const Variant<T...> &t) {
-  // todo: constraints on T: it might be a field's generated Meta, or a
-  // reflected Binding. However, it shouldn't matter, since both of them define
-  // `meta::name()`
-  return customization::visit<Variant>{}(
-    [](const auto &t) -> type_info_t {
-      return {
-        t.name(),
-      };
-    },
-    t);
-}
+// template <template <typename...> class Variant, typename... T>
+// constexpr type_info_t type_info(const Variant<T...> &t) {
+//   // todo: constraints on T: it might be a field's generated Meta, or a
+//   // reflected Binding. However, it shouldn't matter, since both of them
+//   define
+//   // `meta::name()`
+//   return customization::visit<Variant>{}(
+//     [](const auto &t) -> type_info_t {
+//       return {
+//         t.name(),
+//       };
+//     },
+//     t);
+// }
 
 } // namespace omni
