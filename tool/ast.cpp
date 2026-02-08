@@ -110,7 +110,7 @@ void configure_compiler_invocation(const Mode &m,
 
     if constexpr (std::same_as<tool::cli::header_mode, Mode>) {
       const tool::cli::header_mode &mode = m;
-      constexpr std::string_view k_omni_macro = "OMNI_HEADER_REFLECTION";
+      constexpr std::string_view k_omni_macro = "OMNI_HEADER_MODE";
 
       const auto omni_defined = std::find_if(p.Macros.begin(),
         p.Macros.end(),

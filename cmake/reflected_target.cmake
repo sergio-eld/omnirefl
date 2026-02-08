@@ -177,6 +177,7 @@ function(omni_reflected_target target)
 
         target_sources(${target} PRIVATE "${_generated}")
         target_link_libraries(${target} PRIVATE omni::refl)
+        target_compile_definitions(${target} PRIVATE OMNI_SOURCE_MODE)
 
     else() # header
         message(STATUS "omnirefl: selected header-mode for target ${target}")
@@ -226,7 +227,7 @@ function(omni_reflected_target target)
             set_source_files_properties("${_src}" PROPERTIES COMPILE_OPTIONS "$<TARGET_PROPERTY:${_fi_prop}>")
         endforeach()
 
-        target_compile_definitions(${target} PRIVATE OMNI_HEADER_REFLECTION)
+        target_compile_definitions(${target} PRIVATE OMNI_HEADER_MODE)
         target_link_libraries(${target} PRIVATE omni::refl)
     endif()
 
