@@ -59,8 +59,10 @@ TEST(dependency_resolved, as_template_arg) {
         dt::resolved::as_template_arg_layer_2{2}}}};
 
   const std::string mpark_r2 =
-    omni::reflected_call(dt::as_template_arg::get_dependency_name_layer_2, mpark_v2);
-  EXPECT_EQ("mpark_template_dep_level_2::tuple::as_template_arg_layer_2:int", r2);
+    omni::reflected_call(dt::as_template_arg::get_dependency_name_layer_2,
+      mpark_v2);
+  EXPECT_EQ("mpark_template_dep_level_2::tuple::as_template_arg_layer_2:int",
+    mpark_r2);
 }
 
 } // namespace
