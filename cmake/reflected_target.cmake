@@ -32,37 +32,52 @@ endmacro()
 
 # -- Target sources helper --------
 function(_omni_get_target_sources target_name out_sources)
-    if(NOT TARGET ${target_name})
-        message(SEND_ERROR "${target_name} is not a valid CMake target")
-        return()
-    endif()
-
-    get_target_property(target_sources ${target_name} SOURCES)
-    if(NOT target_sources)
+    get_target_property(srcs "${target_name}" SOURCES)
+    if(srcs STREQUAL "srcs-NOTFOUND")
         set(${out_sources} "" PARENT_SCOPE)
         return()
     endif()
 
-    set(abs_paths)
-    foreach(src IN LISTS target_sources)
-        get_filename_component(abs_path "${src}" ABSOLUTE)
-        list(APPEND abs_paths "${abs_path}")
+    set(result)
+    foreach(s IN LISTS srcs)
+        # Keep genex entries (cannot absolutize/filter at configure time)
+        if(s MATCHES "\\$<")
+            list(APPEND result "${s}")
+            continue()
+        endif()
+
+        get_filename_component(abs "${s}" ABSOLUTE)
+
+        # Filter generated sources (only for non-genex)
+        get_source_file_property(is_gen "${abs}" GENERATED)
+        if(is_gen)
+            continue()
+        endif()
+
+        list(APPEND result "${abs}")
     endforeach()
 
-    set(${out_sources} ${abs_paths} PARENT_SCOPE)
+    set(${out_sources} "${result}" PARENT_SCOPE)
 endfunction()
 
 # -- Reflected target helper (default: source mode) --------
+# args: MODE source|header (default: source), INCLUDE <...> | EXCLUDE <...>
+# Generated sources are ignored by the tool.
+# Use INCLUDE or EXCLUDE to refine inputs; entries are file paths or regexes.
+# INCLUDE and EXCLUDE are mutually exclusive.
 function(omni_reflected_target target)
     _omni_checkhealth()
 
-    # args: MODE source|header (default: source)
-    cmake_parse_arguments(OMNIREFL "" "MODE" "" ${ARGN})
+    cmake_parse_arguments(OMNIREFL "" "MODE" "INCLUDE;EXCLUDE" ${ARGN})
+
+    if(OMNIREFL_INCLUDE AND OMNIREFL_EXCLUDE)
+        message(FATAL_ERROR "omni_reflected_target: INCLUDE and EXCLUDE are mutually exclusive")
+    endif()
+
     if(NOT OMNIREFL_MODE)
         set(OMNIREFL_MODE "source")
     endif()
     set(mode "${OMNIREFL_MODE}")
-
     if(NOT TARGET ${target})
         message(SEND_ERROR "${target} is not a valid CMake target")
         return()

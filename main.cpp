@@ -1383,11 +1383,10 @@ int main(int argc, char **argv) {
 
   llvm::errs() << '\n';
 
-  size_t errors = 0; //< ad hoc for std::views::take_while
   util::viewable_range_of<pipeline::source_file_context> auto
     processed_sources_view = //
     std::invoke([&] {
-      static const size_t k_max_errors = 2; //< todo: configure in cli
+      // static const size_t k_max_errors = 2; //< todo: configure in cli
 
       const auto compiler_invocation_for_source_file =
         [&resource_dir = cli_args->resource_dir](const source_file &sf) {
@@ -1619,12 +1618,6 @@ int main(int argc, char **argv) {
                 return ctx;
               });
           })
-        | std::views::take_while([&errors](const auto &result) -> bool {
-            return result
-              || (llvm::errs() << std::format("[error] {}", result.error()),
-                k_max_errors > ++errors);
-          })
-        | std::views::filter(util::valid_only)
         | std::views::transform([](auto e) { return *std::move(e); });
     });
   // fixme: occurred errors are not handled.
