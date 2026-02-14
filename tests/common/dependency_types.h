@@ -227,5 +227,6 @@ struct mpark_template_dep_level_2 {
   mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
 };
 
+// todo: nested types struct foo{ struct bar{}; enum baz{}; };
 
 } // namespace dependency_types
