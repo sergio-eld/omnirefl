@@ -36,17 +36,13 @@ namespace dependency_types {
 namespace as_field {
 
 static const struct get_dependency_name_t {
-  template <typename T>
-  std::string operator()(const T &v) const {
-    using parent_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+  template <typename ParentType>
+  std::string operator()(const ParentType &v) const {
+    const auto f = std::get<0>(omni::reflected(v).fields());
+    using field_type = typename decltype(f)::type;
 
-    const auto fields = omni::reflected(v).fields();
-    const auto f = std::get<0>(fields);
-    using dep_type = typename decltype(f)::type;
-
-    return std::string(omni::reflected<parent_type>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(omni::reflected<ParentType>().name())
+      + "::" + std::string(omni::reflected<field_type>().name()) + ":int";
   }
 } get_dependency_name;
 
@@ -151,6 +147,20 @@ static const struct get_dependency_name_layer_2_t {
 
 } // namespace as_template_arg
 
+namespace as_inherited_struct {
+
+template <typename Base>
+struct is_base_reflected_t {
+  template <typename Derived>
+  bool operator()(const Derived &) const {
+    static_assert(std::is_base_of<Base, Derived>::value,
+      "Input is not Derived from Base");
+    return omni::is_reflected<Base>::value;
+  }
+};
+
+} // namespace as_inherited_struct
+
 // ---------- resolved dependency types ----------
 
 namespace resolved {
@@ -177,6 +187,10 @@ struct as_template_arg {
 
 struct as_template_arg_layer_2 {
   int value;
+};
+
+struct as_inherited_struct {
+  int base_field;
 };
 
 } // namespace resolved
@@ -225,6 +239,15 @@ struct template_dep_level_2 {
 // explicit test of third-party variant
 struct mpark_template_dep_level_2 {
   mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
+};
+
+struct derived_struct: resolved::as_inherited_struct {
+  double inherited_field;
+
+  // ad hoc for C++11
+  derived_struct(int base, double derived)
+      : resolved::as_inherited_struct{base}
+      , inherited_field(derived) {}
 };
 
 // todo: nested types struct foo{ struct bar{}; enum baz{}; };

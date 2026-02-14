@@ -65,4 +65,15 @@ TEST(dependency_resolved, as_template_arg) {
     mpark_r2);
 }
 
+TEST(dependency_resolved, as_inherited_struct) {
+  namespace dt = dependency_types;
+
+  const dt::derived_struct derived{4, 8.15};
+  const dt::as_inherited_struct::is_base_reflected_t<
+    dt::resolved::as_inherited_struct>
+    check{};
+
+  ASSERT_TRUE(omni::reflected_call(check, derived));
+}
+
 } // namespace
