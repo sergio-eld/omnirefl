@@ -86,6 +86,45 @@ endforeach()
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
+# MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
+# Normalize 11 -> 14 to avoid generating duplicate cpp_11 / cpp_14 targets.
+if(MSVC)
+  set(_tmp "")
+  foreach(_n IN LISTS _supported_cpp_standards)
+    if(_n STREQUAL "11")
+      set(_n "14")
+    endif()
+    list(APPEND _tmp "${_n}")
+  endforeach()
+  set(_supported_cpp_standards "${_tmp}")
+  list(REMOVE_DUPLICATES _supported_cpp_standards)
+  list(SORT _supported_cpp_standards)
+
+  # fixme: CMake maps CXX_STANDARD>=23 to /std:c++latest on MSVC; clang-cl can
+  # translate that to -std=c++26, which breaks source-mode parsing on some deps
+  # (e.g. headers using removed facilities).
+  set(_filtered "")
+  set(_dropped "")
+  foreach(_n IN LISTS _supported_cpp_standards)
+    if(_n GREATER 20)
+      list(APPEND _dropped "${_n}")
+    else()
+      list(APPEND _filtered "${_n}")
+    endif()
+  endforeach()
+
+  if(_dropped)
+    list(JOIN _dropped ", " _dropped_str)
+    message(WARNING
+      "MSVC: skipping requested C++ standard levels above 20 (${_dropped_str}). "
+      "Reason: CMake uses /std:c++latest for C++23+, which clang-cl may interpret "
+      "as C++26; this makes compile_commands.json contain 'latest' and can break "
+      "omnirefl source-mode parsing (e.g. std::wstring_convert removal).")
+  endif()
+
+  set(_supported_cpp_standards "${_filtered}")
+endif()
+
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
 
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
@@ -144,69 +183,4 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         endif()
     endforeach()
 endforeach()
-
-# fixme: enable 
-# function(add_reflection_test TEST_SOURCE_DIR)
-#     # ------------------------------------------------------------------
-#     # Options
-#     #   MODES [HEADER|SOURCE] – list of modes to build; defaults to both
-#     # ------------------------------------------------------------------
-#     set(oneValueArgs)
-#     set(multiValueArgs MODES)
-#     cmake_parse_arguments(ARG "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-# 
-#     if(ARG_MODES)
-#         set(_modes ${ARG_MODES})
-#     else()
-#         set(_modes SOURCE HEADER)
-#     endif()
-# 
-#     # Verify test.cpp exists
-#     if(NOT EXISTS "${TEST_SOURCE_DIR}/test.cpp")
-#         message(FATAL_ERROR
-#             "add_reflection_test(): ${TEST_SOURCE_DIR}/test.cpp not found")
-#     endif()
-# 
-#     get_filename_component(_dir_name "${TEST_SOURCE_DIR}" NAME)
-#     set(_base_name "test.${_dir_name}")
-# 
-#     foreach(_mode ${_modes})
-#         string(TOLOWER "${_mode}" _mode)
-#         set(_suffix ".${_mode}-mode")
-#         set(_target     "${_base_name}${_suffix}")
-# 
-#         add_executable(${_target} "${TEST_SOURCE_DIR}/test.cpp")
-# 
-#         # todo: enum standards 11, 14, 17, 20...
-#         set_target_properties(${_target} PROPERTIES CXX_STANDARD 14)
-# 
-#         if(_mode STREQUAL "header")
-#             reflected_target(${_target} HEADER_MODE PRINT_DEBUG)
-#         else()
-#             reflected_target(${_target} PRINT_DEBUG)
-#         endif()
-# 
-#         target_link_libraries(${_target} PRIVATE GTest::gtest)
-# 
-#         add_test(NAME ${_target}.run_omni
-#                  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t ${_target}.omni)
-# 
-#         add_test(NAME ${_target}.build
-#                  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t ${_target})
-# 
-#         add_test(NAME ${_target} COMMAND ${_target})
-# 
-#         set_tests_properties(${_target}.build PROPERTIES DEPENDS ${_target}.run_omni)
-#         set_tests_properties(${_target}       PROPERTIES DEPENDS ${_target}.build)
-#     endforeach()
-# endfunction()
-
-# fixme: both modes
-#   - fix `reflected_target` function:
-#     setting forced include for a source file used by other targets will cause a conflict
-#   - nested struct serialization for header-mode
-# add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/simple MODES SOURCE HEADER)
-# add_subdirectory(multitarget)
-# add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/inplace MODES HEADER)
-# todo: add test for failure
 
