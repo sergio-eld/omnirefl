@@ -110,7 +110,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
             common/test_main.cpp
             common/dependent_types_test.cpp
             common/interface_test.cpp
-            # common/example_test.cpp #< fixme
+            common/example_test.cpp
         )
 
         # todo: can I use and test genex?

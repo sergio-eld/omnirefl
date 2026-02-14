@@ -33,6 +33,7 @@ namespace dependency_types {
 
 // ---------- visitors ----------
 
+// refactorme: 'namespace visit' for every visitor
 namespace as_field {
 
 static const struct get_dependency_name_t {
@@ -242,12 +243,12 @@ struct mpark_template_dep_level_2 {
 };
 
 struct derived_struct: resolved::as_inherited_struct {
-  double inherited_field;
+  double derived_field;
 
   // ad hoc for C++11
   derived_struct(int base, double derived)
       : resolved::as_inherited_struct{base}
-      , inherited_field(derived) {}
+      , derived_field(derived) {}
 };
 
 // todo: nested types struct foo{ struct bar{}; enum baz{}; };
