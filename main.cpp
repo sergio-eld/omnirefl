@@ -1248,7 +1248,6 @@ std::expected<with_compiler_invocation, std::string>
 with_compiler_invocation configure_compiler_invocation(
   const cli::options &cli_args,
   with_compiler_invocation wci) noexcept {
-  // -- todo: this is mode-related, make a map or something
   {
     clang::LangOptions &lo = wci.ci->getLangOpts();
     // todo: investigate how to properly parse comments
@@ -2628,6 +2627,8 @@ auto pipeline::compiler_invocation_for_source_file(const source_file &sf,
     p.PCHThroughHeader.clear();
     p.PCHWithHdrStop = false;
     p.PCHWithHdrStopCreate = false;
+
+    p.Macros.emplace_back("OMNI_TOOL_RUN", /*isUndef*/ false);
   }
 
   return with_compiler_invocation{

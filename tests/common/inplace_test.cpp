@@ -1,10 +1,9 @@
 
+#include "gtest_include.h"
 #include "inplace_structs.h"
 
 #include <omnirefl/reflected_call.hpp>
 #include <omnirefl/reflected_scope.hpp>
-
-#include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
@@ -18,7 +17,6 @@ struct in_cpp_struct {
 
 namespace example_impl {
 struct print_field_names_simple_t {
-
   // c++11 friendly visitor
   struct collect_names {
     std::vector<std::string> &out;

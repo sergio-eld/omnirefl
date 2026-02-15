@@ -1,7 +1,7 @@
 #include "api_structs.hpp"
+#include "gtest_include.h"
 #include "odr_test.hpp"
 
-#include <gtest/gtest.h>
 #include <omnirefl/reflected_call.hpp>
 
 TEST(odr_test, inside_interface_test_cpp) {

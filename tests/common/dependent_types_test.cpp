@@ -1,9 +1,8 @@
 #include "dependency_types.h"
+#include "gtest_include.h"
 #include "structs.h"
 
 #include <omnirefl/reflected_call.hpp>
-
-#include <gtest/gtest.h>
 
 namespace {
 

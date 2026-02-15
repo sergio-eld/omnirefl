@@ -1,8 +1,8 @@
 #include "get_field_names.hpp"
+#include "gtest_include.h"
 
-#include <gtest/gtest.h>
-
-// testing linking 2 reflected static libraries that do not expose reflected context
+// testing linking 2 reflected static libraries that do not expose reflected
+// context
 TEST(multitarget, compare_field_names) {
   static const std::vector<std::string> expected{"oceanic"};
   const odr::dummy d{};

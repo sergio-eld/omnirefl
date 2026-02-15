@@ -99,30 +99,6 @@ if(MSVC)
   set(_supported_cpp_standards "${_tmp}")
   list(REMOVE_DUPLICATES _supported_cpp_standards)
   list(SORT _supported_cpp_standards)
-
-  # fixme: CMake maps CXX_STANDARD>=23 to /std:c++latest on MSVC; clang-cl can
-  # translate that to -std=c++26, which breaks source-mode parsing on some deps
-  # (e.g. headers using removed facilities).
-  set(_filtered "")
-  set(_dropped "")
-  foreach(_n IN LISTS _supported_cpp_standards)
-    if(_n GREATER 20)
-      list(APPEND _dropped "${_n}")
-    else()
-      list(APPEND _filtered "${_n}")
-    endif()
-  endforeach()
-
-  if(_dropped)
-    list(JOIN _dropped ", " _dropped_str)
-    message(WARNING
-      "MSVC: skipping requested C++ standard levels above 20 (${_dropped_str}). "
-      "Reason: CMake uses /std:c++latest for C++23+, which clang-cl may interpret "
-      "as C++26; this makes compile_commands.json contain 'latest' and can break "
-      "omnirefl source-mode parsing (e.g. std::wstring_convert removal).")
-  endif()
-
-  set(_supported_cpp_standards "${_filtered}")
 endif()
 
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
