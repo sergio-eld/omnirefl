@@ -60,6 +60,7 @@ function(_omni_get_target_sources target_name out_sources)
     set(${out_sources} "${result}" PARENT_SCOPE)
 endfunction()
 
+# todo: implement include|exclude handling
 # -- Reflected target helper (default: source mode) --------
 # args: MODE source|header (default: source), INCLUDE <...> | EXCLUDE <...>
 # Generated sources are ignored by the tool.

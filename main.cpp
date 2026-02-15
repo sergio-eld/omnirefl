@@ -1070,7 +1070,7 @@ struct reflection {
                     "\n    }}"
                     "\n"
                     "\n    template <typename _T, typename V>"
-                    "\n    static constexpr void set_value(_T &t, V &&v) {{"
+                    "\n    static void set_value(_T &t, V &&v) {{"
                     "\n      t.{0} = std::forward<V>(v);"
                     "\n    }}"
                     "\n  }};",
@@ -3008,6 +3008,15 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   visited.erase(&root);
   return {visited.begin(), visited.end()};
 }
+
+// bool has_reflectable_dependencies(const clang::Type& t) {
+//   // true if:
+//   // - struct|class|union
+//   // - has aliases: value|type|value_type|key_type|error_type
+//   // - is a template of "tuple" or "variant"
+//   if (t.isFundamentalType())
+//     return false;
+// }
 
 // fixme:
 // nested `wrestler::info` in `example_types` namespace is rendered as
