@@ -18,23 +18,15 @@ endif()
 # Enable FetchContent logging
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
-find_package(GTest QUIET)
-if (TARGET GTest::GTest)
-    message(STATUS "GTest: found via find_package(), using existing GTest::GTest target")
-else()
-    message(STATUS "GTest: not found via find_package(), fetching googletest with FetchContent")
-
-    # do not let googletest install itself when run "cmake --install" / CPack
-    set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
-    set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
-    FetchContent_Declare(googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.15.2)
-
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
-    add_library(GTest::GTest ALIAS gtest)
-endif()
+# do not let googletest install itself when run "cmake --install" / CPack
+set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
+set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+     # The "newest" gtest that supports C++11. 
+     # Otherwize will force its C++ version upon the test targets.
+    GIT_TAG release-1.12.1)
 
 # std-compat utility
 set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
@@ -61,7 +53,8 @@ FetchContent_Declare(mpark_variant
     GIT_SUBMODULES_RECURSE FALSE
 )
 
-FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant)
+FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant googletest)
+add_library(GTest::GTest ALIAS gtest)
 
 # todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
 add_library(std_compat INTERFACE)
