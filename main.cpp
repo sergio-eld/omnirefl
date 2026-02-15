@@ -2890,7 +2890,8 @@ std::vector<member_typedef_decl> member_typedefs(
   return r;
 };
 
-// refactorme: ugleee body
+// refactorme: I don't really benefit from separating this from
+// `resolve_reflected_type` refactorme: ugleee body
 std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
   const clang::CXXRecordDecl &root,
   const std::set<meta::type_id> &resolved_types) noexcept {
@@ -2957,6 +2958,7 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
         clang::cast<clang::ClassTemplateSpecializationDecl>(cur)
           ->getTemplateInstantiationArgs()
           .asArray();
+
       if (1 != arg_list.size()
         || clang::TemplateArgument::Pack != arg_list.front().getKind()) {
         // todo: log? this should not happen
@@ -2977,21 +2979,29 @@ std::vector<const clang::CXXRecordDecl *> recursively_collect_dependency_types(
       continue;
     }
 
-    // fixme: just collect the types: determine reflectable later?
-    for (const clang::FieldDecl *fd : cur->fields()) {
-      if (clang::AccessSpecifier::AS_public != fd->getAccess()
+    // fixme: reverse. Should process the fields in order of their declaration
+    for (const clang::FieldDecl *field_decl : cur->fields()) {
+      if (clang::AccessSpecifier::AS_public != field_decl->getAccess()
         // todo: other checks that would prevent the field from being
-
-        || fd->isUnnamedBitField())
+        || field_decl->isUnnamedBitField())
         continue;
 
-      const clang::QualType qt = fd->getType();
+      const clang::QualType field_qual_type = field_decl->getType();
       // fixme: what about unions, built-in arrays?
-      if (!qt->isStructureOrClassType())
+      if (!field_qual_type->isStructureOrClassType())
         continue;
 
       // todo: support only non-static fields
-      to_visit.push(qt->getAsCXXRecordDecl());
+      to_visit.push(field_qual_type->getAsCXXRecordDecl());
+    }
+
+    for (const clang::CXXBaseSpecifier &base :
+      cur->bases() | std::views::reverse) {
+      const clang::QualType base_qual_type = base.getType();
+      if (!base_qual_type->isStructureOrClassType())
+        continue;
+
+      to_visit.push(base_qual_type->getAsCXXRecordDecl());
     }
   }
 
