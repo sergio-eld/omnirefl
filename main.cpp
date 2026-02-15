@@ -93,10 +93,6 @@ const auto to_vector_of_raw_pointers =
     });
 };
 
-const auto valid_only = //
-  []<typename T, typename E>(
-    const std::expected<T, E> &e) { return e.has_value(); };
-
 const auto accum_back_inserter = //
   []<std::ranges::range Accum, typename Value>(Accum accum, Value &&value)
   requires requires(Accum &a, Value &&v) {
@@ -106,6 +102,25 @@ const auto accum_back_inserter = //
   accum.emplace_back(std::forward<Value>(value));
   return accum;
 };
+
+std::expected<std::ofstream, std::string> create_file_for_writing(
+  const fs::path &file) {
+  std::error_code ec;
+  fs::create_directories(file.parent_path(), ec);
+
+  if (ec) {
+    return std::unexpected(std::format("invalid parent path: {}",
+      file.parent_path().generic_string()));
+  }
+
+  std::ofstream out{file, std::ios::binary};
+  if (!out) {
+    return std::unexpected(
+      std::format("failed to open file {} for writing", file.generic_string()));
+  }
+
+  return out;
+}
 
 template <typename R, typename T>
 concept viewable_range_of = std::ranges::viewable_range<R>
@@ -1241,8 +1256,8 @@ struct with_compiler_invocation {
 };
 
 std::expected<with_compiler_invocation, std::string>
-  compiler_invocation_for_source_file(const source_file &sf,
-    const fs::path &resource_dir) noexcept;
+  compiler_invocation_for_source_file(const fs::path &resource_dir,
+    const source_file &sf) noexcept;
 
 // todo: rename/refactor. This is (should be) entirely mode related.
 with_compiler_invocation configure_compiler_invocation(
@@ -1381,23 +1396,17 @@ int main(int argc, char **argv) {
     format_options(*cli_args));
 
   llvm::errs() << '\n';
+  static const size_t k_max_errors = 2; //< todo: configure in cli
 
-  util::viewable_range_of<pipeline::source_file_context> auto
-    processed_sources_view = //
-    std::invoke([&] {
-      // static const size_t k_max_errors = 2; //< todo: configure in cli
-
+  util::viewable_range_of<std::expected<pipeline::source_file_context,
+    std::string>> auto processed_sources_view = //
+    std::invoke([&cli_args = *cli_args] {
       const auto compiler_invocation_for_source_file =
-        [&resource_dir = cli_args->resource_dir](const source_file &sf) {
-          return pipeline::compiler_invocation_for_source_file(sf,
-            resource_dir);
-        };
+        std::bind_front(pipeline::compiler_invocation_for_source_file,
+          cli_args.resource_dir);
 
       const auto configure_compiler_invocation =
-        [&cli_args = *cli_args](pipeline::with_compiler_invocation wci) {
-          return pipeline::configure_compiler_invocation(cli_args,
-            std::move(wci));
-        };
+        std::bind_front(pipeline::configure_compiler_invocation, cli_args);
 
       static const auto collect_matches =
         [](pipeline::with_ast wast) -> pipeline::source_file_context {
@@ -1555,12 +1564,12 @@ int main(int argc, char **argv) {
           });
       };
 
-      return util::indexed(cli_args->sources, 1)
+      return util::indexed(cli_args.sources, 1)
         | std::views::transform(
           [compiler_invocation_for_source_file,
             configure_compiler_invocation,
-            total_sources = cli_args->sources.size(),
-            mode = cli_args->mode](const auto &indexed_src) {
+            total_sources = cli_args.sources.size(),
+            mode = cli_args.mode](const auto &indexed_src) {
             const auto &[sf, idx] = indexed_src;
 
             llvm::errs() << std::format(
@@ -1616,10 +1625,8 @@ int main(int argc, char **argv) {
 
                 return ctx;
               });
-          })
-        | std::views::transform([](auto e) { return *std::move(e); });
+          });
     });
-  // fixme: occurred errors are not handled.
 
   // refactorme: use ^^^ as view.
   // - for source mode materialize (fold) into a single context and render.
@@ -1634,25 +1641,37 @@ int main(int argc, char **argv) {
       std::set<meta::type_id> dependencies;
 
       std::set<fs::path> includes_deps;
+
+      bool failed;
     };
 
     render_context ctx =
       std::ranges::fold_left(processed_sources_view | std::views::as_rvalue,
         render_context{},
-        [](render_context a,
-          pipeline::source_file_context ctx) -> render_context {
-          // todo: skip errors here, or filter/partition before folding? errors
-          // should be conditionally ignorable (user may provide
-          // --ignore-errors=N)
-          if (!ctx.errors.empty())
-            return a;
+        [errors = std::size_t(0)](render_context a,
+          std::expected<pipeline::source_file_context, std::string> ctx) mutable
+          -> render_context {
+          if (!ctx || !ctx->errors.empty())
+            ++errors;
 
-          std::ranges::move(ctx.reflected, std::back_inserter(a.reflected));
-          std::ranges::move(ctx.calls, std::back_inserter(a.calls));
-          std::ranges::move(ctx.resolved_as_dependent,
+          if (!ctx) {
+            llvm::errs() << std::format("[error] {}", ctx.error());
+            return a;
+          }
+
+          if (k_max_errors <= errors) {
+            llvm::errs() << std::format("[error] exceeded maximum errors {}.",
+              k_max_errors);
+            a.failed = true;
+            return a;
+          }
+
+          std::ranges::move(ctx->reflected, std::back_inserter(a.reflected));
+          std::ranges::move(ctx->calls, std::back_inserter(a.calls));
+          std::ranges::move(ctx->resolved_as_dependent,
             std::inserter(a.dependencies, a.dependencies.begin()));
 
-          std::ranges::move(ctx.includes_deps,
+          std::ranges::move(ctx->includes_deps,
             std::inserter(a.includes_deps, a.includes_deps.begin()));
 
           // todo: implement later. The logic is somewhat complex. If a type is
@@ -1796,6 +1815,15 @@ int main(int argc, char **argv) {
             : fs::path(o) / "source_mode_reflected.cpp";
       });
 
+    llvm::errs() << std::format("\n[info] creating source mode reflection: {}",
+      out.generic_string());
+
+    std::expected out_file = util::create_file_for_writing(out);
+    if (!out_file) {
+      llvm::errs() << std::format("\n[error] {}", out_file.error());
+      return -1;
+    }
+
     std::error_code ec;
     fs::create_directories(out.parent_path(), ec);
     if (ec) {
@@ -1805,17 +1833,6 @@ int main(int argc, char **argv) {
         ec.message(),
         out.parent_path().generic_string());
 
-      return -1;
-    }
-
-    llvm::errs() << std::format("\n[info] creating source mode reflection: {}",
-      out.generic_string());
-
-    std::ofstream out_file{out, std::ios::binary};
-    if (!out_file) {
-      llvm::errs() << std::format(
-        "\n[error] failed to open file {} for writing",
-        out.generic_string());
       return -1;
     }
 
@@ -1830,7 +1847,7 @@ int main(int argc, char **argv) {
     // todo: do I need to print a list of sources and their flags?
 
     // refactorme: this is source mode generation.
-    std::format_to(std::ostreambuf_iterator<char>(out_file),
+    std::format_to(std::ostreambuf_iterator<char>(*out_file),
       "// This file was generated by the omnirefl tool on {0:%F %T}."
       "\n// Do not modify the contents of this file."
       "\n"
@@ -1921,6 +1938,11 @@ int main(int argc, char **argv) {
           dep_file_written.error());
       }
     }
+
+    if (ctx.failed) {
+      llvm::errs() << "\nomnirefl failed\n";
+      return -1;
+    }
   } else {
     struct render_context {
       source_file sf;
@@ -1932,6 +1954,8 @@ int main(int argc, char **argv) {
       // to generate deps file for cmake, so it can rerun the tool upon changes
       // to those headers
       std::set<fs::path> includes_deps;
+
+      bool failed;
     };
 
     // refactorme: std::ranges::to<std::vector>().front(); //< there's only one
@@ -1940,23 +1964,24 @@ int main(int argc, char **argv) {
       std::ranges::fold_left(processed_sources_view | std::views::as_rvalue,
         render_context{},
         [](render_context a,
-          pipeline::source_file_context ctx) -> render_context {
-          // todo: skip errors here, or filter/partition before folding? errors
-          // should be conditionally ignorable (user may provide
-          // --ignore-errors=N)
-          if (!ctx.errors.empty())
+          std::expected<pipeline::source_file_context, std::string> ctx)
+          -> render_context {
+          if (!ctx) {
+            llvm::errs() << std::format("[error] {}", ctx.error());
+            a.failed = true;
             return a;
+          }
 
-          a.sf = std::move(ctx.sf);
+          a.sf = std::move(ctx->sf);
 
-          std::ranges::move(ctx.reflected, std::back_inserter(a.reflected));
-          std::ranges::move(ctx.resolved_as_dependent,
+          std::ranges::move(ctx->reflected, std::back_inserter(a.reflected));
+          std::ranges::move(ctx->resolved_as_dependent,
             std::inserter(a.dependencies, a.dependencies.begin()));
 
-          std::ranges::move(ctx.index_by_type,
+          std::ranges::move(ctx->index_by_type,
             std::inserter(a.index_by_type, a.index_by_type.begin()));
 
-          std::ranges::move(ctx.includes_deps,
+          std::ranges::move(ctx->includes_deps,
             std::inserter(a.includes_deps, a.includes_deps.begin()));
 
           return a;
@@ -2070,6 +2095,11 @@ int main(int argc, char **argv) {
           out.string(),
           dep_file_written.error());
       }
+    }
+
+    if (ctx.failed) {
+      llvm::errs() << "\nomnirefl failed\n";
+      return -1;
     }
   }
 
@@ -2427,8 +2457,8 @@ std::vector<std::string> filter_ast_related_args(
 }
 
 // refactorme: this is an ugly shite
-auto pipeline::compiler_invocation_for_source_file(const source_file &sf,
-  const fs::path &resource_dir) noexcept
+auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
+  const source_file &sf) noexcept
   -> std::expected<with_compiler_invocation, std::string> {
   namespace options = clang::driver::options;
 
