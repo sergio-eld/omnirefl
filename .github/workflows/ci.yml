@@ -149,6 +149,9 @@ jobs:
   aggregate-test-results:
     runs-on: ubuntu-latest
     needs: [test-ubuntu, test-windows]
+    permissions:
+      contents: read
+      actions: write
     if: always()
 
     steps:

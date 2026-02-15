@@ -143,11 +143,9 @@ services:
         cmake .. -GNinja
 
         set +e
-        ctest --output-junit result.xml -V 2>&1 | tee /test/$$PREFIX.log
+        ctest --output-junit /test/$$PREFIX.xml -V 2>&1 | tee /test/$$PREFIX.log
         rc=$$?
         set -e
-
-        cp result.xml /test/$$PREFIX.xml
 
         if [ -n "$${DEBUG_SHELL:-}" ]; then
           echo "ctest rc=$$rc (DEBUG_SHELL set)"
