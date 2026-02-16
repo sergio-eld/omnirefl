@@ -68,18 +68,16 @@ TEST(dependency_resolved, as_template_arg) {
 TEST(dependency_resolved, as_inherited_struct) {
   namespace dt = dependency_types;
 
-  const std::vector<std::string> k_expected_field_names{
-    "base_field",
-    "derived_field",
-  };
-
   const dt::derived_struct derived{4, 8.15};
   const dt::as_inherited_struct::is_base_reflected_t<
     dt::resolved::as_inherited_struct>
     check{};
 
   EXPECT_TRUE(omni::reflected_call(check, derived));
-  EXPECT_EQ(k_expected_field_names,
+  EXPECT_EQ((std::vector<std::string>{
+              "base_field",
+              "derived_field",
+            }),
     omni::reflected_call(example_impl::print_field_names_simple, derived));
 }
 

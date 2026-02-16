@@ -26,20 +26,19 @@ TEST(print_names, simple) {
   // `reflected_t<wrestler::info_t, T>` which will be delayed. The same can be
   // applied to unnamed types:
   // `reflected_t<decltype(std::declval<wrestler>().field), T>`.
-  //
-  // {
-  //   const example_types::wrestler v{};
-  //   const static std::vector<std::string> expected{
-  //     "name",
-  //     "age",
-  //     "catchphrase",
-  //     "titles",
-  //     "info",
-  //   };
-  //   const std::vector<std::string> result =
-  //     omni::reflected_call(example_impl::print_field_names_simple, v);
-  //   EXPECT_EQ(expected, result);
-  // }
+  {
+    const example_types::wrestler v{};
+    const static std::vector<std::string> expected{
+      "name",
+      "age",
+      "catchphrase",
+      "titles",
+      "info",
+    };
+    const std::vector<std::string> result =
+      omni::reflected_call(example_impl::print_field_names_simple, v);
+    EXPECT_EQ(expected, result);
+  }
 }
 
 // todo: remove repetition, 'deduce' suite name from the reflection impl object

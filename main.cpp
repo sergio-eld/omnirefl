@@ -2005,6 +2005,8 @@ int main(int argc, char **argv) {
       return -1;
     }
   } else {
+    // todo: render indexed types
+    // todo: render nested types. Proof of concept: https://godbolt.org/z/87aTse8Ma
     struct render_context {
       source_file sf;
 
