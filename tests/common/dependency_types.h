@@ -73,14 +73,15 @@ static const struct get_dependency_name_layer_2_t {
 namespace as_alias {
 
 static const struct get_dependency_name_t {
-  template <typename T>
-  std::string operator()(const T &) const {
-    using parent_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-    using dep_type = typename T::value_type;
+  template <typename Parent>
+  std::string operator()(const Parent &) const {
+    static_assert(omni::is_reflected<Parent>::value, "Parent is not reflected");
+    static_assert(omni::is_reflected<typename Parent::value_type>::value,
+      "Member alias is not reflected");
 
-    return std::string(omni::reflected<parent_type>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(omni::reflected<Parent>().name()) + "::"
+      + std::string(omni::reflected<typename Parent::value_type>().name())
+      + ":int";
   }
 } get_dependency_name;
 
