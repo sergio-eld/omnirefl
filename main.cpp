@@ -1051,190 +1051,196 @@ struct log {
   }
 };
 
+std::string format_enum(const meta::nm_qual_type &t,
+  const meta::enum_data &d) noexcept {
+  assert(t.name && "format_enum expects named, non-anonymous enum");
+
+  return std::format(
+    "template <typename T>"
+    "\nstruct _reflected<enum {0}, T> {{"
+    "\n  static_assert(std::is_same<enum {0}, T>::value,"
+    "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+    "\n"
+    "\n  using type = T;"
+    "\n"
+    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
+    "\n    return omni::reflected_entity::enumeration;"
+    "\n  }}"
+    "\n"
+    "\n  constexpr static auto name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{1}\")] {{"
+    "\n    return \"{1}\";"
+    "\n  }}"
+    "\n"
+    "\n  constexpr static auto enumerators() noexcept"
+    "\n    -> std::array<std::pair<type, const char*>, {2}> {{"
+    "\n      return {{{{"
+    "\n        {3},"
+    "\n      }}}};"
+    "\n    }}"
+    "\n}};",
+
+    // 0:
+    format_nm_qual_type(t),
+
+    // 1:
+    *t.name,
+
+    // 2:
+    d.enumerators.size(),
+
+    // 3:
+    d.enumerators //
+      | std::views::transform([](std::string_view e) {
+          return std::format("{{type::{0}, \"{0}\"}}", e);
+        })
+      | std::views::join_with(",\n        "sv) //
+      | util::fmt_fold);
+}
+
+std::string format_struct(const meta::nm_qual_type &t,
+  const meta::record_data &d) noexcept {
+  assert(t.name && "format_struct expects named, non-anonymous type");
+
+  // todo:
+  // - `.fields` -> returns all the fields
+  // - `.mutable_fields` -> returns only mutable fields
+  return std::format(
+    "template <typename T>"
+    "\nstruct _reflected<{0} {1}, T> {{"
+    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+    "\n"
+    "\n  using type = T;"
+    "\n"
+    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
+    "\n    return omni::reflected_entity::tagged;"
+    "\n  }}"
+    "\n"
+    "\n  static constexpr auto name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{2}\")] {{"
+    "\n    return \"{2}\";"
+    "\n  }}"
+    "\n"
+    "{3}"
+    "\n"
+    "\n  using fields_t ="
+    "\n    std::tuple<{4}>;"
+    "\n"
+    "\n  static constexpr fields_t fields() noexcept {{ return {{}}; }}"
+    "\n}};",
+
+    // 0:
+    d.type == meta::record_data::is_class //
+      ? "class"
+      : d.type == meta::record_data::is_union //
+        ? "union"
+        : "struct",
+
+    // 1:
+    format_nm_qual_type(t),
+
+    // 2:
+    *t.name,
+
+    // 3:
+    d.public_fields.empty()
+      ? std::string("\n  // no reflectable fields detected")
+      : std::format("\n{}",
+          util::indexed(d.public_fields) | std::views::transform([](const auto &p) {
+            const auto &[name, idx] = p;
+            return std::format(
+              "  struct {0}_t {{"
+              "\n    static constexpr omni::reflected_entity entity() noexcept {{ "
+              "\n      return omni::reflected_entity::member;"
+              "\n    }}"
+              "\n"
+              "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
+              "\n"
+              "\n    static constexpr auto name() noexcept"
+              "\n      -> const char(&)[sizeof(\"{0}\")] {{"
+              "\n      return \"{0}\";"
+              "\n    }}"
+              "\n"
+              "\n    template <typename _T>"
+              "\n    static constexpr auto value(const _T &t) noexcept"
+              "\n      -> const decltype(t.{0})& {{"
+              "\n      return t.{0};"
+              "\n    }}"
+              "\n"
+              "\n    template <typename _T, typename V>"
+              "\n    static void set_value(_T &t, V &&v) {{"
+              "\n      t.{0} = std::forward<V>(v);"
+              "\n    }}"
+              "\n  }};",
+              name,
+              idx);
+          }) //
+            | std::views::join_with("\n\n"sv) //
+            | util::fmt_fold),
+
+    // 4:
+    d.public_fields //
+      | std::views::transform(
+        [](std::string_view f) { return std::format("{}_t", f); }) //
+      | std::views::join_with(",\n      "sv) //
+      | util::fmt_fold);
+}
+
+std::string format_reflected_call(const meta::reflected_call_info &c) noexcept {
+  const std::string invoke_impl = std::format("_impl({})",
+    util::indexed(c.f_sig.args) //
+      | std::views::drop(1) //< first arg is _impl
+      | std::views::transform([](const auto &p) {
+          const auto &[arg, idx] = p;
+          return !arg.is_const && meta::reference_type::ref_rval == arg.ref_type
+            ? std::format("std::move(_{})", idx)
+            : std::format("_{}", idx);
+        }) //
+      | std::views::join_with(",\n  "sv) //
+      | util::fmt_fold);
+
+  return std::format(
+    "template <>"
+    "\nauto omni::reflected_call_t::_call_impl("
+    "\n  {0})"
+    "\n  -> decltype({1}) {{"
+    "\n  return {1};"
+    "\n}}",
+
+    // 0: parameters (Impl + call args)
+    util::indexed(c.f_sig.args) //
+      | std::views::transform([](const auto &p) {
+          const auto &[arg, idx] = p;
+          return std::format("{} {}",
+            format_funcion_arg(arg),
+            0 == idx ? "_impl" : std::format("_{}", idx));
+        }) //
+      | std::views::join_with(",\n  "sv) //
+      | util::fmt_fold,
+
+    // 1:
+    invoke_impl);
+}
+
+std::string format_reflectable(const meta::reflectable &r) noexcept {
+  return std::visit(
+    [&tn = r.definition.type_name]<typename Meta>(const Meta &d) {
+      if constexpr (std::same_as<meta::record_data, Meta>)
+        return format_struct(tn, d);
+      else {
+        static_assert(std::same_as<meta::enum_data, Meta>);
+        return format_enum(tn, d);
+      }
+    },
+    r.data);
+}
+
 // refactorme: ugly shite. Control flow is not readable.
 struct reflection {
   const std::set<meta::type_id> &dependencies;
 
-  static auto format_enum(const meta::nm_qual_type &t,
-    const meta::enum_data &d) noexcept {
-    assert(t.name && "format_enum expects named, non-anonymous enum");
-
-    return std::format(
-      "template <typename T>"
-      "\nstruct _reflected<enum {0}, T> {{"
-      "\n  static_assert(std::is_same<enum {0}, T>::value,"
-      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
-      "\n"
-      "\n  using type = T;"
-      "\n"
-      "\n  static constexpr omni::reflected_entity entity() noexcept {{"
-      "\n    return omni::reflected_entity::enumeration;"
-      "\n  }}"
-      "\n"
-      "\n  constexpr static auto name() noexcept"
-      "\n    -> const char(&)[sizeof(\"{1}\")] {{"
-      "\n    return \"{1}\";"
-      "\n  }}"
-      "\n"
-      "\n  constexpr static auto enumerators() noexcept"
-      "\n    -> std::array<std::pair<type, const char*>, {2}> {{"
-      "\n      return {{{{"
-      "\n        {3},"
-      "\n      }}}};"
-      "\n    }}"
-      "\n}};",
-
-      // 0:
-      format_nm_qual_type(t),
-
-      // 1:
-      *t.name,
-
-      // 2:
-      d.enumerators.size(),
-
-      // 3:
-      d.enumerators //
-        | std::views::transform([](std::string_view e) {
-            return std::format("{{type::{0}, \"{0}\"}}", e);
-          })
-        | std::views::join_with(",\n        "sv) //
-        | util::fmt_fold);
-  }
-
-  static auto format_struct(const meta::nm_qual_type &t,
-    const meta::record_data &d) noexcept -> std::string {
-    assert(t.name && "format_struct expects named, non-anonymous type");
-
-    // todo:
-    // - `.fields` -> returns all the fields
-    // - `.mutable_fields` -> returns only mutable fields
-    return std::format(
-      "template <typename T>"
-      "\nstruct _reflected<{0} {1}, T> {{"
-      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
-      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
-      "\n"
-      "\n  using type = T;"
-      "\n"
-      "\n  static constexpr omni::reflected_entity entity() noexcept {{"
-      "\n    return omni::reflected_entity::tagged;"
-      "\n  }}"
-      "\n"
-      "\n  static constexpr auto name() noexcept"
-      "\n    -> const char(&)[sizeof(\"{2}\")] {{"
-      "\n    return \"{2}\";"
-      "\n  }}"
-      "\n"
-      "{3}"
-      "\n"
-      "\n  using fields_t ="
-      "\n    std::tuple<{4}>;"
-      "\n"
-      "\n  static constexpr fields_t fields() noexcept {{ return {{}}; }}"
-      "\n}};",
-
-      // 0:
-      d.type == meta::record_data::is_class //
-        ? "class"
-        : d.type == meta::record_data::is_union //
-          ? "union"
-          : "struct",
-
-      // 1:
-      format_nm_qual_type(t),
-
-      // 2:
-      *t.name,
-
-      // 3:
-      d.public_fields.empty()
-        ? std::string("\n  // no reflectable fields detected")
-        : std::format("\n{}",
-            util::indexed(d.public_fields)
-              | std::views::transform([](const auto &p) {
-                  const auto &[name, idx] = p;
-                  return std::format(
-                    "  struct {0}_t {{"
-                    "\n    static constexpr omni::reflected_entity entity() noexcept {{ "
-                    "\n      return omni::reflected_entity::member;"
-                    "\n    }}"
-                    "\n"
-                    "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
-                    "\n"
-                    "\n    static constexpr auto name() noexcept"
-                    "\n      -> const char(&)[sizeof(\"{0}\")] {{"
-                    "\n      return \"{0}\";"
-                    "\n    }}"
-                    "\n"
-                    "\n    template <typename _T>"
-                    "\n    static constexpr auto value(const _T &t) noexcept"
-                    "\n      -> const decltype(t.{0})& {{"
-                    "\n      return t.{0};"
-                    "\n    }}"
-                    "\n"
-                    "\n    template <typename _T, typename V>"
-                    "\n    static void set_value(_T &t, V &&v) {{"
-                    "\n      t.{0} = std::forward<V>(v);"
-                    "\n    }}"
-                    "\n  }};",
-                    name,
-                    idx);
-                }) //
-              | std::views::join_with("\n\n"sv) //
-              | util::fmt_fold),
-
-      // 4:
-      d.public_fields //
-        | std::views::transform(
-          [](std::string_view f) { return std::format("{}_t", f); }) //
-        | std::views::join_with(",\n      "sv) //
-        | util::fmt_fold);
-  }
-
-  static std::string format_reflected_call(
-    const meta::reflected_call_info &c) noexcept {
-    const std::string invoke_impl = std::format("_impl({})",
-      util::indexed(c.f_sig.args) //
-        | std::views::drop(1) //< first arg is _impl
-        | std::views::transform([](const auto &p) {
-            const auto &[arg, idx] = p;
-            return !arg.is_const
-                && meta::reference_type::ref_rval == arg.ref_type
-              ? std::format("std::move(_{})", idx)
-              : std::format("_{}", idx);
-          }) //
-        | std::views::join_with(",\n  "sv) //
-        | util::fmt_fold);
-
-    return std::format(
-      "template <>"
-      "\nauto omni::reflected_call_t::_call_impl("
-      "\n  {0})"
-      "\n  -> decltype({1}) {{"
-      "\n  return {1};"
-      "\n}}",
-
-      // 0: parameters (Impl + call args)
-      util::indexed(c.f_sig.args) //
-        | std::views::transform([](const auto &p) {
-            const auto &[arg, idx] = p;
-            return std::format("{} {}",
-              format_funcion_arg(arg),
-              0 == idx ? "_impl" : std::format("_{}", idx));
-          }) //
-        | std::views::join_with(",\n  "sv) //
-        | util::fmt_fold,
-
-      // 1:
-      invoke_impl);
-  }
-
-  auto operator()(const meta::reflected_call_info &c) const noexcept {
-    return format_reflected_call(c);
-  }
-
-  auto operator()(const meta::reflectable &r) const noexcept {
+  std::string operator()(const meta::reflectable &r) const noexcept {
     return std::format(
       "// {0}{1}"
       "\n// declared at: {2}"
@@ -1999,7 +2005,7 @@ int main(int argc, char **argv) {
 
       // 4:
       ctx.calls //
-        | std::views::transform(render_reflection) //
+        | std::views::transform(render::format_reflected_call) //
         | std::views::join_with("\n\n"sv) //
         | util::fmt_fold);
 
@@ -3355,6 +3361,72 @@ std::string declaration_for_enclosing_root_as_dependent(
     elems | std::views::join_with("::"sv) | util::fmt_fold);
 }
 
+template <typename Data>
+  requires std::same_as<meta::record_data, Data>
+  || std::same_as<meta::enum_data, Data>
+std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
+  // to support need field name for `decltype(std::declval<root>().inner)
+  assert(t.name && "unnamed inner structs not supported");
+
+  const std::string_view tag = std::invoke([&d] {
+    if constexpr (std::same_as<meta::record_data, Data>) {
+      switch (d.type) {
+      case meta::record_data::is_class:
+        return "class";
+      case meta::record_data::is_union:
+        return "union";
+      case meta::record_data::is_struct:
+      default:
+        return "struct";
+      }
+    } else {
+      return d.is_scoped ? "enum class" : "enum";
+    }
+  });
+
+  const std::string_view entity = std::invoke([&d] {
+    if constexpr (std::same_as<meta::record_data, Data>)
+      return "record";
+    else
+      return "enumeration";
+  });
+
+  const std::string access_root_for = enclosing_root_as_dependent(t);
+  std::vector<std::string_view> elems{access_root_for, "<T>"};
+  std::ranges::copy(t.enclosing_records | std::views::drop(1),
+    std::back_inserter(elems));
+  elems.push_back(*t.name);
+
+  return std::format(
+    "template <typename T>"
+    "\nstruct _reflected<T, {0} typename std::enable_if<"
+    "\n  std::is_same<T, typename {1}>::value, T>::type> {{"
+    "\n  "
+    "\n  using type = T;"
+    "\n"
+    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
+    "\n    return omni::reflected_entity::{2};"
+    "\n  }}"
+    "\n"
+    "\n  static constexpr auto name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{3}\")] {{"
+    "\n    return \"{3}\";"
+    "\n  }}"
+    "\n",
+
+    // 0
+    tag,
+
+    // 1
+    elems | std::views::join_with("::"sv) | util::fmt_fold,
+
+    // 2
+    entity,
+
+    // 3
+    t.name.value_or("(unnamed)"));
+}
+
 } // namespace render::impl
 
 auto render::prepare_header_mode_context(meta::source_file_context ctx)
@@ -3515,7 +3587,8 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\nnamespace {{"
     "\n"
     "\n// -- reflected types --------"
-    // "\n{3}"
+    "\n{3}"
+    "\n{4}"
     "\n"
     "\n// -- reflected indexed types --------"
     "\n" // todo: ^^^
@@ -3549,14 +3622,21 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
       | std::views::transform(
         render::impl::declaration_for_enclosing_root_as_dependent) //
       | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold);
+      | util::fmt_fold,
 
-  // 3:
-  // ctx.reflected //
-  //   | std::views::transform(get_reflectable)
-  //   | std::views::transform(render_reflection) //
-  //   | std::views::join_with("\n\n"sv) //
-  //   | util::fmt_fold);
+    // 3:
+    ctx.fwd_declarables //
+      | std::views::transform(get_reflectable)
+      | std::views::transform(render::format_reflectable) //
+      | std::views::join_with("\n\n"sv) //
+      | util::fmt_fold,
+
+    // 4:
+    ctx.nested //
+      | std::views::transform(get_reflectable)
+      | std::views::transform(render::format_reflectable) //
+      | std::views::join_with("\n\n"sv) //
+      | util::fmt_fold);
 
   // todo: check if file has errors
 
