@@ -102,7 +102,7 @@ jobs:
           if-no-files-found: error
 
   test-windows:
-    runs-on: windows-2019
+    runs-on: [self-hosted, windows, x64]
     needs: build-package
     strategy:
       fail-fast: false
