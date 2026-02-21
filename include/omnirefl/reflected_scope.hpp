@@ -49,6 +49,9 @@ template <typename T, typename = T>
 struct _reflected;
 #endif // OMNI_REFLECTED_INDEXED_CALLS
 
+template <typename T>
+using _meta = detail::_reflected<compat::decay_t<T>>;
+
 } // namespace
 } // namespace detail
 
@@ -264,8 +267,8 @@ template <typename T>
 struct reflected_t<T,
   detail::_reflected<compat::decay_t<T>>,
   reflected_entity::record> {
+  using meta = detail::_meta<T>;
   using type = compat::decay_t<T>; //< reflecting pointers is pointless
-  using meta = detail::_reflected<type>;
 
   static_assert(is_reflected<type>::value,
     "Type was not reflected (Calling outside a reflected scope?)");
@@ -325,8 +328,8 @@ template <typename T>
 struct reflected_t<T,
   detail::_reflected<compat::decay_t<T>>,
   reflected_entity::enumeration> {
+  using meta = detail::_meta<T>;
   using type = compat::decay_t<T>;
-  using meta = detail::_reflected<type>;
 
   static_assert(std::is_enum<type>::value, "Type is not a enum");
   static_assert(is_reflected<type>::value,
