@@ -69,15 +69,28 @@ services:
     image: sergioeld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
-      - ./build-alpine/linux:/build:rw # ad hoc: must be rw for CTest (SMH)
+      - ./build-alpine/linux:/build:rw # must be rw for CTest
       - ./build-alpine/test:/test:rw
     working_dir: /build
     entrypoint:
       - /bin/ash
       - -euxc
       - |
-        ctest --parallel --output-junit alpine-results.xml -V | tee /test/alpine-results.log
-        cp alpine-results.xml /test/
+        set -o pipefail
+        PREFIX=alpine-results
+
+        set +e
+        ctest --parallel --output-junit "/test/$${PREFIX}.xml" -V 2>&1 | tee "/test/$${PREFIX}.log"
+        rc=$$?
+        set -e
+
+        if [ -n "$${DEBUG_SHELL:-}" ]; then
+          echo "ctest rc=$$rc (DEBUG_SHELL set)"
+          export CTEST_RC="$$rc"
+          exec /bin/ash
+        fi
+
+        exit $$rc
 
   package-linux:
     image: sergioeld/omnirefl-build-alpine

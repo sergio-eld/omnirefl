@@ -779,12 +779,29 @@ struct source_file_context {
 
   // Used to generate deps file for cmake, so it can rerun the tool upon changes
   // to those headers
-  std::set<fs::path> dependencies;
+  std::set<fs::path> file_dependencies;
 };
 
 } // namespace meta
 
 namespace render {
+
+struct source_mode_context {
+  std::vector<meta::reflectable> reflected;
+  std::vector<meta::reflected_call_info> calls;
+
+  std::set<meta::type_id> dependencies;
+
+  std::set<fs::path> file_dependencies;
+
+  bool failed;
+};
+
+std::expected<source_mode_context, std::string> prepare_source_mode_context(
+  std::vector<meta::source_file_context> sfs);
+
+std::expected<source_mode_context, std::string>
+  source_mode_reflection(source_mode_context ctx, std::ofstream file);
 
 struct header_mode_context {
   // can generate forward declaration reflected type
@@ -813,7 +830,7 @@ struct header_mode_context {
   std::vector<nested_type> nested;
   std::vector<indexed_type> indexed;
 
-  std::set<fs::path> dependencies;
+  std::set<fs::path> file_dependencies;
 };
 
 std::expected<header_mode_context, std::string> prepare_header_mode_context(
@@ -1525,7 +1542,7 @@ int main(int argc, char **argv) {
         return ast::reduce_matches(*wast.ast,
           meta::source_file_context{
             .sf = std::move(wast.sf),
-            .dependencies = std::move(wast.includes_deps),
+            .file_dependencies = std::move(wast.includes_deps),
           },
 
           // source mode only (selected by preprocessor)
@@ -1723,7 +1740,7 @@ int main(int argc, char **argv) {
                     | std::views::join_with("\n\n"sv) //
                     | util::fmt_fold,
 
-                  ctx.dependencies //
+                  ctx.file_dependencies //
                     | std::views::transform(
                       [](const fs::path &p) { return p.string(); }) //
                     | std::views::join_with("\n"sv) //
@@ -1740,174 +1757,8 @@ int main(int argc, char **argv) {
   // context
   //
   if (cli::options::source == cli_args->mode) {
-    struct render_context {
-      std::vector<meta::reflectable> reflected;
-      std::vector<meta::reflected_call_info> calls;
-
-      std::set<meta::type_id> dependencies;
-
-      std::set<fs::path> includes_deps;
-
-      bool failed;
-    };
-
-    render_context ctx =
-      std::ranges::fold_left(processed_sources_view | std::views::as_rvalue,
-        render_context{},
-        [errors = std::size_t(0)](render_context a,
-          std::expected<meta::source_file_context, std::string> ctx) mutable
-          -> render_context {
-          if (!ctx || !ctx->errors.empty())
-            ++errors;
-
-          if (!ctx) {
-            llvm::errs() << std::format("[error] {}", ctx.error());
-            return a;
-          }
-
-          if (k_max_errors <= errors) {
-            llvm::errs() << std::format("[error] exceeded maximum errors {}.",
-              k_max_errors);
-            a.failed = true;
-            return a;
-          }
-
-          std::ranges::move(ctx->reflected, std::back_inserter(a.reflected));
-          std::ranges::move(ctx->calls, std::back_inserter(a.calls));
-          std::ranges::move(ctx->resolved_as_dependency,
-            std::inserter(a.dependencies, a.dependencies.begin()));
-
-          std::ranges::move(ctx->dependencies,
-            std::inserter(a.includes_deps, a.includes_deps.begin()));
-
-          // todo: implement later. The logic is somewhat complex. If a type is
-          // reflected as dependency in file 1, but not as dependency in file 2,
-          // it should not be considered 'a dependency' in the overall shared
-          // context. But for information it might be useful to output which
-          // .cpp file it was detected and if as a dependency... a.dependencies
-          // = {};
-
-          return a;
-        });
-
-    // -- Collapse duplicate types --------
-    static constexpr auto tie_source_location = [](const meta::reflectable &r) {
-      return std::tie(r.definition.location.source_file,
-        r.definition.location.line,
-        r.definition.location.column);
-    };
-
-    std::ranges::sort(ctx.reflected,
-      [](const meta::reflectable &lhs, const meta::reflectable &rhs) -> bool {
-        // refactorme: if std::variant .data contains more then two types,
-        // this must be modified (cleaner)
-        static_assert(
-          std::same_as<std::variant<meta::record_data, meta::enum_data>,
-            decltype(lhs.data)>);
-
-        if (lhs.data.index() != rhs.data.index()) {
-          return std::holds_alternative<meta::enum_data>(lhs.data)
-            && !std::holds_alternative<meta::enum_data>(rhs.data);
-        }
-
-        return tie_source_location(lhs) < tie_source_location(rhs);
-      });
-
-    ctx.reflected = std::ranges::fold_left(std::move(ctx.reflected)
-        | std::views::chunk_by( //
-          [](const meta::reflectable &lhs,
-            const meta::reflectable &rhs) -> bool {
-            return tie_source_location(lhs) == tie_source_location(rhs);
-          })
-        | std::views::transform(
-          [](auto group) -> std::expected<meta::reflectable, std::string> {
-            // note:
-            // this can happen, for example, if 2 different .cpp were
-            // including the same header file but with different preprocessor,
-            // selecting different type definition for different .cpp
-
-            // todo: check odr based on cli-flag condition
-            return *std::ranges::begin(group);
-          }),
-      std::vector<meta::reflectable>{},
-      [](auto a, std::expected<meta::reflectable, std::string> v) {
-        if (v) {
-          a.emplace_back(std::move(*v));
-          return a;
-        }
-        llvm::errs() << std::format("[error] ODR violation detected: {}\n",
-          v.error());
-        return a;
-      });
-
-    // -- collapse duplacate calls --------
-    static constexpr auto tie_func_arg =
-      [](const meta::function_signature_arg &a) {
-        return std::tie(a.type_name.namespaces,
-          a.type_name.enclosing_records,
-          a.type_name.name,
-          a.is_const,
-          a.ref_type);
-      };
-
-    std::ranges::sort(ctx.calls,
-      [](const meta::reflected_call_info &lhs,
-        const meta::reflected_call_info &rhs) -> bool {
-        return std::ranges::lexicographical_compare(lhs.f_sig.args,
-          rhs.f_sig.args,
-          [](const auto &l, const auto &r) {
-            return tie_func_arg(l) < tie_func_arg(r);
-          });
-      });
-
-    ctx.calls = std::ranges::fold_left(std::move(ctx.calls)
-        | std::views::chunk_by( //
-          [](const meta::reflected_call_info &lhs,
-            const meta::reflected_call_info &rhs) -> bool {
-            return std::ranges::equal(lhs.f_sig.args,
-              rhs.f_sig.args,
-              [](const auto &l, const auto &r) {
-                return tie_func_arg(l) == tie_func_arg(r);
-              });
-          })
-        | std::views::transform([](auto group) -> meta::reflected_call_info {
-            return *std::ranges::begin(group);
-          }),
-      std::vector<meta::reflected_call_info>{},
-      [](auto a, meta::reflected_call_info v) {
-        a.emplace_back(std::move(v));
-        return a;
-      });
-
-    // !! compare source loacations first!
-    // fixme: collapse identical types. Use chunk_by, for each group do a
-    // transform: if all the elements are the same, collapse it to one,
-    // collect locations. If they are not the same, transform to unexpected
-    // with error string referencing locations and what is different: for
-    // simplicity is equal if the same namespace + same type + same field
-    // names and order. Comparing type of each field is not practical
-    // performance-wise
-
-    const std::set includes = std::ranges::fold_left(ctx.calls,
-      std::ranges::fold_left(ctx.reflected,
-        std::set<fs::path>{},
-        [](auto acc, const meta::reflectable &r) {
-          acc.insert(r.definition.location.source_file);
-          return acc;
-        }),
-      [](auto acc, const meta::reflected_call_info &c) {
-        acc.insert(c.includes.begin(), c.includes.end());
-        return acc;
-      });
-
-    const std::set std_includes = std::ranges::fold_left(ctx.calls,
-      std::set<fs::path>{},
-      [](auto acc, const meta::reflected_call_info &c) {
-        acc.insert(c.std_includes.begin(), c.std_includes.end());
-        return acc;
-      });
-
-    const fs::path out = //
+    // todo: should this be validated in cli parsing?
+    const fs::path reflection_source_path = //
       std::invoke([&o = cli_args->out] {
         // ad hoc to disable fs exception throwing
         [[maybe_unused]] std::error_code ec;
@@ -1921,134 +1772,68 @@ int main(int argc, char **argv) {
             : fs::path(o) / "source_mode_reflected.cpp";
       });
 
-    llvm::errs() << std::format("\n[info] creating source mode reflection: {}",
-      out.generic_string());
+    const std::expected source_mode_reflection =
+      std::invoke( //
+        [processed_sources_view]()
+          -> std::expected<std::vector<meta::source_file_context>,
+            std::string> {
+          std::vector<meta::source_file_context> sources;
+          for (std::size_t errors = 0;
+            std::expected ctx : processed_sources_view) {
+            if (!ctx || !ctx->errors.empty())
+              ++errors;
 
-    std::expected out_file = util::create_file_for_writing(out);
-    if (!out_file) {
-      llvm::errs() << std::format("\n[error] {}", out_file.error());
+            if (!ctx) {
+              llvm::errs() << std::format("\n[error] {}", ctx.error());
+              continue;
+            }
+
+            if (k_max_errors <= errors) {
+              return std::unexpected(
+                std::format("\nexceeded maximum errors {}.", k_max_errors));
+            }
+
+            sources.emplace_back(std::move(*ctx));
+          }
+
+          return sources;
+        })
+        .and_then(render::prepare_source_mode_context)
+        .and_then([&out = reflection_source_path](
+                    render::source_mode_context ctx) {
+          llvm::errs() << std::format(
+            "\n[info] creating source mode reflection: {}",
+            out.generic_string());
+
+          auto render_context =
+            std::bind_front(render::source_mode_reflection, std::move(ctx));
+
+          return util::create_file_for_writing(out) //
+            .and_then(std::move(render_context))
+            .and_then([out](render::source_mode_context ctx) {
+              llvm::errs() << std::format("\n[info] writing deps file for: {}",
+                out.generic_string());
+
+              return render::write_dependencies_file(out, ctx.file_dependencies)
+                .transform([out](fs::path deps) {
+                  return std::pair(out, std::move(deps));
+                });
+            });
+        });
+
+    if (!source_mode_reflection) {
+      llvm::errs() << std::format("\n[error] running header mode: {}.",
+        source_mode_reflection.error());
       return -1;
     }
 
-    std::error_code ec;
-    fs::create_directories(out.parent_path(), ec);
-    if (ec) {
-      llvm::errs() << std::format(
-        "\n[error] {}."
-        "\n  invalid output directory: {}",
-        ec.message(),
-        out.parent_path().generic_string());
+    const auto &[header, deps] = *source_mode_reflection;
+    llvm::errs() << std::format(
+      "\n[info] generated source: {}"
+      "\n[info] generated deps file: {}",
+      header.generic_string(),
+      deps.generic_string());
 
-      return -1;
-    }
-
-    const render::reflection render_reflection{
-      .dependencies = ctx.dependencies,
-    };
-
-    // todo:
-    // for `includes` I may want to remove base path, make it relative to the
-    // inlcudes from the cc1 flags.
-    //
-    // todo: do I need to print a list of sources and their flags?
-
-    // refactorme: this is source mode generation.
-    std::format_to(std::ostreambuf_iterator<char>(*out_file),
-      "// This file was generated by the omnirefl tool on {0:%F %T}."
-      "\n// Do not modify the contents of this file."
-      "\n"
-      "\n// -- headers --------"
-      // refactorme: should be configurable via preprocessor
-      "\n#include <omnirefl/reflected_scope.hpp>"
-      "\n#include <omnirefl/reflected_call.hpp>"
-      "\n"
-      "\n{1}"
-      "\n"
-      "\n#include <array>" //< refactorme: ad hoc for enumerators(). No need
-                           // to
-                           // include if no enums
-      "\n{2}"
-      "\n"
-      "\nnamespace omni {{"
-      "\nnamespace detail {{"
-      "\nnamespace {{"
-      "\n"
-      "\n// -- reflected types --------"
-      "\n{3}"
-      "\n"
-      "\n}} // namespace"
-      "\n}} // namespace detail"
-      "\n}} // namespace omni"
-      "\n"
-      "\ntemplate <typename T, typename>"
-      "\nstruct omni::is_reflected : std::false_type {{}};"
-      "\n"
-      "\ntemplate <typename T>"
-      "\nstruct omni::is_reflected<"
-      "\n    T,"
-      "\n    omni::compat::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
-      "\n> : std::true_type {{}};"
-      "\n"
-      "\n// -- reflected calls --------"
-      "\n{4}",
-
-      // 0:
-      std::invoke([] {
-        using namespace std::chrono;
-        return floor<seconds>(system_clock::now());
-      }),
-
-      // 1:
-      includes //
-        | std::views::transform([](const fs::path &p) {
-            return std::format("#include \"{}\"", p.generic_string());
-          }) //
-        | std::views::join_with("\n"sv) //
-        | util::fmt_fold,
-
-      // 2:
-      std_includes //
-        | std::views::transform([](const fs::path &p) {
-            return std::format("#include <{}>", p.generic_string());
-          }) //
-        | std::views::join_with("\n"sv) | util::fmt_fold,
-
-      // 3:
-      ctx.reflected //
-        | std::views::transform(render_reflection) //
-        | std::views::join_with("\n\n"sv) //
-        | util::fmt_fold,
-
-      // 4:
-      ctx.calls //
-        | std::views::transform(render::format_reflected_call) //
-        | std::views::join_with("\n\n"sv) //
-        | util::fmt_fold);
-
-    if (cli_args->generate_dep_file) {
-      llvm::errs() << std::format("\n[debug] generating dep file for {}",
-        out.string());
-
-      std::expected dep_file_written =
-        render::write_dependencies_file(out, ctx.includes_deps)
-          .transform([](const fs::path &file) {
-            llvm::errs() << std::format("\n[info] written deps file {}",
-              file.string());
-            return file;
-          });
-
-      if (!dep_file_written) {
-        llvm::errs() << std::format(
-          "\n[error] error generating dep file for {}: {}",
-          out.string(),
-          dep_file_written.error());
-      }
-    }
-
-    if (ctx.failed) {
-      llvm::errs() << "\nomnirefl failed\n";
-      return -1;
-    }
   } else {
     const auto reflection_header_path = //
       [&o = cli_args->out](const source_file &instrumented_source) {
@@ -2086,7 +1871,7 @@ int main(int argc, char **argv) {
               llvm::errs() << std::format("\n[info] writing deps file for: {}",
                 out.generic_string());
 
-              return render::write_dependencies_file(out, ctx.dependencies)
+              return render::write_dependencies_file(out, ctx.file_dependencies)
                 .transform([out](fs::path deps) {
                   return std::pair(out, std::move(deps));
                 });
@@ -3578,6 +3363,239 @@ std::string reflectable_body(const meta::record_data &d) {
 
 } // namespace render::impl
 
+auto render::prepare_source_mode_context(
+  std::vector<meta::source_file_context> sfs)
+  -> std::expected<source_mode_context, std::string> {
+  source_mode_context ctx = std::ranges::fold_left(sfs | std::views::as_rvalue,
+    source_mode_context{},
+    [](render::source_mode_context a,
+      std::expected<meta::source_file_context, std::string> ctx) mutable
+      -> render::source_mode_context {
+      std::ranges::move(ctx->reflected, std::back_inserter(a.reflected));
+      std::ranges::move(ctx->calls, std::back_inserter(a.calls));
+      std::ranges::move(ctx->resolved_as_dependency,
+        std::inserter(a.dependencies, a.dependencies.begin()));
+
+      std::ranges::move(ctx->file_dependencies,
+        std::inserter(a.file_dependencies, a.file_dependencies.begin()));
+
+      // todo: implement later. The logic is somewhat complex. If a type is
+      // reflected as dependency in file 1, but not as dependency in file 2,
+      // it should not be considered 'a dependency' in the overall shared
+      // context. But for information it might be useful to output which
+      // .cpp file it was detected and if as a dependency... a.dependencies
+      // = {};
+
+      return a;
+    });
+
+  // -- Collapse duplicate types --------
+  static constexpr auto tie_source_location = [](const meta::reflectable &r) {
+    return std::tie(r.definition.location.source_file,
+      r.definition.location.line,
+      r.definition.location.column);
+  };
+
+  std::ranges::sort(ctx.reflected,
+    [](const meta::reflectable &lhs, const meta::reflectable &rhs) -> bool {
+      // refactorme: if std::variant .data contains more then two types,
+      // this must be modified (cleaner)
+      static_assert(
+        std::same_as<std::variant<meta::record_data, meta::enum_data>,
+          decltype(lhs.data)>);
+
+      if (lhs.data.index() != rhs.data.index()) {
+        return std::holds_alternative<meta::enum_data>(lhs.data)
+          && !std::holds_alternative<meta::enum_data>(rhs.data);
+      }
+
+      return tie_source_location(lhs) < tie_source_location(rhs);
+    });
+
+  ctx.reflected = std::ranges::fold_left(std::move(ctx.reflected)
+      | std::views::chunk_by( //
+        [](const meta::reflectable &lhs, const meta::reflectable &rhs) -> bool {
+          return tie_source_location(lhs) == tie_source_location(rhs);
+        })
+      | std::views::transform(
+        [](auto group) -> std::expected<meta::reflectable, std::string> {
+          // note:
+          // this can happen, for example, if 2 different .cpp were
+          // including the same header file but with different preprocessor,
+          // selecting different type definition for different .cpp
+
+          // todo: check odr based on cli-flag condition
+          return *std::ranges::begin(group);
+        }),
+    std::vector<meta::reflectable>{},
+    [](auto a, std::expected<meta::reflectable, std::string> v) {
+      if (v) {
+        a.emplace_back(std::move(*v));
+        return a;
+      }
+      llvm::errs() << std::format("[error] ODR violation detected: {}\n",
+        v.error());
+      return a;
+    });
+
+  // -- collapse duplacate calls --------
+  static constexpr auto tie_func_arg =
+    [](const meta::function_signature_arg &a) {
+      return std::tie(a.type_name.namespaces,
+        a.type_name.enclosing_records,
+        a.type_name.name,
+        a.is_const,
+        a.ref_type);
+    };
+
+  std::ranges::sort(ctx.calls,
+    [](const meta::reflected_call_info &lhs,
+      const meta::reflected_call_info &rhs) -> bool {
+      return std::ranges::lexicographical_compare(lhs.f_sig.args,
+        rhs.f_sig.args,
+        [](const auto &l, const auto &r) {
+          return tie_func_arg(l) < tie_func_arg(r);
+        });
+    });
+
+  ctx.calls = std::ranges::fold_left(std::move(ctx.calls)
+      | std::views::chunk_by( //
+        [](const meta::reflected_call_info &lhs,
+          const meta::reflected_call_info &rhs) -> bool {
+          return std::ranges::equal(lhs.f_sig.args,
+            rhs.f_sig.args,
+            [](const auto &l, const auto &r) {
+              return tie_func_arg(l) == tie_func_arg(r);
+            });
+        })
+      | std::views::transform([](auto group) -> meta::reflected_call_info {
+          return *std::ranges::begin(group);
+        }),
+    std::vector<meta::reflected_call_info>{},
+    [](auto a, meta::reflected_call_info v) {
+      a.emplace_back(std::move(v));
+      return a;
+    });
+
+  return ctx;
+}
+
+auto render::source_mode_reflection(source_mode_context ctx, std::ofstream file)
+  -> std::expected<source_mode_context, std::string> {
+  // !! compare source loacations first!
+  // fixme: collapse identical types. Use chunk_by, for each group do a
+  // transform: if all the elements are the same, collapse it to one,
+  // collect locations. If they are not the same, transform to unexpected
+  // with error string referencing locations and what is different: for
+  // simplicity is equal if the same namespace + same type + same field
+  // names and order. Comparing type of each field is not practical
+  // performance-wise
+
+  const std::set includes = std::ranges::fold_left(ctx.calls,
+    std::ranges::fold_left(ctx.reflected,
+      std::set<fs::path>{},
+      [](auto acc, const meta::reflectable &r) {
+        acc.insert(r.definition.location.source_file);
+        return acc;
+      }),
+    [](auto acc, const meta::reflected_call_info &c) {
+      acc.insert(c.includes.begin(), c.includes.end());
+      return acc;
+    });
+
+  const std::set std_includes = std::ranges::fold_left(ctx.calls,
+    std::set<fs::path>{},
+    [](auto acc, const meta::reflected_call_info &c) {
+      acc.insert(c.std_includes.begin(), c.std_includes.end());
+      return acc;
+    });
+
+  const render::reflection render_reflection{
+    .dependencies = ctx.dependencies,
+  };
+
+  // todo:
+  // for `includes` I may want to remove base path, make it relative to the
+  // inlcudes from the cc1 flags.
+  //
+  // todo: do I need to print a list of sources and their flags?
+
+  // refactorme: this is source mode generation.
+  std::format_to(std::ostreambuf_iterator<char>(file),
+    "// This file was generated by the omnirefl tool on {0:%F %T}."
+    "\n// Do not modify the contents of this file."
+    "\n"
+    "\n// -- headers --------"
+    // refactorme: should be configurable via preprocessor
+    "\n#include <omnirefl/reflected_scope.hpp>"
+    "\n#include <omnirefl/reflected_call.hpp>"
+    "\n"
+    "\n{1}"
+    "\n"
+    "\n#include <array>" //< refactorme: ad hoc for enumerators(). No need
+                         // to
+                         // include if no enums
+    "\n{2}"
+    "\n"
+    "\nnamespace omni {{"
+    "\nnamespace detail {{"
+    "\nnamespace {{"
+    "\n"
+    "\n// -- reflected types --------"
+    "\n{3}"
+    "\n"
+    "\n}} // namespace"
+    "\n}} // namespace detail"
+    "\n}} // namespace omni"
+    "\n"
+    "\ntemplate <typename T, typename>"
+    "\nstruct omni::is_reflected : std::false_type {{}};"
+    "\n"
+    "\ntemplate <typename T>"
+    "\nstruct omni::is_reflected<"
+    "\n    T,"
+    "\n    omni::compat::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
+    "\n> : std::true_type {{}};"
+    "\n"
+    "\n// -- reflected calls --------"
+    "\n{4}",
+
+    // 0:
+    std::invoke([] {
+      using namespace std::chrono;
+      return floor<seconds>(system_clock::now());
+    }),
+
+    // 1:
+    includes //
+      | std::views::transform([](const fs::path &p) {
+          return std::format("#include \"{}\"", p.generic_string());
+        }) //
+      | std::views::join_with("\n"sv) //
+      | util::fmt_fold,
+
+    // 2:
+    std_includes //
+      | std::views::transform([](const fs::path &p) {
+          return std::format("#include <{}>", p.generic_string());
+        }) //
+      | std::views::join_with("\n"sv) | util::fmt_fold,
+
+    // 3:
+    ctx.reflected //
+      | std::views::transform(render_reflection) //
+      | std::views::join_with("\n\n"sv) //
+      | util::fmt_fold,
+
+    // 4:
+    ctx.calls //
+      | std::views::transform(render::format_reflected_call) //
+      | std::views::join_with("\n\n"sv) //
+      | util::fmt_fold);
+
+  return ctx;
+}
+
 auto render::prepare_header_mode_context(meta::source_file_context ctx)
   -> std::expected<header_mode_context, std::string> {
   const std::map index_by_type_id =
@@ -3667,7 +3685,7 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
 
   return partition_types(std::move(ctx.reflected))
     .transform(
-      [&sf = ctx.sf, &deps = ctx.dependencies]<typename Tuple>(Tuple &&tuple) {
+      [&sf = ctx.sf, &deps = ctx.file_dependencies]<typename Tuple>(Tuple &&tuple) {
         return std::apply(
           [&]<typename F, typename N, typename I>(F &&fwd,
             N &&nested,
@@ -3679,7 +3697,7 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
               .nested = std::forward<N>(nested),
               .indexed = std::forward<I>(indexed),
 
-              .dependencies = std::move(deps),
+              .file_dependencies = std::move(deps),
             };
           },
           std::forward<Tuple>(tuple));
