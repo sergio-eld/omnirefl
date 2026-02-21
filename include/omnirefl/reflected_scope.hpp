@@ -71,21 +71,15 @@ enum class reflected_entity {
 template <typename T, typename = void>
 struct is_reflected;
 
-template <typename T,
-  typename Meta = detail::_reflected<compat::decay_t<T>>,
-  reflected_entity = Meta::entity()>
+template <typename T, reflected_entity = detail::_meta<T>::entity()>
 struct reflected_t;
 
 // struct | class | union
 template <typename T>
-using reflected_record_t = reflected_t<T,
-  detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::record>;
+using reflected_record_t = reflected_t<T, reflected_entity::record>;
 
 template <typename T>
-using reflected_enum_t = reflected_t<T,
-  detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::enumeration>;
+using reflected_enum_t = reflected_t<T, reflected_entity::enumeration>;
 
 template <typename T, reflected_entity = reflected_t<T>::entity()>
 struct reflected_binding;
@@ -264,9 +258,7 @@ struct reflected_mem_binding {
 };
 
 template <typename T>
-struct reflected_t<T,
-  detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::record> {
+struct reflected_t<T, reflected_entity::record> {
   using meta = detail::_meta<T>;
   using type = compat::decay_t<T>; //< reflecting pointers is pointless
 
@@ -325,9 +317,7 @@ struct reflected_t<T,
 };
 
 template <typename T>
-struct reflected_t<T,
-  detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::enumeration> {
+struct reflected_t<T, reflected_entity::enumeration> {
   using meta = detail::_meta<T>;
   using type = compat::decay_t<T>;
 
