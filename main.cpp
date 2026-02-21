@@ -790,11 +790,9 @@ struct source_mode_context {
   std::vector<meta::reflectable> reflected;
   std::vector<meta::reflected_call_info> calls;
 
-  std::set<meta::type_id> dependencies;
+  std::set<meta::type_id> reflected_as_dependency;
 
   std::set<fs::path> file_dependencies;
-
-  bool failed;
 };
 
 std::expected<source_mode_context, std::string> prepare_source_mode_context(
@@ -1095,213 +1093,6 @@ struct log {
       format_funcion_signature(d.f_sig),
       includes,
       std_includes);
-  }
-};
-
-std::string format_enum(const meta::nm_qual_type &t,
-  const meta::enum_data &d) noexcept {
-  assert(t.name && "format_enum expects named, non-anonymous enum");
-
-  return std::format(
-    "template <typename T>"
-    "\nstruct _reflected<enum {0}, T> {{"
-    "\n  static_assert(std::is_same<enum {0}, T>::value,"
-    "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
-    "\n"
-    "\n  using type = T;"
-    "\n"
-    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
-    "\n    return omni::reflected_entity::enumeration;"
-    "\n  }}"
-    "\n"
-    "\n  constexpr static auto name() noexcept"
-    "\n    -> const char(&)[sizeof(\"{1}\")] {{"
-    "\n    return \"{1}\";"
-    "\n  }}"
-    "\n"
-    "\n  constexpr static auto enumerators() noexcept"
-    "\n    -> std::array<std::pair<type, const char*>, {2}> {{"
-    "\n      return {{{{"
-    "\n        {3},"
-    "\n      }}}};"
-    "\n    }}"
-    "\n}};",
-
-    // 0:
-    format_nm_qual_type(t),
-
-    // 1:
-    *t.name,
-
-    // 2:
-    d.enumerators.size(),
-
-    // 3:
-    d.enumerators //
-      | std::views::transform([](std::string_view e) {
-          return std::format("{{type::{0}, \"{0}\"}}", e);
-        })
-      | std::views::join_with(",\n        "sv) //
-      | util::fmt_fold);
-}
-
-std::string format_struct(const meta::nm_qual_type &t,
-  const meta::record_data &d) noexcept {
-  assert(t.name && "format_struct expects named, non-anonymous type");
-
-  // todo:
-  // - `.fields` -> returns all the fields
-  // - `.mutable_fields` -> returns only mutable fields
-  return std::format(
-    "template <typename T>"
-    "\nstruct _reflected<{0} {1}, T> {{"
-    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
-    "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
-    "\n"
-    "\n  using type = T;"
-    "\n"
-    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
-    "\n    return omni::reflected_entity::record;"
-    "\n  }}"
-    "\n"
-    "\n  static constexpr auto name() noexcept"
-    "\n    -> const char(&)[sizeof(\"{2}\")] {{"
-    "\n    return \"{2}\";"
-    "\n  }}"
-    "\n"
-    "{3}"
-    "\n"
-    "\n  using public_fields_t ="
-    "\n    std::tuple<{4}>;"
-    "\n"
-    "\n  static constexpr public_fields_t public_fields() noexcept {{ return {{}}; }}"
-    "\n}};",
-
-    // 0:
-    d.type == meta::record_data::is_class //
-      ? "class"
-      : d.type == meta::record_data::is_union //
-        ? "union"
-        : "struct",
-
-    // 1:
-    format_nm_qual_type(t),
-
-    // 2:
-    *t.name,
-
-    // 3:
-    d.public_fields.empty()
-      ? std::string("\n  // no reflectable fields detected")
-      : std::format("\n{}",
-          util::indexed(d.public_fields)
-            | std::views::transform([](const auto &p) {
-                const auto &[field, idx] = p;
-                return std::format(
-                  "  struct {0}_t {{"
-                  "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
-                  "\n"
-                  "\n    static constexpr auto name() noexcept"
-                  "\n      -> const char(&)[sizeof(\"{0}\")] {{"
-                  "\n      return \"{0}\";"
-                  "\n    }}"
-                  "\n"
-                  "\n    template <typename _T>"
-                  "\n    static constexpr auto value(const _T &t) noexcept"
-                  "\n      -> const decltype(t.{0})& {{"
-                  "\n      return t.{0};"
-                  "\n    }}"
-                  "\n"
-                  "\n    template <typename _T, typename V>"
-                  "\n    static void set_value(_T &t, V &&v) {{"
-                  "\n      t.{0} = std::forward<V>(v);"
-                  "\n    }}"
-                  "\n  }};",
-                  field.name,
-                  idx);
-              }) //
-            | std::views::join_with("\n\n"sv) //
-            | util::fmt_fold),
-
-    // 4:
-    d.public_fields //
-      | std::views::transform(&meta::field_data::name)
-      | std::views::transform(
-        [](std::string_view f) { return std::format("{}_t", f); }) //
-      | std::views::join_with(",\n      "sv) //
-      | util::fmt_fold);
-}
-
-std::string format_reflected_call(const meta::reflected_call_info &c) noexcept {
-  const std::string invoke_impl = std::format("_impl({})",
-    util::indexed(c.f_sig.args) //
-      | std::views::drop(1) //< first arg is _impl
-      | std::views::transform([](const auto &p) {
-          const auto &[arg, idx] = p;
-          return !arg.is_const && meta::reference_type::ref_rval == arg.ref_type
-            ? std::format("std::move(_{})", idx)
-            : std::format("_{}", idx);
-        }) //
-      | std::views::join_with(",\n  "sv) //
-      | util::fmt_fold);
-
-  return std::format(
-    "template <>"
-    "\nauto omni::reflected_call_t::_call_impl("
-    "\n  {0})"
-    "\n  -> decltype({1}) {{"
-    "\n  return {1};"
-    "\n}}",
-
-    // 0: parameters (Impl + call args)
-    util::indexed(c.f_sig.args) //
-      | std::views::transform([](const auto &p) {
-          const auto &[arg, idx] = p;
-          return std::format("{} {}",
-            format_funcion_arg(arg),
-            0 == idx ? "_impl" : std::format("_{}", idx));
-        }) //
-      | std::views::join_with(",\n  "sv) //
-      | util::fmt_fold,
-
-    // 1:
-    invoke_impl);
-}
-
-// refactorme: ugly shite. Control flow is not readable.
-struct reflection {
-  const std::set<meta::type_id> &dependencies;
-
-  std::string operator()(const meta::reflectable &r) const noexcept {
-    return std::format(
-      "// {0}{1}"
-      "\n// declared at: {2}"
-      "\n{3}",
-
-      // 0:
-      dependencies.contains(r.id) //
-        ? "(as dependency) "
-        : "",
-
-      // 1: refactorme: visit/matching
-      std::holds_alternative<meta::record_data>(r.data) //
-        ? "tag type"
-        : "enum",
-
-      // 2:
-      format_location(r.definition.location),
-
-      // 3:
-      std::visit(
-        [&tn = r.definition.type_name]<typename Meta>(const Meta &d) {
-          if constexpr (std::same_as<meta::record_data, Meta>)
-            return format_struct(tn, d);
-          else {
-            static_assert(std::same_as<meta::enum_data, Meta>);
-            return format_enum(tn, d);
-          }
-        },
-        r.data));
   }
 };
 
@@ -3361,6 +3152,43 @@ std::string reflectable_body(const meta::record_data &d) {
       | util::fmt_fold);
 }
 
+std::string format_reflected_call(const meta::reflected_call_info &c) noexcept {
+  const std::string invoke_impl = std::format("_impl({})",
+    util::indexed(c.f_sig.args) //
+      | std::views::drop(1) //< first arg is _impl
+      | std::views::transform([](const auto &p) {
+          const auto &[arg, idx] = p;
+          return !arg.is_const && meta::reference_type::ref_rval == arg.ref_type
+            ? std::format("std::move(_{})", idx)
+            : std::format("_{}", idx);
+        }) //
+      | std::views::join_with(",\n  "sv) //
+      | util::fmt_fold);
+
+  return std::format(
+    "template <>"
+    "\nauto omni::reflected_call_t::_call_impl("
+    "\n  {0})"
+    "\n  -> decltype({1}) {{"
+    "\n  return {1};"
+    "\n}}",
+
+    // 0: parameters (Impl + call args)
+    util::indexed(c.f_sig.args) //
+      | std::views::transform([](const auto &p) {
+          const auto &[arg, idx] = p;
+          return std::format("{} {}",
+            format_funcion_arg(arg),
+            0 == idx ? "_impl" : std::format("_{}", idx));
+        }) //
+      | std::views::join_with(",\n  "sv) //
+      | util::fmt_fold,
+
+    // 1:
+    invoke_impl);
+}
+
+
 } // namespace render::impl
 
 auto render::prepare_source_mode_context(
@@ -3374,7 +3202,8 @@ auto render::prepare_source_mode_context(
       std::ranges::move(ctx->reflected, std::back_inserter(a.reflected));
       std::ranges::move(ctx->calls, std::back_inserter(a.calls));
       std::ranges::move(ctx->resolved_as_dependency,
-        std::inserter(a.dependencies, a.dependencies.begin()));
+        std::inserter(a.reflected_as_dependency,
+          a.reflected_as_dependency.begin()));
 
       std::ranges::move(ctx->file_dependencies,
         std::inserter(a.file_dependencies, a.file_dependencies.begin()));
@@ -3510,9 +3339,69 @@ auto render::source_mode_reflection(source_mode_context ctx, std::ofstream file)
       return acc;
     });
 
-  const render::reflection render_reflection{
-    .dependencies = ctx.dependencies,
-  };
+  // refactorme: should just maintain within the source file context.
+  // ad hoc for rendering bases
+  const std::map type_name_by_id = std::invoke([&types = ctx.reflected] {
+    std::map<meta::type_id, const meta::nm_qual_type *> out{};
+
+    std::ranges::copy(types //
+        | std::views::transform([](const meta::reflectable &t) {
+            return std::pair{t.id, std::addressof(t.definition.type_name)};
+          }),
+      std::inserter(out, out.begin()));
+
+    return out;
+  });
+
+  const auto format_public_bases = //
+    [&type_name_by_id](const meta::record_data &r) {
+      const auto fetch = [&type_name_by_id](const meta::type_id &id)
+        -> const meta::nm_qual_type & { return *type_name_by_id.at(id); };
+
+      return std::format("\n  using public_bases_t = std::tuple<{}>;",
+        r.public_bases //
+          | std::views::transform(fetch) //
+          | std::views::transform(format_nm_qual_type) //
+          | std::views::join_with(",\n    "sv) //
+          | util::fmt_fold);
+    };
+
+  static constexpr auto format_head = //
+    [](const meta::reflectable &r) {
+      return std::visit(
+        [&type_name = r.definition.type_name](
+          const meta::reflectable_data auto &d) {
+          return impl::reflectable_head(type_name, d);
+        },
+        r.data);
+    };
+
+  const auto format_body = //
+    [format_public_bases](const meta::reflectable &r) {
+      return std::visit(
+        [format_public_bases]<meta::reflectable_data Data>(const Data &d) {
+          if constexpr (std::same_as<meta::enum_data, Data>)
+            return impl::reflectable_body(d);
+          else {
+            static_assert(std::same_as<meta::record_data, Data>);
+            return std::format(
+              "{}"
+              "\n{}",
+              format_public_bases(d),
+              impl::reflectable_body(d));
+          }
+        },
+        r.data);
+    };
+
+  const auto format_reflectable = //
+    [format_body](const meta::reflectable &d) {
+      return std::format(
+        "{}"
+        "\n{}",
+        format_head(d),
+        format_body(d));
+    };
 
   // todo:
   // for `includes` I may want to remove base path, make it relative to the
@@ -3583,13 +3472,13 @@ auto render::source_mode_reflection(source_mode_context ctx, std::ofstream file)
 
     // 3:
     ctx.reflected //
-      | std::views::transform(render_reflection) //
+      | std::views::transform(format_reflectable) //
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,
 
     // 4:
     ctx.calls //
-      | std::views::transform(render::format_reflected_call) //
+      | std::views::transform(impl::format_reflected_call) //
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold);
 
@@ -3684,24 +3573,24 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
   };
 
   return partition_types(std::move(ctx.reflected))
-    .transform(
-      [&sf = ctx.sf, &deps = ctx.file_dependencies]<typename Tuple>(Tuple &&tuple) {
-        return std::apply(
-          [&]<typename F, typename N, typename I>(F &&fwd,
-            N &&nested,
-            I &&indexed) {
-            return header_mode_context{
-              .instrumented_source_file = std::move(sf),
+    .transform([&sf = ctx.sf, &deps = ctx.file_dependencies]<typename Tuple>(
+                 Tuple &&tuple) {
+      return std::apply(
+        [&]<typename F, typename N, typename I>(F &&fwd,
+          N &&nested,
+          I &&indexed) {
+          return header_mode_context{
+            .instrumented_source_file = std::move(sf),
 
-              .fwd_declarables = std::forward<F>(fwd),
-              .nested = std::forward<N>(nested),
-              .indexed = std::forward<I>(indexed),
+            .fwd_declarables = std::forward<F>(fwd),
+            .nested = std::forward<N>(nested),
+            .indexed = std::forward<I>(indexed),
 
-              .file_dependencies = std::move(deps),
-            };
-          },
-          std::forward<Tuple>(tuple));
-      });
+            .file_dependencies = std::move(deps),
+          };
+        },
+        std::forward<Tuple>(tuple));
+    });
 }
 
 auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
@@ -3722,8 +3611,8 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     return set;
   });
 
-  // refactorme: should just maintain within the source file context
-  // ad hoc for rendering bases in header mode
+  // refactorme: should just maintain within the source file context.
+  // ad hoc for rendering bases
   const std::map type_name_by_id = std::invoke(
     [](const auto &...types) {
       std::map<meta::type_id, const meta::nm_qual_type *> out{};
