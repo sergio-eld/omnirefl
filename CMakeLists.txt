@@ -115,12 +115,6 @@ target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-# -- Sandbox/Exposition --------
-# Standalone sandbox executable demonstrating the reflection frontend
-# and generated metadata (for experimentation and documentation only).
-add_executable(sb.exposition exposition.cpp)
-target_link_libraries(sb.exposition omni::refl)
-
 # -- Testing / packaging setup --------
 if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
     if(ENABLE_TESTING)
