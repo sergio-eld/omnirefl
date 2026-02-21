@@ -32,7 +32,7 @@ struct print_field_names_simple_t {
   template <typename T>
   void operator()(const T &t, std::vector<std::string> &out) const {
     static_assert(omni::is_reflected<T>::value, "");
-    const auto fields = omni::reflected(t).fields();
+    const auto fields = omni::reflected(t).public_fields();
     omni::compat::apply(collect_names{out}, fields);
   }
 } const static print_field_names_simple{};

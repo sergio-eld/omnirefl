@@ -20,12 +20,6 @@ TEST(print_names, simple) {
     EXPECT_EQ(expected, result);
   }
 
-  // fixme: for header mode fix nested type. Can't generate forward declaration
-  // there, but not really needed: for `struct wrestler::info_t` I can have the
-  // forward declaration for `wrestler` and partial specialization for
-  // `reflected_t<wrestler::info_t, T>` which will be delayed. The same can be
-  // applied to unnamed types:
-  // `reflected_t<decltype(std::declval<wrestler>().field), T>`.
   {
     const example_types::wrestler v{};
     const static std::vector<std::string> expected{

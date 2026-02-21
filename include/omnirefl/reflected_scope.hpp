@@ -8,153 +8,12 @@
 #include <type_traits>
 #include <utility>
 
-#if defined(__cpp_lib_variant) && __cpp_lib_variant >= 201606
-#  define OMNI_HAS_STD_VARIANT
-
-#  include <variant>
-#endif
+#include <omnirefl/compat.hpp>
 
 namespace omni {
-namespace customization {
-
-template <template <typename...> class>
-struct visit;
-
-#if defined(__cpp_lib_variant) && __cpp_lib_variant >= 201606
-
-template <>
-struct visit<std::variant> {
-  template <typename Visitor, typename... Variants>
-  decltype(auto) operator()(Visitor &&vis, Variants &&...vars) const {
-    return std::visit(std::forward<Visitor>(vis),
-      std::forward<Variants>(vars)...);
-  }
-};
-
-#endif // __cpp_lib_variant
-} // namespace customization
 
 namespace detail {
 namespace {
-
-template <std::size_t...>
-struct index_sequence {};
-
-template <class T, T I, T N, T... integers>
-struct _make_integer_sequence {
-  using type =
-    typename _make_integer_sequence<T, I + 1, N, integers..., I>::type;
-};
-
-template <class T, T N, T... integers>
-struct _make_integer_sequence<T, N, N, integers...> {
-  using type = index_sequence<integers...>;
-};
-
-template <std::size_t N>
-using make_index_sequence =
-  typename _make_integer_sequence<std::size_t, 0, N>::type;
-
-// drop-in apply for C++11 (tuple + index_sequence)
-template <typename Visit, typename Tuple, std::size_t... I>
-constexpr auto apply(Visit &&v, Tuple &&t, index_sequence<I...>)
-  -> decltype(std::forward<Visit>(v)(std::get<I>(std::forward<Tuple>(t))...)) {
-  return std::forward<Visit>(v)(std::get<I>(std::forward<Tuple>(t))...);
-}
-
-template <typename Visit, typename Tuple>
-constexpr auto apply(Visit &&v, Tuple &&t)
-  -> decltype(apply(std::forward<Visit>(v),
-    std::forward<Tuple>(t),
-    make_index_sequence<
-      std::tuple_size<typename std::decay<Tuple>::type>::value>{})) {
-  return apply(std::forward<Visit>(v),
-    std::forward<Tuple>(t),
-    make_index_sequence<
-      std::tuple_size<typename std::decay<Tuple>::type>::value>{});
-}
-
-template <typename... Ts>
-struct make_void {
-  typedef void type;
-};
-
-template <typename... Ts>
-using void_t = typename make_void<Ts...>::type;
-
-} // namespace
-} // namespace detail
-
-namespace compat {
-
-#if defined(__cpp_lib_apply) && __cpp_lib_apply >= 201603L
-using std::apply;
-#else
-using detail::apply;
-#endif
-
-#if defined(__cpp_lib_void_t) && __cpp_lib_void_t >= 201411L
-using std::void_t;
-#else
-using detail::void_t;
-#endif
-
-#if defined(__cpp_lib_transformation_trait_aliases) \
-  && __cpp_lib_transformation_trait_aliases >= 201304
-using std::conditional_t;
-#else
-template <bool B, class T, class F>
-using conditional_t = typename std::conditional<B, T, F>::type;
-#endif
-
-#if defined(__cpp_lib_transformation_trait_aliases) \
-  && __cpp_lib_transformation_trait_aliases >= 201304
-using std::decay_t;
-#else
-template <typename T>
-using decay_t = typename std::decay<T>::type;
-#endif
-
-#if defined(__cpp_lib_logical_traits) && __cpp_lib_logical_traits >= 201510L
-using std::disjunction;
-#else
-template <class...>
-struct disjunction: std::false_type {};
-
-template <class B1>
-struct disjunction<B1>: B1 {};
-
-template <class B1, class... Bn>
-struct disjunction<B1, Bn...>:
-    std::conditional<bool(B1::value), B1, disjunction<Bn...>>::type {};
-#endif
-
-#if defined(__cpp_lib_remove_cvref) && __cpp_lib_remove_cvref >= 201711L
-using std::remove_cvref;
-using std::remove_cvref_t;
-#else
-template <class T>
-struct remove_cvref {
-  using type =
-    typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-};
-
-template <class T>
-using remove_cvref_t = typename remove_cvref<T>::type;
-#endif
-
-} // namespace compat
-
-namespace detail {
-namespace {
-
-template <template <typename...> class Variant, typename... T>
-struct _tuple_to_array {
-  template <typename... U>
-  constexpr std::array<Variant<T...>, sizeof...(T)> operator()(U &&...u) const {
-    return {{Variant<T...>{std::forward<U>(u)}...}};
-  }
-};
 
 #ifdef OMNI_REFLECTED_INDEXED_CALLS
 //------------------------------------------------------------------------------
@@ -194,8 +53,7 @@ struct _reflected;
 } // namespace detail
 
 enum class reflected_entity {
-  tagged, // struct | class | union
-  member, // tagged.field
+  record, // struct | class | union
   enumeration, // enum | enum class
 };
 
@@ -217,9 +75,9 @@ struct reflected_t;
 
 // struct | class | union
 template <typename T>
-using reflected_tagged_t = reflected_t<T,
+using reflected_record_t = reflected_t<T,
   detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::tagged>;
+  reflected_entity::record>;
 
 template <typename T>
 using reflected_enum_t = reflected_t<T,
@@ -346,14 +204,14 @@ struct mutable_mem_binding: mem_binding<T> {
 };
 
 // todo: typename Meta is a weak point
-template <typename Tagged, typename Meta>
+template <typename Record, typename Meta>
 struct reflected_mem_binding {
   using type =
-    compat::remove_cvref_t<decltype(Meta::value(std::declval<Tagged>()))>;
+    compat::remove_cvref_t<decltype(Meta::value(std::declval<Record>()))>;
 
   using meta = Meta;
 
-  Tagged &owner;
+  Record &owner;
 
   static constexpr const char *name() noexcept {
     return meta::name();
@@ -392,27 +250,27 @@ struct reflected_mem_binding {
   }
 
   // Meta-erased mutable binding
-  template <typename U = Tagged>
+  template <typename U = Record>
   typename std::enable_if<!std::is_const<U>::value,
     mutable_mem_binding<type>>::type
     mutable_binding() const noexcept {
     return mutable_mem_binding<type>(owner, Meta{});
   }
 
-  constexpr explicit reflected_mem_binding(Tagged &owner): owner(owner) {}
+  constexpr explicit reflected_mem_binding(Record &owner): owner(owner) {}
 };
 
 template <typename T>
 struct reflected_t<T,
   detail::_reflected<compat::decay_t<T>>,
-  reflected_entity::tagged> {
+  reflected_entity::record> {
   using type = compat::decay_t<T>; //< reflecting pointers is pointless
   using meta = detail::_reflected<type>;
 
   static_assert(is_reflected<type>::value,
     "Type was not reflected (Calling outside a reflected scope?)");
 
-  static_assert(reflected_entity::tagged == meta::entity(),
+  static_assert(reflected_entity::record == meta::entity(),
     "Inconcistent reflection");
 
   private:
@@ -428,9 +286,10 @@ struct reflected_t<T,
   };
 
   template <typename _T>
-  static constexpr auto _fields(_T &t) noexcept
-    -> decltype(compat::apply(_bind_fields_metadata<_T>{t}, meta::fields())) {
-    return compat::apply(_bind_fields_metadata<_T>{t}, meta::fields());
+  static constexpr auto _public_fields(_T &t) noexcept
+    -> decltype(compat::apply(_bind_fields_metadata<_T>{t},
+      meta::public_fields())) {
+    return compat::apply(_bind_fields_metadata<_T>{t}, meta::public_fields());
   }
 
   public:
@@ -442,21 +301,24 @@ struct reflected_t<T,
     return meta::entity();
   }
 
-  using fields_t = typename meta::fields_t; //< yields std::tuple<...>
+  using public_fields_t =
+    typename meta::public_fields_t; //< yields std::tuple<...>
 
-  static constexpr fields_t fields() noexcept {
+  static constexpr public_fields_t public_fields() noexcept {
     return {};
   }
 
-  static constexpr auto fields(const type &t) noexcept -> decltype(_fields(t)) {
-    return _fields(t);
+  static constexpr auto public_fields(const type &t) noexcept
+    -> decltype(_public_fields(t)) {
+    return _public_fields(t);
   }
 
-  static constexpr auto fields(type &t) noexcept -> decltype(_fields(t)) {
-    return _fields(t);
+  static constexpr auto public_fields(type &t) noexcept
+    -> decltype(_public_fields(t)) {
+    return _public_fields(t);
   }
 
-  // todo: mutable_fields(T &t) and mutable_fields(const T &t)
+  // todo: mutable_public_fields(T &t) and mutable_public_fields(const T &t)
 };
 
 template <typename T>
@@ -489,9 +351,9 @@ struct reflected_t<T,
 };
 
 template <typename T>
-struct reflected_binding<T, reflected_entity::tagged> {
+struct reflected_binding<T, reflected_entity::record> {
   using type = compat::decay_t<T>;
-  using meta = typename reflected_tagged_t<type>::meta;
+  using meta = typename reflected_record_t<type>::meta;
 
   using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
     std::false_type,
@@ -513,14 +375,15 @@ struct reflected_binding<T, reflected_entity::tagged> {
   }
 
   // fixme: C++11 doesn't support constexpr here
-  auto fields()
-    -> decltype(reflected_tagged_t<type>::fields(std::declval<storage_t &>())) {
-    return reflected_tagged_t<type>::fields(bound);
+  auto public_fields() -> decltype(reflected_record_t<type>::public_fields(
+    std::declval<storage_t &>())) {
+    return reflected_record_t<type>::public_fields(bound);
   }
 
-  constexpr auto fields() const -> decltype(reflected_tagged_t<type>::fields(
-    std::declval<const storage_t &>())) {
-    return reflected_tagged_t<type>::fields(bound);
+  constexpr auto public_fields() const
+    -> decltype(reflected_record_t<type>::public_fields(
+      std::declval<const storage_t &>())) {
+    return reflected_record_t<type>::public_fields(bound);
   }
 
   // non-owning: T is an lvalue reference (U& / const U&)
@@ -591,7 +454,7 @@ constexpr auto reflected() -> reflected_t<T> {
 }
 
 template <typename T>
-constexpr auto reflected_tagged() -> reflected_tagged_t<T> {
+constexpr auto reflected_record() -> reflected_record_t<T> {
   return {};
 }
 
@@ -605,9 +468,9 @@ template <typename T,
     T, //< lvalues: keep reference (and const)
     compat::decay_t<T> //< rvalues: owning, decayed
     >>
-constexpr auto reflected_tagged(T &&t)
-  -> reflected_binding<Binding, reflected_entity::tagged> {
-  return reflected_binding<Binding, reflected_entity::tagged>(
+constexpr auto reflected_record(T &&t)
+  -> reflected_binding<Binding, reflected_entity::record> {
+  return reflected_binding<Binding, reflected_entity::record>(
     std::forward<T>(t));
 }
 
@@ -630,55 +493,5 @@ template <typename T,
 constexpr reflected_binding<Binding> reflected(T &&t) {
   return reflected_binding<Binding>(std::forward<T>(t));
 }
-
-// -- utility -------------------
-
-template <template <typename...> class Variant, typename... T>
-constexpr std::array<Variant<T...>, sizeof...(T)> tuple_to_array(
-  std::tuple<T...> t) {
-  return compat::apply(detail::_tuple_to_array<Variant, T...>{}, std::move(t));
-}
-
-#ifdef OMNI_HAS_STD_VARIANT
-
-template <typename... T>
-constexpr std::array<std::variant<T...>, sizeof...(T)> tuple_to_array(
-  std::tuple<T...> t) {
-  return std::apply(
-    [](auto &&...elems) {
-      return std::array<std::variant<T...>, sizeof...(T)>{
-        std::variant<T...>{std::forward<decltype(elems)>(elems)}...};
-    },
-    std::move(t));
-}
-
-#endif
-
-struct type_info_t {
-  const char *name; //< refactorme: I need std::string_view-like type for this
-
-  // todo: namespaces?
-};
-
-// todo: do I even need this here?
-// convenience adapter to get type info from Variant of field bindings. Example:
-// for (auto f : omni::reflected(t).fields()) {
-// std::cout << omni::type_info(f).name << '\n'; //< Polymorphic access without
-// calling std::visit
-// }
-// template <template <typename...> class Variant, typename... T>
-// constexpr type_info_t type_info(const Variant<T...> &t) {
-//   // todo: constraints on T: it might be a field's generated Meta, or a
-//   // reflected Binding. However, it shouldn't matter, since both of them
-//   define
-//   // `meta::name()`
-//   return customization::visit<Variant>{}(
-//     [](const auto &t) -> type_info_t {
-//       return {
-//         t.name(),
-//       };
-//     },
-//     t);
-// }
 
 } // namespace omni

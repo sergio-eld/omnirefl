@@ -39,7 +39,7 @@ namespace as_field {
 static const struct get_dependency_name_t {
   template <typename ParentType>
   std::string operator()(const ParentType &v) const {
-    const auto f = std::get<0>(omni::reflected(v).fields());
+    const auto f = std::get<0>(omni::reflected(v).public_fields());
     using field_type = typename decltype(f)::type;
 
     return std::string(omni::reflected<ParentType>().name())
@@ -53,12 +53,12 @@ static const struct get_dependency_name_layer_2_t {
     using root_type =
       typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-    const auto outer_fields = omni::reflected(v).fields();
+    const auto outer_fields = omni::reflected(v).public_fields();
     const auto outer_f = std::get<0>(outer_fields);
     using intermediate_type = typename decltype(outer_f)::type;
 
     const auto inner = outer_f.value();
-    const auto inner_fields = omni::reflected(inner).fields();
+    const auto inner_fields = omni::reflected(inner).public_fields();
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
@@ -109,7 +109,7 @@ static const struct get_dependency_name_t {
     using parent_type =
       typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-    const auto fields = omni::reflected(v).fields();
+    const auto fields = omni::reflected(v).public_fields();
     const auto f = std::get<0>(fields);
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
@@ -133,7 +133,7 @@ static const struct get_dependency_name_layer_2_t {
     using root_type =
       typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-    const auto outer_fields = omni::reflected(v).fields();
+    const auto outer_fields = omni::reflected(v).public_fields();
     const auto outer_f = std::get<0>(outer_fields);
     using outer_field_type = typename decltype(outer_f)::type;
 

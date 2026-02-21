@@ -127,7 +127,7 @@ struct _reflected<struct championship, T> {
   using type = T;
 
   constexpr static reflected_entity entity() noexcept {
-    return reflected_entity::tagged;
+    return reflected_entity::record;
   }
 
   constexpr static auto name() noexcept -> const
@@ -179,11 +179,11 @@ struct _reflected<struct championship, T> {
     }
   };
 
-  using fields_t = std::tuple<name_t, title_t>;
+  using public_fields_t = std::tuple<name_t, title_t>;
 
-  // static meta::fields() used by reflected_tagged
-  constexpr static fields_t fields() noexcept {
-    return fields_t{};
+  // static meta::public_fields() used by reflected_record
+  constexpr static public_fields_t public_fields() noexcept {
+    return public_fields_t{};
   }
 };
 
@@ -198,7 +198,7 @@ struct _reflected<struct person_john_cena, T> {
   using type = T;
 
   constexpr static reflected_entity entity() noexcept {
-    return reflected_entity::tagged;
+    return reflected_entity::record;
   }
 
   constexpr static auto name() noexcept -> const
@@ -295,11 +295,11 @@ struct _reflected<struct person_john_cena, T> {
     }
   };
 
-  using fields_t = std::tuple<name_t, age_t, style_t, main_title_t>;
+  using public_fields_t = std::tuple<name_t, age_t, style_t, main_title_t>;
 
-  // static meta::fields() used by reflected_tagged
-  constexpr static fields_t fields() noexcept {
-    return fields_t{};
+  // static meta::public_fields() used by reflected_record
+  constexpr static public_fields_t public_fields() noexcept {
+    return public_fields_t{};
   }
 };
 
@@ -316,7 +316,7 @@ struct omni::is_reflected: std::false_type {};
 
 template <typename T>
 struct omni::is_reflected<T,
-  omni::detail::void_t<
+  omni::compat::void_t<
     typename omni::detail::_reflected<typename std::decay<T>::type>::type>>:
     std::true_type {};
 

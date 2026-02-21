@@ -57,15 +57,15 @@ struct _reflected<{type_tag} {type_name}, T> {{
   // fields meta types declarations
 {reflected_fields}
 
-  using fields_t = std::tuple<
+  using public_fields_t = std::tuple<
 {field_names}
   >;
 
-  constexpr reflected_binding<type, fields_t> operator()(type &t) const noexcept {{
+  constexpr reflected_binding<type, public_fields_t> operator()(type &t) const noexcept {{
     return {{t}};
   }}
 
-  constexpr reflected_binding<const type, fields_t> operator()(const type &t) const noexcept {{
+  constexpr reflected_binding<const type, public_fields_t> operator()(const type &t) const noexcept {{
     return {{t}};
   }}
 }};)",

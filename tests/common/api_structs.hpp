@@ -7,7 +7,7 @@
 
 namespace interface_test {
 
-struct tagged_type_t {
+struct record_type_t {
   int first;
   std::string second;
 };
@@ -19,65 +19,65 @@ enum class enum_type_t {
 
 namespace type_identity {
 
-// tagged: omni::reflected_tagged_t<T>
-struct tagged_type_name_reflected_tagged_t_t {
+// record: omni::reflected_record_t<T>
+struct record_type_name_reflected_record_t_t {
   template <typename T>
   std::string operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return "not reflected";
-    return omni::reflected_tagged_t<T>::name();
+    return omni::reflected_record_t<T>::name();
   }
-} const static tagged_type_name_reflected_tagged_t{};
+} const static record_type_name_reflected_record_t{};
 
-// tagged: omni::reflected_tagged<T>()
-struct tagged_type_name_reflected_tagged_fn_t {
+// record: omni::reflected_record<T>()
+struct record_type_name_reflected_record_fn_t {
   template <typename T>
   std::string operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return "not reflected";
-    return omni::reflected_tagged<T>().name();
+    return omni::reflected_record<T>().name();
   }
-} const static tagged_type_name_reflected_tagged_fn{};
+} const static record_type_name_reflected_record_fn{};
 
-// tagged: omni::reflected_tagged(t)
-struct tagged_type_name_reflected_tagged_lv_t {
+// record: omni::reflected_record(t)
+struct record_type_name_reflected_record_lv_t {
   template <typename T>
   std::string operator()(T &&t) const {
     if (!omni::is_reflected<T>::value)
       return "not reflected";
-    return omni::reflected_tagged(std::forward<T>(t)).name();
+    return omni::reflected_record(std::forward<T>(t)).name();
   }
-} const static tagged_type_name_reflected_tagged_lv{};
+} const static record_type_name_reflected_record_lv{};
 
-// tagged: omni::reflected_t<T>
-struct tagged_type_name_reflected_t_t {
+// record: omni::reflected_t<T>
+struct record_type_name_reflected_t_t {
   template <typename T>
   std::string operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return "not reflected";
     return omni::reflected_t<T>::name();
   }
-} const static tagged_type_name_reflected_t{};
+} const static record_type_name_reflected_t{};
 
-// tagged: omni::reflected<T>()
-struct tagged_type_name_reflected_fn_t {
+// record: omni::reflected<T>()
+struct record_type_name_reflected_fn_t {
   template <typename T>
   std::string operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return "not reflected";
     return omni::reflected<T>().name();
   }
-} const static tagged_type_name_reflected_fn{};
+} const static record_type_name_reflected_fn{};
 
-// tagged: omni::reflected(t)
-struct tagged_type_name_reflected_lv_t {
+// record: omni::reflected(t)
+struct record_type_name_reflected_lv_t {
   template <typename T>
   std::string operator()(T &&t) const {
     if (!omni::is_reflected<T>::value)
       return "not reflected";
     return omni::reflected(std::forward<T>(t)).name();
   }
-} const static tagged_type_name_reflected_lv{};
+} const static record_type_name_reflected_lv{};
 
 // enum: omni::reflected_enum_t<T>
 struct enum_type_name_reflected_enum_t_t {
@@ -268,7 +268,7 @@ struct enum_type_enumerators_reflected_lv_t {
 namespace fields {
 
 // `auto` in labmda support only since C++14
-// visit meta::fields() -> std::vector<std::string> of field names
+// visit meta::public_fields() -> std::vector<std::string> of field names
 struct fields_visitor {
   template <typename... Field>
   std::vector<std::string> operator()(const Field &...) const {
@@ -276,48 +276,48 @@ struct fields_visitor {
   }
 };
 
-// tagged: omni::reflected_tagged_t<T>::fields()
-struct tagged_type_fields_reflected_tagged_t_t {
+// record: omni::reflected_record_t<T>::public_fields()
+struct record_type_fields_reflected_record_t_t {
   template <typename T>
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
     return omni::compat::apply(fields_visitor{},
-      omni::reflected_tagged_t<T>::fields());
+      omni::reflected_record_t<T>::public_fields());
   }
-} const static tagged_type_fields_reflected_tagged_t{};
+} const static record_type_fields_reflected_record_t{};
 
-// tagged: omni::reflected_tagged<T>().fields()
-struct tagged_type_fields_reflected_tagged_fn_t {
+// record: omni::reflected_record<T>().public_fields()
+struct record_type_fields_reflected_record_fn_t {
   template <typename T>
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
     return omni::compat::apply(fields_visitor{},
-      omni::reflected_tagged<T>().fields());
+      omni::reflected_record<T>().public_fields());
   }
-} const static tagged_type_fields_reflected_tagged_fn{};
+} const static record_type_fields_reflected_record_fn{};
 
-// tagged: omni::reflected_t<T>::fields()
-struct tagged_type_fields_reflected_t_t {
+// record: omni::reflected_t<T>::public_fields()
+struct record_type_fields_reflected_t_t {
   template <typename T>
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
     return omni::compat::apply(fields_visitor{},
-      omni::reflected_t<T>::fields());
+      omni::reflected_t<T>::public_fields());
   }
-} const static tagged_type_fields_reflected_t{};
+} const static record_type_fields_reflected_t{};
 
-// tagged: omni::reflected<T>().fields()
-struct tagged_type_fields_reflected_fn2_t {
+// record: omni::reflected<T>().public_fields()
+struct record_type_fields_reflected_fn2_t {
   template <typename T>
   std::vector<std::string> operator()(const T &) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
-    return omni::compat::apply(fields_visitor{}, omni::reflected<T>().fields());
+    return omni::compat::apply(fields_visitor{}, omni::reflected<T>().public_fields());
   }
-} const static tagged_type_fields_reflected_fn2{};
+} const static record_type_fields_reflected_fn2{};
 
 } // namespace fields
 
@@ -340,104 +340,104 @@ struct field_values_visitor {
   }
 };
 
-// tagged: omni::reflected_tagged_t<T>::fields(t)
-struct tagged_type_field_values_reflected_tagged_t_t {
+// record: omni::reflected_record_t<T>::public_fields(t)
+struct record_type_field_values_reflected_record_t_t {
   template <typename T>
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
     return omni::compat::apply(field_values_visitor{},
-      omni::reflected_tagged_t<T>::fields(t));
+      omni::reflected_record_t<T>::public_fields(t));
   }
-} const static tagged_type_field_values_reflected_tagged_t{};
+} const static record_type_field_values_reflected_record_t{};
 
-// tagged: omni::reflected_tagged<T>().fields(t)
-struct tagged_type_field_values_reflected_tagged_fn_t {
+// record: omni::reflected_record<T>().public_fields(t)
+struct record_type_field_values_reflected_record_fn_t {
   template <typename T>
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
     return omni::compat::apply(field_values_visitor{},
-      omni::reflected_tagged<T>().fields(t));
+      omni::reflected_record<T>().public_fields(t));
   }
-} const static tagged_type_field_values_reflected_tagged_fn{};
+} const static record_type_field_values_reflected_record_fn{};
 
-// tagged: omni::reflected_tagged(t).fields()  (non-owning binding)
-struct tagged_type_field_values_reflected_tagged_lv_t {
+// record: omni::reflected_record(t).public_fields()  (non-owning binding)
+struct record_type_field_values_reflected_record_lv_t {
   template <typename T>
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
 
-    auto binding = omni::reflected_tagged(t);
-    return omni::compat::apply(field_values_visitor{}, binding.fields());
+    auto binding = omni::reflected_record(t);
+    return omni::compat::apply(field_values_visitor{}, binding.public_fields());
   }
-} const static tagged_type_field_values_reflected_tagged_lv{};
+} const static record_type_field_values_reflected_record_lv{};
 
-// tagged: omni::reflected_t<T>::fields(t)
-struct tagged_type_field_values_reflected_t_t {
-  template <typename T>
-  std::vector<std::string> operator()(T &t) const {
-    if (!omni::is_reflected<T>::value)
-      return std::vector<std::string>();
-    return omni::compat::apply(field_values_visitor{},
-      omni::reflected_t<T>::fields(t));
-  }
-} const static tagged_type_field_values_reflected_t{};
-
-// tagged: omni::reflected<T>().fields(t)
-struct tagged_type_field_values_reflected_fn_t2 {
+// record: omni::reflected_t<T>::public_fields(t)
+struct record_type_field_values_reflected_t_t {
   template <typename T>
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
     return omni::compat::apply(field_values_visitor{},
-      omni::reflected<T>().fields(t));
+      omni::reflected_t<T>::public_fields(t));
   }
-} const static tagged_type_field_values_reflected_fn2{};
+} const static record_type_field_values_reflected_t{};
 
-// tagged: omni::reflected(t).fields()  (non-owning binding)
-struct tagged_type_field_values_reflected_lv_t2 {
+// record: omni::reflected<T>().public_fields(t)
+struct record_type_field_values_reflected_fn_t2 {
+  template <typename T>
+  std::vector<std::string> operator()(T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return omni::compat::apply(field_values_visitor{},
+      omni::reflected<T>().public_fields(t));
+  }
+} const static record_type_field_values_reflected_fn2{};
+
+// record: omni::reflected(t).public_fields()  (non-owning binding)
+struct record_type_field_values_reflected_lv_t2 {
   template <typename T>
   std::vector<std::string> operator()(T &t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
 
     auto binding = omni::reflected(t);
-    return omni::compat::apply(field_values_visitor{}, binding.fields());
+    return omni::compat::apply(field_values_visitor{}, binding.public_fields());
   }
-} const static tagged_type_field_values_reflected_lv2{};
+} const static record_type_field_values_reflected_lv2{};
 
-// tagged: omni::reflected_tagged(T(t)).fields()  (owning binding)
-struct tagged_type_field_values_reflected_tagged_own_t {
+// record: omni::reflected_record(T(t)).public_fields()  (owning binding)
+struct record_type_field_values_reflected_record_own_t {
   template <typename T>
   std::vector<std::string> operator()(T t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
 
-    auto owning_binding = omni::reflected_tagged(std::move(t));
-    return omni::compat::apply(field_values_visitor{}, owning_binding.fields());
+    auto owning_binding = omni::reflected_record(std::move(t));
+    return omni::compat::apply(field_values_visitor{}, owning_binding.public_fields());
   }
-} const static tagged_type_field_values_reflected_tagged_own{};
+} const static record_type_field_values_reflected_record_own{};
 
-// tagged: omni::reflected(T(t)).fields()  (owning binding, polymorphic)
-struct tagged_type_field_values_reflected_own_t {
+// record: omni::reflected(T(t)).public_fields()  (owning binding, polymorphic)
+struct record_type_field_values_reflected_own_t {
   template <typename T>
   std::vector<std::string> operator()(T t) const {
     if (!omni::is_reflected<T>::value)
       return std::vector<std::string>();
 
     auto owning_binding = omni::reflected(std::move(t));
-    return omni::compat::apply(field_values_visitor{}, owning_binding.fields());
+    return omni::compat::apply(field_values_visitor{}, owning_binding.public_fields());
   }
-} const static tagged_type_field_values_reflected_own{};
+} const static record_type_field_values_reflected_own{};
 
 } // namespace field_value_read
 
 namespace field_value_write {
 
 struct assign_fields {
-  tagged_type_t expected;
+  record_type_t expected;
 
   template <typename... FieldBinding>
   void operator()(FieldBinding... b) const {
@@ -467,103 +467,103 @@ struct assign_fields {
   }
 };
 
-// tagged: omni::reflected_tagged_t<T>::fields(t)  (non-owning)
-struct tagged_type_field_write_reflected_tagged_t_t {
+// record: omni::reflected_record_t<T>::public_fields(t)  (non-owning)
+struct record_type_field_write_reflected_record_t_t {
   template <typename T>
-  void operator()(T &t, const tagged_type_t &expected) const {
+  void operator()(T &t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return;
 
     omni::compat::apply(assign_fields{expected},
-      omni::reflected_tagged_t<T>::fields(t));
+      omni::reflected_record_t<T>::public_fields(t));
   }
-} const static tagged_type_field_write_reflected_tagged_t{};
+} const static record_type_field_write_reflected_record_t{};
 
-// tagged: omni::reflected_tagged<T>().fields(t)  (non-owning)
-struct tagged_type_field_write_reflected_tagged_fn_t {
+// record: omni::reflected_record<T>().public_fields(t)  (non-owning)
+struct record_type_field_write_reflected_record_fn_t {
   template <typename T>
-  void operator()(T &t, const tagged_type_t &expected) const {
+  void operator()(T &t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return;
 
     omni::compat::apply(assign_fields{expected},
-      omni::reflected_tagged<T>().fields(t));
+      omni::reflected_record<T>().public_fields(t));
   }
-} const static tagged_type_field_write_reflected_tagged_fn{};
+} const static record_type_field_write_reflected_record_fn{};
 
-// tagged: omni::reflected_tagged(t).fields()  (non-owning binding)
-struct tagged_type_field_write_reflected_tagged_lv_t {
+// record: omni::reflected_record(t).public_fields()  (non-owning binding)
+struct record_type_field_write_reflected_record_lv_t {
   template <typename T>
-  void operator()(T &t, const tagged_type_t &expected) const {
+  void operator()(T &t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return;
 
-    auto binding = omni::reflected_tagged(t);
-    omni::compat::apply(assign_fields{expected}, binding.fields());
+    auto binding = omni::reflected_record(t);
+    omni::compat::apply(assign_fields{expected}, binding.public_fields());
   }
-} const static tagged_type_field_write_reflected_tagged_lv{};
+} const static record_type_field_write_reflected_record_lv{};
 
-// tagged: omni::reflected_t<T>::fields(t)  (non-owning)
-struct tagged_type_field_write_reflected_t_t {
+// record: omni::reflected_t<T>::public_fields(t)  (non-owning)
+struct record_type_field_write_reflected_t_t {
   template <typename T>
-  void operator()(T &t, const tagged_type_t &expected) const {
-    if (!omni::is_reflected<T>::value)
-      return;
-
-    omni::compat::apply(assign_fields{expected},
-      omni::reflected_t<T>::fields(t));
-  }
-} const static tagged_type_field_write_reflected_t{};
-
-// tagged: omni::reflected<T>().fields(t)  (non-owning)
-struct tagged_type_field_write_reflected_fn_t2 {
-  template <typename T>
-  void operator()(T &t, const tagged_type_t &expected) const {
+  void operator()(T &t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return;
 
     omni::compat::apply(assign_fields{expected},
-      omni::reflected<T>().fields(t));
+      omni::reflected_t<T>::public_fields(t));
   }
-} const static tagged_type_field_write_reflected_fn2{};
+} const static record_type_field_write_reflected_t{};
 
-// tagged: omni::reflected(t).fields()  (non-owning binding)
-struct tagged_type_field_write_reflected_lv_t2 {
+// record: omni::reflected<T>().public_fields(t)  (non-owning)
+struct record_type_field_write_reflected_fn_t2 {
   template <typename T>
-  void operator()(T &t, const tagged_type_t &expected) const {
+  void operator()(T &t, const record_type_t &expected) const {
+    if (!omni::is_reflected<T>::value)
+      return;
+
+    omni::compat::apply(assign_fields{expected},
+      omni::reflected<T>().public_fields(t));
+  }
+} const static record_type_field_write_reflected_fn2{};
+
+// record: omni::reflected(t).public_fields()  (non-owning binding)
+struct record_type_field_write_reflected_lv_t2 {
+  template <typename T>
+  void operator()(T &t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return;
 
     auto binding = omni::reflected(t);
-    omni::compat::apply(assign_fields{expected}, binding.fields());
+    omni::compat::apply(assign_fields{expected}, binding.public_fields());
   }
-} const static tagged_type_field_write_reflected_lv2{};
+} const static record_type_field_write_reflected_lv2{};
 
-// tagged: omni::reflected_tagged(T{...}).fields()  (owning binding)
-struct tagged_type_field_write_reflected_tagged_own_t {
+// record: omni::reflected_record(T{...}).public_fields()  (owning binding)
+struct record_type_field_write_reflected_record_own_t {
   template <typename T>
-  T operator()(T t, const tagged_type_t &expected) const {
+  T operator()(T t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return t;
 
-    auto owning_binding = omni::reflected_tagged(std::move(t));
-    omni::compat::apply(assign_fields{expected}, owning_binding.fields());
+    auto owning_binding = omni::reflected_record(std::move(t));
+    omni::compat::apply(assign_fields{expected}, owning_binding.public_fields());
     return std::move(owning_binding.bound);
   }
-} const static tagged_type_field_write_reflected_tagged_own{};
+} const static record_type_field_write_reflected_record_own{};
 
-// tagged: omni::reflected(T{...}).fields()  (owning binding, polymorphic)
-struct tagged_type_field_write_reflected_own_t {
+// record: omni::reflected(T{...}).public_fields()  (owning binding, polymorphic)
+struct record_type_field_write_reflected_own_t {
   template <typename T>
-  T operator()(T t, const tagged_type_t &expected) const {
+  T operator()(T t, const record_type_t &expected) const {
     if (!omni::is_reflected<T>::value)
       return t;
 
     auto owning_binding = omni::reflected(std::move(t));
-    omni::compat::apply(assign_fields{expected}, owning_binding.fields());
+    omni::compat::apply(assign_fields{expected}, owning_binding.public_fields());
     return std::move(owning_binding.bound);
   }
-} const static tagged_type_field_write_reflected_own{};
+} const static record_type_field_write_reflected_own{};
 
 } // namespace field_value_write
 

@@ -608,8 +608,12 @@ struct nm_qual_type {
   /// namespace
   std::vector<std::string> namespaces;
 
+  // todo: store type_id instead
   /// non-empty for nested types `struct foo { struct bar{}; };`
   std::vector<std::string> enclosing_records;
+
+  // todo: should it be just clang::Decl?
+  static meta::nm_qual_type map_from_decl(const clang::TagDecl *td) noexcept;
 };
 
 enum reference_type {
@@ -641,30 +645,55 @@ struct type_definition {
   } definition_flags;
 };
 
+// as of now - public only
+struct field_data {
+  std::string name;
+
+  enum {
+    none = 0,
+    as_const,
+    as_mutable,
+  } qualified;
+
+  static field_data map_from_decl(const clang::FieldDecl *d) {
+    assert(d);
+    return {
+      .name = std::string(util::to_string_view(d->getName())),
+      .qualified = d->isMutable()
+        ? as_mutable
+        : (d->getType().isConstQualified() ? as_const : none),
+    };
+  }
+};
+
 // todo: add info for template types
 struct record_data {
   // only public-nonvirtual bases
   std::vector<type_id> public_bases;
 
   /// protected and private are not supported now (too complicated)
-  std::vector<std::string> public_fields;
+  std::vector<field_data> public_fields;
 
   enum {
     is_struct,
     is_class,
     is_union,
   } type;
-};
 
-record_data map_to_record_data(const clang::ASTContext &ast,
-  const clang::RecordType *t);
+  static record_data map_from_type(const clang::ASTContext &ast,
+    const clang::RecordType *t);
+};
 
 struct enum_data {
   bool is_scoped; //< true if 'enum class { }`
   std::vector<std::string> enumerators;
+
+  static meta::enum_data map_from_type(const clang::EnumType *t);
 };
 
-meta::enum_data map_to_enum_data(const clang::EnumType *t);
+template <typename Data>
+concept reflectable_data =
+  std::same_as<record_data, Data> || std::same_as<enum_data, Data>;
 
 struct function_signature_arg {
   // fully namespace-qualified type
@@ -686,6 +715,7 @@ struct func_signature {
 struct reflectable {
   type_id id;
 
+  // refactorme: Consider having template arg `reflectable_data` instead
   std::variant<record_data, enum_data> data;
   type_definition definition;
 };
@@ -970,7 +1000,7 @@ struct log {
     for (std::size_t i = 0; i < d.public_fields.size(); ++i) {
       if (i > 0)
         fields += ", ";
-      fields += d.public_fields[i];
+      fields += d.public_fields[i].name;
     }
 
     return std::format("{} {{ {} }}", kind, fields);
@@ -1114,7 +1144,7 @@ std::string format_struct(const meta::nm_qual_type &t,
     "\n  using type = T;"
     "\n"
     "\n  static constexpr omni::reflected_entity entity() noexcept {{"
-    "\n    return omni::reflected_entity::tagged;"
+    "\n    return omni::reflected_entity::record;"
     "\n  }}"
     "\n"
     "\n  static constexpr auto name() noexcept"
@@ -1124,10 +1154,10 @@ std::string format_struct(const meta::nm_qual_type &t,
     "\n"
     "{3}"
     "\n"
-    "\n  using fields_t ="
+    "\n  using public_fields_t ="
     "\n    std::tuple<{4}>;"
     "\n"
-    "\n  static constexpr fields_t fields() noexcept {{ return {{}}; }}"
+    "\n  static constexpr public_fields_t public_fields() noexcept {{ return {{}}; }}"
     "\n}};",
 
     // 0:
@@ -1147,40 +1177,38 @@ std::string format_struct(const meta::nm_qual_type &t,
     d.public_fields.empty()
       ? std::string("\n  // no reflectable fields detected")
       : std::format("\n{}",
-          util::indexed(d.public_fields) | std::views::transform([](const auto &p) {
-            const auto &[name, idx] = p;
-            return std::format(
-              "  struct {0}_t {{"
-              "\n    static constexpr omni::reflected_entity entity() noexcept {{ "
-              "\n      return omni::reflected_entity::member;"
-              "\n    }}"
-              "\n"
-              "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
-              "\n"
-              "\n    static constexpr auto name() noexcept"
-              "\n      -> const char(&)[sizeof(\"{0}\")] {{"
-              "\n      return \"{0}\";"
-              "\n    }}"
-              "\n"
-              "\n    template <typename _T>"
-              "\n    static constexpr auto value(const _T &t) noexcept"
-              "\n      -> const decltype(t.{0})& {{"
-              "\n      return t.{0};"
-              "\n    }}"
-              "\n"
-              "\n    template <typename _T, typename V>"
-              "\n    static void set_value(_T &t, V &&v) {{"
-              "\n      t.{0} = std::forward<V>(v);"
-              "\n    }}"
-              "\n  }};",
-              name,
-              idx);
-          }) //
+          util::indexed(d.public_fields)
+            | std::views::transform([](const auto &p) {
+                const auto &[field, idx] = p;
+                return std::format(
+                  "  struct {0}_t {{"
+                  "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
+                  "\n"
+                  "\n    static constexpr auto name() noexcept"
+                  "\n      -> const char(&)[sizeof(\"{0}\")] {{"
+                  "\n      return \"{0}\";"
+                  "\n    }}"
+                  "\n"
+                  "\n    template <typename _T>"
+                  "\n    static constexpr auto value(const _T &t) noexcept"
+                  "\n      -> const decltype(t.{0})& {{"
+                  "\n      return t.{0};"
+                  "\n    }}"
+                  "\n"
+                  "\n    template <typename _T, typename V>"
+                  "\n    static void set_value(_T &t, V &&v) {{"
+                  "\n      t.{0} = std::forward<V>(v);"
+                  "\n    }}"
+                  "\n  }};",
+                  field.name,
+                  idx);
+              }) //
             | std::views::join_with("\n\n"sv) //
             | util::fmt_fold),
 
     // 4:
     d.public_fields //
+      | std::views::transform(&meta::field_data::name)
       | std::views::transform(
         [](std::string_view f) { return std::format("{}_t", f); }) //
       | std::views::join_with(",\n      "sv) //
@@ -1221,19 +1249,6 @@ std::string format_reflected_call(const meta::reflected_call_info &c) noexcept {
 
     // 1:
     invoke_impl);
-}
-
-std::string format_reflectable(const meta::reflectable &r) noexcept {
-  return std::visit(
-    [&tn = r.definition.type_name]<typename Meta>(const Meta &d) {
-      if constexpr (std::same_as<meta::record_data, Meta>)
-        return format_struct(tn, d);
-      else {
-        static_assert(std::same_as<meta::enum_data, Meta>);
-        return format_enum(tn, d);
-      }
-    },
-    r.data);
 }
 
 // refactorme: ugly shite. Control flow is not readable.
@@ -1349,6 +1364,7 @@ std::expected<with_compiler_invocation, std::string>
   compiler_invocation_for_source_file(const fs::path &resource_dir,
     const source_file &sf) noexcept;
 
+// todo: do I even need this as a separate funcion?
 // todo: rename/refactor. This is (should be) entirely mode related.
 with_compiler_invocation configure_compiler_invocation(
   const cli::options &cli_args,
@@ -1970,7 +1986,7 @@ int main(int argc, char **argv) {
       "\ntemplate <typename T>"
       "\nstruct omni::is_reflected<"
       "\n    T,"
-      "\n    omni::detail::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
+      "\n    omni::compat::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
       "\n> : std::true_type {{}};"
       "\n"
       "\n// -- reflected calls --------"
@@ -2659,6 +2675,9 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
     p.Macros.emplace_back("OMNI_TOOL_RUN", /*isUndef*/ false);
   }
 
+  // do not need this noise when parsing the AST
+  compiler_invocation->DiagnosticOpts->IgnoreWarnings = 1;
+
   return with_compiler_invocation{
     .sf = sf,
     .ci = std::move(compiler_invocation),
@@ -2745,9 +2764,10 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
   return arg.getAsIntegral().getExtValue();
 }
 
-meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
+meta::nm_qual_type meta::nm_qual_type::map_from_decl(
+  const clang::TagDecl *td) noexcept {
   auto [namespaces, enclosing_records] =
-    std::invoke([&decl_ctx = *td.getDeclContext()] {
+    std::invoke([&decl_ctx = *td->getDeclContext()] {
       std::array<std::vector<std::string>, 2> result{};
       auto &&[namespaces, enclosing_records] = result;
 
@@ -2783,7 +2803,7 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
 
   return {
     .name = std::invoke([&td] -> std::optional<std::string> {
-      const clang::IdentifierInfo *id = td.getIdentifier();
+      const clang::IdentifierInfo *id = td->getIdentifier();
       if (!id)
         return std::nullopt;
 
@@ -2796,7 +2816,7 @@ meta::nm_qual_type resolve_nm_qual_type(const clang::TagDecl &td) noexcept {
         // source mode this is sufficient.
         !llvm::isa<clang::ClassTemplateSpecializationDecl>(td)
         ? id->getName().str()
-        : clang::QualType{td.getTypeForDecl(), qual_flags}.getAsString(
+        : clang::QualType{td->getTypeForDecl(), qual_flags}.getAsString(
             std::invoke([] {
               clang::PrintingPolicy p{{}};
 
@@ -2839,7 +2859,7 @@ meta::type_definition resolve_definition(const clang::SourceManager &sm,
 
   const clang::SourceLocation loc = td->getLocation();
   return {
-    .type_name = resolve_nm_qual_type(*td),
+    .type_name = meta::nm_qual_type::map_from_decl(td),
     .location =
       {
         .source_file = get_declaration_source_file(*td, sm),
@@ -2849,22 +2869,6 @@ meta::type_definition resolve_definition(const clang::SourceManager &sm,
     // refactorme: enable bitwise operations
     .definition_flags = td_flags(td_local | td_non_public),
   };
-}
-
-std::vector<std::string> public_field_names(
-  clang::RecordDecl::field_range fields) noexcept {
-  std::vector<std::string> r;
-  std::ranges::transform(fields
-      | std::views::filter([](const clang::FieldDecl *fd) {
-          // todo:
-          //   consider logging for skipped fields, since we are not
-          //   reporting them as errors
-          return clang::AccessSpecifier::AS_public == fd->getAccess();
-        }),
-    std::back_inserter(r),
-    [](const clang::FieldDecl *fd) { return fd->getNameAsString(); });
-
-  return r;
 }
 
 // view of alias declarations considered for reflections, like
@@ -2912,13 +2916,15 @@ util::viewable_range_of<const clang::CXXRecordDecl *> auto public_bases_view(
 }
 
 util::viewable_range_of<const clang::FieldDecl *> auto public_fields_view(
-  const clang::CXXRecordDecl *rd) {
+  const clang::RecordDecl *rd) {
   const auto is_public = //
     [](const clang::FieldDecl *f) {
       return clang::AccessSpecifier::AS_public == f->getAccess();
     };
 
-  return rd->fields() | std::views::filter(is_public);
+  return rd->fields() //
+    | std::views::filter(is_public) //
+    | std::views::filter(std::not_fn(&clang::FieldDecl::isUnnamedBitField));
 }
 
 std::vector<const clang::TagType *> recursively_collect_dependency_types(
@@ -3051,7 +3057,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
   return {collected.begin(), collected.end()};
 }
 
-auto meta::map_to_record_data(const clang::ASTContext &ast,
+auto meta::record_data::map_from_type(const clang::ASTContext &ast,
   const clang::RecordType *t) -> record_data {
   assert(t);
 
@@ -3071,7 +3077,10 @@ auto meta::map_to_record_data(const clang::ASTContext &ast,
           util::accum_back_inserter)
       : std::vector<std::string>{},
 
-    .public_fields = public_field_names(r_decl.fields()),
+    .public_fields = std::ranges::fold_left(public_fields_view(&r_decl)
+        | std::views::transform(meta::field_data::map_from_decl),
+      std::vector<meta::field_data>{},
+      util::accum_back_inserter),
 
     .type = r_decl.isStruct() //
       ? meta::record_data::is_struct
@@ -3081,7 +3090,7 @@ auto meta::map_to_record_data(const clang::ASTContext &ast,
   };
 }
 
-auto meta::map_to_enum_data(const clang::EnumType *t) -> enum_data {
+auto meta::enum_data::map_from_type(const clang::EnumType *t) -> enum_data {
   assert(t);
 
   const clang::EnumDecl &ed = *t->getDecl();
@@ -3110,9 +3119,10 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
   return {
     .id = render_type_id(ast, t),
     .data = clang::isa<clang::EnumType>(t)
-      ? record_or_enum(meta::map_to_enum_data(clang::cast<clang::EnumType>(t)))
-      : record_or_enum(
-          meta::map_to_record_data(ast, clang::cast<clang::RecordType>(t))),
+      ? record_or_enum(
+          meta::enum_data::map_from_type(clang::cast<clang::EnumType>(t)))
+      : record_or_enum(meta::record_data::map_from_type(ast,
+          clang::cast<clang::RecordType>(t))),
     .definition = resolve_definition(ast.getSourceManager(), t->getDecl()),
   };
 }
@@ -3162,7 +3172,7 @@ auto meta::resolve_reflected_type(
       .type =
         reflectable{
           .id = id,
-          .data = map_to_enum_data(enum_type),
+          .data = enum_data::map_from_type(enum_type),
           .definition =
             resolve_definition(ast.getSourceManager(), enum_type->getDecl()),
         },
@@ -3213,7 +3223,7 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
     const clang::TagDecl *tag = base_q->getAsTagDecl();
     return {
       .type_name = tag
-        ? resolve_nm_qual_type(*tag)
+        ? meta::nm_qual_type::map_from_decl(tag)
         // no tag -> fundamental / alias. No namespaces needed.
         : meta::nm_qual_type{
             .name = base_q.getCanonicalType().getAsString(),
@@ -3356,52 +3366,70 @@ std::string declaration_for_enclosing_root_as_dependent(
 
   return std::format(
     "template <typename Inner>"
-    "\nusing {} = typename std::conditional<true, {}, Inner>::type;",
+    "\nusing {} = typename _wrt<{}, Inner>::type;",
     enclosing_root_as_dependent(inner_type),
     elems | std::views::join_with("::"sv) | util::fmt_fold);
 }
 
-template <typename Data>
-  requires std::same_as<meta::record_data, Data>
-  || std::same_as<meta::enum_data, Data>
-std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
-  // to support need field name for `decltype(std::declval<root>().inner)
-  assert(t.name && "unnamed inner structs not supported");
+// render `typename _omni_{root}_as_root<{param}>::inner`
+std::string qualified_inner_type_from_fwd_root(
+  const meta::nm_qual_type &inner_type,
+  std::string_view param) {
+  assert(inner_type.name && "unnamed types are not yet supported");
+  const std::string root =
+    std::format("{}<{}>", enclosing_root_as_dependent(inner_type), param);
 
-  const std::string_view tag = std::invoke([&d] {
-    if constexpr (std::same_as<meta::record_data, Data>) {
-      switch (d.type) {
-      case meta::record_data::is_class:
-        return "class";
-      case meta::record_data::is_union:
-        return "union";
-      case meta::record_data::is_struct:
-      default:
-        return "struct";
-      }
-    } else {
-      return d.is_scoped ? "enum class" : "enum";
-    }
-  });
-
-  const std::string_view entity = std::invoke([&d] {
-    if constexpr (std::same_as<meta::record_data, Data>)
-      return "record";
-    else
-      return "enumeration";
-  });
-
-  const std::string access_root_for = enclosing_root_as_dependent(t);
-  std::vector<std::string_view> elems{access_root_for, "<T>"};
-  std::ranges::copy(t.enclosing_records | std::views::drop(1),
+  std::vector<std::string_view> elems{root};
+  std::ranges::copy(inner_type.enclosing_records | std::views::drop(1),
     std::back_inserter(elems));
-  elems.push_back(*t.name);
+  elems.emplace_back(*inner_type.name);
+
+  return std::format("typename {}",
+    elems | std::views::join_with("::"sv) | util::fmt_fold);
+}
+
+template <meta::reflectable_data Data>
+std::string_view reflectable_tag(const Data &d) {
+  if constexpr (std::same_as<meta::record_data, Data>) {
+    switch (d.type) {
+    case meta::record_data::is_class:
+      return "class";
+    case meta::record_data::is_union:
+      return "union";
+    case meta::record_data::is_struct:
+    default:
+      return "struct";
+    }
+  } else {
+    static_assert(std::same_as<meta::enum_data, Data>);
+    return "enum";
+    // d.is_scoped ? "enum class" : "enum";
+    // ^^^ gives "warning: elaborated-type-specifier for a scoped enum must not
+    // use the ‘class’ keyword"
+  }
+}
+
+template <meta::reflectable_data Data>
+std::string_view reflectable_entity(const Data &) {
+  if constexpr (std::same_as<meta::record_data, Data>)
+    return "record";
+  else {
+    static_assert(std::same_as<meta::enum_data, Data>);
+    return "enumeration";
+  }
+}
+
+template <meta::reflectable_data Data>
+std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
+  // to support, I need to store the decl name for `decltype(instance)`
+  assert(t.name && "unnamed structs not supported");
 
   return std::format(
     "template <typename T>"
-    "\nstruct _reflected<T, {0} typename std::enable_if<"
-    "\n  std::is_same<T, typename {1}>::value, T>::type> {{"
-    "\n  "
+    "\nstruct _reflected<{0} {1}, T> {{"
+    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+    "\n"
     "\n  using type = T;"
     "\n"
     "\n  static constexpr omni::reflected_entity entity() noexcept {{"
@@ -3411,20 +3439,141 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     "\n  static constexpr auto name() noexcept"
     "\n    -> const char(&)[sizeof(\"{3}\")] {{"
     "\n    return \"{3}\";"
-    "\n  }}"
-    "\n",
+    "\n  }}",
 
     // 0
-    tag,
+    reflectable_tag(d),
 
     // 1
-    elems | std::views::join_with("::"sv) | util::fmt_fold,
+    format_nm_qual_type(t),
 
     // 2
-    entity,
+    reflectable_entity(d),
 
     // 3
     t.name.value_or("(unnamed)"));
+}
+
+// SFINAE specialization for inner types of forward-declared types.
+template <meta::reflectable_data Data>
+std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
+  // to support, I need to store the decl field name for
+  // `decltype(std::declval<root>().inner)
+  assert(t.name && "unnamed inner structs not supported");
+
+  const std::string access_root_for =
+    std::format("{}<T>", enclosing_root_as_dependent(t));
+
+  std::vector<std::string_view> elems{access_root_for};
+  std::ranges::copy(t.enclosing_records | std::views::drop(1),
+    std::back_inserter(elems));
+  elems.push_back(*t.name);
+
+  return std::format(
+    "template <typename T>"
+    "\nstruct _reflected<T, typename std::enable_if<"
+    "\n  std::is_same<T, typename {0}>::value, T>::type> {{"
+    "\n  "
+    "\n  using type = T;"
+    "\n"
+    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
+    "\n    return omni::reflected_entity::{1};"
+    "\n  }}"
+    "\n"
+    "\n  static constexpr auto name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{2}\")] {{"
+    "\n    return \"{2}\";"
+    "\n  }}",
+
+    elems | std::views::join_with("::"sv) | util::fmt_fold,
+    reflectable_entity(d),
+    t.name.value_or("(unnamed)"));
+}
+
+// todo: indexed_reflectable_head
+
+std::string reflectable_body(const meta::enum_data &d) {
+  return std::format(
+    "\n  constexpr static auto enumerators() noexcept"
+    "\n    -> std::array<std::pair<type, const char*>, {}> {{"
+    "\n      return {{{{"
+    "\n        {},"
+    "\n      }}}};"
+    "\n    }}"
+    "\n}};",
+    d.enumerators.size(),
+    d.enumerators //
+      | std::views::transform([](std::string_view e) {
+          return std::format("{{type::{0}, \"{0}\"}}", e);
+        })
+      | std::views::join_with(",\n        "sv) //
+      | util::fmt_fold);
+}
+
+std::string reflectable_body(const meta::record_data &d) {
+  constexpr auto format_field = //
+    [](const auto &field_index) {
+      const auto &[f, index] = field_index;
+      return std::format(
+        "  struct {0}_t {{"
+        "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
+        "\n"
+        "\n    static constexpr auto name() noexcept"
+        "\n      -> const char(&)[sizeof(\"{0}\")] {{"
+        "\n      return \"{0}\";"
+        "\n    }}"
+        "\n"
+        "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
+        "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
+        "\n"
+        "\n    template <typename _T>"
+        "\n    static constexpr auto value(const _T &t) noexcept"
+        "\n      -> const decltype(t.{0})& {{"
+        "\n      return t.{0};"
+        "\n    }}"
+        "\n"
+        "\n    template <typename _T, typename V>"
+        "\n    static void set_value(_T &t, V &&v) {{"
+        "\n      t.{0} = std::forward<V>(v);"
+        "\n    }}"
+        "\n  }};",
+        // 0
+        f.name,
+
+        // 1
+        index,
+
+        // 2
+        bool(meta::field_data::as_const == f.qualified),
+
+        // 3
+        bool(meta::field_data::as_mutable == f.qualified));
+    };
+
+  return std::format(
+    "{}"
+    "\n"
+    // todo: consider a comment here for ignored fields
+    "\n  using public_fields_t ="
+    "\n    std::tuple<{}>;"
+    "\n"
+    "\n  static constexpr public_fields_t public_fields() noexcept {{ return {{}}; }}"
+    "\n}};",
+
+    d.public_fields.empty()
+      ? std::string("\n  // no reflectable fields detected")
+      : std::format("\n{}",
+          util::indexed(d.public_fields) //
+            | std::views::transform(format_field)
+            | std::views::join_with("\n\n"sv) //
+            | util::fmt_fold),
+
+    d.public_fields //
+      | std::views::transform(&meta::field_data::name)
+      | std::views::transform(
+        [](std::string_view f) { return std::format("{}_t", f); }) //
+      | std::views::join_with(",\n      "sv) //
+      | util::fmt_fold);
 }
 
 } // namespace render::impl
@@ -3555,13 +3704,91 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     return set;
   });
 
-  const auto get_reflectable = //
-    [](const auto &t) -> const meta::reflectable & { return t.type; };
+  // refactorme: should just maintain within the source file context
+  // ad hoc for rendering bases in header mode
+  const std::map type_name_by_id = std::invoke(
+    [](const auto &...types) {
+      std::map<meta::type_id, const meta::nm_qual_type *> out{};
 
-  // refactorme: this atrocity is not readable at all.
-  // const render::reflection render_reflection{
-  //   .dependencies = ctx.dependencies,
-  // };
+      (std::ranges::copy(types //
+           | std::views::transform(
+             [](const auto &v) -> const meta::reflectable & { return v.type; })
+           | std::views::transform([](const meta::reflectable &t) {
+               return std::pair{t.id, std::addressof(t.definition.type_name)};
+             }),
+         std::inserter(out, out.begin())),
+        ...);
+      return out;
+    },
+    ctx.fwd_declarables,
+    ctx.nested,
+    ctx.indexed);
+
+  static constexpr auto format_head = //
+    []<typename S>(const meta::reflectable &r, std::type_identity<S>) {
+      using hm = header_mode_context;
+
+      return std::visit(
+        [&type_name = r.definition.type_name](
+          const meta::reflectable_data auto &d) {
+          if constexpr (std::same_as<hm::forward_declarable, S>)
+            return impl::reflectable_head(type_name, d);
+          else if constexpr (std::same_as<hm::nested_type, S>)
+            return impl::inner_reflectable_head(type_name, d);
+          else {
+            static_assert(std::same_as<hm::indexed_type, S>);
+            return "// heading for indexed types is not implemented";
+          }
+        },
+        r.data);
+    };
+
+  const auto format_public_bases = //
+    [&type_name_by_id](const meta::record_data &r) {
+      const auto fetch = [&type_name_by_id](const meta::type_id &id)
+        -> const meta::nm_qual_type & { return *type_name_by_id.at(id); };
+
+      const auto format = //
+        [](const meta::nm_qual_type &t) {
+          if (t.enclosing_records.empty())
+            return format_nm_qual_type(t);
+          return impl::qualified_inner_type_from_fwd_root(t, "T");
+        };
+
+      return std::format("\n  using public_bases_t = std::tuple<{}>;",
+        r.public_bases //
+          | std::views::transform(fetch) //
+          | std::views::transform(format) //
+          | std::views::join_with(",\n    "sv) //
+          | util::fmt_fold);
+    };
+
+  const auto format_body = //
+    [format_public_bases](const meta::reflectable &r) {
+      return std::visit(
+        [format_public_bases]<meta::reflectable_data Data>(const Data &d) {
+          if constexpr (std::same_as<meta::enum_data, Data>)
+            return impl::reflectable_body(d);
+          else {
+            static_assert(std::same_as<meta::record_data, Data>);
+            return std::format(
+              "{}"
+              "\n{}",
+              format_public_bases(d),
+              impl::reflectable_body(d));
+          }
+        },
+        r.data);
+    };
+
+  const auto format_reflectable = //
+    [format_body]<typename T>(const T &d) {
+      return std::format(
+        "{}"
+        "\n{}",
+        format_head(d.type, std::type_identity<T>{}),
+        format_body(d.type));
+    };
 
   std::format_to(std::ostreambuf_iterator<char>(file),
     "// This file was generated by the omnirefl tool on {0:%F %T}."
@@ -3570,9 +3797,15 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\n#define OMNI_INCLUDED_GENERATED_REFLECTION_HEADER" //< must come before
                                                           // omni headers
     "\n"
-    // todo: can I _not_ inlcude these? at least not reflected_call.hpp
+    "\n// _wrt<U, T>::type == U, but depends on T."
+    "\n// Needed because some compilers perform early (non-SFINAE) lookup for `U::...`"
+    "\n// when `U` is incomplete unless the nested-name-specifier is dependent."
+    "\ntemplate <class U, class>"
+    "\nstruct _wrt {{ using type = U; }};"
+    "\n"
+    // todo: can I _not_ include these? at least not reflected_call.hpp
     "\n#include <omnirefl/reflected_scope.hpp>"
-    "\n#include <omnirefl/reflected_call.hpp>"
+    // "\n#include <omnirefl/reflected_call.hpp>"
     // refactorme: ad hoc for enumerators(). No need to include if no enums
     "\n#include <array>"
     "\n"
@@ -3588,6 +3821,8 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\n"
     "\n// -- reflected types --------"
     "\n{3}"
+    "\n"
+    "\n// -- reflected inner types --------"
     "\n{4}"
     "\n"
     "\n// -- reflected indexed types --------"
@@ -3602,7 +3837,7 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\ntemplate <typename T>"
     "\nstruct omni::is_reflected<"
     "\n    T,"
-    "\n    omni::detail::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
+    "\n    omni::compat::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
     "\n> : std::true_type {{}};"
     "\n"
     "\n",
@@ -3612,7 +3847,7 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
 
     // 1:
     ctx.fwd_declarables //
-      | std::views::transform(get_reflectable)
+      | std::views::transform(&header_mode_context::forward_declarable::type)
       | std::views::transform(render::forward_declaration) //
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,
@@ -3626,15 +3861,13 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
 
     // 3:
     ctx.fwd_declarables //
-      | std::views::transform(get_reflectable)
-      | std::views::transform(render::format_reflectable) //
+      | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,
 
     // 4:
     ctx.nested //
-      | std::views::transform(get_reflectable)
-      | std::views::transform(render::format_reflectable) //
+      | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold);
 
