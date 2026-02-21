@@ -3130,10 +3130,8 @@ std::string reflectable_body(const meta::record_data &d) {
     "{}"
     "\n"
     // todo: consider a comment here for ignored fields
-    "\n  using public_fields_t ="
+    "\n  using own_public_fields_t ="
     "\n    std::tuple<{}>;"
-    "\n"
-    "\n  static constexpr public_fields_t public_fields() noexcept {{ return {{}}; }}"
     "\n}};",
 
     d.public_fields.empty()

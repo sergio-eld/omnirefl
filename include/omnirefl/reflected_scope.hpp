@@ -52,6 +52,19 @@ struct _reflected;
 template <typename T>
 using _meta = detail::_reflected<compat::decay_t<T>>;
 
+template <typename Meta, typename = typename Meta::public_bases_t>
+struct _all_public_fields;
+
+template <typename Meta, typename... Bases>
+struct _all_public_fields<Meta, std::tuple<Bases...>> {
+  using type = decltype(std::tuple_cat(
+    std::declval<typename _meta<Bases>::own_public_fields_t>()...,
+    std::declval<typename Meta::own_public_fields_t>()));
+};
+
+template <typename Meta>
+using _all_public_fields_t = typename _all_public_fields<Meta>::type;
+
 } // namespace
 } // namespace detail
 
@@ -260,15 +273,13 @@ struct reflected_mem_binding {
 template <typename T>
 struct reflected_t<T, reflected_entity::record> {
   using meta = detail::_meta<T>;
-  using type = compat::decay_t<T>; //< reflecting pointers is pointless
+  using type = typename meta::type;
 
-  static_assert(is_reflected<type>::value,
-    "Type was not reflected (Calling outside a reflected scope?)");
-
-  static_assert(reflected_entity::record == meta::entity(),
-    "Inconcistent reflection");
+  using public_fields_t =
+    detail::_all_public_fields_t<meta>; //< yields std::tuple<...>
 
   private:
+  // C++11 ad hoc. `auto` lambda arguments only since C++14
   template <typename _T>
   struct _bind_fields_metadata {
     _T &t;
@@ -283,8 +294,8 @@ struct reflected_t<T, reflected_entity::record> {
   template <typename _T>
   static constexpr auto _public_fields(_T &t) noexcept
     -> decltype(compat::apply(_bind_fields_metadata<_T>{t},
-      meta::public_fields())) {
-    return compat::apply(_bind_fields_metadata<_T>{t}, meta::public_fields());
+      public_fields_t{})) {
+    return compat::apply(_bind_fields_metadata<_T>{t}, public_fields_t{});
   }
 
   public:
@@ -295,9 +306,6 @@ struct reflected_t<T, reflected_entity::record> {
   static constexpr reflected_entity entity() noexcept {
     return meta::entity();
   }
-
-  using public_fields_t =
-    typename meta::public_fields_t; //< yields std::tuple<...>
 
   static constexpr public_fields_t public_fields() noexcept {
     return {};
@@ -319,7 +327,7 @@ struct reflected_t<T, reflected_entity::record> {
 template <typename T>
 struct reflected_t<T, reflected_entity::enumeration> {
   using meta = detail::_meta<T>;
-  using type = compat::decay_t<T>;
+  using type = typename meta::type;
 
   static_assert(std::is_enum<type>::value, "Type is not a enum");
   static_assert(is_reflected<type>::value,
@@ -398,8 +406,8 @@ struct reflected_binding<T, reflected_entity::record> {
 
 template <typename T>
 struct reflected_binding<T, reflected_entity::enumeration> {
-  using type = compat::decay_t<T>;
-  using meta = typename reflected_enum_t<type>::meta;
+  using meta = typename reflected_enum_t<T>::meta;
+  using type = typename meta::type;
 
   using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
     std::false_type,
