@@ -15,39 +15,23 @@ namespace omni {
 namespace detail {
 namespace {
 
-#ifdef OMNI_REFLECTED_INDEXED_CALLS
 //------------------------------------------------------------------------------
-// Indexed header-mode: local/unnamed type support
+// Notes for indexed header-mode: local/unnamed type support
 //
 // Omnirefl records the integer index `N` that `unique_id<T>()` evaluates to
 // while parsing the AST. During the real compilation, `unique_id<T>()` yields
-// the same `N`, so `_indexed_reflected<unique_id<T>()>` selects the matching
-// generated `_indexed_reflected<N>` specialization directly.
+// the same `N`. Full `_reflected<T>` instantiation will _always_ happen after
+// `reflected_call`, so `unique_id<T>()` will yield the same `N`, which will be
+// used for partial SFINAE specialiation of `_reflected<T>`.
 //
 // Limitation: if a reflected type `T` has member field types that are not
 // forward-declarable, those member types cannot be indexed and therefore will
 // not be available for reflection.
 //------------------------------------------------------------------------------
 
-// `N` is the index value observed for `unique_id<T>()` during the AST pre-run.
-template <int N>
-struct _indexed_reflected;
-
-// Routes local/unnamed types through the indexed path.
-template <typename T, typename = T>
-struct _reflected: _indexed_reflected<unique_id<T>()> {};
-#else
-//------------------------------------------------------------------------------
-// Source-mode frontend declaration
-//
-// In source-mode, the tool emits specializations of `_reflected<T>` (and
-// related traits) into the generated `.cpp`.
-//------------------------------------------------------------------------------
-
 // `= T` is kept for frontend compatibility with header-mode usage.
 template <typename T, typename = T>
 struct _reflected;
-#endif // OMNI_REFLECTED_INDEXED_CALLS
 
 template <typename T>
 using _meta = detail::_reflected<compat::decay_t<T>>;

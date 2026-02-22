@@ -2342,6 +2342,9 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
 
 meta::nm_qual_type meta::nm_qual_type::map_from_decl(
   const clang::TagDecl *td) noexcept {
+  // refactorme: function bodies are also captured as enclosing_records. I think
+  // capturing them for rendering in diagnostics is somewhat useful, but I'd
+  // need to introduce a sum type like {namespace|struct|function}.
   auto [namespaces, enclosing_records] =
     std::invoke([&decl_ctx = *td->getDeclContext()] {
       std::array<std::vector<std::string>, 2> result{};
@@ -3066,7 +3069,31 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     t.name.value_or("(unnamed)"));
 }
 
-// todo: indexed_reflectable_head
+template <meta::reflectable_data Data>
+std::string indexed_reflectable_head(const meta::nm_qual_type &t,
+  const Data &d,
+  std::size_t index) {
+  return std::format(
+    "template <> struct _indexed_type<{0}> {{ static constexpr int value() {{ return {0}; }} }};"
+    "\ntemplate <typename T>"
+    "\nstruct _reflected<T, typename std::enable_if<"
+    "\n  ({0} == _indexed_type<unique_id<T>()>::value()), T>::type> {{"
+    "\n  "
+    "\n  using type = T;"
+    "\n"
+    "\n  static constexpr omni::reflected_entity entity() noexcept {{"
+    "\n    return omni::reflected_entity::{1};"
+    "\n  }}"
+    "\n"
+    "\n  static constexpr auto name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{2}\")] {{"
+    "\n    return \"{2}\";"
+    "\n  }}",
+
+    index,
+    reflectable_entity(d),
+    t.name.value_or("(unnamed)"));
+}
 
 std::string reflectable_body(const meta::enum_data &d) {
   return std::format(
@@ -3185,7 +3212,6 @@ std::string format_reflected_call(const meta::reflected_call_info &c) noexcept {
     // 1:
     invoke_impl);
 }
-
 
 } // namespace render::impl
 
@@ -3519,6 +3545,13 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         meta::type_definition::none == t.definition.definition_flags;
 
       if (!is_nested && !is_unnamed && is_public_non_local) {
+        if (index) {
+          llvm::errs() << std::format(
+            "\n[debug] indexed '{}' type '{}' will be rendered as forward-declarable.",
+            *index,
+            t.id);
+        }
+
         fwd.push_back({
           .type = std::move(t),
           .index = index,
@@ -3532,7 +3565,22 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
       // fixme: check if enclosing root is public && non-local. As of now this
       // info is not collected/resolved: only names are collected.
       if (is_nested
+        // ad hoc to distinguish from indexed types that has non-empty
+        // enclosing_records. Unnamed nested types can be supported, but
+        // distinction from 'indexed' should be stronger.
+        && !is_unnamed
         && !t.definition.type_name.enclosing_records.front().empty()) {
+        if (index) {
+          llvm::errs() << std::format(
+            "\n[debug] indexed '{}' type '{}' will be rendered as nested forward-declarable.",
+            *index,
+            t.id);
+          llvm::errs() << std::format("\n[debug] is_nested: {}", is_nested);
+          llvm::errs() << std::format("\n[debug] enclosing_records: [{}]",
+            t.definition.type_name.enclosing_records
+              | std::views::join_with(", "sv) | util::fmt_fold);
+        }
+
         nested.push_back({
           .type = std::move(t),
           .index = index,
@@ -3630,11 +3678,11 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     ctx.indexed);
 
   static constexpr auto format_head = //
-    []<typename S>(const meta::reflectable &r, std::type_identity<S>) {
+    []<typename S>(const S &r) {
       using hm = header_mode_context;
 
       return std::visit(
-        [&type_name = r.definition.type_name](
+        [&type_name = r.type.definition.type_name, &r](
           const meta::reflectable_data auto &d) {
           if constexpr (std::same_as<hm::forward_declarable, S>)
             return impl::reflectable_head(type_name, d);
@@ -3642,12 +3690,13 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
             return impl::inner_reflectable_head(type_name, d);
           else {
             static_assert(std::same_as<hm::indexed_type, S>);
-            return "// heading for indexed types is not implemented";
+            return impl::indexed_reflectable_head(type_name, d, r.index);
           }
         },
-        r.data);
+        r.type.data);
     };
 
+  // fixme: handle indexed bases
   const auto format_public_bases = //
     [&type_name_by_id](const meta::record_data &r) {
       const auto fetch = [&type_name_by_id](const meta::type_id &id)
@@ -3691,9 +3740,28 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
       return std::format(
         "{}"
         "\n{}",
-        format_head(d.type, std::type_identity<T>{}),
+        format_head(d),
         format_body(d.type));
     };
+
+  const std::vector std_includes = //
+    std::invoke([&] {
+      std::vector<std::string> o;
+
+      if (std::invoke(
+            [](const auto &...rs) {
+              return (std::ranges::any_of(rs, [](const auto &r) {
+                return std::holds_alternative<meta::enum_data>(r.type.data);
+              }) || ...);
+            },
+            ctx.fwd_declarables,
+            ctx.nested,
+            ctx.indexed)) {
+        o.emplace_back("array");
+      }
+
+      return o;
+    });
 
   std::format_to(std::ostreambuf_iterator<char>(file),
     "// This file was generated by the omnirefl tool on {0:%F %T}."
@@ -3710,27 +3778,31 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\n"
     // todo: can I _not_ include these? at least not reflected_call.hpp
     "\n#include <omnirefl/reflected_scope.hpp>"
-    // "\n#include <omnirefl/reflected_call.hpp>"
+    "\n#include <omnirefl/reflected_call.hpp>" //< todo: separate unique_id into
+                                               // a separate header
     // refactorme: ad hoc for enumerators(). No need to include if no enums
-    "\n#include <array>"
-    "\n"
-    "\n// -- forward declarable reflected types --------"
     "\n{1}"
     "\n"
-    "\n// -- enclosing root type accessors --------"
+    "\n// -- forward declarable reflected types --------"
     "\n{2}"
+    "\n"
+    "\n// -- enclosing root type accessors --------"
+    "\n{3}"
     "\n"
     "\nnamespace omni {{"
     "\nnamespace detail {{"
     "\nnamespace {{"
     "\n"
-    "\n// -- reflected types --------"
-    "\n{3}"
+    "\ntemplate <int> struct _indexed_type {{}};"
     "\n"
-    "\n// -- reflected inner types --------"
+    "\n// -- reflected types --------"
     "\n{4}"
     "\n"
+    "\n// -- reflected inner types --------"
+    "\n{5}"
+    "\n"
     "\n// -- reflected indexed types --------"
+    "\n{6}"
     "\n" // todo: ^^^
     "\n}} // namespace"
     "\n}} // namespace detail"
@@ -3751,27 +3823,40 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()),
 
     // 1:
+    std_includes //
+      | std::views::transform(
+        [](std::string_view s) { return std::format("#include <{}>", s); })
+      | std::views::join_with("\n"sv) //
+      | util::fmt_fold,
+
+    // 2:
     ctx.fwd_declarables //
       | std::views::transform(&header_mode_context::forward_declarable::type)
       | std::views::transform(render::forward_declaration) //
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,
 
-    // 2:
+    // 3:
     access_roots //
       | std::views::transform(
         render::impl::declaration_for_enclosing_root_as_dependent) //
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,
 
-    // 3:
+    // 4:
     ctx.fwd_declarables //
       | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,
 
-    // 4:
+    // 5:
     ctx.nested //
+      | std::views::transform(format_reflectable)
+      | std::views::join_with("\n\n"sv) //
+      | util::fmt_fold,
+
+    // 6:
+    ctx.indexed //
       | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold);
