@@ -43,7 +43,7 @@ struct print_type_info_t {
   }
 } const static print_type_info{};
 
-struct print_enum_type_info_t {
+static const struct print_enum_type_info_t {
   struct result {
     print_type_info_t::result type_info;
     std::vector<std::string> names;
@@ -57,59 +57,38 @@ struct print_enum_type_info_t {
       /*names=*/{}, //< todo: implement
     };
   }
-} const print_enum_type_info{};
+} print_enum_type_info{};
 
-struct print_field_names_simple_t {
+static const struct print_field_names_simple_t {
+  // C++11 compat (auto lambda args support since C++14)
+  struct _get_field_names {
+    template <typename... Field>
+    std::vector<std::string> operator()(const Field &...f) const noexcept {
+      return std::vector<std::string>{f.name()...};
+    }
+  };
+
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    const auto fields = omni::reflected(t).fields();
-    std::vector<std::string> out;
-    out.reserve(fields.size());
-    for (const auto &f : fields)
-      out.emplace_back(std::string(f.name));
-
-    return out;
+    return omni::compat::apply(_get_field_names{}, omni::reflected(t).public_fields());
   }
-} const static print_field_names_simple{};
+} print_field_names_simple{};
 
-// fixme: enable after refining
-// struct print_field_names_recursive_t {
-//   template <typename T>
-//   std::vector<std::string> operator()(const T &t) const {
-//     namespace pm = pattern_matching;
-//
-//     const auto fields = omni::reflected(t).fields;
-//     std::vector<std::string> out;
-//     out.reserve(fields.size());
-//
-//     for (const auto &f : fields) {
-//       out.emplace_back(f.name);
-//       f
-//         | pm::matched_in_place( //
-//           pm::m_is<std::vector>([&](const auto &v) {
-//             // !!! nested type in vector is expected to be a struct for this
-//             // example
-//             using nested_type = typename
-//             std::decay_t<decltype(v)>::value_type;
-//
-//             // ad hoc. as of this writing calling `.fields` is only possible
-//             on
-//             // a reflected_binding, which requires a reference. todo: add
-//             // similar method, like `omni::reflected_t<nested_type>::fields`
-//             static const nested_type ad_hoc_dummy{};
-//             for (const auto &s : (*this)(ad_hoc_dummy))
-//               out.emplace_back(std::string(f.name) + "[]." + s);
-//           }),
-//           pm::m_if<omni::is_reflected>([&](const auto &v) {
-//             for (const auto &s : (*this)(v))
-//               out.emplace_back(std::string(f.name) + "." + s);
-//           }),
-//           pm::m_any([](const auto &) { /*no-op*/ }));
-//     }
-//
-//     return out;
-//   }
-// } const static print_field_names_recursive{};
+static const struct print_field_names_recursive_t {
+  // C++11 compat
+  struct _print {
+    template <typename... Fields>
+    std::vector<std::string> operator()(const Fields &...f) const noexcept {
+      // todo: implement
+      return std::vector<std::string>{f.name()...};
+    }
+  };
+
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    return omni::compat::apply(_print{}, omni::reflected(t).public_fields());
+  }
+} print_field_names_recursive{};
 
 // fixme: enable after refining
 // todo: return vector

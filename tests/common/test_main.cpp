@@ -1,7 +1,6 @@
 
+#include "gtest_include.h"
 #include "odr_test.hpp"
-
-#include <gtest/gtest.h>
 
 #include <omnirefl/reflected_call.hpp>
 

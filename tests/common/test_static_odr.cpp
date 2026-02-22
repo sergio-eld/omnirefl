@@ -1,7 +1,6 @@
 
+#include "gtest_include.h"
 #include "odr_test.hpp"
-
-#include <gtest/gtest.h>
 
 // note: this will not be picked up by gtest...
 TEST(odr_test, inside_test_static_odr_cpp) {

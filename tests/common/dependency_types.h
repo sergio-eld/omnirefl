@@ -33,20 +33,17 @@ namespace dependency_types {
 
 // ---------- visitors ----------
 
+// refactorme: 'namespace visit' for every visitor
 namespace as_field {
 
 static const struct get_dependency_name_t {
-  template <typename T>
-  std::string operator()(const T &v) const {
-    using parent_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+  template <typename ParentType>
+  std::string operator()(const ParentType &v) const {
+    const auto f = std::get<0>(omni::reflected(v).public_fields());
+    using field_type = typename decltype(f)::type;
 
-    const auto fields = omni::reflected(v).fields();
-    const auto f = std::get<0>(fields);
-    using dep_type = typename decltype(f)::type;
-
-    return std::string(omni::reflected<parent_type>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(omni::reflected<ParentType>().name())
+      + "::" + std::string(omni::reflected<field_type>().name()) + ":int";
   }
 } get_dependency_name;
 
@@ -56,12 +53,12 @@ static const struct get_dependency_name_layer_2_t {
     using root_type =
       typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-    const auto outer_fields = omni::reflected(v).fields();
+    const auto outer_fields = omni::reflected(v).public_fields();
     const auto outer_f = std::get<0>(outer_fields);
     using intermediate_type = typename decltype(outer_f)::type;
 
     const auto inner = outer_f.value();
-    const auto inner_fields = omni::reflected(inner).fields();
+    const auto inner_fields = omni::reflected(inner).public_fields();
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
@@ -76,14 +73,15 @@ static const struct get_dependency_name_layer_2_t {
 namespace as_alias {
 
 static const struct get_dependency_name_t {
-  template <typename T>
-  std::string operator()(const T &) const {
-    using parent_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-    using dep_type = typename T::value_type;
+  template <typename Parent>
+  std::string operator()(const Parent &) const {
+    static_assert(omni::is_reflected<Parent>::value, "Parent is not reflected");
+    static_assert(omni::is_reflected<typename Parent::value_type>::value,
+      "Member alias is not reflected");
 
-    return std::string(omni::reflected<parent_type>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(omni::reflected<Parent>().name()) + "::"
+      + std::string(omni::reflected<typename Parent::value_type>().name())
+      + ":int";
   }
 } get_dependency_name;
 
@@ -111,7 +109,7 @@ static const struct get_dependency_name_t {
     using parent_type =
       typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-    const auto fields = omni::reflected(v).fields();
+    const auto fields = omni::reflected(v).public_fields();
     const auto f = std::get<0>(fields);
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
@@ -135,7 +133,7 @@ static const struct get_dependency_name_layer_2_t {
     using root_type =
       typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-    const auto outer_fields = omni::reflected(v).fields();
+    const auto outer_fields = omni::reflected(v).public_fields();
     const auto outer_f = std::get<0>(outer_fields);
     using outer_field_type = typename decltype(outer_f)::type;
 
@@ -150,6 +148,20 @@ static const struct get_dependency_name_layer_2_t {
 } get_dependency_name_layer_2;
 
 } // namespace as_template_arg
+
+namespace as_inherited_struct {
+
+template <typename Base>
+struct is_base_reflected_t {
+  template <typename Derived>
+  bool operator()(const Derived &) const {
+    static_assert(std::is_base_of<Base, Derived>::value,
+      "Input is not Derived from Base");
+    return omni::is_reflected<Base>::value;
+  }
+};
+
+} // namespace as_inherited_struct
 
 // ---------- resolved dependency types ----------
 
@@ -177,6 +189,10 @@ struct as_template_arg {
 
 struct as_template_arg_layer_2 {
   int value;
+};
+
+struct as_inherited_struct {
+  int base_field;
 };
 
 } // namespace resolved
@@ -227,5 +243,15 @@ struct mpark_template_dep_level_2 {
   mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
 };
 
+struct derived_struct: resolved::as_inherited_struct {
+  double derived_field;
+
+  // ad hoc for C++11
+  derived_struct(int base, double derived)
+      : resolved::as_inherited_struct{base}
+      , derived_field(derived) {}
+};
+
+// todo: nested types struct foo{ struct bar{}; enum baz{}; };
 
 } // namespace dependency_types

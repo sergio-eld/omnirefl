@@ -18,23 +18,15 @@ endif()
 # Enable FetchContent logging
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
-find_package(GTest QUIET)
-if (TARGET GTest::GTest)
-    message(STATUS "GTest: found via find_package(), using existing GTest::GTest target")
-else()
-    message(STATUS "GTest: not found via find_package(), fetching googletest with FetchContent")
-
-    # do not let googletest install itself when run "cmake --install" / CPack
-    set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
-    set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
-    FetchContent_Declare(googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.15.2)
-
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
-    add_library(GTest::GTest ALIAS gtest)
-endif()
+# do not let googletest install itself when run "cmake --install" / CPack
+set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
+set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+     # The "newest" gtest that supports C++11. 
+     # Otherwize will force its C++ version upon the test targets.
+    GIT_TAG release-1.12.1)
 
 # std-compat utility
 set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
@@ -61,7 +53,8 @@ FetchContent_Declare(mpark_variant
     GIT_SUBMODULES_RECURSE FALSE
 )
 
-FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant)
+FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant googletest)
+add_library(GTest::GTest ALIAS gtest)
 
 # todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
 add_library(std_compat INTERFACE)
@@ -85,6 +78,21 @@ foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
 endforeach()
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
+
+# MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
+# Normalize 11 -> 14 to avoid generating duplicate cpp_11 / cpp_14 targets.
+if(MSVC)
+  set(_tmp "")
+  foreach(_n IN LISTS _supported_cpp_standards)
+    if(_n STREQUAL "11")
+      set(_n "14")
+    endif()
+    list(APPEND _tmp "${_n}")
+  endforeach()
+  set(_supported_cpp_standards "${_tmp}")
+  list(REMOVE_DUPLICATES _supported_cpp_standards)
+  list(SORT _supported_cpp_standards)
+endif()
 
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
 
@@ -110,8 +118,13 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
             common/test_main.cpp
             common/dependent_types_test.cpp
             common/interface_test.cpp
-            # common/example_test.cpp #< fixme
+            common/example_test.cpp
         )
+
+        # todo: can I use and test genex?
+        if(${mode} STREQUAL "header")
+            target_sources(${_test_common_tgt} PRIVATE common/inplace_test.cpp)
+        endif()
 
         set_target_properties(${_test_common_tgt} PROPERTIES
             CXX_STANDARD ${cpp_standard}
@@ -139,69 +152,4 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         endif()
     endforeach()
 endforeach()
-
-# fixme: enable 
-# function(add_reflection_test TEST_SOURCE_DIR)
-#     # ------------------------------------------------------------------
-#     # Options
-#     #   MODES [HEADER|SOURCE] – list of modes to build; defaults to both
-#     # ------------------------------------------------------------------
-#     set(oneValueArgs)
-#     set(multiValueArgs MODES)
-#     cmake_parse_arguments(ARG "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-# 
-#     if(ARG_MODES)
-#         set(_modes ${ARG_MODES})
-#     else()
-#         set(_modes SOURCE HEADER)
-#     endif()
-# 
-#     # Verify test.cpp exists
-#     if(NOT EXISTS "${TEST_SOURCE_DIR}/test.cpp")
-#         message(FATAL_ERROR
-#             "add_reflection_test(): ${TEST_SOURCE_DIR}/test.cpp not found")
-#     endif()
-# 
-#     get_filename_component(_dir_name "${TEST_SOURCE_DIR}" NAME)
-#     set(_base_name "test.${_dir_name}")
-# 
-#     foreach(_mode ${_modes})
-#         string(TOLOWER "${_mode}" _mode)
-#         set(_suffix ".${_mode}-mode")
-#         set(_target     "${_base_name}${_suffix}")
-# 
-#         add_executable(${_target} "${TEST_SOURCE_DIR}/test.cpp")
-# 
-#         # todo: enum standards 11, 14, 17, 20...
-#         set_target_properties(${_target} PROPERTIES CXX_STANDARD 14)
-# 
-#         if(_mode STREQUAL "header")
-#             reflected_target(${_target} HEADER_MODE PRINT_DEBUG)
-#         else()
-#             reflected_target(${_target} PRINT_DEBUG)
-#         endif()
-# 
-#         target_link_libraries(${_target} PRIVATE GTest::gtest)
-# 
-#         add_test(NAME ${_target}.run_omni
-#                  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t ${_target}.omni)
-# 
-#         add_test(NAME ${_target}.build
-#                  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t ${_target})
-# 
-#         add_test(NAME ${_target} COMMAND ${_target})
-# 
-#         set_tests_properties(${_target}.build PROPERTIES DEPENDS ${_target}.run_omni)
-#         set_tests_properties(${_target}       PROPERTIES DEPENDS ${_target}.build)
-#     endforeach()
-# endfunction()
-
-# fixme: both modes
-#   - fix `reflected_target` function:
-#     setting forced include for a source file used by other targets will cause a conflict
-#   - nested struct serialization for header-mode
-# add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/simple MODES SOURCE HEADER)
-# add_subdirectory(multitarget)
-# add_reflection_test(${CMAKE_CURRENT_SOURCE_DIR}/inplace MODES HEADER)
-# todo: add test for failure
 

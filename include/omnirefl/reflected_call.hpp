@@ -8,8 +8,6 @@
 #include <utility>
 
 namespace omni {
-
-// refactorme: move `detail` into private scope of `reflected_call_t`
 namespace detail {
 namespace {
 

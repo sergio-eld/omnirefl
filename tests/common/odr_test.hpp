@@ -19,7 +19,7 @@ struct get_field_name_values_t {
 
     // todo: use range for loop
     return omni::compat::apply(_collect_fields_info{},
-      omni::reflected_tagged(value).fields());
+      omni::reflected_record(value).public_fields());
   }
 
   private:

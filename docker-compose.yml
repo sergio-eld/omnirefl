@@ -64,19 +64,33 @@ services:
         # add link so debuggers can find the external debug file
         x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe
 
+  # todo: should move it to `test-ubuntu` matrix
   build-tests-alpine:
     image: sergioeld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
-      - ./build-alpine/linux:/build:rw # ad hoc: must be rw for CTest (SMH)
+      - ./build-alpine/linux:/build:rw # must be rw for CTest
       - ./build-alpine/test:/test:rw
     working_dir: /build
     entrypoint:
       - /bin/ash
       - -euxc
       - |
-        ctest --parallel --output-junit alpine-results.xml -V | tee /test/alpine-results.log
-        cp alpine-results.xml /test/
+        set -o pipefail
+        PREFIX=alpine-results
+
+        set +e
+        ctest --parallel --output-junit "/test/$${PREFIX}.xml" -V 2>&1 | tee "/test/$${PREFIX}.log"
+        rc=$$?
+        set -e
+
+        if [ -n "$${DEBUG_SHELL:-}" ]; then
+          echo "ctest rc=$$rc (DEBUG_SHELL set)"
+          export CTEST_RC="$$rc"
+          exec /bin/ash
+        fi
+
+        exit $$rc
 
   package-linux:
     image: sergioeld/omnirefl-build-alpine
@@ -123,27 +137,17 @@ services:
     working_dir: /tmp/build
     entrypoint:
       - /bin/bash
-      - -euxc
+      - -euxo
+      - pipefail
+      - -c
       - |
         apt install /install/omnirefl*.deb
 
         case $COMPILER in
-          gcc)
-            export CC=gcc
-            export CXX=g++
-            ;;
-          clang)
-            export CC=clang
-            export CXX=clang++
-            ;;
-          mingw)
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
-            ;;
-          *)
-            echo "Unsupported COMPILER='$COMPILER'" >&2
-            exit 1
-            ;;
+          gcc) export CC=gcc; export CXX=g++ ;;
+          clang) export CC=clang; export CXX=clang++ ;;
+          mingw) export CC=x86_64-w64-mingw32-gcc; export CXX=x86_64-w64-mingw32-g++ ;;
+          *) echo "Unsupported COMPILER='$COMPILER'" >&2; exit 1 ;;
         esac
 
         PREFIX=ubuntu-$UBUNTU_VERSION-$COMPILER-results
@@ -151,12 +155,19 @@ services:
         cp -r /usr/share/omnirefl/tests/* ../
         cmake .. -GNinja
 
-        # NOTE: --parallel will result in .xml not being generated, unlike in alpine container
-        ctest --output-junit result.xml \
-          -V 2>&1 | tee /test/$$PREFIX.log
-        cp result.xml /test/$$PREFIX.xml
+        set +e
+        ctest --output-junit /test/$$PREFIX.xml -V 2>&1 | tee /test/$$PREFIX.log
+        rc=$$?
+        set -e
+
+        if [ -n "$${DEBUG_SHELL:-}" ]; then
+          echo "ctest rc=$$rc (DEBUG_SHELL set)"
+          export CTEST_RC="$$rc"
+          exec /bin/bash
+        fi
 
         apt remove -y omnirefl
+        exit $$rc
 
   # todo: mingw, clang, msvc clang
   test-windows:

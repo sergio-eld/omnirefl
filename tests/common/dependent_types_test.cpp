@@ -1,8 +1,8 @@
 #include "dependency_types.h"
+#include "gtest_include.h"
+#include "structs.h"
 
 #include <omnirefl/reflected_call.hpp>
-
-#include <gtest/gtest.h>
 
 namespace {
 
@@ -63,6 +63,22 @@ TEST(dependency_resolved, as_template_arg) {
       mpark_v2);
   EXPECT_EQ("mpark_template_dep_level_2::tuple::as_template_arg_layer_2:int",
     mpark_r2);
+}
+
+TEST(dependency_resolved, as_inherited_struct) {
+  namespace dt = dependency_types;
+
+  const dt::derived_struct derived{4, 8.15};
+  const dt::as_inherited_struct::is_base_reflected_t<
+    dt::resolved::as_inherited_struct>
+    check{};
+
+  EXPECT_TRUE(omni::reflected_call(check, derived));
+  EXPECT_EQ((std::vector<std::string>{
+              "base_field",
+              "derived_field",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, derived));
 }
 
 } // namespace
