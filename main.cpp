@@ -1161,11 +1161,16 @@ std::expected<fs::path, std::string> write_dependencies_file(
 
 namespace pipeline {
 
+struct diag_engine_binding {
+  std::shared_ptr<clang::DiagnosticOptions> options;
+  llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> engine;
+};
+
 struct with_compiler_invocation {
   source_file sf;
 
   std::shared_ptr<clang::CompilerInvocation> ci;
-  llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diag;
+  diag_engine_binding diag;
 };
 
 std::expected<with_compiler_invocation, std::string>
@@ -1244,7 +1249,7 @@ with_compiler_invocation configure_compiler_invocation(
 struct with_ast {
   source_file sf;
   std::unique_ptr<clang::ASTUnit> ast;
-  llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diag;
+  diag_engine_binding diag;
 
   // will be populated during ASTUnit creation
   std::set<fs::path> includes_deps;
@@ -1271,7 +1276,8 @@ std::expected<with_ast, std::string> ast_from_compiler_invocation(
   std::unique_ptr<clang::ASTUnit> ast{
     clang::ASTUnit::LoadFromCompilerInvocationAction(wci.ci,
       std::make_shared<clang::PCHContainerOperations>(),
-      wci.diag,
+      wci.diag.options,
+      wci.diag.engine,
       &action)};
 
   if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
@@ -2054,13 +2060,17 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
 
   // note: diag to AST is 1:1, has to be recreated each time...
   // must outlive the ast
-  const llvm::IntrusiveRefCntPtr diag = std::invoke([] {
-    llvm::IntrusiveRefCntPtr diag_opts = new clang::DiagnosticOptions();
-    llvm::IntrusiveRefCntPtr diag =
+
+  diag_engine_binding diag = std::invoke([]() -> diag_engine_binding {
+    std::shared_ptr options = std::make_shared<clang::DiagnosticOptions>();
+    llvm::IntrusiveRefCntPtr engine =
       new clang::DiagnosticsEngine(new clang::DiagnosticIDs(),
-        diag_opts,
-        new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts.get()));
-    return diag;
+        *options,
+        new clang::TextDiagnosticPrinter(llvm::errs(), *options));
+    return {
+      .options = std::move(options),
+      .engine = std::move(engine),
+    };
   });
 
   const auto &[source, flags] = sf;
@@ -2172,7 +2182,7 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
   // include paths...
   clang::driver::Driver driver(msvc_used ? "clang-cl" : "clang",
     driver_triple,
-    *diag,
+    *diag.engine,
     "omnirefl reflection tool");
   driver.setCheckInputsExist(false);
 
@@ -2202,7 +2212,7 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
 
   if (!clang::CompilerInvocation::CreateFromArgs(*compiler_invocation,
         compilation_args,
-        *diag)) {
+        *diag.engine)) {
     return std::unexpected("Failed to create CompilerInvocation.");
   }
 
@@ -2252,7 +2262,7 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
   }
 
   // do not need this noise when parsing the AST
-  compiler_invocation->DiagnosticOpts->IgnoreWarnings = 1;
+  compiler_invocation->getDiagnosticOpts().IgnoreWarnings = 1;
 
   return with_compiler_invocation{
     .sf = sf,
@@ -2269,7 +2279,7 @@ meta::type_id render_type_id(const clang::ASTContext &ast,
   p.SuppressScope = false;
   p.SuppressUnwrittenScope = false;
   p.SuppressTagKeyword = false;
-  p.PrintCanonicalTypes = true;
+  p.PrintAsCanonical = true;
   // P.PrintTemplateArguments = true;
 
   // "no qualifiers" (not const, not volatile, not restrict).
@@ -2402,7 +2412,7 @@ meta::nm_qual_type meta::nm_qual_type::map_from_decl(
               p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
               p.SuppressScope = false; //< namespaces or enclosing records
                                        // for <template args>
-              p.PrintCanonicalTypes = true;
+              p.PrintAsCanonical = true;
 
               return p;
             }));

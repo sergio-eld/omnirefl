@@ -2,17 +2,21 @@ diff --git a/libcxx/include/__config_site.in b/libcxx/include/__config_site.in
 index 67022146c..f9648be26 100644
 --- a/libcxx/include/__config_site.in
 +++ b/libcxx/include/__config_site.in
-@@ -31,6 +31,13 @@
+@@ -33,6 +33,17 @@
  #cmakedefine _LIBCPP_HAS_NO_STD_MODULES
- #cmakedefine _LIBCPP_HAS_NO_TIME_ZONE_DATABASE
- #cmakedefine _LIBCPP_INSTRUMENTED_WITH_ASAN
-+// todo: check for wsl
-+#if !defined(_LIBCPP_HAS_MUSL_LIBC)
+ #cmakedefine01 _LIBCPP_HAS_TIME_ZONE_DATABASE
+ #cmakedefine01 _LIBCPP_INSTRUMENTED_WITH_ASAN
++// Package headers built on musl, but usable on glibc and vice-versa.
++// In libc++ 21+, _LIBCPP_HAS_MUSL_LIBC is typically defined via #cmakedefine01 (0/1),
++// so !defined(...) won't trigger. Fix it at preprocess time.
++#if defined(_LIBCPP_HAS_MUSL_LIBC) && defined(__has_include)
++#  undef _LIBCPP_HAS_MUSL_LIBC
 +#  if __has_include(<bits/alltypes.h>)
-+#    define _LIBCPP_HAS_MUSL_LIBC
-+#  endif // __has_include(<bits/alltypes.h>)
-+#endif // !defined(_LIBCPP_HAS_MUSL_LIBC)
-+
++#    define _LIBCPP_HAS_MUSL_LIBC 1
++#  else
++#    define _LIBCPP_HAS_MUSL_LIBC 0
++#  endif
++#endif
  
  // PSTL backends
  #cmakedefine _LIBCPP_PSTL_BACKEND_SERIAL
