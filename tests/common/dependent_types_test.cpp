@@ -254,27 +254,25 @@ TEST(template_dependency, mpark_tuple_level_2_value) {
 
 // fixme: std::vector<T> dependency fields are not supported by source/header
 // shared dependency collection yet. The backend currently special-cases tuple
-// and variant only; reflecting this route walks std::vector internals and the
-// omnirefl run crashes.
-//
-// TEST(sequence_dependency, vector_value_type) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ("vector_dep_level_1::vector::as_sequence_vector",
-//     omni::reflected_call(dt::as_sequence_arg::get_vector_value_name,
-//       dt::vector_dep_level_1{}));
-// }
-//
-// TEST(sequence_dependency, vector_field_names) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "vector_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//     dt::vector_dep_level_1{}));
-// }
+// and variant only; this stays enabled as a regression route for dependency
+// collection.
+
+TEST(sequence_dependency, vector_value_type) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("vector_dep_level_1::vector::as_sequence_vector",
+    omni::reflected_call(dt::as_sequence_arg::get_vector_value_name,
+      dt::vector_dep_level_1{}));
+}
+
+TEST(sequence_dependency, vector_field_names) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{
+              "vector_field",
+            }),
+    omni::reflected_call(dt::inspect::field_names, dt::vector_dep_level_1{}));
+}
 
 TEST(sequence_dependency, tuple_first_value_type) {
   namespace dt = dependency_types;
@@ -318,26 +316,25 @@ TEST(sequence_dependency, mpark_variant_value_type) {
 }
 
 // fixme: same unsupported vector dependency route as vector_dep_level_1.
-//
-// TEST(sequence_dependency, nested_vector_tuple_value_type) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ("nested_vector_tuple_dep::vector::tuple::as_template_arg_layer_2",
-//     omni::reflected_call(
-//       dt::as_sequence_arg::get_nested_vector_tuple_value_name,
-//       dt::nested_vector_tuple_dep{}));
-// }
-//
-// TEST(sequence_dependency, nested_vector_tuple_field_names) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "nested_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::nested_vector_tuple_dep{}));
-// }
+
+TEST(sequence_dependency, nested_vector_tuple_value_type) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("nested_vector_tuple_dep::vector::tuple::as_template_arg_layer_2",
+    omni::reflected_call(
+      dt::as_sequence_arg::get_nested_vector_tuple_value_name,
+      dt::nested_vector_tuple_dep{}));
+}
+
+TEST(sequence_dependency, nested_vector_tuple_field_names) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{
+              "nested_field",
+            }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::nested_vector_tuple_dep{}));
+}
 
 // fixme: public-base chains currently abort header-mode rendering with missing
 // public-base metadata when this larger shared dependency matrix is active.
@@ -471,26 +468,24 @@ TEST(enum_dependency, scoped_enum_names) {
 //     omni::reflected_call(dt::inspect::enum_names, dt::fixed_status_low));
 // }
 
-// fixme: holder structs with enum fields currently crash dependency collection
-// during the omnirefl run. Direct enum reflection above is active; enum fields
-// inside reflected records are preserved here as regression routes.
+// TODO: support dependency types that cannot be forward-declared. Some of
+// these can be generated via decltype(member field); incidental indexes from
+// unrelated reflected_call sites should not affect support.
 //
 // TEST(enum_dependency, enum_holder_field_names) {
 //   namespace dt = dependency_types;
 //
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "plain",
-//       "scoped",
-//       "fixed",
-//     }),
-//     omni::reflected_call(
-//       dt::inspect::field_names,
+//   EXPECT_EQ((std::vector<std::string>{
+//               "plain",
+//               "scoped",
+//               "fixed",
+//             }),
+//     omni::reflected_call(dt::inspect::field_names,
 //       dt::enum_holder{
-//       dt::plain_status_pending,
-//       dt::scoped_status::idle,
-//       dt::fixed_status_low,
-//     });
+//         dt::plain_status_pending,
+//         dt::scoped_status::idle,
+//         dt::fixed_status_low,
+//       }));
 // }
 //
 // TEST(enum_dependency, enum_holder_first_type) {

@@ -879,41 +879,41 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 }
 
 // FIXME: does not generate: reflecting types with private/protected bases or
-// non-public fields currently crashes header generation. Expected behavior is
+// non-public fields currently fails header generation. Expected behavior is
 // to reflect only own public fields and public-base fields.
-//
-// TEST(print_names, in_cpp_private_base) {
-//   const example::in_cpp_private_base p{};
-//   const static std::vector<std::string> expected{
-//     "in_cpp_private_base_field_0",
-//     "in_cpp_private_base_field_1",
-//     "in_cpp_private_base_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_protected_base) {
-//   const example::in_cpp_protected_base p{};
-//   const static std::vector<std::string> expected{
-//     "in_cpp_protected_base_field_0",
-//     "in_cpp_protected_base_field_1",
-//     "in_cpp_protected_base_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_mixed_access) {
-//   const example::in_cpp_mixed_access p{};
-//   const static std::vector<std::string> expected{
-//     "in_cpp_public_field_0",
-//     "in_cpp_public_field_1",
-//     "in_cpp_public_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+
+TEST(print_names, in_cpp_private_base) {
+  const example::in_cpp_private_base p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_private_base_field_0",
+    "in_cpp_private_base_field_1",
+    "in_cpp_private_base_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_protected_base) {
+  const example::in_cpp_protected_base p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_protected_base_field_0",
+    "in_cpp_protected_base_field_1",
+    "in_cpp_protected_base_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_mixed_access) {
+  const example::in_cpp_mixed_access p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_public_field_0",
+    "in_cpp_public_field_1",
+    "in_cpp_public_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 
 // FIXME: does not compile: the dependency base is generated both as a named
 // specialization and as an indexed specialization, making _reflected ambiguous.
@@ -1059,26 +1059,27 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 // }
 
 // FIXME: does not generate: reflecting local unnamed structs with private bases
-// currently crashes header generation. Expected behavior is to reflect only own
+// currently fails header generation. Expected behavior is to reflect only own
 // public fields.
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_private_base) {
-//   struct: private example::in_cpp_struct {
-//     std::string in_cpp_local_private_base_field_0;
-//     int in_cpp_local_private_base_field_1;
-//     double in_cpp_local_private_base_field_2;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_local_private_base_field_0",
-//               "in_cpp_local_private_base_field_1",
-//               "in_cpp_local_private_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
 
-// FIXME: does not generate: local unscoped enum field dependencies in local
-// unnamed structs currently crash header generation.
+TEST(print_names, in_cpp_local_unnamed_struct_with_private_base) {
+  struct: private example::in_cpp_struct {
+    std::string in_cpp_local_private_base_field_0;
+    int in_cpp_local_private_base_field_1;
+    double in_cpp_local_private_base_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_local_private_base_field_0",
+              "in_cpp_local_private_base_field_1",
+              "in_cpp_local_private_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+// TODO: support dependency types that cannot be forward-declared. Some of
+// these can be generated via decltype(member field); incidental indexes from
+// unrelated reflected_call sites should not affect support.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unscoped_enum_field) {
 //   enum local_field_enum {
@@ -1099,9 +1100,6 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: local scoped enum field dependencies in local
-// unnamed structs currently crash header generation.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_scoped_enum_field) {
 //   enum class local_field_enum_class {
@@ -1122,9 +1120,6 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: direct fields of namespace-scope unnamed types in
-// local unnamed structs currently crash header generation.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_field) {
 //   struct {
@@ -1140,9 +1135,6 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: direct fields of local unnamed types in local
-// unnamed structs currently crash header generation.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_local_unnamed_field) {
 //   struct {
@@ -1164,9 +1156,6 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: inheriting from a namespace-scope unnamed type via
-// decltype currently crashes header generation.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_base) {
 //   struct: decltype(unnamed_global) {
@@ -1187,31 +1176,31 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 // }
 
 // FIXME: does not generate: reflecting local unnamed structs with non-public
-// fields currently crashes header generation. Expected behavior is to reflect
+// fields currently fails header generation. Expected behavior is to reflect
 // only public fields.
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_mixed_access) {
-//   struct {
-//     std::string in_cpp_local_public_field_0;
-//     int in_cpp_local_public_field_1;
-//
-//   private:
-//     std::string in_cpp_local_private_field;
-//
-//   public:
-//     double in_cpp_local_public_field_2;
-//
-//   protected:
-//     int in_cpp_local_protected_field;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_local_public_field_0",
-//               "in_cpp_local_public_field_1",
-//               "in_cpp_local_public_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_mixed_access) {
+  struct {
+    std::string in_cpp_local_public_field_0;
+    int in_cpp_local_public_field_1;
+
+    private:
+    std::string in_cpp_local_private_field;
+
+    public:
+    double in_cpp_local_public_field_2;
+
+    protected:
+    int in_cpp_local_protected_field;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_local_public_field_0",
+              "in_cpp_local_public_field_1",
+              "in_cpp_local_public_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 
 // FIXME: does not generate: the unnamed type used through std::vector is
 // collected as a dependency, but header mode reports non-reflectable types.
@@ -1285,8 +1274,8 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
 
-// FIXME: does not generate: local enum type dependencies through std::vector
-// currently crash header generation.
+// TODO: support dependency types that cannot be forward-declared through
+// sequence templates. Some of these can be generated via decltype(member field).
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_enum_vector_field) {
 //   enum local_vector_enum {
@@ -1307,9 +1296,6 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: local enum type dependencies through std::tuple
-// currently crash header generation.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_enum_tuple_field) {
 //   enum local_tuple_enum {
@@ -1330,9 +1316,6 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: local enum type dependencies through mpark::variant
-// currently crash header generation.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_enum_variant_field) {
 //   enum local_variant_enum {

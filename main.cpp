@@ -613,7 +613,7 @@ struct nm_qual_type {
   std::vector<std::string> enclosing_records;
 
   // todo: should it be just clang::Decl?
-  static meta::nm_qual_type map_from_decl(const clang::TagDecl *td) noexcept;
+  static meta::nm_qual_type from_decl(const clang::TagDecl *td) noexcept;
 };
 
 enum reference_type {
@@ -655,7 +655,7 @@ struct field_data {
     as_mutable,
   } qualified;
 
-  static field_data map_from_decl(const clang::FieldDecl *d) {
+  static field_data from_decl(const clang::FieldDecl *d) {
     assert(d);
     return {
       .name = std::string(fn::as<std::string_view>(d->getName())),
@@ -680,7 +680,7 @@ struct record_data {
     is_union,
   } type;
 
-  static record_data map_from_type(const clang::ASTContext &ast,
+  static record_data from_type(const clang::ASTContext &ast,
     const clang::RecordType *t);
 };
 
@@ -688,7 +688,7 @@ struct enum_data {
   bool is_scoped; //< true if 'enum class { }`
   std::vector<std::string> enumerators;
 
-  static meta::enum_data map_from_type(const clang::EnumType *t);
+  static meta::enum_data from_type(const clang::EnumType *t);
 };
 
 template <typename Data>
@@ -1632,7 +1632,7 @@ int main(int argc, char **argv) {
           : o;
       };
 
-    std::expected instrumented_source =
+    const std::expected instrumented_source =
       // there's only one file
       (processed_sources_view | std::ranges::to<std::vector>())
         .front()
@@ -1645,11 +1645,9 @@ int main(int argc, char **argv) {
             "\n[info] creating header mode reflection: {}",
             out.generic_string());
 
-          auto render_context =
-            std::bind_front(render::header_mode_reflection, std::move(ctx));
-
           return util::create_file_for_writing(out) //
-            .and_then(std::move(render_context))
+            .and_then(
+              std::bind_front(render::header_mode_reflection, std::move(ctx)))
             .and_then([out](render::header_mode_context ctx) {
               llvm::errs() << std::format("\n[info] writing deps file for: {}",
                 out.generic_string());
@@ -2331,7 +2329,7 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
   return arg.getAsIntegral().getExtValue();
 }
 
-meta::nm_qual_type meta::nm_qual_type::map_from_decl(
+meta::nm_qual_type meta::nm_qual_type::from_decl(
   const clang::TagDecl *td) noexcept {
   // refactorme: function bodies are also captured as enclosing_records. I think
   // capturing them for rendering in diagnostics is somewhat useful, but I'd
@@ -2429,7 +2427,7 @@ meta::type_definition resolve_definition(const clang::SourceManager &sm,
 
   const clang::SourceLocation loc = td->getLocation();
   return {
-    .type_name = meta::nm_qual_type::map_from_decl(td),
+    .type_name = meta::nm_qual_type::from_decl(td),
     .location =
       {
         .source_file = get_declaration_source_file(*td, sm),
@@ -2528,7 +2526,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
   };
 
   const auto to_tag_type = //
-    [](const clang::Type *t) { return clang::cast<clang::TagType>(t); };
+    [](const clang::Type *t) { return t->getAs<clang::TagType>(); };
 
   const auto not_in_std = //
     [](const clang::TagType *t) { return !t->getDecl()->isInStdNamespace(); };
@@ -2627,26 +2625,24 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
   return {collected.begin(), collected.end()};
 }
 
-auto meta::record_data::map_from_type(const clang::ASTContext &ast,
+auto meta::record_data::from_type(const clang::ASTContext &ast,
   const clang::RecordType *t) -> record_data {
   assert(t);
 
   const clang::RecordDecl &r_decl = *t->getDecl();
   const clang::CXXRecordDecl *cxx_decl = t->getAsCXXRecordDecl();
 
-  util::viewable_range_of<meta::type_id> auto base_ids = cxx_decl->bases()
-    | std::views::transform(&clang::CXXBaseSpecifier::getType)
-    | std::views::transform(&clang::QualType::getTypePtr)
-    | std::views::transform(std::bind_front(render_type_id, std::cref(ast))) //
-    | std::views::as_rvalue;
-
   return {
-    .public_bases = cxx_decl //
-      ? base_ids | std::ranges::to<std::vector>()
+    .public_bases = cxx_decl
+      ? public_bases_view(cxx_decl)
+        | std::views::transform(
+          std::bind_front(meta::map_decl_to_canonical_type, std::cref(ast)))
+        | std::views::transform(std::bind_front(render_type_id, std::cref(ast)))
+        | std::ranges::to<std::vector>()
       : std::vector<std::string>{},
 
     .public_fields = public_fields_view(&r_decl)
-      | std::views::transform(meta::field_data::map_from_decl)
+      | std::views::transform(meta::field_data::from_decl)
       | std::ranges::to<std::vector>(),
 
     .type = r_decl.isStruct() //
@@ -2657,7 +2653,7 @@ auto meta::record_data::map_from_type(const clang::ASTContext &ast,
   };
 }
 
-auto meta::enum_data::map_from_type(const clang::EnumType *t) -> enum_data {
+auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
   assert(t);
 
   const clang::EnumDecl &ed = *t->getDecl();
@@ -2685,8 +2681,8 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
     .id = render_type_id(ast, t),
     .data = clang::isa<clang::EnumType>(t)
       ? record_or_enum(
-          meta::enum_data::map_from_type(clang::cast<clang::EnumType>(t)))
-      : record_or_enum(meta::record_data::map_from_type(ast,
+          meta::enum_data::from_type(clang::cast<clang::EnumType>(t)))
+      : record_or_enum(meta::record_data::from_type(ast,
           clang::cast<clang::RecordType>(t))),
     .definition = resolve_definition(ast.getSourceManager(), t->getDecl()),
   };
@@ -2737,7 +2733,7 @@ auto meta::resolve_reflected_type(
       .type =
         reflectable{
           .id = id,
-          .data = enum_data::map_from_type(enum_type),
+          .data = enum_data::from_type(enum_type),
           .definition =
             resolve_definition(ast.getSourceManager(), enum_type->getDecl()),
         },
@@ -2786,7 +2782,7 @@ auto meta::resolve_reflected_call(const clang::CXXMethodDecl &cd,
     const clang::TagDecl *tag = base_q->getAsTagDecl();
     return {
       .type_name = tag
-        ? meta::nm_qual_type::map_from_decl(tag)
+        ? meta::nm_qual_type::from_decl(tag)
         // no tag -> fundamental / alias. No namespaces needed.
         : meta::nm_qual_type{
             .name = base_q.getCanonicalType().getAsString(),
@@ -3568,8 +3564,9 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         continue;
       }
 
-      // todo: do I need additional error string? Like "non-indexed local or
-      // non-public type"
+      // todo: support dependency types that cannot be forward-declared.
+      // Incidental indexes from unrelated reflected_call sites must not make
+      // those dependencies supported.
       errors.push_back(std::move(t));
     }
 
