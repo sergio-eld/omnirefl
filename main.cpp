@@ -77,22 +77,24 @@
 namespace fs = std::filesystem;
 using namespace std::string_view_literals;
 
-namespace util {
+namespace fn {
 
-constexpr auto to_string_view =
-  [](const std::convertible_to<std::string_view> auto &v) noexcept {
-    return std::string_view(v);
-  };
-
-const auto accum_back_inserter = //
-  []<std::ranges::range Accum, typename Value>(Accum accum, Value &&value)
-  requires requires(Accum &a, Value &&v) {
-    a.emplace_back(std::forward<Value>(v));
+template <typename T>
+struct as_t {
+  template <typename U>
+    requires std::constructible_from<T, U>
+  constexpr T operator()(U &&value) const
+    noexcept(noexcept(T(std::forward<U>(value)))) {
+    return T(std::forward<U>(value));
   }
-{
-  accum.emplace_back(std::forward<Value>(value));
-  return accum;
 };
+
+template <typename T>
+constexpr as_t<T> as{};
+
+} // namespace fn
+
+namespace util {
 
 std::expected<std::ofstream, std::string> create_file_for_writing(
   const fs::path &file) {
@@ -249,7 +251,7 @@ struct source_file {
 namespace cli {
 
 template <typename T>
-constexpr auto str_by = {};
+constexpr std::array<std::pair<std::string_view, T>, 0> str_by{};
 
 template <typename T>
 constexpr std::expected<T, std::string> from_string(std::string_view v) {
@@ -298,8 +300,7 @@ bool lexical_cast(const std::string &arg, cli_source_file &src) {
   // case 1: unquoted (simpler) – handle first.
   if ('"' != sv.front()) {
     auto v_parts = sv | std::views::split(':')
-      | std::views::transform(
-        [](auto &&subrng) { return std::string_view(subrng); });
+      | std::views::transform(fn::as<std::string_view>);
 
     const std::vector parts(v_parts.begin(), v_parts.end());
 
@@ -319,8 +320,7 @@ bool lexical_cast(const std::string &arg, cli_source_file &src) {
 
   // case 2: starts with '"' → quoted logic.
   std::ranges::view auto view = sv | std::views::split('"')
-    | std::views::transform(
-      [](auto &&subrng) { return std::string_view(subrng); })
+    | std::views::transform(fn::as<std::string_view>)
     | std::views::filter([](std::string_view s) { return !s.empty(); });
 
   const std::vector parts(view.begin(), view.end());
@@ -658,7 +658,7 @@ struct field_data {
   static field_data map_from_decl(const clang::FieldDecl *d) {
     assert(d);
     return {
-      .name = std::string(util::to_string_view(d->getName())),
+      .name = std::string(fn::as<std::string_view>(d->getName())),
       .qualified = d->isMutable()
         ? as_mutable
         : (d->getType().isConstQualified() ? as_const : none),
@@ -884,17 +884,14 @@ std::string forward_declaration(const meta::reflectable &t) {
 
   assert(t.definition.type_name.name);
 
-  std::vector<std::string> lines;
-
-  std::ranges::copy(t.definition.type_name.namespaces
-      | std::views::transform(
-        [](const std::string &n) { return std::format("namespace {} {{", n); }),
-    std::back_inserter(lines));
+  std::vector<std::string> lines = t.definition.type_name.namespaces
+    | std::views::transform(
+      [](const std::string &n) { return std::format("namespace {} {{", n); })
+    | std::ranges::to<std::vector>();
 
   const std::string name = std::format("{}{}{}",
     t.definition.type_name.enclosing_records //
-      | std::views::transform(
-        [](const std::string &s) -> std::string_view { return s; })
+      | std::views::transform(fn::as<std::string_view>)
       | std::views::join_with("::"sv) //
       | util::fmt_fold,
     t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
@@ -1289,13 +1286,8 @@ std::expected<with_ast, std::string> ast_from_compiler_invocation(
     .ast = std::move(ast),
     .diag = std::move(wci.diag),
 
-    // refactorme: use std::ranges::to<std::set>() when updated compiler
-    .includes_deps = std::ranges::fold_left(deps_collector.getDependencies(),
-      std::set<fs::path>{},
-      [](std::set<fs::path> acc, const std::string &file) {
-        acc.emplace(file);
-        return acc;
-      }),
+    .includes_deps = deps_collector.getDependencies()
+      | std::views::transform(fn::as<fs::path>) | std::ranges::to<std::set>(),
   };
 }
 
@@ -1513,12 +1505,8 @@ int main(int argc, char **argv) {
               .transform([](meta::source_file_context ctx) {
                 const render::log print_log{
                   .dependencies = ctx.resolved_as_dependency,
-                  .index_by_type = std::ranges::fold_left(ctx.index_by_type,
-                    std::map<meta::type_id, std::size_t>{},
-                    [](auto a, auto pair) {
-                      a.emplace(std::move(pair));
-                      return a;
-                    }),
+                  .index_by_type =
+                    ctx.index_by_type | std::ranges::to<std::map>(),
                 };
 
                 llvm::errs() << std::format(
@@ -1645,11 +1633,8 @@ int main(int argc, char **argv) {
       };
 
     std::expected instrumented_source =
-      // refactorme: std::ranges::to<std::vector>().front();
       // there's only one file
-      std::ranges::fold_left(processed_sources_view | std::views::as_rvalue,
-        std::vector<std::expected<meta::source_file_context, std::string>>{},
-        util::accum_back_inserter)
+      (processed_sources_view | std::ranges::to<std::vector>())
         .front()
         .and_then(render::prepare_header_mode_context)
         .and_then([reflection_header_path](render::header_mode_context ctx) {
@@ -1873,14 +1858,13 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
           return accum;
         }
 
-        std::vector resolved = std::ranges::fold_left(commands //
-            | std::views::as_rvalue
-            | std::views::filter(
-              [&s](const clang::tooling::CompileCommand &c) -> bool {
-                return c.Output.contains(s.output_substr);
-              }),
-          std::vector<clang::tooling::CompileCommand>{},
-          util::accum_back_inserter);
+        std::vector resolved = commands //
+          | std::views::as_rvalue
+          | std::views::filter(
+            [&s](const clang::tooling::CompileCommand &c) -> bool {
+              return c.Output.contains(s.output_substr);
+            })
+          | std::ranges::to<std::vector>();
 
         if (1 == resolved.size()) {
           accum.files.push_back({
@@ -2051,12 +2035,9 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
 
   const auto to_vector_of_raw_pointers =
     [](const std::vector<std::string> &v) -> std::vector<const char *> {
-    return std::ranges::fold_left(v,
-      std::vector<const char *>{},
-      [](auto accum, const std::string &s) {
-        accum.emplace_back(s.c_str());
-        return accum;
-      });
+    return v //
+      | std::views::transform(&std::string::c_str)
+      | std::ranges::to<std::vector>();
   };
 
   // note: diag to AST is 1:1, has to be recreated each time...
@@ -2203,8 +2184,7 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
     "\n[info] using cc1 args:"
     "\n  [{}]\n",
     compilation_args //
-      | std::views::transform(
-        [](const char *s) { return std::string_view(s); }) //
+      | std::views::transform(fn::as<std::string_view>) //
       | std::views::join_with("\n  "sv) //
       | util::fmt_fold);
 
@@ -2476,7 +2456,7 @@ util::viewable_range_of<const clang::Type *> auto member_aliases_view(
     [](const clang::TypedefNameDecl *d) {
       return std::ranges::any_of(meta::k_supported_member_aliases,
         std::bind_front(std::equal_to<std::string_view>{},
-          util::to_string_view(d->getName())));
+          fn::as<std::string_view>(d->getName())));
     };
 
   return rd.decls() //
@@ -2533,7 +2513,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
           },
           rd->getKind())
         && std::ranges::contains(meta::k_supported_template_names,
-          util::to_string_view(
+          fn::as<std::string_view>(
             clang::cast<clang::ClassTemplateSpecializationDecl>(rd)
               ->getSpecializedTemplate()
               ->getName()));
@@ -2662,15 +2642,12 @@ auto meta::record_data::map_from_type(const clang::ASTContext &ast,
 
   return {
     .public_bases = cxx_decl //
-      ? std::ranges::fold_left(base_ids,
-          std::vector<std::string>{},
-          util::accum_back_inserter)
+      ? base_ids | std::ranges::to<std::vector>()
       : std::vector<std::string>{},
 
-    .public_fields = std::ranges::fold_left(public_fields_view(&r_decl)
-        | std::views::transform(meta::field_data::map_from_decl),
-      std::vector<meta::field_data>{},
-      util::accum_back_inserter),
+    .public_fields = public_fields_view(&r_decl)
+      | std::views::transform(meta::field_data::map_from_decl)
+      | std::ranges::to<std::vector>(),
 
     .type = r_decl.isStruct() //
       ? meta::record_data::is_struct
@@ -2687,13 +2664,11 @@ auto meta::enum_data::map_from_type(const clang::EnumType *t) -> enum_data {
   util::viewable_range_of<std::string> auto names = //
     ed.enumerators() //
     | std::views::transform(&clang::EnumDecl::getName)
-    | std::views::transform(util::to_string_view);
+    | std::views::transform(fn::as<std::string_view>);
 
   return {
     .is_scoped = ed.isScoped(),
-    .enumerators = std::ranges::fold_left(names,
-      std::vector<std::string>{},
-      util::accum_back_inserter),
+    .enumerators = names | std::ranges::to<std::vector<std::string>>(),
   };
 }
 
@@ -2773,14 +2748,12 @@ auto meta::resolve_reflected_type(
   const auto *record_type = clang::cast<clang::RecordType>(&template_arg_type);
   return reflected_type_info{
     .type = match_record_type(id, record_type),
-    .dependencies = std::ranges::fold_left( //
-      recursively_collect_dependency_types(ast,
-        resolved_types,
-        *record_type->getAsCXXRecordDecl())
-        | std::views::transform(
-          std::bind_front(match_reflectable_type, std::cref(ast))),
-      std::vector<reflectable>{},
-      util::accum_back_inserter),
+    .dependencies = recursively_collect_dependency_types(ast,
+                      resolved_types,
+                      *record_type->getAsCXXRecordDecl())
+      | std::views::transform(
+        std::bind_front(match_reflectable_type, std::cref(ast)))
+      | std::ranges::to<std::vector>(),
   };
 }
 
@@ -2930,11 +2903,10 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   assert(!inner_type.enclosing_records.front().empty()
     && "can't access unnamed root");
 
-  std::vector<std::string_view> elems;
-  std::ranges::copy(inner_type.namespaces
-      | std::views::transform(util::to_string_view)
-      | std::views::filter([](std::string_view s) { return !s.empty(); }),
-    std::back_inserter(elems));
+  std::vector<std::string_view> elems = inner_type.namespaces
+    | std::views::transform(fn::as<std::string_view>)
+    | std::views::filter([](std::string_view s) { return !s.empty(); })
+    | std::ranges::to<std::vector>();
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format("_omni_{}_as_root",
@@ -2947,11 +2919,10 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
 // Intended to defer nested-name lookup until the enclosing type is complete.
 std::string declaration_for_enclosing_root_as_dependent(
   const meta::nm_qual_type &inner_type) {
-  std::vector<std::string_view> elems;
-  std::ranges::copy(inner_type.namespaces
-      | std::views::transform(util::to_string_view)
-      | std::views::filter([](std::string_view s) { return !s.empty(); }),
-    std::back_inserter(elems));
+  std::vector<std::string_view> elems = inner_type.namespaces
+    | std::views::transform(fn::as<std::string_view>)
+    | std::views::filter([](std::string_view s) { return !s.empty(); })
+    | std::ranges::to<std::vector>();
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format(
@@ -2969,9 +2940,10 @@ std::string qualified_inner_type_from_fwd_root(
   const std::string root =
     std::format("{}<{}>", enclosing_root_as_dependent(inner_type), param);
 
-  std::vector<std::string_view> elems{root};
-  std::ranges::copy(inner_type.enclosing_records | std::views::drop(1),
-    std::back_inserter(elems));
+  std::vector<std::string_view> elems = inner_type.enclosing_records
+    | std::views::drop(1) | std::views::transform(fn::as<std::string_view>)
+    | std::ranges::to<std::vector>();
+  elems.insert(elems.begin(), root);
   elems.emplace_back(*inner_type.name);
 
   return std::format("typename {}",
@@ -3054,9 +3026,10 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
   const std::string access_root_for =
     std::format("{}<T>", enclosing_root_as_dependent(t));
 
-  std::vector<std::string_view> elems{access_root_for};
-  std::ranges::copy(t.enclosing_records | std::views::drop(1),
-    std::back_inserter(elems));
+  std::vector<std::string_view> elems = t.enclosing_records
+    | std::views::drop(1) | std::views::transform(fn::as<std::string_view>)
+    | std::ranges::to<std::vector>();
+  elems.insert(elems.begin(), access_root_for);
   elems.push_back(*t.name);
 
   return std::format(
@@ -3322,24 +3295,20 @@ auto render::prepare_source_mode_context(
         });
     });
 
-  ctx.calls = std::ranges::fold_left(std::move(ctx.calls)
-      | std::views::chunk_by( //
-        [](const meta::reflected_call_info &lhs,
-          const meta::reflected_call_info &rhs) -> bool {
-          return std::ranges::equal(lhs.f_sig.args,
-            rhs.f_sig.args,
-            [](const auto &l, const auto &r) {
-              return tie_func_arg(l) == tie_func_arg(r);
-            });
-        })
-      | std::views::transform([](auto group) -> meta::reflected_call_info {
-          return *std::ranges::begin(group);
-        }),
-    std::vector<meta::reflected_call_info>{},
-    [](auto a, meta::reflected_call_info v) {
-      a.emplace_back(std::move(v));
-      return a;
-    });
+  ctx.calls = std::move(ctx.calls)
+    | std::views::chunk_by( //
+      [](const meta::reflected_call_info &lhs,
+        const meta::reflected_call_info &rhs) -> bool {
+        return std::ranges::equal(lhs.f_sig.args,
+          rhs.f_sig.args,
+          [](const auto &l, const auto &r) {
+            return tie_func_arg(l) == tie_func_arg(r);
+          });
+      })
+    | std::views::transform([](auto group) -> meta::reflected_call_info {
+        return *std::ranges::begin(group);
+      })
+    | std::ranges::to<std::vector>();
 
   return ctx;
 }
@@ -3355,38 +3324,27 @@ auto render::source_mode_reflection(source_mode_context ctx, std::ofstream file)
   // names and order. Comparing type of each field is not practical
   // performance-wise
 
-  const std::set includes = std::ranges::fold_left(ctx.calls,
-    std::ranges::fold_left(ctx.reflected,
-      std::set<fs::path>{},
-      [](auto acc, const meta::reflectable &r) {
-        acc.insert(r.definition.location.source_file);
-        return acc;
-      }),
-    [](auto acc, const meta::reflected_call_info &c) {
-      acc.insert(c.includes.begin(), c.includes.end());
-      return acc;
-    });
+  std::set includes = ctx.reflected
+    | std::views::transform([](const meta::reflectable &r) {
+        return r.definition.location.source_file;
+      })
+    | std::ranges::to<std::set>();
 
-  const std::set std_includes = std::ranges::fold_left(ctx.calls,
-    std::set<fs::path>{},
-    [](auto acc, const meta::reflected_call_info &c) {
-      acc.insert(c.std_includes.begin(), c.std_includes.end());
-      return acc;
-    });
+  std::ranges::for_each(ctx.calls, [&includes](const auto &c) {
+    includes.insert(c.includes.begin(), c.includes.end());
+  });
+
+  const std::set std_includes = ctx.calls
+    | std::views::transform(&meta::reflected_call_info::std_includes)
+    | std::views::join | std::ranges::to<std::set>();
 
   // refactorme: should just maintain within the source file context.
   // ad hoc for rendering bases
-  const std::map type_name_by_id = std::invoke([&types = ctx.reflected] {
-    std::map<meta::type_id, const meta::nm_qual_type *> out{};
-
-    std::ranges::copy(types //
-        | std::views::transform([](const meta::reflectable &t) {
-            return std::pair{t.id, std::addressof(t.definition.type_name)};
-          }),
-      std::inserter(out, out.begin()));
-
-    return out;
-  });
+  const std::map type_name_by_id = ctx.reflected
+    | std::views::transform([](const meta::reflectable &t) {
+        return std::pair{t.id, std::addressof(t.definition.type_name)};
+      })
+    | std::ranges::to<std::map>();
 
   const auto format_public_bases = //
     [&type_name_by_id](const meta::record_data &r) {
@@ -3523,11 +3481,7 @@ auto render::source_mode_reflection(source_mode_context ctx, std::ofstream file)
 auto render::prepare_header_mode_context(meta::source_file_context ctx)
   -> std::expected<header_mode_context, std::string> {
   const std::map index_by_type_id =
-    std::invoke([&index_by_type = ctx.index_by_type] {
-      std::map<meta::type_id, std::size_t> to_map;
-      std::ranges::move(index_by_type, std::inserter(to_map, to_map.begin()));
-      return to_map;
-    });
+    ctx.index_by_type | std::views::as_rvalue | std::ranges::to<std::map>();
 
   using partition_result =
     std::tuple<std::vector<header_mode_context::forward_declarable>,
@@ -3662,30 +3616,28 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
       < std::tie(rhs.namespaces, rhs.name);
   };
 
-  const std::set access_roots = std::invoke([&nested = ctx.nested] {
-    std::set<meta::nm_qual_type, decltype(cmp_roots)> set;
-    std::ranges::copy(nested
-        | std::views::transform([](const header_mode_context::nested_type &n) {
-            return n.type.definition.type_name;
-          }),
-      std::inserter(set, set.begin()));
-    return set;
-  });
+  const std::set access_roots = ctx.nested
+    | std::views::transform([](const header_mode_context::nested_type &n) {
+        return n.type.definition.type_name;
+      })
+    | std::ranges::to<std::set>(cmp_roots);
 
   // refactorme: should just maintain within the source file context.
   // ad hoc for rendering bases
   const std::map type_name_by_id = std::invoke(
     [](const auto &...types) {
-      std::map<meta::type_id, const meta::nm_qual_type *> out{};
+      auto to_pairs = [](const auto &range) {
+        return range //
+          | std::views::transform(
+            [](const auto &v) -> const meta::reflectable & { return v.type; })
+          | std::views::transform([](const meta::reflectable &t) {
+              return std::pair{t.id, std::addressof(t.definition.type_name)};
+            })
+          | std::ranges::to<std::map>();
+      };
 
-      (std::ranges::copy(types //
-           | std::views::transform(
-             [](const auto &v) -> const meta::reflectable & { return v.type; })
-           | std::views::transform([](const meta::reflectable &t) {
-               return std::pair{t.id, std::addressof(t.definition.type_name)};
-             }),
-         std::inserter(out, out.begin())),
-        ...);
+      std::map<meta::type_id, const meta::nm_qual_type *> out{};
+      (out.merge(to_pairs(types)), ...);
       return out;
     },
     ctx.fwd_declarables,
@@ -3695,10 +3647,10 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
   static constexpr auto format_head = //
     []<typename S>(const S &r) {
       using hm = header_mode_context;
+      const auto &type_name = r.type.definition.type_name;
 
       return std::visit(
-        [&type_name = r.type.definition.type_name, &r](
-          const meta::reflectable_data auto &d) {
+        [&](const meta::reflectable_data auto &d) {
           if constexpr (std::same_as<hm::forward_declarable, S>)
             return impl::reflectable_head(type_name, d);
           else if constexpr (std::same_as<hm::nested_type, S>)
