@@ -912,8 +912,9 @@ std::string forward_declaration(const meta::reflectable &t) {
           static_assert(std::same_as<meta::record_data, T>);
           const meta::record_data &struct_data = data;
 
-          // todo: render template (and partial specializations) forward
-          // declarations
+          // TODO(High): Header-mode reflection for templates, template
+          // specializations, partial specializations, and template-template
+          // types.
           return std::format("{} {};",
             std::invoke([type = struct_data.type] {
               switch (type) {
@@ -3554,6 +3555,10 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
       const bool is_public_non_local =
         meta::type_definition::none == t.definition.definition_flags;
 
+      // fixme: if an indexed reflected type can be forward declared, the
+      // indexed reflection must not be generated. Otherwise header mode emits
+      // both the named/nested specialization and the indexed specialization,
+      // which Clang diagnoses as ambiguous _reflected<T> metadata.
       if (!is_nested && !is_unnamed && is_public_non_local) {
         if (index) {
           llvm::errs() << std::format(
