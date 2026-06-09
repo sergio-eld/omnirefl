@@ -3054,10 +3054,9 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
   const Data &d,
   std::size_t index) {
   return std::format(
-    "template <> struct _indexed_type<{0}> {{ static constexpr int value() {{ return {0}; }} }};"
-    "\ntemplate <typename T>"
+    "template <typename T>"
     "\nstruct _reflected<T, typename std::enable_if<"
-    "\n  ({0} == _indexed_type<unique_id<T>()>::value()), T>::type> {{"
+    "\n  decltype(reflected_index_match<{0}, T>::exists(0))::value, T>::type> {{"
     "\n  "
     "\n  using type = T;"
     "\n"
@@ -3756,8 +3755,6 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\nnamespace omni {{"
     "\nnamespace detail {{"
     "\nnamespace {{"
-    "\n"
-    "\ntemplate <int> struct _indexed_type {{}};"
     "\n"
     "\n// -- reflected types --------"
     "\n{4}"
