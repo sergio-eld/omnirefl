@@ -12,11 +12,7 @@ namespace {
 TEST(example_value, field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "name",
-              "count",
-              "score",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"name", "count", "score"}),
     omni::reflected_call(dt::inspect::field_names,
       dt::example_value{"station", 4, 8.15}));
 }
@@ -32,11 +28,7 @@ TEST(example_value, field_count) {
 TEST(example_value, field_indices) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::size_t>{
-              0,
-              1,
-              2,
-            }),
+  EXPECT_EQ((std::vector<std::size_t>{0, 1, 2}),
     omni::reflected_call(dt::inspect::field_indices,
       dt::example_value{"station", 4, 8.15}));
 }
@@ -53,11 +45,7 @@ TEST(example_value, const_lvalue_route) {
   namespace dt = dependency_types;
 
   const dt::example_value value{"constant", 15, 16.23};
-  EXPECT_EQ((std::vector<std::string>{
-              "name",
-              "count",
-              "score",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"name", "count", "score"}),
     omni::reflected_call(dt::inspect::field_names, value));
 }
 
@@ -81,9 +69,7 @@ TEST(field_dependency, level_1_value) {
 TEST(field_dependency, level_1_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "field_level_1",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"field_level_1"}),
     omni::reflected_call(dt::inspect::field_names,
       dt::field_dep_level_1{dt::resolved::as_field{1}}));
 }
@@ -110,9 +96,7 @@ TEST(field_dependency, level_2_value) {
 TEST(field_dependency, level_2_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "field_level_2",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"field_level_2"}),
     omni::reflected_call(dt::inspect::field_names, dt::field_dep_level_2{}));
 }
 
@@ -127,10 +111,7 @@ TEST(field_dependency, level_2_first_field_type) {
 TEST(field_dependency, two_fields_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "first_dependency",
-              "second_dependency",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"first_dependency", "second_dependency"}),
     omni::reflected_call(dt::inspect::field_names, dt::field_dep_two_fields{}));
 }
 
@@ -147,9 +128,7 @@ TEST(field_dependency, two_fields_dependency_types) {
 TEST(field_dependency, level_3_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "field_level_3",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"field_level_3"}),
     omni::reflected_call(dt::inspect::field_names, dt::field_dep_level_3{}));
 }
 
@@ -215,9 +194,7 @@ TEST(template_dependency, tuple_level_1_value) {
 TEST(template_dependency, tuple_level_1_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "tpl_field_1",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"tpl_field_1"}),
     omni::reflected_call(dt::inspect::field_names, dt::template_dep_level_1{}));
 }
 
@@ -268,9 +245,7 @@ TEST(sequence_dependency, vector_value_type) {
 TEST(sequence_dependency, vector_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "vector_field",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"vector_field"}),
     omni::reflected_call(dt::inspect::field_names, dt::vector_dep_level_1{}));
 }
 
@@ -293,9 +268,7 @@ TEST(sequence_dependency, tuple_second_value_type) {
 TEST(sequence_dependency, tuple_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "tuple_field",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"tuple_field"}),
     omni::reflected_call(dt::inspect::field_names, dt::tuple_dep_two_values{}));
 }
 
@@ -329,9 +302,7 @@ TEST(sequence_dependency, nested_vector_tuple_value_type) {
 TEST(sequence_dependency, nested_vector_tuple_field_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "nested_field",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"nested_field"}),
     omni::reflected_call(dt::inspect::field_names,
       dt::nested_vector_tuple_dep{}));
 }
@@ -366,10 +337,7 @@ TEST(sequence_dependency, nested_vector_tuple_field_names) {
 //   namespace dt = dependency_types;
 //
 //   EXPECT_EQ(
-//     (std::vector<std::size_t>{
-//       0,
-//       0,
-//     }),
+//     (std::vector<std::size_t>{0, 0}),
 //     omni::reflected_call(dt::inspect::field_indices,
 //       dt::derived_struct{4, 8.15}));
 // }
@@ -433,11 +401,7 @@ TEST(sequence_dependency, nested_vector_tuple_field_names) {
 TEST(enum_dependency, scoped_enum_names) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "idle",
-              "busy",
-              "blocked",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"idle", "busy", "blocked"}),
     omni::reflected_call(dt::inspect::enum_names, dt::scoped_status::idle));
 }
 
@@ -475,11 +439,7 @@ TEST(enum_dependency, scoped_enum_names) {
 // TEST(enum_dependency, enum_holder_field_names) {
 //   namespace dt = dependency_types;
 //
-//   EXPECT_EQ((std::vector<std::string>{
-//               "plain",
-//               "scoped",
-//               "fixed",
-//             }),
+//   EXPECT_EQ((std::vector<std::string>{"plain", "scoped", "fixed"}),
 //     omni::reflected_call(dt::inspect::field_names,
 //       dt::enum_holder{
 //         dt::plain_status_pending,
@@ -540,9 +500,7 @@ TEST(enum_dependency, scoped_enum_names) {
 TEST(negative_public_only, non_public_fields_are_absent) {
   namespace dt = dependency_types;
 
-  EXPECT_EQ((std::vector<std::string>{
-              "visible",
-            }),
+  EXPECT_EQ((std::vector<std::string>{"visible"}),
     omni::reflected_call(dt::inspect::field_names,
       dt::non_public_fields{"visible", 4, 8.15}));
 }

@@ -215,12 +215,7 @@ struct reflected_mem_binding {
     return meta::index();
   }
 
-  // todo:
-  // if member
-  // - is a pointer,
-  // - is a bit field (detected by the tool)
-  // need to return by value
-  constexpr const type &value() const noexcept {
+  constexpr auto value() const noexcept -> decltype(Meta::value(owner)) {
     return Meta::value(owner);
   }
 
@@ -228,7 +223,7 @@ struct reflected_mem_binding {
     return value();
   }
 
-  constexpr const type &operator*() const noexcept {
+  constexpr auto operator*() const noexcept -> decltype(value()) {
     return value();
   }
 

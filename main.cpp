@@ -648,6 +648,7 @@ struct type_definition {
 // as of now - public only
 struct field_data {
   std::string name;
+  bool is_bitfield;
 
   enum {
     none = 0,
@@ -659,6 +660,7 @@ struct field_data {
     assert(d);
     return {
       .name = std::string(fn::as<std::string_view>(d->getName())),
+      .is_bitfield = d->isBitField(),
       .qualified = d->isMutable()
         ? as_mutable
         : (d->getType().isConstQualified() ? as_const : none),
@@ -873,6 +875,11 @@ std::string format_funcion_arg(const meta::function_signature_arg &a) {
   if (a.is_const)
     s += "const ";
 
+  // fixme: source-mode reflected_call generation renders some builtin type
+  // spellings directly from Clang, so bool inside template arguments can become
+  // `_Bool`, which is not valid C++.
+  // fixme: source-mode reflected_call generation can render std::string
+  // arguments as `std::std::string`.
   s += format_nm_qual_type(a.type_name);
   s += ref_suffix(a.ref_type);
 
@@ -3110,7 +3117,7 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n"
         "\n    template <typename _T>"
         "\n    static constexpr auto value(const _T &t) noexcept"
-        "\n      -> const decltype(t.{0})& {{"
+        "\n      -> {4} {{"
         "\n      return t.{0};"
         "\n    }}"
         "\n"
@@ -3129,7 +3136,11 @@ std::string reflectable_body(const meta::record_data &d) {
         bool(meta::field_data::as_const == f.qualified),
 
         // 3
-        bool(meta::field_data::as_mutable == f.qualified));
+        bool(meta::field_data::as_mutable == f.qualified),
+
+        // 4
+        f.is_bitfield ? std::format("decltype(t.{})", f.name)
+                      : std::format("const decltype(t.{})&", f.name));
     };
 
   return std::format(
@@ -3271,6 +3282,12 @@ auto render::prepare_source_mode_context(
     });
 
   // -- collapse duplacate calls --------
+  // fixme:
+  // source mode does not collect reflected_call specializations reached only
+  // through recursive template instantiation. Example:
+  // from_std_map<T>(map) may be called only while compiling another reflected
+  // visitor body, so _call_impl<from_std_map_return_adapter<T, V>, T> is left
+  // declared but not generated.
   static constexpr auto tie_func_arg =
     [](const meta::function_signature_arg &a) {
       return std::tie(a.type_name.namespaces,
@@ -3554,6 +3571,14 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         continue;
       }
 
+      // fixme(high): indexed reflection for local/unnamed types is still
+      // order-sensitive. With several local unnamed reflected_call routes in one
+      // source file, the real compilation can associate a generated indexed
+      // specialization's field metadata with a different local unnamed record
+      // than the tool observed. The specialization guard needs to reject
+      // unrelated T without assigning or perturbing unique indexes.
+      // Observed in packaged clang builds with repeated local unnamed
+      // std::variant map write routes in header mode.
       if (index) {
         indexed.push_back({
           .type = std::move(t),
@@ -3563,9 +3588,10 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         continue;
       }
 
-      // todo: support dependency types that cannot be forward-declared.
-      // Incidental indexes from unrelated reflected_call sites must not make
-      // those dependencies supported.
+      // fixme: header mode does not instrument supported dependency types
+      // reachable through reflected_call argument types when those dependency
+      // types cannot be forward-declared. Incidental indexes from unrelated
+      // reflected_call sites must not make those dependencies supported.
       errors.push_back(std::move(t));
     }
 
@@ -3660,6 +3686,9 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     };
 
   // fixme: handle indexed bases
+  // fixme: reflected public fields do not include transitive public bases in
+  // header mode. A direct public base is reflected, but fields from a public
+  // grand-base are missing from public_fields().
   const auto format_public_bases = //
     [&type_name_by_id](const meta::record_data &r) {
       const auto fetch = [&type_name_by_id](const meta::type_id &id)

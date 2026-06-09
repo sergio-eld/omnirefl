@@ -4,6 +4,8 @@
 //
 // this header adds support for reflecting types via reflected_call
 
+#include <omnirefl/compat.hpp>
+
 #include <type_traits>
 #include <utility>
 
@@ -174,6 +176,112 @@ struct reflected_call_t {
     (void)detail::_reflected_type<type>{};
     return _call_impl(std::forward<Impl>(impl),
       std::forward<T>(t),
+      std::forward<Args>(args)...);
+#endif
+  }
+
+  // todo: reflected_call currently supports direct values,
+  // compat::type_identity<T>, and std::tuple<T...> as instrumented arguments.
+  // Either forbid other composed types explicitly, or add stable backend
+  // support for supported dependency types reachable through reflected_call
+  // argument types.
+  template <typename Impl, typename T, typename... Args>
+  auto operator()(Impl &&impl,
+    compat::type_identity<T> t,
+    Args &&...args) const
+    -> decltype(std::declval<Impl &&>()(std::declval<compat::type_identity<T>>(),
+      std::declval<Args &&>()...)) {
+#ifdef OMNI_HEADER_MODE
+    (void)detail::_reflected_indexed_type<T>{};
+
+#  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
+    return std::forward<Impl>(impl)(t, std::forward<Args>(args)...);
+#  endif
+#else
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    (void)detail::_reflected_type<T>{};
+    return _call_impl(std::forward<Impl>(impl),
+      t,
+      std::forward<Args>(args)...);
+#endif
+  }
+
+  template <typename Impl, typename... T, typename... Args>
+  auto operator()(Impl &&impl, std::tuple<T...> &t, Args &&...args) const
+    -> decltype(std::declval<Impl &&>()(std::declval<std::tuple<T...> &>(),
+      std::declval<Args &&>()...)) {
+#ifdef OMNI_HEADER_MODE
+    int dummy[] = {0,
+      ((void)detail::_reflected_indexed_type<
+         typename std::decay<T>::type>{},
+        0)...};
+    (void)dummy;
+
+#  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
+    return std::forward<Impl>(impl)(t, std::forward<Args>(args)...);
+#  endif
+#else
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    int dummy[] = {0,
+      ((void)detail::_reflected_type<
+         typename std::decay<T>::type>{}, 0)...};
+    (void)dummy;
+    return _call_impl(std::forward<Impl>(impl),
+      t,
+      std::forward<Args>(args)...);
+#endif
+  }
+
+  template <typename Impl, typename... T, typename... Args>
+  auto operator()(Impl &&impl, const std::tuple<T...> &t, Args &&...args) const
+    -> decltype(std::declval<Impl &&>()(
+      std::declval<const std::tuple<T...> &>(),
+      std::declval<Args &&>()...)) {
+#ifdef OMNI_HEADER_MODE
+    int dummy[] = {0,
+      ((void)detail::_reflected_indexed_type<
+         typename std::decay<T>::type>{},
+        0)...};
+    (void)dummy;
+
+#  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
+    return std::forward<Impl>(impl)(t, std::forward<Args>(args)...);
+#  endif
+#else
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    int dummy[] = {0,
+      ((void)detail::_reflected_type<
+         typename std::decay<T>::type>{}, 0)...};
+    (void)dummy;
+    return _call_impl(std::forward<Impl>(impl),
+      t,
+      std::forward<Args>(args)...);
+#endif
+  }
+
+  template <typename Impl, typename... T, typename... Args>
+  auto operator()(Impl &&impl, std::tuple<T...> &&t, Args &&...args) const
+    -> decltype(std::declval<Impl &&>()(std::declval<std::tuple<T...> &&>(),
+      std::declval<Args &&>()...)) {
+#ifdef OMNI_HEADER_MODE
+    int dummy[] = {0,
+      ((void)detail::_reflected_indexed_type<
+         typename std::decay<T>::type>{},
+        0)...};
+    (void)dummy;
+
+#  ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
+    return std::forward<Impl>(impl)(std::move(t),
+      std::forward<Args>(args)...);
+#  endif
+#else
+    (void)detail::_reflected_impl<typename std::decay<Impl>::type>{};
+    int dummy[] = {0,
+      ((void)detail::_reflected_type<
+         typename std::decay<T>::type>{}, 0)...};
+    (void)dummy;
+    return _call_impl(std::forward<Impl>(impl),
+      std::move(t),
       std::forward<Args>(args)...);
 #endif
   }
