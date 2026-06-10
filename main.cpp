@@ -1487,6 +1487,7 @@ int main(int argc, char **argv) {
           });
       };
 
+      // refactorme: use std::views::enumerate
       return util::indexed(cli_args.sources, 1)
         | std::views::transform(
           [compiler_invocation_for_source_file,
@@ -2643,13 +2644,12 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
   const clang::CXXRecordDecl *cxx_decl = t->getAsCXXRecordDecl();
 
   return {
-    .public_bases = cxx_decl
-      ? public_bases_view(cxx_decl)
+    .public_bases = cxx_decl ? public_bases_view(cxx_decl)
         | std::views::transform(
           std::bind_front(meta::map_decl_to_canonical_type, std::cref(ast)))
         | std::views::transform(std::bind_front(render_type_id, std::cref(ast)))
         | std::ranges::to<std::vector>()
-      : std::vector<std::string>{},
+                             : std::vector<std::string>{},
 
     .public_fields = public_fields_view(&r_decl)
       | std::views::transform(meta::field_data::from_decl)
@@ -2694,8 +2694,8 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
     .data = clang::isa<clang::EnumType>(t)
       ? record_or_enum(
           meta::enum_data::from_type(clang::cast<clang::EnumType>(t)))
-      : record_or_enum(meta::record_data::from_type(ast,
-          clang::cast<clang::RecordType>(t))),
+      : record_or_enum(
+          meta::record_data::from_type(ast, clang::cast<clang::RecordType>(t))),
     .definition = resolve_definition(ast.getSourceManager(), t->getDecl()),
   };
 }
@@ -3497,16 +3497,15 @@ auto render::source_mode_reflection(source_mode_context ctx, std::ofstream file)
 
 auto render::prepare_header_mode_context(meta::source_file_context ctx)
   -> std::expected<header_mode_context, std::string> {
-  const std::map index_by_type_id =
-    ctx.index_by_type | std::views::as_rvalue | std::ranges::to<std::map>();
-
   using partition_result =
     std::tuple<std::vector<header_mode_context::forward_declarable>,
       std::vector<header_mode_context::nested_type>,
       std::vector<header_mode_context::indexed_type>>;
 
   const auto partition_types = //
-    [&index_by_type_id, &resolved_as_dependency = ctx.resolved_as_dependency](
+    [index_by_type_id =
+        ctx.index_by_type | std::views::as_rvalue | std::ranges::to<std::map>(),
+      &resolved_as_dependency = ctx.resolved_as_dependency](
       std::vector<meta::reflectable> types)
     -> std::expected<partition_result, std::string> {
     std::expected<partition_result, std::string> accum{};
@@ -3525,23 +3524,25 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
       const bool is_unnamed = !t.definition.type_name.name;
       const bool is_public_non_local =
         meta::type_definition::none == t.definition.definition_flags;
-      const bool is_forward_declarable_data = std::visit(
-        []<meta::reflectable_data Data>(const Data &data) {
-          if constexpr (std::same_as<meta::enum_data, Data>)
-            return data.is_scoped || data.is_fixed;
-          else {
-            static_assert(std::same_as<meta::record_data, Data>);
-            return true;
-          }
-        },
-        t.data);
 
       // fixme: if an indexed reflected type can be forward declared, the
       // indexed reflection must not be generated. Otherwise header mode emits
       // both the named/nested specialization and the indexed specialization,
       // which Clang diagnoses as ambiguous _reflected<T> metadata.
-      if (!is_nested && !is_unnamed && is_public_non_local
-        && is_forward_declarable_data) {
+      if (std::visit(
+            [is_nested, is_unnamed, is_public_non_local]<
+              meta::reflectable_data Data>(const Data &data) {
+              if (is_nested || is_unnamed || !is_public_non_local)
+                return false;
+
+              if constexpr (std::same_as<meta::enum_data, Data>)
+                return data.is_scoped || data.is_fixed;
+              else {
+                static_assert(std::same_as<meta::record_data, Data>);
+                return true;
+              }
+            },
+            t.data)) {
         if (index) {
           llvm::errs() << std::format(
             "\n[debug] indexed '{}' type '{}' will be rendered as forward-declarable.",
@@ -3587,14 +3588,12 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         continue;
       }
 
-      // fixme(high): indexed reflection for local/unnamed types is still
-      // order-sensitive. With several local unnamed reflected_call routes in one
-      // source file, the real compilation can associate a generated indexed
-      // specialization's field metadata with a different local unnamed record
-      // than the tool observed. The specialization guard needs to reject
-      // unrelated T without assigning or perturbing unique indexes.
-      // Observed in packaged clang builds with repeated local unnamed
-      // std::variant map write routes in header mode.
+      // fixme(high): some local/unnamed indexed routes still fail in header
+      // mode, but the failure is not caused by reflected-scope queries changing
+      // unique-id order. Generated indexed reflection checks
+      // reflected_index_match<N, T> directly and do not call unique_id<T>().
+      // Re-triage the remaining failures as wrong/duplicate indexed metadata or
+      // missing generated indexed specializations.
       if (index) {
         indexed.push_back({
           .type = std::move(t),

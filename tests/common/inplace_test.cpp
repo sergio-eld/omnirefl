@@ -759,12 +759,10 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
     example_impl::maybe_print_field_names(p));
 }
 
-// FIXME(high): index-pollution triage routes. These cases intentionally probe
-// non-reflected local/composed types from within a reflected scope immediately
-// before reflecting a local unnamed type. Header mode must query whether
-// `(index, T)` is already registered without evaluating `unique_id<T>()`;
-// otherwise a negative probe can consume the index intended for the following
-// positive reflected_call.
+// Regression guard: these cases intentionally probe non-reflected
+// local/composed types from within a reflected scope immediately before
+// reflecting a local unnamed type. Header mode must query whether `(index, T)`
+// is already registered without evaluating `unique_id<T>()`.
 TEST(print_names,
   index_pollution_non_reflected_local_record_before_positive) {
   struct {
@@ -2802,9 +2800,47 @@ TEST(write_values, in_cpp_local_unnamed_struct_with_unsigned_from_std_map) {
   ASSERT_EQ("unsigned", p.label);
 }
 
-// FIXME(high): does not compile in header mode: after several earlier local unnamed
-// reflected_call routes, generated indexed field metadata from another local
-// unnamed record can be selected for this direct reflected_call record.
+// FIXME(high): does not compile in header mode in this large translation unit:
+// same-shape local unnamed direct reflected_call records generate correct
+// metadata, but the real compilation can match an earlier incompatible indexed
+// specialization. This is not bitfield-specific; observed first test metadata
+// generated at index 62 with fields `foo_count`, `bar_count`,
+// `untouched_count`, while real compilation matched index 53, generated for
+// `write_values.in_cpp_local_unnamed_struct_from_std_map` with fields `name`,
+// `count`, `score`. A standalone two-route probe keeps stable indexes under
+// Clang and GCC with the generated header force-included, so the trigger needs
+// accumulated header-mode TU context.
+// TEST(write_values, in_cpp_local_unnamed_struct_foo_bar_first_identical) {
+//   struct {
+//     int foo_count;
+//     int bar_count;
+//     int untouched_count;
+//   } p{1, 2, 3};
+//
+//   omni::reflected_call(example_impl::write_foo_bar, p);
+//
+//   ASSERT_EQ(8, p.foo_count);
+//   ASSERT_EQ(15, p.bar_count);
+//   ASSERT_EQ(3, p.untouched_count);
+// }
+//
+// TEST(write_values, in_cpp_local_unnamed_struct_foo_bar_second_identical) {
+//   struct {
+//     int foo_count;
+//     int bar_count;
+//     int untouched_count;
+//   } p{4, 5, 6};
+//
+//   omni::reflected_call(example_impl::write_foo_bar, p);
+//
+//   ASSERT_EQ(8, p.foo_count);
+//   ASSERT_EQ(15, p.bar_count);
+//   ASSERT_EQ(6, p.untouched_count);
+// }
+
+// FIXME(high): does not compile in header mode: broader direct local unnamed
+// write visitor route for the same indexed mismatch reproduced by the
+// same-shape regression above.
 //
 // TEST(write_values, in_cpp_local_unnamed_struct_foo_bar_visitor) {
 //   struct {
@@ -2905,11 +2941,9 @@ TEST(write_values, in_cpp_local_unnamed_bitfields_from_std_map) {
   ASSERT_EQ(113, p.value);
 }
 
-// FIXME(high): does not compile in header mode: this direct reflected_call on a
-// local unnamed bitfield record can select indexed field metadata from an
-// earlier local unnamed record (`name`, `count`, `score`). This is the same
-// order-sensitive indexed local/unnamed specialization bug as the local unnamed
-// foo/bar visitor above.
+// FIXME(high): does not compile in header mode: bitfield variant of the same
+// direct local unnamed indexed mismatch reproduced by the same-shape regression
+// above. Bitfields are not the root trigger.
 //
 // TEST(write_values, in_cpp_local_unnamed_bitfields_foo_bar_visitor) {
 //   struct {
@@ -3355,8 +3389,8 @@ TEST(write_values, in_cpp_struct_with_nested_std_variant_map) {
 // FIXME(high): does not compile in packaged clang header-mode builds for
 // C++17 and later. Local unnamed std::variant map routes are detected by the
 // tool, but the real compilation does not find a matching generated _reflected
-// specialization for the local unnamed record. This is another local/unnamed
-// indexed specialization ordering regression.
+// specialization for the local unnamed record. This is not an indexed unique-id
+// order issue; reflected-scope index queries are non-mutating.
 //
 // TEST(write_values, in_cpp_local_unnamed_struct_from_std_variant_map_reference)
 // {
