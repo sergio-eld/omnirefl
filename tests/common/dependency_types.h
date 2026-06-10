@@ -411,6 +411,12 @@ enum fixed_status : unsigned {
   fixed_status_high,
 };
 
+enum class scoped_fixed_status : unsigned {
+  low,
+  medium,
+  high,
+};
+
 // ---------- holders (dependency chains) ----------
 
 struct example_value {

@@ -307,96 +307,95 @@ TEST(sequence_dependency, nested_vector_tuple_field_names) {
       dt::nested_vector_tuple_dep{}));
 }
 
-// fixme: public-base chains currently abort header-mode rendering with missing
-// public-base metadata when this larger shared dependency matrix is active.
-//
-// TEST(inheritance_dependency, base_is_reflected) {
-//   namespace dt = dependency_types;
-//
-//   const dt::derived_struct derived{4, 8.15};
-//   const dt::as_inherited_struct::is_base_reflected_t<
-//     dt::resolved::as_inherited_struct>
-//     check{};
-//
-//   EXPECT_TRUE(omni::reflected_call(check, derived));
-// }
-//
-// TEST(inheritance_dependency, public_base_fields_are_flattened) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "base_field",
-//       "derived_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::derived_struct{4, 8.15}));
-// }
-//
-// TEST(inheritance_dependency, public_base_indices) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::size_t>{0, 0}),
-//     omni::reflected_call(dt::inspect::field_indices,
-//       dt::derived_struct{4, 8.15}));
-// }
-//
-// TEST(inheritance_dependency, multi_base_fields_are_flattened) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "base_field",
-//       "second_base_field",
-//       "own_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::multi_base_derived{4, "second", 15}));
-// }
-//
-// TEST(inheritance_dependency, multi_base_field_count) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(std::size_t{3},
-//     omni::reflected_call(dt::inspect::field_count,
-//       dt::multi_base_derived{4, "second", 15}));
-// }
-//
-// TEST(inheritance_dependency, deep_base_fields_are_flattened) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "base_field",
-//       "mid_field",
-//       "deep_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::deep_derived{4, "middle", 8.15}));
-// }
-//
-// TEST(inheritance_dependency, three_base_fields_are_flattened) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "base_field",
-//       "second_base_field",
-//       "third_base_field",
-//       "own_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::three_base_derived{4, "second", 8.15, "own"}));
-// }
-//
-// TEST(inheritance_dependency, three_base_field_count) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(std::size_t{4},
-//     omni::reflected_call(dt::inspect::field_count,
-//       dt::three_base_derived{4, "second", 8.15, "own"}));
-// }
+TEST(inheritance_dependency, base_is_reflected) {
+  namespace dt = dependency_types;
+
+  const dt::derived_struct derived{4, 8.15};
+  const dt::as_inherited_struct::is_base_reflected_t<
+    dt::resolved::as_inherited_struct>
+    check{};
+
+  EXPECT_TRUE(omni::reflected_call(check, derived));
+}
+
+TEST(inheritance_dependency, public_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "base_field",
+      "derived_field",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::derived_struct{4, 8.15}));
+}
+
+TEST(inheritance_dependency, public_base_indices) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::size_t>{0, 0}),
+    omni::reflected_call(dt::inspect::field_indices,
+      dt::derived_struct{4, 8.15}));
+}
+
+TEST(inheritance_dependency, multi_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "base_field",
+      "second_base_field",
+      "own_field",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::multi_base_derived{4, "second", 15}));
+}
+
+TEST(inheritance_dependency, multi_base_field_count) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{3},
+    omni::reflected_call(dt::inspect::field_count,
+      dt::multi_base_derived{4, "second", 15}));
+}
+
+// FIXME: disabled: header mode reflects direct public base fields, but omits
+// transitive public base fields inherited through that direct base.
+TEST(inheritance_dependency, DISABLED_deep_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "base_field",
+      "mid_field",
+      "deep_field",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::deep_derived{4, "middle", 8.15}));
+}
+
+TEST(inheritance_dependency, three_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "base_field",
+      "second_base_field",
+      "third_base_field",
+      "own_field",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::three_base_derived{4, "second", 8.15, "own"}));
+}
+
+TEST(inheritance_dependency, three_base_field_count) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{4},
+    omni::reflected_call(dt::inspect::field_count,
+      dt::three_base_derived{4, "second", 8.15, "own"}));
+}
 
 TEST(enum_dependency, scoped_enum_names) {
   namespace dt = dependency_types;
@@ -405,36 +404,41 @@ TEST(enum_dependency, scoped_enum_names) {
     omni::reflected_call(dt::inspect::enum_names, dt::scoped_status::idle));
 }
 
-// fixme: unscoped enum routes are reflected, but header-mode generated forward
-// declarations are invalid for unscoped enums.
-//
-// TEST(enum_dependency, plain_enum_names) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "plain_status_pending",
-//       "plain_status_running",
-//       "plain_status_done",
-//     }),
-//     omni::reflected_call(dt::inspect::enum_names, dt::plain_status_pending));
-// }
-//
-// TEST(enum_dependency, fixed_enum_names) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "fixed_status_low",
-//       "fixed_status_medium",
-//       "fixed_status_high",
-//     }),
-//     omni::reflected_call(dt::inspect::enum_names, dt::fixed_status_low));
-// }
+TEST(enum_dependency, plain_enum_names) {
+  namespace dt = dependency_types;
 
-// TODO: support dependency types that cannot be forward-declared. Some of
-// these can be generated via decltype(member field); incidental indexes from
-// unrelated reflected_call sites should not affect support.
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "plain_status_pending",
+      "plain_status_running",
+      "plain_status_done",
+    }),
+    omni::reflected_call(dt::inspect::enum_names, dt::plain_status_pending));
+}
+
+TEST(enum_dependency, fixed_enum_names) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "fixed_status_low",
+      "fixed_status_medium",
+      "fixed_status_high",
+    }),
+    omni::reflected_call(dt::inspect::enum_names, dt::fixed_status_low));
+}
+
+TEST(enum_dependency, scoped_fixed_enum_names) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"low", "medium", "high"}),
+    omni::reflected_call(dt::inspect::enum_names, dt::scoped_fixed_status::low));
+}
+
+// FIXME: does not compile in header mode: enum field dependencies that are also
+// reflected directly can produce duplicate named/indexed _reflected
+// specializations. The plain unscoped enum dependency also still needs indexed
+// dependency metadata because it cannot be forward-declared.
 //
 // TEST(enum_dependency, enum_holder_field_names) {
 //   namespace dt = dependency_types;
@@ -464,7 +468,7 @@ TEST(enum_dependency, scoped_enum_names) {
 //       dt::enum_holder{}));
 // }
 
-// fixme: mixed_dependency_holder contains vector_dep_level_1, so it currently
+// FIXME: mixed_dependency_holder contains vector_dep_level_1, so it currently
 // hits the same unsupported std::vector dependency route.
 //
 // TEST(mixed_dependency, holder_field_names) {
@@ -513,40 +517,37 @@ TEST(negative_public_only, non_public_field_count) {
       dt::non_public_fields{"visible", 4, 8.15}));
 }
 
-// fixme: non-public inheritance should not expose base fields, but these routes
-// currently abort header-mode rendering with missing base metadata.
-//
-// TEST(negative_public_only, private_base_fields_are_absent) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "own_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::private_base_derived{4, "own"}));
-// }
-//
-// TEST(negative_public_only, protected_base_fields_are_absent) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "own_field",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::protected_base_derived{4, "own"}));
-// }
-//
-// TEST(negative_public_only, mixed_access_keeps_only_public_members) {
-//   namespace dt = dependency_types;
-//
-//   EXPECT_EQ(
-//     (std::vector<std::string>{
-//       "visible",
-//     }),
-//     omni::reflected_call(dt::inspect::field_names,
-//       dt::mixed_access_derived{1, "visible", 2, 3.5}));
-// }
+TEST(negative_public_only, private_base_fields_are_absent) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "own_field",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::private_base_derived{4, "own"}));
+}
+
+TEST(negative_public_only, protected_base_fields_are_absent) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "own_field",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::protected_base_derived{4, "own"}));
+}
+
+TEST(negative_public_only, mixed_access_keeps_only_public_members) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "visible",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::mixed_access_derived{1, "visible", 2, 3.5}));
+}
 
 } // namespace

@@ -1382,17 +1382,13 @@ TEST(print_names, in_cpp_multi_base) {
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
 
-// FIXME: does not compile: generated forward declaration is emitted as
-// `enum in_cpp_enum;`, but unscoped enum forward declarations require a fixed
-// underlying type.
-//
-// TEST(print_enums, in_cpp_enum) {
-//   const example::in_cpp_enum e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_enum_a", "in_cpp_enum_b", "in_cpp_enum_c"}),
-//     omni::reflected_call(get_enumerators, e));
-// }
+TEST(print_enums, in_cpp_enum) {
+  const example::in_cpp_enum e{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_enum_a", "in_cpp_enum_b", "in_cpp_enum_c"}),
+    omni::reflected_call(get_enumerators, e));
+}
 
 TEST(print_enums, in_cpp_unnamed_global_enum) {
   ASSERT_EQ((std::vector<std::string>{"unnamed_global_enum_a",
@@ -1412,33 +1408,27 @@ TEST(print_enums, in_cpp_scoped_enum) {
     omni::reflected_call(get_enumerators, e));
 }
 
-// FIXME: does not compile: generated enum forward declaration loses the
-// namespace and fixed underlying type.
-//
-// TEST(print_enums, in_cpp_fixed_enum) {
-//   const example::in_cpp_fixed_enum e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_fixed_enum_a",
-//               "in_cpp_fixed_enum_b",
-//               "in_cpp_fixed_enum_c",
-//             }),
-//     omni::reflected_call(get_enumerators, e));
-// }
+TEST(print_enums, in_cpp_fixed_enum) {
+  const example::in_cpp_fixed_enum e{};
 
-// FIXME: does not compile: scoped enum forward declaration is generated without
-// the explicit underlying type.
-//
-// TEST(print_enums, in_cpp_scoped_enum_with_underlying) {
-//   const example::in_cpp_scoped_enum_with_underlying e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_scoped_enum_with_underlying_a",
-//               "in_cpp_scoped_enum_with_underlying_b",
-//               "in_cpp_scoped_enum_with_underlying_c",
-//             }),
-//     omni::reflected_call(get_enumerators, e));
-// }
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_fixed_enum_a",
+              "in_cpp_fixed_enum_b",
+              "in_cpp_fixed_enum_c",
+            }),
+    omni::reflected_call(get_enumerators, e));
+}
+
+TEST(print_enums, in_cpp_scoped_enum_with_underlying) {
+  const example::in_cpp_scoped_enum_with_underlying e{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_scoped_enum_with_underlying_a",
+              "in_cpp_scoped_enum_with_underlying_b",
+              "in_cpp_scoped_enum_with_underlying_c",
+            }),
+    omni::reflected_call(get_enumerators, e));
+}
 
 TEST(print_enums, in_cpp_local_unnamed_enum) {
   enum {

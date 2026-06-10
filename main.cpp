@@ -688,6 +688,8 @@ struct record_data {
 
 struct enum_data {
   bool is_scoped; //< true if 'enum class { }`
+  bool is_fixed;
+  std::string underlying_type;
   std::vector<std::string> enumerators;
 
   static meta::enum_data from_type(const clang::EnumType *t);
@@ -909,9 +911,10 @@ std::string forward_declaration(const meta::reflectable &t) {
     return std::visit(
       [&]<typename T>(const T &data) -> std::string {
         if constexpr (std::same_as<meta::enum_data, T>) {
-          return std::format("enum {}{};",
+          return std::format("enum {}{}{};",
             data.is_scoped ? "class " : "",
-            name);
+            name,
+            data.is_fixed ? std::format(" : {}", data.underlying_type) : "");
         } else {
           static_assert(std::same_as<meta::record_data, T>);
           const meta::record_data &struct_data = data;
@@ -2671,6 +2674,8 @@ auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
 
   return {
     .is_scoped = ed.isScoped(),
+    .is_fixed = ed.isFixed(),
+    .underlying_type = ed.isFixed() ? ed.getIntegerType().getAsString() : "",
     .enumerators = names | std::ranges::to<std::vector<std::string>>(),
   };
 }
@@ -3520,12 +3525,23 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
       const bool is_unnamed = !t.definition.type_name.name;
       const bool is_public_non_local =
         meta::type_definition::none == t.definition.definition_flags;
+      const bool is_forward_declarable_data = std::visit(
+        []<meta::reflectable_data Data>(const Data &data) {
+          if constexpr (std::same_as<meta::enum_data, Data>)
+            return data.is_scoped || data.is_fixed;
+          else {
+            static_assert(std::same_as<meta::record_data, Data>);
+            return true;
+          }
+        },
+        t.data);
 
       // fixme: if an indexed reflected type can be forward declared, the
       // indexed reflection must not be generated. Otherwise header mode emits
       // both the named/nested specialization and the indexed specialization,
       // which Clang diagnoses as ambiguous _reflected<T> metadata.
-      if (!is_nested && !is_unnamed && is_public_non_local) {
+      if (!is_nested && !is_unnamed && is_public_non_local
+        && is_forward_declarable_data) {
         if (index) {
           llvm::errs() << std::format(
             "\n[debug] indexed '{}' type '{}' will be rendered as forward-declarable.",
