@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <tuple>
 #if defined CXX_STANDARD && 17 <= CXX_STANDARD
 #  include <variant>
 #endif
@@ -121,6 +122,14 @@ enum class scoped_enum {
   beta,
   gamma,
 };
+
+struct non_reflected_probe_record {
+  int not_reflected;
+};
+
+enum class non_reflected_probe_enum {
+  value,
+};
 } // namespace source_mode
 
 namespace source_mode_impl {
@@ -131,6 +140,14 @@ template <typename T>
 struct is_reflected_record<T, true>:
     std::integral_constant<bool,
       omni::reflected_entity::record == omni::reflected_t<T>::entity()> {};
+
+template <typename T, typename = void>
+struct is_reflected_query: std::false_type {};
+
+template <typename T>
+struct is_reflected_query<T,
+  omni::compat::void_t<decltype(omni::is_reflected<T>::value)>>:
+    std::integral_constant<bool, omni::is_reflected<T>::value> {};
 
 template <typename T>
 struct is_string_map: std::false_type {};
@@ -179,6 +196,59 @@ struct maybe_field_names_t {
     return field_names(value);
   }
 } const static maybe_field_names{};
+
+struct query_non_reflected_record_then_field_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &value) const {
+    static_assert(!is_reflected_query<
+        source_mode::non_reflected_probe_record>::value,
+      "negative record probe must not register an indexed reflection");
+    return field_names(value);
+  }
+} const static query_non_reflected_record_then_field_names{};
+
+struct query_non_reflected_enum_then_field_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &value) const {
+    static_assert(!is_reflected_query<
+        source_mode::non_reflected_probe_enum>::value,
+      "negative enum probe must not register an indexed reflection");
+    return field_names(value);
+  }
+} const static query_non_reflected_enum_then_field_names{};
+
+struct query_composed_non_reflected_then_field_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &value) const {
+    static_assert(
+      !is_reflected_query<
+        std::vector<source_mode::non_reflected_probe_record>>::value,
+      "negative composed probe must not register an indexed reflection");
+    return field_names(value);
+  }
+} const static query_composed_non_reflected_then_field_names{};
+
+struct query_mixed_non_reflected_then_field_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &value) const {
+    static_assert(!is_reflected_query<
+        source_mode::non_reflected_probe_record>::value,
+      "negative record probe must not register an indexed reflection");
+    static_assert(!is_reflected_query<
+        source_mode::non_reflected_probe_enum>::value,
+      "negative enum probe must not register an indexed reflection");
+    static_assert(
+      !is_reflected_query<
+        std::vector<source_mode::non_reflected_probe_record>>::value,
+      "negative vector probe must not register an indexed reflection");
+    static_assert(
+      !is_reflected_query<
+        std::tuple<source_mode::non_reflected_probe_record,
+          source_mode::non_reflected_probe_enum>>::value,
+      "negative tuple probe must not register an indexed reflection");
+    return field_names(value);
+  }
+} const static query_mixed_non_reflected_then_field_names{};
 
 struct field_values_t {
   template <typename T>

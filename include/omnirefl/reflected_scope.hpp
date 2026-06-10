@@ -19,10 +19,11 @@ namespace {
 // Notes for indexed header-mode: local/unnamed type support
 //
 // Omnirefl records the integer index `N` that `unique_id<T>()` evaluates to
-// while parsing the AST. During the real compilation, `unique_id<T>()` yields
-// the same `N`. Full `_reflected<T>` instantiation will _always_ happen after
-// `reflected_call`, so `unique_id<T>()` will yield the same `N`, which will be
-// used for partial SFINAE specialiation of `_reflected<T>`.
+// while parsing the AST. During the real compilation, `reflected_call` registers
+// the `(N, T)` pair and generated `_reflected<T>` queries that registration.
+// The query must not evaluate `unique_id<T>()`: probing an unrelated type would
+// otherwise allocate a new index and change the order seen by later reflected
+// calls.
 //
 // Limitation: if a reflected type `T` has member field types that are not
 // forward-declarable, those member types cannot be indexed and therefore will

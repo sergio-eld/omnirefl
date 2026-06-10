@@ -343,6 +343,42 @@ TEST(source_mode_read_values, bitfield_values) {
     omni::reflected_call(source_mode_impl::field_values, value));
 }
 
+TEST(index_pollution, non_reflected_record_before_shared_record) {
+  const source_mode::record value{};
+
+  ASSERT_EQ((std::vector<std::string>{"name", "count", "score"}),
+    omni::reflected_call(
+      source_mode_impl::query_non_reflected_record_then_field_names,
+      value));
+}
+
+TEST(index_pollution, non_reflected_enum_before_shared_record) {
+  const source_mode::record value{};
+
+  ASSERT_EQ((std::vector<std::string>{"name", "count", "score"}),
+    omni::reflected_call(
+      source_mode_impl::query_non_reflected_enum_then_field_names,
+      value));
+}
+
+TEST(index_pollution, composed_non_reflected_type_before_shared_record) {
+  const source_mode::record value{};
+
+  ASSERT_EQ((std::vector<std::string>{"name", "count", "score"}),
+    omni::reflected_call(
+      source_mode_impl::query_composed_non_reflected_then_field_names,
+      value));
+}
+
+TEST(index_pollution, mixed_non_reflected_probes_before_shared_record) {
+  const source_mode::record value{};
+
+  ASSERT_EQ((std::vector<std::string>{"name", "count", "score"}),
+    omni::reflected_call(
+      source_mode_impl::query_mixed_non_reflected_then_field_names,
+      value));
+}
+
 TEST(source_mode_write_values, record_from_mpark_map) {
   source_mode::record value{};
 

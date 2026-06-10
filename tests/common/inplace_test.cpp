@@ -134,6 +134,68 @@ struct maybe_print_field_names_t {
   }
 } const static maybe_print_field_names{};
 
+struct query_local_record_then_print_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    struct negative_probe {
+      int not_reflected;
+    };
+
+    static_assert(!omni::is_reflected<negative_probe>::value,
+      "negative local record probe must not register an indexed reflection");
+    return print_field_names_simple(t);
+  }
+} const static query_local_record_then_print_names{};
+
+struct query_local_enum_then_print_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    enum class negative_probe {
+      value,
+    };
+
+    static_assert(!omni::is_reflected<negative_probe>::value,
+      "negative local enum probe must not register an indexed reflection");
+    return print_field_names_simple(t);
+  }
+} const static query_local_enum_then_print_names{};
+
+struct query_composed_local_record_then_print_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    struct negative_probe {
+      int not_reflected;
+    };
+
+    static_assert(!omni::is_reflected<std::vector<negative_probe>>::value,
+      "negative composed probe must not register an indexed reflection");
+    return print_field_names_simple(t);
+  }
+} const static query_composed_local_record_then_print_names{};
+
+struct query_mixed_unregistered_types_then_print_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    struct negative_record {
+      int not_reflected;
+    };
+    enum class negative_enum {
+      value,
+    };
+
+    static_assert(!omni::is_reflected<negative_record>::value,
+      "negative local record probe must not register an indexed reflection");
+    static_assert(!omni::is_reflected<negative_enum>::value,
+      "negative local enum probe must not register an indexed reflection");
+    static_assert(!omni::is_reflected<std::vector<negative_record>>::value,
+      "negative vector probe must not register an indexed reflection");
+    static_assert(
+      !omni::is_reflected<std::tuple<negative_record, negative_enum>>::value,
+      "negative tuple probe must not register an indexed reflection");
+    return print_field_names_simple(t);
+  }
+} const static query_mixed_unregistered_types_then_print_names{};
+
 struct field_values_simple_t {
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
@@ -697,6 +759,78 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
     example_impl::maybe_print_field_names(p));
 }
 
+// FIXME(high): index-pollution triage routes. These cases intentionally probe
+// non-reflected local/composed types from within a reflected scope immediately
+// before reflecting a local unnamed type. Header mode must query whether
+// `(index, T)` is already registered without evaluating `unique_id<T>()`;
+// otherwise a negative probe can consume the index intended for the following
+// positive reflected_call.
+TEST(print_names,
+  index_pollution_non_reflected_local_record_before_positive) {
+  struct {
+    std::string after_negative_field_0;
+    int after_negative_field_1;
+    double after_negative_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "after_negative_field_0",
+              "after_negative_field_1",
+              "after_negative_field_2",
+            }),
+    omni::reflected_call(
+      example_impl::query_local_record_then_print_names, p));
+}
+
+TEST(print_names,
+  index_pollution_non_reflected_local_enum_before_positive) {
+  struct {
+    std::string after_enum_probe_field_0;
+    int after_enum_probe_field_1;
+    double after_enum_probe_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "after_enum_probe_field_0",
+              "after_enum_probe_field_1",
+              "after_enum_probe_field_2",
+            }),
+    omni::reflected_call(example_impl::query_local_enum_then_print_names, p));
+}
+
+TEST(print_names,
+  index_pollution_non_reflected_composed_type_before_positive) {
+  struct {
+    std::string after_composed_probe_field_0;
+    int after_composed_probe_field_1;
+    double after_composed_probe_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "after_composed_probe_field_0",
+              "after_composed_probe_field_1",
+              "after_composed_probe_field_2",
+            }),
+    omni::reflected_call(
+      example_impl::query_composed_local_record_then_print_names, p));
+}
+
+TEST(print_names, index_pollution_mixed_negative_probes_before_positive) {
+  struct {
+    std::string after_mixed_probe_field_0;
+    int after_mixed_probe_field_1;
+    double after_mixed_probe_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "after_mixed_probe_field_0",
+              "after_mixed_probe_field_1",
+              "after_mixed_probe_field_2",
+            }),
+    omni::reflected_call(
+      example_impl::query_mixed_unregistered_types_then_print_names, p));
+}
+
 // FIXME: does not generate: when a reflected_call input is a composed type
 // such as std::tuple<std::tuple<unnamed, int>>, the unnamed nested tuple
 // element is not promoted to stable reflection metadata. Header mode currently
@@ -720,143 +854,137 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
 //     omni::reflected_call(example_impl::print_tuple_first_field_names, types));
 // }
 
-// FIXME: does not compile with Clang: header-mode local unnamed indexed
-// specializations drift after multiple local unnamed reflected types, and
-// local unnamed structs with named bases also hit ambiguous named/indexed
-// base metadata. Keep these as coverage routes until header mode
-// generates Clang-stable indexed specializations.
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_base) {
-//   struct: example::in_cpp_struct {
-//     std::string in_cpp_local_unnamed_with_base_field_0;
-//     int in_cpp_local_unnamed_with_base_field_1;
-//     double in_cpp_local_unnamed_with_base_field_2;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_field_0",
-//               "in_cpp_field_1",
-//               "in_cpp_field_2",
-//               "in_cpp_local_unnamed_with_base_field_0",
-//               "in_cpp_local_unnamed_with_base_field_1",
-//               "in_cpp_local_unnamed_with_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_header_base) {
-//   struct: example::in_header_struct {
-//     std::string in_cpp_local_unnamed_header_base_field_0;
-//     int in_cpp_local_unnamed_header_base_field_1;
-//     double in_cpp_local_unnamed_header_base_field_2;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "in_cpp_local_unnamed_header_base_field_0",
-//               "in_cpp_local_unnamed_header_base_field_1",
-//               "in_cpp_local_unnamed_header_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_multi_base) {
-//   struct: example::in_header_struct, example::in_cpp_struct {
-//     std::string in_cpp_local_unnamed_multi_base_field_0;
-//     int in_cpp_local_unnamed_multi_base_field_1;
-//     double in_cpp_local_unnamed_multi_base_field_2;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "in_cpp_field_0",
-//               "in_cpp_field_1",
-//               "in_cpp_field_2",
-//               "in_cpp_local_unnamed_multi_base_field_0",
-//               "in_cpp_local_unnamed_multi_base_field_1",
-//               "in_cpp_local_unnamed_multi_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_0) {
-//   struct {
-//     bool local_scalar_bool;
-//     char local_scalar_char;
-//     long local_scalar_long;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_scalar_bool",
-//               "local_scalar_char",
-//               "local_scalar_long",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_1) {
-//   struct {
-//     unsigned int local_scalar_unsigned;
-//     float local_scalar_float;
-//     std::string local_scalar_string;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_scalar_unsigned",
-//               "local_scalar_float",
-//               "local_scalar_string",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_2) {
-//   struct {
-//     short local_scalar_short;
-//     long long local_scalar_long_long;
-//     double local_scalar_double;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_scalar_short",
-//               "local_scalar_long_long",
-//               "local_scalar_double",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_0) {
-//   struct {
-//     int *local_pointer_int;
-//     const char *local_pointer_char;
-//     double *local_pointer_double;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_pointer_int",
-//               "local_pointer_char",
-//               "local_pointer_double",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_1) {
-//   struct {
-//     bool *local_pointer_bool;
-//     char *local_pointer_mutable_char;
-//     float *local_pointer_float;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_pointer_bool",
-//               "local_pointer_mutable_char",
-//               "local_pointer_float",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+TEST(print_names, in_cpp_local_unnamed_struct_with_base) {
+  struct: example::in_cpp_struct {
+    std::string in_cpp_local_unnamed_with_base_field_0;
+    int in_cpp_local_unnamed_with_base_field_1;
+    double in_cpp_local_unnamed_with_base_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_field_0",
+              "in_cpp_field_1",
+              "in_cpp_field_2",
+              "in_cpp_local_unnamed_with_base_field_0",
+              "in_cpp_local_unnamed_with_base_field_1",
+              "in_cpp_local_unnamed_with_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_header_base) {
+  struct: example::in_header_struct {
+    std::string in_cpp_local_unnamed_header_base_field_0;
+    int in_cpp_local_unnamed_header_base_field_1;
+    double in_cpp_local_unnamed_header_base_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "in_cpp_local_unnamed_header_base_field_0",
+              "in_cpp_local_unnamed_header_base_field_1",
+              "in_cpp_local_unnamed_header_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_multi_base) {
+  struct: example::in_header_struct, example::in_cpp_struct {
+    std::string in_cpp_local_unnamed_multi_base_field_0;
+    int in_cpp_local_unnamed_multi_base_field_1;
+    double in_cpp_local_unnamed_multi_base_field_2;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "in_cpp_field_0",
+              "in_cpp_field_1",
+              "in_cpp_field_2",
+              "in_cpp_local_unnamed_multi_base_field_0",
+              "in_cpp_local_unnamed_multi_base_field_1",
+              "in_cpp_local_unnamed_multi_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_0) {
+  struct {
+    bool local_scalar_bool;
+    char local_scalar_char;
+    long local_scalar_long;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_scalar_bool",
+              "local_scalar_char",
+              "local_scalar_long",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_1) {
+  struct {
+    unsigned int local_scalar_unsigned;
+    float local_scalar_float;
+    std::string local_scalar_string;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_scalar_unsigned",
+              "local_scalar_float",
+              "local_scalar_string",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_2) {
+  struct {
+    short local_scalar_short;
+    long long local_scalar_long_long;
+    double local_scalar_double;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_scalar_short",
+              "local_scalar_long_long",
+              "local_scalar_double",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_0) {
+  struct {
+    int *local_pointer_int;
+    const char *local_pointer_char;
+    double *local_pointer_double;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_pointer_int",
+              "local_pointer_char",
+              "local_pointer_double",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_1) {
+  struct {
+    bool *local_pointer_bool;
+    char *local_pointer_mutable_char;
+    float *local_pointer_float;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_pointer_bool",
+              "local_pointer_mutable_char",
+              "local_pointer_float",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_std_vector_field_0) {
 //   struct {
@@ -962,21 +1090,20 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_3) {
-//   struct {
-//     unsigned long local_scalar_unsigned_long;
-//     signed char local_scalar_signed_char;
-//     double local_scalar_measurement;
-//   } p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_scalar_unsigned_long",
-//               "local_scalar_signed_char",
-//               "local_scalar_measurement",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_3) {
+  struct {
+    unsigned long local_scalar_unsigned_long;
+    signed char local_scalar_signed_char;
+    double local_scalar_measurement;
+  } p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_scalar_unsigned_long",
+              "local_scalar_signed_char",
+              "local_scalar_measurement",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_vector_field_3) {
 //   struct {
@@ -1093,175 +1220,167 @@ TEST(print_names, in_cpp_unnamed_global) {
       unnamed_global));
 }
 
-// FIXME: does not compile with Clang: named public bases are also
-// emitted as indexed metadata, making _reflected<Base> ambiguous.
-//
-// TEST(print_names, in_cpp_unnamed_global_with_header_base) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "unnamed_global_header_base_field_0",
-//               "unnamed_global_header_base_field_1",
-//               "unnamed_global_header_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       unnamed_global_with_header_base));
-// }
-//
-// TEST(print_names, in_cpp_unnamed_global_with_cpp_base) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_field_0",
-//               "in_cpp_field_1",
-//               "in_cpp_field_2",
-//               "unnamed_global_cpp_base_field_0",
-//               "unnamed_global_cpp_base_field_1",
-//               "unnamed_global_cpp_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       unnamed_global_with_cpp_base));
-// }
-//
-// TEST(print_names, in_cpp_unnamed_global_with_multi_base) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "in_cpp_field_0",
-//               "in_cpp_field_1",
-//               "in_cpp_field_2",
-//               "unnamed_global_multi_base_field_0",
-//               "unnamed_global_multi_base_field_1",
-//               "unnamed_global_multi_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       unnamed_global_with_multi_base));
-// }
+TEST(print_names, in_cpp_unnamed_global_with_header_base) {
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "unnamed_global_header_base_field_0",
+              "unnamed_global_header_base_field_1",
+              "unnamed_global_header_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      unnamed_global_with_header_base));
+}
 
-// FIXME: does not compile with Clang: forward-declarable indexed records
-// currently get both named and indexed _reflected specializations.
-// Returned unnamed structs with named bases hit the same base ambiguity.
-//
-// TEST(print_names, in_header_struct) {
-//   const example::in_header_struct p{};
-//   const static std::vector<std::string> expected{
-//     "in_header_field_0",
-//     "in_header_field_1",
-//     "in_header_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// #if defined CXX_STANDARD && 11 < CXX_STANDARD
-// TEST(print_names, in_cpp_unnamed_returned_struct) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "g_a",
-//               "g_b",
-//               "g_c",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       example::unnamed_returned_struct()));
-// }
-//
-// TEST(print_names, in_cpp_unnamed_returned_struct_with_header_base) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "returned_header_base_field_0",
-//               "returned_header_base_field_1",
-//               "returned_header_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       example::unnamed_returned_struct_with_header_base()));
-// }
-//
-// TEST(print_names, in_cpp_unnamed_returned_struct_with_cpp_base) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_field_0",
-//               "in_cpp_field_1",
-//               "in_cpp_field_2",
-//               "returned_cpp_base_field_0",
-//               "returned_cpp_base_field_1",
-//               "returned_cpp_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       example::unnamed_returned_struct_with_cpp_base()));
-// }
-//
-// TEST(print_names, in_cpp_unnamed_returned_struct_with_multi_base) {
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "in_cpp_field_0",
-//               "in_cpp_field_1",
-//               "in_cpp_field_2",
-//               "returned_multi_base_field_0",
-//               "returned_multi_base_field_1",
-//               "returned_multi_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple,
-//       example::unnamed_returned_struct_with_multi_base()));
-// }
-// #endif
-//
-// TEST(print_names, in_cpp_struct) {
-//   const example::in_cpp_struct p{};
-//   const static std::vector<std::string> expected{
-//     "in_cpp_field_0",
-//     "in_cpp_field_1",
-//     "in_cpp_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_derived_from_header_struct) {
-//   const example::in_cpp_derived_from_header_struct p{};
-//   const static std::vector<std::string> expected{
-//     "in_header_field_0",
-//     "in_header_field_1",
-//     "in_header_field_2",
-//     "in_cpp_derived_field_0",
-//     "in_cpp_derived_field_1",
-//     "in_cpp_derived_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_derived_from_cpp_struct) {
-//   const example::in_cpp_derived_from_cpp_struct p{};
-//   const static std::vector<std::string> expected{
-//     "in_cpp_field_0",
-//     "in_cpp_field_1",
-//     "in_cpp_field_2",
-//     "in_cpp_derived_from_cpp_field_0",
-//     "in_cpp_derived_from_cpp_field_1",
-//     "in_cpp_derived_from_cpp_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
-//
-// TEST(print_names, in_cpp_multi_base) {
-//   const example::in_cpp_multi_base p{};
-//   const static std::vector<std::string> expected{
-//     "in_header_field_0",
-//     "in_header_field_1",
-//     "in_header_field_2",
-//     "in_cpp_field_0",
-//     "in_cpp_field_1",
-//     "in_cpp_field_2",
-//     "in_cpp_multi_base_field_0",
-//     "in_cpp_multi_base_field_1",
-//     "in_cpp_multi_base_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+TEST(print_names, in_cpp_unnamed_global_with_cpp_base) {
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_field_0",
+              "in_cpp_field_1",
+              "in_cpp_field_2",
+              "unnamed_global_cpp_base_field_0",
+              "unnamed_global_cpp_base_field_1",
+              "unnamed_global_cpp_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      unnamed_global_with_cpp_base));
+}
+
+TEST(print_names, in_cpp_unnamed_global_with_multi_base) {
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "in_cpp_field_0",
+              "in_cpp_field_1",
+              "in_cpp_field_2",
+              "unnamed_global_multi_base_field_0",
+              "unnamed_global_multi_base_field_1",
+              "unnamed_global_multi_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      unnamed_global_with_multi_base));
+}
+
+TEST(print_names, in_header_struct) {
+  const example::in_header_struct p{};
+  const static std::vector<std::string> expected{
+    "in_header_field_0",
+    "in_header_field_1",
+    "in_header_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+#if defined CXX_STANDARD && 11 < CXX_STANDARD
+TEST(print_names, in_cpp_unnamed_returned_struct) {
+  ASSERT_EQ((std::vector<std::string>{
+              "g_a",
+              "g_b",
+              "g_c",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      example::unnamed_returned_struct()));
+}
+
+TEST(print_names, in_cpp_unnamed_returned_struct_with_header_base) {
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "returned_header_base_field_0",
+              "returned_header_base_field_1",
+              "returned_header_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      example::unnamed_returned_struct_with_header_base()));
+}
+
+TEST(print_names, in_cpp_unnamed_returned_struct_with_cpp_base) {
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_field_0",
+              "in_cpp_field_1",
+              "in_cpp_field_2",
+              "returned_cpp_base_field_0",
+              "returned_cpp_base_field_1",
+              "returned_cpp_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      example::unnamed_returned_struct_with_cpp_base()));
+}
+
+TEST(print_names, in_cpp_unnamed_returned_struct_with_multi_base) {
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "in_cpp_field_0",
+              "in_cpp_field_1",
+              "in_cpp_field_2",
+              "returned_multi_base_field_0",
+              "returned_multi_base_field_1",
+              "returned_multi_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple,
+      example::unnamed_returned_struct_with_multi_base()));
+}
+#endif
+
+TEST(print_names, in_cpp_struct) {
+  const example::in_cpp_struct p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_field_0",
+    "in_cpp_field_1",
+    "in_cpp_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_derived_from_header_struct) {
+  const example::in_cpp_derived_from_header_struct p{};
+  const static std::vector<std::string> expected{
+    "in_header_field_0",
+    "in_header_field_1",
+    "in_header_field_2",
+    "in_cpp_derived_field_0",
+    "in_cpp_derived_field_1",
+    "in_cpp_derived_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_derived_from_cpp_struct) {
+  const example::in_cpp_derived_from_cpp_struct p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_field_0",
+    "in_cpp_field_1",
+    "in_cpp_field_2",
+    "in_cpp_derived_from_cpp_field_0",
+    "in_cpp_derived_from_cpp_field_1",
+    "in_cpp_derived_from_cpp_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_multi_base) {
+  const example::in_cpp_multi_base p{};
+  const static std::vector<std::string> expected{
+    "in_header_field_0",
+    "in_header_field_1",
+    "in_header_field_2",
+    "in_cpp_field_0",
+    "in_cpp_field_1",
+    "in_cpp_field_2",
+    "in_cpp_multi_base_field_0",
+    "in_cpp_multi_base_field_1",
+    "in_cpp_multi_base_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 
 // FIXME: does not compile: generated forward declaration is emitted as
 // `enum in_cpp_enum;`, but unscoped enum forward declarations require a fixed
@@ -1282,19 +1401,16 @@ TEST(print_enums, in_cpp_unnamed_global_enum) {
     omni::reflected_call(get_enumerators, unnamed_global_enum));
 }
 
-// FIXME: does not compile with Clang: forward-declarable indexed enums
-// currently get both named and indexed _reflected specializations.
-//
-// TEST(print_enums, in_cpp_scoped_enum) {
-//   const example::in_cpp_scoped_enum e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_cpp_scoped_enum_a",
-//               "in_cpp_scoped_enum_b",
-//               "in_cpp_scoped_enum_c",
-//             }),
-//     omni::reflected_call(get_enumerators, e));
-// }
+TEST(print_enums, in_cpp_scoped_enum) {
+  const example::in_cpp_scoped_enum e{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_cpp_scoped_enum_a",
+              "in_cpp_scoped_enum_b",
+              "in_cpp_scoped_enum_c",
+            }),
+    omni::reflected_call(get_enumerators, e));
+}
 
 // FIXME: does not compile: generated enum forward declaration loses the
 // namespace and fixed underlying type.
@@ -1552,10 +1668,6 @@ TEST(read_values, in_cpp_local_unnamed_bitfield_values) {
     omni::reflected_call(example_impl::field_values_simple, p));
 }
 
-// FIXME: does not generate: reflecting types with private/protected bases or
-// non-public fields currently fails header generation. Expected behavior is
-// to reflect only own public fields and public-base fields.
-
 TEST(print_names, in_cpp_private_base) {
   const example::in_cpp_private_base p{};
   const static std::vector<std::string> expected{
@@ -1589,49 +1701,49 @@ TEST(print_names, in_cpp_mixed_access) {
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
 
-// FIXME: does not compile: the dependency base is generated both as a named
-// specialization and as an indexed specialization, making _reflected ambiguous.
+// FIXME: compiles but omits transitive public base fields inherited through the
+// direct reflected base.
 //
-// TEST(print_names, in_cpp_deep_public_base_chain) {
-//   const example::in_cpp_deep_derived p{};
-//   const static std::vector<std::string> expected{
-//     "in_header_field_0",
-//     "in_header_field_1",
-//     "in_header_field_2",
-//     "in_cpp_mid_field_0",
-//     "in_cpp_mid_field_1",
-//     "in_cpp_mid_field_2",
-//     "in_cpp_deep_field_0",
-//     "in_cpp_deep_field_1",
-//     "in_cpp_deep_field_2",
-//   };
-//   ASSERT_EQ(expected,
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
+  const example::in_cpp_deep_derived p{};
+  const static std::vector<std::string> expected{
+    "in_header_field_0",
+    "in_header_field_1",
+    "in_header_field_2",
+    "in_cpp_mid_field_0",
+    "in_cpp_mid_field_1",
+    "in_cpp_mid_field_2",
+    "in_cpp_deep_field_0",
+    "in_cpp_deep_field_1",
+    "in_cpp_deep_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 
-// FIXME: does not compile: unnamed global types with deep public base chains
-// hit the same ambiguous _reflected specialization as named deep base chains.
+// FIXME: compiles but omits transitive public base fields inherited through the
+// direct reflected base.
 //
-// TEST(print_names, in_cpp_unnamed_global_with_deep_public_base_chain) {
-//   struct: example::in_cpp_mid_base {
-//     std::string unnamed_global_deep_base_field_0;
-//     int unnamed_global_deep_base_field_1;
-//     double unnamed_global_deep_base_field_2;
-//   } const p{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "in_header_field_0",
-//               "in_header_field_1",
-//               "in_header_field_2",
-//               "in_cpp_mid_field_0",
-//               "in_cpp_mid_field_1",
-//               "in_cpp_mid_field_2",
-//               "unnamed_global_deep_base_field_0",
-//               "unnamed_global_deep_base_field_1",
-//               "unnamed_global_deep_base_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_field_names_simple, p));
-// }
+TEST(print_names, DISABLED_in_cpp_unnamed_global_with_deep_public_base_chain) {
+  struct: example::in_cpp_mid_base {
+    std::string unnamed_global_deep_base_field_0;
+    int unnamed_global_deep_base_field_1;
+    double unnamed_global_deep_base_field_2;
+  } const p{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "in_header_field_0",
+              "in_header_field_1",
+              "in_header_field_2",
+              "in_cpp_mid_field_0",
+              "in_cpp_mid_field_1",
+              "in_cpp_mid_field_2",
+              "unnamed_global_deep_base_field_0",
+              "unnamed_global_deep_base_field_1",
+              "unnamed_global_deep_base_field_2",
+            }),
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
 
 // FIXME: does not compile: returned unnamed types with deep public base chains
 // hit the same ambiguous _reflected specialization as named deep base chains.
@@ -1731,10 +1843,6 @@ TEST(print_names, in_cpp_mixed_access) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: reflecting local unnamed structs with private bases
-// currently fails header generation. Expected behavior is to reflect only own
-// public fields.
 
 TEST(print_names, in_cpp_local_unnamed_struct_with_private_base) {
   struct: private example::in_cpp_struct {
@@ -1848,10 +1956,6 @@ TEST(print_names, in_cpp_local_unnamed_struct_with_private_base) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-// FIXME: does not generate: reflecting local unnamed structs with non-public
-// fields currently fails header generation. Expected behavior is to reflect
-// only public fields.
 
 TEST(print_names, in_cpp_local_unnamed_struct_with_mixed_access) {
   struct {
@@ -2518,52 +2622,51 @@ TEST(print_names, in_cpp_local_unnamed_struct_with_mixed_access) {
 //             }),
 //     omni::reflected_call(get_enumerators, e));
 // }
-//
-// TEST(print_enums, in_cpp_local_unnamed_fixed_enum) {
-//   enum : int {
-//     local_unnamed_fixed_enum_a,
-//     local_unnamed_fixed_enum_b,
-//     local_unnamed_fixed_enum_c,
-//   } const e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_unnamed_fixed_enum_a",
-//               "local_unnamed_fixed_enum_b",
-//               "local_unnamed_fixed_enum_c",
-//             }),
-//     omni::reflected_call(get_enumerators, e));
-// }
-//
-// TEST(print_enums, in_cpp_local_unnamed_enum_three_values) {
-//   enum {
-//     local_unnamed_enum_a,
-//     local_unnamed_enum_b,
-//     local_unnamed_enum_c,
-//   } const e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_unnamed_enum_a",
-//               "local_unnamed_enum_b",
-//               "local_unnamed_enum_c",
-//             }),
-//     omni::reflected_call(get_enumerators, e));
-// }
-//
-// TEST(print_enums, in_cpp_local_unnamed_enum_with_values) {
-//   enum {
-//     local_unnamed_enum_value_a = 4,
-//     local_unnamed_enum_value_b = 8,
-//     local_unnamed_enum_value_c = 15,
-//   } const e{};
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "local_unnamed_enum_value_a",
-//               "local_unnamed_enum_value_b",
-//               "local_unnamed_enum_value_c",
-//             }),
-//     omni::reflected_call(get_enumerators, e));
-// }
-//
+TEST(print_enums, in_cpp_local_unnamed_fixed_enum) {
+  enum : int {
+    local_unnamed_fixed_enum_a,
+    local_unnamed_fixed_enum_b,
+    local_unnamed_fixed_enum_c,
+  } const e{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_unnamed_fixed_enum_a",
+              "local_unnamed_fixed_enum_b",
+              "local_unnamed_fixed_enum_c",
+            }),
+    omni::reflected_call(get_enumerators, e));
+}
+
+TEST(print_enums, in_cpp_local_unnamed_enum_three_values) {
+  enum {
+    local_unnamed_enum_a,
+    local_unnamed_enum_b,
+    local_unnamed_enum_c,
+  } const e{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_unnamed_enum_a",
+              "local_unnamed_enum_b",
+              "local_unnamed_enum_c",
+            }),
+    omni::reflected_call(get_enumerators, e));
+}
+
+TEST(print_enums, in_cpp_local_unnamed_enum_with_values) {
+  enum {
+    local_unnamed_enum_value_a = 4,
+    local_unnamed_enum_value_b = 8,
+    local_unnamed_enum_value_c = 15,
+  } const e{};
+
+  ASSERT_EQ((std::vector<std::string>{
+              "local_unnamed_enum_value_a",
+              "local_unnamed_enum_value_b",
+              "local_unnamed_enum_value_c",
+            }),
+    omni::reflected_call(get_enumerators, e));
+}
+
 TEST(write_values, in_cpp_local_unnamed_struct_from_std_map) {
   struct {
     std::string name;
@@ -3410,10 +3513,6 @@ TEST(write_values, in_cpp_struct_with_nested_std_map_wrong_nested_value_type) {
 //   ASSERT_EQ("nested", p.name);
 // }
 
-// FIXME: reflected_call on compat::type_identity<T> indexes T manually, but
-// header mode still emits indexed specializations for forward-declarable T
-// along with forward-declarable specializations.
-#if 0
 TEST(write_values, in_cpp_struct_with_nested_struct_from_std_map) {
   std::map<std::string, mpark::variant<int, double, std::string>> from;
   from["i"] = 815;
@@ -3439,7 +3538,6 @@ TEST(write_values, in_cpp_named_struct_from_std_map) {
   ASSERT_EQ(23, p.in_cpp_field_1);
   ASSERT_EQ(42.5, p.in_cpp_field_2);
 }
-#endif
 
 #if defined CXX_STANDARD && 17 <= CXX_STANDARD
 // FIXME: header mode does not instrument supported dependency types reachable
