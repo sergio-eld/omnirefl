@@ -1,5 +1,6 @@
 build*/
 .cache/
+.nvim-cmake/
 compile_commands.json
 sample/build*/
 sample/compile_commands.json

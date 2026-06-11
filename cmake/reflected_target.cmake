@@ -234,6 +234,15 @@ function(omni_reflected_target target)
 
             set(_fi_prop "OMNIREFL_FORCE_INCLUDE_${_src_hash}")
 
+            # fixme(QoL): Header-mode forced includes can make clangd report
+            # stale or invalid diagnostics. The real compiler build is safe
+            # because the generated header is an explicit target dependency,
+            # but clangd reads compile_commands.json outside that dependency
+            # graph. Missing or stale .omnirefl.hpp files can pollute the LSP
+            # parse, e.g. false omni::is_reflected<T> assertion failures in
+            # reflected_call visitors. Consider a stable LSP/pre-build strategy
+            # that avoids stale generated metadata while still making the forced
+            # include path exist before the real header is generated.
             if(MSVC)
                 set_target_properties(${target} PROPERTIES ${_fi_prop} "/FI${_generated_header}")
             else()
@@ -264,4 +273,3 @@ function(omni_reflected_target target)
         VERBATIM
     )
 endfunction()
-
