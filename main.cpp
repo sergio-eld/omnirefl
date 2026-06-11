@@ -136,20 +136,6 @@ bool is_subpath(const std::filesystem::path &path,
   return mismatch_pair.second == base.end();
 }
 
-// todo: extend formatting context (padding, what else?)
-// todo: do I need a way to combine the adaptors? each of them should serve
-// (exactly?) one purpose:
-// - custom format
-// - for range:
-//   - element format (achievable now via std::views)
-//   - joining with delim (implemented by join)
-//   - ???
-template <typename T, typename Formatter>
-struct use_fmt {
-  const T &value;
-  Formatter fmt;
-};
-
 template <typename V, typename CharT = char>
 struct fmt_fold_t {
   V rng;
@@ -173,34 +159,6 @@ struct fmt_fold_adaptor {
 constexpr fmt_fold_adaptor fmt_fold{};
 
 } // namespace util
-
-template <typename T, typename Formatter>
-struct std::formatter<util::use_fmt<T, Formatter>> {
-  /// holds parsed {:specs} for strings – width, alignment, etc.
-  mutable std::formatter<std::string_view> _base;
-
-  template <typename ParseContext>
-  constexpr auto parse(ParseContext &ctx) {
-    /// delegate parsing of {:specs} to the string formatter
-    return _base.parse(ctx);
-  }
-
-  template <typename FormatContext>
-    requires std::invocable<Formatter, const T &, FormatContext &>
-  constexpr auto format(const util::use_fmt<T, Formatter> &wrapped,
-    FormatContext &ctx) const {
-    return wrapped.fmt(wrapped.value, ctx);
-  }
-
-  template <typename FormatContext>
-    requires std::invocable<Formatter, const T &>
-    && std::convertible_to<std::invoke_result_t<Formatter, const T &>,
-      std::basic_string_view<typename FormatContext::char_type>>
-  constexpr auto format(const util::use_fmt<T, Formatter> &wrapped,
-    FormatContext &ctx) const {
-    return _base.format(wrapped.fmt(wrapped.value), ctx);
-  }
-};
 
 template <std::ranges::input_range V, typename CharT>
 struct std::formatter<util::fmt_fold_t<V, CharT>, CharT> {
