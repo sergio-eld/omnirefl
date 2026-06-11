@@ -179,7 +179,7 @@ struct wrestler {
   std::string catchphrase{};
   std::vector<championship> titles{};
 
-  // fixme: implement support in header-mode
+  // fixme: implement support in generated-header
   class info_t {
     public:
     std::string ring_name;

@@ -42,7 +42,7 @@ void bm_parse_ast_using_compilation_db(benchmark::State &state) {
   const std::filesystem::path resource_dir = {RESOURCE_DIR};
 
   for (auto _ : state) {
-    auto res = tool::parse_ast_from_source(tool::cli::source_mode{},
+    auto res = tool::parse_ast_from_source(tool::cli::options{},
       resource_dir,
       cpp_path,
       **compilation_db,
@@ -82,7 +82,7 @@ void bm_parse_ast_direct(benchmark::State &state) {
 
   for (auto _ : state) {
     // todo: get rid of `**compilation_db`
-    auto res = tool::parse_ast_from_source(tool::cli::source_mode{},
+    auto res = tool::parse_ast_from_source(tool::cli::options{},
       resource_dir,
       cpp_path,
       **compilation_db,

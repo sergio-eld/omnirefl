@@ -1,15 +1,15 @@
 #include "gtest_include.h"
 
-// FIXME(high): indexed header-mode reflection is currently disabled as a
+// FIXME(high): indexed generated-header reflection is currently disabled as a
 // production test surface. The implementation relies on friend-injection
 // indexes for non-forward-declarable local/unnamed types; those specializations
 // are expensive for MSVC and currently exhaust compiler heap space in large
 // test translation units. Keep indexed-type cases in this file until the
 // implementation is either removed or redesigned.
-#if 0 //< 1 to enable indexed header-mode tests.
+#if 0 //< 1 to enable indexed generated-header tests.
 #  include "index_regression.cpp"
 
-// FIXME: header mode does not instrument supported dependency types reachable
+// FIXME: generated-header reflection does not instrument supported dependency types reachable
 // through reflected_call argument types when those dependency types cannot be
 // forward-declared.
 //

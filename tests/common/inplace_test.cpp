@@ -1,6 +1,6 @@
 
 #include "gtest_include.h"
-#include "inplace_structs.h"
+#include "shared_structs.h"
 
 #include <omnirefl/reflected_call.hpp>
 #include <omnirefl/reflected_scope.hpp>
@@ -17,9 +17,8 @@
 #endif
 #include <vector>
 
-// This file is intentionally large: header-mode in-place reflection relies on
-// stable indexed type ordering, and broad coverage here helps detect valid
-// indexing-order regressions.
+// This file is intentionally large to exercise generated-header reflection
+// across a broad translation unit.
 
 #if defined(__has_cpp_attribute)
 #  if __has_cpp_attribute(maybe_unused) \
@@ -67,8 +66,8 @@ void from_std_map(const std::map<std::string, V> &from, T &to);
 template <typename T, typename V>
 T from_std_map(const std::map<std::string, V> &from);
 
-// FIXME: leaking reflected-scope query helper, but not the index mismatch
-// cause unless instantiated outside a reflected scope.
+// FIXME: leaking reflected-scope query helper; safe only while instantiated
+// inside a reflected scope.
 template <typename T, bool = omni::is_reflected<T>::value>
 struct is_reflected_record: std::false_type {};
 
@@ -578,7 +577,7 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
 
 // FIXME: does not generate: when a reflected_call input is a composed type
 // such as std::tuple<std::tuple<unnamed, int>>, the unnamed nested tuple
-// element is not promoted to stable reflection metadata. Header mode currently
+// element is not promoted to stable reflection metadata. Generated-header reflection currently
 // only instruments direct std::tuple element types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_through_nested_tuple_arg) {
@@ -802,13 +801,13 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
 //   in_cpp_local_unnamed_struct_with_nested_vector_variant_field) {
 //   struct {
 //     std::vector<mpark::variant<int, double>> local_nested_variant_vector;
-//     int local_nested_variant_vector_index;
+//     int local_nested_variant_vector_rank;
 //     std::string local_nested_variant_vector_note;
 //   } p{};
 //
 //   ASSERT_EQ((std::vector<std::string>{
 //               "local_nested_variant_vector",
-//               "local_nested_variant_vector_index",
+//               "local_nested_variant_vector_rank",
 //               "local_nested_variant_vector_note",
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
@@ -1165,9 +1164,8 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
 
-// FIXME: does not compile: local base and derived types need direct indexed
-// specializations, but the current generated header tries to route them through
-// the not-yet-declared GTest fixture class.
+// FIXME: does not compile: local base and derived types cannot be named
+// from the generated header through the not-yet-declared GTest fixture class.
 //
 // TEST(print_names, in_cpp_local_public_base_chain) {
 //   struct local_base {
@@ -1194,8 +1192,8 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 // }
 
 // TODO: support dependency types that cannot be forward-declared. Some of
-// these can be generated via decltype(member field); incidental indexes from
-// unrelated reflected_call sites should not affect support.
+// these can be generated via decltype(member field); unrelated reflected_call
+// routes should not affect support.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unscoped_enum_field) {
 //   enum local_field_enum {
@@ -1292,7 +1290,7 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 // }
 
 // FIXME: does not generate: the unnamed type used through std::vector is
-// collected as a dependency, but header mode reports non-reflectable types.
+// collected as a dependency, but generated-header reflection reports non-reflectable types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_vector_field) {
 //   struct {
@@ -1316,7 +1314,7 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 // }
 
 // FIXME: does not generate: the unnamed type used through std::tuple is
-// collected as a dependency, but header mode reports non-reflectable types.
+// collected as a dependency, but generated-header reflection reports non-reflectable types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_tuple_field) {
 //   struct {
@@ -1340,7 +1338,7 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 // }
 
 // FIXME: does not generate: the unnamed type used through mpark::variant is
-// collected as a dependency, but header mode reports non-reflectable types.
+// collected as a dependency, but generated-header reflection reports non-reflectable types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_variant_field) {
 //   struct {
@@ -1450,8 +1448,7 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 // FIXME: does not compile: local named class declarations are emitted through
 // the GTest fixture scope before that scope can be named from the forced
 // include. These cases describe additional local/context/template-route
-// combinations that should eventually be generated through indexed
-// specializations.
+// combinations that need a non-global type naming strategy.
 //
 // TEST(print_names, in_cpp_local_named_struct_with_std_vector_field) {
 //   struct local_named_struct {
@@ -1933,16 +1930,10 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 //             }),
 //     omni::reflected_call(get_enumerators, e));
 // }
-// FIXME(high): does not compile in header mode in this large translation unit:
-// same-shape local unnamed direct reflected_call records generate correct
-// metadata, but the real compilation can match an earlier incompatible indexed
-// specialization. This is not bitfield-specific; observed first test metadata
-// generated at index 62 with fields `foo_count`, `bar_count`,
-// `untouched_count`, while real compilation matched index 53, generated for
-// `write_values.in_cpp_local_unnamed_struct_from_std_map` with fields `name`,
-// `count`, `score`. A standalone two-route probe keeps stable indexes under
-// Clang and GCC with the generated header force-included, so the trigger needs
-// accumulated header-mode TU context.
+// FIXME(high): does not compile in generated-header reflection in this large
+// translation unit: same-shape local unnamed direct reflected_call records can
+// resolve to metadata generated for another local unnamed record. This is not
+// bitfield-specific; the trigger needs accumulated generated-header TU context.
 // TEST(write_values, in_cpp_local_unnamed_struct_foo_bar_first_identical) {
 //   struct {
 //     int foo_count;
@@ -1977,9 +1968,9 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 //   ASSERT_EQ(6, p.untouched_count);
 // }
 
-// FIXME(high): does not compile in header mode: broader direct local unnamed
-// write visitor route for the same indexed mismatch reproduced by the
-// same-shape regression above.
+// FIXME(high): does not compile in generated-header reflection: broader direct
+// local unnamed write visitor route for the same metadata mismatch reproduced
+// by the same-shape regression above.
 //
 // TEST(write_values, in_cpp_local_unnamed_struct_foo_bar_visitor) {
 //   struct {
@@ -2050,9 +2041,9 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 //   ASSERT_EQ(1, p.hidden_value());
 // }
 
-// FIXME(high): does not compile in header mode: bitfield variant of the same
-// direct local unnamed indexed mismatch reproduced by the same-shape regression
-// above. Bitfields are not the root trigger.
+// FIXME(high): does not compile in generated-header reflection: bitfield
+// variant of the same direct local unnamed metadata mismatch reproduced by the
+// same-shape regression above. Bitfields are not the root trigger.
 //
 // TEST(write_values, in_cpp_local_unnamed_bitfields_foo_bar_visitor) {
 //   struct {
@@ -2320,7 +2311,7 @@ TEST(write_values, in_cpp_scalar_pack_from_std_map_extra_keys) {
   ASSERT_EQ("extra scalar", p.label);
 }
 
-// FIXME: disabled: header mode reflects direct public base fields, but not
+// FIXME: disabled: generated-header reflection reflects direct public base fields, but not
 // transitive public base fields. The in_header_struct grand-base fields remain
 // unchanged at runtime.
 TEST(write_values, DISABLED_in_cpp_deep_derived_from_std_map) {
@@ -2506,11 +2497,10 @@ TEST(write_values, in_cpp_struct_with_nested_std_variant_map) {
   ASSERT_EQ("standard nested", p.name);
 }
 
-// FIXME(high): does not compile in packaged clang header-mode builds for
+// FIXME(high): does not compile in packaged clang generated-header builds for
 // C++17 and later. Local unnamed std::variant map routes are detected by the
 // tool, but the real compilation does not find a matching generated _reflected
-// specialization for the local unnamed record. This is not an indexed unique-id
-// order issue; reflected-scope index queries are non-mutating.
+// specialization for the local unnamed record.
 //
 // TEST(write_values, in_cpp_local_unnamed_struct_from_std_variant_map_reference)
 // {
@@ -2639,7 +2629,7 @@ TEST(write_values, in_cpp_struct_with_nested_std_map_wrong_nested_value_type) {
 #endif
 
 // TODO: support nested type fields declared inside a local unnamed parent.
-// Header mode currently generates an invalid nested type reference for this
+// Generated-header reflection currently generates an invalid nested type reference for this
 // route.
 //
 // TEST(write_values, in_cpp_local_unnamed_struct_with_nested_struct_from_std_map) {

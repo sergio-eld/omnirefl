@@ -702,7 +702,7 @@ struct source_file_context {
 
 namespace render {
 
-struct header_mode_context {
+struct reflection_context {
   // can generate forward declaration reflected type
   struct forward_declarable {
     meta::reflectable type;
@@ -732,11 +732,11 @@ struct header_mode_context {
   std::set<fs::path> file_dependencies;
 };
 
-std::expected<header_mode_context, std::string> prepare_header_mode_context(
+std::expected<reflection_context, std::string> prepare_reflection_context(
   meta::source_file_context ctx);
 
-std::expected<header_mode_context, std::string>
-  header_mode_reflection(header_mode_context ctx, std::ofstream file);
+std::expected<reflection_context, std::string>
+  generate_reflection(reflection_context ctx, std::ofstream file);
 
 auto format_location(const meta::source_location &d) {
   return std::format("{}:{}:{}",
@@ -788,7 +788,7 @@ std::string forward_declaration(const meta::reflectable &t) {
           static_assert(std::same_as<meta::record_data, T>);
           const meta::record_data &struct_data = data;
 
-          // TODO(High): Header-mode reflection for templates, template
+          // TODO(High): Generated-header reflection for templates, template
           // specializations, partial specializations, and template-template
           // types.
           return std::format("{} {};",
@@ -1019,7 +1019,7 @@ with_compiler_invocation configure_compiler_invocation(
 
   {
     clang::PreprocessorOptions &po = wci.ci->getPreprocessorOpts();
-    constexpr std::string_view k_omni_macro = "OMNI_HEADER_MODE";
+    constexpr std::string_view k_omni_macro = "OMNI_GENERATED_REFLECTION";
 
     if (const auto omni_defined = std::ranges::find_if(po.Macros,
           [k_omni_macro](const auto &macro_def) {
@@ -1272,8 +1272,8 @@ int main(int argc, char **argv) {
 
   const std::expected instrumented_source =
     processed_source
-      .and_then(render::prepare_header_mode_context)
-      .and_then([reflection_header_path](render::header_mode_context ctx) {
+      .and_then(render::prepare_reflection_context)
+      .and_then([reflection_header_path](render::reflection_context ctx) {
         const fs::path out = reflection_header_path(ctx.instrumented_source_file);
 
         llvm::errs() << std::format(
@@ -1282,8 +1282,8 @@ int main(int argc, char **argv) {
 
         return util::create_file_for_writing(out) //
           .and_then(
-            std::bind_front(render::header_mode_reflection, std::move(ctx)))
-          .and_then([out](render::header_mode_context ctx) {
+            std::bind_front(render::generate_reflection, std::move(ctx)))
+          .and_then([out](render::reflection_context ctx) {
             llvm::errs() << std::format("\n[info] writing deps file for: {}",
               out.generic_string());
 
@@ -1869,7 +1869,7 @@ std::expected<clang::Type const *, std::string> get_template_type_arg(
   return arg.getAsType().getTypePtr();
 }
 
-// todo: remove maybe_unused when header mode is implemented (indexed calls)
+// todo: remove maybe_unused when generated-header reflection uses this helper.
 [[maybe_unused]] std::expected<int, std::string> get_template_value_arg(
   const clang::ClassTemplateSpecializationDecl &template_decl,
   size_t n) noexcept {
@@ -2611,12 +2611,12 @@ std::string reflectable_body(const meta::record_data &d) {
 
 } // namespace render::impl
 
-auto render::prepare_header_mode_context(meta::source_file_context ctx)
-  -> std::expected<header_mode_context, std::string> {
+auto render::prepare_reflection_context(meta::source_file_context ctx)
+  -> std::expected<reflection_context, std::string> {
   using partition_result =
-    std::tuple<std::vector<header_mode_context::forward_declarable>,
-      std::vector<header_mode_context::nested_type>,
-      std::vector<header_mode_context::indexed_type>>;
+    std::tuple<std::vector<reflection_context::forward_declarable>,
+      std::vector<reflection_context::nested_type>,
+      std::vector<reflection_context::indexed_type>>;
 
   const auto partition_types = //
     [index_by_type_id =
@@ -2641,10 +2641,11 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
       const bool is_public_non_local =
         meta::type_definition::none == t.definition.definition_flags;
 
-      // fixme: if an indexed reflected type can be forward declared, the
-      // indexed reflection must not be generated. Otherwise header mode emits
-      // both the named/nested specialization and the indexed specialization,
-      // which Clang diagnoses as ambiguous _reflected<T> metadata.
+      // fixme: if a generated reflected type can be forward declared, the
+      // fallback specialization must not be generated. Otherwise generated-header
+      // reflection emits both the named/nested specialization and fallback
+      // specialization, which Clang diagnoses as ambiguous _reflected<T>
+      // metadata.
       if (std::visit(
             [is_nested, is_unnamed, is_public_non_local]<
               meta::reflectable_data Data>(const Data &data) {
@@ -2661,7 +2662,7 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
             t.data)) {
         if (index) {
           llvm::errs() << std::format(
-            "\n[debug] indexed '{}' type '{}' will be rendered as forward-declarable.",
+            "\n[debug] generated fallback '{}' type '{}' will be rendered as forward-declarable.",
             *index,
             t.id);
         }
@@ -2679,14 +2680,14 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
       // fixme: check if enclosing root is public && non-local. As of now this
       // info is not collected/resolved: only names are collected.
       if (is_nested
-        // ad hoc to distinguish from indexed types that has non-empty
+        // ad hoc to distinguish from fallback-specialized types that has non-empty
         // enclosing_records. Unnamed nested types can be supported, but
-        // distinction from 'indexed' should be stronger.
+        // the distinction should be stronger.
         && !is_unnamed
         && !t.definition.type_name.enclosing_records.front().empty()) {
         if (index) {
           llvm::errs() << std::format(
-            "\n[debug] indexed '{}' type '{}' will be rendered as nested forward-declarable.",
+            "\n[debug] generated fallback '{}' type '{}' will be rendered as nested forward-declarable.",
             *index,
             t.id);
           llvm::errs() << std::format("\n[debug] is_nested: {}", is_nested);
@@ -2704,12 +2705,10 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         continue;
       }
 
-      // fixme(high): some local/unnamed indexed routes still fail in header
-      // mode, but the failure is not caused by reflected-scope queries changing
-      // unique-id order. Generated indexed reflection checks
-      // reflected_index_match<N, T> directly and do not call unique_id<T>().
-      // Re-triage the remaining failures as wrong/duplicate indexed metadata or
-      // missing generated indexed specializations.
+      // fixme(high): some local/unnamed fallback-specialized routes still fail.
+      // The generated guard is non-mutating, so re-triage the remaining
+      // failures as wrong/duplicate metadata or missing generated fallback
+      // specializations.
       if (index) {
         indexed.push_back({
           .type = std::move(t),
@@ -2719,17 +2718,17 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         continue;
       }
 
-      // fixme: header mode does not instrument supported dependency types
+      // fixme: generated-header reflection does not instrument supported dependency types
       // reachable through reflected_call argument types when those dependency
-      // types cannot be forward-declared. Incidental indexes from unrelated
-      // reflected_call sites must not make those dependencies supported.
+      // types cannot be forward-declared. Incidental reflected_call
+      // registrations must not make those dependencies supported.
       errors.push_back(std::move(t));
     }
 
     // todo:
     // - fwd: not nested && non-local && named
     // - nested: nested && (enclosing root is non-local && named)
-    // - indexed: everything else that has index
+    // - generated fallback: everything else discovered through reflected_call
     // - error if failed to classify. Collect errors, aggregate and report as
     // an error string
 
@@ -2747,7 +2746,7 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
         [&]<typename F, typename N, typename I>(F &&fwd,
           N &&nested,
           I &&indexed) {
-          return header_mode_context{
+          return reflection_context{
             .instrumented_source_file = std::move(sf),
 
             .fwd_declarables = std::forward<F>(fwd),
@@ -2761,8 +2760,8 @@ auto render::prepare_header_mode_context(meta::source_file_context ctx)
     });
 }
 
-auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
-  -> std::expected<header_mode_context, std::string> {
+auto render::generate_reflection(reflection_context ctx, std::ofstream file)
+  -> std::expected<reflection_context, std::string> {
   static constexpr auto cmp_roots = //
     [](const meta::nm_qual_type &lhs, const meta::nm_qual_type &rhs) -> bool {
     return std::tie(lhs.namespaces, lhs.name)
@@ -2770,7 +2769,7 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
   };
 
   const std::set access_roots = ctx.nested
-    | std::views::transform([](const header_mode_context::nested_type &n) {
+    | std::views::transform([](const reflection_context::nested_type &n) {
         return n.type.definition.type_name;
       })
     | std::ranges::to<std::set>(cmp_roots);
@@ -2799,26 +2798,26 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
 
   static constexpr auto format_head = //
     []<typename S>(const S &r) {
-      using hm = header_mode_context;
+      using rc = reflection_context;
       const auto &type_name = r.type.definition.type_name;
 
       return std::visit(
         [&](const meta::reflectable_data auto &d) {
-          if constexpr (std::same_as<hm::forward_declarable, S>)
+          if constexpr (std::same_as<rc::forward_declarable, S>)
             return impl::reflectable_head(type_name, d);
-          else if constexpr (std::same_as<hm::nested_type, S>)
+          else if constexpr (std::same_as<rc::nested_type, S>)
             return impl::inner_reflectable_head(type_name, d);
           else {
-            static_assert(std::same_as<hm::indexed_type, S>);
+            static_assert(std::same_as<rc::indexed_type, S>);
             return impl::indexed_reflectable_head(type_name, d, r.index);
           }
         },
         r.type.data);
     };
 
-  // fixme: handle indexed bases
+  // fixme: handle fallback-specialized bases
   // fixme: reflected public fields do not include transitive public bases in
-  // header mode. A direct public base is reflected, but fields from a public
+  // generated-header reflection. A direct public base is reflected, but fields from a public
   // grand-base are missing from public_fields().
   const auto format_public_bases = //
     [&type_name_by_id](const meta::record_data &r) {
@@ -2922,7 +2921,7 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
     "\n// -- reflected inner types --------"
     "\n{5}"
     "\n"
-    "\n// -- reflected indexed types --------"
+    "\n// -- generated fallback reflected types --------"
     "\n{6}"
     "\n" // todo: ^^^
     "\n}} // namespace"
@@ -2952,7 +2951,7 @@ auto render::header_mode_reflection(header_mode_context ctx, std::ofstream file)
 
     // 2:
     ctx.fwd_declarables //
-      | std::views::transform(&header_mode_context::forward_declarable::type)
+      | std::views::transform(&reflection_context::forward_declarable::type)
       | std::views::transform(render::forward_declaration) //
       | std::views::join_with("\n\n"sv) //
       | util::fmt_fold,

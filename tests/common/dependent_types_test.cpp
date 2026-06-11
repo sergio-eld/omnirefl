@@ -382,7 +382,7 @@ TEST(inheritance_dependency, multi_base_field_count) {
       dt::multi_base_derived{4, "second", 15}));
 }
 
-// FIXME: disabled: header mode reflects direct public base fields, but omits
+// FIXME: disabled: generated-header reflection reflects direct public base fields, but omits
 // transitive public base fields inherited through that direct base.
 TEST(inheritance_dependency, DISABLED_deep_base_fields_are_flattened) {
   namespace dt = dependency_types;
@@ -469,7 +469,7 @@ TEST(enum_dependency, forward_declarable_enum_holder_second_type) {
       dt::forward_declarable_enum_holder{}));
 }
 
-// FIXME: does not compile in header mode: the plain unscoped enum dependency
+// FIXME: does not compile in generated-header reflection: the plain unscoped enum dependency
 // cannot be forward-declared.
 //
 // TEST(enum_dependency, enum_holder_field_names) {

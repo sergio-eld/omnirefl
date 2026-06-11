@@ -16,18 +16,15 @@ namespace detail {
 namespace {
 
 //------------------------------------------------------------------------------
-// Notes for indexed generated-header reflection: local/unnamed type support
+// Notes for generated-header reflection: local/unnamed type support
 //
-// Omnirefl records the integer index `N` that `unique_id<T>()` evaluates to
-// while parsing the AST. During the real compilation, `reflected_call` registers
-// the `(N, T)` pair and generated `_reflected<T>` queries that registration.
-// The query must not evaluate `unique_id<T>()`: probing an unrelated type would
-// otherwise allocate a new index and change the order seen by later reflected
-// calls.
+// During the real compilation, `reflected_call` registers local/unnamed types
+// observed by the tool. Generated `_reflected<T>` queries must only inspect
+// those registrations: probing an unrelated type must not mutate reflection
+// state observed by later reflected calls.
 //
 // Limitation: if a reflected type `T` has member field types that are not
-// forward-declarable, those member types cannot be indexed and therefore will
-// not be available for reflection.
+// forward-declarable, those member types are not available for reflection.
 //------------------------------------------------------------------------------
 
 // `= T` is kept for frontend compatibility with generated metadata.
