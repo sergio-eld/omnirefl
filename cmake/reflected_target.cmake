@@ -61,24 +61,24 @@ function(_omni_get_target_sources target_name out_sources)
 endfunction()
 
 # todo: implement include|exclude handling
-# -- Reflected target helper (default: source mode) --------
-# args: MODE source|header (default: source), INCLUDE <...> | EXCLUDE <...>
+# -- Reflected target helper --------
+# args: INCLUDE <...> | EXCLUDE <...>
 # Generated sources are ignored by the tool.
 # Use INCLUDE or EXCLUDE to refine inputs; entries are file paths or regexes.
 # INCLUDE and EXCLUDE are mutually exclusive.
 function(omni_reflected_target target)
     _omni_checkhealth()
 
-    cmake_parse_arguments(OMNIREFL "" "MODE" "INCLUDE;EXCLUDE" ${ARGN})
+    cmake_parse_arguments(OMNIREFL "" "" "INCLUDE;EXCLUDE" ${ARGN})
 
     if(OMNIREFL_INCLUDE AND OMNIREFL_EXCLUDE)
         message(FATAL_ERROR "omni_reflected_target: INCLUDE and EXCLUDE are mutually exclusive")
     endif()
 
-    if(NOT OMNIREFL_MODE)
-        set(OMNIREFL_MODE "source")
+    if(OMNIREFL_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "omni_reflected_target: unexpected arguments: ${OMNIREFL_UNPARSED_ARGUMENTS}")
     endif()
-    set(mode "${OMNIREFL_MODE}")
     if(NOT TARGET ${target})
         message(SEND_ERROR "${target} is not a valid CMake target")
         return()
@@ -97,7 +97,7 @@ function(omni_reflected_target target)
     endif()
 
     # OBJECT and INTERFACE libraries are not supported.
-    # - OBJECT: can cause multiple definition of explicit _call_impl specializations when reused.
+    # - OBJECT: can cause duplicated generated reflection metadata when reused.
     # - INTERFACE: has no compilation step / sources.
     get_target_property(target_type ${target} TYPE)
     if(target_type STREQUAL "OBJECT_LIBRARY")
@@ -153,108 +153,62 @@ function(omni_reflected_target target)
     set(_gen_outputs)
     set(_gen_depfiles)
 
-    if(mode STREQUAL "source")
-        set(_generated "${_out_dir}/reflected_${target}_source_mode.cpp")
-        set(_depfile "${_generated}.d")
+    message(STATUS "omnirefl: selected generated-header reflection for target ${target}")
+    message(STATUS "omnirefl: output dir for target ${target}: ${_out_dir}")
 
-        message(STATUS "omnirefl: selected source-mode for target ${target}")
-        message(STATUS "omnirefl: output file for target ${target}: ${_generated}")
-        message(STATUS "omnirefl: depfile for target ${target}: ${_depfile}")
+    foreach(_src IN LISTS _tu_sources)
+        get_filename_component(_abs "${_src}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+        string(SHA1 _src_hash "${_abs}")
+        get_filename_component(_stem "${_src}" NAME_WE)
 
-        # Build all "src":"target.dir" pairs (headers included)
-        set(_pairs_quoted)
-        foreach(src IN LISTS _refl_sources)
-            set(_pair "\"${src}\":\"${target}.dir\"")
-            list(APPEND _pairs_quoted ${_pair})
-            message(VERBOSE "omnirefl: for target ${target} selected source: ${_pair}")
-        endforeach()
+        set(_generated_header "${_out_dir}/${_stem}_${_src_hash}.omnirefl.hpp")
+        set(_depfile "${_generated_header}.d")
 
-        set(_omni_args
-            --mode=source
-            --resource-dir "${omnirefl_RESOURCE_DIR}"
-            --comp-db "${_comp_db}"
-            -o "${_generated}"
-            -s ${_pairs_quoted}
-        )
+        set(_pair "\"${_src}\":\"${target}.dir\"")
+        message(VERBOSE "omnirefl: for target ${target} selected TU: ${_pair}")
+
+	    set(_omni_args
+	        --resource-dir "${omnirefl_RESOURCE_DIR}"
+	        --comp-db "${_comp_db}"
+	        -o "${_generated_header}"
+	        --source ${_pair}
+	    )
 
         add_custom_command(
-            OUTPUT "${_generated}"
+            OUTPUT "${_generated_header}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
             COMMAND omni::tool ${_omni_args}
-            COMMENT "omnirefl: running (source mode) for ${target}"
-            DEPENDS ${_refl_sources} omni::tool
+            COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
+            DEPENDS "${_src}" omni::tool
             BYPRODUCTS "${_depfile}"
             DEPFILE "${_depfile}"
             VERBATIM
         )
 
-        list(APPEND _gen_outputs "${_generated}")
+        list(APPEND _gen_outputs "${_generated_header}")
         list(APPEND _gen_depfiles "${_depfile}")
 
-        target_sources(${target} PRIVATE "${_generated}")
-        target_link_libraries(${target} PRIVATE omni::refl)
-        target_compile_definitions(${target} PRIVATE OMNI_SOURCE_MODE)
+        set(_fi_prop "OMNIREFL_FORCE_INCLUDE_${_src_hash}")
 
-    else() # header
-        message(STATUS "omnirefl: selected header-mode for target ${target}")
-        message(STATUS "omnirefl: output dir for target ${target}: ${_out_dir}")
+        # fixme(QoL): forced generated includes can make clangd report
+        # stale or invalid diagnostics. The real compiler build is safe
+        # because the generated header is an explicit target dependency,
+        # but clangd reads compile_commands.json outside that dependency
+        # graph. Missing or stale .omnirefl.hpp files can pollute the LSP
+        # parse, e.g. false omni::is_reflected<T> assertion failures in
+        # reflected_call visitors. Consider a stable LSP/pre-build strategy
+        # that avoids stale generated metadata while still making the forced
+        # include path exist before the real header is generated.
+        if(MSVC)
+            set_target_properties(${target} PROPERTIES ${_fi_prop} "/FI${_generated_header}")
+        else()
+            set_target_properties(${target} PROPERTIES ${_fi_prop} "-include;${_generated_header}")
+        endif()
 
-        foreach(_src IN LISTS _tu_sources)
-            get_filename_component(_abs "${_src}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-            string(SHA1 _src_hash "${_abs}")
-            get_filename_component(_stem "${_src}" NAME_WE)
+        set_source_files_properties("${_src}" PROPERTIES COMPILE_OPTIONS "$<TARGET_PROPERTY:${_fi_prop}>")
+    endforeach()
 
-            set(_generated_header "${_out_dir}/${_stem}_${_src_hash}.omnirefl.hpp")
-            set(_depfile "${_generated_header}.d")
-
-            set(_pair "\"${_src}\":\"${target}.dir\"")
-            message(VERBOSE "omnirefl: for target ${target} selected TU: ${_pair}")
-
-            set(_omni_args
-                --mode=header
-                --resource-dir "${omnirefl_RESOURCE_DIR}"
-                --comp-db "${_comp_db}"
-                -o "${_generated_header}"
-                -s ${_pair}
-            )
-
-            add_custom_command(
-                OUTPUT "${_generated_header}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
-                COMMAND omni::tool ${_omni_args}
-                COMMENT "omnirefl: running (header mode) for ${target}: ${_src}"
-                DEPENDS "${_src}" omni::tool
-                BYPRODUCTS "${_depfile}"
-                DEPFILE "${_depfile}"
-                VERBATIM
-            )
-
-            list(APPEND _gen_outputs "${_generated_header}")
-            list(APPEND _gen_depfiles "${_depfile}")
-
-            set(_fi_prop "OMNIREFL_FORCE_INCLUDE_${_src_hash}")
-
-            # fixme(QoL): Header-mode forced includes can make clangd report
-            # stale or invalid diagnostics. The real compiler build is safe
-            # because the generated header is an explicit target dependency,
-            # but clangd reads compile_commands.json outside that dependency
-            # graph. Missing or stale .omnirefl.hpp files can pollute the LSP
-            # parse, e.g. false omni::is_reflected<T> assertion failures in
-            # reflected_call visitors. Consider a stable LSP/pre-build strategy
-            # that avoids stale generated metadata while still making the forced
-            # include path exist before the real header is generated.
-            if(MSVC)
-                set_target_properties(${target} PROPERTIES ${_fi_prop} "/FI${_generated_header}")
-            else()
-                set_target_properties(${target} PROPERTIES ${_fi_prop} "-include;${_generated_header}")
-            endif()
-
-            set_source_files_properties("${_src}" PROPERTIES COMPILE_OPTIONS "$<TARGET_PROPERTY:${_fi_prop}>")
-        endforeach()
-
-        target_compile_definitions(${target} PRIVATE OMNI_HEADER_MODE)
-        target_link_libraries(${target} PRIVATE omni::refl)
-    endif()
+    target_link_libraries(${target} PRIVATE omni::refl)
 
     # Common plumbing: hook outputs into build + manual force-regenerate target
     set(_gen_target "_gen.${target}.omni")
