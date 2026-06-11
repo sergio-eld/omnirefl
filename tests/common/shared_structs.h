@@ -206,20 +206,6 @@ struct query_non_reflected_enum_then_field_names_t {
   }
 } const static query_non_reflected_enum_then_field_names{};
 
-struct query_composed_non_reflected_then_field_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &value) const {
-    struct non_reflected_probe_record {
-      int not_reflected;
-    };
-
-    static_assert(
-      !omni::is_reflected<std::vector<non_reflected_probe_record>>::value,
-      "negative composed probe must not register reflection metadata");
-    return field_names(value);
-  }
-} const static query_composed_non_reflected_then_field_names{};
-
 struct query_mixed_non_reflected_then_field_names_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {

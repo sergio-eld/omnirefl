@@ -141,8 +141,6 @@ static const struct print_field_names_recursive_t {
 // fixme: enable after refining
 // naive implementation, does not support containers
 // struct simple_from_map_t {
-//   // todo: modify with type_identity<T> as a reflected type. It may be not
-//   // default-constructible
 //   template <typename T>
 //   void operator()(T &to,
 //     const std::map<std::string, std::string> &from) const noexcept {

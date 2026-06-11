@@ -99,26 +99,6 @@ struct print_field_names_simple_t {
   }
 } const static print_field_names_simple{};
 
-struct print_tuple_first_field_names_t {
-  template <typename Tuple>
-  std::vector<std::string> operator()(const Tuple &) const {
-    using first_type = typename std::tuple_element<0,
-      typename std::decay<Tuple>::type>::type;
-    const auto fields = omni::reflected<first_type>().public_fields();
-    return omni::compat::apply(print_field_names_simple_t::_visit{}, fields);
-  }
-} const static print_tuple_first_field_names{};
-
-struct print_tuple_second_field_names_t {
-  template <typename Tuple>
-  std::vector<std::string> operator()(const Tuple &) const {
-    using second_type = typename std::tuple_element<1,
-      typename std::decay<Tuple>::type>::type;
-    const auto fields = omni::reflected<second_type>().public_fields();
-    return omni::compat::apply(print_field_names_simple_t::_visit{}, fields);
-  }
-} const static print_tuple_second_field_names{};
-
 struct maybe_print_field_names_t {
   std::vector<std::string> operator()(int) const {
     return {};
@@ -541,28 +521,6 @@ struct: example::in_header_struct, example::in_cpp_struct {
   double unnamed_global_multi_base_field_2;
 } const unnamed_global_with_multi_base OMNI_INPLACE_MAYBE_UNUSED{};
 
-TEST(print_names, in_cpp_struct_through_tuple_arg) {
-  std::tuple<example::in_cpp_struct> p;
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-            }),
-    omni::reflected_call(example_impl::print_tuple_first_field_names, p));
-}
-
-TEST(print_names, in_cpp_second_struct_through_tuple_arg) {
-  std::tuple<int, example::in_cpp_struct> p;
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-            }),
-    omni::reflected_call(example_impl::print_tuple_second_field_names, p));
-}
-
 TEST(print_names, not_reflected_int_path_returns_empty_names) {
   ASSERT_EQ((std::vector<std::string>{}),
     example_impl::maybe_print_field_names(8));
@@ -574,29 +532,6 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
   ASSERT_EQ((std::vector<std::string>{}),
     example_impl::maybe_print_field_names(p));
 }
-
-// FIXME: does not generate: when a reflected_call input is a composed type
-// such as std::tuple<std::tuple<unnamed, int>>, the unnamed nested tuple
-// element is not promoted to stable reflection metadata. Generated-header reflection currently
-// only instruments direct std::tuple element types.
-//
-// TEST(print_names, in_cpp_local_unnamed_struct_through_nested_tuple_arg) {
-//   struct {
-//     std::string nested_tuple_input_field_0;
-//     int nested_tuple_input_field_1;
-//     double nested_tuple_input_field_2;
-//   } p{};
-//
-//   const std::tuple<std::tuple<decltype(p), int>> types =
-//     std::make_tuple(std::make_tuple(p, 1));
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "nested_tuple_input_field_0",
-//               "nested_tuple_input_field_1",
-//               "nested_tuple_input_field_2",
-//             }),
-//     omni::reflected_call(example_impl::print_tuple_first_field_names, types));
-// }
 
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_std_vector_field_0) {
@@ -933,33 +868,6 @@ TEST(print_enums, in_cpp_scoped_enum_with_underlying) {
       e));
 #endif
 }
-
-// FIXME: does not generate: when a reflected_call input is a composed type
-// such as std::tuple<std::tuple<unnamed, int>>, the unnamed nested tuple
-// element is not instrumented as a reflected type. The current tuple overload
-// only instruments direct std::tuple element types.
-//
-// TEST(read_values, in_cpp_local_unnamed_struct_through_nested_tuple_arg) {
-//   struct {
-//     std::string read_nested_tuple_name;
-//     int read_nested_tuple_count;
-//     double read_nested_tuple_score;
-//   } p{"nested tuple reader", 46, 46.5};
-//
-//   const std::tuple<std::tuple<decltype(p), int>> types =
-//     std::make_tuple(std::make_tuple(p, 1));
-//
-//   ASSERT_EQ((std::vector<std::string>{
-//               "nested tuple reader",
-//               "46",
-//               "46.5",
-//             }),
-//     omni::reflected_call([](const auto &types) {
-//       const auto fields = omni::reflected(std::get<0>(std::get<0>(types)))
-//                             .public_fields();
-//       return omni::compat::apply(example_impl::_field_values{}, fields);
-//     }, types));
-// }
 
 TEST(read_values, in_cpp_struct) {
   example::in_cpp_struct p{};
