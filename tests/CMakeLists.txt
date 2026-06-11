@@ -76,6 +76,7 @@ foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
         endif()
     endif()
 endforeach()
+
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
@@ -123,7 +124,10 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
         # todo: can I use and test genex?
         if(${mode} STREQUAL "header")
-            target_sources(${_test_common_tgt} PRIVATE common/inplace_test.cpp)
+            target_sources(${_test_common_tgt} PRIVATE
+                common/index_regression.cpp
+                common/inplace_test.cpp
+            )
         endif()
 
         set_target_properties(${_test_common_tgt} PROPERTIES
@@ -152,4 +156,3 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         endif()
     endforeach()
 endforeach()
-

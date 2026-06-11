@@ -123,32 +123,9 @@ enum class scoped_enum {
   gamma,
 };
 
-struct non_reflected_probe_record {
-  int not_reflected;
-};
-
-enum class non_reflected_probe_enum {
-  value,
-};
 } // namespace source_mode
 
 namespace source_mode_impl {
-template <typename T, bool = omni::is_reflected<T>::value>
-struct is_reflected_record: std::false_type {};
-
-template <typename T>
-struct is_reflected_record<T, true>:
-    std::integral_constant<bool,
-      omni::reflected_entity::record == omni::reflected_t<T>::entity()> {};
-
-template <typename T, typename = void>
-struct is_reflected_query: std::false_type {};
-
-template <typename T>
-struct is_reflected_query<T,
-  omni::compat::void_t<decltype(omni::is_reflected<T>::value)>>:
-    std::integral_constant<bool, omni::is_reflected<T>::value> {};
-
 template <typename T>
 struct is_string_map: std::false_type {};
 
@@ -200,8 +177,11 @@ struct maybe_field_names_t {
 struct query_non_reflected_record_then_field_names_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    static_assert(!is_reflected_query<
-        source_mode::non_reflected_probe_record>::value,
+    struct non_reflected_probe_record {
+      int not_reflected;
+    };
+
+    static_assert(!omni::is_reflected<non_reflected_probe_record>::value,
       "negative record probe must not register an indexed reflection");
     return field_names(value);
   }
@@ -210,8 +190,11 @@ struct query_non_reflected_record_then_field_names_t {
 struct query_non_reflected_enum_then_field_names_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    static_assert(!is_reflected_query<
-        source_mode::non_reflected_probe_enum>::value,
+    enum class non_reflected_probe_enum {
+      value,
+    };
+
+    static_assert(!omni::is_reflected<non_reflected_probe_enum>::value,
       "negative enum probe must not register an indexed reflection");
     return field_names(value);
   }
@@ -220,9 +203,12 @@ struct query_non_reflected_enum_then_field_names_t {
 struct query_composed_non_reflected_then_field_names_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
+    struct non_reflected_probe_record {
+      int not_reflected;
+    };
+
     static_assert(
-      !is_reflected_query<
-        std::vector<source_mode::non_reflected_probe_record>>::value,
+      !omni::is_reflected<std::vector<non_reflected_probe_record>>::value,
       "negative composed probe must not register an indexed reflection");
     return field_names(value);
   }
@@ -231,20 +217,24 @@ struct query_composed_non_reflected_then_field_names_t {
 struct query_mixed_non_reflected_then_field_names_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    static_assert(!is_reflected_query<
-        source_mode::non_reflected_probe_record>::value,
+    struct non_reflected_probe_record {
+      int not_reflected;
+    };
+    enum class non_reflected_probe_enum {
+      value,
+    };
+
+    static_assert(!omni::is_reflected<non_reflected_probe_record>::value,
       "negative record probe must not register an indexed reflection");
-    static_assert(!is_reflected_query<
-        source_mode::non_reflected_probe_enum>::value,
+    static_assert(!omni::is_reflected<non_reflected_probe_enum>::value,
       "negative enum probe must not register an indexed reflection");
     static_assert(
-      !is_reflected_query<
-        std::vector<source_mode::non_reflected_probe_record>>::value,
+      !omni::is_reflected<std::vector<non_reflected_probe_record>>::value,
       "negative vector probe must not register an indexed reflection");
     static_assert(
-      !is_reflected_query<
-        std::tuple<source_mode::non_reflected_probe_record,
-          source_mode::non_reflected_probe_enum>>::value,
+      !omni::is_reflected<
+        std::tuple<non_reflected_probe_record,
+          non_reflected_probe_enum>>::value,
       "negative tuple probe must not register an indexed reflection");
     return field_names(value);
   }
@@ -336,31 +326,29 @@ struct write_fields_from_std_map {
 
   private:
   template <typename V, typename Field>
-  static typename std::enable_if<
-    !is_reflected_record<typename Field::type>::value>::type
-    _write_field(const std::map<std::string, V> &from, Field field) {
-    if (0 == from.count(field.name()))
+  static void _write_field(const std::map<std::string, V> &from, Field field) {
+    if (0 == from.count(field.name())) {
+      _write_field_from_flat_map(from, field);
       return;
+    }
 
     const auto *value = source_mode_compat::get_if<
       typename Field::type>(&from.at(field.name()));
-    if (value)
+    if (value) {
       field.set_value(*value);
-  }
-
-  template <typename V, typename Field>
-  static typename std::enable_if<
-    is_reflected_record<typename Field::type>::value>::type
-    _write_field(const std::map<std::string, V> &from, Field field) {
-    if (0 != from.count(field.name())
-        && _write_field_from_nested_map(from.at(field.name()), field))
       return;
+    }
 
-    field.set_value(from_std_map<typename Field::type>(from));
+    if (!_write_field_from_nested_map(from.at(field.name()), field))
+      _write_field_from_flat_map(from, field);
   }
 
   template <typename Field, typename Nested>
-  static typename std::enable_if<is_string_map<Nested>::value, bool>::type
+  static typename std::enable_if<
+    is_string_map<Nested>::value
+      && std::is_class<typename Field::type>::value
+      && !std::is_same<std::string, typename Field::type>::value,
+    bool>::type
     _try_nested_map(const Nested *nested, Field field) {
     if (!nested)
       return false;
@@ -370,10 +358,29 @@ struct write_fields_from_std_map {
   }
 
   template <typename Field, typename T>
-  static typename std::enable_if<!is_string_map<T>::value, bool>::type
+  static typename std::enable_if<
+    !is_string_map<T>::value
+      || !std::is_class<typename Field::type>::value
+      || std::is_same<std::string, typename Field::type>::value,
+    bool>::type
     _try_nested_map(const T *, Field) {
     return false;
   }
+
+  template <typename V, typename Field>
+  static typename std::enable_if<
+    std::is_class<typename Field::type>::value
+      && !std::is_same<std::string, typename Field::type>::value>::type
+    _write_field_from_flat_map(const std::map<std::string, V> &from,
+      Field field) {
+    field.set_value(from_std_map<typename Field::type>(from));
+  }
+
+  template <typename V, typename Field>
+  static typename std::enable_if<
+    !std::is_class<typename Field::type>::value
+      || std::is_same<std::string, typename Field::type>::value>::type
+    _write_field_from_flat_map(const std::map<std::string, V> &, Field) {}
 
   template <typename Field, typename... V>
   static bool _write_field_from_nested_map(const mpark::variant<V...> &value,
