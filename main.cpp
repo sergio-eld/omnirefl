@@ -2815,10 +2815,6 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
         r.type.data);
     };
 
-  // fixme: handle fallback-specialized bases
-  // fixme: reflected public fields do not include transitive public bases in
-  // generated-header reflection. A direct public base is reflected, but fields from a public
-  // grand-base are missing from public_fields().
   const auto format_public_bases = //
     [&type_name_by_id](const meta::record_data &r) {
       const auto fetch = [&type_name_by_id](const meta::type_id &id)

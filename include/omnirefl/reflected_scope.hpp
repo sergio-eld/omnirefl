@@ -40,7 +40,7 @@ struct _all_public_fields;
 template <typename Meta, typename... Bases>
 struct _all_public_fields<Meta, std::tuple<Bases...>> {
   using type = decltype(std::tuple_cat(
-    std::declval<typename _meta<Bases>::own_public_fields_t>()...,
+    std::declval<typename _all_public_fields<_meta<Bases>>::type>()...,
     std::declval<typename Meta::own_public_fields_t>()));
 };
 

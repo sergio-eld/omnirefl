@@ -1070,10 +1070,7 @@ TEST(print_names, in_cpp_mixed_access) {
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
 
-// FIXME: compiles but omits transitive public base fields inherited through the
-// direct reflected base.
-//
-TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
+TEST(print_names, in_cpp_deep_public_base_chain) {
   const example::in_cpp_deep_derived p{};
   const static std::vector<std::string> expected{
     "in_header_field_0",
@@ -1090,11 +1087,8 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
 
-// FIXME: compiles but omits transitive public base fields inherited through the
-// direct reflected base.
-//
 // FIXME: does not compile: returned unnamed types with deep public base chains
-// hit the same ambiguous _reflected specialization as named deep base chains.
+// still hit the local/unnamed generated metadata limitation.
 //
 // TEST(print_names, in_cpp_unnamed_returned_struct_with_deep_public_base_chain)
 // {
@@ -2311,10 +2305,7 @@ TEST(write_values, in_cpp_scalar_pack_from_std_map_extra_keys) {
   ASSERT_EQ("extra scalar", p.label);
 }
 
-// FIXME: disabled: generated-header reflection reflects direct public base fields, but not
-// transitive public base fields. The in_header_struct grand-base fields remain
-// unchanged at runtime.
-TEST(write_values, DISABLED_in_cpp_deep_derived_from_std_map) {
+TEST(write_values, in_cpp_deep_derived_from_std_map) {
   example::in_cpp_deep_derived p{};
 
   std::map<std::string, mpark::variant<int, double, std::string>> from;

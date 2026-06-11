@@ -382,9 +382,7 @@ TEST(inheritance_dependency, multi_base_field_count) {
       dt::multi_base_derived{4, "second", 15}));
 }
 
-// FIXME: disabled: generated-header reflection reflects direct public base fields, but omits
-// transitive public base fields inherited through that direct base.
-TEST(inheritance_dependency, DISABLED_deep_base_fields_are_flattened) {
+TEST(inheritance_dependency, deep_base_fields_are_flattened) {
   namespace dt = dependency_types;
 
   EXPECT_EQ(
@@ -394,6 +392,14 @@ TEST(inheritance_dependency, DISABLED_deep_base_fields_are_flattened) {
       "deep_field",
     }),
     omni::reflected_call(dt::inspect::field_names,
+      dt::deep_derived{4, "middle", 8.15}));
+}
+
+TEST(inheritance_dependency, deep_base_field_count) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{3},
+    omni::reflected_call(dt::inspect::field_count,
       dt::deep_derived{4, "middle", 8.15}));
 }
 
