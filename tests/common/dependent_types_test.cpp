@@ -178,6 +178,15 @@ TEST(alias_dependency, level_3_has_no_public_fields) {
     omni::reflected_call(dt::inspect::field_count, dt::alias_dep_level_3{}));
 }
 
+TEST(alias_dependency, reflected_enum_alias_dependency) {
+  namespace dt = dependency_types;
+
+  const dt::enum_alias_dep v{};
+  const std::string r =
+    omni::reflected_call(dt::as_alias::get_dependency_name, v);
+  EXPECT_EQ("enum_alias_dep::scoped_status:int", r);
+}
+
 TEST(template_dependency, tuple_level_1_value) {
   namespace dt = dependency_types;
 
@@ -196,6 +205,19 @@ TEST(template_dependency, tuple_level_1_field_names) {
 
   EXPECT_EQ((std::vector<std::string>{"tpl_field_1"}),
     omni::reflected_call(dt::inspect::field_names, dt::template_dep_level_1{}));
+}
+
+TEST(template_dependency, reflected_enum_template_arg_dependency) {
+  namespace dt = dependency_types;
+
+  const dt::enum_template_dep v{
+    std::tuple<dt::scoped_fixed_status>{
+      dt::scoped_fixed_status::medium,
+    },
+  };
+  const std::string r =
+    omni::reflected_call(dt::as_template_arg::get_dependency_name, v);
+  EXPECT_EQ("enum_template_dep::scoped_fixed_status:int", r);
 }
 
 TEST(template_dependency, tuple_level_2_value) {
@@ -397,10 +419,58 @@ TEST(inheritance_dependency, three_base_field_count) {
       dt::three_base_derived{4, "second", 8.15, "own"}));
 }
 
-// FIXME: does not compile in header mode: enum field dependencies that are also
-// reflected directly can produce duplicate named/indexed _reflected
-// specializations. The plain unscoped enum dependency also still needs indexed
-// dependency metadata because it cannot be forward-declared.
+TEST(enum_dependency, scoped_enum_is_reflected_directly) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"idle", "busy", "blocked"}),
+    omni::reflected_call(dt::inspect::enum_names, dt::scoped_status::idle));
+}
+
+TEST(enum_dependency, fixed_enum_is_reflected_directly) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{
+              "fixed_status_low",
+              "fixed_status_medium",
+              "fixed_status_high",
+            }),
+    omni::reflected_call(dt::inspect::enum_names, dt::fixed_status_low));
+}
+
+TEST(enum_dependency, scoped_fixed_enum_is_reflected_directly) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"low", "medium", "high"}),
+    omni::reflected_call(dt::inspect::enum_names,
+      dt::scoped_fixed_status::low));
+}
+
+TEST(enum_dependency, forward_declarable_enum_holder_field_names) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"scoped", "fixed", "scoped_fixed"}),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::forward_declarable_enum_holder{}));
+}
+
+TEST(enum_dependency, forward_declarable_enum_holder_first_type) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("scoped_status",
+    omni::reflected_call(dt::inspect::first_field_type_name,
+      dt::forward_declarable_enum_holder{}));
+}
+
+TEST(enum_dependency, forward_declarable_enum_holder_second_type) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("fixed_status",
+    omni::reflected_call(dt::inspect::second_field_type_name,
+      dt::forward_declarable_enum_holder{}));
+}
+
+// FIXME: does not compile in header mode: the plain unscoped enum dependency
+// cannot be forward-declared.
 //
 // TEST(enum_dependency, enum_holder_field_names) {
 //   namespace dt = dependency_types;

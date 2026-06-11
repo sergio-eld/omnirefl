@@ -474,10 +474,18 @@ struct alias_dep_level_3 {
   using value_type = alias_dep_mid_level_3;
 };
 
+struct enum_alias_dep {
+  using value_type = scoped_status;
+};
+
 // tuple / variant dependency chains
 
 struct template_dep_level_1 {
   std::tuple<resolved::as_template_arg> tpl_field_1;
+};
+
+struct enum_template_dep {
+  std::tuple<scoped_fixed_status> tpl_field_1;
 };
 
 struct template_dep_level_2 {
@@ -568,6 +576,12 @@ struct enum_holder {
   plain_status plain;
   scoped_status scoped;
   fixed_status fixed;
+};
+
+struct forward_declarable_enum_holder {
+  scoped_status scoped;
+  fixed_status fixed;
+  scoped_fixed_status scoped_fixed;
 };
 
 struct mixed_dependency_holder {

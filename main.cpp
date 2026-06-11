@@ -2095,6 +2095,11 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
   const auto not_in_std = //
     [](const clang::TagType *t) { return !t->getDecl()->isInStdNamespace(); };
 
+  const auto not_resolved = //
+    [&ast, &resolved_types](const clang::TagType *t) {
+      return !resolved_types.contains(render_type_id(ast, t));
+    };
+
   std::set<const clang::TagType *> collected;
 
   // only CXXRecordDecl may have dependencies
@@ -2115,7 +2120,8 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
     std::ranges::move(member_aliases_view(ast, *cur_decl) //
         | std::views::filter(&clang::Type::isEnumeralType) //
         | std::views::transform(to_tag_type) //
-        | std::views::filter(not_in_std),
+        | std::views::filter(not_in_std) //
+        | std::views::filter(not_resolved),
       std::inserter(collected, collected.begin()));
 
     std::ranges::for_each(member_aliases_view(ast, *cur_decl) //
@@ -2148,7 +2154,8 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
         template_specialization_types(arg_list.front().getPackAsArray()) //
           | std::views::filter(&clang::Type::isEnumeralType) //
           | std::views::transform(to_tag_type) //
-          | std::views::filter(not_in_std),
+          | std::views::filter(not_in_std) //
+          | std::views::filter(not_resolved),
         std::inserter(collected, collected.begin()));
 
       std::ranges::for_each(
@@ -2171,7 +2178,8 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
         | std::views::transform(&clang::QualType::getTypePtr)
         | std::views::filter(&clang::Type::isEnumeralType)
         | std::views::transform(to_tag_type) //
-        | std::views::filter(not_in_std),
+        | std::views::filter(not_in_std) //
+        | std::views::filter(not_resolved),
       std::inserter(collected, collected.begin()));
 
     std::ranges::for_each(public_fields_view(cur_decl) //
