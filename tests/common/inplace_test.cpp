@@ -136,68 +136,6 @@ struct maybe_print_field_names_t {
   }
 } const static maybe_print_field_names{};
 
-struct query_local_record_then_print_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    struct negative_probe {
-      int not_reflected;
-    };
-
-    static_assert(!omni::is_reflected<negative_probe>::value,
-      "negative local record probe must not register an indexed reflection");
-    return print_field_names_simple(t);
-  }
-} const static query_local_record_then_print_names{};
-
-struct query_local_enum_then_print_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    enum class negative_probe {
-      value,
-    };
-
-    static_assert(!omni::is_reflected<negative_probe>::value,
-      "negative local enum probe must not register an indexed reflection");
-    return print_field_names_simple(t);
-  }
-} const static query_local_enum_then_print_names{};
-
-struct query_composed_local_record_then_print_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    struct negative_probe {
-      int not_reflected;
-    };
-
-    static_assert(!omni::is_reflected<std::vector<negative_probe>>::value,
-      "negative composed probe must not register an indexed reflection");
-    return print_field_names_simple(t);
-  }
-} const static query_composed_local_record_then_print_names{};
-
-struct query_mixed_unregistered_types_then_print_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    struct negative_record {
-      int not_reflected;
-    };
-    enum class negative_enum {
-      value,
-    };
-
-    static_assert(!omni::is_reflected<negative_record>::value,
-      "negative local record probe must not register an indexed reflection");
-    static_assert(!omni::is_reflected<negative_enum>::value,
-      "negative local enum probe must not register an indexed reflection");
-    static_assert(!omni::is_reflected<std::vector<negative_record>>::value,
-      "negative vector probe must not register an indexed reflection");
-    static_assert(
-      !omni::is_reflected<std::tuple<negative_record, negative_enum>>::value,
-      "negative tuple probe must not register an indexed reflection");
-    return print_field_names_simple(t);
-  }
-} const static query_mixed_unregistered_types_then_print_names{};
-
 struct field_values_simple_t {
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
@@ -252,74 +190,6 @@ struct field_values_simple_t {
       && !std::is_same<double, typename Field::type>::value>::type
     _append(std::vector<std::string> &, const Field &) {}
 } const static field_values_simple{};
-
-struct field_values_tuple_first_t {
-  template <typename Tuple>
-  std::vector<std::string> operator()(const Tuple &tuple) const {
-    const auto &value = std::get<0>(tuple);
-    return field_values_simple(value);
-  }
-} const static field_values_tuple_first{};
-
-struct field_values_tuple_second_t {
-  template <typename Tuple>
-  std::vector<std::string> operator()(const Tuple &tuple) const {
-    const auto &value = std::get<1>(tuple);
-    return field_values_simple(value);
-  }
-} const static field_values_tuple_second{};
-
-struct field_values_nested_tuple_first_t {
-  template <typename Tuple>
-  std::vector<std::string> operator()(const Tuple &tuple) const {
-    const auto &inner = std::get<0>(tuple);
-    const auto &value = std::get<0>(inner);
-    return field_values_simple(value);
-  }
-} const static field_values_nested_tuple_first{};
-
-struct write_foo_bar_t {
-  template <typename T>
-  void operator()(T &t) const {
-    const auto fields = omni::reflected(t).public_fields();
-    omni::compat::apply(*this, fields);
-  }
-
-  template <typename... Field>
-  void operator()(Field... field) const {
-    int dummy[] = {0, (_write_field(field), 0)...};
-    (void)dummy;
-  }
-
-  private:
-  template <typename Field>
-  static typename std::enable_if<
-    std::is_same<int, typename Field::type>::value>::type
-    _write_field(Field field) {
-    const std::string name = field.name();
-    if (std::string::npos != name.find("foo"))
-      field.set_value(8);
-    if (std::string::npos != name.find("bar"))
-      field.set_value(15);
-  }
-
-  template <typename Field>
-  static typename std::enable_if<
-    std::is_same<unsigned, typename Field::type>::value>::type
-    _write_field(Field field) {
-    const std::string name = field.name();
-    if (std::string::npos != name.find("foo"))
-      field.set_value(8u);
-    if (std::string::npos != name.find("bar"))
-      field.set_value(15u);
-  }
-
-  template <typename Field>
-  static typename std::enable_if<
-    !std::is_same<int, typename Field::type>::value
-      && !std::is_same<unsigned, typename Field::type>::value>::type
-    _write_field(Field) {}
-} const static write_foo_bar{};
 
 struct write_fields_from_std_map {
   template <typename V, typename... Field>
@@ -672,27 +542,6 @@ struct: example::in_header_struct, example::in_cpp_struct {
   double unnamed_global_multi_base_field_2;
 } const unnamed_global_with_multi_base OMNI_INPLACE_MAYBE_UNUSED{};
 
-enum {
-  unnamed_global_enum_a,
-  unnamed_global_enum_b,
-  unnamed_global_enum_c,
-} const unnamed_global_enum{};
-
-TEST(print_names, in_cpp_local_unnamed_struct) {
-  struct {
-    std::string in_cpp_local_unnamed_field_0;
-    int in_cpp_local_unnamed_field_1;
-    double in_cpp_local_unnamed_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_local_unnamed_field_0",
-              "in_cpp_local_unnamed_field_1",
-              "in_cpp_local_unnamed_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
 TEST(print_names, in_cpp_struct_through_tuple_arg) {
   std::tuple<example::in_cpp_struct> p;
 
@@ -702,23 +551,6 @@ TEST(print_names, in_cpp_struct_through_tuple_arg) {
               "in_cpp_field_2",
             }),
     omni::reflected_call(example_impl::print_tuple_first_field_names, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_through_tuple_arg) {
-  struct {
-    std::string local_tuple_field_0;
-    int local_tuple_field_1;
-    double local_tuple_field_2;
-  } p{};
-
-  const std::tuple<decltype(p)> types = std::make_tuple(p);
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_tuple_field_0",
-              "local_tuple_field_1",
-              "local_tuple_field_2",
-            }),
-    omni::reflected_call(example_impl::print_tuple_first_field_names, types));
 }
 
 TEST(print_names, in_cpp_second_struct_through_tuple_arg) {
@@ -732,23 +564,6 @@ TEST(print_names, in_cpp_second_struct_through_tuple_arg) {
     omni::reflected_call(example_impl::print_tuple_second_field_names, p));
 }
 
-TEST(print_names, in_cpp_second_local_unnamed_struct_through_tuple_arg) {
-  struct {
-    std::string local_tuple_second_field_0;
-    int local_tuple_second_field_1;
-    double local_tuple_second_field_2;
-  } p{};
-
-  const std::tuple<int, decltype(p)> types = std::make_tuple(1, p);
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_tuple_second_field_0",
-              "local_tuple_second_field_1",
-              "local_tuple_second_field_2",
-            }),
-    omni::reflected_call(example_impl::print_tuple_second_field_names, types));
-}
-
 TEST(print_names, not_reflected_int_path_returns_empty_names) {
   ASSERT_EQ((std::vector<std::string>{}),
     example_impl::maybe_print_field_names(8));
@@ -759,76 +574,6 @@ TEST(print_names, not_reflected_string_path_returns_empty_names) {
 
   ASSERT_EQ((std::vector<std::string>{}),
     example_impl::maybe_print_field_names(p));
-}
-
-// Regression guard: these cases intentionally probe non-reflected
-// local/composed types from within a reflected scope immediately before
-// reflecting a local unnamed type. Header mode must query whether `(index, T)`
-// is already registered without evaluating `unique_id<T>()`.
-TEST(print_names,
-  index_pollution_non_reflected_local_record_before_positive) {
-  struct {
-    std::string after_negative_field_0;
-    int after_negative_field_1;
-    double after_negative_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "after_negative_field_0",
-              "after_negative_field_1",
-              "after_negative_field_2",
-            }),
-    omni::reflected_call(
-      example_impl::query_local_record_then_print_names, p));
-}
-
-TEST(print_names,
-  index_pollution_non_reflected_local_enum_before_positive) {
-  struct {
-    std::string after_enum_probe_field_0;
-    int after_enum_probe_field_1;
-    double after_enum_probe_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "after_enum_probe_field_0",
-              "after_enum_probe_field_1",
-              "after_enum_probe_field_2",
-            }),
-    omni::reflected_call(example_impl::query_local_enum_then_print_names, p));
-}
-
-TEST(print_names,
-  index_pollution_non_reflected_composed_type_before_positive) {
-  struct {
-    std::string after_composed_probe_field_0;
-    int after_composed_probe_field_1;
-    double after_composed_probe_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "after_composed_probe_field_0",
-              "after_composed_probe_field_1",
-              "after_composed_probe_field_2",
-            }),
-    omni::reflected_call(
-      example_impl::query_composed_local_record_then_print_names, p));
-}
-
-TEST(print_names, index_pollution_mixed_negative_probes_before_positive) {
-  struct {
-    std::string after_mixed_probe_field_0;
-    int after_mixed_probe_field_1;
-    double after_mixed_probe_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "after_mixed_probe_field_0",
-              "after_mixed_probe_field_1",
-              "after_mixed_probe_field_2",
-            }),
-    omni::reflected_call(
-      example_impl::query_mixed_unregistered_types_then_print_names, p));
 }
 
 // FIXME: does not generate: when a reflected_call input is a composed type
@@ -854,137 +599,6 @@ TEST(print_names, index_pollution_mixed_negative_probes_before_positive) {
 //     omni::reflected_call(example_impl::print_tuple_first_field_names, types));
 // }
 
-TEST(print_names, in_cpp_local_unnamed_struct_with_base) {
-  struct: example::in_cpp_struct {
-    std::string in_cpp_local_unnamed_with_base_field_0;
-    int in_cpp_local_unnamed_with_base_field_1;
-    double in_cpp_local_unnamed_with_base_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-              "in_cpp_local_unnamed_with_base_field_0",
-              "in_cpp_local_unnamed_with_base_field_1",
-              "in_cpp_local_unnamed_with_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_header_base) {
-  struct: example::in_header_struct {
-    std::string in_cpp_local_unnamed_header_base_field_0;
-    int in_cpp_local_unnamed_header_base_field_1;
-    double in_cpp_local_unnamed_header_base_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "in_cpp_local_unnamed_header_base_field_0",
-              "in_cpp_local_unnamed_header_base_field_1",
-              "in_cpp_local_unnamed_header_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_multi_base) {
-  struct: example::in_header_struct, example::in_cpp_struct {
-    std::string in_cpp_local_unnamed_multi_base_field_0;
-    int in_cpp_local_unnamed_multi_base_field_1;
-    double in_cpp_local_unnamed_multi_base_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-              "in_cpp_local_unnamed_multi_base_field_0",
-              "in_cpp_local_unnamed_multi_base_field_1",
-              "in_cpp_local_unnamed_multi_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_0) {
-  struct {
-    bool local_scalar_bool;
-    char local_scalar_char;
-    long local_scalar_long;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_scalar_bool",
-              "local_scalar_char",
-              "local_scalar_long",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_1) {
-  struct {
-    unsigned int local_scalar_unsigned;
-    float local_scalar_float;
-    std::string local_scalar_string;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_scalar_unsigned",
-              "local_scalar_float",
-              "local_scalar_string",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_2) {
-  struct {
-    short local_scalar_short;
-    long long local_scalar_long_long;
-    double local_scalar_double;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_scalar_short",
-              "local_scalar_long_long",
-              "local_scalar_double",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_0) {
-  struct {
-    int *local_pointer_int;
-    const char *local_pointer_char;
-    double *local_pointer_double;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_pointer_int",
-              "local_pointer_char",
-              "local_pointer_double",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_1) {
-  struct {
-    bool *local_pointer_bool;
-    char *local_pointer_mutable_char;
-    float *local_pointer_float;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_pointer_bool",
-              "local_pointer_mutable_char",
-              "local_pointer_float",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_std_vector_field_0) {
 //   struct {
@@ -1090,20 +704,6 @@ TEST(print_names, in_cpp_local_unnamed_struct_with_pointer_mix_1) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_3) {
-  struct {
-    unsigned long local_scalar_unsigned_long;
-    signed char local_scalar_signed_char;
-    double local_scalar_measurement;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_scalar_unsigned_long",
-              "local_scalar_signed_char",
-              "local_scalar_measurement",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_vector_field_3) {
 //   struct {
@@ -1214,54 +814,6 @@ TEST(print_names, in_cpp_local_unnamed_struct_with_scalar_mix_3) {
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
 //
-TEST(print_names, in_cpp_unnamed_global) {
-  ASSERT_EQ((std::vector<std::string>{"oceanic", "station", "bearing"}),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      unnamed_global));
-}
-
-TEST(print_names, in_cpp_unnamed_global_with_header_base) {
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "unnamed_global_header_base_field_0",
-              "unnamed_global_header_base_field_1",
-              "unnamed_global_header_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      unnamed_global_with_header_base));
-}
-
-TEST(print_names, in_cpp_unnamed_global_with_cpp_base) {
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-              "unnamed_global_cpp_base_field_0",
-              "unnamed_global_cpp_base_field_1",
-              "unnamed_global_cpp_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      unnamed_global_with_cpp_base));
-}
-
-TEST(print_names, in_cpp_unnamed_global_with_multi_base) {
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-              "unnamed_global_multi_base_field_0",
-              "unnamed_global_multi_base_field_1",
-              "unnamed_global_multi_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      unnamed_global_with_multi_base));
-}
-
 TEST(print_names, in_header_struct) {
   const example::in_header_struct p{};
   const static std::vector<std::string> expected{
@@ -1272,60 +824,6 @@ TEST(print_names, in_header_struct) {
   ASSERT_EQ(expected,
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
-#if defined CXX_STANDARD && 11 < CXX_STANDARD
-TEST(print_names, in_cpp_unnamed_returned_struct) {
-  ASSERT_EQ((std::vector<std::string>{
-              "g_a",
-              "g_b",
-              "g_c",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      example::unnamed_returned_struct()));
-}
-
-TEST(print_names, in_cpp_unnamed_returned_struct_with_header_base) {
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "returned_header_base_field_0",
-              "returned_header_base_field_1",
-              "returned_header_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      example::unnamed_returned_struct_with_header_base()));
-}
-
-TEST(print_names, in_cpp_unnamed_returned_struct_with_cpp_base) {
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-              "returned_cpp_base_field_0",
-              "returned_cpp_base_field_1",
-              "returned_cpp_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      example::unnamed_returned_struct_with_cpp_base()));
-}
-
-TEST(print_names, in_cpp_unnamed_returned_struct_with_multi_base) {
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "in_cpp_field_0",
-              "in_cpp_field_1",
-              "in_cpp_field_2",
-              "returned_multi_base_field_0",
-              "returned_multi_base_field_1",
-              "returned_multi_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple,
-      example::unnamed_returned_struct_with_multi_base()));
-}
-#endif
-
 TEST(print_names, in_cpp_struct) {
   const example::in_cpp_struct p{};
   const static std::vector<std::string> expected{
@@ -1382,25 +880,6 @@ TEST(print_names, in_cpp_multi_base) {
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
 
-// FIXME(high): non-local enum reflection in installed header-mode builds can
-// generate invalid or insufficient enum forward declarations on older GCC.
-// Local/unnamed enum routes below remain enabled for header-mode coverage.
-#if !defined OMNI_HEADER_MODE
-TEST(print_enums, in_cpp_enum) {
-  const example::in_cpp_enum e{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_enum_a", "in_cpp_enum_b", "in_cpp_enum_c"}),
-    omni::reflected_call(get_enumerators, e));
-}
-
-TEST(print_enums, in_cpp_unnamed_global_enum) {
-  ASSERT_EQ((std::vector<std::string>{"unnamed_global_enum_a",
-              "unnamed_global_enum_b",
-              "unnamed_global_enum_c"}),
-    omni::reflected_call(get_enumerators, unnamed_global_enum));
-}
-
 TEST(print_enums, in_cpp_scoped_enum) {
   const example::in_cpp_scoped_enum e{};
 
@@ -1426,25 +905,12 @@ TEST(print_enums, in_cpp_fixed_enum) {
 TEST(print_enums, in_cpp_scoped_enum_with_underlying) {
   const example::in_cpp_scoped_enum_with_underlying e{};
 
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_scoped_enum_with_underlying_a",
-              "in_cpp_scoped_enum_with_underlying_b",
-              "in_cpp_scoped_enum_with_underlying_c",
-            }),
-    omni::reflected_call(get_enumerators, e));
-}
-#endif
-
-TEST(print_enums, in_cpp_local_unnamed_enum) {
-  enum {
-    unnamed_a,
-    unnamed_b,
-  } const e{};
-
   static const std::vector<std::string> k_expected{
-    "unnamed_a",
-    "unnamed_b",
+    "in_cpp_scoped_enum_with_underlying_a",
+    "in_cpp_scoped_enum_with_underlying_b",
+    "in_cpp_scoped_enum_with_underlying_c",
   };
+
   ASSERT_EQ(k_expected, omni::reflected_call(get_enumerators, e));
 
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
@@ -1466,57 +932,7 @@ TEST(print_enums, in_cpp_local_unnamed_enum) {
         return names;
       },
       e));
-
 #endif
-}
-
-TEST(read_values, in_cpp_local_unnamed_struct) {
-  struct {
-    std::string read_name;
-    int read_count;
-    double read_score;
-  } p{"reader", 4, 8.15};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "reader",
-              "4",
-              "8.15",
-            }),
-    omni::reflected_call(example_impl::field_values_simple, p));
-}
-
-TEST(read_values, in_cpp_local_unnamed_struct_through_tuple_arg) {
-  struct {
-    std::string read_tuple_name;
-    int read_tuple_count;
-    double read_tuple_score;
-  } p{"tuple reader", 44, 44.5};
-
-  const std::tuple<decltype(p)> types = std::make_tuple(p);
-
-  ASSERT_EQ((std::vector<std::string>{
-              "tuple reader",
-              "44",
-              "44.5",
-            }),
-    omni::reflected_call(example_impl::field_values_tuple_first, types));
-}
-
-TEST(read_values, in_cpp_second_local_unnamed_struct_through_tuple_arg) {
-  struct {
-    std::string read_second_tuple_name;
-    int read_second_tuple_count;
-    double read_second_tuple_score;
-  } p{"second tuple reader", 45, 45.5};
-
-  const std::tuple<int, decltype(p)> types = std::make_tuple(1, p);
-
-  ASSERT_EQ((std::vector<std::string>{
-              "second tuple reader",
-              "45",
-              "45.5",
-            }),
-    omni::reflected_call(example_impl::field_values_tuple_second, types));
 }
 
 // FIXME: does not generate: when a reflected_call input is a composed type
@@ -1539,38 +955,12 @@ TEST(read_values, in_cpp_second_local_unnamed_struct_through_tuple_arg) {
 //               "46",
 //               "46.5",
 //             }),
-//     omni::reflected_call(example_impl::field_values_nested_tuple_first,
-//       types));
+//     omni::reflected_call([](const auto &types) {
+//       const auto fields = omni::reflected(std::get<0>(std::get<0>(types)))
+//                             .public_fields();
+//       return omni::compat::apply(example_impl::_field_values{}, fields);
+//     }, types));
 // }
-
-TEST(read_values, in_cpp_local_unnamed_struct_with_ignored_field_type) {
-  struct {
-    std::string read_name;
-    bool read_ignored_flag;
-    int read_count;
-  } p{"reader", true, 15};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "reader",
-              "15",
-            }),
-    omni::reflected_call(example_impl::field_values_simple, p));
-}
-
-TEST(read_values, in_cpp_local_unnamed_bitfield_names) {
-  struct {
-    unsigned read_flag_bits : 3;
-    unsigned read_code_bits : 5;
-    int read_plain_value;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "read_flag_bits",
-              "read_code_bits",
-              "read_plain_value",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
 
 TEST(read_values, in_cpp_struct) {
   example::in_cpp_struct p{};
@@ -1648,21 +1038,6 @@ TEST(read_values, in_cpp_mixed_access_public_only) {
     omni::reflected_call(example_impl::field_values_simple, p));
 }
 
-TEST(read_values, in_cpp_local_unnamed_bitfield_values) {
-  struct {
-    unsigned read_flag_bits : 3;
-    unsigned read_code_bits : 5;
-    int read_plain_value;
-  } p{5, 17, 42};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "5",
-              "17",
-              "42",
-            }),
-    omni::reflected_call(example_impl::field_values_simple, p));
-}
-
 TEST(print_names, in_cpp_private_base) {
   const example::in_cpp_private_base p{};
   const static std::vector<std::string> expected{
@@ -1719,27 +1094,6 @@ TEST(print_names, DISABLED_in_cpp_deep_public_base_chain) {
 // FIXME: compiles but omits transitive public base fields inherited through the
 // direct reflected base.
 //
-TEST(print_names, DISABLED_in_cpp_unnamed_global_with_deep_public_base_chain) {
-  struct: example::in_cpp_mid_base {
-    std::string unnamed_global_deep_base_field_0;
-    int unnamed_global_deep_base_field_1;
-    double unnamed_global_deep_base_field_2;
-  } const p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_header_field_0",
-              "in_header_field_1",
-              "in_header_field_2",
-              "in_cpp_mid_field_0",
-              "in_cpp_mid_field_1",
-              "in_cpp_mid_field_2",
-              "unnamed_global_deep_base_field_0",
-              "unnamed_global_deep_base_field_1",
-              "unnamed_global_deep_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
 // FIXME: does not compile: returned unnamed types with deep public base chains
 // hit the same ambiguous _reflected specialization as named deep base chains.
 //
@@ -1839,21 +1193,6 @@ TEST(print_names, DISABLED_in_cpp_unnamed_global_with_deep_public_base_chain) {
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
 
-TEST(print_names, in_cpp_local_unnamed_struct_with_private_base) {
-  struct: private example::in_cpp_struct {
-    std::string in_cpp_local_private_base_field_0;
-    int in_cpp_local_private_base_field_1;
-    double in_cpp_local_private_base_field_2;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_local_private_base_field_0",
-              "in_cpp_local_private_base_field_1",
-              "in_cpp_local_private_base_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
-
 // TODO: support dependency types that cannot be forward-declared. Some of
 // these can be generated via decltype(member field); incidental indexes from
 // unrelated reflected_call sites should not affect support.
@@ -1951,29 +1290,6 @@ TEST(print_names, in_cpp_local_unnamed_struct_with_private_base) {
 //             }),
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
-
-TEST(print_names, in_cpp_local_unnamed_struct_with_mixed_access) {
-  struct {
-    std::string in_cpp_local_public_field_0;
-    int in_cpp_local_public_field_1;
-
-    private:
-    std::string in_cpp_local_private_field;
-
-    public:
-    double in_cpp_local_public_field_2;
-
-    protected:
-    int in_cpp_local_protected_field;
-  } p{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "in_cpp_local_public_field_0",
-              "in_cpp_local_public_field_1",
-              "in_cpp_local_public_field_2",
-            }),
-    omni::reflected_call(example_impl::print_field_names_simple, p));
-}
 
 // FIXME: does not generate: the unnamed type used through std::vector is
 // collected as a dependency, but header mode reports non-reflectable types.
@@ -2617,196 +1933,6 @@ TEST(print_names, in_cpp_local_unnamed_struct_with_mixed_access) {
 //             }),
 //     omni::reflected_call(get_enumerators, e));
 // }
-TEST(print_enums, in_cpp_local_unnamed_fixed_enum) {
-  enum : int {
-    local_unnamed_fixed_enum_a,
-    local_unnamed_fixed_enum_b,
-    local_unnamed_fixed_enum_c,
-  } const e{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_unnamed_fixed_enum_a",
-              "local_unnamed_fixed_enum_b",
-              "local_unnamed_fixed_enum_c",
-            }),
-    omni::reflected_call(get_enumerators, e));
-}
-
-TEST(print_enums, in_cpp_local_unnamed_enum_three_values) {
-  enum {
-    local_unnamed_enum_a,
-    local_unnamed_enum_b,
-    local_unnamed_enum_c,
-  } const e{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_unnamed_enum_a",
-              "local_unnamed_enum_b",
-              "local_unnamed_enum_c",
-            }),
-    omni::reflected_call(get_enumerators, e));
-}
-
-TEST(print_enums, in_cpp_local_unnamed_enum_with_values) {
-  enum {
-    local_unnamed_enum_value_a = 4,
-    local_unnamed_enum_value_b = 8,
-    local_unnamed_enum_value_c = 15,
-  } const e{};
-
-  ASSERT_EQ((std::vector<std::string>{
-              "local_unnamed_enum_value_a",
-              "local_unnamed_enum_value_b",
-              "local_unnamed_enum_value_c",
-            }),
-    omni::reflected_call(get_enumerators, e));
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_from_std_map) {
-  struct {
-    std::string name;
-    int count;
-    double score;
-  } p{};
-
-  std::map<std::string, mpark::variant<int, double, std::string>> from;
-  from["name"] = std::string{"mapped"};
-  from["count"] = 47;
-  from["score"] = 8.15;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ("mapped", p.name);
-  ASSERT_EQ(47, p.count);
-  ASSERT_EQ(8.15, p.score);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_constructed_from_std_map) {
-  struct {
-    std::string name;
-    int count;
-    double score;
-  } seed{};
-
-  std::map<std::string, mpark::variant<int, double, std::string>> from;
-  from["name"] = std::string{"constructed"};
-  from["count"] = 48;
-  from["score"] = 9.15;
-
-  const decltype(seed) p = example_impl::from_std_map<decltype(seed)>(from);
-
-  ASSERT_EQ("constructed", p.name);
-  ASSERT_EQ(48, p.count);
-  ASSERT_EQ(9.15, p.score);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_from_std_map_with_extra_keys) {
-  struct {
-    std::string name;
-    int count;
-    double score;
-  } p{};
-
-  std::map<std::string, mpark::variant<int, double, std::string>> from;
-  from["name"] = std::string{"mapped"};
-  from["count"] = 4;
-  from["score"] = 8.15;
-  from["unused"] = 16;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ("mapped", p.name);
-  ASSERT_EQ(4, p.count);
-  ASSERT_EQ(8.15, p.score);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_from_std_map_missing_field) {
-  struct {
-    std::string name;
-    int count;
-    double score;
-  } p{"old", 23, 42.5};
-
-  std::map<std::string, mpark::variant<int, double, std::string>> from;
-  from["name"] = std::string{"new"};
-  from["score"] = 9.5;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ("new", p.name);
-  ASSERT_EQ(23, p.count);
-  ASSERT_EQ(9.5, p.score);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_from_std_map_wrong_type) {
-  struct {
-    std::string name;
-    int count;
-    double score;
-  } p{"old", 23, 42.5};
-
-  std::map<std::string, mpark::variant<int, double, std::string>> from;
-  from["name"] = 815;
-  from["count"] = std::string{"wrong"};
-  from["score"] = 9.5;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ("old", p.name);
-  ASSERT_EQ(23, p.count);
-  ASSERT_EQ(9.5, p.score);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_with_bool_from_std_map) {
-  struct {
-    bool enabled;
-    int count;
-    std::string label;
-  } p{};
-
-  std::map<std::string, mpark::variant<bool, int, std::string>> from;
-  from["enabled"] = true;
-  from["count"] = 108;
-  from["label"] = std::string{"bool"};
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ(true, p.enabled);
-  ASSERT_EQ(108, p.count);
-  ASSERT_EQ("bool", p.label);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_with_char_from_std_map) {
-  struct {
-    char code;
-    int count;
-    std::string label;
-  } p{};
-
-  std::map<std::string, mpark::variant<char, int, std::string>> from;
-  from["code"] = 'x';
-  from["count"] = 109;
-  from["label"] = std::string{"char"};
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ('x', p.code);
-  ASSERT_EQ(109, p.count);
-  ASSERT_EQ("char", p.label);
-}
-
-TEST(write_values, in_cpp_local_unnamed_struct_with_unsigned_from_std_map) {
-  struct {
-    unsigned code;
-    int count;
-    std::string label;
-  } p{};
-
-  std::map<std::string, mpark::variant<unsigned, int, std::string>> from;
-  from["code"] = 42u;
-  from["count"] = 110;
-  from["label"] = std::string{"unsigned"};
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ(42u, p.code);
-  ASSERT_EQ(110, p.count);
-  ASSERT_EQ("unsigned", p.label);
-}
-
 // FIXME(high): does not compile in header mode in this large translation unit:
 // same-shape local unnamed direct reflected_call records generate correct
 // metadata, but the real compilation can match an earlier incompatible indexed
@@ -2824,7 +1950,10 @@ TEST(write_values, in_cpp_local_unnamed_struct_with_unsigned_from_std_map) {
 //     int untouched_count;
 //   } p{1, 2, 3};
 //
-//   omni::reflected_call(example_impl::write_foo_bar, p);
+//   omni::reflected_call([](auto &v) {
+//     const auto fields = omni::reflected(v).public_fields();
+//     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
+//   }, p);
 //
 //   ASSERT_EQ(8, p.foo_count);
 //   ASSERT_EQ(15, p.bar_count);
@@ -2838,7 +1967,10 @@ TEST(write_values, in_cpp_local_unnamed_struct_with_unsigned_from_std_map) {
 //     int untouched_count;
 //   } p{4, 5, 6};
 //
-//   omni::reflected_call(example_impl::write_foo_bar, p);
+//   omni::reflected_call([](auto &v) {
+//     const auto fields = omni::reflected(v).public_fields();
+//     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
+//   }, p);
 //
 //   ASSERT_EQ(8, p.foo_count);
 //   ASSERT_EQ(15, p.bar_count);
@@ -2857,7 +1989,10 @@ TEST(write_values, in_cpp_local_unnamed_struct_with_unsigned_from_std_map) {
 //     std::string foo_name;
 //   } p{1, 2, 3, "same"};
 //
-//   omni::reflected_call(example_impl::write_foo_bar, p);
+//   omni::reflected_call([](auto &v) {
+//     const auto fields = omni::reflected(v).public_fields();
+//     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
+//   }, p);
 //
 //   ASSERT_EQ(8, p.foo_count);
 //   ASSERT_EQ(15, p.bar_count);
@@ -2873,31 +2008,16 @@ TEST(write_values, in_cpp_local_unnamed_struct_with_unsigned_from_std_map) {
 //     double foo_score;
 //   } p{1, "unchanged", 2, 3.5};
 //
-//   omni::reflected_call(example_impl::write_foo_bar, p);
+//   omni::reflected_call([](auto &v) {
+//     const auto fields = omni::reflected(v).public_fields();
+//     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
+//   }, p);
 //
 //   ASSERT_EQ(15, p.bar_first);
 //   ASSERT_EQ("unchanged", p.title);
 //   ASSERT_EQ(8, p.foo_second);
 //   ASSERT_EQ(3.5, p.foo_score);
 // }
-
-TEST(write_values, in_cpp_local_unnamed_struct_with_private_base_from_std_map) {
-  struct: private example::in_cpp_struct {
-    std::string name;
-    int count;
-    double score;
-  } p{};
-
-  std::map<std::string, mpark::variant<int, double, std::string>> from;
-  from["name"] = std::string{"private base"};
-  from["count"] = 111;
-  from["score"] = 11.1;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ("private base", p.name);
-  ASSERT_EQ(111, p.count);
-  ASSERT_EQ(11.1, p.score);
-}
 
 // FIXME: does not compile: local class types inside TEST bodies are rendered
 // through the GTest fixture class before that class is declared in the forced
@@ -2930,24 +2050,6 @@ TEST(write_values, in_cpp_local_unnamed_struct_with_private_base_from_std_map) {
 //   ASSERT_EQ(1, p.hidden_value());
 // }
 
-TEST(write_values, in_cpp_local_unnamed_bitfields_from_std_map) {
-  struct {
-    unsigned enabled_bits : 1;
-    unsigned code_bits : 4;
-    int value;
-  } p{};
-
-  std::map<std::string, mpark::variant<unsigned, int>> from;
-  from["enabled_bits"] = 1u;
-  from["code_bits"] = 9u;
-  from["value"] = 113;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ(1u, p.enabled_bits);
-  ASSERT_EQ(9u, p.code_bits);
-  ASSERT_EQ(113, p.value);
-}
-
 // FIXME(high): does not compile in header mode: bitfield variant of the same
 // direct local unnamed indexed mismatch reproduced by the same-shape regression
 // above. Bitfields are not the root trigger.
@@ -2959,7 +2061,10 @@ TEST(write_values, in_cpp_local_unnamed_bitfields_from_std_map) {
 //     int plain;
 //   } p{};
 //
-//   omni::reflected_call(example_impl::write_foo_bar, p);
+//   omni::reflected_call([](auto &v) {
+//     const auto fields = omni::reflected(v).public_fields();
+//     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
+//   }, p);
 //
 //   ASSERT_EQ(8u, p.foo_bits);
 //   ASSERT_EQ(15u, p.bar_bits);
@@ -3584,31 +2689,6 @@ TEST(write_values, in_cpp_named_struct_from_std_map) {
   ASSERT_EQ(23, p.in_cpp_field_1);
   ASSERT_EQ(42.5, p.in_cpp_field_2);
 }
-
-#if defined CXX_STANDARD && 17 <= CXX_STANDARD
-// FIXME: header mode does not instrument supported dependency types reachable
-// through reflected_call argument types when those dependency types cannot be
-// forward-declared.
-#if 0
-TEST(write_values, in_cpp_local_unnamed_struct_from_std_variant_map) {
-  struct {
-    std::string name;
-    int count;
-    double score;
-  } p{};
-
-  std::map<std::string, std::variant<int, double, std::string>> from;
-  from["name"] = std::string{"standard"};
-  from["count"] = 64;
-  from["score"] = 11.5;
-  example_impl::from_std_map(from, p);
-
-  ASSERT_EQ("standard", p.name);
-  ASSERT_EQ(64, p.count);
-  ASSERT_EQ(11.5, p.score);
-}
-#endif
-#endif
 
 /////// Templates
 

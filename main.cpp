@@ -1724,11 +1724,7 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
     ->check(CLI::ExistingDirectory);
   // ->default_val(fs::path()); //< todo: resolve from installation
 
-  options::mode_t cli_mode;
-  // todo: how to print normal error?
-  app.add_option("--mode", cli_mode, "reflection mode")
-    ->default_val(cli::options::source)
-    ->transform(CLI::CheckedTransformer(cli::str_by<cli::options::mode_t>));
+  options::mode_t cli_mode = options::header;
 
   std::vector<cli_source_file> cli_sources;
   app

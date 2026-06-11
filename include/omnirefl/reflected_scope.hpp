@@ -16,7 +16,7 @@ namespace detail {
 namespace {
 
 //------------------------------------------------------------------------------
-// Notes for indexed header-mode: local/unnamed type support
+// Notes for indexed generated-header reflection: local/unnamed type support
 //
 // Omnirefl records the integer index `N` that `unique_id<T>()` evaluates to
 // while parsing the AST. During the real compilation, `reflected_call` registers
@@ -30,7 +30,7 @@ namespace {
 // not be available for reflection.
 //------------------------------------------------------------------------------
 
-// `= T` is kept for frontend compatibility with header-mode usage.
+// `= T` is kept for frontend compatibility with generated metadata.
 template <typename T, typename = T>
 struct _reflected;
 

@@ -397,50 +397,6 @@ TEST(inheritance_dependency, three_base_field_count) {
       dt::three_base_derived{4, "second", 8.15, "own"}));
 }
 
-// FIXME(high): non-local enum reflection in installed header-mode builds can
-// generate invalid or insufficient enum forward declarations on older GCC.
-// Keep these enabled for source mode while header mode is being redesigned
-// around direct reflected() instrumentation and forward-declarable metadata.
-#if !defined OMNI_HEADER_MODE
-TEST(enum_dependency, scoped_enum_names) {
-  namespace dt = dependency_types;
-
-  EXPECT_EQ((std::vector<std::string>{"idle", "busy", "blocked"}),
-    omni::reflected_call(dt::inspect::enum_names, dt::scoped_status::idle));
-}
-
-TEST(enum_dependency, plain_enum_names) {
-  namespace dt = dependency_types;
-
-  EXPECT_EQ(
-    (std::vector<std::string>{
-      "plain_status_pending",
-      "plain_status_running",
-      "plain_status_done",
-    }),
-    omni::reflected_call(dt::inspect::enum_names, dt::plain_status_pending));
-}
-
-TEST(enum_dependency, fixed_enum_names) {
-  namespace dt = dependency_types;
-
-  EXPECT_EQ(
-    (std::vector<std::string>{
-      "fixed_status_low",
-      "fixed_status_medium",
-      "fixed_status_high",
-    }),
-    omni::reflected_call(dt::inspect::enum_names, dt::fixed_status_low));
-}
-
-TEST(enum_dependency, scoped_fixed_enum_names) {
-  namespace dt = dependency_types;
-
-  EXPECT_EQ((std::vector<std::string>{"low", "medium", "high"}),
-    omni::reflected_call(dt::inspect::enum_names, dt::scoped_fixed_status::low));
-}
-#endif
-
 // FIXME: does not compile in header mode: enum field dependencies that are also
 // reflected directly can produce duplicate named/indexed _reflected
 // specializations. The plain unscoped enum dependency also still needs indexed
