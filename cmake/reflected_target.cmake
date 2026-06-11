@@ -167,12 +167,12 @@ function(omni_reflected_target target)
         set(_pair "\"${_src}\":\"${target}.dir\"")
         message(VERBOSE "omnirefl: for target ${target} selected TU: ${_pair}")
 
-        set(_omni_args
-            --resource-dir "${omnirefl_RESOURCE_DIR}"
-            --comp-db "${_comp_db}"
-            -o "${_generated_header}"
-            -s ${_pair}
-        )
+	    set(_omni_args
+	        --resource-dir "${omnirefl_RESOURCE_DIR}"
+	        --comp-db "${_comp_db}"
+	        -o "${_generated_header}"
+	        --source ${_pair}
+	    )
 
         add_custom_command(
             OUTPUT "${_generated_header}"
