@@ -93,20 +93,12 @@ template <typename T>
 constexpr as_t<T> as{};
 
 template <typename F>
-struct with_t {
-  F f;
-
-  template <typename T>
-  constexpr auto operator()(T &&value) const {
+constexpr auto with(F &&f) {
+  return [f = std::decay_t<F>(std::forward<F>(f))]<typename T>(T &&value)
+    requires std::invocable<decltype(f) &, T &>
+  {
     std::invoke(f, value);
     return std::forward<T>(value);
-  }
-};
-
-template <typename F>
-constexpr auto with(F &&f) {
-  return with_t<std::decay_t<F>>{
-    .f = std::forward<F>(f),
   };
 }
 
@@ -136,34 +128,6 @@ std::expected<std::ofstream, std::string> create_file_for_writing(
 template <typename R, typename T>
 concept viewable_range_of = std::ranges::viewable_range<R>
   && requires(std::ranges::range_reference_t<R> v) { T{v}; };
-
-template <std::ranges::range R, std::integral I = std::size_t>
-  requires(std::ranges::viewable_range<R>
-    || std::move_constructible<std::remove_cvref_t<R>>)
-constexpr auto indexed(R &&r, I start = 0) {
-  auto idx = std::views::iota(start);
-
-  if constexpr (std::ranges::viewable_range<R>) {
-    return std::views::zip(std::views::all(std::forward<R>(r)), idx);
-  } else {
-    // R is an rvalue non-viewable (typically non-borrowed);
-    // own it to avoid dangling.
-    using D = std::remove_cvref_t<R>;
-    return std::views::zip(std::ranges::owning_view<D>{std::forward<R>(r)},
-      idx);
-  }
-}
-
-struct concat_t {
-  template <typename T, typename... TT>
-  std::vector<T> operator()(std::vector<T> lhs, std::vector<TT>... rhs) const {
-    size_t rhs_size = 0;
-    ((rhs_size += rhs.size()), ...);
-    lhs.reserve(lhs.size() + rhs_size);
-    (std::move(rhs.begin(), rhs.end(), std::back_inserter(lhs)), ...);
-    return lhs;
-  }
-} constexpr const concat{};
 
 bool is_subpath(const std::filesystem::path &path,
   const std::filesystem::path &base) {
@@ -292,91 +256,7 @@ struct cli_source_file {
 };
 
 /// CLI11 uses ADL to specialize parsing cli args to custom types
-bool lexical_cast(const std::string &arg, cli_source_file &src) {
-  std::string_view sv = arg;
-  if (sv.empty())
-    return false;
-
-  // case 1: unquoted (simpler) – handle first.
-  if ('"' != sv.front()) {
-    auto v_parts = sv | std::views::split(':')
-      | std::views::transform(fn::as<std::string_view>);
-
-    const std::vector parts(v_parts.begin(), v_parts.end());
-
-    // Valid only if 1 or 2 parts.
-    if (parts.empty() || 2 < parts.size())
-      return false;
-
-    // Path before ':' must not be empty.
-    if (parts.front().empty())
-      return false;
-
-    src.path = fs::path(parts.front());
-    src.output_substr =
-      (2 == parts.size()) ? std::string(parts.back()) : std::string{};
-    return true;
-  }
-
-  // case 2: starts with '"' → quoted logic.
-  std::ranges::view auto view = sv | std::views::split('"')
-    | std::views::transform(fn::as<std::string_view>)
-    | std::views::filter([](std::string_view s) { return !s.empty(); });
-
-  const std::vector parts(view.begin(), view.end());
-
-  if (parts.empty() || 3 < parts.size())
-    return false;
-
-  if (1 == parts.size()) {
-    // `"path"`
-    // Reject empty quoted path: ""...
-    if (2 <= sv.size() && '"' == sv[1])
-      return false;
-
-    src.path = fs::path(parts[0]);
-    src.output_substr.clear();
-    return true;
-  }
-
-  if (2 == parts.size()) {
-    // `"path":out` -> [path, :out]
-    const auto &p0 = parts[0];
-    const auto &p1 = parts[1];
-
-    if (p0.empty())
-      return false;
-
-    if (p1.empty())
-      return false;
-
-    if (':' != p1.front())
-      return false;
-
-    // second "path" (after ':') must not be empty
-    if (1 == p1.size())
-      return false;
-
-    src.path = fs::path(p0);
-    src.output_substr.assign(p1.substr(1)); // after ':'
-    return true;
-  }
-
-  // 3 == parts.size(): `"path":"out"` -> [path, :, out]
-  const auto &p0 = parts[0];
-  const auto &p1 = parts[1];
-  const auto &p2 = parts[2];
-
-  if (p0.empty() || p2.empty())
-    return false;
-
-  if (!(1 == p1.size() && ':' == p1.front()))
-    return false;
-
-  src.path = fs::path(p0);
-  src.output_substr.assign(p2);
-  return true;
-}
+bool lexical_cast(const std::string &arg, cli_source_file &src);
 
 // parsed cli args (in correct state)
 struct options {
@@ -391,22 +271,6 @@ struct options {
   // todo: implement parsing
   bool generate_dep_file = true;
 };
-
-std::string format_options(const options &o) {
-  // todo: consider printing flags
-  return std::format(
-    "source:{}"
-    "\nout:{}"
-    "\nresource_dir:{}",
-    // 0:
-    source_file::path_as_string(o.source),
-
-    // 1:
-    o.out.generic_string(),
-
-    // 2:
-    o.resource_dir.generic_string());
-}
 
 std::expected<options, app_error> parse(int argc,
   const char *const *argv) noexcept;
@@ -769,10 +633,12 @@ auto format_location(const meta::source_location &d) {
 }
 
 std::string format_nm_qual_type(const meta::nm_qual_type &t) {
-  // refactorme: implement concat as view
-  const std::vector elems = util::concat(t.namespaces,
-    t.enclosing_records,
-    std::vector{t.name.value_or("(unnamed)")});
+  std::vector<std::string> elems;
+  elems.reserve(
+    t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
+  std::ranges::copy(t.namespaces, std::back_inserter(elems));
+  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
+  elems.emplace_back(t.name.value_or("(unnamed)"));
 
   return std::format("{}",
     elems //
@@ -1074,7 +940,31 @@ std::expected<run_report, app_error> emit_outputs(reflection_context ctx);
 
 } // namespace pipeline
 
+namespace log {
+
+void print_options(const cli::options &args);
+void print_instrumented_source(const cli::options &args);
+int report_success(const pipeline::run_report &out);
+
+} // namespace log
+
+std::expected<int, app_error> report_error(app_error error);
+
 } // namespace
+
+int main(int argc, char **argv) {
+  return cli::parse(argc, argv)
+    .transform(fn::with(log::print_options))
+    .transform(fn::with(log::print_instrumented_source))
+    .and_then(pipeline::to_compiler_invocation)
+    .and_then(pipeline::to_parsed_ast)
+    .and_then(pipeline::reduce_matches)
+    .and_then(pipeline::resolve_reflection_context)
+    .and_then(pipeline::emit_outputs)
+    .transform(log::report_success)
+    .or_else(report_error)
+    .value();
+}
 
 namespace {
 
@@ -1085,6 +975,93 @@ app_error processing_error(const source_file &sf, std::string error) {
       sf.path.string(),
       std::move(error)),
   };
+}
+
+/// CLI11 uses ADL to specialize parsing cli args to custom types
+bool cli::lexical_cast(const std::string &arg, cli_source_file &src) {
+  std::string_view sv = arg;
+  if (sv.empty())
+    return false;
+
+  // case 1: unquoted (simpler) - handle first.
+  if ('"' != sv.front()) {
+    auto v_parts = sv | std::views::split(':')
+      | std::views::transform(fn::as<std::string_view>);
+
+    const std::vector parts(v_parts.begin(), v_parts.end());
+
+    // Valid only if 1 or 2 parts.
+    if (parts.empty() || 2 < parts.size())
+      return false;
+
+    // Path before ':' must not be empty.
+    if (parts.front().empty())
+      return false;
+
+    src.path = fs::path(parts.front());
+    src.output_substr =
+      (2 == parts.size()) ? std::string(parts.back()) : std::string{};
+    return true;
+  }
+
+  // case 2: starts with '"' -> quoted logic.
+  std::ranges::view auto view = sv | std::views::split('"')
+    | std::views::transform(fn::as<std::string_view>)
+    | std::views::filter([](std::string_view s) { return !s.empty(); });
+
+  const std::vector parts(view.begin(), view.end());
+
+  if (parts.empty() || 3 < parts.size())
+    return false;
+
+  if (1 == parts.size()) {
+    // `"path"`
+    // Reject empty quoted path: ""...
+    if (2 <= sv.size() && '"' == sv[1])
+      return false;
+
+    src.path = fs::path(parts[0]);
+    src.output_substr.clear();
+    return true;
+  }
+
+  if (2 == parts.size()) {
+    // `"path":out` -> [path, :out]
+    const auto &p0 = parts[0];
+    const auto &p1 = parts[1];
+
+    if (p0.empty())
+      return false;
+
+    if (p1.empty())
+      return false;
+
+    if (':' != p1.front())
+      return false;
+
+    // second "path" (after ':') must not be empty
+    if (1 == p1.size())
+      return false;
+
+    src.path = fs::path(p0);
+    src.output_substr.assign(p1.substr(1)); // after ':'
+    return true;
+  }
+
+  // 3 == parts.size(): `"path":"out"` -> [path, :, out]
+  const auto &p0 = parts[0];
+  const auto &p1 = parts[1];
+  const auto &p2 = parts[2];
+
+  if (p0.empty() || p2.empty())
+    return false;
+
+  if (!(1 == p1.size() && ':' == p1.front()))
+    return false;
+
+  src.path = fs::path(p0);
+  src.output_substr.assign(p2);
+  return true;
 }
 
 std::expected<cli::options, app_error> cli::parse(int argc,
@@ -1869,10 +1846,15 @@ std::expected<int, app_error> report_error(app_error error) {
 namespace log {
 
 void print_options(const cli::options &args) {
+  // todo: consider printing flags.
   llvm::errs() << std::format(
     "\nargs:"
-    "\n{}",
-    format_options(args));
+    "\nsource:{}"
+    "\nout:{}"
+    "\nresource_dir:{}",
+    source_file::path_as_string(args.source),
+    args.out.generic_string(),
+    args.resource_dir.generic_string());
 }
 
 void print_instrumented_source(const cli::options &args) {
@@ -1906,20 +1888,6 @@ int report_success(const pipeline::run_report &out) {
 } // namespace log
 
 } // namespace
-
-int main(int argc, char **argv) {
-  return cli::parse(argc, argv)
-    .transform(fn::with(log::print_options))
-    .transform(fn::with(log::print_instrumented_source))
-    .and_then(pipeline::to_compiler_invocation)
-    .and_then(pipeline::to_parsed_ast)
-    .and_then(pipeline::reduce_matches)
-    .and_then(pipeline::resolve_reflection_context)
-    .and_then(pipeline::emit_outputs)
-    .transform(log::report_success)
-    .or_else(report_error)
-    .value();
-}
 
 namespace {
 
@@ -2652,7 +2620,7 @@ std::string reflectable_body(const meta::enum_data &d) {
 std::string reflectable_body(const meta::record_data &d) {
   constexpr auto format_field = //
     [](const auto &field_index) {
-      const auto &[f, index] = field_index;
+      const auto &[index, f] = field_index;
       return std::format(
         "  struct {0}_t {{"
         "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
@@ -2704,7 +2672,7 @@ std::string reflectable_body(const meta::record_data &d) {
     d.public_fields.empty()
       ? std::string("\n  // no reflectable fields detected")
       : std::format("\n{}",
-          util::indexed(d.public_fields) //
+          d.public_fields | std::views::enumerate //
             | std::views::transform(format_field)
             | std::views::join_with("\n\n"sv) //
             | util::fmt_fold),
