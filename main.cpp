@@ -137,38 +137,38 @@ bool is_subpath(const std::filesystem::path &path,
 }
 
 template <typename V, typename CharT = char>
-struct fmt_fold_t {
+struct format_range_t {
   V rng;
 };
 
-struct fmt_fold_adaptor {
+struct format_range_adaptor {
   template <std::ranges::viewable_range R>
     requires std::ranges::input_range<std::views::all_t<R>>
   constexpr auto operator()(R &&r) const {
     using V = std::views::all_t<R>;
-    return fmt_fold_t<V, char>{std::views::all(std::forward<R>(r))};
+    return format_range_t<V, char>{std::views::all(std::forward<R>(r))};
   }
 
   template <std::ranges::viewable_range R>
     requires std::ranges::input_range<std::views::all_t<R>>
-  friend constexpr auto operator|(R &&r, fmt_fold_adaptor self) {
+  friend constexpr auto operator|(R &&r, format_range_adaptor self) {
     return self(std::forward<R>(r));
   }
 };
 
-constexpr fmt_fold_adaptor fmt_fold{};
+constexpr format_range_adaptor format_range{};
 
 } // namespace util
 
 template <std::ranges::input_range V, typename CharT>
-struct std::formatter<util::fmt_fold_t<V, CharT>, CharT> {
+struct std::formatter<util::format_range_t<V, CharT>, CharT> {
   template <typename ParseContext>
   static constexpr auto parse(ParseContext &pc) {
     return std::formatter<std::basic_string_view<CharT>, CharT>{}.parse(pc);
   }
 
   template <typename FormatContext>
-  static constexpr auto format(util::fmt_fold_t<V, CharT> x,
+  static constexpr auto format(util::format_range_t<V, CharT> x,
     FormatContext &ctx) {
     return std::ranges::fold_left(x.rng, ctx.out(), [&](auto out, auto &&e) {
       return std::format_to(out, "{}", e);
@@ -213,9 +213,6 @@ struct cli_source_file {
   std::string output_substr;
 };
 
-/// CLI11 uses ADL to specialize parsing cli args to custom types
-bool lexical_cast(const std::string &arg, cli_source_file &src);
-
 // parsed cli args (in correct state)
 struct options {
   // .cpp source
@@ -232,6 +229,9 @@ struct options {
 
 std::expected<options, app_error> parse(int argc,
   const char *const *argv) noexcept;
+
+/// CLI11 uses ADL to specialize parsing cli args to custom types
+bool lexical_cast(const std::string &arg, cli_source_file &src);
 
 } // namespace cli
 
@@ -530,7 +530,9 @@ struct source_file_context {
 
   std::vector<meta::reflectable> reflected{};
 
-  std::set<meta::type_id> resolved_types{}; //< all resolved
+  // Reducer state used while resolving reflected calls. Tracks ids already
+  // seen during direct and dependency resolution.
+  std::set<meta::type_id> resolved_types{};
   std::set<meta::type_id> resolved_as_dependency{};
   std::set<meta::type_id> non_reflectable_types{}; //< for debug or info
 
@@ -577,9 +579,6 @@ struct reflection_context {
   std::set<fs::path> file_dependencies;
 };
 
-std::expected<reflection_context, std::string> prepare_reflection_context(
-  meta::source_file_context ctx);
-
 std::expected<reflection_context, std::string>
   generate_reflection(reflection_context ctx, std::ofstream file);
 
@@ -601,7 +600,7 @@ std::string format_nm_qual_type(const meta::nm_qual_type &t) {
   return std::format("{}",
     elems //
       | std::views::join_with("::"sv) //
-      | util::fmt_fold);
+      | util::format_range);
 }
 
 std::string forward_declaration(const meta::reflectable &t) {
@@ -618,7 +617,7 @@ std::string forward_declaration(const meta::reflectable &t) {
     t.definition.type_name.enclosing_records //
       | std::views::transform(fn::as<std::string_view>)
       | std::views::join_with("::"sv) //
-      | util::fmt_fold,
+      | util::format_range,
     t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
     *t.definition.type_name.name);
 
@@ -676,7 +675,7 @@ std::string forward_declaration(const meta::reflectable &t) {
   return std::format("{}",
     lines //
       | std::views::join_with("\n"sv) //
-      | util::fmt_fold);
+      | util::format_range);
 }
 
 // refactorme: ugleee shite
@@ -814,7 +813,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
             | std::views::transform(
               [&](const fs::path &p) { return esc(p.string()); }) //
             | std::views::join_with(" \\\n  "sv) //
-            | util::fmt_fold));
+            | util::format_range));
 
   os.close();
   if (!os)
@@ -902,6 +901,7 @@ namespace log {
 
 void print_options(const cli::options &args);
 void print_instrumented_source(const cli::options &args);
+void print_reduced_matches(const pipeline::reduced_matches &rm);
 int report_success(const pipeline::run_report &out);
 
 } // namespace log
@@ -917,6 +917,7 @@ int main(int argc, char **argv) {
     .and_then(pipeline::to_compiler_invocation)
     .and_then(pipeline::to_parsed_ast)
     .and_then(pipeline::reduce_matches)
+    .transform(fn::with(log::print_reduced_matches))
     .and_then(pipeline::resolve_reflection_context)
     .and_then(pipeline::emit_outputs)
     .transform(log::report_success)
@@ -933,93 +934,6 @@ app_error processing_error(const source_file &sf, std::string error) {
       sf.path.string(),
       std::move(error)),
   };
-}
-
-/// CLI11 uses ADL to specialize parsing cli args to custom types
-bool cli::lexical_cast(const std::string &arg, cli_source_file &src) {
-  std::string_view sv = arg;
-  if (sv.empty())
-    return false;
-
-  // case 1: unquoted (simpler) - handle first.
-  if ('"' != sv.front()) {
-    auto v_parts = sv | std::views::split(':')
-      | std::views::transform(fn::as<std::string_view>);
-
-    const std::vector parts(v_parts.begin(), v_parts.end());
-
-    // Valid only if 1 or 2 parts.
-    if (parts.empty() || 2 < parts.size())
-      return false;
-
-    // Path before ':' must not be empty.
-    if (parts.front().empty())
-      return false;
-
-    src.path = fs::path(parts.front());
-    src.output_substr =
-      (2 == parts.size()) ? std::string(parts.back()) : std::string{};
-    return true;
-  }
-
-  // case 2: starts with '"' -> quoted logic.
-  std::ranges::view auto view = sv | std::views::split('"')
-    | std::views::transform(fn::as<std::string_view>)
-    | std::views::filter([](std::string_view s) { return !s.empty(); });
-
-  const std::vector parts(view.begin(), view.end());
-
-  if (parts.empty() || 3 < parts.size())
-    return false;
-
-  if (1 == parts.size()) {
-    // `"path"`
-    // Reject empty quoted path: ""...
-    if (2 <= sv.size() && '"' == sv[1])
-      return false;
-
-    src.path = fs::path(parts[0]);
-    src.output_substr.clear();
-    return true;
-  }
-
-  if (2 == parts.size()) {
-    // `"path":out` -> [path, :out]
-    const auto &p0 = parts[0];
-    const auto &p1 = parts[1];
-
-    if (p0.empty())
-      return false;
-
-    if (p1.empty())
-      return false;
-
-    if (':' != p1.front())
-      return false;
-
-    // second "path" (after ':') must not be empty
-    if (1 == p1.size())
-      return false;
-
-    src.path = fs::path(p0);
-    src.output_substr.assign(p1.substr(1)); // after ':'
-    return true;
-  }
-
-  // 3 == parts.size(): `"path":"out"` -> [path, :, out]
-  const auto &p0 = parts[0];
-  const auto &p1 = parts[1];
-  const auto &p2 = parts[2];
-
-  if (p0.empty() || p2.empty())
-    return false;
-
-  if (!(1 == p1.size() && ':' == p1.front()))
-    return false;
-
-  src.path = fs::path(p0);
-  src.output_substr.assign(p2);
-  return true;
 }
 
 std::expected<cli::options, app_error> cli::parse(int argc,
@@ -1186,6 +1100,93 @@ std::expected<cli::options, app_error> cli::parse(int argc,
   };
 }
 
+/// CLI11 uses ADL to specialize parsing cli args to custom types
+bool cli::lexical_cast(const std::string &arg, cli_source_file &src) {
+  std::string_view sv = arg;
+  if (sv.empty())
+    return false;
+
+  // case 1: unquoted (simpler) - handle first.
+  if ('"' != sv.front()) {
+    auto v_parts = sv | std::views::split(':')
+      | std::views::transform(fn::as<std::string_view>);
+
+    const std::vector parts(v_parts.begin(), v_parts.end());
+
+    // Valid only if 1 or 2 parts.
+    if (parts.empty() || 2 < parts.size())
+      return false;
+
+    // Path before ':' must not be empty.
+    if (parts.front().empty())
+      return false;
+
+    src.path = fs::path(parts.front());
+    src.output_substr =
+      (2 == parts.size()) ? std::string(parts.back()) : std::string{};
+    return true;
+  }
+
+  // case 2: starts with '"' -> quoted logic.
+  std::ranges::view auto view = sv | std::views::split('"')
+    | std::views::transform(fn::as<std::string_view>)
+    | std::views::filter([](std::string_view s) { return !s.empty(); });
+
+  const std::vector parts(view.begin(), view.end());
+
+  if (parts.empty() || 3 < parts.size())
+    return false;
+
+  if (1 == parts.size()) {
+    // `"path"`
+    // Reject empty quoted path: ""...
+    if (2 <= sv.size() && '"' == sv[1])
+      return false;
+
+    src.path = fs::path(parts[0]);
+    src.output_substr.clear();
+    return true;
+  }
+
+  if (2 == parts.size()) {
+    // `"path":out` -> [path, :out]
+    const auto &p0 = parts[0];
+    const auto &p1 = parts[1];
+
+    if (p0.empty())
+      return false;
+
+    if (p1.empty())
+      return false;
+
+    if (':' != p1.front())
+      return false;
+
+    // second "path" (after ':') must not be empty
+    if (1 == p1.size())
+      return false;
+
+    src.path = fs::path(p0);
+    src.output_substr.assign(p1.substr(1)); // after ':'
+    return true;
+  }
+
+  // 3 == parts.size(): `"path":"out"` -> [path, :, out]
+  const auto &p0 = parts[0];
+  const auto &p1 = parts[1];
+  const auto &p2 = parts[2];
+
+  if (p0.empty() || p2.empty())
+    return false;
+
+  if (!(1 == p1.size() && ':' == p1.front()))
+    return false;
+
+  src.path = fs::path(p0);
+  src.output_substr.assign(p2);
+  return true;
+}
+
 std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
   const std::vector<std::string> &flags) {
   std::vector<const char *> cli_ref;
@@ -1305,7 +1306,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
   -> std::expected<compiler_invocation, app_error> {
   namespace options = clang::driver::options;
   const fs::path &resource_dir = cli_args.resource_dir;
-  const source_file &sf = cli_args.source;
+  source_file sf = cli_args.source;
 
   const auto to_vector_of_raw_pointers =
     [](const std::vector<std::string> &v) -> std::vector<const char *> {
@@ -1334,7 +1335,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
   llvm::errs() << std::format(
     "\n[info] input flags:"
     "\n  [{}]\n",
-    flags | std::views::join_with("\n  "sv) | util::fmt_fold);
+    flags | std::views::join_with("\n  "sv) | util::format_range);
 
   const std::expected normalized_args = parse_driver_args(flags);
   if (!normalized_args)
@@ -1460,7 +1461,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
     compilation_args //
       | std::views::transform(fn::as<std::string_view>) //
       | std::views::join_with("\n  "sv) //
-      | util::fmt_fold);
+      | util::format_range);
 
   std::shared_ptr clang_invocation =
     std::make_shared<clang::CompilerInvocation>();
@@ -1561,7 +1562,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
                     macro);
                 }) //
               | std::views::join_with("\n"sv) //
-              | util::fmt_fold));
+              | util::format_range));
 
     llvm::errs() << (po.Includes.empty()
         ? std::string()
@@ -1572,7 +1573,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
                     inc);
                 }) //
               | std::views::join_with("\n"sv) //
-              | util::fmt_fold));
+              | util::format_range));
   }
 
   // do not need this noise when parsing the AST
@@ -1580,7 +1581,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
 
   return compiler_invocation{
     .args = std::move(cli_args),
-    .sf = sf,
+    .sf = std::move(sf),
     .ci = std::move(clang_invocation),
     .diag = std::move(diag),
   };
@@ -1652,7 +1653,7 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
         [&ast = wast.ast->getASTContext()](meta::source_file_context a,
           const clang::ClassTemplateSpecializationDecl &decl) {
           std::expected resolved =
-            meta::resolve_reflected_indexed_type(decl, ast, a.resolved_types)
+              meta::resolve_reflected_indexed_type(decl, ast, a.resolved_types)
               .transform( //
                 [&a](
                   std::pair<std::size_t, meta::reflected_type_info> r) -> void {
@@ -1681,7 +1682,8 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
 
                   std::ranges::copy(resolved.dependencies
                       | std::views::transform(&meta::reflectable::id),
-                    std::inserter(a.resolved_types, a.resolved_types.begin()));
+                    std::inserter(a.resolved_types,
+                      a.resolved_types.begin()));
 
                   std::ranges::copy(resolved.dependencies
                       | std::views::transform(&meta::reflectable::id),
@@ -1709,40 +1711,140 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
 
 std::expected<pipeline::reflection_context, app_error>
   pipeline::resolve_reflection_context(reduced_matches rm) {
-  const render::log print_log{
-    .dependencies = rm.ctx.resolved_as_dependency,
-    .index_by_type = rm.ctx.index_by_type | std::ranges::to<std::map>(),
-  };
+  using render_context = render::reflection_context;
 
-  llvm::errs() << std::format(
-    "\n[info] processed source: {}"
-    "\n\n[info] -- types --------\n{}"
-    "\n\n[info] -- includes --------\n{}",
-    source_file::path_as_string(rm.ctx.sf),
+  const source_file source = rm.ctx.sf;
+  const std::map index_by_type_id =
+    rm.ctx.index_by_type | std::views::as_rvalue | std::ranges::to<std::map>();
 
-    rm.ctx.reflected //
-      | std::views::transform(print_log) //
-      | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold,
+  std::vector<render_context::forward_declarable> fwd;
+  std::vector<render_context::nested_type> nested;
+  std::vector<render_context::indexed_type> indexed;
+  std::vector<meta::reflectable> errors;
 
-    rm.ctx.file_dependencies //
-      | std::views::transform([](const fs::path &p) { return p.string(); })
-      | std::views::join_with("\n"sv) //
-      | util::fmt_fold);
+  for (meta::reflectable &&t : rm.ctx.reflected | std::views::as_rvalue) {
+    const std::optional index = index_by_type_id.contains(t.id)
+      ? std::optional(index_by_type_id.at(t.id))
+      : std::nullopt;
 
-  const source_file sf = rm.ctx.sf;
+    const bool as_dependency = rm.ctx.resolved_as_dependency.contains(t.id);
 
-  return render::prepare_reflection_context(std::move(rm.ctx))
-    .transform_error([&sf](std::string error) {
-      return processing_error(sf, std::move(error));
-    })
-    .transform(
-      [args = std::move(rm.args)](render::reflection_context ctx) mutable {
-        return reflection_context{
-          .args = std::move(args),
-          .ctx = std::move(ctx),
-        };
+    const bool is_nested = !t.definition.type_name.enclosing_records.empty();
+    const bool is_unnamed = !t.definition.type_name.name;
+    const bool is_public_non_local =
+      meta::type_definition::none == t.definition.definition_flags;
+
+    // fixme: if a generated reflected type can be forward declared, the
+    // fallback specialization must not be generated. Otherwise
+    // generated-header reflection emits both the named/nested specialization
+    // and fallback specialization, which Clang diagnoses as ambiguous
+    // _reflected<T> metadata.
+    if (std::visit(
+          [is_nested,
+            is_unnamed,
+            is_public_non_local]<meta::reflectable_data Data>(
+            const Data &data) {
+            if (is_nested || is_unnamed || !is_public_non_local)
+              return false;
+
+            if constexpr (std::same_as<meta::enum_data, Data>)
+              return data.is_scoped || data.is_fixed;
+            else {
+              static_assert(std::same_as<meta::record_data, Data>);
+              return true;
+            }
+          },
+          t.data)) {
+      if (index) {
+        llvm::errs() << std::format(
+          "\n[debug] generated fallback '{}' type '{}' will be rendered as forward-declarable.",
+          *index,
+          t.id);
+      }
+
+      fwd.push_back({
+        .type = std::move(t),
+        .index = index,
+        .as_dependent = as_dependency,
       });
+
+      continue;
+    }
+
+    // fixme: case when nested was reflected, but root was not.
+    // fixme: check if enclosing root is public && non-local. As of now this
+    // info is not collected/resolved: only names are collected.
+    if (is_nested
+      // ad hoc to distinguish from fallback-specialized types that has
+      // non-empty enclosing_records. Unnamed nested types can be supported,
+      // but the distinction should be stronger.
+      && !is_unnamed
+      && !t.definition.type_name.enclosing_records.front().empty()) {
+      if (index) {
+        llvm::errs() << std::format(
+          "\n[debug] generated fallback '{}' type '{}' will be rendered as nested forward-declarable.",
+          *index,
+          t.id);
+        llvm::errs() << std::format("\n[debug] is_nested: {}", is_nested);
+        llvm::errs() << std::format("\n[debug] enclosing_records: [{}]",
+          t.definition.type_name.enclosing_records
+            | std::views::join_with(", "sv) | util::format_range);
+      }
+
+      nested.push_back({
+        .type = std::move(t),
+        .index = index,
+        .as_dependent = as_dependency,
+      });
+
+      continue;
+    }
+
+    // fixme(high): some local/unnamed fallback-specialized routes still fail.
+    // The generated guard is non-mutating, so re-triage the remaining
+    // failures as wrong/duplicate metadata or missing generated fallback
+    // specializations.
+    if (index) {
+      indexed.push_back({
+        .type = std::move(t),
+        .index = *index,
+      });
+
+      continue;
+    }
+
+    // fixme: generated-header reflection does not instrument supported
+    // dependency types reachable through reflected_call argument types when
+    // those dependency types cannot be forward-declared. Incidental
+    // reflected_call registrations must not make those dependencies
+    // supported.
+    errors.push_back(std::move(t));
+  }
+
+  // todo:
+  // - fwd: not nested && non-local && named
+  // - nested: nested && (enclosing root is non-local && named)
+  // - generated fallback: everything else discovered through reflected_call
+  // - error if failed to classify. Collect errors, aggregate and report as an
+  // error string
+
+  if (!errors.empty())
+    // todo: list types. "qualified::type declared at: loc"
+    return std::unexpected(processing_error(source, "non-reflectable types: []"));
+
+  return reflection_context{
+    .args = std::move(rm.args),
+    .ctx =
+      render_context{
+        .instrumented_source_file = std::move(rm.ctx.sf),
+
+        .fwd_declarables = std::move(fwd),
+        .nested = std::move(nested),
+        .indexed = std::move(indexed),
+
+        .file_dependencies = std::move(rm.ctx.file_dependencies),
+      },
+  };
 }
 
 std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
@@ -1818,6 +1920,29 @@ void print_options(const cli::options &args) {
 void print_instrumented_source(const cli::options &args) {
   llvm::errs() << std::format("\n[info] running for file: {}\t\r",
     args.source.path.string());
+}
+
+void print_reduced_matches(const pipeline::reduced_matches &rm) {
+  const render::log print_log{
+    .dependencies = rm.ctx.resolved_as_dependency,
+    .index_by_type = rm.ctx.index_by_type | std::ranges::to<std::map>(),
+  };
+
+  llvm::errs() << std::format(
+    "\n[info] processed source: {}"
+    "\n\n[info] -- types --------\n{}"
+    "\n\n[info] -- includes --------\n{}",
+    source_file::path_as_string(rm.ctx.sf),
+
+    rm.ctx.reflected //
+      | std::views::transform(print_log) //
+      | std::views::join_with("\n\n"sv) //
+      | util::format_range,
+
+    rm.ctx.file_dependencies //
+      | std::views::transform([](const fs::path &p) { return p.string(); })
+      | std::views::join_with("\n"sv) //
+      | util::format_range);
 }
 
 int report_success(const pipeline::run_report &out) {
@@ -2389,7 +2514,7 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format("_omni_{}_as_root",
-    elems | std::views::join_with("_"sv) | util::fmt_fold);
+    elems | std::views::join_with("_"sv) | util::format_range);
 }
 
 // Makes a qualified type name dependent so it can be used in SFINAE even when
@@ -2408,7 +2533,7 @@ std::string declaration_for_enclosing_root_as_dependent(
     "template <typename Inner>"
     "\nusing {} = typename _wrt<{}, Inner>::type;",
     enclosing_root_as_dependent(inner_type),
-    elems | std::views::join_with("::"sv) | util::fmt_fold);
+    elems | std::views::join_with("::"sv) | util::format_range);
 }
 
 // render `typename _omni_{root}_as_root<{param}>::inner`
@@ -2426,7 +2551,7 @@ std::string qualified_inner_type_from_fwd_root(
   elems.emplace_back(*inner_type.name);
 
   return std::format("typename {}",
-    elems | std::views::join_with("::"sv) | util::fmt_fold);
+    elems | std::views::join_with("::"sv) | util::format_range);
 }
 
 template <meta::reflectable_data Data>
@@ -2527,7 +2652,7 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     "\n    return \"{2}\";"
     "\n  }}",
 
-    elems | std::views::join_with("::"sv) | util::fmt_fold,
+    elems | std::views::join_with("::"sv) | util::format_range,
     reflectable_entity(d),
     t.name.value_or("(unnamed)"));
 }
@@ -2572,7 +2697,7 @@ std::string reflectable_body(const meta::enum_data &d) {
           return std::format("{{type::{0}, \"{0}\"}}", e);
         })
       | std::views::join_with(",\n        "sv) //
-      | util::fmt_fold);
+      | util::format_range);
 }
 
 std::string reflectable_body(const meta::record_data &d) {
@@ -2633,169 +2758,17 @@ std::string reflectable_body(const meta::record_data &d) {
           d.public_fields | std::views::enumerate //
             | std::views::transform(format_field)
             | std::views::join_with("\n\n"sv) //
-            | util::fmt_fold),
+            | util::format_range),
 
     d.public_fields //
       | std::views::transform(&meta::field_data::name)
       | std::views::transform(
         [](std::string_view f) { return std::format("{}_t", f); }) //
       | std::views::join_with(",\n      "sv) //
-      | util::fmt_fold);
+      | util::format_range);
 }
 
 } // namespace render::impl
-
-auto render::prepare_reflection_context(meta::source_file_context ctx)
-  -> std::expected<reflection_context, std::string> {
-  using partition_result =
-    std::tuple<std::vector<reflection_context::forward_declarable>,
-      std::vector<reflection_context::nested_type>,
-      std::vector<reflection_context::indexed_type>>;
-
-  const auto partition_types = //
-    [index_by_type_id =
-        ctx.index_by_type | std::views::as_rvalue | std::ranges::to<std::map>(),
-      &resolved_as_dependency = ctx.resolved_as_dependency](
-      std::vector<meta::reflectable> types)
-    -> std::expected<partition_result, std::string> {
-    std::expected<partition_result, std::string> accum{};
-
-    auto &[fwd, nested, indexed] = *accum;
-    std::vector<meta::reflectable> errors;
-
-    for (meta::reflectable &&t : types | std::views::as_rvalue) {
-      const std::optional index = index_by_type_id.contains(t.id)
-        ? std::optional(index_by_type_id.at(t.id))
-        : std::nullopt;
-
-      const bool as_dependency = resolved_as_dependency.contains(t.id);
-
-      const bool is_nested = !t.definition.type_name.enclosing_records.empty();
-      const bool is_unnamed = !t.definition.type_name.name;
-      const bool is_public_non_local =
-        meta::type_definition::none == t.definition.definition_flags;
-
-      // fixme: if a generated reflected type can be forward declared, the
-      // fallback specialization must not be generated. Otherwise
-      // generated-header reflection emits both the named/nested specialization
-      // and fallback specialization, which Clang diagnoses as ambiguous
-      // _reflected<T> metadata.
-      if (std::visit(
-            [is_nested,
-              is_unnamed,
-              is_public_non_local]<meta::reflectable_data Data>(
-              const Data &data) {
-              if (is_nested || is_unnamed || !is_public_non_local)
-                return false;
-
-              if constexpr (std::same_as<meta::enum_data, Data>)
-                return data.is_scoped || data.is_fixed;
-              else {
-                static_assert(std::same_as<meta::record_data, Data>);
-                return true;
-              }
-            },
-            t.data)) {
-        if (index) {
-          llvm::errs() << std::format(
-            "\n[debug] generated fallback '{}' type '{}' will be rendered as forward-declarable.",
-            *index,
-            t.id);
-        }
-
-        fwd.push_back({
-          .type = std::move(t),
-          .index = index,
-          .as_dependent = as_dependency,
-        });
-
-        continue;
-      }
-
-      // fixme: case when nested was reflected, but root was not.
-      // fixme: check if enclosing root is public && non-local. As of now this
-      // info is not collected/resolved: only names are collected.
-      if (is_nested
-        // ad hoc to distinguish from fallback-specialized types that has
-        // non-empty enclosing_records. Unnamed nested types can be supported,
-        // but the distinction should be stronger.
-        && !is_unnamed
-        && !t.definition.type_name.enclosing_records.front().empty()) {
-        if (index) {
-          llvm::errs() << std::format(
-            "\n[debug] generated fallback '{}' type '{}' will be rendered as nested forward-declarable.",
-            *index,
-            t.id);
-          llvm::errs() << std::format("\n[debug] is_nested: {}", is_nested);
-          llvm::errs() << std::format("\n[debug] enclosing_records: [{}]",
-            t.definition.type_name.enclosing_records
-              | std::views::join_with(", "sv) | util::fmt_fold);
-        }
-
-        nested.push_back({
-          .type = std::move(t),
-          .index = index,
-          .as_dependent = as_dependency,
-        });
-
-        continue;
-      }
-
-      // fixme(high): some local/unnamed fallback-specialized routes still fail.
-      // The generated guard is non-mutating, so re-triage the remaining
-      // failures as wrong/duplicate metadata or missing generated fallback
-      // specializations.
-      if (index) {
-        indexed.push_back({
-          .type = std::move(t),
-          .index = *index,
-        });
-
-        continue;
-      }
-
-      // fixme: generated-header reflection does not instrument supported
-      // dependency types reachable through reflected_call argument types when
-      // those dependency types cannot be forward-declared. Incidental
-      // reflected_call registrations must not make those dependencies
-      // supported.
-      errors.push_back(std::move(t));
-    }
-
-    // todo:
-    // - fwd: not nested && non-local && named
-    // - nested: nested && (enclosing root is non-local && named)
-    // - generated fallback: everything else discovered through reflected_call
-    // - error if failed to classify. Collect errors, aggregate and report as
-    // an error string
-
-    if (errors.empty())
-      return accum;
-
-    // todo: list types. "qualified::type declared at: loc"
-    return std::unexpected("non-reflectable types: []");
-  };
-
-  return partition_types(std::move(ctx.reflected))
-    .transform([&sf = ctx.sf, &deps = ctx.file_dependencies]<typename Tuple>(
-                 Tuple &&tuple) {
-      return std::apply(
-        [&]<typename F, typename N, typename I>(F &&fwd,
-          N &&nested,
-          I &&indexed) {
-          return reflection_context{
-            .instrumented_source_file = std::move(sf),
-
-            .fwd_declarables = std::forward<F>(fwd),
-            .nested = std::forward<N>(nested),
-            .indexed = std::forward<I>(indexed),
-
-            .file_dependencies = std::move(deps),
-          };
-        },
-        std::forward<Tuple>(tuple));
-    });
-}
 
 auto render::generate_reflection(reflection_context ctx, std::ofstream file)
   -> std::expected<reflection_context, std::string> {
@@ -2869,7 +2842,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
           | std::views::transform(fetch) //
           | std::views::transform(format) //
           | std::views::join_with(",\n    "sv) //
-          | util::fmt_fold);
+          | util::format_range);
     };
 
   const auto format_body = //
@@ -2980,39 +2953,39 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(
         [](std::string_view s) { return std::format("#include <{}>", s); })
       | std::views::join_with("\n"sv) //
-      | util::fmt_fold,
+      | util::format_range,
 
     // 2:
     ctx.fwd_declarables //
       | std::views::transform(&reflection_context::forward_declarable::type)
       | std::views::transform(render::forward_declaration) //
       | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold,
+      | util::format_range,
 
     // 3:
     access_roots //
       | std::views::transform(
         render::impl::declaration_for_enclosing_root_as_dependent) //
       | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold,
+      | util::format_range,
 
     // 4:
     ctx.fwd_declarables //
       | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold,
+      | util::format_range,
 
     // 5:
     ctx.nested //
       | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold,
+      | util::format_range,
 
     // 6:
     ctx.indexed //
       | std::views::transform(format_reflectable)
       | std::views::join_with("\n\n"sv) //
-      | util::fmt_fold);
+      | util::format_range);
 
   // todo: check if file has errors
 
