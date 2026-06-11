@@ -922,7 +922,6 @@ struct log {
       format_definition(d.definition),
       std::visit(*this, d.data));
   }
-
 };
 
 std::expected<fs::path, std::string> write_dependencies_file(
@@ -1003,73 +1002,8 @@ struct with_compiler_invocation {
 };
 
 std::expected<with_compiler_invocation, std::string>
-  compiler_invocation_for_source_file(const fs::path &resource_dir,
+  compiler_invocation_for_source_file(const cli::options &cli_args,
     const source_file &sf) noexcept;
-
-// todo: do I even need this as a separate funcion?
-// todo: rename/refactor. This is (should be) entirely mode related.
-with_compiler_invocation configure_compiler_invocation(
-  const cli::options &cli_args,
-  with_compiler_invocation wci) noexcept {
-  {
-    clang::LangOptions &lo = wci.ci->getLangOpts();
-    // todo: investigate how to properly parse comments
-    lo.CommentOpts.ParseAllComments = true;
-  }
-
-  {
-    clang::PreprocessorOptions &po = wci.ci->getPreprocessorOpts();
-    constexpr std::string_view k_omni_macro = "OMNI_GENERATED_REFLECTION";
-
-    if (const auto omni_defined = std::ranges::find_if(po.Macros,
-          [k_omni_macro](const auto &macro_def) {
-            const auto &[macro, is_undef] = macro_def;
-            return macro == k_omni_macro;
-          });
-      po.Macros.cend() == omni_defined) {
-      // enable for the tool
-      po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
-    } else {
-      auto &[_, is_undef] = *omni_defined;
-      // todo: warning if `true == is_undef`?
-      is_undef = false;
-    }
-
-    // removing force-included reflection header that is being generated
-    std::erase_if(po.Includes,
-      [&output_dir = cli_args.out](const std::string &s) -> bool {
-        // todo: should I remove the exact path?
-        return util::is_subpath(s, output_dir);
-      });
-
-    // refactorme: use single `<<` call
-    llvm::errs() << (po.Macros.empty()
-        ? std::string()
-        : std::format("\n{}\n",
-            po.Macros //
-              | std::views::transform([](const auto &pair) {
-                  const auto &[macro, is_undef] = pair;
-                  return std::format("[debug] preprocessor #{} {}",
-                    is_undef ? "undef" : "define",
-                    macro);
-                }) //
-              | std::views::join_with("\n"sv) //
-              | util::fmt_fold));
-
-    llvm::errs() << (po.Includes.empty()
-        ? std::string()
-        : std::format("{}\n",
-            po.Includes //
-              | std::views::transform([](const auto &inc) {
-                  return std::format("[debug] preprocessor #include \"{}\"",
-                    inc);
-                }) //
-              | std::views::join_with("\n"sv) //
-              | util::fmt_fold));
-  }
-
-  return wci;
-}
 
 struct with_ast {
   source_file sf;
@@ -1081,42 +1015,7 @@ struct with_ast {
 };
 
 std::expected<with_ast, std::string> ast_from_compiler_invocation(
-  with_compiler_invocation wci) {
-  struct deps_collector_t final: clang::DependencyCollector {
-    bool needSystemDependencies() override {
-      return false;
-    }
-  } deps_collector;
-
-  struct action_t final: clang::SyntaxOnlyAction {
-    clang::DependencyCollector &dc;
-    explicit action_t(clang::DependencyCollector &dc): dc(dc) {}
-
-    bool BeginSourceFileAction(clang::CompilerInstance &CI) override {
-      dc.attachToPreprocessor(CI.getPreprocessor());
-      return clang::SyntaxOnlyAction::BeginSourceFileAction(CI);
-    }
-  } action{deps_collector};
-
-  std::unique_ptr<clang::ASTUnit> ast{
-    clang::ASTUnit::LoadFromCompilerInvocationAction(wci.ci,
-      std::make_shared<clang::PCHContainerOperations>(),
-      wci.diag.options,
-      wci.diag.engine,
-      &action)};
-
-  if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
-    return std::unexpected("Failed to build AST Unit.");
-
-  return with_ast{
-    .sf = std::move(wci.sf),
-    .ast = std::move(ast),
-    .diag = std::move(wci.diag),
-
-    .includes_deps = deps_collector.getDependencies()
-      | std::views::transform(fn::as<fs::path>) | std::ranges::to<std::set>(),
-  };
-}
+  with_compiler_invocation wci);
 
 } // namespace pipeline
 
@@ -1137,11 +1036,7 @@ int main(int argc, char **argv) {
 
   const cli::options &args = *cli_args;
   const auto compiler_invocation_for_source_file =
-    std::bind_front(pipeline::compiler_invocation_for_source_file,
-      args.resource_dir);
-
-  const auto configure_compiler_invocation =
-    std::bind_front(pipeline::configure_compiler_invocation, args);
+    std::bind_front(pipeline::compiler_invocation_for_source_file, args);
 
   static const auto collect_matches =
     [](pipeline::with_ast wast) -> meta::source_file_context {
@@ -1226,14 +1121,14 @@ int main(int argc, char **argv) {
 
   const std::expected processed_source =
     compiler_invocation_for_source_file(args.source)
-      .transform(configure_compiler_invocation)
       .and_then(pipeline::ast_from_compiler_invocation)
       .transform(collect_matches)
-      .transform_error([filename = args.source.path.string()](std::string error) {
-        return std::format("Failed to process '{}' with error: {}",
-          filename,
-          std::move(error));
-      })
+      .transform_error(
+        [filename = args.source.path.string()](std::string error) {
+          return std::format("Failed to process '{}' with error: {}",
+            filename,
+            std::move(error));
+        })
       .transform([](meta::source_file_context ctx) {
         const render::log print_log{
           .dependencies = ctx.resolved_as_dependency,
@@ -1252,7 +1147,8 @@ int main(int argc, char **argv) {
             | util::fmt_fold,
 
           ctx.file_dependencies //
-            | std::views::transform([](const fs::path &p) { return p.string(); })
+            | std::views::transform(
+              [](const fs::path &p) { return p.string(); })
             | std::views::join_with("\n"sv) //
             | util::fmt_fold);
 
@@ -1271,13 +1167,12 @@ int main(int argc, char **argv) {
     };
 
   const std::expected instrumented_source =
-    processed_source
-      .and_then(render::prepare_reflection_context)
+    processed_source.and_then(render::prepare_reflection_context)
       .and_then([reflection_header_path](render::reflection_context ctx) {
-        const fs::path out = reflection_header_path(ctx.instrumented_source_file);
+        const fs::path out =
+          reflection_header_path(ctx.instrumented_source_file);
 
-        llvm::errs() << std::format(
-          "\n[info] creating reflection header: {}",
+        llvm::errs() << std::format("\n[info] creating reflection header: {}",
           out.generic_string());
 
         return util::create_file_for_writing(out) //
@@ -1313,6 +1208,7 @@ int main(int argc, char **argv) {
 }
 
 namespace {
+
 std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
   const char *const *argv) noexcept {
   // refactorme: app description and cli parameters should be at the start
@@ -1340,9 +1236,7 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
 
   cli_source_file cli_source;
   app
-    .add_option("-s,--source",
-      cli_source,
-      ".cpp file path to run the tool on.")
+    .add_option("-s,--source", cli_source, ".cpp file path to run the tool on.")
     ->type_name("FILE")
     ->required();
 
@@ -1370,18 +1264,20 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
   app.callback([&] {
     // -- check source
     {
-      cli_source.path = fs::absolute(std::move(cli_source.path)).lexically_normal();
+      cli_source.path =
+        fs::absolute(std::move(cli_source.path)).lexically_normal();
 
       // refactorme: 'unquote' string function
       if (cli_source.output_substr.starts_with("\'")
         || cli_source.output_substr.starts_with("\""))
-        cli_source.output_substr = std::move(cli_source.output_substr).substr(1);
+        cli_source.output_substr =
+          std::move(cli_source.output_substr).substr(1);
 
       if (cli_source.output_substr.ends_with("\'")
         || cli_source.output_substr.ends_with("\""))
-        cli_source.output_substr = std::move(cli_source.output_substr)
-                                     .substr(0, cli_source.output_substr.size()
-                                                   - 1);
+        cli_source.output_substr =
+          std::move(cli_source.output_substr)
+            .substr(0, cli_source.output_substr.size() - 1);
 
       if (!fs::exists(cli_source.path)) {
         throw CLI::ValidationError("Non-existent source:",
@@ -1430,8 +1326,7 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
       throw CLI::ValidationError("Invalid compilation db file:",
         cli_comp_db->generic_string());
 
-    llvm::errs() << std::format(
-      "\n[debug] disambiguation substring for {}: {}",
+    llvm::errs() << std::format("\n[debug] disambiguation substring for {}: {}",
       cli_source.path.string(),
       cli_source.output_substr);
 
@@ -1440,15 +1335,14 @@ std::expected<cli::options, std::pair<int, std::string>> cli::parse(int argc,
 
     std::vector resolved = commands //
       | std::views::as_rvalue
-      | std::views::filter([&cli_source](
-                             const clang::tooling::CompileCommand &c) -> bool {
+      | std::views::filter(
+        [&cli_source](const clang::tooling::CompileCommand &c) -> bool {
           return c.Output.contains(cli_source.output_substr);
         })
       | std::ranges::to<std::vector>();
 
     if (1 != resolved.size()) {
-      throw CLI::ValidationError(
-        "Failed to resolve source from compilation db",
+      throw CLI::ValidationError("Failed to resolve source from compilation db",
         std::format("{}: failed to resolve from {} commands by substring `{}`",
           cli_source.path.generic_string(),
           commands.size(),
@@ -1591,10 +1485,11 @@ std::vector<std::string> filter_ast_related_args(
 }
 
 // refactorme: this is an ugly shite
-auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
+auto pipeline::compiler_invocation_for_source_file(const cli::options &cli_args,
   const source_file &sf) noexcept
   -> std::expected<with_compiler_invocation, std::string> {
   namespace options = clang::driver::options;
+  const fs::path &resource_dir = cli_args.resource_dir;
 
   const auto to_vector_of_raw_pointers =
     [](const std::vector<std::string> &v) -> std::vector<const char *> {
@@ -1805,6 +1700,64 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
     p.Macros.emplace_back("OMNI_TOOL_RUN", /*isUndef*/ false);
   }
 
+  {
+    clang::LangOptions &lo = compiler_invocation->getLangOpts();
+    // todo: investigate how to properly parse comments
+    lo.CommentOpts.ParseAllComments = true;
+  }
+
+  {
+    clang::PreprocessorOptions &po = compiler_invocation->getPreprocessorOpts();
+    constexpr std::string_view k_omni_macro = "OMNI_GENERATED_REFLECTION";
+
+    if (const auto omni_defined = std::ranges::find_if(po.Macros,
+          [k_omni_macro](const auto &macro_def) {
+            const auto &[macro, is_undef] = macro_def;
+            return macro == k_omni_macro;
+          });
+      po.Macros.cend() == omni_defined) {
+      // enable for the tool
+      po.Macros.emplace_back(k_omni_macro, /*isUndef*/ false);
+    } else {
+      auto &[_, is_undef] = *omni_defined;
+      // todo: warning if `true == is_undef`?
+      is_undef = false;
+    }
+
+    // removing force-included reflection header that is being generated
+    std::erase_if(po.Includes,
+      [&output_dir = cli_args.out](const std::string &s) -> bool {
+        // todo: should I remove the exact path?
+        return util::is_subpath(s, output_dir);
+      });
+
+    // todo: unify logging with level tags.
+    // refactorme: use single `<<` call
+    llvm::errs() << (po.Macros.empty()
+        ? std::string()
+        : std::format("\n{}\n",
+            po.Macros //
+              | std::views::transform([](const auto &pair) {
+                  const auto &[macro, is_undef] = pair;
+                  return std::format("[debug] preprocessor #{} {}",
+                    is_undef ? "undef" : "define",
+                    macro);
+                }) //
+              | std::views::join_with("\n"sv) //
+              | util::fmt_fold));
+
+    llvm::errs() << (po.Includes.empty()
+        ? std::string()
+        : std::format("{}\n",
+            po.Includes //
+              | std::views::transform([](const auto &inc) {
+                  return std::format("[debug] preprocessor #include \"{}\"",
+                    inc);
+                }) //
+              | std::views::join_with("\n"sv) //
+              | util::fmt_fold));
+  }
+
   // do not need this noise when parsing the AST
   compiler_invocation->getDiagnosticOpts().IgnoreWarnings = 1;
 
@@ -1812,6 +1765,44 @@ auto pipeline::compiler_invocation_for_source_file(const fs::path &resource_dir,
     .sf = sf,
     .ci = std::move(compiler_invocation),
     .diag = std::move(diag),
+  };
+}
+
+std::expected<pipeline::with_ast, std::string>
+pipeline::ast_from_compiler_invocation(with_compiler_invocation wci) {
+  struct deps_collector_t final: clang::DependencyCollector {
+    bool needSystemDependencies() override {
+      return false;
+    }
+  } deps_collector;
+
+  struct action_t final: clang::SyntaxOnlyAction {
+    clang::DependencyCollector &dc;
+    explicit action_t(clang::DependencyCollector &dc): dc(dc) {}
+
+    bool BeginSourceFileAction(clang::CompilerInstance &CI) override {
+      dc.attachToPreprocessor(CI.getPreprocessor());
+      return clang::SyntaxOnlyAction::BeginSourceFileAction(CI);
+    }
+  } action{deps_collector};
+
+  std::unique_ptr<clang::ASTUnit> ast{
+    clang::ASTUnit::LoadFromCompilerInvocationAction(wci.ci,
+      std::make_shared<clang::PCHContainerOperations>(),
+      wci.diag.options,
+      wci.diag.engine,
+      &action)};
+
+  if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
+    return std::unexpected("Failed to build AST Unit.");
+
+  return with_ast{
+    .sf = std::move(wci.sf),
+    .ast = std::move(ast),
+    .diag = std::move(wci.diag),
+
+    .includes_deps = deps_collector.getDependencies()
+      | std::views::transform(fn::as<fs::path>) | std::ranges::to<std::set>(),
   };
 }
 
@@ -2642,13 +2633,15 @@ auto render::prepare_reflection_context(meta::source_file_context ctx)
         meta::type_definition::none == t.definition.definition_flags;
 
       // fixme: if a generated reflected type can be forward declared, the
-      // fallback specialization must not be generated. Otherwise generated-header
-      // reflection emits both the named/nested specialization and fallback
-      // specialization, which Clang diagnoses as ambiguous _reflected<T>
-      // metadata.
+      // fallback specialization must not be generated. Otherwise
+      // generated-header reflection emits both the named/nested specialization
+      // and fallback specialization, which Clang diagnoses as ambiguous
+      // _reflected<T> metadata.
       if (std::visit(
-            [is_nested, is_unnamed, is_public_non_local]<
-              meta::reflectable_data Data>(const Data &data) {
+            [is_nested,
+              is_unnamed,
+              is_public_non_local]<meta::reflectable_data Data>(
+              const Data &data) {
               if (is_nested || is_unnamed || !is_public_non_local)
                 return false;
 
@@ -2680,9 +2673,9 @@ auto render::prepare_reflection_context(meta::source_file_context ctx)
       // fixme: check if enclosing root is public && non-local. As of now this
       // info is not collected/resolved: only names are collected.
       if (is_nested
-        // ad hoc to distinguish from fallback-specialized types that has non-empty
-        // enclosing_records. Unnamed nested types can be supported, but
-        // the distinction should be stronger.
+        // ad hoc to distinguish from fallback-specialized types that has
+        // non-empty enclosing_records. Unnamed nested types can be supported,
+        // but the distinction should be stronger.
         && !is_unnamed
         && !t.definition.type_name.enclosing_records.front().empty()) {
         if (index) {
@@ -2718,10 +2711,11 @@ auto render::prepare_reflection_context(meta::source_file_context ctx)
         continue;
       }
 
-      // fixme: generated-header reflection does not instrument supported dependency types
-      // reachable through reflected_call argument types when those dependency
-      // types cannot be forward-declared. Incidental reflected_call
-      // registrations must not make those dependencies supported.
+      // fixme: generated-header reflection does not instrument supported
+      // dependency types reachable through reflected_call argument types when
+      // those dependency types cannot be forward-declared. Incidental
+      // reflected_call registrations must not make those dependencies
+      // supported.
       errors.push_back(std::move(t));
     }
 
