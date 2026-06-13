@@ -8,6 +8,7 @@
 #include <mpark/variant.hpp>
 
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -455,6 +456,84 @@ struct in_cpp_deep_derived: in_cpp_mid_base {
   std::string in_cpp_deep_field_0;
   int in_cpp_deep_field_1;
   double in_cpp_deep_field_2;
+};
+
+template <typename Derived>
+struct in_cpp_crtp_base {
+  int in_cpp_crtp_base_field;
+};
+
+template <typename Derived>
+struct in_cpp_second_crtp_base {
+  std::string in_cpp_second_crtp_base_field;
+};
+
+template <typename Derived>
+struct in_cpp_crtp_base_with_header_base: in_header_struct {
+  int in_cpp_crtp_header_base_field;
+};
+
+template <typename Derived>
+class in_cpp_crtp_mixed_access_base {
+  int in_cpp_hidden_crtp_base_field OMNI_INPLACE_MAYBE_UNUSED;
+
+  public:
+  int in_cpp_visible_crtp_base_field;
+};
+
+template <typename Derived>
+struct in_cpp_crtp_base_with_private_cpp_base: private in_cpp_struct {
+  int in_cpp_crtp_private_cpp_base_field;
+};
+
+struct in_cpp_crtp_derived: in_cpp_crtp_base<in_cpp_crtp_derived> {
+  std::string in_cpp_crtp_field_0;
+  double in_cpp_crtp_field_1;
+};
+
+struct in_cpp_second_crtp_derived: in_cpp_crtp_base<in_cpp_second_crtp_derived> {
+  std::string in_cpp_second_crtp_field_0;
+  double in_cpp_second_crtp_field_1;
+};
+
+struct in_cpp_multi_crtp_derived:
+    in_cpp_crtp_base<in_cpp_multi_crtp_derived>,
+    in_cpp_second_crtp_base<in_cpp_multi_crtp_derived> {
+  double in_cpp_multi_crtp_field;
+};
+
+struct in_cpp_crtp_with_header_base:
+    in_header_struct,
+    in_cpp_crtp_base<in_cpp_crtp_with_header_base> {
+  double in_cpp_crtp_with_header_field;
+};
+
+struct in_cpp_layered_crtp_derived:
+    in_cpp_crtp_base_with_header_base<in_cpp_layered_crtp_derived> {
+  std::string in_cpp_layered_crtp_field;
+};
+
+struct in_cpp_crtp_mixed_access_derived:
+    in_cpp_crtp_mixed_access_base<in_cpp_crtp_mixed_access_derived> {
+  std::string in_cpp_crtp_mixed_access_field;
+};
+
+struct in_cpp_crtp_private_cpp_base_derived:
+    in_cpp_crtp_base_with_private_cpp_base<
+      in_cpp_crtp_private_cpp_base_derived> {
+  std::string in_cpp_crtp_private_cpp_base_derived_field;
+};
+
+struct in_cpp_private_crtp_derived:
+    private in_cpp_crtp_base<in_cpp_private_crtp_derived> {
+  std::string in_cpp_private_crtp_field_0;
+  int in_cpp_private_crtp_field_1;
+};
+
+struct in_cpp_protected_crtp_derived:
+    protected in_cpp_crtp_base<in_cpp_protected_crtp_derived> {
+  std::string in_cpp_protected_crtp_field_0;
+  int in_cpp_protected_crtp_field_1;
 };
 
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
@@ -990,6 +1069,105 @@ TEST(print_names, in_cpp_deep_public_base_chain) {
     "in_cpp_deep_field_0",
     "in_cpp_deep_field_1",
     "in_cpp_deep_field_2",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_crtp_public_base) {
+  const example::in_cpp_crtp_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_base_field",
+    "in_cpp_crtp_field_0",
+    "in_cpp_crtp_field_1",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_second_crtp_public_base) {
+  const example::in_cpp_second_crtp_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_base_field",
+    "in_cpp_second_crtp_field_0",
+    "in_cpp_second_crtp_field_1",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_multi_crtp_public_bases) {
+  const example::in_cpp_multi_crtp_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_base_field",
+    "in_cpp_second_crtp_base_field",
+    "in_cpp_multi_crtp_field",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_crtp_mixed_with_header_base) {
+  const example::in_cpp_crtp_with_header_base p{};
+  const static std::vector<std::string> expected{
+    "in_header_field_0",
+    "in_header_field_1",
+    "in_header_field_2",
+    "in_cpp_crtp_base_field",
+    "in_cpp_crtp_with_header_field",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_layered_crtp_base_chain) {
+  const example::in_cpp_layered_crtp_derived p{};
+  const static std::vector<std::string> expected{
+    "in_header_field_0",
+    "in_header_field_1",
+    "in_header_field_2",
+    "in_cpp_crtp_header_base_field",
+    "in_cpp_layered_crtp_field",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_crtp_base_with_non_public_fields) {
+  const example::in_cpp_crtp_mixed_access_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_visible_crtp_base_field",
+    "in_cpp_crtp_mixed_access_field",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_crtp_base_with_private_cpp_base) {
+  const example::in_cpp_crtp_private_cpp_base_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_private_cpp_base_field",
+    "in_cpp_crtp_private_cpp_base_derived_field",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_private_crtp_public_only) {
+  const example::in_cpp_private_crtp_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_private_crtp_field_0",
+    "in_cpp_private_crtp_field_1",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_protected_crtp_public_only) {
+  const example::in_cpp_protected_crtp_derived p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_protected_crtp_field_0",
+    "in_cpp_protected_crtp_field_1",
   };
   ASSERT_EQ(expected,
     omni::reflected_call(example_impl::print_field_names_simple, p));
@@ -2239,6 +2417,139 @@ TEST(write_values, in_cpp_deep_derived_from_std_map) {
   ASSERT_EQ(35.5, p.in_cpp_deep_field_2);
 }
 
+TEST(write_values, in_cpp_crtp_public_base_from_std_map) {
+  example::in_cpp_crtp_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 136;
+  from["in_cpp_crtp_field_0"] = std::string{"crtp"};
+  from["in_cpp_crtp_field_1"] = 36.5;
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(136, p.in_cpp_crtp_base_field);
+  ASSERT_EQ("crtp", p.in_cpp_crtp_field_0);
+  ASSERT_EQ(36.5, p.in_cpp_crtp_field_1);
+}
+
+TEST(write_values, in_cpp_second_crtp_public_base_from_std_map) {
+  example::in_cpp_second_crtp_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 141;
+  from["in_cpp_second_crtp_field_0"] = std::string{"second crtp"};
+  from["in_cpp_second_crtp_field_1"] = 41.5;
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(141, p.in_cpp_crtp_base_field);
+  ASSERT_EQ("second crtp", p.in_cpp_second_crtp_field_0);
+  ASSERT_EQ(41.5, p.in_cpp_second_crtp_field_1);
+}
+
+TEST(write_values, in_cpp_multi_crtp_public_bases_from_std_map) {
+  example::in_cpp_multi_crtp_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 142;
+  from["in_cpp_second_crtp_base_field"] = std::string{"multi crtp base"};
+  from["in_cpp_multi_crtp_field"] = 42.5;
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(142, p.in_cpp_crtp_base_field);
+  ASSERT_EQ("multi crtp base", p.in_cpp_second_crtp_base_field);
+  ASSERT_EQ(42.5, p.in_cpp_multi_crtp_field);
+}
+
+TEST(write_values, in_cpp_crtp_mixed_with_header_base_from_std_map) {
+  example::in_cpp_crtp_with_header_base p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_header_field_0"] = std::string{"header crtp"};
+  from["in_header_field_1"] = 143;
+  from["in_header_field_2"] = 43.5;
+  from["in_cpp_crtp_base_field"] = 144;
+  from["in_cpp_crtp_with_header_field"] = 44.5;
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ("header crtp", p.in_header_field_0);
+  ASSERT_EQ(143, p.in_header_field_1);
+  ASSERT_EQ(43.5, p.in_header_field_2);
+  ASSERT_EQ(144, p.in_cpp_crtp_base_field);
+  ASSERT_EQ(44.5, p.in_cpp_crtp_with_header_field);
+}
+
+TEST(write_values, in_cpp_layered_crtp_base_chain_from_std_map) {
+  example::in_cpp_layered_crtp_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_header_field_0"] = std::string{"layered header"};
+  from["in_header_field_1"] = 145;
+  from["in_header_field_2"] = 45.5;
+  from["in_cpp_crtp_header_base_field"] = 146;
+  from["in_cpp_layered_crtp_field"] = std::string{"layered crtp"};
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ("layered header", p.in_header_field_0);
+  ASSERT_EQ(145, p.in_header_field_1);
+  ASSERT_EQ(45.5, p.in_header_field_2);
+  ASSERT_EQ(146, p.in_cpp_crtp_header_base_field);
+  ASSERT_EQ("layered crtp", p.in_cpp_layered_crtp_field);
+}
+
+TEST(write_values, in_cpp_crtp_base_with_non_public_fields_from_std_map) {
+  example::in_cpp_crtp_mixed_access_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_hidden_crtp_base_field"] = 147;
+  from["in_cpp_visible_crtp_base_field"] = 148;
+  from["in_cpp_crtp_mixed_access_field"] = std::string{"mixed crtp"};
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(148, p.in_cpp_visible_crtp_base_field);
+  ASSERT_EQ("mixed crtp", p.in_cpp_crtp_mixed_access_field);
+}
+
+TEST(write_values, in_cpp_crtp_base_with_private_cpp_base_from_std_map) {
+  example::in_cpp_crtp_private_cpp_base_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_field_0"] = std::string{"hidden cpp base"};
+  from["in_cpp_field_1"] = 149;
+  from["in_cpp_field_2"] = 49.5;
+  from["in_cpp_crtp_private_cpp_base_field"] = 150;
+  from["in_cpp_crtp_private_cpp_base_derived_field"] =
+    std::string{"private cpp crtp"};
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(150, p.in_cpp_crtp_private_cpp_base_field);
+  ASSERT_EQ("private cpp crtp", p.in_cpp_crtp_private_cpp_base_derived_field);
+}
+
+TEST(write_values, in_cpp_private_crtp_from_std_map_public_only) {
+  example::in_cpp_private_crtp_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 137;
+  from["in_cpp_private_crtp_field_0"] = std::string{"private crtp"};
+  from["in_cpp_private_crtp_field_1"] = 138;
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ("private crtp", p.in_cpp_private_crtp_field_0);
+  ASSERT_EQ(138, p.in_cpp_private_crtp_field_1);
+}
+
+TEST(write_values, in_cpp_protected_crtp_from_std_map_public_only) {
+  example::in_cpp_protected_crtp_derived p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 139;
+  from["in_cpp_protected_crtp_field_0"] = std::string{"protected crtp"};
+  from["in_cpp_protected_crtp_field_1"] = 140;
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ("protected crtp", p.in_cpp_protected_crtp_field_0);
+  ASSERT_EQ(140, p.in_cpp_protected_crtp_field_1);
+}
+
 TEST(write_values, in_cpp_struct_with_nested_mpark_variant_map) {
   using nested_type = example::in_cpp_struct_with_nested_struct::nested;
   using nested_value = mpark::variant<int, double, std::string>;
@@ -2591,10 +2902,36 @@ struct in_cpp_template<int>: in_header_struct {
   int in_cpp_template_field_1;
   double in_cpp_template_field_2;
 };
+
+template <typename T>
+struct in_cpp_template_crtp_derived:
+    in_cpp_crtp_base<in_cpp_template_crtp_derived<T>> {
+  T in_cpp_template_crtp_field;
+  std::string in_cpp_template_crtp_name;
+};
+
+template <typename T>
+struct in_cpp_crtp_allocator: std::allocator<T> {
+  in_cpp_crtp_allocator() noexcept {}
+
+  template <typename U>
+  in_cpp_crtp_allocator(const in_cpp_crtp_allocator<U> &) noexcept {}
+
+  template <typename U>
+  struct rebind {
+    using other = in_cpp_crtp_allocator<U>;
+  };
+};
+
+template <typename T, typename Alloc = in_cpp_crtp_allocator<T>>
+struct in_cpp_allocator_crtp_derived:
+    in_cpp_crtp_base<in_cpp_allocator_crtp_derived<T, Alloc>> {
+  std::vector<T, Alloc> in_cpp_allocator_crtp_values;
+  std::string in_cpp_allocator_crtp_name;
+};
 } // namespace example
 
-// FIXME: does not compile: generated forward declaration is emitted as
-// `struct in_cpp_template<int>;` instead of preserving the class-template form.
+// TODO: explicit record template specializations are not supported.
 //
 // TEST(print_names, in_cpp_template_specialization_with_base) {
 //   const example::in_cpp_template<int> p{};
@@ -2609,3 +2946,106 @@ struct in_cpp_template<int>: in_header_struct {
 //   ASSERT_EQ(expected,
 //     omni::reflected_call(example_impl::print_field_names_simple, p));
 // }
+
+// TODO: full specialization-specific CRTP base metadata is not supported.
+// Once supported, the tool must reflect the specialization shape instead of
+// collapsing it to the primary template.
+//
+// template <>
+// struct example::in_cpp_crtp_base<example::in_cpp_specialized_crtp_derived> {
+//   std::string specialized_crtp_base_field;
+// };
+//
+// namespace example {
+// struct in_cpp_specialized_crtp_derived:
+//     in_cpp_crtp_base<in_cpp_specialized_crtp_derived> {
+//   int specialized_crtp_own_field;
+// };
+// } // namespace example
+//
+// TEST(print_names, in_cpp_specialized_crtp_base_shape) {
+//   const example::in_cpp_specialized_crtp_derived p{};
+//   const static std::vector<std::string> expected{
+//     "specialized_crtp_base_field",
+//     "specialized_crtp_own_field",
+//   };
+//   ASSERT_EQ(expected,
+//     omni::reflected_call(example_impl::print_field_names_simple, p));
+// }
+
+TEST(print_names, in_cpp_template_crtp_public_base) {
+  const example::in_cpp_template_crtp_derived<double> p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_base_field",
+    "in_cpp_template_crtp_field",
+    "in_cpp_template_crtp_name",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(print_names, in_cpp_template_crtp_second_instantiation_public_base) {
+  const example::in_cpp_template_crtp_derived<int> p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_base_field",
+    "in_cpp_template_crtp_field",
+    "in_cpp_template_crtp_name",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(write_values, in_cpp_template_crtp_public_base_from_std_map) {
+  example::in_cpp_template_crtp_derived<double> p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 137;
+  from["in_cpp_template_crtp_field"] = 37.5;
+  from["in_cpp_template_crtp_name"] = std::string{"template crtp"};
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(137, p.in_cpp_crtp_base_field);
+  ASSERT_EQ(37.5, p.in_cpp_template_crtp_field);
+  ASSERT_EQ("template crtp", p.in_cpp_template_crtp_name);
+}
+
+TEST(write_values, in_cpp_template_crtp_second_instantiation_from_std_map) {
+  example::in_cpp_template_crtp_derived<int> p{};
+
+  std::map<std::string, mpark::variant<int, double, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 151;
+  from["in_cpp_template_crtp_field"] = 152;
+  from["in_cpp_template_crtp_name"] = std::string{"template crtp int"};
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(151, p.in_cpp_crtp_base_field);
+  ASSERT_EQ(152, p.in_cpp_template_crtp_field);
+  ASSERT_EQ("template crtp int", p.in_cpp_template_crtp_name);
+}
+
+TEST(print_names, in_cpp_allocator_crtp_public_base) {
+  const example::in_cpp_allocator_crtp_derived<int> p{};
+  const static std::vector<std::string> expected{
+    "in_cpp_crtp_base_field",
+    "in_cpp_allocator_crtp_values",
+    "in_cpp_allocator_crtp_name",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(write_values, in_cpp_allocator_crtp_from_std_map) {
+  using record = example::in_cpp_allocator_crtp_derived<int>;
+  using values = std::vector<int, example::in_cpp_crtp_allocator<int>>;
+  record p{};
+
+  std::map<std::string, mpark::variant<int, values, std::string>> from;
+  from["in_cpp_crtp_base_field"] = 153;
+  from["in_cpp_allocator_crtp_values"] = values{1, 2, 3};
+  from["in_cpp_allocator_crtp_name"] = std::string{"allocator crtp"};
+  example_impl::from_std_map(from, p);
+
+  ASSERT_EQ(153, p.in_cpp_crtp_base_field);
+  ASSERT_EQ((values{1, 2, 3}), p.in_cpp_allocator_crtp_values);
+  ASSERT_EQ("allocator crtp", p.in_cpp_allocator_crtp_name);
+}

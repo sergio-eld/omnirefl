@@ -1,4 +1,3 @@
-
 #pragma push_macro("_FORTIFY_SOURCE")
 #ifdef _FORTIFY_SOURCE
 #  undef _FORTIFY_SOURCE
@@ -15,6 +14,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Type.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -65,6 +65,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -100,6 +101,14 @@ constexpr auto with(F &&f) {
     std::invoke(f, value);
     return std::forward<T>(value);
   };
+}
+
+template <typename T>
+constexpr std::optional<std::remove_cvref_t<T>> maybe(T &&value) {
+  if (true == static_cast<bool>(value))
+    return std::forward<T>(value);
+
+  return std::nullopt;
 }
 
 } // namespace fn
@@ -398,7 +407,12 @@ struct map_decl_to_type_t<clang::CXXRecordDecl>:
 template <>
 struct map_decl_to_type_t<clang::TypeDecl>: std::type_identity<clang::Type> {};
 
-// todo: benchmark, then use hash unique type identifier
+// refactorme: type_id is the reflection emission identity. For primary record
+// templates it identifies the primary template declaration, not the observed
+// concrete specialization. Rename to make that semantic explicit.
+// todo: after a large-enough .cpp benchmark exists, replace ad hoc string
+// type_id rendering with verified Clang declaration identity where applicable,
+// especially clang::index::generateUSRForDecl for declaration-backed ids.
 using type_id = std::string;
 
 struct nm_qual_type {
@@ -463,7 +477,38 @@ struct field_data {
   }
 };
 
-// todo: add info for template types
+struct template_type_param {
+  std::string name;
+  bool is_pack;
+};
+
+struct template_value_param {
+  std::string type;
+  std::string name;
+  bool is_pack;
+};
+
+struct template_template_param;
+
+using template_param = std::variant<
+  template_type_param,
+  template_value_param,
+  template_template_param>;
+
+struct template_template_param {
+  std::vector<template_param> params;
+  std::string name;
+  bool is_pack;
+};
+
+struct template_data {
+  std::string primary_name;
+  std::vector<template_param> params;
+
+  static template_data from_decl(const clang::ASTContext &ast,
+    const clang::ClassTemplateSpecializationDecl *spec);
+};
+
 struct record_data {
   // only public-nonvirtual bases
   std::vector<type_id> public_bases;
@@ -471,11 +516,13 @@ struct record_data {
   /// protected and private are not supported now (too complicated)
   std::vector<field_data> public_fields;
 
-  enum {
+  enum type_t {
     is_struct,
     is_class,
     is_union,
   } type;
+
+  std::optional<template_data> template_info;
 
   static record_data from_type(const clang::ASTContext &ast,
     const clang::RecordType *t);
@@ -675,6 +722,25 @@ int report_success(const pipeline::run_report &out);
 } // namespace log
 } // namespace
 
+template <>
+struct std::formatter<meta::record_data::type_t, char>:
+    std::formatter<std::string_view, char> {
+  template <typename FormatContext>
+  auto format(meta::record_data::type_t t, FormatContext &ctx) const {
+    switch (t) {
+    case meta::record_data::is_struct:
+      return std::formatter<std::string_view, char>::format("struct"sv, ctx);
+    case meta::record_data::is_class:
+      return std::formatter<std::string_view, char>::format("class"sv, ctx);
+    case meta::record_data::is_union:
+      return std::formatter<std::string_view, char>::format("union"sv, ctx);
+    }
+
+    assert(false && "unreachable");
+    return std::formatter<std::string_view, char>::format("struct"sv, ctx);
+  }
+};
+
 int main(int argc, char **argv) {
   return cli::parse(argc, argv)
     .transform(fn::with(log::print_options))
@@ -715,6 +781,74 @@ std::string format_nm_qual_type(const meta::nm_qual_type &t) {
       | util::format_range);
 }
 
+std::string format_template_params(const std::vector<meta::template_param> &params,
+  std::size_t indent_level) {
+  const auto indent = [](std::size_t level) {
+    return std::string(level * 2, ' ');
+  };
+
+  const auto format_list =
+    [&indent](auto self,
+      const std::vector<meta::template_param> &params,
+      std::size_t level,
+      bool with_names) -> std::string {
+    std::string out;
+    for (std::size_t i = 0; params.size() > i; ++i) {
+      if (0 != i)
+        out += std::format(",\n{}", indent(level));
+
+      out += std::visit(
+        [&indent, self, i, level, with_names]<typename Param>(const Param &p)
+          -> std::string {
+          const std::string name =
+            with_names ? std::format("_T{}", i) : std::string();
+          if constexpr (std::same_as<meta::template_type_param, Param>) {
+            if (!with_names)
+              return std::format("typename{}", p.is_pack ? "..." : "");
+
+            return std::format("typename{}{}", p.is_pack ? "..." : " ", name);
+          } else if constexpr (std::same_as<meta::template_value_param, Param>) {
+            if (!with_names)
+              return std::format("{}{}", p.type, p.is_pack ? "..." : "");
+
+            return std::format("{}{}{}", p.type, p.is_pack ? "..." : " ", name);
+          } else {
+            static_assert(std::same_as<meta::template_template_param, Param>);
+            if (!with_names) {
+              return std::format("template <\n{0}{1}\n{2}> class{3}",
+                indent(level + 1),
+                self(self, p.params, level + 1, false),
+                indent(level),
+                p.is_pack ? "..." : "");
+            }
+
+            return std::format("template <\n{0}{1}\n{2}> class{3}{4}",
+              indent(level + 1),
+              self(self, p.params, level + 1, false),
+              indent(level),
+              p.is_pack ? "..." : " ",
+              name);
+          }
+        },
+        params[i]);
+    }
+    return out;
+  };
+
+  return format_list(format_list, params, indent_level, true);
+}
+
+std::string format_template_args(const meta::template_data &t) {
+  return std::format("{}",
+    t.params //
+      | std::views::enumerate //
+      | std::views::transform([](const auto &param_index) {
+          return std::format("_T{}", std::get<0>(param_index));
+        }) //
+      | std::views::join_with(", "sv) //
+      | util::format_range);
+}
+
 std::string forward_declaration(const meta::reflectable &t) {
   assert(t.definition.type_name.name);
 
@@ -732,9 +866,9 @@ std::string forward_declaration(const meta::reflectable &t) {
     *t.definition.type_name.name);
 
   const auto format_data_sum =
-    [&name]<typename... U>(const std::variant<U...> &data) -> std::string {
+    [&name, &t]<typename... U>(const std::variant<U...> &data) -> std::string {
     return std::visit(
-      [&name]<typename T>(const T &data) -> std::string {
+      [&name, &t]<typename T>(const T &data) -> std::string {
         if constexpr (std::same_as<meta::enum_data, T>) {
           return std::format("enum {}{}{};",
             data.is_scoped ? "class " : "",
@@ -744,22 +878,21 @@ std::string forward_declaration(const meta::reflectable &t) {
           static_assert(std::same_as<meta::record_data, T>);
           const meta::record_data &struct_data = data;
 
-          // TODO(High): Generated-header reflection for templates, template
-          // specializations, partial specializations, and template-template
-          // types.
+          if (struct_data.template_info) {
+            return std::format("template <\n  {}\n>\n{} {};",
+              format_template_params(struct_data.template_info->params, 1),
+              struct_data.type,
+              std::format("{}{}{}",
+                t.definition.type_name.enclosing_records //
+                  | std::views::transform(fn::as<std::string_view>)
+                  | std::views::join_with("::"sv) //
+                  | util::format_range,
+                t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
+                struct_data.template_info->primary_name));
+          }
+
           return std::format("{} {};",
-            std::invoke([type = struct_data.type] {
-              switch (type) {
-              case meta::record_data::is_struct:
-                return "struct"sv;
-              case meta::record_data::is_class:
-                return "class"sv;
-              case meta::record_data::is_union:
-                return "union"sv;
-              }
-              assert(false && "unreachable");
-              return "_unhandled_type"sv;
-            }),
+            struct_data.type,
             name);
         }
       },
@@ -1647,6 +1780,14 @@ std::expected<pipeline::reflection_context, app_error>
     const bool is_public_non_local =
       meta::type_definition::none == t.definition.definition_flags;
 
+    if (is_nested && is_unnamed) {
+      // todo: report source location and reflected-call stack. Unnamed nested
+      // types need `decltype(std::declval<root>().field)`-style access, which
+      // is not implemented yet.
+      errors.push_back(std::move(t));
+      continue;
+    }
+
     // A generated fallback type that can be forward-declared is promoted to a
     // named specialization. This avoids emitting competing fallback metadata.
     if (std::visit(
@@ -1727,8 +1868,55 @@ std::expected<pipeline::reflection_context, app_error>
     errors.push_back(std::move(t));
   }
 
-  // todo: validate that every public base id exists in type_name_by_id and fail
-  // with diagnostics before rendering.
+  // std::ranges::to<std::vector>() can precompute size for filtered ranges,
+  // causing another pass over a stateful dedup predicate. Keep this as explicit
+  // single-pass mutation.
+  std::set<meta::type_id> emitted_forward_declarables;
+  std::erase_if(fwd, [&emitted_forward_declarables](const auto &t) {
+    return !emitted_forward_declarables.emplace(t.type.id).second;
+  });
+
+  const auto missing_base = [&rm](const meta::reflectable &r)
+    -> std::optional<meta::type_id> {
+    return std::visit(
+      [&rm](const meta::reflectable_data auto &data)
+        -> std::optional<meta::type_id> {
+        if constexpr (std::same_as<meta::record_data,
+                        std::remove_cvref_t<decltype(data)>>) {
+          for (const meta::type_id &base_id : data.public_bases)
+            if (!rm.ctx.type_name_by_id.contains(base_id))
+              return base_id;
+        }
+
+        return std::nullopt;
+      },
+      r.data);
+  };
+
+  for (const render_context::forward_declarable &t : fwd) {
+    if (const std::optional base_id = missing_base(t.type))
+      return std::unexpected(processing_error(source,
+        std::format("missing reflected public base metadata: '{}' required by '{}'",
+          *base_id,
+          t.type.id)));
+  }
+
+  for (const render_context::nested_type &t : nested) {
+    if (const std::optional base_id = missing_base(t.type))
+      return std::unexpected(processing_error(source,
+        std::format("missing reflected public base metadata: '{}' required by '{}'",
+          *base_id,
+          t.type.id)));
+  }
+
+  for (const render_context::indexed_type &t : indexed) {
+    if (const std::optional base_id = missing_base(t.type))
+      return std::unexpected(processing_error(source,
+        std::format("missing reflected public base metadata: '{}' required by '{}'",
+          *base_id,
+          t.type.id)));
+  }
+
   // todo: validate that no two classified types emit the same specialization
   // target. This is a tool bug: report both declarations and the generated
   // specialization target so the backend resolution can be fixed.
@@ -1853,17 +2041,11 @@ std::string format_type_definition(const meta::type_definition &d) {
 }
 
 std::string format_record_data(const meta::record_data &d) {
-  const char *kind = d.type == meta::record_data::is_struct //
-    ? "struct"
-    : d.type == meta::record_data::is_class //
-      ? "class"
-      : "union";
-
   if (d.public_fields.empty())
-    return std::format("{} {{}}", kind);
+    return std::format("{} {{}}", d.type);
 
   return std::format("{} {{ {} }}",
-    kind,
+    d.type,
     d.public_fields //
       | std::views::transform(&meta::field_data::name) //
       | std::views::join_with(", "sv) //
@@ -1999,6 +2181,32 @@ meta::type_id render_type_id(const clang::ASTContext &ast,
   return clang::QualType(type, qual_flags).getAsString(p);
 }
 
+meta::type_id render_primary_template_id(
+  const clang::ClassTemplateDecl *template_decl) {
+  assert(template_decl);
+  // ad hoc: type_id is still a rendered string, not a Clang-provided opaque
+  // identity. Prefix primary-template declaration ids so they cannot collide
+  // with rendered concrete type ids if full specializations are supported later.
+  return std::format("primary-template:{}",
+    template_decl->getCanonicalDecl()->getQualifiedNameAsString());
+}
+
+meta::type_id render_reflectable_id(const clang::ASTContext &ast,
+  const clang::TagType *t) {
+  assert(t);
+
+  const auto *template_spec =
+    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+      t->getDecl());
+  // todo: replace this ad hoc primary-template collapse with general template
+  // specialization reflection metadata. `crtp_base<X>` and `crtp_base<Y>` are
+  // treated as the same reflected template shape for now, which is only valid
+  // while full and partial specializations are unsupported/rejected.
+  return template_spec
+    ? render_primary_template_id(template_spec->getSpecializedTemplate())
+    : render_type_id(ast, t);
+}
+
 // todo: use expected
 std::string get_declaration_source_file(const clang::Decl &d,
   const clang::SourceManager &sm) noexcept {
@@ -2012,6 +2220,73 @@ std::string get_declaration_source_file(const clang::Decl &d,
 
   std::string filename = pm.getFilename();
   return filename;
+}
+
+meta::template_param map_template_param(const clang::ASTContext &ast,
+  const clang::NamedDecl *decl) {
+  assert(decl);
+
+  // TemplateParameterList exposes parameters as NamedDecl*. The runtime domain
+  // handled here is TemplateTypeParmDecl, NonTypeTemplateParmDecl, or
+  // TemplateTemplateParmDecl.
+  if (const auto *p = llvm::dyn_cast<clang::TemplateTypeParmDecl>(decl)) {
+    return meta::template_type_param{
+      .name = p->getName().str(),
+      .is_pack = p->isParameterPack(),
+    };
+  }
+
+  if (const auto *p = llvm::dyn_cast<clang::NonTypeTemplateParmDecl>(decl)) {
+    clang::PrintingPolicy pp(ast.getLangOpts());
+    pp.FullyQualifiedName = true;
+    pp.SuppressScope = false;
+    pp.SuppressUnwrittenScope = false;
+    pp.SuppressTagKeyword = false;
+    pp.PrintAsCanonical = true;
+
+    return meta::template_value_param{
+      .type = p->getType().getAsString(pp),
+      .name = p->getName().str(),
+      .is_pack = p->isParameterPack(),
+    };
+  }
+
+  const auto *p = clang::cast<clang::TemplateTemplateParmDecl>(decl);
+  return meta::template_template_param{
+    .params = *p->getTemplateParameters() //
+      | std::views::transform(std::bind_front(map_template_param,
+        std::cref(ast)))
+      | std::ranges::to<std::vector>(),
+    .name = p->getName().str(),
+    .is_pack = p->isParameterPack(),
+  };
+}
+
+auto meta::template_data::from_decl(
+  const clang::ASTContext &ast,
+  const clang::ClassTemplateSpecializationDecl *spec) -> template_data {
+  assert(spec);
+
+  const clang::ClassTemplateDecl *primary = spec->getSpecializedTemplate();
+  return meta::template_data{
+    .primary_name = primary->getNameAsString(),
+    .params = *primary->getTemplateParameters() //
+      | std::views::transform(std::bind_front(map_template_param,
+        std::cref(ast)))
+      | std::ranges::to<std::vector>(),
+  };
+}
+
+bool has_template_record_parent(const clang::DeclContext *dc) {
+  for (const clang::DeclContext *cur = dc; cur; cur = cur->getParent()) {
+    const auto *rd = llvm::dyn_cast<clang::CXXRecordDecl>(cur);
+    if (rd
+      && (llvm::isa<clang::ClassTemplateSpecializationDecl>(rd)
+        || llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(rd)))
+      return true;
+  }
+
+  return false;
 }
 
 std::expected<clang::Type const *, std::string> get_template_type_arg(
@@ -2374,9 +2649,11 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
 
   return {
     .public_bases = cxx_decl ? public_bases_view(cxx_decl)
+        | std::views::transform([](const clang::CXXRecordDecl *rd) {
+            return clang::cast<clang::TagType>(rd->getTypeForDecl());
+          })
         | std::views::transform(
-          std::bind_front(meta::map_decl_to_canonical_type, std::cref(ast)))
-        | std::views::transform(std::bind_front(render_type_id, std::cref(ast)))
+          std::bind_front(render_reflectable_id, std::cref(ast)))
         | std::ranges::to<std::vector>()
                              : std::vector<std::string>{},
 
@@ -2389,6 +2666,11 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
       : r_decl.isClass() //
         ? meta::record_data::is_class
         : meta::record_data::is_union,
+
+    .template_info =
+      fn::maybe(llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(&r_decl))
+        .transform(std::bind_front(meta::template_data::from_decl,
+          std::cref(ast))),
   };
 }
 
@@ -2419,7 +2701,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
     "Inconsistency for reflectable types detected.");
 
   return {
-    .id = render_type_id(ast, t),
+    .id = render_reflectable_id(ast, t),
     .data = clang::isa<clang::EnumType>(t)
       ? record_or_enum(
           meta::enum_data::from_type(clang::cast<clang::EnumType>(t)))
@@ -2483,6 +2765,34 @@ auto meta::resolve_reflected_type(
   }
 
   const auto *record_type = clang::cast<clang::RecordType>(&template_arg_type);
+  const clang::RecordDecl *record_decl = record_type->getDecl();
+  if (llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(record_decl)) {
+    // todo: report source location and reflected-call stack for unsupported
+    // template diagnostics.
+    return std::unexpected(std::format(
+      "unsupported reflected record template '{}': partial specializations are not supported",
+      id));
+  }
+
+  if (const auto *spec =
+        llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record_decl)) {
+    if (clang::TSK_ExplicitSpecialization == spec->getSpecializationKind()) {
+      // todo: report source location and reflected-call stack for unsupported
+      // template diagnostics.
+      return std::unexpected(std::format(
+        "unsupported reflected record template '{}': explicit specializations are not supported",
+        id));
+    }
+
+    if (has_template_record_parent(record_decl->getDeclContext())) {
+      // todo: report source location and reflected-call stack for unsupported
+      // template diagnostics.
+      return std::unexpected(std::format(
+        "unsupported reflected record template '{}': nested record templates inside template records are not supported yet",
+        id));
+    }
+  }
+
   return reflected_type_info{
     .type = match_record_type(id, record_type),
     .dependencies = recursively_collect_dependency_types(ast,
@@ -2545,6 +2855,47 @@ std::string declaration_for_enclosing_root_as_dependent(
     elems | std::views::join_with("::"sv) | util::format_range);
 }
 
+std::string forward_declaration_for_enclosing_root(
+  const meta::nm_qual_type &inner_type) {
+  assert(!inner_type.enclosing_records.empty());
+
+  return std::format(
+    "{}"
+    "{};"
+    "{}",
+    inner_type.namespaces //
+      | std::views::filter([](std::string_view ns) { return !ns.empty(); })
+      | std::views::transform([](std::string_view ns) {
+          return std::format("namespace {} {{\n", ns);
+        }) //
+      | util::format_range,
+    std::format("struct {}", inner_type.enclosing_records.front()),
+    inner_type.namespaces //
+      | std::views::filter([](std::string_view ns) { return !ns.empty(); })
+      | std::views::transform([](std::string_view ns) {
+          return std::format("\n}} // namespace {}", ns);
+        }) //
+      | util::format_range);
+}
+
+std::string format_qualified_inner_type_from_root(
+  const std::string &root,
+  const meta::nm_qual_type &inner_type) {
+  assert(inner_type.name && "unnamed types are not yet supported");
+  const std::string leaf = inner_type.name->contains('<')
+    ? std::format("template {}", *inner_type.name)
+    : *inner_type.name;
+  const std::array spans{
+    std::span<const std::string>{&root, 1},
+    std::span<const std::string>{inner_type.enclosing_records}.subspan(1),
+    std::span<const std::string>{&leaf, 1},
+  };
+
+  return std::format("{}",
+    spans | std::views::join | std::views::join_with("::"sv)
+      | util::format_range);
+}
+
 // render `typename _omni_{root}_as_root<{param}>::inner`
 std::string qualified_inner_type_from_fwd_root(
   const meta::nm_qual_type &inner_type,
@@ -2553,28 +2904,14 @@ std::string qualified_inner_type_from_fwd_root(
   const std::string root =
     std::format("{}<{}>", enclosing_root_as_dependent(inner_type), param);
 
-  std::vector<std::string_view> elems = inner_type.enclosing_records
-    | std::views::drop(1) | std::views::transform(fn::as<std::string_view>)
-    | std::ranges::to<std::vector>();
-  elems.insert(elems.begin(), root);
-  elems.emplace_back(*inner_type.name);
-
   return std::format("typename {}",
-    elems | std::views::join_with("::"sv) | util::format_range);
+    format_qualified_inner_type_from_root(root, inner_type));
 }
 
 template <meta::reflectable_data Data>
-std::string_view reflectable_tag(const Data &d) {
+std::string reflectable_tag(const Data &d) {
   if constexpr (std::same_as<meta::record_data, Data>) {
-    switch (d.type) {
-    case meta::record_data::is_class:
-      return "class";
-    case meta::record_data::is_union:
-      return "union";
-    case meta::record_data::is_struct:
-    default:
-      return "struct";
-    }
+    return std::format("{}", d.type);
   } else {
     static_assert(std::same_as<meta::enum_data, Data>);
     return "enum";
@@ -2598,6 +2935,59 @@ template <meta::reflectable_data Data>
 std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
   // to support, I need to store the decl name for `decltype(instance)`
   assert(t.name && "unnamed structs not supported");
+
+  if constexpr (std::same_as<meta::record_data, Data>) {
+    if (d.template_info) {
+      const std::string template_args = format_template_args(*d.template_info);
+      std::vector<std::string> elems;
+      elems.reserve(
+        t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
+      std::ranges::copy(t.namespaces, std::back_inserter(elems));
+      std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
+      elems.emplace_back(d.template_info->primary_name);
+
+      const std::string type_name = std::format("{}<{}>",
+        elems | std::views::join_with("::"sv) | util::format_range,
+        template_args);
+
+      // todo: when/if explicit or partial specializations are implemented,
+      // reflected type names and namespace-qualified names must describe the
+      // selected specialization. For primary templates, returning only
+      // `record` from name() is intentional.
+      return std::format(
+        "{4}"
+        "\nstruct _reflected<{0} {1}, _omni_binding> {{"
+        "\n  static_assert(std::is_same<{0} {1}, _omni_binding>::value,"
+        "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
+        "\n"
+        "\n  using type = _omni_binding;"
+        "\n"
+        "\n  static constexpr omni::reflected_entity entity() noexcept {{"
+        "\n    return omni::reflected_entity::{2};"
+        "\n  }}"
+        "\n"
+        "\n  static constexpr auto name() noexcept"
+        "\n    -> const char(&)[sizeof(\"{3}\")] {{"
+        "\n    return \"{3}\";"
+        "\n  }}",
+
+        // 0
+        reflectable_tag(d),
+
+        // 1
+        type_name,
+
+        // 2
+        reflectable_entity(d),
+
+        // 3
+        d.template_info->primary_name,
+
+        // 4
+        std::format("template <\n  {},\n  typename _omni_binding\n>",
+          format_template_params(d.template_info->params, 1)));
+    }
+  }
 
   return std::format(
     "template <typename T>"
@@ -2639,12 +3029,6 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
   const std::string access_root_for =
     std::format("{}<T>", enclosing_root_as_dependent(t));
 
-  std::vector<std::string_view> elems = t.enclosing_records
-    | std::views::drop(1) | std::views::transform(fn::as<std::string_view>)
-    | std::ranges::to<std::vector>();
-  elems.insert(elems.begin(), access_root_for);
-  elems.push_back(*t.name);
-
   return std::format(
     "template <typename T>"
     "\nstruct _reflected<T, typename std::enable_if<"
@@ -2661,7 +3045,7 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     "\n    return \"{2}\";"
     "\n  }}",
 
-    elems | std::views::join_with("::"sv) | util::format_range,
+    format_qualified_inner_type_from_root(access_root_for, t),
     reflectable_entity(d),
     t.name.value_or("(unnamed)"));
 }
@@ -2897,10 +3281,13 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\n#define OMNI_INCLUDED_GENERATED_REFLECTION_HEADER" //< must come before
                                                           // omni headers
     "\n"
-    "\n// _wrt<U, T>::type == U, but depends on T."
-    "\n// Needed because some compilers perform early (non-SFINAE) lookup for `U::...`"
-    "\n// when `U` is incomplete unless the nested-name-specifier is dependent."
-    "\ntemplate <class U, class>"
+    "\n// _wrt means \"with respect to\"."
+    "\n// _wrt<U, T>::type == U, but the selected type syntactically depends on T."
+    "\n// Generated reflection uses it to name nested types through a forward-declared"
+    "\n// root while delaying nested-name lookup until SFINAE substitution. Without"
+    "\n// the dependent wrapper, some compilers perform early non-SFINAE lookup for"
+    "\n// `U::...` and reject the generated header while U is still incomplete."
+    "\ntemplate <typename U, typename>"
     "\nstruct _wrt {{ using type = U; }};"
     "\n"
     "\n{1}"
@@ -2908,21 +3295,24 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\n// -- forward declarable reflected types --------"
     "\n{2}"
     "\n"
-    "\n// -- enclosing root type accessors --------"
+    "\n// -- enclosing root forward declarations --------"
     "\n{3}"
+    "\n"
+    "\n// -- enclosing root type accessors --------"
+    "\n{4}"
     "\n"
     "\nnamespace omni {{"
     "\nnamespace detail {{"
     "\nnamespace {{"
     "\n"
     "\n// -- reflected types --------"
-    "\n{4}"
-    "\n"
-    "\n// -- reflected inner types --------"
     "\n{5}"
     "\n"
-    "\n// -- generated fallback reflected types --------"
+    "\n// -- reflected inner types --------"
     "\n{6}"
+    "\n"
+    "\n// -- generated fallback reflected types --------"
+    "\n{7}"
     "\n" // todo: ^^^
     "\n}} // namespace"
     "\n}} // namespace detail"
@@ -2959,25 +3349,32 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     // 3:
     ctx.enclosing_roots //
       | std::views::transform(
-        render::impl::declaration_for_enclosing_root_as_dependent) //
+        render::impl::forward_declaration_for_enclosing_root) //
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 4:
+    ctx.enclosing_roots //
+      | std::views::transform(
+        render::impl::declaration_for_enclosing_root_as_dependent) //
+      | std::views::join_with("\n\n"sv) //
+      | util::format_range,
+
+    // 5:
     ctx.fwd_declarables //
       | std::views::transform(std::bind_front(render_forward_declarable,
         std::cref(ctx.type_name_by_id)))
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 5:
+    // 6:
     ctx.nested //
       | std::views::transform(
         std::bind_front(render_nested_type, std::cref(ctx.type_name_by_id)))
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 6:
+    // 7:
     ctx.indexed //
       | std::views::transform(
         std::bind_front(render_indexed_type, std::cref(ctx.type_name_by_id)))

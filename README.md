@@ -9,8 +9,11 @@ todo: write the readme
 - (+) named globally accessible records
 - (+) named globally accessible enums
 - (+) nested named records/enums of supported globally accessible parents
-- (+) named explicit record template specializations
-- (-) primary record templates
+- (+) primary record templates, including type, value, and template-template
+  parameters
+- (+) observed concrete instantiations of supported primary record templates
+- (-) explicit record template specializations
+- (-) partial record template specializations
 
 ### Records
 
@@ -19,10 +22,15 @@ todo: write the readme
 - (+) write public non-const fields
 - (+) inherited public fields
 - (+) transitive public base fields
+- (+) public CRTP base fields through supported primary templates
+- (+) multiple public base fields
+- (+) public base fields from template records
+- (+) private/protected base fields are not reflected through derived records
+- (+) non-public fields are not reflected
 - (+) field names
 - (+) field types
 - (+) field count / iteration
-- (?) unqualified record name
+- (+) unqualified record name
 - (?) namespace-qualified record name
 
 ### Enums
@@ -31,7 +39,7 @@ todo: write the readme
 - (+) enumerator values
 - (+) scoped enums
 - (+) fixed-underlying enums
-- (?) enum type name
+- (+) enum type name
 - (?) namespace-qualified enum type name
 - (?) plain unscoped enum field dependencies
 
@@ -40,6 +48,8 @@ todo: write the readme
 - (+) public field type dependencies
 - (+) public base type dependencies
 - (+) transitive public base dependencies
+- (+) template record field dependencies
+- (+) CRTP base dependencies
 - (+) supported member alias dependencies: `error_type`, `key_type`, `type`,
   `value`, `value_type`
 - (+) supported template-pack dependencies for template names exactly `tuple`
@@ -52,6 +62,7 @@ todo: write the readme
 - (+) reflect record field types
 - (+) read field values
 - (+) write field values
+- (+) write inherited public field values
 - (+) reflect enum names
 - (+) reflect enum values
 - (+) recurse into reflected record fields
@@ -63,17 +74,24 @@ todo: write the readme
 - (+) CMake integration
 - (+) Linux package/install matrix
 - (+) Windows package/install test
+- (+) GCC and Clang package/install tests
 
 ## Planned After Minimal Release
 
 ### Types
 
-- (-) primary record templates
+- (-) nested records inside record template parents
+- (-) explicit specializations
 - (-) partial specializations
+- (-) specialization-specific record template metadata
+- (-) specialization-specific CRTP base metadata
 
 ### Metadata
 
 - (-) comment annotations
+- (-) namespace-qualified reflected type names
+- (-) specialization-aware reflected type names when/if explicit or partial
+  specializations are implemented
 
 ### Frontend/API
 

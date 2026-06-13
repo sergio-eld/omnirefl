@@ -2,9 +2,12 @@
 
 #include <omnirefl/reflected_scope.hpp>
 
+#include <map>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <mpark/variant.hpp>
@@ -103,7 +106,7 @@ static const struct enum_names_t {
     std::vector<std::string> names;
     names.reserve(enumerators.size());
 
-    for (std::size_t i = 0; i < enumerators.size(); ++i)
+    for (std::size_t i = 0; enumerators.size() > i; ++i)
       names.emplace_back(enumerators[i].second);
 
     return names;
@@ -417,6 +420,21 @@ enum class scoped_fixed_status : unsigned {
   high,
 };
 
+template <typename T>
+struct custom_allocator: std::allocator<T> {
+  using value_type = T;
+
+  custom_allocator() noexcept {}
+
+  template <typename U>
+  custom_allocator(const custom_allocator<U> &) noexcept {}
+
+  template <typename U>
+  struct rebind {
+    using other = custom_allocator<U>;
+  };
+};
+
 // ---------- holders (dependency chains) ----------
 
 struct example_value {
@@ -496,6 +514,77 @@ struct template_dep_level_2 {
 // explicit test of third-party variant
 struct mpark_template_dep_level_2 {
   mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
+};
+
+template <typename T>
+struct primary_template_record {
+  T value;
+  int count;
+};
+
+template <typename T, int N>
+struct value_param_template_record {
+  T value;
+  int fixed_values[N];
+};
+
+template <typename T, typename Alloc = custom_allocator<T>>
+struct default_allocator_template_record {
+  std::vector<T, Alloc> values;
+};
+
+template <typename T, typename Alloc>
+struct typed_allocator_template_record {
+  std::vector<T, Alloc> values;
+};
+
+template <template <typename> class Alloc>
+struct allocator_policy_template_record {
+  std::vector<resolved::as_field, Alloc<resolved::as_field>> vec;
+  std::map<int,
+    resolved::as_second_base,
+    std::less<int>,
+    Alloc<std::pair<const int, resolved::as_second_base>>>
+    map;
+};
+
+template <typename T>
+struct template_base {
+  T base_value;
+};
+
+template <typename T>
+struct template_derived: template_base<T> {
+  int own_field;
+};
+
+template <typename Derived>
+struct crtp_base {
+  int crtp_base_field;
+};
+
+struct crtp_derived: crtp_base<crtp_derived> {
+  std::string crtp_own_field;
+};
+
+template <typename T>
+struct crtp_template_derived: crtp_base<crtp_template_derived<T>> {
+  T crtp_template_field;
+};
+
+struct nested_template_parent {
+  template <typename T>
+  struct nested_template {
+    T nested_value;
+  };
+};
+
+template <typename T>
+struct template_parent {
+  struct nested_non_template {
+    T nested_value;
+    int count;
+  };
 };
 
 struct vector_dep_level_1 {
