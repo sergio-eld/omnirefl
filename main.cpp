@@ -131,9 +131,9 @@ concept viewable_range_of = std::ranges::viewable_range<R>
 
 bool is_subpath(const std::filesystem::path &path,
   const std::filesystem::path &base) {
-  const auto mismatch_pair =
-    std::mismatch(path.begin(), path.end(), base.begin(), base.end());
-  return mismatch_pair.second == base.end();
+  return std::mismatch(path.begin(), path.end(), base.begin(), base.end())
+           .second
+    == base.end();
 }
 
 template <typename V, typename CharT = char>
@@ -192,6 +192,11 @@ struct app_error {
   int code;
   std::string message;
 };
+
+std::expected<int, app_error> report_error(app_error error) {
+  llvm::errs() << error.message << '\n';
+  return error.code;
+}
 
 namespace cli {
 
@@ -573,7 +578,7 @@ struct reflection_context {
     bool as_dependent;
   };
 
-  // can only be reflected using a generated index
+  // (experimental) can only be reflected using a generated index
   struct indexed_type {
     meta::reflectable type;
     std::size_t index;
@@ -593,163 +598,6 @@ struct reflection_context {
 
 std::expected<reflection_context, std::string>
   generate_reflection(reflection_context ctx, std::ofstream file);
-
-auto format_location(const meta::source_location &d) {
-  return std::format("{}:{}:{}",
-    d.source_file.generic_string(),
-    d.line,
-    d.column);
-}
-
-std::string format_nm_qual_type(const meta::nm_qual_type &t) {
-  std::vector<std::string> elems;
-  elems.reserve(
-    t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
-  std::ranges::copy(t.namespaces, std::back_inserter(elems));
-  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
-  elems.emplace_back(t.name.value_or("(unnamed)"));
-
-  return std::format("{}",
-    elems //
-      | std::views::join_with("::"sv) //
-      | util::format_range);
-}
-
-std::string forward_declaration(const meta::reflectable &t) {
-  using namespace std::string_view_literals;
-
-  assert(t.definition.type_name.name);
-
-  std::vector<std::string> lines = t.definition.type_name.namespaces
-    | std::views::transform(
-      [](const std::string &n) { return std::format("namespace {} {{", n); })
-    | std::ranges::to<std::vector>();
-
-  const std::string name = std::format("{}{}{}",
-    t.definition.type_name.enclosing_records //
-      | std::views::transform(fn::as<std::string_view>)
-      | std::views::join_with("::"sv) //
-      | util::format_range,
-    t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
-    *t.definition.type_name.name);
-
-  const auto format_data_sum =
-    [&name]<typename... U>(const std::variant<U...> &data) -> std::string {
-    return std::visit(
-      [&]<typename T>(const T &data) -> std::string {
-        if constexpr (std::same_as<meta::enum_data, T>) {
-          return std::format("enum {}{}{};",
-            data.is_scoped ? "class " : "",
-            name,
-            data.is_fixed ? std::format(" : {}", data.underlying_type) : "");
-        } else {
-          static_assert(std::same_as<meta::record_data, T>);
-          const meta::record_data &struct_data = data;
-
-          // TODO(High): Generated-header reflection for templates, template
-          // specializations, partial specializations, and template-template
-          // types.
-          return std::format("{} {};",
-            std::invoke([type = struct_data.type] {
-              switch (type) {
-              case meta::record_data::is_struct:
-                return "struct"sv;
-              case meta::record_data::is_class:
-                return "class"sv;
-              case meta::record_data::is_union:
-                return "union"sv;
-              }
-              assert(false && "unreachable");
-              return "_unhandled_type"sv;
-            }),
-            name);
-        }
-      },
-      data);
-  };
-
-  std::ranges::copy(std::views::single(t) //
-      | std::views::transform([&](const meta::reflectable &r) -> std::string {
-          return std::format(
-            "// declared at: {}"
-            "\n{}",
-            format_location(r.definition.location),
-            format_data_sum(r.data));
-        }),
-    std::back_inserter(lines));
-
-  std::ranges::copy(t.definition.type_name.namespaces
-      | std::views::transform([](const std::string &n) {
-          return std::format("}} // namespace {}", n);
-        }),
-    std::back_inserter(lines));
-
-  return std::format("{}",
-    lines //
-      | std::views::join_with("\n"sv) //
-      | util::format_range);
-}
-
-std::expected<fs::path, std::string> write_dependencies_file(
-  const fs::path &generated_file,
-  const util::viewable_range_of<fs::path> auto &includes) {
-  fs::path depfile = generated_file;
-  depfile += ".d";
-
-  std::error_code ec;
-  if (auto parent = depfile.parent_path(); !parent.empty()) {
-    fs::create_directories(parent, ec);
-    if (ec) {
-      return std::unexpected(std::format("create_directories('{}'): {}",
-        depfile.string(),
-        ec.message()));
-    }
-  }
-
-  fs::path tmp = depfile;
-  tmp += ".tmp";
-
-  std::ofstream os(tmp, std::ios::out | std::ios::trunc);
-  if (!os)
-    return std::unexpected(std::format("open('{}')", depfile.string()));
-
-  const auto esc = [](std::string_view s) -> std::string {
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-      if (c == ' ' || c == '\\' || c == '#')
-        out.push_back('\\');
-      out.push_back(c);
-    }
-    return out;
-  };
-
-  os << std::format("{}:{}\n",
-    esc(generated_file.string()),
-    std::ranges::empty(includes)
-      ? std::string{}
-      : std::format(" \\\n  {}\n",
-          includes //
-            | std::views::transform(
-              [&](const fs::path &p) { return esc(p.string()); }) //
-            | std::views::join_with(" \\\n  "sv) //
-            | util::format_range));
-
-  os.close();
-  if (!os)
-    return std::unexpected(std::format("write/close('{}')", depfile.string()));
-
-  fs::rename(tmp, depfile, ec);
-  if (ec) {
-    fs::remove(tmp, ec);
-    return std::unexpected(
-      std::format("rename('{}'): {}", depfile.string(), ec.message()));
-  }
-
-  return depfile;
-}
-
-// todo: yaml dump
 
 } // namespace render
 
@@ -825,9 +673,6 @@ void print_reduced_matches(const pipeline::reduced_matches &rm);
 int report_success(const pipeline::run_report &out);
 
 } // namespace log
-
-std::expected<int, app_error> report_error(app_error error);
-
 } // namespace
 
 int main(int argc, char **argv) {
@@ -846,6 +691,167 @@ int main(int argc, char **argv) {
 }
 
 namespace {
+
+namespace render::impl {
+
+std::string format_location(const meta::source_location &d) {
+  return std::format("{}:{}:{}",
+    d.source_file.generic_string(),
+    d.line,
+    d.column);
+}
+
+std::string format_nm_qual_type(const meta::nm_qual_type &t) {
+  std::vector<std::string> elems;
+  elems.reserve(
+    t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
+  std::ranges::copy(t.namespaces, std::back_inserter(elems));
+  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
+  elems.emplace_back(t.name.value_or("(unnamed)"));
+
+  return std::format("{}",
+    elems //
+      | std::views::join_with("::"sv) //
+      | util::format_range);
+}
+
+std::string forward_declaration(const meta::reflectable &t) {
+  assert(t.definition.type_name.name);
+
+  std::vector<std::string> lines = t.definition.type_name.namespaces
+    | std::views::transform(
+      [](const std::string &n) { return std::format("namespace {} {{", n); })
+    | std::ranges::to<std::vector>();
+
+  const std::string name = std::format("{}{}{}",
+    t.definition.type_name.enclosing_records //
+      | std::views::transform(fn::as<std::string_view>)
+      | std::views::join_with("::"sv) //
+      | util::format_range,
+    t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
+    *t.definition.type_name.name);
+
+  const auto format_data_sum =
+    [&name]<typename... U>(const std::variant<U...> &data) -> std::string {
+    return std::visit(
+      [&name]<typename T>(const T &data) -> std::string {
+        if constexpr (std::same_as<meta::enum_data, T>) {
+          return std::format("enum {}{}{};",
+            data.is_scoped ? "class " : "",
+            name,
+            data.is_fixed ? std::format(" : {}", data.underlying_type) : "");
+        } else {
+          static_assert(std::same_as<meta::record_data, T>);
+          const meta::record_data &struct_data = data;
+
+          // TODO(High): Generated-header reflection for templates, template
+          // specializations, partial specializations, and template-template
+          // types.
+          return std::format("{} {};",
+            std::invoke([type = struct_data.type] {
+              switch (type) {
+              case meta::record_data::is_struct:
+                return "struct"sv;
+              case meta::record_data::is_class:
+                return "class"sv;
+              case meta::record_data::is_union:
+                return "union"sv;
+              }
+              assert(false && "unreachable");
+              return "_unhandled_type"sv;
+            }),
+            name);
+        }
+      },
+      data);
+  };
+
+  std::ranges::copy(std::views::single(t) //
+      | std::views::transform([&](const meta::reflectable &r) -> std::string {
+          return std::format(
+            "// declared at: {}"
+            "\n{}",
+            render::impl::format_location(r.definition.location),
+            format_data_sum(r.data));
+        }),
+    std::back_inserter(lines));
+
+  std::ranges::copy(t.definition.type_name.namespaces
+      | std::views::transform([](const std::string &n) {
+          return std::format("}} // namespace {}", n);
+        }),
+    std::back_inserter(lines));
+
+  return std::format("{}",
+    lines //
+      | std::views::join_with("\n"sv) //
+      | util::format_range);
+}
+
+} // namespace render::impl
+
+namespace render {
+
+std::expected<fs::path, std::string> write_dependencies_file(
+  const fs::path &generated_file,
+  const util::viewable_range_of<fs::path> auto &includes) {
+  fs::path depfile = generated_file;
+  depfile += ".d";
+
+  std::error_code ec;
+  if (auto parent = depfile.parent_path(); !parent.empty()) {
+    fs::create_directories(parent, ec);
+    if (ec) {
+      return std::unexpected(std::format("create_directories('{}'): {}",
+        depfile.string(),
+        ec.message()));
+    }
+  }
+
+  fs::path tmp = depfile;
+  tmp += ".tmp";
+
+  std::ofstream os(tmp, std::ios::out | std::ios::trunc);
+  if (!os)
+    return std::unexpected(std::format("open('{}')", depfile.string()));
+
+  const auto esc = [](std::string_view s) -> std::string {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+      if (c == ' ' || c == '\\' || c == '#')
+        out.push_back('\\');
+      out.push_back(c);
+    }
+    return out;
+  };
+
+  os << std::format("{}:{}\n",
+    esc(generated_file.string()),
+    std::ranges::empty(includes)
+      ? std::string{}
+      : std::format(" \\\n  {}\n",
+          includes //
+            | std::views::transform(
+              [&](const fs::path &p) { return esc(p.string()); }) //
+            | std::views::join_with(" \\\n  "sv) //
+            | util::format_range));
+
+  os.close();
+  if (!os)
+    return std::unexpected(std::format("write/close('{}')", depfile.string()));
+
+  fs::rename(tmp, depfile, ec);
+  if (ec) {
+    fs::remove(tmp, ec);
+    return std::unexpected(
+      std::format("rename('{}'): {}", depfile.string(), ec.message()));
+  }
+
+  return depfile;
+}
+
+} // namespace render
 
 app_error processing_error(const source_file &sf, std::string error) {
   return {
@@ -1814,11 +1820,6 @@ std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
     });
 }
 
-std::expected<int, app_error> report_error(app_error error) {
-  llvm::errs() << error.message << '\n';
-  return error.code;
-}
-
 namespace log {
 
 std::string format_definition_flags(int flags) {
@@ -1843,12 +1844,12 @@ std::string format_type_definition(const meta::type_definition &d) {
   return std::format(
     "declared at: {}{}"
     "\n  {}",
-    render::format_location(d.location),
+    render::impl::format_location(d.location),
     std::invoke([f = format_definition_flags(d.definition_flags)] {
       return f.empty() ? std::string() : std::format("\n  [{}]", f);
     }),
 
-    render::format_nm_qual_type(d.type_name));
+    render::impl::format_nm_qual_type(d.type_name));
 }
 
 std::string format_record_data(const meta::record_data &d) {
@@ -2800,13 +2801,15 @@ std::string render_reflectable_head(const S &r) {
 std::string render_public_bases(
   const std::map<meta::type_id, meta::nm_qual_type> &type_name_by_id,
   const meta::record_data &r) {
-  const auto fetch = [&type_name_by_id](const meta::type_id &id)
-    -> const meta::nm_qual_type & { return type_name_by_id.at(id); };
+  const auto fetch = [&type_name_by_id](
+                       const meta::type_id &id) -> const meta::nm_qual_type & {
+    return type_name_by_id.at(id);
+  };
 
   const auto format = //
     [](const meta::nm_qual_type &t) {
       if (t.enclosing_records.empty())
-        return render::format_nm_qual_type(t);
+        return render::impl::format_nm_qual_type(t);
       return render::impl::qualified_inner_type_from_fwd_root(t, "T");
     };
 
@@ -2949,7 +2952,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     // 2:
     ctx.fwd_declarables //
       | std::views::transform(&reflection_context::forward_declarable::type)
-      | std::views::transform(render::forward_declaration) //
+      | std::views::transform(render::impl::forward_declaration) //
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
@@ -2962,8 +2965,8 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
 
     // 4:
     ctx.fwd_declarables //
-      | std::views::transform(
-        std::bind_front(render_forward_declarable, std::cref(ctx.type_name_by_id)))
+      | std::views::transform(std::bind_front(render_forward_declarable,
+        std::cref(ctx.type_name_by_id)))
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
