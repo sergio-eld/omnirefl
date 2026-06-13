@@ -46,6 +46,7 @@ KeepEmptyLinesAtTheStartOfBlocks: 'false'
 Language: Cpp
 MaxEmptyLinesToKeep: '1'
 NamespaceIndentation: None
+PenaltyBreakScopeResolution: '1000000'
 PointerAlignment: Right
 ReflowComments: 'true'
 SortIncludes: 'true'

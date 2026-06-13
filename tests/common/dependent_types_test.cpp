@@ -251,6 +251,90 @@ TEST(template_dependency, mpark_tuple_level_2_value) {
     r);
 }
 
+TEST(record_template, type_parameter_field_names) {
+  namespace dt = dependency_types;
+
+  using record = dt::primary_template_record<dt::resolved::as_template_arg>;
+  EXPECT_EQ((std::vector<std::string>{"value", "count"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, value_parameter_field_names) {
+  namespace dt = dependency_types;
+
+  using record = dt::value_param_template_record<dt::resolved::as_template_arg, 3>;
+  EXPECT_EQ((std::vector<std::string>{"value", "fixed_values"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, default_allocator_parameter_field_names) {
+  namespace dt = dependency_types;
+
+  using record =
+    dt::default_allocator_template_record<dt::resolved::as_template_arg>;
+  EXPECT_EQ((std::vector<std::string>{"values"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, typed_allocator_parameter_field_names) {
+  namespace dt = dependency_types;
+
+  using record = dt::typed_allocator_template_record<dt::resolved::as_template_arg,
+    dt::custom_allocator<dt::resolved::as_template_arg>>;
+  EXPECT_EQ((std::vector<std::string>{"values"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, allocator_policy_template_parameter_field_names) {
+  namespace dt = dependency_types;
+
+  using record = dt::allocator_policy_template_record<dt::custom_allocator>;
+  EXPECT_EQ((std::vector<std::string>{"vec", "map"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, template_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  using record = dt::template_derived<dt::resolved::as_template_arg>;
+  EXPECT_EQ((std::vector<std::string>{"base_value", "own_field"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, crtp_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"crtp_base_field", "crtp_own_field"}),
+    omni::reflected_call(dt::inspect::field_names, dt::crtp_derived{}));
+}
+
+TEST(record_template, crtp_template_base_fields_are_flattened) {
+  namespace dt = dependency_types;
+
+  using record = dt::crtp_template_derived<dt::resolved::as_template_arg>;
+  EXPECT_EQ((std::vector<std::string>{"crtp_base_field", "crtp_template_field"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, nested_template_inside_non_template_parent) {
+  namespace dt = dependency_types;
+
+  using record = dt::nested_template_parent::nested_template<int>;
+  EXPECT_EQ((std::vector<std::string>{"nested_value"}),
+    omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+// TODO: nested records inside record template parents need the enclosing
+// primary template declaration to be generated for the `_wrt` root accessor.
+//
+// TEST(record_template, non_template_nested_inside_template_parent) {
+//   namespace dt = dependency_types;
+//
+//   using record = dt::template_parent<int>::nested_non_template;
+//   EXPECT_EQ((std::vector<std::string>{"nested_value", "count"}),
+//     omni::reflected_call(dt::inspect::field_names, record{}));
+// }
+
 // fixme: std::vector<T> dependency fields are not supported by source/header
 // shared dependency collection yet. The backend currently special-cases tuple
 // and variant only; this stays enabled as a regression route for dependency
