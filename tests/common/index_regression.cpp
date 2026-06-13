@@ -219,7 +219,7 @@ TEST(index_regression, prior_inplace_template_lambda_does_not_pollute_direct_wri
 #endif
 }
 
-// FIXME(high): header mode generates an indexed specialization for this local
+// FIXME(high): generated-header reflection generates an indexed specialization for this local
 // unnamed function-template from_std_map route, then the later direct
 // write_foo_bar route can match that earlier metadata during real compilation.
 // The equivalent inline map writer passes; continue triage with smaller
@@ -294,7 +294,7 @@ TEST(index_regression, prior_extra_arg_lambda_does_not_pollute_direct_write) {
 #endif
 }
 
-// FIXME(high): header mode indexed reflection is mismatched when
+// FIXME(high): generated-header reflection indexed reflection is mismatched when
 // reflected_call itself is inside a function template instantiated with a local
 // unnamed type. The tool observes the first local record in
 // touch_fields_through_template<T>, but real compilation later matches that

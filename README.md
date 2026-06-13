@@ -1,6 +1,106 @@
-
 todo: write the readme
 
-TODO: document reflected_call output construction. A type mentioned only as a
-lambda return type is not reflected; the reflectable type must be passed as an
-argument, for example via std::type_identity<T> or an equivalent tag.
+# Release Scope
+
+## Minimal Release
+
+### Types
+
+- (+) named globally accessible records
+- (+) named globally accessible enums
+- (+) nested named records/enums of supported globally accessible parents
+- (+) named explicit record template specializations
+- (-) primary record templates
+
+### Records
+
+- (+) public data fields
+- (+) read public fields
+- (+) write public non-const fields
+- (+) inherited public fields
+- (+) transitive public base fields
+- (+) field names
+- (+) field types
+- (+) field count / iteration
+- (?) unqualified record name
+- (?) namespace-qualified record name
+
+### Enums
+
+- (+) enumerator names
+- (+) enumerator values
+- (+) scoped enums
+- (+) fixed-underlying enums
+- (?) enum type name
+- (?) namespace-qualified enum type name
+- (?) plain unscoped enum field dependencies
+
+### Dependency Routes
+
+- (+) public field type dependencies
+- (+) public base type dependencies
+- (+) transitive public base dependencies
+- (+) supported member alias dependencies: `error_type`, `key_type`, `type`,
+  `value`, `value_type`
+- (+) supported template-pack dependencies for template names exactly `tuple`
+  and `variant`
+- (+) recursive dependency walk through supported routes
+
+### Serialization Completeness
+
+- (+) reflect record field names
+- (+) reflect record field types
+- (+) read field values
+- (+) write field values
+- (+) reflect enum names
+- (+) reflect enum values
+- (+) recurse into reflected record fields
+- (+) recurse through supported dependency routes
+
+### Build/Release
+
+- (+) generated-header reflection
+- (+) CMake integration
+- (+) Linux package/install matrix
+- (+) Windows package/install test
+
+## Planned After Minimal Release
+
+### Types
+
+- (-) primary record templates
+- (-) partial specializations
+
+### Metadata
+
+- (-) comment annotations
+
+### Frontend/API
+
+- (-) refine the public interface
+- (-) replace `reflected_call`
+- (-) refine the CLI interface
+- (-) remove dependency on compilation database
+- (-) make the tool callable like a compiler instance with limited support for
+  compilation-meaningful flags
+
+### Build/Release
+
+- (-) add Windows MinGW/MSYS2 to the test matrix
+- (-) add Linux MinGW cross-compilation for Windows to the test matrix
+
+## Might Be Considered Later
+
+- (-) unnamed non-local types addressable from namespace scope via
+  `decltype(symbol)`
+- (-) unnamed non-local types addressable through function return type
+- (-) other globally addressable unnamed cases
+
+## Out
+
+- (-) source mode
+- (-) private/protected fields
+- (-) methods
+- (-) local/block-scope types
+- (-) arbitrary composed `reflected_call` instrumentation
+- (-) recursive reflection

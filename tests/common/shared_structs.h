@@ -1,7 +1,5 @@
 #pragma once
 
-#include "inplace_structs.h"
-
 #include <omnirefl/reflected_call.hpp>
 #include <omnirefl/reflected_scope.hpp>
 
@@ -17,7 +15,15 @@
 #endif
 #include <vector>
 
-namespace source_mode_compat {
+namespace example {
+struct in_header_struct {
+  std::string in_header_field_0;
+  int in_header_field_1;
+  double in_header_field_2;
+};
+} // namespace example
+
+namespace reflection_compat {
 template <typename T, typename... V>
 const T *get_if(const mpark::variant<V...> *value) {
   return mpark::get_if<T>(value);
@@ -29,9 +35,9 @@ const T *get_if(const std::variant<V...> *value) {
   return std::get_if<T>(value);
 }
 #endif
-} // namespace source_mode_compat
+} // namespace reflection_compat
 
-namespace source_mode {
+namespace reflection {
 struct record {
   std::string name;
   int count;
@@ -123,9 +129,9 @@ enum class scoped_enum {
   gamma,
 };
 
-} // namespace source_mode
+} // namespace reflection
 
-namespace source_mode_impl {
+namespace reflection_impl {
 template <typename T>
 struct is_string_map: std::false_type {};
 
@@ -182,7 +188,7 @@ struct query_non_reflected_record_then_field_names_t {
     };
 
     static_assert(!omni::is_reflected<non_reflected_probe_record>::value,
-      "negative record probe must not register an indexed reflection");
+      "negative record probe must not register reflection metadata");
     return field_names(value);
   }
 } const static query_non_reflected_record_then_field_names{};
@@ -195,24 +201,10 @@ struct query_non_reflected_enum_then_field_names_t {
     };
 
     static_assert(!omni::is_reflected<non_reflected_probe_enum>::value,
-      "negative enum probe must not register an indexed reflection");
+      "negative enum probe must not register reflection metadata");
     return field_names(value);
   }
 } const static query_non_reflected_enum_then_field_names{};
-
-struct query_composed_non_reflected_then_field_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(const T &value) const {
-    struct non_reflected_probe_record {
-      int not_reflected;
-    };
-
-    static_assert(
-      !omni::is_reflected<std::vector<non_reflected_probe_record>>::value,
-      "negative composed probe must not register an indexed reflection");
-    return field_names(value);
-  }
-} const static query_composed_non_reflected_then_field_names{};
 
 struct query_mixed_non_reflected_then_field_names_t {
   template <typename T>
@@ -225,17 +217,17 @@ struct query_mixed_non_reflected_then_field_names_t {
     };
 
     static_assert(!omni::is_reflected<non_reflected_probe_record>::value,
-      "negative record probe must not register an indexed reflection");
+      "negative record probe must not register reflection metadata");
     static_assert(!omni::is_reflected<non_reflected_probe_enum>::value,
-      "negative enum probe must not register an indexed reflection");
+      "negative enum probe must not register reflection metadata");
     static_assert(
       !omni::is_reflected<std::vector<non_reflected_probe_record>>::value,
-      "negative vector probe must not register an indexed reflection");
+      "negative vector probe must not register reflection metadata");
     static_assert(
       !omni::is_reflected<
         std::tuple<non_reflected_probe_record,
           non_reflected_probe_enum>>::value,
-      "negative tuple probe must not register an indexed reflection");
+      "negative tuple probe must not register reflection metadata");
     return field_names(value);
   }
 } const static query_mixed_non_reflected_then_field_names{};
@@ -332,7 +324,7 @@ struct write_fields_from_std_map {
       return;
     }
 
-    const auto *value = source_mode_compat::get_if<
+    const auto *value = reflection_compat::get_if<
       typename Field::type>(&from.at(field.name()));
     if (value) {
       field.set_value(*value);
@@ -388,7 +380,7 @@ struct write_fields_from_std_map {
     bool written = false;
     int dummy[] = {0,
       (written = written
-          || _try_nested_map(source_mode_compat::get_if<V>(&value),
+          || _try_nested_map(reflection_compat::get_if<V>(&value),
             field),
         0)...};
     (void)dummy;
@@ -402,7 +394,7 @@ struct write_fields_from_std_map {
     bool written = false;
     int dummy[] = {0,
       (written = written
-          || _try_nested_map(source_mode_compat::get_if<V>(&value),
+          || _try_nested_map(reflection_compat::get_if<V>(&value),
             field),
         0)...};
     (void)dummy;
@@ -488,4 +480,4 @@ struct write_foo_bar_t {
     !std::is_same<int, typename Field::type>::value>::type
     _write_field(Field) {}
 } const static write_foo_bar{};
-} // namespace source_mode_impl
+} // namespace reflection_impl

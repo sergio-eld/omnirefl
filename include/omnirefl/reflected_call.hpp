@@ -159,11 +159,6 @@ struct reflected_call_t {
 #endif
   }
 
-  // todo: reflected_call currently supports direct values,
-  // compat::type_identity<T>, and std::tuple<T...> as instrumented arguments.
-  // Either forbid other composed types explicitly, or add stable backend
-  // support for supported dependency types reachable through reflected_call
-  // argument types.
   template <typename Impl, typename T, typename... Args>
   auto operator()(Impl &&impl,
     compat::type_identity<T> t,

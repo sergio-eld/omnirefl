@@ -99,9 +99,8 @@ message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATU
 
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
-    set(mode_prefix "${cpp_prefix}.header_mode")
 
-    set(_static_odr_tgt "${mode_prefix}.test.common.static_odr")
+    set(_static_odr_tgt "${cpp_prefix}.test.common.static_odr")
     add_library(${_static_odr_tgt} STATIC common/test_static_odr.cpp)
     set_target_properties(${_static_odr_tgt} PROPERTIES
         CXX_STANDARD ${cpp_standard}
@@ -113,7 +112,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
     target_link_libraries(${_static_odr_tgt} PRIVATE GTest::GTest std_compat)
     omni_reflected_target(${_static_odr_tgt})
 
-    set(_test_common_tgt "${mode_prefix}.test.common")
+    set(_test_common_tgt "${cpp_prefix}.test.common")
     set(_test_common_sources
         common/test_main.cpp
         common/dependent_types_test.cpp
@@ -135,18 +134,18 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
     target_link_libraries(${_test_common_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
     omni_reflected_target(${_test_common_tgt})
 
-    add_test(NAME "${mode_prefix}.test.common.run_omni"
+    add_test(NAME "${cpp_prefix}.test.common.run_omni"
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}.omni")
 
-    add_test(NAME "${mode_prefix}.test.common.build"
+    add_test(NAME "${cpp_prefix}.test.common.build"
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}")
 
-    set_tests_properties("${mode_prefix}.test.common.build" PROPERTIES
-        DEPENDS "${mode_prefix}.test.common.run_omni")
+    set_tests_properties("${cpp_prefix}.test.common.build" PROPERTIES
+        DEPENDS "${cpp_prefix}.test.common.run_omni")
 
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
-        add_test(NAME "${mode_prefix}.test.common" COMMAND ${_test_common_tgt})
-        set_tests_properties("${mode_prefix}.test.common" PROPERTIES
-            DEPENDS "${mode_prefix}.test.common.build")
+        add_test(NAME "${cpp_prefix}.test.common" COMMAND ${_test_common_tgt})
+        set_tests_properties("${cpp_prefix}.test.common" PROPERTIES
+            DEPENDS "${cpp_prefix}.test.common.build")
     endif()
 endforeach()
