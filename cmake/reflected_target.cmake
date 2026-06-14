@@ -69,7 +69,7 @@ endfunction()
 function(omni_reflected_target target)
     _omni_checkhealth()
 
-    cmake_parse_arguments(OMNIREFL "" "" "INCLUDE;EXCLUDE" ${ARGN})
+    cmake_parse_arguments(OMNIREFL "NO_ANNOTATIONS" "" "INCLUDE;EXCLUDE" ${ARGN})
 
     if(OMNIREFL_INCLUDE AND OMNIREFL_EXCLUDE)
         message(FATAL_ERROR "omni_reflected_target: INCLUDE and EXCLUDE are mutually exclusive")
@@ -173,6 +173,10 @@ function(omni_reflected_target target)
 	        -o "${_generated_header}"
 	        --source ${_pair}
 	    )
+
+        if(OMNIREFL_NO_ANNOTATIONS)
+            list(APPEND _omni_args --no-annotations)
+        endif()
 
         add_custom_command(
             OUTPUT "${_generated_header}"

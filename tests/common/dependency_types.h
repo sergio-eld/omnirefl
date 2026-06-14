@@ -77,6 +77,43 @@ static const struct reflected_name_t {
   }
 } reflected_name;
 
+static const struct reflected_annotation_t {
+  template <typename T>
+  std::string operator()(const T &) const {
+    return omni::reflected<T>().annotation();
+  }
+} reflected_annotation;
+
+static const struct field_annotations_t {
+  struct collect {
+    template <typename... Field>
+    std::vector<std::string> operator()(const Field &...f) const {
+      return std::vector<std::string>{f.annotation()...};
+    }
+  };
+
+  template <typename T>
+  std::vector<std::string> operator()(const T &v) const {
+    return omni::compat::apply(collect{}, omni::reflected(v).public_fields());
+  }
+} field_annotations;
+
+static const struct constexpr_annotations_t {
+  template <typename T>
+  bool operator()(const T &) const {
+    typedef typename std::tuple_element<
+      0,
+      typename omni::reflected_record_t<T>::public_fields_t>::type first_field;
+
+    static_assert('a' == omni::reflected_record_t<T>::annotation()[0],
+      "type annotation must be constexpr");
+    static_assert('a' == first_field::annotation()[0],
+      "field annotation must be constexpr");
+
+    return true;
+  }
+} constexpr_annotations;
+
 static const struct first_field_type_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
@@ -342,7 +379,9 @@ struct is_base_reflected_t {
 
 namespace resolved {
 
+/** annotation: as_field type */
 struct as_field {
+  //! annotation: as_field value
   int value;
 };
 
@@ -366,8 +405,9 @@ struct as_template_arg_layer_2 {
   int value;
 };
 
+/*! annotation: inherited base type */
 struct as_inherited_struct {
-  int base_field;
+  int base_field; ///< annotation: inherited base field
 };
 
 struct as_second_base {
@@ -402,6 +442,7 @@ enum plain_status {
   plain_status_done,
 };
 
+//! annotation: scoped status enum
 enum class scoped_status {
   idle,
   busy,
@@ -441,6 +482,11 @@ struct example_value {
   std::string name;
   int count;
   double score;
+};
+
+struct unannotated_record {
+  std::string name;
+  int count;
 };
 
 // field → dependency
@@ -516,10 +562,26 @@ struct mpark_template_dep_level_2 {
   mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
 };
 
+/** annotation: primary template record */
 template <typename T>
 struct primary_template_record {
+  //! annotation: primary template value
   T value;
-  int count;
+  int count; ///< annotation: primary template count
+};
+
+/*! annotation: comment forms type */
+struct annotation_comment_forms {
+  /// annotation: slash line field
+  int slash_line;
+  //! annotation: bang line field
+  int bang_line;
+  /** annotation: slash block field */
+  int slash_block;
+  /*! annotation: bang block field */
+  int bang_block;
+  int trailing_slash; ///< annotation: trailing slash field
+  int trailing_bang; //!< annotation: trailing bang field
 };
 
 template <typename T, int N>
@@ -548,27 +610,35 @@ struct allocator_policy_template_record {
     map;
 };
 
+//! annotation: template base type
 template <typename T>
 struct template_base {
+  /** annotation: template base value */
   T base_value;
 };
 
+/*! annotation: template derived type */
 template <typename T>
 struct template_derived: template_base<T> {
-  int own_field;
+  int own_field; //!< annotation: template derived own field
 };
 
+/** annotation: CRTP base template */
 template <typename Derived>
 struct crtp_base {
+  //! annotation: CRTP base field
   int crtp_base_field;
 };
 
+//! annotation: CRTP derived type
 struct crtp_derived: crtp_base<crtp_derived> {
-  std::string crtp_own_field;
+  std::string crtp_own_field; ///< annotation: CRTP own field
 };
 
+/// annotation: CRTP template derived type
 template <typename T>
 struct crtp_template_derived: crtp_base<crtp_template_derived<T>> {
+  /// annotation: CRTP template field
   T crtp_template_field;
 };
 

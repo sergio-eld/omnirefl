@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,48 @@ enum class enum_type_t {
   zero,
   one,
 };
+
+namespace nested {
+
+struct namespaced_record_t {
+  int value;
+};
+
+enum class namespaced_enum_t {
+  first,
+  second,
+};
+
+struct namespaced_field_types_t {
+  namespaced_record_t record;
+  namespaced_enum_t state;
+};
+
+namespace left {
+struct duplicate_name_t {
+  int value;
+};
+} // namespace left
+
+namespace right {
+struct duplicate_name_t {
+  int value;
+};
+} // namespace right
+
+struct duplicate_leaf_field_types_t {
+  left::duplicate_name_t left;
+  right::duplicate_name_t right;
+};
+
+struct sized_integer_field_types_t {
+  std::uint16_t unsigned_16;
+  std::int32_t signed_32;
+  std::uint64_t *unsigned_64_ptr;
+  std::int16_t **signed_16_ptr_ptr;
+};
+
+} // namespace nested
 
 namespace type_identity {
 
@@ -276,6 +319,13 @@ struct fields_visitor {
   }
 };
 
+struct field_type_names_visitor {
+  template <typename... Field>
+  std::vector<std::string> operator()(const Field &...) const {
+    return std::vector<std::string>{Field::type_name()...};
+  }
+};
+
 // record: omni::reflected_record_t<T>::public_fields()
 struct record_type_fields_reflected_record_t_t {
   template <typename T>
@@ -318,6 +368,16 @@ struct record_type_fields_reflected_fn2_t {
     return omni::compat::apply(fields_visitor{}, omni::reflected<T>().public_fields());
   }
 } const static record_type_fields_reflected_fn2{};
+
+struct record_type_field_type_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    if (!omni::is_reflected<T>::value)
+      return std::vector<std::string>();
+    return omni::compat::apply(field_type_names_visitor{},
+      omni::reflected(t).public_fields());
+  }
+} const static record_type_field_type_names{};
 
 } // namespace fields
 

@@ -1,5 +1,3 @@
-todo: write the readme
-
 # Release Scope
 
 ## Minimal Release
@@ -29,9 +27,12 @@ todo: write the readme
 - (+) non-public fields are not reflected
 - (+) field names
 - (+) field types
+- (+) canonical field type names
+- (+) only canonical field type names are collected; alias spelling such as
+  `std::uint16_t` is not preserved
 - (+) field count / iteration
 - (+) unqualified record name
-- (?) namespace-qualified record name
+- (-) namespace-qualified record name
 
 ### Enums
 
@@ -40,7 +41,7 @@ todo: write the readme
 - (+) scoped enums
 - (+) fixed-underlying enums
 - (+) enum type name
-- (?) namespace-qualified enum type name
+- (-) namespace-qualified enum type name
 - (?) plain unscoped enum field dependencies
 
 ### Dependency Routes
@@ -60,11 +61,16 @@ todo: write the readme
 
 - (+) reflect record field names
 - (+) reflect record field types
+- (+) reflect canonical record field type names
+- (+) reflect record and field annotations
+- (+) reflect documentation comment annotations from `///`, `//!`,
+  `/** */`, `/*! */`, `///<`, and `//!<`
 - (+) read field values
 - (+) write field values
 - (+) write inherited public field values
 - (+) reflect enum names
 - (+) reflect enum values
+- (+) reflect enum annotations
 - (+) recurse into reflected record fields
 - (+) recurse through supported dependency routes
 
@@ -72,6 +78,9 @@ todo: write the readme
 
 - (+) generated-header reflection
 - (+) CMake integration
+- (+) annotations enabled by default
+- (+) annotations can be disabled with `--no-annotations` or CMake
+  `NO_ANNOTATIONS`
 - (+) Linux package/install matrix
 - (+) Windows package/install test
 - (+) GCC and Clang package/install tests
@@ -88,7 +97,8 @@ todo: write the readme
 
 ### Metadata
 
-- (-) comment annotations
+- (-) OpenAPI-like schema table generation from reflected structs/enums using
+  type, field, enum, and annotation metadata
 - (-) namespace-qualified reflected type names
 - (-) specialization-aware reflected type names when/if explicit or partial
   specializations are implemented
@@ -101,6 +111,9 @@ todo: write the readme
 - (-) remove dependency on compilation database
 - (-) make the tool callable like a compiler instance with limited support for
   compilation-meaningful flags
+- (-) Unix-like invocation: `omnirefl -o <reflection.hpp> -MF <deps.d> -- <cc1 args...>`
+- (-) split compiler-driver/compile-db args to cc1 mapping into a separate
+  composable tool
 
 ### Build/Release
 

@@ -100,6 +100,30 @@ struct print_field_names_simple_t {
   }
 } const static print_field_names_simple{};
 
+struct print_field_annotations_simple_t {
+  struct _visit {
+    template <typename... F>
+    std::vector<std::string> operator()(const F &...field) {
+      return {std::string(field.annotation())...};
+    }
+  };
+
+  template <typename T>
+  std::vector<std::string> operator()(const T &t) const {
+    static_assert(omni::is_reflected<T>::value, "");
+    const auto fields = omni::reflected(t).public_fields();
+    return omni::compat::apply(_visit{}, fields);
+  }
+} const static print_field_annotations_simple{};
+
+struct print_annotation_simple_t {
+  template <typename T>
+  std::string operator()(const T &) const {
+    static_assert(omni::is_reflected<T>::value, "");
+    return omni::reflected<T>().annotation();
+  }
+} const static print_annotation_simple{};
+
 struct maybe_print_field_names_t {
   std::vector<std::string> operator()(int) const {
     return {};
@@ -342,9 +366,11 @@ static const struct {
 } get_enumerators{};
 
 namespace example {
+/** annotation: in_cpp_struct type */
 struct in_cpp_struct {
+  //! annotation: in_cpp field 0
   std::string in_cpp_field_0;
-  int in_cpp_field_1;
+  int in_cpp_field_1; ///< annotation: in_cpp field 1
   double in_cpp_field_2;
 };
 
@@ -428,6 +454,7 @@ enum in_cpp_enum {
   in_cpp_enum_c,
 };
 
+/*! annotation: in_cpp scoped enum */
 enum class in_cpp_scoped_enum {
   in_cpp_scoped_enum_a,
   in_cpp_scoped_enum_b,
@@ -458,8 +485,10 @@ struct in_cpp_deep_derived: in_cpp_mid_base {
   double in_cpp_deep_field_2;
 };
 
+//! annotation: in_cpp CRTP base
 template <typename Derived>
 struct in_cpp_crtp_base {
+  /** annotation: in_cpp CRTP base field */
   int in_cpp_crtp_base_field;
 };
 
@@ -486,8 +515,9 @@ struct in_cpp_crtp_base_with_private_cpp_base: private in_cpp_struct {
   int in_cpp_crtp_private_cpp_base_field;
 };
 
+/*! annotation: in_cpp CRTP derived */
 struct in_cpp_crtp_derived: in_cpp_crtp_base<in_cpp_crtp_derived> {
-  std::string in_cpp_crtp_field_0;
+  std::string in_cpp_crtp_field_0; //!< annotation: in_cpp CRTP field 0
   double in_cpp_crtp_field_1;
 };
 
@@ -846,6 +876,42 @@ TEST(print_names, in_cpp_struct) {
   };
   ASSERT_EQ(expected,
     omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(annotations, in_cpp_struct_type_annotation) {
+  const example::in_cpp_struct p{};
+  ASSERT_EQ("annotation: in_cpp_struct type",
+    omni::reflected_call(example_impl::print_annotation_simple, p));
+}
+
+TEST(annotations, in_cpp_struct_field_annotations) {
+  const example::in_cpp_struct p{};
+  const static std::vector<std::string> expected{
+    "annotation: in_cpp field 0",
+    "annotation: in_cpp field 1",
+    "",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_annotations_simple, p));
+}
+
+TEST(annotations, in_cpp_scoped_enum_annotation) {
+  const example::in_cpp_scoped_enum e{};
+  ASSERT_EQ("annotation: in_cpp scoped enum",
+    omni::reflected_call(example_impl::print_annotation_simple, e));
+}
+
+TEST(annotations, in_cpp_crtp_annotation_and_fields) {
+  const example::in_cpp_crtp_derived p{};
+
+  ASSERT_EQ("annotation: in_cpp CRTP derived",
+    omni::reflected_call(example_impl::print_annotation_simple, p));
+  ASSERT_EQ((std::vector<std::string>{
+              "annotation: in_cpp CRTP base field",
+              "annotation: in_cpp CRTP field 0",
+              "",
+            }),
+    omni::reflected_call(example_impl::print_field_annotations_simple, p));
 }
 
 TEST(print_names, in_cpp_derived_from_header_struct) {
@@ -2903,9 +2969,11 @@ struct in_cpp_template<int>: in_header_struct {
   double in_cpp_template_field_2;
 };
 
+/** annotation: in_cpp template CRTP derived */
 template <typename T>
 struct in_cpp_template_crtp_derived:
     in_cpp_crtp_base<in_cpp_template_crtp_derived<T>> {
+  //! annotation: in_cpp template CRTP field
   T in_cpp_template_crtp_field;
   std::string in_cpp_template_crtp_name;
 };
@@ -2993,6 +3061,22 @@ TEST(print_names, in_cpp_template_crtp_second_instantiation_public_base) {
   };
   ASSERT_EQ(expected,
     omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(annotations, in_cpp_template_crtp_annotation_is_shared_by_instantiations) {
+  const example::in_cpp_template_crtp_derived<double> first{};
+  const example::in_cpp_template_crtp_derived<int> second{};
+
+  ASSERT_EQ("annotation: in_cpp template CRTP derived",
+    omni::reflected_call(example_impl::print_annotation_simple, first));
+  ASSERT_EQ("annotation: in_cpp template CRTP derived",
+    omni::reflected_call(example_impl::print_annotation_simple, second));
+  ASSERT_EQ((std::vector<std::string>{
+              "annotation: in_cpp CRTP base field",
+              "annotation: in_cpp template CRTP field",
+              "",
+            }),
+    omni::reflected_call(example_impl::print_field_annotations_simple, first));
 }
 
 TEST(write_values, in_cpp_template_crtp_public_base_from_std_map) {

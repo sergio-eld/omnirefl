@@ -15,6 +15,7 @@
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/DeclTemplate.h>
+#include <clang/AST/RawCommentList.h>
 #include <clang/AST/Type.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -239,6 +240,8 @@ struct options {
 
   // todo: implement parsing
   bool generate_dep_file = true;
+
+  bool annotations = true;
 };
 
 std::expected<options, app_error> parse(int argc,
@@ -454,9 +457,14 @@ struct type_definition {
   } definition_flags;
 };
 
+std::string annotation_from_decl(const clang::ASTContext &ast,
+  const clang::Decl *decl);
+
 // as of now - public only
 struct field_data {
   std::string name;
+  std::string type_name;
+  std::string annotation;
   bool is_bitfield;
 
   enum {
@@ -465,10 +473,14 @@ struct field_data {
     as_mutable,
   } qualified;
 
-  static field_data from_decl(const clang::FieldDecl *d) {
+  static field_data from_decl(const clang::ASTContext &ast,
+    const clang::FieldDecl *d) {
     assert(d);
     return {
       .name = std::string(fn::as<std::string_view>(d->getName())),
+      .type_name = d->getType().getCanonicalType().getAsString(
+        ast.getPrintingPolicy()),
+      .annotation = annotation_from_decl(ast, d),
       .is_bitfield = d->isBitField(),
       .qualified = d->isMutable()
         ? as_mutable
@@ -543,6 +555,7 @@ concept reflectable_data =
 
 struct reflectable {
   type_id id;
+  std::string annotation;
 
   // refactorme: Consider having template arg `reflectable_data` instead
   std::variant<record_data, enum_data> data;
@@ -1032,6 +1045,13 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     ->type_name("PATH")
     ->default_val(fs::current_path().generic_string());
 
+  bool no_annotations = false;
+  app
+    .add_flag("--no-annotations",
+      no_annotations,
+      "Disable reflected documentation comment annotations.")
+    ->configurable(false);
+
   std::optional<fs::path> cli_comp_db = std::nullopt;
   app.add_option("--comp-db", cli_comp_db, "Path to compile_commands.json")
     ->type_name("FILE")
@@ -1156,6 +1176,7 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     .source = std::move(cli_source_with_flags),
     .out = std::move(cli_out),
     .resource_dir = std::move(cli_resource_dir),
+    .annotations = !no_annotations,
   };
 }
 
@@ -1577,8 +1598,7 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
 
   {
     clang::LangOptions &lo = clang_invocation->getLangOpts();
-    // todo: investigate how to properly parse comments
-    lo.CommentOpts.ParseAllComments = true;
+    lo.CommentOpts.ParseAllComments = cli_args.annotations;
   }
 
   {
@@ -2222,6 +2242,26 @@ std::string get_declaration_source_file(const clang::Decl &d,
   return filename;
 }
 
+std::string meta::annotation_from_decl(const clang::ASTContext &ast,
+  const clang::Decl *decl) {
+  assert(decl);
+
+  // Raw-comment lookup may be relatively expensive; skip it when annotations
+  // were explicitly disabled.
+  if (!ast.getLangOpts().CommentOpts.ParseAllComments)
+    return "";
+
+  const clang::Decl *canonical = decl->getCanonicalDecl();
+  const clang::RawComment *comment =
+    ast.getRawCommentForDeclNoCache(canonical);
+  if (!comment)
+    comment = ast.getRawCommentForDeclNoCache(decl);
+  if (!comment)
+    return "";
+
+  return comment->getBriefText(ast);
+}
+
 meta::template_param map_template_param(const clang::ASTContext &ast,
   const clang::NamedDecl *decl) {
   assert(decl);
@@ -2540,7 +2580,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
 
   const auto not_resolved = //
     [&ast, &resolved_types](const clang::TagType *t) {
-      return !resolved_types.contains(render_type_id(ast, t));
+      return !resolved_types.contains(render_reflectable_id(ast, t));
     };
 
   std::set<const clang::TagType *> collected;
@@ -2553,7 +2593,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
     const clang::CXXRecordDecl *cur_decl = to_visit.top();
     const clang::TagType *cur_type =
       meta::map_decl_to_canonical_type(ast, cur_decl);
-    const meta::type_id cur_id = render_type_id(ast, cur_type);
+    const meta::type_id cur_id = render_reflectable_id(ast, cur_type);
 
     to_visit.pop();
 
@@ -2658,7 +2698,8 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
                              : std::vector<std::string>{},
 
     .public_fields = public_fields_view(&r_decl)
-      | std::views::transform(meta::field_data::from_decl)
+      | std::views::transform(std::bind_front(meta::field_data::from_decl,
+        std::cref(ast)))
       | std::ranges::to<std::vector>(),
 
     .type = r_decl.isStruct() //
@@ -2702,6 +2743,13 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
 
   return {
     .id = render_reflectable_id(ast, t),
+    .annotation = std::invoke([&ast, t] {
+      const auto *spec =
+        llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(t->getDecl());
+      return meta::annotation_from_decl(ast,
+        spec ? static_cast<const clang::Decl *>(spec->getSpecializedTemplate())
+             : static_cast<const clang::Decl *>(t->getDecl()));
+    }),
     .data = clang::isa<clang::EnumType>(t)
       ? record_or_enum(
           meta::enum_data::from_type(clang::cast<clang::EnumType>(t)))
@@ -2732,21 +2780,22 @@ auto meta::resolve_reflected_type(
     return std::unexpected(std::move(template_arg).error());
 
   const clang::Type &template_arg_type = **template_arg;
-  const meta::type_id id = render_type_id(ast, &template_arg_type);
   // todo: C-arrays, pointers?
-
-  if (resolved_types.contains(id)) {
-    return reflected_type_info{
-      .type = already_reflected{.id = id},
-      .dependencies = {}, //< refactorme: dependencies here make no sense
-    };
-  }
 
   // not a struct|class|union|enum
   if (!clang::isa<clang::TagType>(template_arg_type)) {
     return reflected_type_info{
-      .type = non_reflectable{.id = id},
+      .type = non_reflectable{.id = render_type_id(ast, &template_arg_type)},
       .dependencies = {},
+    };
+  }
+
+  const auto *tag_type = clang::cast<clang::TagType>(&template_arg_type);
+  const meta::type_id id = render_reflectable_id(ast, tag_type);
+  if (resolved_types.contains(id)) {
+    return reflected_type_info{
+      .type = already_reflected{.id = id},
+      .dependencies = {}, //< refactorme: dependencies here make no sense
     };
   }
 
@@ -2756,6 +2805,7 @@ auto meta::resolve_reflected_type(
       .type =
         reflectable{
           .id = id,
+          .annotation = annotation_from_decl(ast, enum_type->getDecl()),
           .data = enum_data::from_type(enum_type),
           .definition =
             resolve_definition(ast.getSourceManager(), enum_type->getDecl()),
@@ -2819,6 +2869,46 @@ auto meta::resolve_reflected_indexed_type(
 }
 
 namespace render::impl {
+
+std::string escaped_string_literal_content(std::string_view s) {
+  std::string out;
+  for (const unsigned char c : s) {
+    switch (c) {
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '"':
+      out += "\\\"";
+      break;
+    default:
+      if (0x20 <= c && 0x7f > c)
+        out += static_cast<char>(c);
+      else
+        out += std::format("\\{:03o}", static_cast<unsigned int>(c));
+      break;
+    }
+  }
+  return out;
+}
+
+std::string annotation_method(std::string_view annotation) {
+  const std::string escaped = escaped_string_literal_content(annotation);
+  return std::format(
+    "\n  static constexpr auto annotation() noexcept"
+    "\n    -> const char(&)[sizeof(\"{0}\")] {{"
+    "\n    return \"{0}\";"
+    "\n  }}",
+    escaped);
+}
 
 // render `_omni_{root}_as_root` for `root::inner_type` as input
 std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
@@ -2932,7 +3022,9 @@ std::string_view reflectable_entity(const Data &) {
 }
 
 template <meta::reflectable_data Data>
-std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
+std::string reflectable_head(const meta::nm_qual_type &t,
+  std::string_view annotation,
+  const Data &d) {
   // to support, I need to store the decl name for `decltype(instance)`
   assert(t.name && "unnamed structs not supported");
 
@@ -2969,7 +3061,8 @@ std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
         "\n  static constexpr auto name() noexcept"
         "\n    -> const char(&)[sizeof(\"{3}\")] {{"
         "\n    return \"{3}\";"
-        "\n  }}",
+        "\n  }}"
+        "{5}",
 
         // 0
         reflectable_tag(d),
@@ -2985,7 +3078,10 @@ std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
 
         // 4
         std::format("template <\n  {},\n  typename _omni_binding\n>",
-          format_template_params(d.template_info->params, 1)));
+          format_template_params(d.template_info->params, 1)),
+
+        // 5
+        annotation_method(annotation));
     }
   }
 
@@ -3004,7 +3100,8 @@ std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     "\n  static constexpr auto name() noexcept"
     "\n    -> const char(&)[sizeof(\"{3}\")] {{"
     "\n    return \"{3}\";"
-    "\n  }}",
+    "\n  }}"
+    "{4}",
 
     // 0
     reflectable_tag(d),
@@ -3016,12 +3113,17 @@ std::string reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     reflectable_entity(d),
 
     // 3
-    t.name.value_or("(unnamed)"));
+    t.name.value_or("(unnamed)"),
+
+    // 4
+    annotation_method(annotation));
 }
 
 // SFINAE specialization for inner types of forward-declared types.
 template <meta::reflectable_data Data>
-std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
+std::string inner_reflectable_head(const meta::nm_qual_type &t,
+  std::string_view annotation,
+  const Data &d) {
   // to support, I need to store the decl field name for
   // `decltype(std::declval<root>().inner)
   assert(t.name && "unnamed inner structs not supported");
@@ -3043,15 +3145,18 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t, const Data &d) {
     "\n  static constexpr auto name() noexcept"
     "\n    -> const char(&)[sizeof(\"{2}\")] {{"
     "\n    return \"{2}\";"
-    "\n  }}",
+    "\n  }}"
+    "{3}",
 
     format_qualified_inner_type_from_root(access_root_for, t),
     reflectable_entity(d),
-    t.name.value_or("(unnamed)"));
+    t.name.value_or("(unnamed)"),
+    annotation_method(annotation));
 }
 
 template <meta::reflectable_data Data>
 std::string indexed_reflectable_head(const meta::nm_qual_type &t,
+  std::string_view annotation,
   const Data &d,
   std::size_t index) {
   return std::format(
@@ -3068,11 +3173,13 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
     "\n  static constexpr auto name() noexcept"
     "\n    -> const char(&)[sizeof(\"{2}\")] {{"
     "\n    return \"{2}\";"
-    "\n  }}",
+    "\n  }}"
+    "{3}",
 
     index,
     reflectable_entity(d),
-    t.name.value_or("(unnamed)"));
+    t.name.value_or("(unnamed)"),
+    annotation_method(annotation));
 }
 
 std::string reflectable_body(const meta::enum_data &d) {
@@ -3106,6 +3213,12 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n      return \"{0}\";"
         "\n    }}"
         "\n"
+        "\n    static constexpr auto type_name() noexcept"
+        "\n      -> const char(&)[sizeof(\"{5}\")] {{"
+        "\n      return \"{5}\";"
+        "\n    }}"
+        "{6}"
+        "\n"
         "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
         "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
         "\n"
@@ -3134,7 +3247,13 @@ std::string reflectable_body(const meta::record_data &d) {
 
         // 4
         f.is_bitfield ? std::format("decltype(t.{})", f.name)
-                      : std::format("const decltype(t.{})&", f.name));
+                      : std::format("const decltype(t.{})&", f.name),
+
+        // 5
+        escaped_string_literal_content(f.type_name),
+
+        // 6
+        annotation_method(f.annotation));
     };
 
   return std::format(
@@ -3171,12 +3290,19 @@ std::string render_reflectable_head(const S &r) {
   return std::visit(
     [&](const meta::reflectable_data auto &d) {
       if constexpr (std::same_as<rc::forward_declarable, S>)
-        return render::impl::reflectable_head(type_name, d);
+        return render::impl::reflectable_head(type_name,
+          r.type.annotation,
+          d);
       else if constexpr (std::same_as<rc::nested_type, S>)
-        return render::impl::inner_reflectable_head(type_name, d);
+        return render::impl::inner_reflectable_head(type_name,
+          r.type.annotation,
+          d);
       else {
         static_assert(std::same_as<rc::indexed_type, S>);
-        return render::impl::indexed_reflectable_head(type_name, d, r.index);
+        return render::impl::indexed_reflectable_head(type_name,
+          r.type.annotation,
+          d,
+          r.index);
       }
     },
     r.type.data);

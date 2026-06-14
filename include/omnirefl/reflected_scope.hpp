@@ -97,6 +97,12 @@ struct mem_binding {
   const char *name() const noexcept {
     return _vtable->name();
   }
+  const char *type_name() const noexcept {
+    return _vtable->type_name();
+  }
+  const char *annotation() const noexcept {
+    return _vtable->annotation();
+  }
   std::size_t index() const noexcept {
     return _vtable->index();
   }
@@ -114,6 +120,8 @@ struct mem_binding {
   struct vtable {
     virtual const T &value(const void *owner) const noexcept = 0;
     virtual const char *name() const noexcept = 0;
+    virtual const char *type_name() const noexcept = 0;
+    virtual const char *annotation() const noexcept = 0;
     virtual std::size_t index() const noexcept = 0;
     virtual ~vtable() {}
   };
@@ -128,6 +136,14 @@ struct mem_binding {
 
       const char *name() const noexcept override {
         return Meta::name();
+      }
+
+      const char *type_name() const noexcept override {
+        return Meta::type_name();
+      }
+
+      const char *annotation() const noexcept override {
+        return Meta::annotation();
       }
 
       std::size_t index() const noexcept override {
@@ -156,6 +172,7 @@ struct mutable_mem_binding: mem_binding<T> {
   using base::operator const T &;
   using base::operator*;
   using base::name;
+  using base::annotation;
   using base::index;
 
   template <typename V>
@@ -207,6 +224,14 @@ struct reflected_mem_binding {
 
   static constexpr const char *name() noexcept {
     return meta::name();
+  }
+
+  static constexpr const char *type_name() noexcept {
+    return meta::type_name();
+  }
+
+  static constexpr const char *annotation() noexcept {
+    return meta::annotation();
   }
 
   static constexpr std::size_t index() noexcept {
@@ -280,6 +305,10 @@ struct reflected_t<T, reflected_entity::record> {
     return meta::name();
   }
 
+  static constexpr const char *annotation() noexcept {
+    return meta::annotation();
+  }
+
   static constexpr reflected_entity entity() noexcept {
     return meta::entity();
   }
@@ -317,6 +346,10 @@ struct reflected_t<T, reflected_entity::enumeration> {
     return meta::name();
   }
 
+  static constexpr const char *annotation() noexcept {
+    return meta::annotation();
+  }
+
   static constexpr reflected_entity entity() noexcept {
     return meta::entity();
   }
@@ -346,6 +379,10 @@ struct reflected_binding<T, reflected_entity::record> {
 
   static constexpr const char *name() noexcept {
     return meta::name();
+  }
+
+  static constexpr const char *annotation() noexcept {
+    return meta::annotation();
   }
 
   constexpr operator const type &() const {
@@ -399,6 +436,10 @@ struct reflected_binding<T, reflected_entity::enumeration> {
 
   static constexpr const char *name() noexcept {
     return meta::name();
+  }
+
+  static constexpr const char *annotation() noexcept {
+    return meta::annotation();
   }
 
   operator const type &() const {

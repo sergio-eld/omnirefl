@@ -59,8 +59,6 @@ void value_categories_read_test(const std::vector<std::string> &expected,
   // prvalue tested outside with 'owning' reflected visitors
 }
 
-// todo: add test for namespaces
-
 TEST(type_identity, record_type_t) {
   using interface_test::record_type_t;
   namespace ti = interface_test::type_identity;
@@ -87,6 +85,24 @@ TEST(type_identity, record_type_t) {
 
   // omni::reflected(t).name()
   value_categories_test<record_type_t>("record_type_t",
+    ti::record_type_name_reflected_lv);
+}
+
+TEST(type_identity, namespaced_record_type_t) {
+  using interface_test::nested::namespaced_record_t;
+  namespace ti = interface_test::type_identity;
+
+  value_categories_test<namespaced_record_t>("namespaced_record_t",
+    ti::record_type_name_reflected_record_t);
+  value_categories_test<namespaced_record_t>("namespaced_record_t",
+    ti::record_type_name_reflected_record_fn);
+  value_categories_test<namespaced_record_t>("namespaced_record_t",
+    ti::record_type_name_reflected_record_lv);
+  value_categories_test<namespaced_record_t>("namespaced_record_t",
+    ti::record_type_name_reflected_t);
+  value_categories_test<namespaced_record_t>("namespaced_record_t",
+    ti::record_type_name_reflected_fn);
+  value_categories_test<namespaced_record_t>("namespaced_record_t",
     ti::record_type_name_reflected_lv);
 }
 
@@ -119,6 +135,24 @@ TEST(type_identity, enum_type_t) {
     ti::enum_type_name_reflected_lv);
 }
 
+TEST(type_identity, namespaced_enum_type_t) {
+  using interface_test::nested::namespaced_enum_t;
+  namespace ti = interface_test::type_identity;
+
+  value_categories_test<namespaced_enum_t>("namespaced_enum_t",
+    ti::enum_type_name_reflected_enum_t);
+  value_categories_test<namespaced_enum_t>("namespaced_enum_t",
+    ti::enum_type_name_reflected_enum_fn);
+  value_categories_test<namespaced_enum_t>("namespaced_enum_t",
+    ti::enum_type_name_reflected_enum_lv);
+  value_categories_test<namespaced_enum_t>("namespaced_enum_t",
+    ti::enum_type_name_reflected_t);
+  value_categories_test<namespaced_enum_t>("namespaced_enum_t",
+    ti::enum_type_name_reflected_fn);
+  value_categories_test<namespaced_enum_t>("namespaced_enum_t",
+    ti::enum_type_name_reflected_lv);
+}
+
 TEST(fields, record_type_t) {
   using interface_test::record_type_t;
   namespace f = interface_test::fields;
@@ -140,6 +174,58 @@ TEST(fields, record_type_t) {
   // omni::reflected<T>().public_fields()
   value_categories_test<record_type_t>(k_expected,
     f::record_type_fields_reflected_fn2);
+}
+
+TEST(fields, namespaced_field_type_names) {
+  using interface_test::nested::namespaced_field_types_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "interface_test::nested::namespaced_record_t",
+    "interface_test::nested::namespaced_enum_t",
+  };
+
+  value_categories_test<namespaced_field_types_t>(k_expected,
+    f::record_type_field_type_names);
+}
+
+TEST(fields, fully_qualified_duplicate_leaf_field_type_names) {
+  using interface_test::nested::duplicate_leaf_field_types_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "interface_test::nested::left::duplicate_name_t",
+    "interface_test::nested::right::duplicate_name_t",
+  };
+
+  value_categories_test<duplicate_leaf_field_types_t>(k_expected,
+    f::record_type_field_type_names);
+}
+
+TEST(fields, sized_integer_field_types) {
+  using interface_test::nested::sized_integer_field_types_t;
+  namespace f = interface_test::fields;
+
+  // These are canonical type-name strings reported by the tool. The source
+  // fields use `std::uint16_t` and friends, but those are typedef aliases, not
+  // canonical type names.
+  static const std::vector<std::string> k_expected{
+    "unsigned short",
+    "int",
+    "unsigned long *",
+    "short **",
+  };
+
+  sized_integer_field_types_t lvalue{};
+  const sized_integer_field_types_t const_lvalue{};
+
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(f::record_type_field_type_names, lvalue));
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(f::record_type_field_type_names, const_lvalue));
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(f::record_type_field_type_names,
+      sized_integer_field_types_t{}));
 }
 
 TEST(enumerators, enum_type_t) {
