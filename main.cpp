@@ -112,6 +112,16 @@ constexpr std::optional<std::remove_cvref_t<T>> maybe(T &&value) {
   return std::nullopt;
 }
 
+template <typename T, typename E>
+constexpr std::expected<std::remove_cvref_t<T>, std::remove_cvref_t<E>> expect(
+  T &&value,
+  E &&error) {
+  if (true == static_cast<bool>(value))
+    return std::forward<T>(value);
+
+  return std::unexpected(std::forward<E>(error));
+}
+
 } // namespace fn
 
 namespace util {
@@ -438,6 +448,12 @@ struct source_location {
   std::filesystem::path source_file;
   std::uint32_t line;
   std::uint32_t column;
+
+  friend bool operator<(const source_location &lhs,
+    const source_location &rhs) {
+    return std::tie(lhs.source_file, lhs.line, lhs.column)
+      < std::tie(rhs.source_file, rhs.line, rhs.column);
+  }
 };
 
 // refactorme: source_file and location should be separated into
@@ -585,15 +601,9 @@ struct reflected_type_info {
 };
 
 std::expected<reflected_type_info, std::string> resolve_reflected_type(
-  const clang::ClassTemplateSpecializationDecl &decl,
+  clang::QualType type,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_types);
-
-std::expected<std::pair<std::size_t, reflected_type_info>, std::string>
-  resolve_reflected_indexed_type(
-    const clang::ClassTemplateSpecializationDecl &decl,
-    const clang::ASTContext &ast,
-    const std::set<type_id> &resolved_types);
 
 struct source_file_context {
   source_file sf;
@@ -610,7 +620,9 @@ struct source_file_context {
   // avoid coupling render lifetime to reflected collection layout.
   std::map<meta::type_id, meta::nm_qual_type> type_name_by_id{};
 
-  std::vector<std::pair<meta::type_id, std::size_t>> index_by_type{};
+  std::map<meta::type_id, std::size_t> index_by_type_id{};
+  std::map<meta::type_id, std::set<meta::source_location>>
+    callsites_by_type_id{};
 
   std::vector<std::string> errors{};
 
@@ -660,6 +672,12 @@ std::expected<reflection_context, std::string>
   generate_reflection(reflection_context ctx, std::ofstream file);
 
 } // namespace render
+
+meta::type_id render_type_id(const clang::ASTContext &ast,
+  const clang::Type *type);
+
+meta::type_id render_reflectable_id(const clang::ASTContext &ast,
+  const clang::TagType *t);
 
 namespace pipeline {
 
@@ -1706,6 +1724,112 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
     },
 
     ast::rule{
+      .pattern = ast::pattern(cxxOperatorCallExpr,
+        callee(cxxMethodDecl(
+          ofClass(cxxRecordDecl(hasName("omni::reflected_call_t"))),
+          hasOverloadedOperatorName("()")))),
+      .reduce =
+        [&ast = wast.ast->getASTContext()](meta::source_file_context a,
+          const clang::CXXOperatorCallExpr &call) {
+          std::expected callee = fn::expect(call.getDirectCallee(),
+            "tool error: reflected_call matcher could not resolve the selected overload"sv);
+          if (!callee) {
+            a.errors.emplace_back(std::move(callee).error());
+            return a;
+          }
+
+          const clang::TemplateArgumentList *template_args =
+            (*callee)->getTemplateSpecializationArgs();
+          if (!template_args) {
+            a.errors.emplace_back(
+              "tool error: reflected_call matcher could not extract template arguments");
+            return a;
+          }
+
+          if (template_args->size() <= 1) {
+            a.errors.emplace_back(
+              "tool error: reflected_call matcher could not extract the reflected type argument");
+            return a;
+          }
+
+          const clang::TemplateArgument &arg = template_args->get(1);
+          if (clang::TemplateArgument::Type != arg.getKind()) {
+            a.errors.emplace_back(
+              "tool error: reflected_call matcher selected an unexpected non-type reflected argument");
+            return a;
+          }
+
+          std::expected resolved =
+            meta::resolve_reflected_type(arg.getAsType(), ast, a.resolved_types);
+
+          if (!resolved) {
+            a.errors.emplace_back(std::move(resolved).error());
+            return a;
+          }
+
+          meta::reflected_type_info &info = *resolved;
+          const meta::type_id id = std::visit(
+            []<typename T>(const T &t) {
+              return t.id;
+            },
+            info.type);
+
+          const clang::SourceManager &sm = ast.getSourceManager();
+          const clang::SourceLocation loc = call.getExprLoc();
+          const clang::PresumedLoc presumed = sm.getPresumedLoc(loc);
+          if (!presumed.isValid()) {
+            a.errors.emplace_back(
+              "tool error: reflected_call matcher could not resolve a source location");
+            return a;
+          }
+
+          meta::source_location callsite{
+            .source_file = presumed.getFilename(),
+            .line = sm.getSpellingLineNumber(loc),
+            .column = sm.getSpellingColumnNumber(loc),
+          };
+
+          a.callsites_by_type_id[id].emplace(std::move(callsite));
+
+          std::visit(
+            [&a]<typename T>(T t) {
+              a.resolved_types.emplace(t.id);
+
+              if constexpr (std::same_as<meta::reflectable, T>) {
+                meta::reflectable &r = t;
+                a.type_name_by_id.emplace(r.id, r.definition.type_name);
+                a.reflected.emplace_back(std::move(r));
+              } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                // todo:
+                // Only a limited set of T in reflected_call<T>
+                // is supported, and it should be reported as
+                // error diagnostics
+              } else {
+                static_assert(std::same_as<meta::already_reflected, T>);
+                // todo: log for info?
+              }
+            },
+            std::move(info.type));
+
+          std::ranges::copy(info.dependencies
+              | std::views::transform(&meta::reflectable::id),
+            std::inserter(a.resolved_types, a.resolved_types.begin()));
+
+          std::ranges::copy(info.dependencies
+              | std::views::transform(&meta::reflectable::id),
+            std::inserter(a.resolved_as_dependency,
+              a.resolved_as_dependency.begin()));
+
+          for (meta::reflectable &dep : info.dependencies) {
+            a.type_name_by_id.emplace(dep.id, dep.definition.type_name);
+            a.reflected.emplace_back(std::move(dep));
+          }
+
+          return a;
+        },
+    },
+
+    ast::rule{
       .pattern = ast::pattern(classTemplateSpecializationDecl,
         unless(isInStdNamespace()),
         hasAncestor(namespaceDecl(hasName("omni"))),
@@ -1716,55 +1840,34 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
       .reduce =
         [&ast = wast.ast->getASTContext()](meta::source_file_context a,
           const clang::ClassTemplateSpecializationDecl &decl) {
-          std::expected resolved =
-            meta::resolve_reflected_indexed_type(decl, ast, a.resolved_types)
-              .transform( //
-                [&a](
-                  std::pair<std::size_t, meta::reflected_type_info> r) -> void {
-                  auto &&[index, resolved] = std::move(r);
-
-                  std::visit(
-                    [&a, index]<typename T>(T t) {
-                      a.resolved_types.emplace(t.id);
-                      a.index_by_type.emplace_back(t.id, index);
-
-                      if constexpr (std::same_as<meta::reflectable, T>) {
-                        meta::reflectable &r = t;
-                        a.type_name_by_id.emplace(r.id, r.definition.type_name);
-                        a.reflected.emplace_back(std::move(r));
-                      } else if constexpr (std::same_as<meta::non_reflectable,
-                                             T>) {
-                        // todo:
-                        // Only a limited set of T in _relfected_type<T>
-                        // is supported, and it should be reported as
-                        // error diagnostics
-                      } else {
-                        static_assert(std::same_as<meta::already_reflected, T>);
-                        // todo: log for info?
-                      }
-                    },
-                    std::move(resolved.type));
-
-                  std::ranges::copy(resolved.dependencies
-                      | std::views::transform(&meta::reflectable::id),
-                    std::inserter(a.resolved_types, a.resolved_types.begin()));
-
-                  std::ranges::copy(resolved.dependencies
-                      | std::views::transform(&meta::reflectable::id),
-                    std::inserter(a.resolved_as_dependency,
-                      a.resolved_as_dependency.begin()));
-
-                  for (meta::reflectable &dep : resolved.dependencies) {
-                    a.type_name_by_id.emplace(dep.id, dep.definition.type_name);
-                    a.reflected.emplace_back(std::move(dep));
-                  }
-                });
-
-          if (!resolved) {
-            a.errors.emplace_back(std::move(resolved).error());
+          const clang::TemplateArgumentList &args = decl.getTemplateArgs();
+          if (args.size() <= 1) {
+            a.errors.emplace_back(
+              "invalid _reflected_indexed_type signature");
             return a;
           }
 
+          const clang::TemplateArgument &type_arg = args.get(0);
+          if (clang::TemplateArgument::Type != type_arg.getKind()) {
+            a.errors.emplace_back(
+              "invalid _reflected_indexed_type signature: non-type first argument");
+            return a;
+          }
+
+          const clang::TemplateArgument &index_arg = args.get(1);
+          if (clang::TemplateArgument::Integral != index_arg.getKind()) {
+            a.errors.emplace_back(
+              "invalid _reflected_indexed_type signature: non-integral index argument");
+            return a;
+          }
+
+          const clang::Type &type = *type_arg.getAsType();
+          const meta::type_id id = clang::isa<clang::TagType>(type)
+            ? render_reflectable_id(ast, clang::cast<clang::TagType>(&type))
+            : render_type_id(ast, &type);
+          a.index_by_type_id.emplace(
+            std::move(id),
+            index_arg.getAsIntegral().getExtValue());
           return a;
         },
     });
@@ -1780,8 +1883,6 @@ std::expected<pipeline::reflection_context, app_error>
   using render_context = render::reflection_context;
 
   const source_file source = rm.ctx.sf;
-  const std::map index_by_type_id =
-    rm.ctx.index_by_type | std::views::as_rvalue | std::ranges::to<std::map>();
 
   std::vector<render_context::forward_declarable> fwd;
   std::vector<render_context::nested_type> nested;
@@ -1789,8 +1890,8 @@ std::expected<pipeline::reflection_context, app_error>
   std::vector<meta::reflectable> errors;
 
   for (meta::reflectable &&t : rm.ctx.reflected | std::views::as_rvalue) {
-    const std::optional index = index_by_type_id.contains(t.id)
-      ? std::optional(index_by_type_id.at(t.id))
+    const std::optional index = rm.ctx.index_by_type_id.contains(t.id)
+      ? std::optional(rm.ctx.index_by_type_id.at(t.id))
       : std::nullopt;
 
     const bool as_dependency = rm.ctx.resolved_as_dependency.contains(t.id);
@@ -2134,9 +2235,6 @@ void print_instrumented_source(const cli::options &args) {
 }
 
 void print_reduced_matches(const pipeline::reduced_matches &rm) {
-  const std::map index_by_type =
-    rm.ctx.index_by_type | std::ranges::to<std::map>();
-
   llvm::errs() << std::format(
     "\n[info] processed source: {}"
     "\n\n[info] -- types --------\n{}"
@@ -2146,7 +2244,7 @@ void print_reduced_matches(const pipeline::reduced_matches &rm) {
     rm.ctx.reflected //
       | std::views::transform(std::bind_front(format_reflectable,
         std::cref(rm.ctx.resolved_as_dependency),
-        std::cref(index_by_type))) //
+        std::cref(rm.ctx.index_by_type_id))) //
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
@@ -2327,54 +2425,6 @@ bool has_template_record_parent(const clang::DeclContext *dc) {
   }
 
   return false;
-}
-
-std::expected<clang::Type const *, std::string> get_template_type_arg(
-  const clang::ClassTemplateSpecializationDecl &template_decl,
-  size_t n) noexcept {
-  const auto &template_args_list = template_decl.getTemplateArgs();
-
-  if (template_args_list.size() <= n) {
-    const std::string_view detail_struct_name = template_decl.getName();
-    return std::unexpected(
-      std::format("invalid template signature for internal omnirefl type {}",
-        detail_struct_name));
-  }
-
-  const clang::TemplateArgument &arg = template_args_list.get(n);
-  if (clang::TemplateArgument::ArgKind::Type != arg.getKind()) {
-    const std::string_view detail_struct_name = template_decl.getName();
-    return std::unexpected(std::format("non-type template argument `{}` of {}",
-      n,
-      detail_struct_name));
-  }
-
-  return arg.getAsType().getTypePtr();
-}
-
-// todo: remove maybe_unused when generated-header reflection uses this helper.
-[[maybe_unused]] std::expected<int, std::string> get_template_value_arg(
-  const clang::ClassTemplateSpecializationDecl &template_decl,
-  size_t n) noexcept {
-  const auto &template_args_list = template_decl.getTemplateArgs();
-
-  if (template_args_list.size() <= n) {
-    const std::string_view detail_struct_name = template_decl.getName();
-    return std::unexpected(
-      std::format("invalid template signature for internal omnirefl type {}",
-        detail_struct_name));
-  }
-
-  const clang::TemplateArgument &arg = template_args_list.get(n);
-  if (clang::TemplateArgument::ArgKind::Integral != arg.getKind()) {
-    const std::string_view detail_struct_name = template_decl.getName();
-    return std::unexpected(
-      std::format("non-integral template argument `{}` of {}",
-        n,
-        detail_struct_name));
-  }
-
-  return arg.getAsIntegral().getExtValue();
 }
 
 meta::nm_qual_type meta::nm_qual_type::from_decl(
@@ -2760,7 +2810,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
 }
 
 auto meta::resolve_reflected_type(
-  const clang::ClassTemplateSpecializationDecl &template_decl,
+  clang::QualType template_arg,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_types)
   -> std::expected<reflected_type_info, std::string> {
@@ -2773,13 +2823,11 @@ auto meta::resolve_reflected_type(
     return match_reflectable_type(ast, t);
   };
 
-  // todo: assert template signature
-  // omni::detail::_reflected_indexed_type<T, I>
-  std::expected template_arg = get_template_type_arg(template_decl, 0);
-  if (!template_arg)
-    return std::unexpected(std::move(template_arg).error());
+  while (template_arg->isReferenceType())
+    template_arg = template_arg->getPointeeType();
 
-  const clang::Type &template_arg_type = **template_arg;
+  const clang::Type &template_arg_type =
+    *ast.getCanonicalType(template_arg.getUnqualifiedType()).getTypePtr();
   // todo: C-arrays, pointers?
 
   // not a struct|class|union|enum
@@ -2852,20 +2900,6 @@ auto meta::resolve_reflected_type(
         std::bind_front(match_reflectable_type, std::cref(ast)))
       | std::ranges::to<std::vector>(),
   };
-}
-
-auto meta::resolve_reflected_indexed_type(
-  const clang::ClassTemplateSpecializationDecl &decl,
-  const clang::ASTContext &ast,
-  const std::set<type_id> &resolved_types)
-  -> std::expected<std::pair<std::size_t, reflected_type_info>, std::string> {
-  return get_template_value_arg(decl, 1) //
-    .and_then([&](std::size_t index) {
-      return resolve_reflected_type(decl, ast, resolved_types)
-        .transform([index](reflected_type_info r) {
-          return std::pair(index, std::move(r));
-        });
-    });
 }
 
 namespace render::impl {

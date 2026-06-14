@@ -147,8 +147,10 @@ struct reflected_call_t {
   auto operator()(Impl &&impl, T &&t, Args &&...args) const
     -> decltype(std::declval<Impl &&>()(std::declval<T &&>(),
       std::declval<Args &&>()...)) {
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
     using type = typename std::decay<T>::type;
     (void)detail::_reflected_indexed_type<type>{};
+#endif
 
     // todo: suppress missing return warning for tool invocation
 
@@ -165,7 +167,9 @@ struct reflected_call_t {
     Args &&...args) const
     -> decltype(std::declval<Impl &&>()(std::declval<compat::type_identity<T>>(),
       std::declval<Args &&>()...)) {
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
     (void)detail::_reflected_indexed_type<T>{};
+#endif
 
 #ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
     return std::forward<Impl>(impl)(t, std::forward<Args>(args)...);
@@ -176,11 +180,13 @@ struct reflected_call_t {
   auto operator()(Impl &&impl, std::tuple<T...> &t, Args &&...args) const
     -> decltype(std::declval<Impl &&>()(std::declval<std::tuple<T...> &>(),
       std::declval<Args &&>()...)) {
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
     int dummy[] = {0,
       ((void)detail::_reflected_indexed_type<
          typename std::decay<T>::type>{},
         0)...};
     (void)dummy;
+#endif
 
 #ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
     return std::forward<Impl>(impl)(t, std::forward<Args>(args)...);
@@ -192,11 +198,13 @@ struct reflected_call_t {
     -> decltype(std::declval<Impl &&>()(
       std::declval<const std::tuple<T...> &>(),
       std::declval<Args &&>()...)) {
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
     int dummy[] = {0,
       ((void)detail::_reflected_indexed_type<
          typename std::decay<T>::type>{},
         0)...};
     (void)dummy;
+#endif
 
 #ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
     return std::forward<Impl>(impl)(t, std::forward<Args>(args)...);
@@ -207,11 +215,13 @@ struct reflected_call_t {
   auto operator()(Impl &&impl, std::tuple<T...> &&t, Args &&...args) const
     -> decltype(std::declval<Impl &&>()(std::declval<std::tuple<T...> &&>(),
       std::declval<Args &&>()...)) {
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
     int dummy[] = {0,
       ((void)detail::_reflected_indexed_type<
          typename std::decay<T>::type>{},
         0)...};
     (void)dummy;
+#endif
 
 #ifdef OMNI_INCLUDED_GENERATED_REFLECTION_HEADER
     return std::forward<Impl>(impl)(std::move(t),

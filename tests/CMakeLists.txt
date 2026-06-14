@@ -110,7 +110,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
     target_compile_definitions(${_static_odr_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_static_odr_tgt} PRIVATE GTest::GTest std_compat)
-    omni_reflected_target(${_static_odr_tgt})
+    omni_reflected_target(${_static_odr_tgt} ENABLE_INDEX_MODE)
 
     set(_test_common_tgt "${cpp_prefix}.test.common")
     set(_test_common_sources
@@ -132,7 +132,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
     target_compile_definitions(${_test_common_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_test_common_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
-    omni_reflected_target(${_test_common_tgt})
+    omni_reflected_target(${_test_common_tgt} ENABLE_INDEX_MODE)
 
     add_test(NAME "${cpp_prefix}.test.common.run_omni"
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}.omni")
