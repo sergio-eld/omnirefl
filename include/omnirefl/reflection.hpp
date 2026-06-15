@@ -487,7 +487,10 @@ struct binding_t<T, reflected_entity::record> {
     return _value;
   }
 
-  // fixme: C++11 doesn't support constexpr here
+  // C++11 does not allow non-const constexpr member functions.
+#if OMNI_CPLUSPLUS >= 201402L
+  constexpr
+#endif
   auto public_fields() & -> decltype(meta_t<type>::_public_fields(
     std::declval<storage_t &>())) {
     return meta_t<type>::_public_fields(_value);

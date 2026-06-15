@@ -120,6 +120,7 @@
 - (-) replace `reflected_call`
 - (-) document why reflected-scope visitors sometimes need explicit trailing
   return types to avoid premature instantiation during the tool run
+- (-) separate const and mutable public-field accessors in the public interface
 - (-) recoverable reflection query/fallback branch for non-reflected types
 - (-) type-erased field wrappers, likely short `field_t`-style names
 - (-) refine the CLI interface
