@@ -95,7 +95,7 @@ struct field_meta_t;
 template <typename Record, typename FieldMeta>
 struct field_binding_t;
 
-#if OMNI_CPLUSPLUS >= 202002L
+#if defined(__cpp_concepts)
 template <typename T>
 concept meta = requires {
   typename compat::remove_cvref_t<T>::omni_meta_tag;

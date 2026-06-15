@@ -112,6 +112,10 @@
 
 ### Frontend/API
 
+- TODO(High): detect `reflected_call` inside a reflected scope as a tool error
+  when possible, and add dedicated negative tool-run tests.
+- TODO(High): detect reflection query instantiation outside a reflected scope as
+  a tool error when possible, and add dedicated negative tool-run tests.
 - (-) refine the public interface
 - (-) replace `reflected_call`
 - (-) document why reflected-scope visitors sometimes need explicit trailing

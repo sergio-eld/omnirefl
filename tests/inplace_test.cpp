@@ -61,12 +61,6 @@ const T *get_if(const std::variant<V...> *value) {
 } // namespace compat
 
 namespace example_impl {
-template <typename T, typename V>
-void from_std_map(const std::map<std::string, V> &from, T &to);
-
-template <typename T, typename V>
-T from_std_map(const std::map<std::string, V> &from);
-
 // FIXME: leaking reflected-scope query helper; safe only while instantiated
 // inside a reflected scope.
 template <typename T, bool = omni::is_reflected<T>::value>
@@ -188,6 +182,12 @@ struct field_values_simple_t {
     _append(std::vector<std::string> &, const Field &) {}
 } const static field_values_simple{};
 
+template <typename T, typename V>
+void from_std_map(const std::map<std::string, V> &from, T &to);
+
+template <typename T, typename V>
+T from_std_map(const std::map<std::string, V> &from);
+
 struct write_fields_from_std_map {
   template <typename V, typename... Field>
   void operator()(const std::map<std::string, V> &from, Field... field) const {
@@ -196,6 +196,16 @@ struct write_fields_from_std_map {
   }
 
   private:
+  template <typename Map>
+  struct _bind_map {
+    const Map &from;
+
+    template <typename... Field>
+    void operator()(Field... field) const {
+      write_fields_from_std_map{}(from, field...);
+    }
+  };
+
   template <typename V, typename Field>
   static typename std::enable_if<
     !is_reflected_record<typename Field::type>::value>::type
@@ -220,8 +230,12 @@ struct write_fields_from_std_map {
         && _write_field_from_nested_map(from.at(field.name()), field))
       return;
 
+    auto nested_binding = omni::meta_t<typename Field::type>::bind();
+    omni::compat::apply(_bind_map<std::map<std::string, V>>{from},
+      nested_binding.public_fields());
+
     // TODO: use the frontend mutability interface once it exists.
-    field.set_value(from_std_map<typename Field::type>(from));
+    field.set_value(nested_binding);
   }
 
   template <typename Field, typename Nested>
@@ -230,8 +244,12 @@ struct write_fields_from_std_map {
     if (!nested)
       return false;
 
+    auto nested_binding = omni::meta_t<typename Field::type>::bind();
+    omni::compat::apply(_bind_map<Nested>{*nested},
+      nested_binding.public_fields());
+
     // TODO: use the frontend mutability interface once it exists.
-    field.set_value(from_std_map<typename Field::type>(*nested));
+    field.set_value(nested_binding);
     return true;
   }
 
@@ -339,6 +357,7 @@ T from_std_map(const std::map<std::string, V> &from) {
     T{});
 #endif
 }
+
 } // namespace example_impl
 
 static const struct {

@@ -61,7 +61,7 @@ void value_categories_read_test(const std::vector<std::string> &expected,
   // prvalue tested outside with 'owning' reflected visitors
 }
 
-#if defined CXX_STANDARD && 20 <= CXX_STANDARD
+#if defined(__cpp_concepts)
 TEST(cpp20_template_lambdas, meta_type_token) {
   using interface_test::record_type_t;
 
@@ -187,7 +187,11 @@ TEST(fields, sized_integer_field_types) {
   static const std::vector<std::string> k_expected{
     "unsigned short",
     "int",
+#if defined _MSC_VER
+    "unsigned long long *",
+#else
     "unsigned long *",
+#endif
     "short **",
   };
 
@@ -235,12 +239,7 @@ TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
   static const std::vector<std::string> k_expected{"815", "oceanic"};
 
   EXPECT_EQ(k_expected,
-    omni::reflected_call(
-      [](auto binding) -> std::vector<std::string> {
-        using record = typename decltype(binding)::type;
-        auto value = omni::reflected(record{815, "oceanic"});
-        return fv::record_type_field_values(value);
-      },
+    omni::reflected_call(interface_test::inline_examples::rvalue_binding_can_be_named,
       record_type_t{}));
 
   // Direct rvalue field access is intentionally invalid:
@@ -263,19 +262,12 @@ TEST(record_type_t, field_value_write) {
 
   {
     record_type_t value{};
-    omni::reflected_call(
-      [](auto binding) -> void {
-        fw::record_type_field_write(binding, k_expected);
-      },
-      value);
+    omni::reflected_call(fw::record_type_field_write_call_t{k_expected}, value);
     EXPECT_EQ_FIELDS(k_expected, value);
   }
 
   EXPECT_EQ_FIELDS(k_expected,
-    omni::reflected_call(
-      [](auto binding) -> interface_test::record_type_t {
-        return fw::record_type_field_write_own(binding, k_expected);
-      },
+    omni::reflected_call(fw::record_type_field_write_own_call_t{k_expected},
       record_type_t{}));
 
 #undef EXPECT_EQ_FIELDS

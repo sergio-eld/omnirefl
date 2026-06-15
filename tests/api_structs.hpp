@@ -217,7 +217,39 @@ struct record_type_field_write_own_t {
 record_type_field_write_t const static record_type_field_write{};
 record_type_field_write_own_t const static record_type_field_write_own{};
 
+struct record_type_field_write_call_t {
+  record_type_t expected;
+
+  template <typename T>
+  void operator()(omni::binding_t<T &> binding) const {
+    record_type_field_write(binding, expected);
+  }
+};
+
+struct record_type_field_write_own_call_t {
+  record_type_t expected;
+
+  template <typename T>
+  T operator()(omni::binding_t<T> binding) const {
+    return record_type_field_write_own(binding, expected);
+  }
+};
+
 } // namespace field_value_write
+
+namespace inline_examples {
+
+struct rvalue_binding_can_be_named_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::binding_t<T>) const {
+    auto value = omni::reflected(T{815, "oceanic"});
+    return field_value_read::record_type_field_values(value);
+  }
+};
+
+rvalue_binding_can_be_named_t const static rvalue_binding_can_be_named{};
+
+} // namespace inline_examples
 
 // todo: implement
 namespace fields_for_loop {} // namespace fields_for_loop
