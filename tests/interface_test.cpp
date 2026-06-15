@@ -2,7 +2,7 @@
 #include "gtest_include.h"
 #include "odr_test.hpp"
 
-#include <omnirefl/reflected_call.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <utility>
 

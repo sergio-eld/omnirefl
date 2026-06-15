@@ -3444,8 +3444,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
 
   const std::vector required_includes =
     std::to_array<std::string_view>({
-      "omnirefl/reflected_scope.hpp",
-      !ctx.indexed.empty() ? "omnirefl/reflected_call.hpp" : "",
+      "omnirefl/reflection.hpp",
       has_enums ? "array" : "",
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })

@@ -2,7 +2,7 @@
 #include "gtest_include.h"
 #include "structs.h" //< todo: move to a separate file
 
-#include <omnirefl/reflected_call.hpp>
+#include <omnirefl/reflection.hpp>
 
 namespace {
 

@@ -2,7 +2,7 @@
 
 // todo: copiright notice (MIT)
 
-// This header contains utilities only available within a reflected scope.
+// Public reflection interface and generated metadata contract.
 
 #include <tuple>
 #include <type_traits>
@@ -10,22 +10,14 @@
 
 #include <omnirefl/compat.hpp>
 
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
+#  include <omnirefl/unique_id.hpp>
+#endif
+
 namespace omni {
 
 namespace detail {
 namespace {
-
-//------------------------------------------------------------------------------
-// Notes for generated-header reflection: local/unnamed type support
-//
-// During the real compilation, `reflected_call` registers local/unnamed types
-// observed by the tool. Generated `_reflected<T>` queries must only inspect
-// those registrations: probing an unrelated type must not mutate reflection
-// state observed by later reflected calls.
-//
-// Limitation: if a reflected type `T` has member field types that are not
-// forward-declarable, those member types are not available for reflection.
-//------------------------------------------------------------------------------
 
 // `= T` is kept for frontend compatibility with generated metadata.
 template <typename T, typename = T>
@@ -96,6 +88,10 @@ template <typename Record, typename FieldMeta>
 struct field_binding_t;
 
 #if defined(__cpp_concepts)
+// Concepts intentionally check marker tags instead of exact specialization
+// shapes. As of this writing, the entity parameter pollutes meta/binding
+// interface types; the tags keep C++20 visitor syntax stable if internals
+// change, and accept cv/ref-qualified arguments.
 template <typename T>
 concept meta = requires {
   typename compat::remove_cvref_t<T>::omni_meta_tag;
@@ -120,6 +116,15 @@ concept field_binding = requires {
 struct reflected_call_t {
   private:
 #if defined(OMNI_TOOL_RUN)
+  // During the tool run generated `_reflected<T>` metadata does not exist yet,
+  // so real `_reflect_arg(value)` would instantiate `binding_t<T>` and fail
+  // while trying to evaluate `_reflected<T>::entity()`.
+  //
+  // The reflected_call return type still has to look like
+  // `impl(meta_t<T>...)` / `impl(binding_t<T>...)` so Clang can parse and match
+  // user calls. Declarations are enough for this unevaluated trailing return
+  // type; the functions are never defined or called during the tool run, and
+  // the visitor body remains uninstantiated until the generated header exists.
   template <typename T>
   static constexpr meta_t<T> _tool_arg(type_t<T>) noexcept;
 
@@ -156,6 +161,87 @@ struct reflected_call_t {
 #endif
 };
 
+namespace detail {
+namespace {
+
+template <typename T>
+struct reflected_arg_type {
+  using type = T;
+};
+
+template <typename T>
+struct reflected_arg_type<type_t<T>> {
+  using type = T;
+};
+
+} // namespace
+} // namespace detail
+
+/// class to invoke a callable implementation object
+#if defined(OMNI_TOOL_RUN)
+// Tool-run operator definition must stay available in this translation unit:
+// reflected_call can receive local/unnamed visitor types, and Clang rejects a
+// used-but-undefined function template specialization whose type has no linkage.
+// The body is still unevaluated for tool purposes, hence the return warning
+// suppression below.
+#  if defined(__clang__)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wreturn-type"
+#  elif defined(__GNUC__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wreturn-type"
+#  elif defined(_MSC_VER)
+#    pragma warning(push)
+#    pragma warning(disable : 4715)
+#  endif
+#endif
+
+template <typename Impl, typename... Args>
+auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
+#if defined(OMNI_TOOL_RUN)
+  -> decltype(std::declval<Impl &&>()(
+    _tool_arg(std::declval<Args &&>())...)) {
+#else
+  -> decltype(std::declval<Impl &&>()(
+    _reflect_arg(std::declval<Args &&>())...)) {
+#endif
+#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
+  int registered[] = {0,
+    ((void)detail::_reflected_indexed_type<
+       typename detail::reflected_arg_type<
+         typename std::decay<Args>::type>::type>{},
+      0)...};
+  (void)registered;
+#else
+  int unused_args[] = {0, ((void)args, 0)...};
+  (void)unused_args;
+#endif
+
+  (void)impl;
+
+  // Tool-run calls are parsed and matched, but never evaluated. The missing
+  // return is intentional there: constructing an arbitrary visitor result would
+  // instantiate exactly the user code reflected_call is meant to defer.
+#if !defined(OMNI_TOOL_RUN)
+  return std::forward<Impl>(impl)(
+    _reflect_arg(std::forward<Args>(args))...);
+#endif
+}
+
+#if defined(OMNI_TOOL_RUN)
+#  if defined(__clang__)
+#    pragma clang diagnostic pop
+#  elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#  elif defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
+#endif
+
+// Field metadata is wrapped as functions instead of exposing member pointers.
+// This keeps normal fields and bitfields on the same interface: bitfields can
+// be read/written through generated accessors, but cannot be addressed by
+// pointer-to-member.
 template <typename Owner, typename FieldMeta>
 struct field_meta_t {
   using omni_field_meta_tag = void;
@@ -192,6 +278,9 @@ struct field_meta_t {
   }
 };
 
+// Field binding pairs field metadata with an object instance. It uses the same
+// generated accessors as field_meta_t, so bitfields remain readable/writable
+// even though pointer-to-member cannot represent them.
 template <typename Record, typename FieldMeta>
 struct field_binding_t {
   using omni_field_binding_tag = void;
@@ -502,5 +591,7 @@ constexpr auto reflected(T &&t) noexcept(
   -> decltype(meta_t<compat::decay_t<T>>::bind(std::forward<T>(t))) {
   return meta_t<compat::decay_t<T>>::bind(std::forward<T>(t));
 }
+
+constexpr reflected_call_t reflected_call{};
 
 } // namespace omni

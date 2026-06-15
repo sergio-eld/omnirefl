@@ -2,7 +2,7 @@
 #include "gtest_include.h"
 #include "structs.h"
 
-#include <omnirefl/reflected_call.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <string>
 #include <vector>

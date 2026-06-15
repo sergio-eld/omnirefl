@@ -2,8 +2,7 @@
 #include "gtest_include.h"
 #include "shared_structs.h"
 
-#include <omnirefl/reflected_call.hpp>
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <mpark/variant.hpp>
 

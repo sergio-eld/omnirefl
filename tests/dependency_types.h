@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <map>
 #include <memory>

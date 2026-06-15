@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 namespace interface_test {
 

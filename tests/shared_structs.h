@@ -1,7 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflected_call.hpp>
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <mpark/variant.hpp>
 

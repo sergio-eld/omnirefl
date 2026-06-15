@@ -2,12 +2,18 @@
 
 // todo: copyright and detailed explanation
 //
-// this header adds support for reflecting types via reflected_call
-
-#include <omnirefl/reflected_scope.hpp>
+// Friend-injection based indexing used by the experimental indexed reflection
+// path. This is instrumentation machinery, not the public reflection interface.
+//
+// During the real compilation, `reflected_call` can register non-forward
+// declarable types observed by the tool. Generated `_reflected<T>` queries must
+// only inspect those registrations: probing an unrelated type must not mutate
+// reflection state observed by later reflected calls.
+//
+// Limitation: if a reflected type `T` has member field types that are not
+// forward-declarable, those member types are not available for reflection.
 
 #include <type_traits>
-#include <utility>
 
 namespace omni {
 namespace detail {
@@ -138,52 +144,6 @@ struct _reflected_indexed_type {
   typename reflected_index_match<Index, T>::generator _{};
 };
 
-template <typename T>
-struct reflected_arg_type {
-  using type = T;
-};
-
-template <typename T>
-struct reflected_arg_type<type_t<T>> {
-  using type = T;
-};
-
 } // namespace
 } // namespace detail
-
-/// class to invoke a callable implementation object
-template <typename Impl, typename... Args>
-auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
-#if defined(OMNI_TOOL_RUN)
-  -> decltype(std::declval<Impl &&>()(
-    _tool_arg(std::declval<Args &&>())...)) {
-#else
-  -> decltype(std::declval<Impl &&>()(
-    _reflect_arg(std::declval<Args &&>())...)) {
-#endif
-#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
-  int registered[] = {0,
-    ((void)detail::_reflected_indexed_type<
-       typename detail::reflected_arg_type<
-         typename std::decay<Args>::type>::type>{},
-      0)...};
-  (void)registered;
-#else
-  int unused_args[] = {0, ((void)args, 0)...};
-  (void)unused_args;
-#endif
-
-  (void)impl;
-
-  // todo: suppress missing return warning for tool invocation
-
-  // ad hoc to prevent "compilation errors" during the omnirefl run
-#if defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER) && !defined(OMNI_TOOL_RUN)
-  return std::forward<Impl>(impl)(
-    _reflect_arg(std::forward<Args>(args))...);
-#endif
-}
-
-constexpr reflected_call_t reflected_call{};
-
 } // namespace omni
