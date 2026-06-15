@@ -74,6 +74,13 @@
 - (+) recurse into reflected record fields
 - (+) recurse through supported dependency routes
 
+### Frontend/API
+
+- (+) `reflected_call` as the supported reflection instrumentation interface
+- (+) `meta_t`, `binding_t`, `field_meta_t`, and `field_binding_t` public
+  reflection interfaces
+- (+) C++20 `meta`, `binding`, `field_meta`, and `field_binding` concepts
+
 ### Build/Release
 
 - (+) generated-header reflection
@@ -107,6 +114,10 @@
 
 - (-) refine the public interface
 - (-) replace `reflected_call`
+- (-) document why reflected-scope visitors sometimes need explicit trailing
+  return types to avoid premature instantiation during the tool run
+- (-) recoverable reflection query/fallback branch for non-reflected types
+- (-) type-erased field wrappers, likely short `field_t`-style names
 - (-) refine the CLI interface
 - (-) remove dependency on compilation database
 - (-) make the tool callable like a compiler instance with limited support for

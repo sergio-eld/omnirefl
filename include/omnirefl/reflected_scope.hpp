@@ -66,159 +66,137 @@ enum class reflected_entity {
 template <typename T, typename = void>
 struct is_reflected;
 
+template <typename T>
+struct type_t {};
+
+#if OMNI_CPLUSPLUS >= 201402L
+template <typename T>
+constexpr type_t<T> type{};
+#endif
+
+#if defined(OMNI_TOOL_RUN)
+template <typename T, reflected_entity = reflected_entity::record>
+struct meta_t;
+
+template <typename T, reflected_entity = reflected_entity::record>
+struct binding_t;
+#else
 template <typename T, reflected_entity = detail::_meta<T>::entity()>
-struct reflected_t;
+struct meta_t;
 
-// struct | class | union
+template <typename T,
+  reflected_entity = detail::_meta<compat::decay_t<T>>::entity()>
+struct binding_t;
+#endif
+
+template <typename Owner, typename FieldMeta>
+struct field_meta_t;
+
+template <typename Record, typename FieldMeta>
+struct field_binding_t;
+
+#if OMNI_CPLUSPLUS >= 202002L
 template <typename T>
-using reflected_record_t = reflected_t<T, reflected_entity::record>;
-
-template <typename T>
-using reflected_enum_t = reflected_t<T, reflected_entity::enumeration>;
-
-template <typename T, reflected_entity = reflected_t<T>::entity()>
-struct reflected_binding;
-
-template <typename T>
-struct mem_binding {
-  using value_type = T;
-
-  const T &value() const noexcept {
-    return _vtable->value(_owner);
-  }
-
-  operator const T &() const noexcept {
-    return value();
-  }
-  const T &operator*() const noexcept {
-    return value();
-  }
-
-  const char *name() const noexcept {
-    return _vtable->name();
-  }
-  const char *type_name() const noexcept {
-    return _vtable->type_name();
-  }
-  const char *annotation() const noexcept {
-    return _vtable->annotation();
-  }
-  std::size_t index() const noexcept {
-    return _vtable->index();
-  }
-
-  protected:
-  // can point to const or non-const Owner
-  const void *_owner = nullptr;
-
-  template <typename Owner, typename Meta>
-  mem_binding(Owner *owner, Meta) noexcept
-      : _owner(owner)
-      , _vtable(get_vtable<Owner, Meta>()) {}
-
-  private:
-  struct vtable {
-    virtual const T &value(const void *owner) const noexcept = 0;
-    virtual const char *name() const noexcept = 0;
-    virtual const char *type_name() const noexcept = 0;
-    virtual const char *annotation() const noexcept = 0;
-    virtual std::size_t index() const noexcept = 0;
-    virtual ~vtable() {}
-  };
-
-  template <typename Owner, typename Meta>
-  static const vtable *get_vtable() noexcept {
-    struct impl_t final: vtable {
-      const T &value(const void *owner) const noexcept override {
-        using COwner = typename std::add_const<Owner>::type;
-        return Meta::value(*static_cast<const COwner *>(owner));
-      }
-
-      const char *name() const noexcept override {
-        return Meta::name();
-      }
-
-      const char *type_name() const noexcept override {
-        return Meta::type_name();
-      }
-
-      const char *annotation() const noexcept override {
-        return Meta::annotation();
-      }
-
-      std::size_t index() const noexcept override {
-        return Meta::index();
-      }
-    };
-    static const impl_t impl{};
-    return &impl;
-  }
-
-  const vtable *_vtable = nullptr;
-
-  template <typename, typename>
-  friend struct reflected_mem_binding;
-
-  template <typename>
-  friend struct mutable_mem_binding;
+concept meta = requires {
+  typename compat::remove_cvref_t<T>::omni_meta_tag;
 };
 
 template <typename T>
-struct mutable_mem_binding: mem_binding<T> {
-  using base = mem_binding<T>;
-  using value_type = T;
-
-  using base::value;
-  using base::operator const T &;
-  using base::operator*;
-  using base::name;
-  using base::annotation;
-  using base::index;
-
-  template <typename V>
-  void set_value(V &&v) const {
-    T tmp = static_cast<T>(std::forward<V>(v));
-    _vtable->set_value(const_cast<void *>(this->_owner), std::move(tmp));
-  }
-
-  private:
-  struct vtable {
-    virtual void set_value(void *owner, T v) const = 0;
-    virtual ~vtable() {}
-  };
-
-  const vtable *_vtable = nullptr;
-
-  template <typename, typename>
-  friend struct reflected_mem_binding;
-
-  template <typename Owner, typename Meta>
-  mutable_mem_binding(Owner *owner, Meta) noexcept
-      : base(owner, Meta{})
-      , _vtable(get_vtable<Owner, Meta>()) {
-    static_assert(!std::is_const<Owner>::value,
-      "mutable_mem_binding cannot bind const Owner");
-  }
-
-  template <typename Owner, typename Meta>
-  static const vtable *get_vtable() noexcept {
-    struct impl_t final: vtable {
-      void set_value(void *owner, T v) const override {
-        Meta::set_value(*static_cast<Owner *>(owner), std::move(v));
-      }
-    };
-    static const impl_t impl{};
-    return &impl;
-  }
+concept binding = requires {
+  typename compat::remove_cvref_t<T>::omni_binding_tag;
 };
 
-// todo: typename Meta is a weak point
-template <typename Record, typename Meta>
-struct reflected_mem_binding {
+template <typename T>
+concept field_meta = requires {
+  typename compat::remove_cvref_t<T>::omni_field_meta_tag;
+};
+
+template <typename T>
+concept field_binding = requires {
+  typename compat::remove_cvref_t<T>::omni_field_binding_tag;
+};
+#endif
+
+struct reflected_call_t {
+  private:
+#if defined(OMNI_TOOL_RUN)
+  template <typename T>
+  static constexpr meta_t<T> _tool_arg(type_t<T>) noexcept;
+
+  template <typename T,
+    typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
+      T,
+      compat::decay_t<T>>>
+  static constexpr binding_t<Binding> _tool_arg(T &&) noexcept;
+#endif
+
+  template <typename T>
+  static constexpr meta_t<T> _reflect_arg(type_t<T>) noexcept {
+    return {};
+  }
+
+  template <typename T,
+    typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
+      T,
+      compat::decay_t<T>>>
+  static constexpr binding_t<Binding> _reflect_arg(T &&t) noexcept(
+    noexcept(binding_t<Binding>{std::forward<T>(t)})) {
+    return binding_t<Binding>{std::forward<T>(t)};
+  }
+
+  public:
+  template <typename Impl, typename... Args>
+  auto operator()(Impl &&impl, Args &&...args) const
+#if defined(OMNI_TOOL_RUN)
+    -> decltype(std::declval<Impl &&>()(
+      _tool_arg(std::declval<Args &&>())...));
+#else
+    -> decltype(std::declval<Impl &&>()(
+      _reflect_arg(std::declval<Args &&>())...));
+#endif
+};
+
+template <typename Owner, typename FieldMeta>
+struct field_meta_t {
+  using omni_field_meta_tag = void;
+  using owner_type = compat::decay_t<Owner>;
+  using reflected = FieldMeta;
   using type =
-    compat::remove_cvref_t<decltype(Meta::value(std::declval<Record>()))>;
+    compat::remove_cvref_t<decltype(reflected::value(std::declval<Owner &>()))>;
 
-  using meta = Meta;
+  static constexpr const char *name() noexcept {
+    return reflected::name();
+  }
+
+  static constexpr const char *type_name() noexcept {
+    return reflected::type_name();
+  }
+
+  static constexpr const char *annotation() noexcept {
+    return reflected::annotation();
+  }
+
+  static constexpr std::size_t index() noexcept {
+    return reflected::index();
+  }
+
+  template <typename T>
+  static constexpr auto value(T &&t) noexcept
+    -> decltype(reflected::value(std::forward<T>(t))) {
+    return reflected::value(std::forward<T>(t));
+  }
+
+  template <typename T, typename V>
+  static void set_value(T &&t, V &&v) {
+    reflected::set_value(std::forward<T>(t), std::forward<V>(v));
+  }
+};
+
+template <typename Record, typename FieldMeta>
+struct field_binding_t {
+  using omni_field_binding_tag = void;
+  using type = typename FieldMeta::type;
+  using meta = FieldMeta;
 
   Record &owner;
 
@@ -238,8 +216,8 @@ struct reflected_mem_binding {
     return meta::index();
   }
 
-  constexpr auto value() const noexcept -> decltype(Meta::value(owner)) {
-    return Meta::value(owner);
+  constexpr auto value() const noexcept -> decltype(meta::value(owner)) {
+    return meta::value(owner);
   }
 
   constexpr operator const type &() const noexcept {
@@ -253,34 +231,46 @@ struct reflected_mem_binding {
   // todo: enable_if is_mutable
   template <typename V>
   void set_value(V &&v) {
-    Meta::set_value(owner, std::forward<V>(v));
+    meta::set_value(owner, std::forward<V>(v));
   }
 
-  // Meta-erased const binding
-  operator mem_binding<type>() const noexcept {
-    return mem_binding<type>(owner, Meta{});
-  }
-
-  // Meta-erased mutable binding
-  template <typename U = Record>
-  typename std::enable_if<!std::is_const<U>::value,
-    mutable_mem_binding<type>>::type
-    mutable_binding() const noexcept {
-    return mutable_mem_binding<type>(owner, Meta{});
-  }
-
-  constexpr explicit reflected_mem_binding(Record &owner): owner(owner) {}
+  constexpr explicit field_binding_t(Record &owner): owner(owner) {}
 };
 
+#if defined(OMNI_TOOL_RUN)
+template <typename T, reflected_entity Entity>
+struct meta_t {
+  using omni_meta_tag = void;
+  using type = compat::decay_t<T>;
+};
+
+template <typename T, reflected_entity Entity>
+struct binding_t {
+  using omni_binding_tag = void;
+  using type = compat::decay_t<T>;
+};
+
+#else
 template <typename T>
-struct reflected_t<T, reflected_entity::record> {
-  using meta = detail::_meta<T>;
-  using type = typename meta::type;
+struct meta_t<T, reflected_entity::record> {
+  using omni_meta_tag = void;
+  using reflected = detail::_meta<T>;
+  using type = typename reflected::type;
 
   using public_fields_t =
-    detail::_all_public_fields_t<meta>; //< yields std::tuple<...>
+    detail::_all_public_fields_t<reflected>; //< yields std::tuple<...>
 
   private:
+  friend struct reflected_call_t;
+
+  template <typename U>
+  friend constexpr meta_t<compat::decay_t<U>> reflected() noexcept;
+
+  template <typename, reflected_entity>
+  friend struct binding_t;
+
+  constexpr meta_t() noexcept = default;
+
   // C++11 ad hoc. `auto` lambda arguments only since C++14
   template <typename _T>
   struct _bind_fields_metadata {
@@ -288,8 +278,8 @@ struct reflected_t<T, reflected_entity::record> {
 
     template <typename... FieldMeta>
     constexpr auto operator()(FieldMeta...) const noexcept
-      -> std::tuple<reflected_mem_binding<_T, FieldMeta>...> {
-      return std::make_tuple(reflected_mem_binding<_T, FieldMeta>{t}...);
+      -> std::tuple<field_binding_t<_T, FieldMeta>...> {
+      return std::make_tuple(field_binding_t<_T, FieldMeta>{t}...);
     }
   };
 
@@ -302,69 +292,88 @@ struct reflected_t<T, reflected_entity::record> {
 
   public:
   static constexpr const char *name() noexcept {
-    return meta::name();
+    return reflected::name();
   }
 
   static constexpr const char *annotation() noexcept {
-    return meta::annotation();
+    return reflected::annotation();
   }
 
   static constexpr reflected_entity entity() noexcept {
-    return meta::entity();
+    return reflected::entity();
   }
 
   static constexpr public_fields_t public_fields() noexcept {
     return {};
   }
 
-  static constexpr auto public_fields(const type &t) noexcept
-    -> decltype(_public_fields(t)) {
-    return _public_fields(t);
+  template <typename U,
+    typename Binding = compat::conditional_t<std::is_lvalue_reference<U &&>::value,
+      U &&,
+      compat::decay_t<U>>>
+  static constexpr auto bind(U &&t) noexcept(
+    noexcept(binding_t<Binding>{std::forward<U>(t)}))
+    -> decltype(binding_t<Binding>{std::forward<U>(t)}) {
+    return binding_t<Binding>{std::forward<U>(t)};
   }
 
-  static constexpr auto public_fields(type &t) noexcept
-    -> decltype(_public_fields(t)) {
-    return _public_fields(t);
+  template <typename U = type,
+    typename std::enable_if<std::is_default_constructible<U>::value,
+      int>::type = 0>
+  static constexpr binding_t<type> bind() noexcept(
+    std::is_nothrow_default_constructible<type>::value) {
+    return binding_t<type>{type{}};
   }
 
   // todo: mutable_public_fields(T &t) and mutable_public_fields(const T &t)
 };
 
 template <typename T>
-struct reflected_t<T, reflected_entity::enumeration> {
-  using meta = detail::_meta<T>;
-  using type = typename meta::type;
+struct meta_t<T, reflected_entity::enumeration> {
+  using omni_meta_tag = void;
+  using reflected = detail::_meta<T>;
+  using type = typename reflected::type;
 
   static_assert(std::is_enum<type>::value, "Type is not a enum");
   static_assert(is_reflected<type>::value,
     "Type was not reflected (Calling outside a reflected scope?)");
 
-  static_assert(reflected_entity::enumeration == meta::entity(),
+  static_assert(reflected_entity::enumeration == reflected::entity(),
     "Inconcistent reflection");
 
+  private:
+  friend struct reflected_call_t;
+
+  template <typename U>
+  friend constexpr meta_t<compat::decay_t<U>> reflected() noexcept;
+
+  constexpr meta_t() noexcept = default;
+
+  public:
   static constexpr const char *name() noexcept {
-    return meta::name();
+    return reflected::name();
   }
 
   static constexpr const char *annotation() noexcept {
-    return meta::annotation();
+    return reflected::annotation();
   }
 
   static constexpr reflected_entity entity() noexcept {
-    return meta::entity();
+    return reflected::entity();
   }
 
   // yields std::array of pair<type, const char*>
   static constexpr auto enumerators() noexcept
-    -> decltype(meta::enumerators()) {
-    return meta::enumerators();
+    -> decltype(reflected::enumerators()) {
+    return reflected::enumerators();
   }
 };
 
 template <typename T>
-struct reflected_binding<T, reflected_entity::record> {
+struct binding_t<T, reflected_entity::record> {
+  using omni_binding_tag = void;
   using type = compat::decay_t<T>;
-  using meta = typename reflected_record_t<type>::meta;
+  using reflected = typename meta_t<type>::reflected;
 
   using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
     std::false_type,
@@ -375,53 +384,64 @@ struct reflected_binding<T, reflected_entity::record> {
     T //< hold a reference (T is U& / const U&)
     >::type;
 
-  storage_t bound;
+  storage_t _value;
 
   static constexpr const char *name() noexcept {
-    return meta::name();
+    return reflected::name();
   }
 
   static constexpr const char *annotation() noexcept {
-    return meta::annotation();
+    return reflected::annotation();
   }
 
   constexpr operator const type &() const {
-    return bound;
+    return _value;
   }
 
   // fixme: C++11 doesn't support constexpr here
-  auto public_fields() -> decltype(reflected_record_t<type>::public_fields(
+  auto public_fields() & -> decltype(meta_t<type>::_public_fields(
     std::declval<storage_t &>())) {
-    return reflected_record_t<type>::public_fields(bound);
+    return meta_t<type>::_public_fields(_value);
   }
 
-  constexpr auto public_fields() const
-    -> decltype(reflected_record_t<type>::public_fields(
+  constexpr auto public_fields() const &
+    -> decltype(meta_t<type>::_public_fields(
       std::declval<const storage_t &>())) {
-    return reflected_record_t<type>::public_fields(bound);
+    return meta_t<type>::_public_fields(_value);
   }
+
+  auto public_fields() && -> decltype(meta_t<type>::_public_fields(
+    std::declval<storage_t &>())) = delete;
+
+  auto public_fields() const && -> decltype(meta_t<type>::_public_fields(
+    std::declval<const storage_t &>())) = delete;
+
+  private:
+  friend struct reflected_call_t;
+  friend struct meta_t<type>;
 
   // non-owning: T is an lvalue reference (U& / const U&)
   template <typename U,
     typename std::enable_if<!owning::value
         && std::is_convertible<U &, T>::value,
       int>::type = 0>
-  constexpr explicit reflected_binding(U &u) noexcept: bound(u) {}
+  constexpr explicit binding_t(U &u) noexcept: _value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
     typename std::enable_if<owning::value
         && std::is_constructible<type, U &&>::value,
       int>::type = 0>
-  constexpr explicit reflected_binding(U &&u) noexcept(
+  constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_move_constructible<type>::value)
-      : bound(std::forward<U>(u)) {}
+      : _value(std::forward<U>(u)) {}
 };
 
 template <typename T>
-struct reflected_binding<T, reflected_entity::enumeration> {
-  using meta = typename reflected_enum_t<T>::meta;
-  using type = typename meta::type;
+struct binding_t<T, reflected_entity::enumeration> {
+  using omni_binding_tag = void;
+  using reflected = typename meta_t<T>::reflected;
+  using type = typename reflected::type;
 
   using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
     std::false_type,
@@ -432,85 +452,55 @@ struct reflected_binding<T, reflected_entity::enumeration> {
     T //< hold a reference (T is U& / const U&)
     >::type;
 
-  storage_t bound;
+  storage_t _value;
 
   static constexpr const char *name() noexcept {
-    return meta::name();
+    return reflected::name();
   }
 
   static constexpr const char *annotation() noexcept {
-    return meta::annotation();
+    return reflected::annotation();
   }
 
   operator const type &() const {
-    return bound;
+    return _value;
   }
 
-  static constexpr auto enumerators() -> decltype(meta::enumerators()) {
-    return meta::enumerators();
+  static constexpr auto enumerators() -> decltype(reflected::enumerators()) {
+    return reflected::enumerators();
   }
+
+  private:
+  friend struct reflected_call_t;
 
   // non-owning: T is an lvalue reference (U& / const U&)
   template <typename U,
     typename std::enable_if<!owning::value
         && std::is_convertible<U &, T>::value,
       int>::type = 0>
-  constexpr explicit reflected_binding(U &u) noexcept: bound(u) {}
+  constexpr explicit binding_t(U &u) noexcept: _value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
     typename std::enable_if<owning::value
         && std::is_constructible<type, U &&>::value,
       int>::type = 0>
-  constexpr explicit reflected_binding(U &&u) noexcept(
+  constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_move_constructible<type>::value)
-      : bound(std::forward<U>(u)) {}
+      : _value(std::forward<U>(u)) {}
 };
+#endif
 
 template <typename T>
-constexpr auto reflected() -> reflected_t<T> {
+constexpr meta_t<compat::decay_t<T>> reflected() noexcept {
   return {};
 }
 
 template <typename T>
-constexpr auto reflected_record() -> reflected_record_t<T> {
-  return {};
-}
-
-template <typename T>
-constexpr auto reflected_enum() -> reflected_enum_t<T> {
-  return {};
-}
-
-template <typename T,
-  typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-    T, //< lvalues: keep reference (and const)
-    compat::decay_t<T> //< rvalues: owning, decayed
-    >>
-constexpr auto reflected_record(T &&t)
-  -> reflected_binding<Binding, reflected_entity::record> {
-  return reflected_binding<Binding, reflected_entity::record>(
-    std::forward<T>(t));
-}
-
-template <typename T,
-  typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-    T, //< lvalues: keep reference (and const)
-    compat::decay_t<T> //< rvalues: owning, decayed
-    >>
-constexpr auto reflected_enum(T &&t)
-  -> reflected_binding<Binding, reflected_entity::enumeration> {
-  return reflected_binding<Binding, reflected_entity::enumeration>(
-    std::forward<T>(t));
-}
-
-template <typename T,
-  typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-    T, //< lvalues: keep reference (and const)
-    compat::decay_t<T> //< rvalues: owning, decayed
-    >>
-constexpr reflected_binding<Binding> reflected(T &&t) {
-  return reflected_binding<Binding>(std::forward<T>(t));
+constexpr auto reflected(T &&t) noexcept(
+  noexcept(meta_t<compat::decay_t<T>>::bind(std::forward<T>(t))))
+  -> decltype(meta_t<compat::decay_t<T>>::bind(std::forward<T>(t))) {
+  return meta_t<compat::decay_t<T>>::bind(std::forward<T>(t));
 }
 
 } // namespace omni

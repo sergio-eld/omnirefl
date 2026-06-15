@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -134,6 +135,19 @@ struct remove_cvref {
 template <class T>
 using remove_cvref_t = typename remove_cvref<T>::type;
 #endif
+
+inline const std::string &to_string(const std::string &v) noexcept {
+  return v;
+}
+
+inline std::string to_string(std::string &&v) noexcept {
+  return std::move(v);
+}
+
+template <typename T>
+auto to_string(const T &v) -> decltype(std::to_string(v)) {
+  return std::to_string(v);
+}
 
 } // namespace compat
 } // namespace omni

@@ -1725,54 +1725,24 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
 
     ast::rule{
       .pattern = ast::pattern(cxxOperatorCallExpr,
-        callee(cxxMethodDecl(
-          ofClass(cxxRecordDecl(hasName("omni::reflected_call_t"))),
-          hasOverloadedOperatorName("()")))),
+        hasOverloadedOperatorName("()")),
       .reduce =
         [&ast = wast.ast->getASTContext()](meta::source_file_context a,
           const clang::CXXOperatorCallExpr &call) {
-          std::expected callee = fn::expect(call.getDirectCallee(),
-            "tool error: reflected_call matcher could not resolve the selected overload"sv);
-          if (!callee) {
-            a.errors.emplace_back(std::move(callee).error());
+          if (call.getNumArgs() <= 2)
+            return a;
+
+          const clang::Type *call_object_type =
+            ast.getCanonicalType(call.getArg(0)->getType())
+              .getUnqualifiedType()
+              .getTypePtr();
+          const auto *call_object_decl =
+            call_object_type->getAsCXXRecordDecl();
+          if (!call_object_decl
+            || "omni::reflected_call_t"
+              != call_object_decl->getQualifiedNameAsString()) {
             return a;
           }
-
-          const clang::TemplateArgumentList *template_args =
-            (*callee)->getTemplateSpecializationArgs();
-          if (!template_args) {
-            a.errors.emplace_back(
-              "tool error: reflected_call matcher could not extract template arguments");
-            return a;
-          }
-
-          if (template_args->size() <= 1) {
-            a.errors.emplace_back(
-              "tool error: reflected_call matcher could not extract the reflected type argument");
-            return a;
-          }
-
-          const clang::TemplateArgument &arg = template_args->get(1);
-          if (clang::TemplateArgument::Type != arg.getKind()) {
-            a.errors.emplace_back(
-              "tool error: reflected_call matcher selected an unexpected non-type reflected argument");
-            return a;
-          }
-
-          std::expected resolved =
-            meta::resolve_reflected_type(arg.getAsType(), ast, a.resolved_types);
-
-          if (!resolved) {
-            a.errors.emplace_back(std::move(resolved).error());
-            return a;
-          }
-
-          meta::reflected_type_info &info = *resolved;
-          const meta::type_id id = std::visit(
-            []<typename T>(const T &t) {
-              return t.id;
-            },
-            info.type);
 
           const clang::SourceManager &sm = ast.getSourceManager();
           const clang::SourceLocation loc = call.getExprLoc();
@@ -1789,40 +1759,85 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
             .column = sm.getSpellingColumnNumber(loc),
           };
 
-          a.callsites_by_type_id[id].emplace(std::move(callsite));
+          const auto reflected_arg_type =
+            [](clang::QualType type) -> clang::QualType {
+            while (type->isReferenceType())
+              type = type->getPointeeType();
 
-          std::visit(
-            [&a]<typename T>(T t) {
-              a.resolved_types.emplace(t.id);
+            const auto *record = type->getAs<clang::RecordType>();
+            if (!record)
+              return type;
 
-              if constexpr (std::same_as<meta::reflectable, T>) {
-                meta::reflectable &r = t;
-                a.type_name_by_id.emplace(r.id, r.definition.type_name);
-                a.reflected.emplace_back(std::move(r));
-              } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                // todo:
-                // Only a limited set of T in reflected_call<T>
-                // is supported, and it should be reported as
-                // error diagnostics
-              } else {
-                static_assert(std::same_as<meta::already_reflected, T>);
-                // todo: log for info?
-              }
-            },
-            std::move(info.type));
+            const auto *spec =
+              llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+                record->getDecl());
+            if (!spec
+              || "omni::type_t" != spec->getSpecializedTemplate()
+                   ->getQualifiedNameAsString()) {
+              return type;
+            }
 
-          std::ranges::copy(info.dependencies
-              | std::views::transform(&meta::reflectable::id),
-            std::inserter(a.resolved_types, a.resolved_types.begin()));
+            const clang::TemplateArgumentList &args = spec->getTemplateArgs();
+            if (1 != args.size()
+              || clang::TemplateArgument::Type != args.get(0).getKind()) {
+              return type;
+            }
 
-          std::ranges::copy(info.dependencies
-              | std::views::transform(&meta::reflectable::id),
-            std::inserter(a.resolved_as_dependency,
-              a.resolved_as_dependency.begin()));
+            return args.get(0).getAsType();
+          };
 
-          for (meta::reflectable &dep : info.dependencies) {
-            a.type_name_by_id.emplace(dep.id, dep.definition.type_name);
-            a.reflected.emplace_back(std::move(dep));
+          for (unsigned i = 2; call.getNumArgs() > i; ++i) {
+            std::expected resolved = meta::resolve_reflected_type(
+              reflected_arg_type(call.getArg(i)->getType()),
+              ast,
+              a.resolved_types);
+
+            if (!resolved) {
+              a.errors.emplace_back(std::move(resolved).error());
+              return a;
+            }
+
+            meta::reflected_type_info &info = *resolved;
+            const meta::type_id id = std::visit(
+              []<typename T>(const T &t) {
+                return t.id;
+              },
+              info.type);
+
+            a.callsites_by_type_id[id].emplace(callsite);
+
+            std::visit(
+              [&a]<typename T>(T t) {
+                a.resolved_types.emplace(t.id);
+
+                if constexpr (std::same_as<meta::reflectable, T>) {
+                  meta::reflectable &r = t;
+                  a.type_name_by_id.emplace(r.id, r.definition.type_name);
+                  a.reflected.emplace_back(std::move(r));
+                } else if constexpr (std::same_as<meta::non_reflectable, T>) {
+                  // todo:
+                  // Only a limited set of reflected_call arguments is
+                  // supported, and it should be reported as error diagnostics.
+                } else {
+                  static_assert(std::same_as<meta::already_reflected, T>);
+                  // todo: log for info?
+                }
+              },
+              std::move(info.type));
+
+            std::ranges::copy(info.dependencies
+                | std::views::transform(&meta::reflectable::id),
+              std::inserter(a.resolved_types, a.resolved_types.begin()));
+
+            std::ranges::copy(info.dependencies
+                | std::views::transform(&meta::reflectable::id),
+              std::inserter(a.resolved_as_dependency,
+                a.resolved_as_dependency.begin()));
+
+            for (meta::reflectable &dep : info.dependencies) {
+              a.type_name_by_id.emplace(dep.id, dep.definition.type_name);
+              a.reflected.emplace_back(std::move(dep));
+            }
           }
 
           return a;
@@ -3309,7 +3324,9 @@ std::string reflectable_body(const meta::record_data &d) {
     d.public_fields //
       | std::views::transform(&meta::field_data::name)
       | std::views::transform(
-        [](std::string_view f) { return std::format("{}_t", f); }) //
+        [](std::string_view f) {
+          return std::format("omni::field_meta_t<type, {}_t>", f);
+        }) //
       | std::views::join_with(",\n      "sv) //
       | util::format_range);
 }

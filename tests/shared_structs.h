@@ -148,15 +148,14 @@ struct field_names_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    const auto fields = omni::reflected(value).public_fields();
-    return omni::compat::apply(_visit{}, fields);
+    return omni::compat::apply(_visit{}, value.public_fields());
   }
 } const static field_names{};
 
 struct enum_names_t {
   template <typename Enum>
-  std::vector<std::string> operator()(Enum) const {
-    const auto enums = omni::reflected_enum_t<Enum>::enumerators();
+  std::vector<std::string> operator()(Enum e) const {
+    const auto enums = e.enumerators();
     std::vector<std::string> names;
     for (const auto &value_name : enums)
       names.emplace_back(value_name.second);
@@ -174,9 +173,8 @@ struct maybe_field_names_t {
   }
 
   template <typename T>
-  std::vector<std::string> operator()(const T &value) const {
-    static_assert(omni::is_reflected<T>::value, "");
-    return field_names(value);
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return field_names(binding);
   }
 } const static maybe_field_names{};
 
@@ -235,8 +233,7 @@ struct query_mixed_non_reflected_then_field_names_t {
 struct field_values_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    const auto fields = omni::reflected(value).public_fields();
-    return omni::compat::apply(*this, fields);
+    return omni::compat::apply(*this, value.public_fields());
   }
 
   template <typename... Field>
@@ -413,9 +410,8 @@ struct from_std_map_adapter {
   const std::map<std::string, V> &from;
 
   template <typename T>
-  void operator()(T &to) const {
-    auto fields = omni::reflected(to).public_fields();
-    omni::compat::apply(*this, fields);
+  void operator()(T to) const {
+    omni::compat::apply(*this, to.public_fields());
   }
 
   template <typename... Field>
@@ -428,10 +424,10 @@ template <typename T, typename V>
 struct from_std_map_return_adapter {
   const std::map<std::string, V> &from;
 
-  T operator()(T to) const {
-    auto fields = omni::reflected(to).public_fields();
-    omni::compat::apply(*this, fields);
-    return to;
+  template <typename Binding>
+  T operator()(Binding value) const {
+    omni::compat::apply(*this, value.public_fields());
+    return value;
   }
 
   template <typename... Field>
@@ -447,14 +443,14 @@ void from_std_map(const std::map<std::string, V> &from, T &to) {
 
 template <typename T, typename V>
 T from_std_map(const std::map<std::string, V> &from) {
-  return omni::reflected_call(from_std_map_return_adapter<T, V>{from}, T{});
+  return omni::reflected_call(from_std_map_return_adapter<T, V>{from},
+    T{});
 }
 
 struct write_foo_bar_t {
   template <typename T>
-  void operator()(T &value) const {
-    const auto fields = omni::reflected(value).public_fields();
-    omni::compat::apply(*this, fields);
+  void operator()(T value) const {
+    omni::compat::apply(*this, value.public_fields());
   }
 
   template <typename... Field>
