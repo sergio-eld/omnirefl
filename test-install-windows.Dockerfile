@@ -20,6 +20,10 @@ RUN powershell -Command `
 # Install Git, 7zip, and Ninja build system
 RUN choco install -y git 7zip ninja cmake neovim
 
+# todo: extend the Windows build matrix with MSVC, clang-cl, MSYS2 MinGW GCC,
+# and MSYS2 MinGW Clang. clang-cl currently requires adding the VS/LLVM toolset
+# component here; MSYS2 requires installing the MinGW compiler packages.
+
 # Install Visual Studio Build Tools with minimal C++ workload
 RUN `
     # Download the Build Tools bootstrapper

@@ -1369,21 +1369,36 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
       return out;
     });
 
-  const std::string driver_triple = std::invoke([msvc_used, &normalized_args] {
-    const std::string target_triple = std::invoke([&normalized_args] {
-      if (const auto *opt =
-            normalized_args->getLastArgNoClaim(options::OPT_target))
-        return llvm::Triple::normalize(opt->getValue());
-      return llvm::sys::getProcessTriple();
-    });
+  const std::string driver_triple =
+    std::invoke([msvc_used, &normalized_args, &flags] {
+      const std::string target_triple = std::invoke([&normalized_args] {
+        if (const auto *opt =
+              normalized_args->getLastArgNoClaim(options::OPT_target))
+          return llvm::Triple::normalize(opt->getValue());
+        return llvm::sys::getProcessTriple();
+      });
 
-    llvm::Triple triple(target_triple);
-    if (msvc_used) {
-      triple.setOS(llvm::Triple::Win32);
-      triple.setEnvironment(llvm::Triple::MSVC);
-    }
-    return triple.str();
-  });
+      llvm::Triple triple(target_triple);
+      if (msvc_used) {
+        triple.setOS(llvm::Triple::Win32);
+        triple.setEnvironment(llvm::Triple::MSVC);
+      }
+
+      if (!msvc_used
+        && !normalized_args->getLastArgNoClaim(options::OPT_target)
+        && !flags.empty()) {
+        // refactorme(cc1_flags): infer the target from GCC-style cross compiler
+        // names until compiler-driver mapping is split out of omnirefl.
+        const std::string compiler =
+          fs::path(flags.front()).filename().string();
+        if (compiler.starts_with("x86_64-w64-mingw32-"))
+          return std::string{"x86_64-w64-windows-gnu"};
+        if (compiler.starts_with("i686-w64-mingw32-"))
+          return std::string{"i686-w64-windows-gnu"};
+      }
+
+      return triple.str();
+    });
 
   // ad hoc: this is a heavy-weight solution just to get proper argument
   // translations (for other compilers' commands) and to resolve system
