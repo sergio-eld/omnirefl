@@ -391,8 +391,12 @@ struct meta_t<T, reflected_entity::record> {
   }
 
   public:
-  static constexpr const char *name() noexcept {
-    return reflected::name();
+  static constexpr const char *type_name() noexcept {
+    return reflected::type_name();
+  }
+
+  static constexpr const char *qualified_type_name() noexcept {
+    return reflected::qualified_type_name();
   }
 
   static constexpr const char *annotation() noexcept {
@@ -450,8 +454,12 @@ struct meta_t<T, reflected_entity::enumeration> {
   constexpr meta_t() noexcept = default;
 
   public:
-  static constexpr const char *name() noexcept {
-    return reflected::name();
+  static constexpr const char *type_name() noexcept {
+    return reflected::type_name();
+  }
+
+  static constexpr const char *qualified_type_name() noexcept {
+    return reflected::qualified_type_name();
   }
 
   static constexpr const char *annotation() noexcept {
@@ -486,8 +494,12 @@ struct binding_t<T, reflected_entity::record> {
 
   storage_t _value;
 
-  static constexpr const char *name() noexcept {
-    return reflected::name();
+  static constexpr const char *type_name() noexcept {
+    return reflected::type_name();
+  }
+
+  static constexpr const char *qualified_type_name() noexcept {
+    return reflected::qualified_type_name();
   }
 
   static constexpr const char *annotation() noexcept {
@@ -557,8 +569,12 @@ struct binding_t<T, reflected_entity::enumeration> {
 
   storage_t _value;
 
-  static constexpr const char *name() noexcept {
-    return reflected::name();
+  static constexpr const char *type_name() noexcept {
+    return reflected::type_name();
+  }
+
+  static constexpr const char *qualified_type_name() noexcept {
+    return reflected::qualified_type_name();
   }
 
   static constexpr const char *annotation() noexcept {

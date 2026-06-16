@@ -10,8 +10,6 @@
 - (+) primary record templates, including type, value, and template-template
   parameters
 - (+) observed concrete instantiations of supported primary record templates
-- (-) explicit record template specializations
-- (-) partial record template specializations
 
 ### Records
 
@@ -31,8 +29,8 @@
 - (+) only canonical field type names are collected; alias spelling such as
   `std::uint16_t` is not preserved
 - (+) field count / iteration
-- (+) unqualified record name
-- (-) namespace-qualified record name
+- (+) record `type_name()` without namespaces, including enclosing records
+- (+) record `qualified_type_name()` with namespaces and enclosing records
 
 ### Enums
 
@@ -40,8 +38,8 @@
 - (+) enumerator values
 - (+) scoped enums
 - (+) fixed-underlying enums
-- (+) enum type name
-- (-) namespace-qualified enum type name
+- (+) enum `type_name()` without namespaces
+- (+) enum `qualified_type_name()` with namespaces
 - (?) plain unscoped enum field dependencies
 
 ### Dependency Routes
@@ -49,6 +47,7 @@
 - (+) public field type dependencies
 - (+) public base type dependencies
 - (+) transitive public base dependencies
+- (+) standard-library public bases are ignored as reflection dependencies
 - (+) template record field dependencies
 - (+) CRTP base dependencies
 - (+) supported member alias dependencies: `error_type`, `key_type`, `type`,
@@ -97,8 +96,8 @@
 ### Types
 
 - (-) nested records inside record template parents
-- (-) explicit specializations
-- (-) partial specializations
+- (-) explicit record template specializations
+- (-) partial record template specializations
 - (-) specialization-specific record template metadata
 - (-) specialization-specific CRTP base metadata
 
@@ -106,14 +105,15 @@
 
 - (-) OpenAPI-like schema table generation from reflected structs/enums using
   type, field, enum, and annotation metadata
-- (-) namespace-qualified reflected type names
 - (-) specialization-aware reflected type names when/if explicit or partial
   specializations are implemented
 
 ### Frontend/API
 
-- TODO(High): detect `reflected_call` inside a reflected scope as a tool error
-  when possible, and add dedicated negative tool-run tests.
+- TODO(High): forbid `reflected_call` inside a reflected scope. With the current
+  deferred visitor implementation, reliable detection is not practically
+  possible without instantiating visitor bodies or adding a broader semantic
+  analysis pass.
 - TODO(High): detect reflection query instantiation outside a reflected scope as
   a tool error when possible, and add dedicated negative tool-run tests.
 - (-) refine the public interface

@@ -820,6 +820,48 @@ std::string format_nm_qual_type(const meta::nm_qual_type &t) {
       | util::format_range);
 }
 
+std::string format_type_name(const meta::nm_qual_type &t) {
+  std::vector<std::string> elems;
+  elems.reserve(t.enclosing_records.size() + std::size_t{1});
+  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
+  elems.emplace_back(t.name.value_or("(unnamed)"));
+
+  return std::format("{}",
+    elems //
+      | std::views::join_with("::"sv) //
+      | util::format_range);
+}
+
+std::string format_primary_template_type_name(
+  const meta::nm_qual_type &t,
+  std::string_view primary_name) {
+  std::vector<std::string> elems;
+  elems.reserve(t.enclosing_records.size() + std::size_t{1});
+  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
+  elems.emplace_back(primary_name);
+
+  return std::format("{}",
+    elems //
+      | std::views::join_with("::"sv) //
+      | util::format_range);
+}
+
+std::string format_primary_template_qualified_type_name(
+  const meta::nm_qual_type &t,
+  std::string_view primary_name) {
+  std::vector<std::string> elems;
+  elems.reserve(
+    t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
+  std::ranges::copy(t.namespaces, std::back_inserter(elems));
+  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
+  elems.emplace_back(primary_name);
+
+  return std::format("{}",
+    elems //
+      | std::views::join_with("::"sv) //
+      | util::format_range);
+}
+
 std::string format_template_params(const std::vector<meta::template_param> &params,
   std::size_t indent_level) {
   const auto indent = [](std::size_t level) {
@@ -2759,7 +2801,10 @@ util::viewable_range_of<const clang::CXXRecordDecl *> auto public_bases_view(
     | std::views::filter(is_public)
     | std::views::transform(&clang::CXXBaseSpecifier::getType)
     | std::views::transform(&clang::QualType::getTypePtr)
-    | std::views::transform(&clang::Type::getAsCXXRecordDecl);
+    | std::views::transform(&clang::Type::getAsCXXRecordDecl)
+    | std::views::filter([](const clang::CXXRecordDecl *base) {
+        return base && !base->isInStdNamespace();
+      });
 }
 
 util::viewable_range_of<const clang::FieldDecl *> auto public_fields_view(
@@ -3254,14 +3299,19 @@ std::string reflectable_head(const meta::nm_qual_type &t,
       std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
       elems.emplace_back(d.template_info->primary_name);
 
-      const std::string type_name = std::format("{}<{}>",
+      const std::string reflected_type_name =
+        format_primary_template_type_name(t, d.template_info->primary_name);
+      const std::string reflected_qualified_type_name =
+        format_primary_template_qualified_type_name(t,
+          d.template_info->primary_name);
+      const std::string generated_type_name = std::format("{}<{}>",
         elems | std::views::join_with("::"sv) | util::format_range,
         template_args);
 
       // todo: when/if explicit or partial specializations are implemented,
       // reflected type names and namespace-qualified names must describe the
-      // selected specialization. For primary templates, returning only
-      // `record` from name() is intentional.
+      // selected specialization. For primary templates, returning the primary
+      // template name is intentional.
       return std::format(
         "{4}"
         "\nstruct _reflected<{0} {1}, _omni_binding> {{"
@@ -3274,29 +3324,37 @@ std::string reflectable_head(const meta::nm_qual_type &t,
         "\n    return omni::reflected_entity::{2};"
         "\n  }}"
         "\n"
-        "\n  static constexpr auto name() noexcept"
+        "\n  static constexpr auto type_name() noexcept"
         "\n    -> const char(&)[sizeof(\"{3}\")] {{"
         "\n    return \"{3}\";"
         "\n  }}"
-        "{5}",
+        "\n"
+        "\n  static constexpr auto qualified_type_name() noexcept"
+        "\n    -> const char(&)[sizeof(\"{5}\")] {{"
+        "\n    return \"{5}\";"
+        "\n  }}"
+        "{6}",
 
         // 0
         reflectable_tag(d),
 
         // 1
-        type_name,
+        generated_type_name,
 
         // 2
         reflectable_entity(d),
 
         // 3
-        d.template_info->primary_name,
+        reflected_type_name,
 
         // 4
         std::format("template <\n  {},\n  typename _omni_binding\n>",
           format_template_params(d.template_info->params, 1)),
 
         // 5
+        reflected_qualified_type_name,
+
+        // 6
         annotation_method(annotation));
     }
   }
@@ -3313,11 +3371,16 @@ std::string reflectable_head(const meta::nm_qual_type &t,
     "\n    return omni::reflected_entity::{2};"
     "\n  }}"
     "\n"
-    "\n  static constexpr auto name() noexcept"
+    "\n  static constexpr auto type_name() noexcept"
     "\n    -> const char(&)[sizeof(\"{3}\")] {{"
     "\n    return \"{3}\";"
     "\n  }}"
-    "{4}",
+    "\n"
+    "\n  static constexpr auto qualified_type_name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{4}\")] {{"
+    "\n    return \"{4}\";"
+    "\n  }}"
+    "{5}",
 
     // 0
     reflectable_tag(d),
@@ -3329,9 +3392,12 @@ std::string reflectable_head(const meta::nm_qual_type &t,
     reflectable_entity(d),
 
     // 3
-    t.name.value_or("(unnamed)"),
+    format_type_name(t),
 
     // 4
+    format_nm_qual_type(t),
+
+    // 5
     annotation_method(annotation));
 }
 
@@ -3358,15 +3424,21 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t,
     "\n    return omni::reflected_entity::{1};"
     "\n  }}"
     "\n"
-    "\n  static constexpr auto name() noexcept"
+    "\n  static constexpr auto type_name() noexcept"
     "\n    -> const char(&)[sizeof(\"{2}\")] {{"
     "\n    return \"{2}\";"
     "\n  }}"
-    "{3}",
+    "\n"
+    "\n  static constexpr auto qualified_type_name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{3}\")] {{"
+    "\n    return \"{3}\";"
+    "\n  }}"
+    "{4}",
 
     format_qualified_inner_type_from_root(access_root_for, t),
     reflectable_entity(d),
-    t.name.value_or("(unnamed)"),
+    format_type_name(t),
+    format_nm_qual_type(t),
     annotation_method(annotation));
 }
 
@@ -3386,15 +3458,21 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
     "\n    return omni::reflected_entity::{1};"
     "\n  }}"
     "\n"
-    "\n  static constexpr auto name() noexcept"
+    "\n  static constexpr auto type_name() noexcept"
     "\n    -> const char(&)[sizeof(\"{2}\")] {{"
     "\n    return \"{2}\";"
     "\n  }}"
-    "{3}",
+    "\n"
+    "\n  static constexpr auto qualified_type_name() noexcept"
+    "\n    -> const char(&)[sizeof(\"{3}\")] {{"
+    "\n    return \"{3}\";"
+    "\n  }}"
+    "{4}",
 
     index,
     reflectable_entity(d),
-    t.name.value_or("(unnamed)"),
+    format_type_name(t),
+    format_nm_qual_type(t),
     annotation_method(annotation));
 }
 

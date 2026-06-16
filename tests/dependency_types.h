@@ -72,7 +72,7 @@ static const struct field_count_t {
 static const struct reflected_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    return v.name();
+    return v.type_name();
   }
 } reflected_name;
 
@@ -120,7 +120,7 @@ static const struct first_field_type_name_t {
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type field_type;
 
-    return omni::meta_t<field_type>::name();
+    return omni::meta_t<field_type>::type_name();
   }
 } first_field_type_name;
 
@@ -131,7 +131,7 @@ static const struct second_field_type_name_t {
     const auto f = std::get<1>(fields);
     typedef typename decltype(f)::type field_type;
 
-    return omni::meta_t<field_type>::name();
+    return omni::meta_t<field_type>::type_name();
   }
 } second_field_type_name;
 
@@ -160,8 +160,8 @@ static const struct get_dependency_name_t {
     const auto f = std::get<0>(v.public_fields());
     using field_type = typename decltype(f)::type;
 
-    return std::string(v.name()) + "::"
-      + std::string(omni::reflected<field_type>().name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::reflected<field_type>().type_name()) + ":int";
   }
 } get_dependency_name;
 
@@ -178,9 +178,9 @@ static const struct get_dependency_name_layer_2_t {
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
-    return std::string(v.name()) + "::"
-      + std::string(omni::reflected<intermediate_type>().name()) + "::"
-      + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::reflected<intermediate_type>().type_name()) + "::"
+      + std::string(omni::reflected<dep_type>().type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -197,8 +197,8 @@ static const struct get_dependency_name_t {
     static_assert(omni::is_reflected<typename parent_type::value_type>::value,
       "Member alias is not reflected");
 
-    return std::string(Parent::name()) + "::"
-      + std::string(omni::meta_t<typename parent_type::value_type>::name())
+    return std::string(Parent::type_name()) + "::"
+      + std::string(omni::meta_t<typename parent_type::value_type>::type_name())
       + ":int";
   }
 } get_dependency_name;
@@ -210,9 +210,9 @@ static const struct get_dependency_name_layer_2_t {
     using level_1 = typename root_type::value_type;
     using dep_type = typename level_1::value_type;
 
-    return std::string(T::name()) + "::"
-      + std::string(omni::meta_t<level_1>::name()) + "::"
-      + std::string(omni::meta_t<dep_type>::name()) + ":int";
+    return std::string(T::type_name()) + "::"
+      + std::string(omni::meta_t<level_1>::type_name()) + "::"
+      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -228,8 +228,8 @@ static const struct get_dependency_name_t {
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
 
-    return std::string(v.name()) + "::"
-      + std::string(omni::meta_t<dep_type>::name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name;
 
@@ -252,8 +252,8 @@ static const struct get_dependency_name_layer_2_t {
       typename first_variant_arg<outer_field_type>::type; // std::tuple<...>
     using dep_type = typename std::tuple_element<0, intermediate_type>::type;
 
-    return std::string(v.name()) + "::tuple::" // intermediate_type is a std::tuple<...>
-      + std::string(omni::meta_t<dep_type>::name()) + ":int";
+    return std::string(v.type_name()) + "::tuple::" // intermediate_type is a std::tuple<...>
+      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -272,8 +272,8 @@ static const struct get_vector_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Vector value type is not reflected");
 
-    return std::string(v.name())
-      + "::vector::" + omni::meta_t<value_type>::name();
+    return std::string(v.type_name())
+      + "::vector::" + omni::meta_t<value_type>::type_name();
   }
 } get_vector_value_name;
 
@@ -288,8 +288,8 @@ static const struct get_tuple_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Tuple value type is not reflected");
 
-    return std::string(v.name())
-      + "::tuple::" + omni::meta_t<value_type>::name();
+    return std::string(v.type_name())
+      + "::tuple::" + omni::meta_t<value_type>::type_name();
   }
 } get_tuple_value_name;
 
@@ -304,8 +304,8 @@ static const struct get_tuple_second_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Tuple second value type is not reflected");
 
-    return std::string(v.name())
-      + "::tuple::" + omni::meta_t<value_type>::name();
+    return std::string(v.type_name())
+      + "::tuple::" + omni::meta_t<value_type>::type_name();
   }
 } get_tuple_second_value_name;
 
@@ -328,8 +328,8 @@ static const struct get_variant_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Variant value type is not reflected");
 
-    return std::string(v.name())
-      + "::variant::" + omni::meta_t<value_type>::name();
+    return std::string(v.type_name())
+      + "::variant::" + omni::meta_t<value_type>::type_name();
   }
 } get_variant_value_name;
 
@@ -345,8 +345,8 @@ static const struct get_nested_vector_tuple_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Nested vector tuple value type is not reflected");
 
-    return std::string(v.name())
-      + "::vector::tuple::" + omni::meta_t<value_type>::name();
+    return std::string(v.type_name())
+      + "::vector::tuple::" + omni::meta_t<value_type>::type_name();
   }
 } get_nested_vector_tuple_value_name;
 
@@ -677,6 +677,16 @@ struct derived_struct: resolved::as_inherited_struct {
   derived_struct(int base, double derived)
       : resolved::as_inherited_struct{base}
       , derived_field(derived) {}
+};
+
+struct shared_from_this_derived:
+    std::enable_shared_from_this<shared_from_this_derived> {
+  std::string name;
+  int count;
+
+  shared_from_this_derived(std::string n, int c)
+      : name(n)
+      , count(c) {}
 };
 
 struct multi_base_derived:

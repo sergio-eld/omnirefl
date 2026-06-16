@@ -13,6 +13,12 @@ struct record_type_t {
   std::string second;
 };
 
+struct parent_record_t {
+  struct nested_record_t {
+    int value;
+  };
+};
+
 enum class enum_type_t {
   zero,
   one,
@@ -22,6 +28,12 @@ namespace nested {
 
 struct namespaced_record_t {
   int value;
+};
+
+struct parent_record_t {
+  struct nested_record_t {
+    int value;
+  };
 };
 
 enum class namespaced_enum_t {
@@ -63,16 +75,30 @@ struct sized_integer_field_types_t {
 struct type_name_t {
   template <typename T>
   std::string operator()(omni::meta_t<T> meta) const {
-    return meta.name();
+    return meta.type_name();
   }
 
   template <typename T>
   std::string operator()(omni::binding_t<T> binding) const {
-    return binding.name();
+    return binding.type_name();
   }
 };
 
 type_name_t const static type_name{};
+
+struct qualified_type_name_t {
+  template <typename T>
+  std::string operator()(omni::meta_t<T> meta) const {
+    return meta.qualified_type_name();
+  }
+
+  template <typename T>
+  std::string operator()(omni::binding_t<T> binding) const {
+    return binding.qualified_type_name();
+  }
+};
+
+qualified_type_name_t const static qualified_type_name{};
 
 namespace enumerators {
 

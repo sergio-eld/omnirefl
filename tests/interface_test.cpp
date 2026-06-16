@@ -68,7 +68,7 @@ TEST(cpp20_template_lambdas, meta_type_token) {
   EXPECT_EQ("record_type_t",
     omni::reflected_call(
       [](omni::meta auto type) -> std::string {
-        return type.name();
+        return type.type_name();
       },
       omni::type<record_type_t>));
 }
@@ -103,11 +103,59 @@ TEST(type_names, namespaced_record_type_t) {
     interface_test::type_name);
 }
 
+TEST(type_names, namespaced_record_qualified_type_name_t) {
+  using interface_test::nested::namespaced_record_t;
+
+  value_categories_test<namespaced_record_t>(
+    "interface_test::nested::namespaced_record_t",
+    interface_test::qualified_type_name);
+}
+
+TEST(type_names, nested_record_type_t) {
+  using nested_record_t = interface_test::parent_record_t::nested_record_t;
+
+  value_categories_test<nested_record_t>("parent_record_t::nested_record_t",
+    interface_test::type_name);
+}
+
+TEST(type_names, nested_record_qualified_type_name_t) {
+  using nested_record_t = interface_test::parent_record_t::nested_record_t;
+
+  value_categories_test<nested_record_t>(
+    "interface_test::parent_record_t::nested_record_t",
+    interface_test::qualified_type_name);
+}
+
+TEST(type_names, namespaced_nested_record_type_t) {
+  using nested_record_t =
+    interface_test::nested::parent_record_t::nested_record_t;
+
+  value_categories_test<nested_record_t>("parent_record_t::nested_record_t",
+    interface_test::type_name);
+}
+
+TEST(type_names, namespaced_nested_record_qualified_type_name_t) {
+  using nested_record_t =
+    interface_test::nested::parent_record_t::nested_record_t;
+
+  value_categories_test<nested_record_t>(
+    "interface_test::nested::parent_record_t::nested_record_t",
+    interface_test::qualified_type_name);
+}
+
 TEST(type_names, direct_type_token_record_type_t) {
   using interface_test::record_type_t;
 
   EXPECT_EQ("record_type_t",
     omni::reflected_call(interface_test::type_name,
+      omni::type_t<record_type_t>{}));
+}
+
+TEST(type_names, direct_type_token_record_qualified_type_name_t) {
+  using interface_test::record_type_t;
+
+  EXPECT_EQ("interface_test::record_type_t",
+    omni::reflected_call(interface_test::qualified_type_name,
       omni::type_t<record_type_t>{}));
 }
 
@@ -127,6 +175,13 @@ TEST(type_names, enum_type_t) {
   value_categories_test<enum_type_t>("enum_type_t", interface_test::type_name);
 }
 
+TEST(type_names, enum_qualified_type_name_t) {
+  using interface_test::enum_type_t;
+
+  value_categories_test<enum_type_t>("interface_test::enum_type_t",
+    interface_test::qualified_type_name);
+}
+
 TEST(type_names, direct_type_token_enum_type_t) {
   using interface_test::enum_type_t;
 
@@ -135,11 +190,27 @@ TEST(type_names, direct_type_token_enum_type_t) {
       omni::type_t<enum_type_t>{}));
 }
 
+TEST(type_names, direct_type_token_enum_qualified_type_name_t) {
+  using interface_test::enum_type_t;
+
+  EXPECT_EQ("interface_test::enum_type_t",
+    omni::reflected_call(interface_test::qualified_type_name,
+      omni::type_t<enum_type_t>{}));
+}
+
 TEST(type_names, namespaced_enum_type_t) {
   using interface_test::nested::namespaced_enum_t;
 
   value_categories_test<namespaced_enum_t>("namespaced_enum_t",
     interface_test::type_name);
+}
+
+TEST(type_names, namespaced_enum_qualified_type_name_t) {
+  using interface_test::nested::namespaced_enum_t;
+
+  value_categories_test<namespaced_enum_t>(
+    "interface_test::nested::namespaced_enum_t",
+    interface_test::qualified_type_name);
 }
 
 TEST(fields, record_type_t) {

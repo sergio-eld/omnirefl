@@ -540,6 +540,18 @@ TEST(inheritance_dependency, public_base_fields_are_flattened) {
       dt::derived_struct{4, 8.15}));
 }
 
+TEST(inheritance_dependency, std_enable_shared_from_this_base_is_ignored) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "name",
+      "count",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::shared_from_this_derived{"record", 7}));
+}
+
 TEST(inheritance_dependency, public_base_indices) {
   namespace dt = dependency_types;
 
