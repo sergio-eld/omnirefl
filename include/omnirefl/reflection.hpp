@@ -267,6 +267,8 @@ struct field_meta_t {
     return reflected::annotation();
   }
 
+  // Index is local to the field's declaring record.
+  // Flattened inherited public field tuples may contain repeated indexes.
   static constexpr std::size_t index() noexcept {
     return reflected::index();
   }

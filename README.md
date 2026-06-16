@@ -29,6 +29,8 @@
 - (+) only canonical field type names are collected; alias spelling such as
   `std::uint16_t` is not preserved
 - (+) field count / iteration
+- (+) field index is local to the declaring record, not the flattened inherited
+  field tuple
 - (+) record `type_name()` without namespaces, including enclosing records
 - (+) record `qualified_type_name()` with namespaces and enclosing records
 
