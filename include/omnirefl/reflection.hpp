@@ -58,6 +58,11 @@ enum class reflected_entity {
 template <typename T, typename = void>
 struct is_reflected;
 
+#if defined(OMNI_TOOL_RUN)
+template <typename T, typename S>
+struct is_reflected: std::false_type {};
+#endif
+
 template <typename T>
 struct type_t {};
 
@@ -331,12 +336,18 @@ template <typename T, reflected_entity Entity>
 struct meta_t {
   using omni_meta_tag = void;
   using type = compat::decay_t<T>;
+
+  template <typename U>
+  static constexpr binding_t<compat::decay_t<U>> bind(U &&) noexcept;
 };
 
 template <typename T, reflected_entity Entity>
 struct binding_t {
   using omni_binding_tag = void;
   using type = compat::decay_t<T>;
+
+  template <typename U, reflected_entity E>
+  constexpr operator binding_t<U, E>() const noexcept;
 };
 
 #else

@@ -60,7 +60,7 @@ const T *get_if(const std::variant<V...> *value) {
 } // namespace compat
 
 namespace example_impl {
-// FIXME: leaking reflected-scope query helper; safe only while instantiated
+// note: reflected-scope query helper; safe only while instantiated
 // inside a reflected scope.
 template <typename T, bool = omni::is_reflected<T>::value>
 struct is_reflected_record: std::false_type {};

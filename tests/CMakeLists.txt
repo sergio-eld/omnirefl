@@ -77,6 +77,45 @@ foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
     endif()
 endforeach()
 
+if("17" IN_LIST _supported_cpp_standards)
+    function(_omnirefl_negative_tool_run name source min_diagnostics)
+        set(_target "cpp_17.negative.${name}")
+        add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+        )
+        target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
+        target_link_libraries(${_target} PRIVATE std_compat)
+        omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+
+        add_test(NAME "${_target}.run_omni"
+            COMMAND ${CMAKE_COMMAND}
+                -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                -D "TARGET=${_target}.omni"
+                -D "MIN_DIAGNOSTICS=${min_diagnostics}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
+    endfunction()
+
+    _omnirefl_negative_tool_run(
+        "query_out_of_scope"
+        negative_run/query_out_of_scope.cpp
+        1)
+    _omnirefl_negative_tool_run(
+        "query_non_template_visitor"
+        negative_run/query_non_template_visitor.cpp
+        1)
+    _omnirefl_negative_tool_run(
+        "query_lambda_deduced_return"
+        negative_run/query_lambda_deduced_return.cpp
+        1)
+    _omnirefl_negative_tool_run(
+        "query_multiple"
+        negative_run/query_multiple.cpp
+        7)
+endif()
+
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 

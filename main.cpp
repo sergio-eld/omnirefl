@@ -456,6 +456,12 @@ struct source_location {
   }
 };
 
+struct invalid_reflection_query {
+  std::string query;
+  source_location location;
+  std::string note;
+};
+
 // refactorme: source_file and location should be separated into
 // `struct source_location`
 struct type_definition {
@@ -623,6 +629,8 @@ struct source_file_context {
   std::map<meta::type_id, std::size_t> index_by_type_id{};
   std::map<meta::type_id, std::set<meta::source_location>>
     callsites_by_type_id{};
+
+  std::vector<meta::invalid_reflection_query> invalid_reflection_queries{};
 
   std::vector<std::string> errors{};
 
@@ -1717,10 +1725,148 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
   parsed_ast wast) {
   using namespace clang::ast_matchers;
 
+  const auto source_location_from =
+    [](const clang::ASTContext &ast, clang::SourceLocation loc)
+    -> std::expected<meta::source_location, std::string> {
+    if (!loc.isValid())
+      return std::unexpected("invalid source location");
+
+    const clang::SourceManager &sm = ast.getSourceManager();
+    const clang::PresumedLoc presumed = sm.getPresumedLoc(loc);
+    if (!presumed.isValid())
+      return std::unexpected("invalid presumed source location");
+
+    return meta::source_location{
+      .source_file = presumed.getFilename(),
+      .line = sm.getSpellingLineNumber(loc),
+      .column = sm.getSpellingColumnNumber(loc),
+    };
+  };
+
+  const auto is_omni_frontend_location =
+    [](const meta::source_location &loc) {
+    const std::string path = loc.source_file.generic_string();
+    return std::string::npos != path.find("/include/omnirefl/");
+  };
+
+  const auto is_concrete_template_arg =
+    [](const clang::TemplateArgument &arg) {
+    switch (arg.getKind()) {
+    case clang::TemplateArgument::Type: {
+      const clang::QualType type = arg.getAsType();
+      return !type->isDependentType() && !type->isInstantiationDependentType()
+        && !type->containsUnexpandedParameterPack();
+    }
+    case clang::TemplateArgument::Integral:
+    case clang::TemplateArgument::Declaration:
+    case clang::TemplateArgument::NullPtr:
+    case clang::TemplateArgument::Template:
+    case clang::TemplateArgument::TemplateExpansion:
+    case clang::TemplateArgument::StructuralValue:
+      return true;
+    case clang::TemplateArgument::Expression: {
+      const clang::Expr *expr = arg.getAsExpr();
+      return expr && !expr->isTypeDependent()
+        && !expr->isInstantiationDependent()
+        && !expr->containsUnexpandedParameterPack();
+    }
+    case clang::TemplateArgument::Pack:
+    case clang::TemplateArgument::Null:
+      return false;
+    }
+
+    return false;
+  };
+
+  const auto instantiation_or_decl_location =
+    [](const auto &decl) {
+    clang::SourceLocation loc = decl.getPointOfInstantiation();
+    if (!loc.isValid())
+      loc = decl.getLocation();
+    return loc;
+  };
+
+  const auto append_invalid_reflection_query =
+    [source_location_from,
+      is_omni_frontend_location](meta::source_file_context a,
+      const clang::ASTContext &ast,
+      std::string query,
+      clang::SourceLocation loc,
+      std::string note) {
+    std::expected location = source_location_from(ast, loc);
+    if (!location) {
+      a.errors.emplace_back(std::format(
+        "tool error: invalid reflection query matcher location: {}",
+        std::move(location).error()));
+      return a;
+    }
+
+    if (is_omni_frontend_location(*location))
+      return a;
+
+    a.invalid_reflection_queries.push_back({
+      .query = std::move(query),
+      .location = *std::move(location),
+      .note = std::move(note),
+    });
+    return a;
+  };
+
   meta::source_file_context ctx = ast::reduce_matches(*wast.ast,
     meta::source_file_context{
       .sf = std::move(wast.sf),
       .file_dependencies = std::move(wast.includes_deps),
+    },
+
+    ast::rule{
+      .pattern = ast::pattern(classTemplateSpecializationDecl,
+        isTemplateInstantiation(),
+        isDefinition(),
+        anyOf(
+          hasName("::omni::is_reflected"),
+          hasName("::omni::meta_t"),
+          hasName("::omni::binding_t"),
+          hasName("::omni::field_meta_t"),
+          hasName("::omni::field_binding_t"))),
+      .reduce =
+        [&ast = wast.ast->getASTContext(),
+          is_concrete_template_arg,
+          instantiation_or_decl_location,
+          append_invalid_reflection_query](meta::source_file_context a,
+          const clang::ClassTemplateSpecializationDecl &decl) {
+          const clang::TemplateArgumentList &args = decl.getTemplateArgs();
+          if (!std::ranges::all_of(args.asArray(), is_concrete_template_arg))
+            return a;
+
+          const clang::ClassTemplateDecl *tmpl = decl.getSpecializedTemplate();
+          const std::string query = tmpl
+            ? tmpl->getQualifiedNameAsString()
+            : decl.getQualifiedNameAsString();
+
+          return append_invalid_reflection_query(std::move(a),
+            ast,
+            query,
+            instantiation_or_decl_location(decl),
+            "reflection query class template instantiated during the tool run");
+        },
+    },
+
+    ast::rule{
+      .pattern = ast::pattern(functionDecl,
+        isTemplateInstantiation(),
+        isDefinition(),
+        hasName("::omni::reflected")),
+      .reduce =
+        [&ast = wast.ast->getASTContext(),
+          instantiation_or_decl_location,
+          append_invalid_reflection_query](meta::source_file_context a,
+          const clang::FunctionDecl &decl) {
+          return append_invalid_reflection_query(std::move(a),
+            ast,
+            decl.getQualifiedNameAsString(),
+            instantiation_or_decl_location(decl),
+            "reflection query function instantiated during the tool run");
+        },
     },
 
     ast::rule{
@@ -1898,6 +2044,27 @@ std::expected<pipeline::reflection_context, app_error>
   using render_context = render::reflection_context;
 
   const source_file source = rm.ctx.sf;
+
+  if (!rm.ctx.invalid_reflection_queries.empty()) {
+    std::string message =
+      "reflection query instantiated during the tool run";
+    for (const meta::invalid_reflection_query &q :
+      rm.ctx.invalid_reflection_queries) {
+      message += std::format("\n  {}:{}:{}: {} ({})",
+        q.location.source_file.generic_string(),
+        q.location.line,
+        q.location.column,
+        q.query,
+        q.note);
+    }
+    message +=
+      "\nreflection queries are valid only inside deferred reflected scope. "
+      "Move the query into a reflected_call visitor body, make the visitor "
+      "dependent/deferred, and add an explicit trailing return type when "
+      "deduced return type would instantiate the body during the tool run.";
+
+    return std::unexpected(processing_error(source, std::move(message)));
+  }
 
   std::vector<render_context::forward_declarable> fwd;
   std::vector<render_context::nested_type> nested;
