@@ -2,7 +2,7 @@
 #include "gtest_include.h"
 #include "structs.h"
 
-#include <omnirefl/reflected_call.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <string>
 #include <vector>
@@ -259,6 +259,110 @@ TEST(record_template, type_parameter_field_names) {
     omni::reflected_call(dt::inspect::field_names, record{}));
 }
 
+TEST(annotations, record_type_annotation) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("annotation: inherited base type",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::resolved::as_inherited_struct{}));
+}
+
+TEST(annotations, enum_type_annotation) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("annotation: scoped status enum",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::scoped_status{}));
+}
+
+TEST(annotations, public_field_annotations) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"annotation: as_field value"}),
+    omni::reflected_call(dt::inspect::field_annotations,
+      dt::resolved::as_field{}));
+}
+
+TEST(annotations, documentation_comment_forms) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("annotation: comment forms type",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::annotation_comment_forms{}));
+  EXPECT_EQ((std::vector<std::string>{
+              "annotation: slash line field",
+              "annotation: bang line field",
+              "annotation: slash block field",
+              "annotation: bang block field",
+              "annotation: trailing slash field",
+              "annotation: trailing bang field",
+            }),
+    omni::reflected_call(dt::inspect::field_annotations,
+      dt::annotation_comment_forms{}));
+}
+
+TEST(annotations, unannotated_type_and_field_are_empty) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::unannotated_record{}));
+  EXPECT_EQ((std::vector<std::string>{"", ""}),
+    omni::reflected_call(dt::inspect::field_annotations,
+      dt::unannotated_record{}));
+}
+
+TEST(annotations, inherited_base_field_annotation_is_preserved) {
+  namespace dt = dependency_types;
+
+  using record = dt::template_derived<dt::resolved::as_template_arg>;
+  EXPECT_EQ("annotation: template derived type",
+    omni::reflected_call(dt::inspect::reflected_annotation, record{}));
+  EXPECT_EQ((std::vector<std::string>{
+              "annotation: template base value",
+              "annotation: template derived own field",
+            }),
+    omni::reflected_call(dt::inspect::field_annotations, record{}));
+}
+
+TEST(annotations, primary_template_annotation_is_shared_by_instantiations) {
+  namespace dt = dependency_types;
+
+  using first = dt::primary_template_record<dt::resolved::as_template_arg>;
+  using second = dt::primary_template_record<dt::resolved::as_field>;
+
+  EXPECT_EQ("annotation: primary template record",
+    omni::reflected_call(dt::inspect::reflected_annotation, first{}));
+  EXPECT_EQ("annotation: primary template record",
+    omni::reflected_call(dt::inspect::reflected_annotation, second{}));
+  EXPECT_EQ((std::vector<std::string>{
+              "annotation: primary template value",
+              "annotation: primary template count",
+            }),
+    omni::reflected_call(dt::inspect::field_annotations, first{}));
+}
+
+TEST(annotations, crtp_annotations_are_preserved) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("annotation: CRTP derived type",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::crtp_derived{}));
+  EXPECT_EQ((std::vector<std::string>{
+              "annotation: CRTP base field",
+              "annotation: CRTP own field",
+            }),
+    omni::reflected_call(dt::inspect::field_annotations, dt::crtp_derived{}));
+}
+
+TEST(annotations, constexpr_type_and_field_annotations) {
+  namespace dt = dependency_types;
+  using record = dt::primary_template_record<dt::resolved::as_template_arg>;
+
+  EXPECT_TRUE(omni::reflected_call(dt::inspect::constexpr_annotations,
+    record{}));
+}
+
 TEST(record_template, value_parameter_field_names) {
   namespace dt = dependency_types;
 
@@ -434,6 +538,18 @@ TEST(inheritance_dependency, public_base_fields_are_flattened) {
     }),
     omni::reflected_call(dt::inspect::field_names,
       dt::derived_struct{4, 8.15}));
+}
+
+TEST(inheritance_dependency, std_enable_shared_from_this_base_is_ignored) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(
+    (std::vector<std::string>{
+      "name",
+      "count",
+    }),
+    omni::reflected_call(dt::inspect::field_names,
+      dt::shared_from_this_derived{"record", 7}));
 }
 
 TEST(inheritance_dependency, public_base_indices) {

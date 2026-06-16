@@ -2,7 +2,7 @@
 
 // #include <eld/pattern_matching.hpp>
 // #include <mpark/variant.hpp>
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <map>
 #include <string>
@@ -70,7 +70,7 @@ static const struct print_field_names_simple_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    return omni::compat::apply(_get_field_names{}, omni::reflected(t).public_fields());
+    return omni::compat::apply(_get_field_names{}, t.public_fields());
   }
 } print_field_names_simple{};
 
@@ -86,7 +86,7 @@ static const struct print_field_names_recursive_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    return omni::compat::apply(_print{}, omni::reflected(t).public_fields());
+    return omni::compat::apply(_print{}, t.public_fields());
   }
 } print_field_names_recursive{};
 

@@ -1,7 +1,6 @@
 #include "gtest_include.h"
 
-#include <omnirefl/reflected_call.hpp>
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <mpark/variant.hpp>
 
@@ -21,16 +20,14 @@ struct print_names_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    const auto fields = omni::reflected(t).public_fields();
-    return omni::compat::apply(_visit{}, fields);
+    return omni::compat::apply(_visit{}, t.public_fields());
   }
 } const static print_names{};
 
 struct write_foo_bar_t {
   template <typename T>
-  void operator()(T &t) const {
-    const auto fields = omni::reflected(t).public_fields();
-    omni::compat::apply(*this, fields);
+  void operator()(T t) const {
+    omni::compat::apply(*this, t.public_fields());
   }
 
   template <typename... Field>
@@ -88,9 +85,8 @@ struct from_std_map_adapter {
   const std::map<std::string, V> &from;
 
   template <typename T>
-  void operator()(T &to) const {
-    auto fields = omni::reflected(to).public_fields();
-    omni::compat::apply(*this, fields);
+  void operator()(T to) const {
+    omni::compat::apply(*this, to.public_fields());
   }
 
   template <typename... Field>
@@ -104,14 +100,13 @@ template <typename T, typename V>
 void from_std_map(const std::map<std::string, V> &from, T &to) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   omni::reflected_call(
-    [](auto &v, const auto &from) -> void {
-      auto fields = omni::reflected(v).public_fields();
+    [&from](auto v) -> void {
+      auto fields = v.public_fields();
       omni::compat::apply(
         [&from](auto... field) { write_fields_from_std_map{}(from, field...); },
         fields);
     },
-    to,
-    from);
+    to);
 #else
   omni::reflected_call(from_std_map_adapter<V>{from}, to);
 #endif
@@ -122,12 +117,11 @@ void touch_fields_through_template(const std::map<std::string, V> &from,
   T &to) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   omni::reflected_call(
-    [](auto &v, const auto &) -> void {
-      const auto fields = omni::reflected(v).public_fields();
+    [](auto v) -> void {
+      const auto fields = v.public_fields();
       (void)fields;
     },
-    to,
-    from);
+    to);
 #else
   (void)from;
   (void)to;
@@ -138,8 +132,8 @@ template <typename T>
 void touch_fields_through_template(T &to) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   omni::reflected_call(
-    [](auto &v) -> void {
-      const auto fields = omni::reflected(v).public_fields();
+    [](auto v) -> void {
+      const auto fields = v.public_fields();
       (void)fields;
     },
     to);
@@ -196,7 +190,7 @@ TEST(index_regression, prior_inplace_template_lambda_does_not_pollute_direct_wri
       }),
       omni::reflected_call(
         [](const auto &v) -> std::vector<std::string> {
-          const auto fields = omni::reflected(v).public_fields();
+          const auto fields = v.public_fields();
           return omni::compat::apply(index_regression::print_names_t::_visit{},
             fields);
         },
@@ -270,12 +264,12 @@ TEST(index_regression, prior_extra_arg_lambda_does_not_pollute_direct_write) {
 
     std::map<std::string, mpark::variant<int, double, std::string>> from;
     omni::reflected_call(
-      [](auto &v, const auto &) -> void {
-        const auto fields = omni::reflected(v).public_fields();
+      [](auto v) -> void {
+        const auto fields = v.public_fields();
         (void)fields;
       },
-      p,
-      from);
+      p);
+    (void)from;
   }
 
   {
@@ -377,8 +371,8 @@ TEST(index_regression, prior_apply_fields_lambda_does_not_pollute_direct_write) 
 
     std::map<std::string, mpark::variant<int, double, std::string>> from;
     omni::reflected_call(
-      [](auto &v, const auto &) -> void {
-        const auto fields = omni::reflected(v).public_fields();
+      [](auto v) -> void {
+        const auto fields = v.public_fields();
         omni::compat::apply(
           [](const auto &...field) {
             int dummy[] = {0, ((void)field.name(), 0)...};
@@ -386,8 +380,8 @@ TEST(index_regression, prior_apply_fields_lambda_does_not_pollute_direct_write) 
           },
           fields);
       },
-      p,
-      from);
+      p);
+    (void)from;
   }
 
   {
@@ -481,8 +475,8 @@ TEST(index_regression, prior_inline_set_value_does_not_pollute_direct_write) {
     from["count"] = 47;
     from["score"] = 8.15;
     omni::reflected_call(
-      [](auto &v, const auto &from) -> void {
-        const auto fields = omni::reflected(v).public_fields();
+      [&from](auto v) -> void {
+        const auto fields = v.public_fields();
         omni::compat::apply(
           [&from](auto... field) {
             int dummy[] = {0,
@@ -499,8 +493,7 @@ TEST(index_regression, prior_inline_set_value_does_not_pollute_direct_write) {
           },
           fields);
       },
-      p,
-      from);
+      p);
 
     ASSERT_EQ("mapped", p.name);
     ASSERT_EQ(47, p.count);
@@ -538,16 +531,15 @@ TEST(index_regression, prior_helper_writer_does_not_pollute_direct_write) {
     from["count"] = 47;
     from["score"] = 8.15;
     omni::reflected_call(
-      [](auto &v, const auto &from) -> void {
-        const auto fields = omni::reflected(v).public_fields();
+      [&from](auto v) -> void {
+        const auto fields = v.public_fields();
         omni::compat::apply(
           [&from](auto... field) {
             index_regression::write_fields_from_std_map{}(from, field...);
           },
           fields);
       },
-      p,
-      from);
+      p);
 
     ASSERT_EQ("mapped", p.name);
     ASSERT_EQ(47, p.count);

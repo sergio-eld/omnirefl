@@ -77,6 +77,45 @@ foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
     endif()
 endforeach()
 
+if("17" IN_LIST _supported_cpp_standards)
+    function(_omnirefl_negative_tool_run name source min_diagnostics)
+        set(_target "cpp_17.negative.${name}")
+        add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+        )
+        target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
+        target_link_libraries(${_target} PRIVATE std_compat)
+        omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+
+        add_test(NAME "${_target}.run_omni"
+            COMMAND ${CMAKE_COMMAND}
+                -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                -D "TARGET=${_target}.omni"
+                -D "MIN_DIAGNOSTICS=${min_diagnostics}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
+    endfunction()
+
+    _omnirefl_negative_tool_run(
+        "query_out_of_scope"
+        negative_run/query_out_of_scope.cpp
+        1)
+    _omnirefl_negative_tool_run(
+        "query_non_template_visitor"
+        negative_run/query_non_template_visitor.cpp
+        1)
+    _omnirefl_negative_tool_run(
+        "query_lambda_deduced_return"
+        negative_run/query_lambda_deduced_return.cpp
+        1)
+    _omnirefl_negative_tool_run(
+        "query_multiple"
+        negative_run/query_multiple.cpp
+        7)
+endif()
+
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
@@ -100,8 +139,8 @@ message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATU
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
 
-    set(_static_odr_tgt "${cpp_prefix}.test.common.static_odr")
-    add_library(${_static_odr_tgt} STATIC common/test_static_odr.cpp)
+    set(_static_odr_tgt "${cpp_prefix}.test.static_odr")
+    add_library(${_static_odr_tgt} STATIC test_static_odr.cpp)
     set_target_properties(${_static_odr_tgt} PROPERTIES
         CXX_STANDARD ${cpp_standard}
         CXX_STANDARD_REQUIRED YES
@@ -110,42 +149,42 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
     target_compile_definitions(${_static_odr_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_static_odr_tgt} PRIVATE GTest::GTest std_compat)
-    omni_reflected_target(${_static_odr_tgt})
+    omni_reflected_target(${_static_odr_tgt} ENABLE_INDEX_MODE)
 
-    set(_test_common_tgt "${cpp_prefix}.test.common")
-    set(_test_common_sources
-        common/test_main.cpp
-        common/dependent_types_test.cpp
-        common/interface_test.cpp
-        common/example_test.cpp
-        common/indexed_types.cpp
-        common/inplace_test.cpp
+    set(_test_tgt "${cpp_prefix}.test")
+    set(_test_sources
+        test_main.cpp
+        dependent_types_test.cpp
+        interface_test.cpp
+        example_test.cpp
+        indexed_types.cpp
+        inplace_test.cpp
     )
 
-    add_executable(${_test_common_tgt} ${_test_common_sources})
+    add_executable(${_test_tgt} ${_test_sources})
 
-    set_target_properties(${_test_common_tgt} PROPERTIES
+    set_target_properties(${_test_tgt} PROPERTIES
         CXX_STANDARD ${cpp_standard}
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO
     )
 
-    target_compile_definitions(${_test_common_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
-    target_link_libraries(${_test_common_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
-    omni_reflected_target(${_test_common_tgt})
+    target_compile_definitions(${_test_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
+    target_link_libraries(${_test_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
+    omni_reflected_target(${_test_tgt} ENABLE_INDEX_MODE)
 
-    add_test(NAME "${cpp_prefix}.test.common.run_omni"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}.omni")
+    add_test(NAME "${cpp_prefix}.test.run_omni"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}.omni")
 
-    add_test(NAME "${cpp_prefix}.test.common.build"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_common_tgt}")
+    add_test(NAME "${cpp_prefix}.test.build"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}")
 
-    set_tests_properties("${cpp_prefix}.test.common.build" PROPERTIES
-        DEPENDS "${cpp_prefix}.test.common.run_omni")
+    set_tests_properties("${cpp_prefix}.test.build" PROPERTIES
+        DEPENDS "${cpp_prefix}.test.run_omni")
 
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
-        add_test(NAME "${cpp_prefix}.test.common" COMMAND ${_test_common_tgt})
-        set_tests_properties("${cpp_prefix}.test.common" PROPERTIES
-            DEPENDS "${cpp_prefix}.test.common.build")
+        add_test(NAME "${cpp_prefix}.test" COMMAND ${_test_tgt})
+        set_tests_properties("${cpp_prefix}.test" PROPERTIES
+            DEPENDS "${cpp_prefix}.test.build")
     endif()
 endforeach()

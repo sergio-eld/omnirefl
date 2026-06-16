@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <map>
 #include <memory>
@@ -44,7 +44,7 @@ static const struct field_names_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &v) const {
-    return omni::compat::apply(collect{}, omni::reflected(v).public_fields());
+    return omni::compat::apply(collect{}, v.public_fields());
   }
 } field_names;
 
@@ -58,51 +58,87 @@ static const struct field_indices_t {
 
   template <typename T>
   std::vector<std::size_t> operator()(const T &v) const {
-    return omni::compat::apply(collect{}, omni::reflected(v).public_fields());
+    return omni::compat::apply(collect{}, v.public_fields());
   }
 } field_indices;
 
 static const struct field_count_t {
   template <typename T>
-  std::size_t operator()(const T &) const {
-    return std::tuple_size<
-      typename omni::reflected_record_t<T>::public_fields_t>::value;
+  std::size_t operator()(const T &v) const {
+    return std::tuple_size<decltype(v.public_fields())>::value;
   }
 } field_count;
 
 static const struct reflected_name_t {
   template <typename T>
-  std::string operator()(const T &) const {
-    return omni::reflected<T>().name();
+  std::string operator()(const T &v) const {
+    return v.type_name();
   }
 } reflected_name;
+
+static const struct reflected_annotation_t {
+  template <typename T>
+  std::string operator()(const T &v) const {
+    return v.annotation();
+  }
+} reflected_annotation;
+
+static const struct field_annotations_t {
+  struct collect {
+    template <typename... Field>
+    std::vector<std::string> operator()(const Field &...f) const {
+      return std::vector<std::string>{f.annotation()...};
+    }
+  };
+
+  template <typename T>
+  std::vector<std::string> operator()(const T &v) const {
+    return omni::compat::apply(collect{}, v.public_fields());
+  }
+} field_annotations;
+
+static const struct constexpr_annotations_t {
+  template <typename T>
+  bool operator()(const T &v) const {
+    typedef typename std::tuple_element<
+      0,
+      decltype(v.public_fields())>::type first_field;
+
+    static_assert('a' == T::annotation()[0],
+      "type annotation must be constexpr");
+    static_assert('a' == first_field::annotation()[0],
+      "field annotation must be constexpr");
+
+    return true;
+  }
+} constexpr_annotations;
 
 static const struct first_field_type_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type field_type;
 
-    return omni::reflected<field_type>().name();
+    return omni::meta_t<field_type>::type_name();
   }
 } first_field_type_name;
 
 static const struct second_field_type_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<1>(fields);
     typedef typename decltype(f)::type field_type;
 
-    return omni::reflected<field_type>().name();
+    return omni::meta_t<field_type>::type_name();
   }
 } second_field_type_name;
 
 static const struct enum_names_t {
   template <typename Enum>
-  std::vector<std::string> operator()(const Enum &) const {
-    const auto enumerators = omni::reflected<Enum>().enumerators();
+  std::vector<std::string> operator()(const Enum &e) const {
+    const auto enumerators = e.enumerators();
     std::vector<std::string> names;
     names.reserve(enumerators.size());
 
@@ -121,32 +157,30 @@ namespace as_field {
 static const struct get_dependency_name_t {
   template <typename ParentType>
   std::string operator()(const ParentType &v) const {
-    const auto f = std::get<0>(omni::reflected(v).public_fields());
+    const auto f = std::get<0>(v.public_fields());
     using field_type = typename decltype(f)::type;
 
-    return std::string(omni::reflected<ParentType>().name())
-      + "::" + std::string(omni::reflected<field_type>().name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::reflected<field_type>().type_name()) + ":int";
   }
 } get_dependency_name;
 
 static const struct get_dependency_name_layer_2_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    using root_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-
-    const auto outer_fields = omni::reflected(v).public_fields();
+    const auto outer_fields = v.public_fields();
     const auto outer_f = std::get<0>(outer_fields);
     using intermediate_type = typename decltype(outer_f)::type;
 
     const auto inner = outer_f.value();
-    const auto inner_fields = omni::reflected(inner).public_fields();
+    auto inner_reflection = omni::reflected(inner);
+    const auto inner_fields = inner_reflection.public_fields();
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
-    return std::string(omni::reflected<root_type>().name())
-      + "::" + std::string(omni::reflected<intermediate_type>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::reflected<intermediate_type>().type_name()) + "::"
+      + std::string(omni::reflected<dep_type>().type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -157,12 +191,14 @@ namespace as_alias {
 static const struct get_dependency_name_t {
   template <typename Parent>
   std::string operator()(const Parent &) const {
-    static_assert(omni::is_reflected<Parent>::value, "Parent is not reflected");
-    static_assert(omni::is_reflected<typename Parent::value_type>::value,
+    using parent_type = typename Parent::type;
+    static_assert(omni::is_reflected<parent_type>::value,
+      "Parent is not reflected");
+    static_assert(omni::is_reflected<typename parent_type::value_type>::value,
       "Member alias is not reflected");
 
-    return std::string(omni::reflected<Parent>().name()) + "::"
-      + std::string(omni::reflected<typename Parent::value_type>().name())
+    return std::string(Parent::type_name()) + "::"
+      + std::string(omni::meta_t<typename parent_type::value_type>::type_name())
       + ":int";
   }
 } get_dependency_name;
@@ -170,14 +206,13 @@ static const struct get_dependency_name_t {
 static const struct get_dependency_name_layer_2_t {
   template <typename T>
   std::string operator()(const T &) const {
-    using root_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-    using level_1 = typename T::value_type;
+    using root_type = typename T::type;
+    using level_1 = typename root_type::value_type;
     using dep_type = typename level_1::value_type;
 
-    return std::string(omni::reflected<root_type>().name())
-      + "::" + std::string(omni::reflected<level_1>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(T::type_name()) + "::"
+      + std::string(omni::meta_t<level_1>::type_name()) + "::"
+      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -188,16 +223,13 @@ namespace as_template_arg {
 static const struct get_dependency_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    using parent_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
 
-    return std::string(omni::reflected<parent_type>().name())
-      + "::" + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name;
 
@@ -212,10 +244,7 @@ static const struct get_dependency_name_layer_2_t {
 
   template <typename T>
   std::string operator()(const T &v) const {
-    using root_type =
-      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
-
-    const auto outer_fields = omni::reflected(v).public_fields();
+    const auto outer_fields = v.public_fields();
     const auto outer_f = std::get<0>(outer_fields);
     using outer_field_type = typename decltype(outer_f)::type;
 
@@ -223,9 +252,8 @@ static const struct get_dependency_name_layer_2_t {
       typename first_variant_arg<outer_field_type>::type; // std::tuple<...>
     using dep_type = typename std::tuple_element<0, intermediate_type>::type;
 
-    return std::string(omni::reflected<root_type>().name())
-      + "::tuple::" // intermediate_type is a std::tuple<...>
-      + std::string(omni::reflected<dep_type>().name()) + ":int";
+    return std::string(v.type_name()) + "::tuple::" // intermediate_type is a std::tuple<...>
+      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -236,7 +264,7 @@ namespace as_sequence_arg {
 static const struct get_vector_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type vector_type;
     typedef typename vector_type::value_type value_type;
@@ -244,15 +272,15 @@ static const struct get_vector_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Vector value type is not reflected");
 
-    return std::string(omni::reflected<T>().name())
-      + "::vector::" + omni::reflected<value_type>().name();
+    return std::string(v.type_name())
+      + "::vector::" + omni::meta_t<value_type>::type_name();
   }
 } get_vector_value_name;
 
 static const struct get_tuple_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type tuple_type;
     typedef typename std::tuple_element<0, tuple_type>::type value_type;
@@ -260,15 +288,15 @@ static const struct get_tuple_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Tuple value type is not reflected");
 
-    return std::string(omni::reflected<T>().name())
-      + "::tuple::" + omni::reflected<value_type>().name();
+    return std::string(v.type_name())
+      + "::tuple::" + omni::meta_t<value_type>::type_name();
   }
 } get_tuple_value_name;
 
 static const struct get_tuple_second_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type tuple_type;
     typedef typename std::tuple_element<1, tuple_type>::type value_type;
@@ -276,8 +304,8 @@ static const struct get_tuple_second_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Tuple second value type is not reflected");
 
-    return std::string(omni::reflected<T>().name())
-      + "::tuple::" + omni::reflected<value_type>().name();
+    return std::string(v.type_name())
+      + "::tuple::" + omni::meta_t<value_type>::type_name();
   }
 } get_tuple_second_value_name;
 
@@ -292,7 +320,7 @@ static const struct get_variant_value_name_t {
 
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type variant_type;
     typedef typename first_variant_arg<variant_type>::type value_type;
@@ -300,15 +328,15 @@ static const struct get_variant_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Variant value type is not reflected");
 
-    return std::string(omni::reflected<T>().name())
-      + "::variant::" + omni::reflected<value_type>().name();
+    return std::string(v.type_name())
+      + "::variant::" + omni::meta_t<value_type>::type_name();
   }
 } get_variant_value_name;
 
 static const struct get_nested_vector_tuple_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = omni::reflected(v).public_fields();
+    const auto fields = v.public_fields();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type vector_type;
     typedef typename vector_type::value_type tuple_type;
@@ -317,8 +345,8 @@ static const struct get_nested_vector_tuple_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Nested vector tuple value type is not reflected");
 
-    return std::string(omni::reflected<T>().name())
-      + "::vector::tuple::" + omni::reflected<value_type>().name();
+    return std::string(v.type_name())
+      + "::vector::tuple::" + omni::meta_t<value_type>::type_name();
   }
 } get_nested_vector_tuple_value_name;
 
@@ -330,7 +358,7 @@ template <typename Base>
 struct is_base_reflected_t {
   template <typename Derived>
   bool operator()(const Derived &) const {
-    static_assert(std::is_base_of<Base, Derived>::value,
+    static_assert(std::is_base_of<Base, typename Derived::type>::value,
       "Input is not Derived from Base");
     return omni::is_reflected<Base>::value;
   }
@@ -342,7 +370,9 @@ struct is_base_reflected_t {
 
 namespace resolved {
 
+/** annotation: as_field type */
 struct as_field {
+  //! annotation: as_field value
   int value;
 };
 
@@ -366,8 +396,9 @@ struct as_template_arg_layer_2 {
   int value;
 };
 
+/*! annotation: inherited base type */
 struct as_inherited_struct {
-  int base_field;
+  int base_field; ///< annotation: inherited base field
 };
 
 struct as_second_base {
@@ -402,6 +433,7 @@ enum plain_status {
   plain_status_done,
 };
 
+//! annotation: scoped status enum
 enum class scoped_status {
   idle,
   busy,
@@ -441,6 +473,11 @@ struct example_value {
   std::string name;
   int count;
   double score;
+};
+
+struct unannotated_record {
+  std::string name;
+  int count;
 };
 
 // field → dependency
@@ -516,10 +553,26 @@ struct mpark_template_dep_level_2 {
   mpark::variant<std::tuple<resolved::as_template_arg_layer_2>> var_field_2;
 };
 
+/** annotation: primary template record */
 template <typename T>
 struct primary_template_record {
+  //! annotation: primary template value
   T value;
-  int count;
+  int count; ///< annotation: primary template count
+};
+
+/*! annotation: comment forms type */
+struct annotation_comment_forms {
+  /// annotation: slash line field
+  int slash_line;
+  //! annotation: bang line field
+  int bang_line;
+  /** annotation: slash block field */
+  int slash_block;
+  /*! annotation: bang block field */
+  int bang_block;
+  int trailing_slash; ///< annotation: trailing slash field
+  int trailing_bang; //!< annotation: trailing bang field
 };
 
 template <typename T, int N>
@@ -548,27 +601,35 @@ struct allocator_policy_template_record {
     map;
 };
 
+//! annotation: template base type
 template <typename T>
 struct template_base {
+  /** annotation: template base value */
   T base_value;
 };
 
+/*! annotation: template derived type */
 template <typename T>
 struct template_derived: template_base<T> {
-  int own_field;
+  int own_field; //!< annotation: template derived own field
 };
 
+/** annotation: CRTP base template */
 template <typename Derived>
 struct crtp_base {
+  //! annotation: CRTP base field
   int crtp_base_field;
 };
 
+//! annotation: CRTP derived type
 struct crtp_derived: crtp_base<crtp_derived> {
-  std::string crtp_own_field;
+  std::string crtp_own_field; ///< annotation: CRTP own field
 };
 
+/// annotation: CRTP template derived type
 template <typename T>
 struct crtp_template_derived: crtp_base<crtp_template_derived<T>> {
+  /// annotation: CRTP template field
   T crtp_template_field;
 };
 
@@ -616,6 +677,16 @@ struct derived_struct: resolved::as_inherited_struct {
   derived_struct(int base, double derived)
       : resolved::as_inherited_struct{base}
       , derived_field(derived) {}
+};
+
+struct shared_from_this_derived:
+    std::enable_shared_from_this<shared_from_this_derived> {
+  std::string name;
+  int count;
+
+  shared_from_this_derived(std::string n, int c)
+      : name(n)
+      , count(c) {}
 };
 
 struct multi_base_derived:

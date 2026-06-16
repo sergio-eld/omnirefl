@@ -2,8 +2,7 @@
 #include "gtest_include.h"
 #include "shared_structs.h"
 
-#include <omnirefl/reflected_call.hpp>
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp>
 
 #include <mpark/variant.hpp>
 
@@ -61,13 +60,7 @@ const T *get_if(const std::variant<V...> *value) {
 } // namespace compat
 
 namespace example_impl {
-template <typename T, typename V>
-void from_std_map(const std::map<std::string, V> &from, T &to);
-
-template <typename T, typename V>
-T from_std_map(const std::map<std::string, V> &from);
-
-// FIXME: leaking reflected-scope query helper; safe only while instantiated
+// note: reflected-scope query helper; safe only while instantiated
 // inside a reflected scope.
 template <typename T, bool = omni::is_reflected<T>::value>
 struct is_reflected_record: std::false_type {};
@@ -75,7 +68,7 @@ struct is_reflected_record: std::false_type {};
 template <typename T>
 struct is_reflected_record<T, true>:
     std::integral_constant<bool,
-      omni::reflected_entity::record == omni::reflected_t<T>::entity()> {};
+      omni::reflected_entity::record == omni::meta_t<T>::entity()> {};
 
 template <typename T>
 struct is_string_map: std::false_type {};
@@ -93,12 +86,31 @@ struct print_field_names_simple_t {
   };
 
   template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    static_assert(omni::is_reflected<T>::value, "");
-    const auto fields = omni::reflected(t).public_fields();
-    return omni::compat::apply(_visit{}, fields);
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return omni::compat::apply(_visit{}, binding.public_fields());
   }
 } const static print_field_names_simple{};
+
+struct print_field_annotations_simple_t {
+  struct _visit {
+    template <typename... F>
+    std::vector<std::string> operator()(const F &...field) {
+      return {std::string(field.annotation())...};
+    }
+  };
+
+  template <typename T>
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return omni::compat::apply(_visit{}, binding.public_fields());
+  }
+} const static print_field_annotations_simple{};
+
+struct print_annotation_simple_t {
+  template <typename T>
+  std::string operator()(omni::binding_t<T> binding) const {
+    return binding.annotation();
+  }
+} const static print_annotation_simple{};
 
 struct maybe_print_field_names_t {
   std::vector<std::string> operator()(int) const {
@@ -110,17 +122,15 @@ struct maybe_print_field_names_t {
   }
 
   template <typename T>
-  std::vector<std::string> operator()(const T &t) const {
-    static_assert(omni::is_reflected<T>::value, "");
-    return print_field_names_simple(t);
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return print_field_names_simple(binding);
   }
 } const static maybe_print_field_names{};
 
 struct field_values_simple_t {
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    const auto fields = omni::reflected(t).public_fields();
-    return omni::compat::apply(*this, fields);
+    return omni::compat::apply(*this, t.public_fields());
   }
 
   template <typename... Field>
@@ -171,6 +181,12 @@ struct field_values_simple_t {
     _append(std::vector<std::string> &, const Field &) {}
 } const static field_values_simple{};
 
+template <typename T, typename V>
+void from_std_map(const std::map<std::string, V> &from, T &to);
+
+template <typename T, typename V>
+T from_std_map(const std::map<std::string, V> &from);
+
 struct write_fields_from_std_map {
   template <typename V, typename... Field>
   void operator()(const std::map<std::string, V> &from, Field... field) const {
@@ -179,6 +195,16 @@ struct write_fields_from_std_map {
   }
 
   private:
+  template <typename Map>
+  struct _bind_map {
+    const Map &from;
+
+    template <typename... Field>
+    void operator()(Field... field) const {
+      write_fields_from_std_map{}(from, field...);
+    }
+  };
+
   template <typename V, typename Field>
   static typename std::enable_if<
     !is_reflected_record<typename Field::type>::value>::type
@@ -203,8 +229,12 @@ struct write_fields_from_std_map {
         && _write_field_from_nested_map(from.at(field.name()), field))
       return;
 
+    auto nested_binding = omni::meta_t<typename Field::type>::bind();
+    omni::compat::apply(_bind_map<std::map<std::string, V>>{from},
+      nested_binding.public_fields());
+
     // TODO: use the frontend mutability interface once it exists.
-    field.set_value(from_std_map<typename Field::type>(from));
+    field.set_value(nested_binding);
   }
 
   template <typename Field, typename Nested>
@@ -213,8 +243,12 @@ struct write_fields_from_std_map {
     if (!nested)
       return false;
 
+    auto nested_binding = omni::meta_t<typename Field::type>::bind();
+    omni::compat::apply(_bind_map<Nested>{*nested},
+      nested_binding.public_fields());
+
     // TODO: use the frontend mutability interface once it exists.
-    field.set_value(from_std_map<typename Field::type>(*nested));
+    field.set_value(nested_binding);
     return true;
   }
 
@@ -262,9 +296,8 @@ struct from_std_map_adapter {
   const std::map<std::string, V> &from;
 
   template <typename T>
-  void operator()(T &to) const {
-    auto fields = omni::reflected(to).public_fields();
-    omni::compat::apply(*this, fields);
+  void operator()(T to) const {
+    omni::compat::apply(*this, to.public_fields());
   }
 
   template <typename... Field>
@@ -277,10 +310,10 @@ template <typename T, typename V>
 struct from_std_map_return_adapter {
   const std::map<std::string, V> &from;
 
-  T operator()(T to) const {
-    auto fields = omni::reflected(to).public_fields();
-    omni::compat::apply(*this, fields);
-    return to;
+  template <typename Binding>
+  T operator()(Binding value) const {
+    omni::compat::apply(*this, value.public_fields());
+    return value;
   }
 
   template <typename... Field>
@@ -294,14 +327,13 @@ template <typename T, typename V>
 void from_std_map(const std::map<std::string, V> &from, T &to) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   omni::reflected_call(
-    [](auto &v, const auto &from) -> void {
-      auto fields = omni::reflected(v).public_fields();
+    [&from](auto binding) -> void {
+      auto fields = binding.public_fields();
       omni::compat::apply(
         [&from](auto... field) { write_fields_from_std_map{}(from, field...); },
         fields);
     },
-    to,
-    from);
+    to);
 #else
   omni::reflected_call(from_std_map_adapter<V>{from}, to);
 #endif
@@ -311,28 +343,27 @@ template <typename T, typename V>
 T from_std_map(const std::map<std::string, V> &from) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   return omni::reflected_call(
-    [](auto type, const auto &from) -> T {
-      using out_type = typename decltype(type)::type;
-      out_type to{};
-      auto fields = omni::reflected(to).public_fields();
+    [&from](auto binding) -> T {
+      auto fields = binding.public_fields();
       omni::compat::apply(
         [&from](auto... field) { write_fields_from_std_map{}(from, field...); },
         fields);
-      return to;
+      return binding;
     },
-    omni::compat::type_identity<T>{},
-    from);
+    T{});
 #else
-  return omni::reflected_call(from_std_map_return_adapter<T, V>{from}, T{});
+  return omni::reflected_call(from_std_map_return_adapter<T, V>{from},
+    T{});
 #endif
 }
+
 } // namespace example_impl
 
 static const struct {
   template <typename Enum>
-  std::vector<std::string> operator()(const Enum &) const noexcept {
-    static_assert(omni::is_reflected<Enum>::value, "enum not reflected");
-    const auto enums = omni::reflected_enum_t<Enum>::enumerators();
+  std::vector<std::string> operator()(omni::binding_t<Enum> binding) const
+    noexcept {
+    const auto enums = binding.enumerators();
     std::vector<std::string> names;
     for (const auto &value_name : enums)
       names.emplace_back(value_name.second);
@@ -342,9 +373,11 @@ static const struct {
 } get_enumerators{};
 
 namespace example {
+/** annotation: in_cpp_struct type */
 struct in_cpp_struct {
+  //! annotation: in_cpp field 0
   std::string in_cpp_field_0;
-  int in_cpp_field_1;
+  int in_cpp_field_1; ///< annotation: in_cpp field 1
   double in_cpp_field_2;
 };
 
@@ -428,6 +461,7 @@ enum in_cpp_enum {
   in_cpp_enum_c,
 };
 
+/*! annotation: in_cpp scoped enum */
 enum class in_cpp_scoped_enum {
   in_cpp_scoped_enum_a,
   in_cpp_scoped_enum_b,
@@ -458,8 +492,10 @@ struct in_cpp_deep_derived: in_cpp_mid_base {
   double in_cpp_deep_field_2;
 };
 
+//! annotation: in_cpp CRTP base
 template <typename Derived>
 struct in_cpp_crtp_base {
+  /** annotation: in_cpp CRTP base field */
   int in_cpp_crtp_base_field;
 };
 
@@ -486,8 +522,9 @@ struct in_cpp_crtp_base_with_private_cpp_base: private in_cpp_struct {
   int in_cpp_crtp_private_cpp_base_field;
 };
 
+/*! annotation: in_cpp CRTP derived */
 struct in_cpp_crtp_derived: in_cpp_crtp_base<in_cpp_crtp_derived> {
-  std::string in_cpp_crtp_field_0;
+  std::string in_cpp_crtp_field_0; //!< annotation: in_cpp CRTP field 0
   double in_cpp_crtp_field_1;
 };
 
@@ -848,6 +885,42 @@ TEST(print_names, in_cpp_struct) {
     omni::reflected_call(example_impl::print_field_names_simple, p));
 }
 
+TEST(annotations, in_cpp_struct_type_annotation) {
+  const example::in_cpp_struct p{};
+  ASSERT_EQ("annotation: in_cpp_struct type",
+    omni::reflected_call(example_impl::print_annotation_simple, p));
+}
+
+TEST(annotations, in_cpp_struct_field_annotations) {
+  const example::in_cpp_struct p{};
+  const static std::vector<std::string> expected{
+    "annotation: in_cpp field 0",
+    "annotation: in_cpp field 1",
+    "",
+  };
+  ASSERT_EQ(expected,
+    omni::reflected_call(example_impl::print_field_annotations_simple, p));
+}
+
+TEST(annotations, in_cpp_scoped_enum_annotation) {
+  const example::in_cpp_scoped_enum e{};
+  ASSERT_EQ("annotation: in_cpp scoped enum",
+    omni::reflected_call(example_impl::print_annotation_simple, e));
+}
+
+TEST(annotations, in_cpp_crtp_annotation_and_fields) {
+  const example::in_cpp_crtp_derived p{};
+
+  ASSERT_EQ("annotation: in_cpp CRTP derived",
+    omni::reflected_call(example_impl::print_annotation_simple, p));
+  ASSERT_EQ((std::vector<std::string>{
+              "annotation: in_cpp CRTP base field",
+              "annotation: in_cpp CRTP field 0",
+              "",
+            }),
+    omni::reflected_call(example_impl::print_field_annotations_simple, p));
+}
+
 TEST(print_names, in_cpp_derived_from_header_struct) {
   const example::in_cpp_derived_from_header_struct p{};
   const static std::vector<std::string> expected{
@@ -933,11 +1006,14 @@ TEST(print_enums, in_cpp_scoped_enum_with_underlying) {
       // IMPORTANT NOTE: Trailing return type _must_ be specified, otherwise AST
       // parser will go inside the body to evaluate the return type, thus
       // breaking the tool run.
-      [](const auto &v) -> std::vector<std::string> {
-        using Enum = decltype(v);
+      [](auto binding) -> std::vector<std::string> {
+        using Enum = typename decltype(binding)::type;
 
+        // Top-level reflected_call args must be reflected already, or this
+        // lambda will not compile. This assertion is documentation, not a
+        // separate runtime path.
         static_assert(omni::is_reflected<Enum>::value, "enum not reflected");
-        const auto enums = omni::reflected_enum_t<Enum>::enumerators();
+        const auto enums = binding.enumerators();
         std::vector<std::string> names;
         for (const auto &value_name : enums)
           names.emplace_back(value_name.second);
@@ -2903,9 +2979,11 @@ struct in_cpp_template<int>: in_header_struct {
   double in_cpp_template_field_2;
 };
 
+/** annotation: in_cpp template CRTP derived */
 template <typename T>
 struct in_cpp_template_crtp_derived:
     in_cpp_crtp_base<in_cpp_template_crtp_derived<T>> {
+  //! annotation: in_cpp template CRTP field
   T in_cpp_template_crtp_field;
   std::string in_cpp_template_crtp_name;
 };
@@ -2993,6 +3071,22 @@ TEST(print_names, in_cpp_template_crtp_second_instantiation_public_base) {
   };
   ASSERT_EQ(expected,
     omni::reflected_call(example_impl::print_field_names_simple, p));
+}
+
+TEST(annotations, in_cpp_template_crtp_annotation_is_shared_by_instantiations) {
+  const example::in_cpp_template_crtp_derived<double> first{};
+  const example::in_cpp_template_crtp_derived<int> second{};
+
+  ASSERT_EQ("annotation: in_cpp template CRTP derived",
+    omni::reflected_call(example_impl::print_annotation_simple, first));
+  ASSERT_EQ("annotation: in_cpp template CRTP derived",
+    omni::reflected_call(example_impl::print_annotation_simple, second));
+  ASSERT_EQ((std::vector<std::string>{
+              "annotation: in_cpp CRTP base field",
+              "annotation: in_cpp template CRTP field",
+              "",
+            }),
+    omni::reflected_call(example_impl::print_field_annotations_simple, first));
 }
 
 TEST(write_values, in_cpp_template_crtp_public_base_from_std_map) {

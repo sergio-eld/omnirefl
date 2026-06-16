@@ -1,7 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflected_call.hpp> //< for in-header call
-#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/reflection.hpp> //< for in-header call
 
 #include <sstream>
 #include <string>
@@ -13,13 +12,9 @@ namespace odr_test {
 
 struct get_field_name_values_t {
   template <typename T>
-  std::vector<std::string> operator()(const T &value) const {
-    if (!omni::is_reflected<T>::value)
-      return {"not", "reflected"};
-
+  std::vector<std::string> operator()(omni::binding_t<T> value) const {
     // todo: use range for loop
-    return omni::compat::apply(_collect_fields_info{},
-      omni::reflected_record(value).public_fields());
+    return omni::compat::apply(_collect_fields_info{}, value.public_fields());
   }
 
   private:
