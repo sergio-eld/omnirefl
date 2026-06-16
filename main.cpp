@@ -36,7 +36,6 @@
 #include <clang/Frontend/Utils.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Serialization/PCHContainerOperations.h>
-#include <clang/Tooling/CompilationDatabase.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/SmallVector.h>
@@ -220,24 +219,6 @@ std::expected<int, app_error> report_error(app_error error) {
 
 namespace cli {
 
-/// compilation flags
-struct cl_flags {
-  std::vector<std::string> values;
-};
-
-/// compile_commands.json
-struct json_cl_db {
-  fs::path path;
-};
-
-struct cli_source_file {
-  fs::path path;
-
-  /// used to deduplicate if compilation_db contains several commands for one
-  /// file
-  std::string output_substr;
-};
-
 // parsed cli args (in correct state)
 struct options {
   // .cpp source
@@ -256,9 +237,6 @@ struct options {
 
 std::expected<options, app_error> parse(int argc,
   const char *const *argv) noexcept;
-
-/// CLI11 uses ADL to specialize parsing cli args to custom types
-bool lexical_cast(const std::string &arg, cli_source_file &src);
 
 } // namespace cli
 
@@ -1085,6 +1063,8 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     "\n"
     "\nGenerates a .hpp header containing reflection metadata for a given .cpp file."
     "\nThe header must be implicitly included at the start of the translation unit."
+    "\n"
+    "\nUsage: omnirefl -o <reflection.hpp> --source <source.cpp> -- <compiler command...>"
     "\n  WARNING: Uses compile time counters via friend injection, which is not guaranteed"
     "\n           by the C++ Standard to be consistent between compiler implementations.",
   };
@@ -1101,10 +1081,11 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     ->check(CLI::ExistingDirectory);
   // ->default_val(fs::path()); //< todo: resolve from installation
 
-  cli_source_file cli_source;
+  fs::path cli_source;
   app
     .add_option("-s,--source", cli_source, ".cpp file path to run the tool on.")
     ->type_name("FILE")
+    ->check(CLI::ExistingFile)
     ->required();
 
   fs::path cli_out;
@@ -1120,112 +1101,21 @@ std::expected<cli::options, app_error> cli::parse(int argc,
       "Disable reflected documentation comment annotations.")
     ->configurable(false);
 
-  std::optional<fs::path> cli_comp_db = std::nullopt;
-  app.add_option("--comp-db", cli_comp_db, "Path to compile_commands.json")
-    ->type_name("FILE")
-    ->check([](const std::string &file) -> std::string {
-      if (file.empty())
-        return "";
-      return CLI::ExistingFile(file);
-    });
-
   app.allow_extras();
 
   source_file cli_source_with_flags;
 
-  // refactorme: use ranges
-  // Validation here
   app.callback([&] {
-    // -- check source
-    {
-      cli_source.path =
-        fs::absolute(std::move(cli_source.path)).lexically_normal();
+    std::vector flags = app.remaining();
+    if (!flags.empty() && "--" == flags.front())
+      flags.erase(flags.begin());
 
-      // refactorme: 'unquote' string function
-      if (cli_source.output_substr.starts_with("\'")
-        || cli_source.output_substr.starts_with("\""))
-        cli_source.output_substr =
-          std::move(cli_source.output_substr).substr(1);
-
-      if (cli_source.output_substr.ends_with("\'")
-        || cli_source.output_substr.ends_with("\""))
-        cli_source.output_substr =
-          std::move(cli_source.output_substr)
-            .substr(0, cli_source.output_substr.size() - 1);
-
-      if (!fs::exists(cli_source.path)) {
-        throw CLI::ValidationError("Non-existent source:",
-          cli_source.path.generic_string());
-      }
-    }
-
-    const std::vector flags = app.remaining();
-    if (!cli_comp_db) {
-      cli_source_with_flags = {
-        .path = std::move(cli_source.path),
-        .flags = flags,
-      };
-
-      return;
-    }
-
-    if (!app.remaining().empty())
-      throw CLI::ValidationError(
-        "Compilation flags are not allowed if compile_commands.json is used.");
-
-    cli_comp_db = fs::absolute(*std::move(cli_comp_db)).lexically_normal();
-
-    const std::expected loaded = std::invoke(
-      [](const fs::path &db_path)
-        -> std::expected<std::unique_ptr<clang::tooling::CompilationDatabase>,
-          std::string> {
-        std::string err;
-        std::unique_ptr loaded =
-          // fixme:
-          // this is an inconsistent cli interface. one can pass any
-          // 'existing' file which is actually not a `compile_commands.json`
-          // but still load `compile_commands.json`
-          clang::tooling::CompilationDatabase::loadFromDirectory(
-            db_path.parent_path().generic_string(),
-            err);
-
-        if (!loaded)
-          return std::unexpected(std::move(err));
-
-        return loaded;
-      },
-      *cli_comp_db);
-
-    if (!loaded)
-      throw CLI::ValidationError("Invalid compilation db file:",
-        cli_comp_db->generic_string());
-
-    llvm::errs() << std::format("\n[debug] disambiguation substring for {}: {}",
-      cli_source.path.string(),
-      cli_source.output_substr);
-
-    std::vector commands =
-      (*loaded)->getCompileCommands(cli_source.path.generic_string());
-
-    std::vector resolved = commands //
-      | std::views::as_rvalue
-      | std::views::filter(
-        [&cli_source](const clang::tooling::CompileCommand &c) -> bool {
-          return c.Output.contains(cli_source.output_substr);
-        })
-      | std::ranges::to<std::vector>();
-
-    if (1 != resolved.size()) {
-      throw CLI::ValidationError("Failed to resolve source from compilation db",
-        std::format("{}: failed to resolve from {} commands by substring `{}`",
-          cli_source.path.generic_string(),
-          commands.size(),
-          cli_source.output_substr));
-    }
+    if (flags.empty())
+      throw CLI::ValidationError("Missing compiler command after `--`.");
 
     cli_source_with_flags = {
-      .path = cli_source.path,
-      .flags = std::move(resolved.front().CommandLine),
+      .path = fs::absolute(std::move(cli_source)).lexically_normal(),
+      .flags = std::move(flags),
     };
   });
 
@@ -1246,93 +1136,6 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     .resource_dir = std::move(cli_resource_dir),
     .annotations = !no_annotations,
   };
-}
-
-/// CLI11 uses ADL to specialize parsing cli args to custom types
-bool cli::lexical_cast(const std::string &arg, cli_source_file &src) {
-  std::string_view sv = arg;
-  if (sv.empty())
-    return false;
-
-  // case 1: unquoted (simpler) - handle first.
-  if ('"' != sv.front()) {
-    auto v_parts = sv | std::views::split(':')
-      | std::views::transform(fn::as<std::string_view>);
-
-    const std::vector parts(v_parts.begin(), v_parts.end());
-
-    // Valid only if 1 or 2 parts.
-    if (parts.empty() || 2 < parts.size())
-      return false;
-
-    // Path before ':' must not be empty.
-    if (parts.front().empty())
-      return false;
-
-    src.path = fs::path(parts.front());
-    src.output_substr =
-      (2 == parts.size()) ? std::string(parts.back()) : std::string{};
-    return true;
-  }
-
-  // case 2: starts with '"' -> quoted logic.
-  std::ranges::view auto view = sv | std::views::split('"')
-    | std::views::transform(fn::as<std::string_view>)
-    | std::views::filter([](std::string_view s) { return !s.empty(); });
-
-  const std::vector parts(view.begin(), view.end());
-
-  if (parts.empty() || 3 < parts.size())
-    return false;
-
-  if (1 == parts.size()) {
-    // `"path"`
-    // Reject empty quoted path: ""...
-    if (2 <= sv.size() && '"' == sv[1])
-      return false;
-
-    src.path = fs::path(parts[0]);
-    src.output_substr.clear();
-    return true;
-  }
-
-  if (2 == parts.size()) {
-    // `"path":out` -> [path, :out]
-    const auto &p0 = parts[0];
-    const auto &p1 = parts[1];
-
-    if (p0.empty())
-      return false;
-
-    if (p1.empty())
-      return false;
-
-    if (':' != p1.front())
-      return false;
-
-    // second "path" (after ':') must not be empty
-    if (1 == p1.size())
-      return false;
-
-    src.path = fs::path(p0);
-    src.output_substr.assign(p1.substr(1)); // after ':'
-    return true;
-  }
-
-  // 3 == parts.size(): `"path":"out"` -> [path, :, out]
-  const auto &p0 = parts[0];
-  const auto &p1 = parts[1];
-  const auto &p2 = parts[2];
-
-  if (p0.empty() || p2.empty())
-    return false;
-
-  if (!(1 == p1.size() && ':' == p1.front()))
-    return false;
-
-  src.path = fs::path(p0);
-  src.output_substr.assign(p2);
-  return true;
 }
 
 std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
@@ -1687,11 +1490,12 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
       is_undef = false;
     }
 
-    // removing force-included reflection header that is being generated
+    // Remove force-included reflection headers. They belong to the real
+    // compilation step, not to the tool run.
     std::erase_if(po.Includes,
-      [&output_dir = cli_args.out](const std::string &s) -> bool {
-        // todo: should I remove the exact path?
-        return util::is_subpath(s, output_dir);
+      [&out = cli_args.out](const std::string &s) -> bool {
+        const std::string filename = fs::path{s}.filename().string();
+        return util::is_subpath(s, out) || filename.ends_with(".omnirefl.hpp");
       });
 
     // todo: unify logging with level tags.

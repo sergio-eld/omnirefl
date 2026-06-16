@@ -18,7 +18,7 @@ services:
           -DENABLE_TESTING=ON \
           -DENABLE_BENCH=ON \
           -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
-        cmake --build . -t omnirefl -j$$(nproc) && # strip it before running tests 
+        cmake --build . -t omnirefl ccdb_query -j$$(nproc) && # strip it before running tests 
 
         # split debug info into separate file
         mkdir -p symbols &&
@@ -52,7 +52,7 @@ services:
           -DENABLE_TESTING=OFF \
           -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
 
-        cmake --build . -t omnirefl.exe -j$$(nproc) &&
+        cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
 
         # split debug info into separate file (PE/COFF)
         mkdir -p symbols &&
@@ -78,9 +78,12 @@ services:
       - |
         set -o pipefail
         PREFIX=alpine-results
+        JOBS=$$(( $$(nproc) > 2 ? $$(nproc) - 2 : 1 ))
+
+        cmake --build . -t omnirefl ccdb_query -j$$JOBS
 
         set +e
-        ctest --parallel --output-junit "/test/$${PREFIX}.xml" -V 2>&1 | tee "/test/$${PREFIX}.log"
+        ctest --parallel $$JOBS --output-junit "/test/$${PREFIX}.xml" -V 2>&1 | tee "/test/$${PREFIX}.log"
         rc=$$?
         set -e
 
@@ -196,4 +199,3 @@ services:
         ; ctest . --output-junit C:/test/windows-results.xml -V | tee C:/test/windows-results.log
         ; exit $$LASTEXITCODE
         ;}
-

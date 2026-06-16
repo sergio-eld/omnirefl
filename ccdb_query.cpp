@@ -12,6 +12,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -20,26 +21,34 @@ using namespace std::string_view_literals;
 
 namespace fs = std::filesystem;
 
+struct cli_path {
+  fs::path value;
+};
+
+bool lexical_cast(const std::string &arg, cli_path &out) {
+  out = {.value = fs::path{arg}};
+  return true;
+}
+
 std::string shell_quote(std::string_view arg) {
   if (arg.empty())
     return "''";
 
   const bool needs_quote = std::ranges::any_of(arg, [](const char c) {
     return std::isspace(static_cast<unsigned char>(c))
-      || "'\"\\$`|&;<>()[{}]*?!#"sv.contains(c);
+      || "'\"$`|&;<>()[{}]*?!#"sv.contains(c);
   });
 
-  return needs_quote
-    ? std::format("'{}'",
-        arg //
-          | std::views::transform([](const char &c) -> std::string_view {
-              return '\'' == c //
-                ? "'\\''"sv
-                : std::string_view{&c, 1};
-            }) //
-          | std::views::join //
-          | std::ranges::to<std::string>())
-    : std::string{arg};
+  const auto escaped = arg //
+    | std::views::transform([](const char &c) -> std::string_view {
+        if ('\\' == c)
+          return "/"sv;
+        return '\'' == c ? "'\\''"sv : std::string_view{&c, 1};
+      }) //
+    | std::views::join //
+    | std::ranges::to<std::string>();
+
+  return needs_quote ? std::format("'{}'", escaped) : escaped;
 }
 
 std::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
@@ -58,21 +67,24 @@ std::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
   return loaded;
 }
 
+struct options {
+  fs::path compile_commands;
+  fs::path source;
+  std::string output_contains;
+};
+
 std::expected<clang::tooling::CompileCommand, std::string> resolve_command(
-  const fs::path &db_path,
-  const fs::path &source,
-  std::string_view output_contains) {
-  std::expected db = load_compile_db(db_path);
+  const options &o) {
+  std::expected db = load_compile_db(o.compile_commands);
   if (!db)
     return std::unexpected(std::move(db).error());
 
   const std::vector commands =
-    (*db)->getCompileCommands(source.generic_string());
+    (*db)->getCompileCommands(o.source.generic_string());
 
   std::vector resolved = commands //
-    | std::views::filter(
-      [&output_contains](const clang::tooling::CompileCommand &c) {
-        return c.Output.contains(output_contains);
+    | std::views::filter([&o](const clang::tooling::CompileCommand &c) {
+        return c.Output.contains(o.output_contains);
       })
     | std::ranges::to<std::vector>();
 
@@ -83,25 +95,19 @@ std::expected<clang::tooling::CompileCommand, std::string> resolve_command(
     return std::unexpected(
       std::format("{}: no compile command from {} candidate(s) matches output "
                   "substring `{}`",
-        source.generic_string(),
+        o.source.generic_string(),
         commands.size(),
-        output_contains));
+        o.output_contains));
   }
 
   return std::unexpected(
     std::format("{}: ambiguous compile command: {} command(s) from {} "
                 "candidate(s) match output substring `{}`",
-      source.generic_string(),
+      o.source.generic_string(),
       resolved.size(),
       commands.size(),
-      output_contains));
+      o.output_contains));
 }
-
-struct options {
-  fs::path compile_commands;
-  fs::path source;
-  std::string output_contains;
-};
 
 std::expected<options, std::string> parse(int argc, const char *const *argv) {
   CLI::App app{
@@ -110,25 +116,23 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
     "\nUsage: ccdb_query <compile_commands.json> <source.cpp> [output-contains]",
   };
 
-  options o;
+  CLI::Option *compile_commands =
+    app.add_option("compile_commands", "Path to compile_commands.json.")
+      ->type_name("FILE")
+      ->check(CLI::ExistingFile)
+      ->required();
 
-  app
-    .add_option("compile_commands",
-      o.compile_commands,
-      "Path to compile_commands.json.")
-    ->type_name("FILE")
-    ->check(CLI::ExistingFile)
-    ->required();
+  CLI::Option *source = //
+    app.add_option("source", "Source file to query.")
+      ->type_name("FILE")
+      ->required();
 
-  app.add_option("source", o.source, "Source file to query.")
-    ->type_name("FILE")
-    ->required();
-
-  app
-    .add_option("output_contains",
-      o.output_contains,
-      "Substring used to disambiguate compile command output.")
-    ->default_val(std::string{});
+  CLI::Option *output_contains = //
+    app
+      .add_option("output_contains",
+        "Substring used to disambiguate compile command output.")
+      ->type_name("TEXT")
+      ->default_val(std::string{});
 
   try {
     app.parse(argc, argv);
@@ -139,25 +143,27 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
     return std::unexpected(std::string{e.what()});
   }
 
-  o.compile_commands =
-    fs::absolute(std::move(o.compile_commands)).lexically_normal();
-  o.source = fs::absolute(std::move(o.source)).lexically_normal();
+  fs::path parsed_source =
+    fs::absolute(source->as<cli_path>().value).lexically_normal();
 
-  if (!fs::exists(o.source)) {
+  if (!fs::exists(parsed_source)) {
     return std::unexpected(
-      std::format("source does not exist: {}", o.source.generic_string()));
+      std::format("source does not exist: {}", parsed_source.generic_string()));
   }
 
-  return o;
+  return options{
+    .compile_commands =
+      fs::absolute(compile_commands->as<cli_path>().value).lexically_normal(),
+    .source = std::move(parsed_source),
+    .output_contains = output_contains->as<std::string>(),
+  };
 }
 
 } // namespace
 
 int main(int argc, const char *const *argv) {
   return parse(argc, argv)
-    .and_then([](const options &o) {
-      return resolve_command(o.compile_commands, o.source, o.output_contains);
-    })
+    .and_then(resolve_command)
     .transform([](const clang::tooling::CompileCommand &c) {
       std::cout << (c.CommandLine //
         | std::views::transform(shell_quote) //
@@ -166,10 +172,11 @@ int main(int argc, const char *const *argv) {
                 << '\n';
       return 0;
     })
-    .or_else([](const std::string &error) -> std::expected<int, std::string> {
-      if (!error.empty())
-        std::cerr << error << '\n';
-      return error.empty() ? 0 : -1;
-    })
+    .or_else(
+      [](const std::string &error) -> std::expected<int, std::monostate> {
+        if (!error.empty())
+          std::cerr << error << '\n';
+        return error.empty() ? 0 : -1;
+      })
     .value();
 }
