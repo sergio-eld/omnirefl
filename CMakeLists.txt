@@ -99,6 +99,22 @@ target_include_directories(tool PRIVATE
 target_link_libraries(tool PRIVATE CLI11::CLI11 clangTooling)
 add_static_compile_options(tool)
 
+add_executable(ccdb_query ccdb_query.cpp)
+add_executable(omni::ccdb_query ALIAS ccdb_query)
+
+set_target_properties(ccdb_query PROPERTIES
+    INTERPROCEDURAL_OPTIMIZATION ON
+    ENABLE_EXPORTS OFF)
+
+target_include_directories(ccdb_query SYSTEM PRIVATE
+    ${CLANG_INCLUDE_DIRS}
+    ${LLVM_INCLUDE_DIRS})
+
+target_include_directories(ccdb_query PRIVATE
+    ${PROJECT_SOURCE_DIR})
+
+target_link_libraries(ccdb_query PRIVATE CLI11::CLI11 clangTooling)
+add_static_compile_options(ccdb_query)
 
 # -- Tool frontend --------
 add_library(refl INTERFACE)
@@ -131,14 +147,16 @@ elseif(ENABLE_TESTING OR ENABLE_PACKAGE)
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
 
-    add_subdirectory(tests)
+    add_subdirectory(tests/tool tests)
+
+    add_subdirectory(tests/ccdb_query tests/ccdb_query)
 endif()
 
 if(ENABLE_PACKAGE)
     message(STATUS "Generating ${PROJECT_NAME} package")
     include(GNUInstallDirs)
 
-    install(TARGETS tool refl
+    install(TARGETS tool ccdb_query refl
         EXPORT "${PROJECT_NAME}Targets"
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
@@ -154,8 +172,8 @@ if(ENABLE_PACKAGE)
 
     # Ship tests as source so they can be run on other platforms.
     install(DIRECTORY
-        ${CMAKE_SOURCE_DIR}/tests
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
+        ${CMAKE_SOURCE_DIR}/tests/tool/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"
@@ -178,6 +196,7 @@ if(ENABLE_PACKAGE)
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/reflected_target.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_omnirefl_from_ccdb.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
     # fixme: do not print message when building for windows

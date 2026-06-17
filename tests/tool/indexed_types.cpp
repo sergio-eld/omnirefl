@@ -1,4 +1,4 @@
-#include "gtest_include.h"
+#include <gtest/gtest.h>
 
 // FIXME(high): indexed generated-header reflection is currently disabled as a
 // production test surface. The implementation relies on friend-injection

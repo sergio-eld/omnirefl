@@ -69,7 +69,12 @@ endfunction()
 function(omni_reflected_target target)
     _omni_checkhealth()
 
-    cmake_parse_arguments(OMNIREFL "ENABLE_INDEX_MODE;NO_ANNOTATIONS" "" "INCLUDE;EXCLUDE" ${ARGN})
+    cmake_parse_arguments(
+        OMNIREFL
+        "ENABLE_INDEX_MODE;NO_ANNOTATIONS;_DISABLE_PREVIEW_AD_HOC"
+        ""
+        "INCLUDE;EXCLUDE"
+        ${ARGN})
 
     if(OMNIREFL_INCLUDE AND OMNIREFL_EXCLUDE)
         message(FATAL_ERROR "omni_reflected_target: INCLUDE and EXCLUDE are mutually exclusive")
@@ -153,6 +158,18 @@ function(omni_reflected_target target)
         return()
     endif()
 
+    get_target_property(_target_cxx_standard ${target} CXX_STANDARD)
+    if(_target_cxx_standard STREQUAL "_target_cxx_standard-NOTFOUND")
+        set(_target_cxx_standard "${CMAKE_CXX_STANDARD}")
+    endif()
+
+    set(_msvc_cxx23_preview_ad_hoc 0)
+    if(MSVC
+            AND "${_target_cxx_standard}" STREQUAL "23"
+            AND NOT OMNIREFL__DISABLE_PREVIEW_AD_HOC)
+        set(_msvc_cxx23_preview_ad_hoc 1)
+    endif()
+
     # Shared lists for common plumbing
     set(_gen_outputs)
     set(_gen_depfiles)
@@ -168,26 +185,32 @@ function(omni_reflected_target target)
         set(_generated_header "${_out_dir}/${_stem}_${_src_hash}.omnirefl.hpp")
         set(_depfile "${_generated_header}.d")
 
-        set(_pair "\"${_src}\":\"${target}.dir\"")
-        message(VERBOSE "omnirefl: for target ${target} selected TU: ${_pair}")
-
-	    set(_omni_args
-	        --resource-dir "${omnirefl_RESOURCE_DIR}"
-	        --comp-db "${_comp_db}"
-	        -o "${_generated_header}"
-	        --source ${_pair}
-	    )
-
+        set(_no_annotations 0)
         if(OMNIREFL_NO_ANNOTATIONS)
-            list(APPEND _omni_args --no-annotations)
+            set(_no_annotations 1)
         endif()
 
+        # The compiler command is only available at build time from
+        # compile_commands.json, so this cannot be expressed as a static
+        # add_custom_command argument list. The -P bridge runs ccdb_query,
+        # tokenizes its shell-quoted output, then invokes omnirefl with those
+        # compiler args after `--` while preserving diagnostics.
         add_custom_command(
             OUTPUT "${_generated_header}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
-            COMMAND omni::tool ${_omni_args}
+            COMMAND ${CMAKE_COMMAND}
+                -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
+                -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
+                -D "COMP_DB=${_comp_db}"
+                -D "SOURCE=${_src}"
+                -D "OUTPUT_CONTAINS=${target}.dir"
+                -D "OUT=${_generated_header}"
+                -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
+                -D "NO_ANNOTATIONS=${_no_annotations}"
+                -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
-            DEPENDS "${_src}" omni::tool
+            DEPENDS "${_src}" omni::tool omni::ccdb_query
             BYPRODUCTS "${_depfile}"
             DEPFILE "${_depfile}"
             VERBATIM

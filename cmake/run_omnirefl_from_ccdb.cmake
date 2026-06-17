@@ -1,0 +1,81 @@
+if(NOT DEFINED CCDB_QUERY)
+    message(FATAL_ERROR "CCDB_QUERY is required")
+endif()
+if(NOT DEFINED OMNIREFL)
+    message(FATAL_ERROR "OMNIREFL is required")
+endif()
+if(NOT DEFINED COMP_DB)
+    message(FATAL_ERROR "COMP_DB is required")
+endif()
+if(NOT DEFINED SOURCE)
+    message(FATAL_ERROR "SOURCE is required")
+endif()
+if(NOT DEFINED OUTPUT_CONTAINS)
+    message(FATAL_ERROR "OUTPUT_CONTAINS is required")
+endif()
+if(NOT DEFINED OUT)
+    message(FATAL_ERROR "OUT is required")
+endif()
+if(NOT DEFINED RESOURCE_DIR)
+    message(FATAL_ERROR "RESOURCE_DIR is required")
+endif()
+if(NOT DEFINED NO_ANNOTATIONS)
+    set(NO_ANNOTATIONS 0)
+endif()
+if(NOT DEFINED MSVC_CXX23_PREVIEW_AD_HOC)
+    set(MSVC_CXX23_PREVIEW_AD_HOC 0)
+endif()
+
+execute_process(
+    COMMAND "${CCDB_QUERY}" "${COMP_DB}" "${SOURCE}" "${OUTPUT_CONTAINS}"
+    RESULT_VARIABLE _ccdb_result
+    OUTPUT_VARIABLE _compiler_command
+    ERROR_VARIABLE _ccdb_err)
+
+if(NOT 0 EQUAL _ccdb_result)
+    message(FATAL_ERROR "${_ccdb_err}")
+endif()
+
+string(STRIP "${_compiler_command}" _compiler_command)
+separate_arguments(_compiler_args UNIX_COMMAND "${_compiler_command}")
+
+if(MSVC_CXX23_PREVIEW_AD_HOC)
+    # ad hoc: CMake can emit `/std:c++latest` for a target whose CXX_STANDARD is
+    # 23 under MSVC. Clang's driver maps that to a newer cc1 mode, currently
+    # C++26, which makes the tool-run parse disagree with the real target
+    # intent. Keep the build-time ccdb_query flow, but normalize the single
+    # standard flag before invoking omnirefl. This should move to cc1_flags.
+    list(TRANSFORM _compiler_args REPLACE "^[-/]std:c\\+\\+latest$" "/std:c++23preview")
+endif()
+
+set(_omnirefl_args
+    "${OMNIREFL}"
+    --resource-dir "${RESOURCE_DIR}"
+    -o "${OUT}"
+    --source "${SOURCE}")
+
+if(NO_ANNOTATIONS)
+    list(APPEND _omnirefl_args --no-annotations)
+endif()
+
+list(APPEND _omnirefl_args -- ${_compiler_args})
+
+execute_process(
+    COMMAND ${_omnirefl_args}
+    RESULT_VARIABLE _omnirefl_result
+    OUTPUT_VARIABLE _omnirefl_out
+    ERROR_VARIABLE _omnirefl_err)
+
+if(_omnirefl_out)
+    message("${_omnirefl_out}")
+endif()
+if(_omnirefl_err)
+    message("${_omnirefl_err}")
+endif()
+
+if(NOT 0 EQUAL _omnirefl_result)
+    message(FATAL_ERROR
+        "omnirefl failed with code ${_omnirefl_result}"
+        "\nstdout:\n${_omnirefl_out}"
+        "\nstderr:\n${_omnirefl_err}")
+endif()
