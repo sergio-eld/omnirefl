@@ -1,5 +1,5 @@
 
-#include "gtest_include.h"
+#include <gtest/gtest.h>
 #include "structs.h" //< todo: move to a separate file
 
 #include <omnirefl/reflection.hpp>

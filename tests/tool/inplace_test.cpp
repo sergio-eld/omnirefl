@@ -1,5 +1,5 @@
 
-#include "gtest_include.h"
+#include <gtest/gtest.h>
 #include "shared_structs.h"
 
 #include <omnirefl/reflection.hpp>

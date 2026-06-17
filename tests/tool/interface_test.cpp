@@ -1,5 +1,5 @@
 #include "api_structs.hpp"
-#include "gtest_include.h"
+#include <gtest/gtest.h>
 #include "odr_test.hpp"
 
 #include <omnirefl/reflection.hpp>

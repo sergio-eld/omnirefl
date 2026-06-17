@@ -22,6 +22,9 @@ endif()
 if(NOT DEFINED NO_ANNOTATIONS)
     set(NO_ANNOTATIONS 0)
 endif()
+if(NOT DEFINED MSVC_CXX23_PREVIEW_AD_HOC)
+    set(MSVC_CXX23_PREVIEW_AD_HOC 0)
+endif()
 
 execute_process(
     COMMAND "${CCDB_QUERY}" "${COMP_DB}" "${SOURCE}" "${OUTPUT_CONTAINS}"
@@ -35,6 +38,15 @@ endif()
 
 string(STRIP "${_compiler_command}" _compiler_command)
 separate_arguments(_compiler_args UNIX_COMMAND "${_compiler_command}")
+
+if(MSVC_CXX23_PREVIEW_AD_HOC)
+    # ad hoc: CMake can emit `/std:c++latest` for a target whose CXX_STANDARD is
+    # 23 under MSVC. Clang's driver maps that to a newer cc1 mode, currently
+    # C++26, which makes the tool-run parse disagree with the real target
+    # intent. Keep the build-time ccdb_query flow, but normalize the single
+    # standard flag before invoking omnirefl. This should move to cc1_flags.
+    list(TRANSFORM _compiler_args REPLACE "^[-/]std:c\\+\\+latest$" "/std:c++23preview")
+endif()
 
 set(_omnirefl_args
     "${OMNIREFL}"

@@ -1,5 +1,5 @@
 #include "dependency_types.h"
-#include "gtest_include.h"
+#include <gtest/gtest.h>
 #include "structs.h"
 
 #include <omnirefl/reflection.hpp>

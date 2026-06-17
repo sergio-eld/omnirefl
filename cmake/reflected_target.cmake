@@ -69,7 +69,12 @@ endfunction()
 function(omni_reflected_target target)
     _omni_checkhealth()
 
-    cmake_parse_arguments(OMNIREFL "ENABLE_INDEX_MODE;NO_ANNOTATIONS" "" "INCLUDE;EXCLUDE" ${ARGN})
+    cmake_parse_arguments(
+        OMNIREFL
+        "ENABLE_INDEX_MODE;NO_ANNOTATIONS;_DISABLE_PREVIEW_AD_HOC"
+        ""
+        "INCLUDE;EXCLUDE"
+        ${ARGN})
 
     if(OMNIREFL_INCLUDE AND OMNIREFL_EXCLUDE)
         message(FATAL_ERROR "omni_reflected_target: INCLUDE and EXCLUDE are mutually exclusive")
@@ -153,6 +158,18 @@ function(omni_reflected_target target)
         return()
     endif()
 
+    get_target_property(_target_cxx_standard ${target} CXX_STANDARD)
+    if(_target_cxx_standard STREQUAL "_target_cxx_standard-NOTFOUND")
+        set(_target_cxx_standard "${CMAKE_CXX_STANDARD}")
+    endif()
+
+    set(_msvc_cxx23_preview_ad_hoc 0)
+    if(MSVC
+            AND "${_target_cxx_standard}" STREQUAL "23"
+            AND NOT OMNIREFL__DISABLE_PREVIEW_AD_HOC)
+        set(_msvc_cxx23_preview_ad_hoc 1)
+    endif()
+
     # Shared lists for common plumbing
     set(_gen_outputs)
     set(_gen_depfiles)
@@ -190,6 +207,7 @@ function(omni_reflected_target target)
                 -D "OUT=${_generated_header}"
                 -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
                 -D "NO_ANNOTATIONS=${_no_annotations}"
+                -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
             DEPENDS "${_src}" omni::tool omni::ccdb_query
