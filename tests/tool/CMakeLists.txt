@@ -157,6 +157,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         dependent_types_test.cpp
         interface_test.cpp
         example_test.cpp
+        usage_guide_test.cpp
         indexed_types.cpp
         inplace_test.cpp
     )

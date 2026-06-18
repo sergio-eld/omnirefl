@@ -4,7 +4,7 @@
 
 #include <omnirefl/reflection.hpp>
 
-#include <utility>
+#include <utility> // IWYU pragma: keep
 
 TEST(odr_test, inside_interface_test_cpp) {
   static const odr_test::input k_input{815,
@@ -305,7 +305,6 @@ TEST(record_type_t, field_value_read) {
 
 TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
   using interface_test::record_type_t;
-  namespace fv = interface_test::field_value_read;
 
   static const std::vector<std::string> k_expected{"815", "oceanic"};
 
@@ -337,9 +336,10 @@ TEST(record_type_t, field_value_write) {
     EXPECT_EQ_FIELDS(k_expected, value);
   }
 
-  EXPECT_EQ_FIELDS(k_expected,
+  const record_type_t owned =
     omni::reflected_call(fw::record_type_field_write_own_call_t{k_expected},
-      record_type_t{}));
+      record_type_t{});
+  EXPECT_EQ_FIELDS(k_expected, owned);
 
 #undef EXPECT_EQ_FIELDS
 }

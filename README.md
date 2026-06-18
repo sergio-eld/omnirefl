@@ -84,6 +84,8 @@
 
 ### Build/Release
 
+- TODO(High): add a dedicated usage/comprehensive guide `.cpp` as gtest tests,
+  and reference it from this README for in-depth usage demonstrations.
 - (+) generated-header reflection
 - (+) CMake integration
 - (+) annotations enabled by default
@@ -135,6 +137,9 @@
 
 ### Build/Release
 
+- TODO(High): cross-build the tool for macOS.
+- TODO(High): investigate switching the tool build to Cosmopolitan after a
+  baseline benchmark is in place.
 - (-) add Windows MinGW/MSYS2 to the test matrix
 - (-) add Linux MinGW cross-compilation for Windows to the test matrix
 
