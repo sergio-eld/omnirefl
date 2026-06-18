@@ -532,6 +532,8 @@ struct binding_t<T, reflected_entity::record> {
     T //< hold a reference (T is U& / const U&)
     >::type;
 
+  // todo: add an explicit interface to `std::move` an owned value out of a
+  // binding_t<T> without exposing the storage member.
   storage_t _value;
 
   static constexpr const char *type_name() noexcept {
@@ -607,6 +609,8 @@ struct binding_t<T, reflected_entity::enumeration> {
     T //< hold a reference (T is U& / const U&)
     >::type;
 
+  // todo: add an explicit interface to `std::move` an owned value out of a
+  // binding_t<T> without exposing the storage member.
   storage_t _value;
 
   static constexpr const char *type_name() noexcept {
