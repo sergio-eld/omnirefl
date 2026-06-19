@@ -28,12 +28,12 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Login to Docker Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -48,14 +48,14 @@ jobs:
             docker compose run --rm build-${{ matrix.os }}
 
       - name: Upload Package Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: packages-${{ matrix.os }}
           path: ./artifacts/packages/${{ matrix.os }}
           if-no-files-found: error
 
   test-linux:
-    name: Linux package / ${{ matrix.platform }}-${{ matrix.toolchain }}
+    name: Linux test / ${{ matrix.platform }}-${{ matrix.toolchain }}
     runs-on: ubuntu-latest
     needs: build-package
     strategy:
@@ -75,10 +75,10 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Login to Docker Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -93,7 +93,7 @@ jobs:
           fi
 
       - name: Download Package Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: packages-linux
           path: ./artifacts/packages/linux
@@ -115,14 +115,14 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-${{ matrix.platform }}-${{ matrix.toolchain }}
           path: ./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
   test-windows:
-    name: Windows package / ${{ matrix.toolchain }}
+    name: Windows test / ${{ matrix.toolchain }}
     runs-on: [self-hosted, windows, x64]
     needs: build-package
     strategy:
@@ -136,10 +136,10 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Login to Docker Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -157,7 +157,7 @@ jobs:
           }
 
       - name: Download Package Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: packages-windows
           path: ./artifacts/packages/windows
@@ -185,7 +185,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-windows-${{ matrix.toolchain }}
           path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
@@ -201,7 +201,7 @@ jobs:
 
     steps:
       - name: Download test artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: test-*
           path: ./test-results
@@ -210,7 +210,7 @@ jobs:
       - name: Upload aggregated test artifact
         id: upload_agg
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: all-test-results
           path: ./test-results
@@ -220,7 +220,5 @@ jobs:
         if: ${{ always() && steps.upload_agg.outcome == 'success' }}
         uses: geekyeggo/delete-artifact@v5
         with:
-          name: |
-            test-*
-            packages-*
+          name: test-*
           failOnError: false
