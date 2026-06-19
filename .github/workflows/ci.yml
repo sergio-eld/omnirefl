@@ -76,11 +76,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
-        with:
-          # Self-hosted Windows runners reuse the same workspace between matrix
-          # rows. Keep each toolchain checkout isolated so a later row does not
-          # clean the previous row's checkout during actions/checkout startup.
-          path: ${{ matrix.toolchain }}
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
@@ -142,6 +137,11 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          # Self-hosted Windows runners reuse the workspace between matrix rows.
+          # Keep rows in separate checkout directories so each checkout cleans
+          # only its own previous state.
+          path: ${{ matrix.toolchain }}
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
