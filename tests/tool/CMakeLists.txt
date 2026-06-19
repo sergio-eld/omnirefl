@@ -119,6 +119,10 @@ endif()
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
+# C++26 has standard reflection. Keep omnirefl release/package validation on the
+# pre-reflection language modes it targets.
+list(REMOVE_ITEM _supported_cpp_standards "26")
+
 # MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
 # Normalize 11 -> 14 to avoid generating duplicate cpp_11 / cpp_14 targets.
 if(MSVC)

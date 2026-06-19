@@ -258,7 +258,7 @@ TEST(fields, sized_integer_field_types) {
   static const std::vector<std::string> k_expected{
     "unsigned short",
     "int",
-#if defined _MSC_VER
+#if defined _WIN32
     "unsigned long long *",
 #else
     "unsigned long *",

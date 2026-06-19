@@ -1,0 +1,4 @@
+*
+!*.Dockerfile
+!clang-cmake-options
+!llvm-project.patch

@@ -9,7 +9,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Package tests use the same public shape as docker-compose.yml:
+  #
+  #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows>
+  #   toolchain=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
+  #
+  # Alpine and Windows still dispatch to dedicated compose services because
+  # their package install/runtime shells differ from Ubuntu.
   build-package:
+    name: Build package / ${{ matrix.os }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -17,11 +25,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [linux, windows]
-        include:
-          - os: linux
-            run_tests: false # todo: (disabled) should move alpine tests to the test job matrix
-          - os: windows
-            run_tests: false
 
     steps:
       - name: Checkout Repository
@@ -29,162 +32,195 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Login to Docker Hub
+      - name: Login to Docker Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull build-alpine Image
-        run: docker pull sergioeld/omnirefl-build-alpine:latest
+        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine:latest
 
-      - name: Build omnirefl tool
+      - name: Build and package omnirefl tool
         run: |
-          docker compose run --rm build-${{ matrix.os }}
+          PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
+            docker compose run --rm build-${{ matrix.os }}
 
-      - name: Run test
-        if: ${{ matrix.run_tests }}
-        run: docker compose run --rm build-tests-alpine
-
-      # todo: packaging should not run on a merge request (? I think)
-      - name: Package omnirefl tool
-        run: |
-          docker compose run --rm package-${{ matrix.os }}
-      
-      - name: Upload Build Artifacts
+      - name: Upload Package Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: install-${{ matrix.os }}
-          path: ./build-alpine/*/install/
+          name: packages-${{ matrix.os }}
+          path: ./artifacts/packages/${{ matrix.os }}
           if-no-files-found: error
 
-  test-ubuntu:
+  test-linux:
+    name: Linux package / ${{ matrix.platform }}-${{ matrix.toolchain }}
     runs-on: ubuntu-latest
     needs: build-package
     strategy:
       fail-fast: false
       matrix:
-        version: [18, 20, 22]
-        compiler: [gcc, clang]
+        platform: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
+        toolchain: [gcc, clang, mingw]
+        exclude:
+          # FIXME(high): enable Alpine clang package tests once the package-test
+          # image has a clang toolchain installed and configured.
+          - platform: alpine
+            toolchain: clang
+          # FIXME(high): Ubuntu 18.04 MinGW currently fails during omnirefl AST
+          # generation in MinGW's `float.h` include_next chain.
+          - platform: ubuntu-18.04
+            toolchain: mingw
 
     steps:
-      # needed only for `docker-compose.yml`
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Login to Docker Hub
+      - name: Login to Docker Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull Docker Image
-        run: docker pull sergioeld/test-install-ubuntu-${{ matrix.version }}-${{ matrix.compiler }}
+        run: |
+          if [ "alpine" = "${{ matrix.platform }}" ]; then
+            docker pull ghcr.io/sergio-eld/test-alpine:latest
+          else
+            docker pull ghcr.io/sergio-eld/test-${{ matrix.platform }}-${{ matrix.toolchain }}
+          fi
 
-      - name: Download Build Artifacts
+      - name: Download Package Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: install-linux
-          path: ./build-alpine/
+          name: packages-linux
+          path: ./artifacts/packages/linux
 
-      - name: Run Test
-        run: UBUNTU_VERSION=${{ matrix.version }} COMPILER=${{ matrix.compiler }} docker compose run --rm test-ubuntu
+      - name: Run Package Test
+        run: |
+          if [ "alpine" = "${{ matrix.platform }}" ]; then
+            TOOLCHAIN=${{ matrix.toolchain }} \
+            LINUX_PACKAGE_DIR=./artifacts/packages/linux \
+            TEST_RESULTS_DIR=./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }} \
+              docker compose run --rm test-alpine
+          else
+            TEST_PLATFORM=${{ matrix.platform }} \
+            TOOLCHAIN=${{ matrix.toolchain }} \
+            LINUX_PACKAGE_DIR=./artifacts/packages/linux \
+            TEST_RESULTS_DIR=./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }} \
+              docker compose run --rm test-ubuntu
+          fi
 
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # SAME name for all matrix entries – single artifact to aggregate later
-          name: test-ubuntu-${{ matrix.version }}-${{ matrix.compiler }}
-          # Directory where each container wrote:
-          #   /build-alpine/test/ubuntu-<version>-<compiler>.xml / .log
-          path: ./build-alpine/test
+          name: test-${{ matrix.platform }}-${{ matrix.toolchain }}
+          path: ./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
   test-windows:
+    name: Windows package / ${{ matrix.toolchain }}
     runs-on: [self-hosted, windows, x64]
     needs: build-package
     strategy:
       fail-fast: false
-      # matrix: #< todo
+      matrix:
+        toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
+        exclude:
+          # FIXME(high): enable MSYS2 clang package tests once the bundled
+          # Clang/libc++ resource setup works with the clang64 MinGW CRT.
+          - toolchain: msys2-clang
 
     steps:
-      # needed only for `docker-compose.yml`
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Login to Docker Hub
+      - name: Login to Docker Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull Docker Image
-        run: docker pull sergioeld/test-install-windows
+        shell: powershell
+        run: |
+          switch ("${{ matrix.toolchain }}") {
+            "msvc" { docker pull ghcr.io/sergio-eld/test-windows-msvc }
+            "clang-cl" { docker pull ghcr.io/sergio-eld/test-windows-clang-cl }
+            "msys2-mingw" { docker pull ghcr.io/sergio-eld/test-windows-msys2-mingw }
+            "msys2-clang" { docker pull ghcr.io/sergio-eld/test-windows-msys2-clang }
+            default { throw "unsupported Windows toolchain: ${{ matrix.toolchain }}" }
+          }
 
-      - name: Download Build Artifacts
+      - name: Download Package Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: install-windows
-          path: ./build-alpine/
+          name: packages-windows
+          path: ./artifacts/packages/windows
 
-      # ensure bind mount sources exist for Docker on Windows
-      - name: Prepare test directory
+      - name: Run Package Test
+        shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path 'build-alpine\test' | Out-Null
+          if (-not (Get-ChildItem -Path "artifacts/packages/windows" -Filter "omnirefl-*.zip" | Select-Object -First 1)) {
+            throw "Windows package artifact was not found"
+          }
 
-      - name: Run Test
-        run: docker compose run --rm test-windows
+          $service = switch ("${{ matrix.toolchain }}") {
+            "msvc" { "test-windows-msvc" }
+            "clang-cl" { "test-windows-clang-cl" }
+            "msys2-mingw" { "test-windows-msys2-mingw" }
+            "msys2-clang" { "test-windows-msys2-clang" }
+            default { throw "unsupported Windows toolchain: ${{ matrix.toolchain }}" }
+          }
+
+          $results = New-Item -ItemType Directory -Force -Path "artifacts/test-results/windows-${{ matrix.toolchain }}"
+          $env:TOOLCHAIN = "${{ matrix.toolchain }}"
+          $env:WINDOWS_PACKAGE_DIR = (Resolve-Path "artifacts/packages/windows").Path
+          $env:TEST_RESULTS_DIR = $results.FullName
+          docker compose run --rm $service
 
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # separate logical artifact name for windows
-          name: test-windows
-          # SAME on-disk path as linux -> aggregator sees everything under build-alpine/test
-          path: ./build-alpine/test
+          name: test-windows-${{ matrix.toolchain }}
+          path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
           if-no-files-found: error
 
   aggregate-test-results:
     runs-on: ubuntu-latest
-    needs: [test-ubuntu, test-windows]
+    needs: [test-linux, test-windows]
     permissions:
       contents: read
       actions: write
     if: always()
 
     steps:
-      - name: Download all ubuntu test artifacts
+      - name: Download test artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: test-ubuntu-*
+          pattern: test-*
           path: ./test-results
           merge-multiple: true
-
-      - name: Download windows test artifact
-        if: ${{ needs.test-windows.result == 'success' }}
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: test-windows
-          path: ./test-results
 
       - name: Upload aggregated test artifact
         id: upload_agg
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-all
+          name: all-test-results
           path: ./test-results
           if-no-files-found: error
 
-      - name: Clean up per-job test artifacts
+      - name: Clean up intermediate artifacts
         if: ${{ always() && steps.upload_agg.outcome == 'success' }}
         uses: geekyeggo/delete-artifact@v5
         with:
           name: |
-            test-ubuntu-*
-            test-windows
+            test-*
+            packages-*
           failOnError: false
-

@@ -1,14 +1,27 @@
+# Local package-test entrypoints use the same public shape as CI:
+#
+#   TEST_PLATFORM=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows>
+#   TOOLCHAIN=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
+#
+# Linux package tests use TEST_PLATFORM + TOOLCHAIN to select the image.
+# Alpine has a dedicated service because it unpacks the TGZ package instead of
+# installing the DEB package. Windows tests use separate services where a
+# matrix row needs a different image or shell, but still receive only TOOLCHAIN.
+# Windows package tests intentionally install under `C:/with space` to catch
+# path quoting regressions.
+# When invoking `docker.exe compose` from WSL, export WINDOWS_PACKAGE_DIR,
+# TEST_RESULTS_DIR, and TOOLCHAIN through WSLENV. Windows containers cannot bind
+# mount WSL UNC paths, so package/results directories must be on a Windows drive.
+
 services:
   build-linux:
-    image: sergioeld/omnirefl-build-alpine
-    build:
-      context: .
-      dockerfile: build-alpine.Dockerfile
+    image: ghcr.io/sergio-eld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/linux}:/packages:rw
     working_dir: /build
-    entrypoint:
+    command:
       - /bin/ash
       - -euxc
       - |
@@ -18,29 +31,26 @@ services:
           -DENABLE_TESTING=ON \
           -DENABLE_BENCH=ON \
           -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
-        cmake --build . -t omnirefl ccdb_query -j$$(nproc) && # strip it before running tests 
+        cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
 
-        # split debug info into separate file
         mkdir -p symbols &&
         objcopy --only-keep-debug omnirefl symbols/omnirefl.debug &&
-
-        # strip debug info from the main binary
         strip --strip-unneeded omnirefl &&
+        (objcopy --remove-section .gnu_debuglink omnirefl 2>/dev/null || true) &&
+        objcopy --add-gnu-debuglink=symbols/omnirefl.debug omnirefl &&
 
-        # add link so debuggers can find the external debug file
-        objcopy --add-gnu-debuglink=symbols/omnirefl.debug omnirefl
+        mkdir -p /tmp/package /packages &&
+        cpack -G "DEB;TGZ" -B /tmp/package &&
+        mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
   build-windows:
-    image: sergioeld/omnirefl-build-alpine
-    build:
-      context: .
-      dockerfile: build-alpine.Dockerfile
+    image: ghcr.io/sergio-eld/omnirefl-build-alpine
     volumes:
       - ./:/src:ro
       - ./build-alpine/windows:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/windows}:/packages:rw
     working_dir: /build
-    # testing only possible in Windows container
-    entrypoint:
+    command:
       - /bin/ash
       - -euxc
       - |
@@ -54,89 +64,89 @@ services:
 
         cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
 
-        # split debug info into separate file (PE/COFF)
         mkdir -p symbols &&
         x86_64-w64-mingw32-objcopy --only-keep-debug omnirefl.exe symbols/omnirefl.exe.debug &&
-
-        # strip debug info from the main binary
         x86_64-w64-mingw32-strip --strip-unneeded omnirefl.exe &&
+        (x86_64-w64-mingw32-objcopy --remove-section .gnu_debuglink omnirefl.exe 2>/dev/null || true) &&
+        x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe &&
 
-        # add link so debuggers can find the external debug file
-        x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe
+        mkdir -p /tmp/package /packages &&
+        cpack -G "ZIP" -B /tmp/package &&
+        mv /tmp/package/*.zip /packages/
 
-  # todo: should move it to `test-ubuntu` matrix
-  build-tests-alpine:
-    image: sergioeld/omnirefl-build-alpine
+  test-alpine:
+    image: ghcr.io/sergio-eld/test-alpine
+    environment:
+      TOOLCHAIN: ${TOOLCHAIN:-gcc}
+      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
-      - ./:/src:ro
-      - ./build-alpine/linux:/build:rw # must be rw for CTest
-      - ./build-alpine/test:/test:rw
-    working_dir: /build
+      - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-${TOOLCHAIN:-gcc}}:/results:rw
+    working_dir: /tmp/build
     entrypoint:
       - /bin/ash
       - -euxc
       - |
         set -o pipefail
-        PREFIX=alpine-results
-        JOBS=$$(( $$(nproc) > 2 ? $$(nproc) - 2 : 1 ))
+        mkdir -p /results /tmp/build /tmp/src /opt/omnirefl
+        pkg=$$(find /packages -maxdepth 1 -name 'omnirefl-*.tar.gz' | sort | tail -n 1)
+        test -n "$$pkg"
+        tar -xzf "$$pkg" -C /opt/omnirefl --strip-components=1
+        cp -r /opt/omnirefl/share/omnirefl/tests/* /tmp/src/
 
-        cmake --build . -t omnirefl ccdb_query -j$$JOBS
+        CMAKE_FLAGS=""
+        case $${TOOLCHAIN:-gcc} in
+          gcc) export CC=gcc; export CXX=g++ ;;
+          clang) export CC=clang; export CXX=clang++ ;;
+          mingw)
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            CMAKE_FLAGS="-DCMAKE_SYSTEM_NAME=Windows"
+            ;;
+          *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
+        esac
+
+        PREFIX=alpine-$${TOOLCHAIN:-gcc}
+
+        cmake /tmp/src -GNinja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -Domnirefl_DIR=/opt/omnirefl/lib/cmake/omnirefl \
+          $$CMAKE_FLAGS
 
         set +e
-        ctest --parallel $$JOBS --output-junit "/test/$${PREFIX}.xml" -V 2>&1 | tee "/test/$${PREFIX}.log"
+        ctest --output-junit /results/$$PREFIX.xml -V 2>&1 | tee /results/$$PREFIX.log
         rc=$$?
         set -e
 
-        if [ -n "$${DEBUG_SHELL:-}" ]; then
-          echo "ctest rc=$$rc (DEBUG_SHELL set)"
-          export CTEST_RC="$$rc"
-          exec /bin/ash
+        mkdir -p /results/diagnostics
+        cp -f CMakeCache.txt compile_commands.json /results/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /results/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /results/diagnostics/ 2>/dev/null || true
+        find . -path './omni_*/*.omnirefl.hpp' -o -path './omni_*/*.omnirefl.hpp.d' \
+          | tar -czf /results/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
         fi
 
         exit $$rc
 
-  package-linux:
-    image: sergioeld/omnirefl-build-alpine
-    volumes:
-      - ./:/src:ro
-      - ./build-alpine/linux:/build:rw # ad hoc: must be rw for CPack (SMH)
-      - ./build-alpine/linux/install:/install:rw
-    working_dir: /build
-    entrypoint:
-      - /bin/ash
-      - -euxc
-      - |
-        mkdir -p /tmp/build
-        cpack -G "DEB;TGZ" -B /tmp/build
-        mv /tmp/build/*.deb /tmp/build/*.tar.gz /install/
-
-  package-windows:
-    image: sergioeld/omnirefl-build-alpine
-    volumes:
-      - ./:/src:ro
-      - ./build-alpine/windows:/build:rw # ad hoc: must be rw for CPack (SMH)
-      - ./build-alpine/windows/install:/install:rw
-    working_dir: /build
-    entrypoint:
-      - /bin/ash
-      - -euxc
-      - |
-        mkdir -p /tmp/build
-        cpack -G "ZIP" -B /tmp/build
-        mv /tmp/build/*.zip /install/
-
-  # [18, 20, 22] [gcc, clang]
   test-ubuntu:
-    image: sergioeld/test-install-ubuntu-$UBUNTU_VERSION-$COMPILER
+    image: ghcr.io/sergio-eld/test-${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}
     build:
       context: .
-      dockerfile: test-install-ubuntu.Dockerfile
+      dockerfile: test-ubuntu.Dockerfile
       args:
-        UBUNTU_VERSION: $UBUNTU_VERSION
-        COMPILER: $COMPILER
+        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
+        COMPILER: ${TOOLCHAIN:-gcc}
     volumes:
-      - ./build-alpine/linux/install:/install:ro
-      - ./build-alpine/test:/test:rw
+      - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}}:/results:rw
+    environment:
+      TOOLCHAIN: ${TOOLCHAIN:-gcc}
+      TEST_PLATFORM: ${TEST_PLATFORM:-ubuntu-22.04}
+      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     working_dir: /tmp/build
     entrypoint:
       - /bin/bash
@@ -144,58 +154,292 @@ services:
       - pipefail
       - -c
       - |
-        apt install /install/omnirefl*.deb
+        mkdir -p /results
+        apt install /packages/omnirefl*.deb
 
-        case $COMPILER in
+        CMAKE_FLAGS=""
+        case $${TOOLCHAIN:-gcc} in
           gcc) export CC=gcc; export CXX=g++ ;;
           clang) export CC=clang; export CXX=clang++ ;;
-          mingw) export CC=x86_64-w64-mingw32-gcc; export CXX=x86_64-w64-mingw32-g++ ;;
-          *) echo "Unsupported COMPILER='$COMPILER'" >&2; exit 1 ;;
+          mingw)
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            CMAKE_FLAGS="-DCMAKE_SYSTEM_NAME=Windows"
+            ;;
+          *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
         esac
 
-        PREFIX=ubuntu-$UBUNTU_VERSION-$COMPILER-results
+        PREFIX=$${TEST_PLATFORM:-ubuntu-22.04}-$${TOOLCHAIN:-gcc}
 
-        cp -r /usr/share/omnirefl/tests/* ../
-        cmake .. -GNinja
+        cp -r /usr/share/omnirefl/tests/* /tmp/
+        cmake /tmp -GNinja $$CMAKE_FLAGS
 
         set +e
-        ctest --output-junit /test/$$PREFIX.xml -V 2>&1 | tee /test/$$PREFIX.log
+        ctest --output-junit /results/$$PREFIX.xml -V 2>&1 | tee /results/$$PREFIX.log
         rc=$$?
         set -e
 
-        if [ -n "$${DEBUG_SHELL:-}" ]; then
-          echo "ctest rc=$$rc (DEBUG_SHELL set)"
-          export CTEST_RC="$$rc"
-          exec /bin/bash
-        fi
+        mkdir -p /results/diagnostics
+        cp -f CMakeCache.txt compile_commands.json /results/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /results/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /results/diagnostics/ 2>/dev/null || true
+        find . -path './omni_*/*.omnirefl.hpp' -o -path './omni_*/*.omnirefl.hpp.d' \
+          | tar -czf /results/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
 
         apt remove -y omnirefl
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
+        fi
+
         exit $$rc
 
-  # todo: mingw, clang, msvc clang
-  test-windows:
-    image: sergioeld/test-install-windows
+  test-windows-msvc:
+    image: ghcr.io/sergio-eld/test-windows-msvc
     build:
       context: .
-      dockerfile: test-install-windows.Dockerfile
+      dockerfile: test-windows-msvc.Dockerfile
+      args:
+        TOOLCHAIN: msvc
+    environment:
+      TOOLCHAIN: ${TOOLCHAIN:-msvc}
+      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
-      - ./build-alpine/windows/install:C:\install:ro
-      - ./build-alpine/test:C:\test:rw
-    working_dir: "C:/with space/build"
-    command:
+      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/windows}:C:/install:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msvc}}:C:/test:rw
+    working_dir: "C:/"
+    entrypoint:
       - powershell
+      - -NoLogo
+      - -ExecutionPolicy
+      - Bypass
+      - -NoProfile
       - -Command
-        |
-        & {
+    command:
+      - |
         $$ErrorActionPreference = 'Stop'
-        ; 7z x C:/install/omnirefl* -o'C:/with space/'
-        ; cd 'C:/with space'
-        ; mv ./omnirefl* ./omnirefl
-        ; cp -r omnirefl/share/omnirefl/tests ./
-        ; ./omnirefl/bin/omnirefl.exe -h
-        ; cd 'C:/with space/build'
-        ; cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
-        ; cmake --build . -j $$env:NUMBER_OF_PROCESSORS
-        ; ctest . --output-junit C:/test/windows-results.xml -V | tee C:/test/windows-results.log
-        ; exit $$LASTEXITCODE
-        ;}
+        $$vsEnv = cmd /c '"C:\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && set'
+        foreach ($$line in $$vsEnv) {
+          if ($$line -match '^(.*?)=(.*)$$') {
+            Set-Item -Path ('Env:' + $$matches[1]) -Value $$matches[2]
+          }
+        }
+
+        New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
+        $$package = Get-ChildItem -Path 'C:/install' -Filter 'omnirefl-*.zip' | Sort-Object Name | Select-Object -Last 1
+        if (-not $$package) { throw 'Windows package artifact was not found in C:/install' }
+        Expand-Archive -Path $$package.FullName -DestinationPath 'C:/with space' -Force
+
+        Set-Location 'C:/with space'
+        $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
+        if (-not $$installRoot) { throw 'could not find extracted omnirefl package root' }
+        Move-Item $$installRoot.FullName ./omnirefl
+        Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
+        ./omnirefl/bin/omnirefl.exe -h
+
+        Set-Location 'C:/with space/build'
+        cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
+        cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+
+        ctest . --output-junit C:/test/windows-$$env:TOOLCHAIN.xml -V 2>&1 |
+          Tee-Object C:/test/windows-$$env:TOOLCHAIN.log
+        $$rc = $$LASTEXITCODE
+
+        Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
+        Copy-Item -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/
+        Copy-Item -ErrorAction SilentlyContinue CMakeFiles/CMakeError.log C:/test/diagnostics/
+        Get-ChildItem -Recurse -Include *.omnirefl.hpp, *.omnirefl.hpp.d -Path . |
+          Compress-Archive -DestinationPath C:/test/diagnostics/generated-reflection.zip -Force
+
+        if ((0 -ne $$rc) -and $$env:KEEP_ALIVE_ON_FAILURE) {
+          Write-Host ('ctest failed with rc=' + $$rc + '; keeping container alive')
+          while ($$true) { Start-Sleep -Seconds 3600 }
+        }
+
+        exit $$rc
+
+  test-windows-clang-cl:
+    image: ghcr.io/sergio-eld/test-windows-clang-cl
+    build:
+      context: .
+      dockerfile: test-windows-msvc.Dockerfile
+      args:
+        TOOLCHAIN: clang-cl
+    environment:
+      TOOLCHAIN: ${TOOLCHAIN:-clang-cl}
+      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+    volumes:
+      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/windows}:C:/install:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-clang-cl}}:C:/test:rw
+    working_dir: "C:/"
+    entrypoint:
+      - powershell
+      - -NoLogo
+      - -ExecutionPolicy
+      - Bypass
+      - -NoProfile
+      - -Command
+    command:
+      - |
+        $$ErrorActionPreference = 'Stop'
+        $$vsEnv = cmd /c '"C:\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && set'
+        foreach ($$line in $$vsEnv) {
+          if ($$line -match '^(.*?)=(.*)$$') {
+            Set-Item -Path ('Env:' + $$matches[1]) -Value $$matches[2]
+          }
+        }
+
+        New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
+        $$package = Get-ChildItem -Path 'C:/install' -Filter 'omnirefl-*.zip' | Sort-Object Name | Select-Object -Last 1
+        if (-not $$package) { throw 'Windows package artifact was not found in C:/install' }
+        Expand-Archive -Path $$package.FullName -DestinationPath 'C:/with space' -Force
+
+        Set-Location 'C:/with space'
+        $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
+        if (-not $$installRoot) { throw 'could not find extracted omnirefl package root' }
+        Move-Item $$installRoot.FullName ./omnirefl
+        Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
+        ./omnirefl/bin/omnirefl.exe -h
+
+        $$env:Path = 'C:/Program Files/LLVM/bin;' + $$env:Path
+        $$env:CC = 'clang-cl'
+        $$env:CXX = 'clang-cl'
+
+        Set-Location 'C:/with space/build'
+        cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
+        cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+
+        ctest . --output-junit C:/test/windows-$$env:TOOLCHAIN.xml -V 2>&1 |
+          Tee-Object C:/test/windows-$$env:TOOLCHAIN.log
+        $$rc = $$LASTEXITCODE
+
+        Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
+        Copy-Item -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/
+        Copy-Item -ErrorAction SilentlyContinue CMakeFiles/CMakeError.log C:/test/diagnostics/
+        Get-ChildItem -Recurse -Include *.omnirefl.hpp, *.omnirefl.hpp.d -Path . |
+          Compress-Archive -DestinationPath C:/test/diagnostics/generated-reflection.zip -Force
+
+        if ((0 -ne $$rc) -and $$env:KEEP_ALIVE_ON_FAILURE) {
+          Write-Host ('ctest failed with rc=' + $$rc + '; keeping container alive')
+          while ($$true) { Start-Sleep -Seconds 3600 }
+        }
+
+        exit $$rc
+
+  test-windows-msys2-mingw:
+    image: ghcr.io/sergio-eld/test-windows-msys2-mingw
+    build:
+      context: .
+      dockerfile: test-windows-msys2-mingw.Dockerfile
+    environment:
+      TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
+      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+    volumes:
+      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/windows}:C:/install:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msys2-mingw}}:C:/test:rw
+    working_dir: "C:/"
+    entrypoint:
+      - C:\tools\msys64\usr\bin\bash.exe
+      - -lc
+      - |
+        set -euxo pipefail
+        mkdir -p "/c/with space" /c/test/diagnostics
+        pkg="$$(find /c/install -maxdepth 1 -name "omnirefl-*.zip" | sort | tail -n 1)"
+        test -n "$$pkg"
+        unzip -q "$$pkg" -d "/c/with space"
+
+        cd "/c/with space"
+        install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
+        test -n "$$install_root"
+        mv "$$install_root" ./omnirefl
+        cp -r omnirefl/share/omnirefl/tests ./
+        ./omnirefl/bin/omnirefl.exe -h
+
+        export PATH=/mingw64/bin:/usr/bin:$$PATH
+        export CC=gcc
+        export CXX=g++
+
+        mkdir -p "/c/with space/build"
+        cd "/c/with space/build"
+        cmake "../tests" -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
+        cmake --build . -j"$$(nproc)"
+
+        set +e
+        ctest . --output-junit "/c/test/windows-$$TOOLCHAIN.xml" -V 2>&1 |
+          tee "/c/test/windows-$$TOOLCHAIN.log"
+        rc=$${PIPESTATUS[0]}
+        set -e
+
+        cp -f CMakeCache.txt compile_commands.json /c/test/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /c/test/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /c/test/diagnostics/ 2>/dev/null || true
+        find . -name "*.omnirefl.hpp" -o -name "*.omnirefl.hpp.d" |
+          tar -czf /c/test/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
+        fi
+
+        exit "$$rc"
+
+  # FIXME(high): keep this matrix entry enabled, but expect it to be unstable
+  # until omnirefl's bundled Clang/libc++ resource setup works with the MSYS2
+  # clang64 MinGW CRT environment.
+  test-windows-msys2-clang:
+    image: ghcr.io/sergio-eld/test-windows-msys2-clang
+    build:
+      context: .
+      dockerfile: test-windows-msys2-clang.Dockerfile
+    environment:
+      TOOLCHAIN: ${TOOLCHAIN:-msys2-clang}
+      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+    volumes:
+      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/windows}:C:/install:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msys2-clang}}:C:/test:rw
+    working_dir: "C:/"
+    entrypoint:
+      - C:\tools\msys64\usr\bin\bash.exe
+      - -lc
+      - |
+        set -euxo pipefail
+        mkdir -p "/c/with space" /c/test/diagnostics
+        pkg="$$(find /c/install -maxdepth 1 -name "omnirefl-*.zip" | sort | tail -n 1)"
+        test -n "$$pkg"
+        unzip -q "$$pkg" -d "/c/with space"
+
+        cd "/c/with space"
+        install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
+        test -n "$$install_root"
+        mv "$$install_root" ./omnirefl
+        cp -r omnirefl/share/omnirefl/tests ./
+        ./omnirefl/bin/omnirefl.exe -h
+
+        export PATH=/clang64/bin:/usr/bin:$$PATH
+        export CC=clang
+        export CXX=clang++
+
+        mkdir -p "/c/with space/build"
+        cd "/c/with space/build"
+        cmake "../tests" -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
+        cmake --build . -j"$$(nproc)"
+
+        set +e
+        ctest . --output-junit "/c/test/windows-$$TOOLCHAIN.xml" -V 2>&1 |
+          tee "/c/test/windows-$$TOOLCHAIN.log"
+        rc=$${PIPESTATUS[0]}
+        set -e
+
+        cp -f CMakeCache.txt compile_commands.json /c/test/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /c/test/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /c/test/diagnostics/ 2>/dev/null || true
+        find . -name "*.omnirefl.hpp" -o -name "*.omnirefl.hpp.d" |
+          tar -czf /c/test/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
+        fi
+
+        exit "$$rc"

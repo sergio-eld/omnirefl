@@ -135,13 +135,31 @@
 - (-) split compiler-driver/compile-db args to cc1 mapping into a separate
   composable tool
 
-### Build/Release
+### Supported Toolchains
 
-- TODO(High): cross-build the tool for macOS.
+Current state is reported by the
+[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+
+- (+) `Linux:Alpine GCC` covered by CI package matrix
+- (+) `Linux:Alpine MinGW GCC` covered by CI package matrix
+  (build-only for Windows test binaries)
+- (+) `Linux:Ubuntu 18.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 18.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 20.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 20.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 MinGW GCC` covered by CI package matrix
+  (build-only for Windows test binaries)
+- (+) `Windows:MSVC` covered by CI package matrix
+- (+) `Windows:clang-cl` covered by CI package matrix
+- (+) `Windows:MSYS2 MinGW` covered by CI package matrix
+- (-) `Windows:MSYS2 clang` currently fails while building the AST because
+  bundled libc++ headers are used with the MSYS2 clang64 MinGW CRT setup,
+  leaving CRT names such as `ldiv_t` and `FP_NAN` unresolved.
+- TODO(High): cross-build the tool for `macOS`.
 - TODO(High): investigate switching the tool build to Cosmopolitan after a
   baseline benchmark is in place.
-- (-) add Windows MinGW/MSYS2 to the test matrix
-- (-) add Linux MinGW cross-compilation for Windows to the test matrix
 
 ## Might Be Considered Later
 

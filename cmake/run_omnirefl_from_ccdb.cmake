@@ -46,6 +46,13 @@ endif()
 string(STRIP "${_compiler_command}" _compiler_command)
 separate_arguments(_compiler_args UNIX_COMMAND "${_compiler_command}")
 
+# clang-cl compile commands may contain a standalone `--` before the source.
+# Clang's driver accepts that as command-line syntax, but the tooling invocation
+# can treat it as an additional input and reject object-output flags as if
+# multiple sources were passed. omnirefl already receives SOURCE separately, so
+# the separator is not meaningful here.
+list(REMOVE_ITEM _compiler_args "--")
+
 if(MSVC_CXX23_PREVIEW_AD_HOC)
     # ad hoc: CMake can emit `/std:c++latest` for a target whose CXX_STANDARD is
     # 23 under MSVC. Clang's driver maps that to a newer cc1 mode, currently

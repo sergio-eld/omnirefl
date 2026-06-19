@@ -1,15 +1,13 @@
 # Usage example:
-#   docker build -f test-install-ubuntu.Dockerfile \
+#   docker build -f test-ubuntu.Dockerfile \
 #     --build-arg UBUNTU_VERSION=18.04 \
-#     --build-arg COMPILER=gcc   \  # or clang / mingw
-#     -t sergioeld/test-install-ubuntu-18-gcc .
+#     --build-arg COMPILER=gcc \
+#     -t ghcr.io/sergio-eld/test-ubuntu-18.04-gcc .
 
 ARG UBUNTU_VERSION=18.04
-ARG COMPILER=gcc   # gcc | clang | mingw
 
 FROM ubuntu:${UBUNTU_VERSION} AS build
 
-ARG COMPILER
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update \
@@ -21,13 +19,6 @@ RUN apt update \
         unzip \
         curl \
         ca-certificates \
-    && if [ "$COMPILER" = "clang" ]; then \
-           apt install -y clang; \
-       elif [ "$COMPILER" = "mingw" ]; then \
-           apt install -y mingw-w64 g++-mingw-w64-x86-64; \
-           update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix; \
-           update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix; \
-       fi \
     && apt clean -y \
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,6 +42,23 @@ RUN set -eux; \
     tar -czf /opt/installers/cmake.tar.gz -C /opt/pkg/cmake .; \
     rm -rf /opt/pkg/cmake
 
+ARG COMPILER=gcc
+
+RUN set -eux; \
+    apt update; \
+    if [ "$COMPILER" = "clang" ]; then \
+        apt install -y clang; \
+    elif [ "$COMPILER" = "mingw" ]; then \
+        apt install -y mingw-w64 g++-mingw-w64-x86-64; \
+        update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix; \
+        update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix; \
+    elif [ "$COMPILER" != "gcc" ]; then \
+        echo "Unsupported COMPILER '$COMPILER' (expected gcc|clang|mingw)"; \
+        exit 1; \
+    fi; \
+    apt clean -y; \
+    rm -rf /var/lib/apt/lists/*
+
 ARG GTEST_VERSION=1.14.0
 ADD https://github.com/google/googletest/archive/refs/tags/v${GTEST_VERSION}.tar.gz /tmp/gtest.tar.gz
 
@@ -60,7 +68,6 @@ RUN set -eux; \
     elif [ "$COMPILER" = "clang" ]; then \
         CC=clang; CXX=clang++; EXTRA_CMAKE_FLAGS=""; \
     elif [ "$COMPILER" = "mingw" ]; then \
-        # Use POSIX-threaded MinGW so std::mutex/std::condition_variable exist
         CC=x86_64-w64-mingw32-gcc-posix; \
         CXX=x86_64-w64-mingw32-g++-posix; \
         EXTRA_CMAKE_FLAGS="-DCMAKE_SYSTEM_NAME=Windows -Dgtest_disable_pthreads=ON"; \
@@ -89,14 +96,13 @@ RUN set -eux; \
 
 FROM ubuntu:${UBUNTU_VERSION} AS final
 
-ARG COMPILER
+ARG COMPILER=gcc
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN set -eux; \
     apt update; \
     apt install -y \
         git \
-        neovim \
         ninja-build; \
     if [ "$COMPILER" = "gcc" ] || [ "$COMPILER" = "clang" ]; then \
         apt install -y build-essential g++; \
@@ -111,7 +117,6 @@ RUN set -eux; \
     apt clean -y; \
     rm -rf /var/lib/apt/lists/*
 
-# Bring in installers from build stage
 COPY --from=build /opt/installers /opt/installers
 
 RUN set -eux; \
