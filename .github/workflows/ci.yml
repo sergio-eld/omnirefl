@@ -172,7 +172,7 @@ jobs:
         shell: powershell
         working-directory: ${{ matrix.toolchain }}
         run: |
-          if (-not (Get-ChildItem -Path "artifacts/packages/windows" -Filter "omnirefl-*.zip" | Select-Object -First 1)) {
+          if ($null -eq (Get-ChildItem -Path "artifacts/packages/windows" -Filter "omnirefl-*.zip" | Select-Object -First 1)) {
             throw "Windows package artifact was not found"
           }
 
@@ -224,8 +224,8 @@ jobs:
           if-no-files-found: error
 
       - name: Clean up intermediate artifacts
-        if: ${{ always() && steps.upload_agg.outcome == 'success' }}
-        uses: geekyeggo/delete-artifact@v5
+        if: ${{ always() && 'success' == steps.upload_agg.outcome }}
+        uses: geekyeggo/delete-artifact@v6
         with:
           name: test-*
           failOnError: false

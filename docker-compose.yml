@@ -232,12 +232,12 @@ services:
 
         New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
         $$package = Get-ChildItem -Path 'C:/install' -Filter 'omnirefl-*.zip' | Sort-Object Name | Select-Object -Last 1
-        if (-not $$package) { throw 'Windows package artifact was not found in C:/install' }
+        if ($$null -eq $$package) { throw 'Windows package artifact was not found in C:/install' }
         Expand-Archive -Path $$package.FullName -DestinationPath 'C:/with space' -Force
 
         Set-Location 'C:/with space'
         $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
-        if (-not $$installRoot) { throw 'could not find extracted omnirefl package root' }
+        if ($$null -eq $$installRoot) { throw 'could not find extracted omnirefl package root' }
         Move-Item $$installRoot.FullName ./omnirefl
         Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
         ./omnirefl/bin/omnirefl.exe -h
