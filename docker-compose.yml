@@ -332,10 +332,10 @@ services:
         exit $$rc
 
   test-windows-msys2-mingw:
-    image: ghcr.io/sergio-eld/test-windows-msys2-mingw
+    image: ghcr.io/sergio-eld/test-windows-msys2
     build:
       context: .
-      dockerfile: test-windows-msys2-mingw.Dockerfile
+      dockerfile: test-windows-msys2.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
@@ -392,10 +392,10 @@ services:
   # until omnirefl's bundled Clang/libc++ resource setup works with the MSYS2
   # clang64 MinGW CRT environment.
   test-windows-msys2-clang:
-    image: ghcr.io/sergio-eld/test-windows-msys2-clang
+    image: ghcr.io/sergio-eld/test-windows-msys2
     build:
       context: .
-      dockerfile: test-windows-msys2-clang.Dockerfile
+      dockerfile: test-windows-msys2.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-msys2-clang}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}

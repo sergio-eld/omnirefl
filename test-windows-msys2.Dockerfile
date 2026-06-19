@@ -15,4 +15,4 @@ RUN C:\msys2.exe -y -oC:\tools `
     && C:\tools\msys64\usr\bin\bash.exe -lc "pacman -Syuu --noconfirm" `
     || C:\tools\msys64\usr\bin\bash.exe -lc "pacman -Syuu --noconfirm"
 
-RUN C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed unzip mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-gcc && pacman -Scc --noconfirm"
+RUN C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed git unzip mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-gcc mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-ninja mingw-w64-clang-x86_64-clang && pacman -Scc --noconfirm"

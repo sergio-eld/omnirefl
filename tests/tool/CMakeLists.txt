@@ -182,7 +182,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}.omni")
 
     add_test(NAME "${cpp_prefix}.test.build"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}")
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}" --parallel)
 
     set_tests_properties("${cpp_prefix}.test.build" PROPERTIES
         DEPENDS "${cpp_prefix}.test.run_omni")
