@@ -178,9 +178,9 @@ jobs:
 
           $service = switch ("${{ matrix.toolchain }}") {
             "msvc" { "test-windows-msvc" }
-            "clang-cl" { "test-windows-clang-cl" }
-            "msys2-mingw" { "test-windows-msys2-mingw" }
-            "msys2-clang" { "test-windows-msys2-clang" }
+            "clang-cl" { "test-windows-msvc" }
+            "msys2-mingw" { "test-windows-msys2" }
+            "msys2-clang" { "test-windows-msys2" }
             default { throw "unsupported Windows toolchain: ${{ matrix.toolchain }}" }
           }
 
