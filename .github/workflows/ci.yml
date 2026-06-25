@@ -116,6 +116,8 @@ jobs:
     name: Windows test / ${{ matrix.toolchain }}
     runs-on: [self-hosted, windows, x64]
     needs: build-package
+    env:
+      WORK_DIR: ${{ matrix.toolchain }}-${{ github.run_id }}-${{ github.run_attempt }}
     strategy:
       fail-fast: false
       matrix:
@@ -128,7 +130,7 @@ jobs:
           # Self-hosted Windows runners reuse the workspace between matrix rows.
           # Keep rows in separate checkout directories so each checkout cleans
           # only its own previous state.
-          path: ${{ matrix.toolchain }}
+          path: ${{ env.WORK_DIR }}
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
@@ -139,7 +141,7 @@ jobs:
 
       - name: Pull Docker Image
         shell: powershell
-        working-directory: ${{ matrix.toolchain }}
+        working-directory: ${{ env.WORK_DIR }}
         run: |
           switch ("${{ matrix.toolchain }}") {
             "msvc" { docker pull ghcr.io/sergio-eld/test-windows-msvc }
@@ -153,11 +155,11 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: packages-windows
-          path: ./${{ matrix.toolchain }}/artifacts/packages/windows
+          path: ./${{ env.WORK_DIR }}/artifacts/packages/windows
 
       - name: Run Package Test
         shell: powershell
-        working-directory: ${{ matrix.toolchain }}
+        working-directory: ${{ env.WORK_DIR }}
         run: |
           if ($null -eq (Get-ChildItem -Path "artifacts/packages/windows" -Filter "omnirefl-*.zip" | Select-Object -First 1)) {
             throw "Windows package artifact was not found"
@@ -177,12 +179,25 @@ jobs:
           $env:TEST_RESULTS_DIR = $results.FullName
           docker compose run --rm $service
 
+      - name: Normalize Test Result Permissions
+        if: always()
+        shell: powershell
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          $results = "artifacts/test-results/windows-${{ matrix.toolchain }}"
+          if (Test-Path $results) {
+            $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            Get-ChildItem -LiteralPath $results -Recurse -Force |
+              ForEach-Object { $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly) }
+            icacls $results /grant "${identity}:(OI)(CI)F" /T /C | Out-Host
+          }
+
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: test-windows-${{ matrix.toolchain }}
-          path: ./${{ matrix.toolchain }}/artifacts/test-results/windows-${{ matrix.toolchain }}
+          path: ./${{ env.WORK_DIR }}/artifacts/test-results/windows-${{ matrix.toolchain }}
           if-no-files-found: error
 
   aggregate-test-results:
