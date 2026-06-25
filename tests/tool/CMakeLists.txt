@@ -119,6 +119,10 @@ endif()
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
+# C++26 has standard reflection. Keep omnirefl release/package validation on the
+# pre-reflection language modes it targets.
+list(REMOVE_ITEM _supported_cpp_standards "26")
+
 # MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
 # Normalize 11 -> 14 to avoid generating duplicate cpp_11 / cpp_14 targets.
 if(MSVC)
@@ -157,6 +161,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         dependent_types_test.cpp
         interface_test.cpp
         example_test.cpp
+        usage_guide_test.cpp
         indexed_types.cpp
         inplace_test.cpp
     )
@@ -177,7 +182,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}.omni")
 
     add_test(NAME "${cpp_prefix}.test.build"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}")
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}" --parallel)
 
     set_tests_properties("${cpp_prefix}.test.build" PROPERTIES
         DEPENDS "${cpp_prefix}.test.run_omni")

@@ -93,6 +93,12 @@ template <typename Record, typename FieldMeta>
 struct field_binding_t;
 
 #if defined(__cpp_concepts)
+// refactorme: consider replacing tag-only concepts with structural
+// public-interface concepts. They would advertise the callable surface
+// (`type_name`, `public_fields`, `enumerators`, field `value`/`set_value`,
+// etc.) instead of only proving that a wrapper type was produced by omnirefl.
+// Possible limitation: structural checks may instantiate too much generated
+// reflection/query surface before the generated header exists.
 // Concepts intentionally check marker tags instead of exact specialization
 // shapes. As of this writing, the entity parameter pollutes meta/binding
 // interface types; the tags keep C++20 visitor syntax stable if internals
@@ -120,6 +126,32 @@ concept field_binding = requires {
 
 struct reflected_call_t {
   private:
+#if !defined(OMNI_TOOL_RUN) && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+  // Ad hoc for normal IDE/clangd parsing before the first tool run.
+  //
+  // Reflected source files force-include a generated header. During CMake
+  // configure that header may exist only as an empty placeholder, so
+  // `reflected_call(...)` must still be parseable even though `_reflected<T>`
+  // specializations are unavailable.
+  //
+  // This is not used by the omnirefl tool run: `OMNI_TOOL_RUN` still uses
+  // `_tool_arg(...)` return-type deduction so invalid visitors, such as lambdas
+  // missing a required trailing return type, can be diagnosed by the tool.
+  //
+  // This placeholder is only for the pre-generation IDE parse, where real
+  // `_reflect_arg(...)` deduction would instantiate `binding_t<T>`/`meta_t<T>`
+  // and fail because the generated metadata is absent. After omnirefl generates
+  // the header, `OMNI_INCLUDED_GENERATED_REFLECTION_HEADER` is defined and real
+  // visitor invocation is compiled instead.
+  struct _ungenerated_result {
+    template <typename T>
+    constexpr operator T() const noexcept(
+      std::is_nothrow_default_constructible<T>::value) {
+      return T{};
+    }
+  };
+#endif
+
 #if defined(OMNI_TOOL_RUN)
   // During the tool run generated `_reflected<T>` metadata does not exist yet,
   // so real `_reflect_arg(value)` would instantiate `binding_t<T>` and fail
@@ -160,6 +192,8 @@ struct reflected_call_t {
 #if defined(OMNI_TOOL_RUN)
     -> decltype(std::declval<Impl &&>()(
       _tool_arg(std::declval<Args &&>())...));
+#elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+    -> _ungenerated_result;
 #else
     -> decltype(std::declval<Impl &&>()(
       _reflect_arg(std::declval<Args &&>())...));
@@ -206,6 +240,8 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #if defined(OMNI_TOOL_RUN)
   -> decltype(std::declval<Impl &&>()(
     _tool_arg(std::declval<Args &&>())...)) {
+#elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+  -> reflected_call_t::_ungenerated_result {
 #else
   -> decltype(std::declval<Impl &&>()(
     _reflect_arg(std::declval<Args &&>())...)) {
@@ -227,7 +263,9 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
   // Tool-run calls are parsed and matched, but never evaluated. The missing
   // return is intentional there: constructing an arbitrary visitor result would
   // instantiate exactly the user code reflected_call is meant to defer.
-#if !defined(OMNI_TOOL_RUN)
+#if !defined(OMNI_TOOL_RUN) && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+  return {};
+#elif !defined(OMNI_TOOL_RUN)
   return std::forward<Impl>(impl)(
     _reflect_arg(std::forward<Args>(args))...);
 #endif
@@ -294,7 +332,7 @@ struct field_binding_t {
   using type = typename FieldMeta::type;
   using meta = FieldMeta;
 
-  Record &owner;
+  Record &_owner;
 
   static constexpr const char *name() noexcept {
     return meta::name();
@@ -312,8 +350,8 @@ struct field_binding_t {
     return meta::index();
   }
 
-  constexpr auto value() const noexcept -> decltype(meta::value(owner)) {
-    return meta::value(owner);
+  constexpr auto value() const noexcept -> decltype(meta::value(_owner)) {
+    return meta::value(_owner);
   }
 
   constexpr operator const type &() const noexcept {
@@ -327,10 +365,10 @@ struct field_binding_t {
   // todo: enable_if is_mutable
   template <typename V>
   void set_value(V &&v) {
-    meta::set_value(owner, std::forward<V>(v));
+    meta::set_value(_owner, std::forward<V>(v));
   }
 
-  constexpr explicit field_binding_t(Record &owner): owner(owner) {}
+  constexpr explicit field_binding_t(Record &owner): _owner(owner) {}
 };
 
 #if defined(OMNI_TOOL_RUN)
@@ -494,6 +532,8 @@ struct binding_t<T, reflected_entity::record> {
     T //< hold a reference (T is U& / const U&)
     >::type;
 
+  // todo: add an explicit interface to `std::move` an owned value out of a
+  // binding_t<T> without exposing the storage member.
   storage_t _value;
 
   static constexpr const char *type_name() noexcept {
@@ -569,6 +609,8 @@ struct binding_t<T, reflected_entity::enumeration> {
     T //< hold a reference (T is U& / const U&)
     >::type;
 
+  // todo: add an explicit interface to `std::move` an owned value out of a
+  // binding_t<T> without exposing the storage member.
   storage_t _value;
 
   static constexpr const char *type_name() noexcept {

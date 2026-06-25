@@ -1,4 +1,5 @@
 build*/
+artifacts/
 .cache/
 .nvim-cmake/
 compile_commands.json

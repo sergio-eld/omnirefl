@@ -10,7 +10,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
-#include <tuple>
+#include <tuple> // IWYU pragma: keep
 #include <type_traits>
 #if defined CXX_STANDARD && 17 <= CXX_STANDARD
 #  include <variant>

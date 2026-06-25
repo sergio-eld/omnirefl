@@ -84,6 +84,8 @@
 
 ### Build/Release
 
+- TODO(High): add a dedicated usage/comprehensive guide `.cpp` as gtest tests,
+  and reference it from this README for in-depth usage demonstrations.
 - (+) generated-header reflection
 - (+) CMake integration
 - (+) annotations enabled by default
@@ -133,10 +135,30 @@
 - (-) split compiler-driver/compile-db args to cc1 mapping into a separate
   composable tool
 
-### Build/Release
+### Supported Toolchains
 
-- (-) add Windows MinGW/MSYS2 to the test matrix
-- (-) add Linux MinGW cross-compilation for Windows to the test matrix
+Current state is reported by the
+[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+
+- (+) `Linux:Alpine GCC` covered by CI package matrix
+- (+) `Linux:Alpine Clang` covered by CI package matrix
+- (+) `Linux:Alpine MinGW GCC` covered by CI package matrix
+  (build-only for Windows test binaries)
+- (+) `Linux:Ubuntu 18.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 18.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 20.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 20.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu MinGW GCC` covered by CI package matrix
+  (build-only for Windows test binaries)
+- (+) `Windows:MSVC` covered by CI package matrix
+- (+) `Windows:clang-cl` covered by CI package matrix
+- (+) `Windows:MSYS2 MinGW` covered by CI package matrix
+- (+) `Windows:MSYS2 clang` covered by CI package matrix
+- TODO(High): cross-build the tool for `macOS`.
+- TODO(High): investigate switching the tool build to Cosmopolitan after a
+  baseline benchmark is in place.
 
 ## Might Be Considered Later
 
