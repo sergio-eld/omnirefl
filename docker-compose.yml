@@ -80,6 +80,9 @@ services:
 
   test-alpine:
     image: ghcr.io/sergio-eld/test-alpine
+    build:
+      context: .
+      dockerfile: test-alpine.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}

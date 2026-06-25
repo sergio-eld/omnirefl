@@ -1317,6 +1317,134 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
       return driver_mode_cl || invoked_as_cl || has_msvc_style_args;
     });
 
+  const std::string driver_triple =
+    std::invoke([msvc_used, &normalized_args, &flags] {
+      const std::string target_triple = std::invoke([&normalized_args] {
+        if (const auto *opt =
+              normalized_args->getLastArgNoClaim(options::OPT_target))
+          return llvm::Triple::normalize(opt->getValue());
+        return llvm::sys::getProcessTriple();
+      });
+
+      llvm::Triple triple(target_triple);
+      if (msvc_used) {
+        triple.setOS(llvm::Triple::Win32);
+        triple.setEnvironment(llvm::Triple::MSVC);
+      }
+
+      if (!msvc_used
+        && !normalized_args->getLastArgNoClaim(options::OPT_target)
+        && !flags.empty()) {
+        // refactorme(cc1_flags): infer the target from GCC-style cross compiler
+        // names until compiler-driver mapping is split out of omnirefl.
+        const std::string compiler =
+          fs::path(flags.front()).filename().string();
+        if (compiler.starts_with("x86_64-w64-mingw32-"))
+          return std::string{"x86_64-w64-windows-gnu"};
+        if (compiler.starts_with("i686-w64-mingw32-"))
+          return std::string{"i686-w64-windows-gnu"};
+      }
+
+      return triple.str();
+    });
+
+  const bool mingw_used = llvm::Triple(driver_triple).isWindowsGNUEnvironment();
+
+  const std::vector<fs::path> mingw_include_paths = std::invoke([&] {
+    std::vector<fs::path> paths;
+    if (!mingw_used || flags.empty())
+      return paths;
+
+    const std::string compiler_name =
+      fs::path(flags.front()).filename().string();
+
+    const std::string gcc_machine = std::invoke([&] {
+      if (compiler_name.starts_with("x86_64-w64-mingw32-"))
+        return std::string{"x86_64-w64-mingw32"};
+      if (compiler_name.starts_with("i686-w64-mingw32-"))
+        return std::string{"i686-w64-mingw32"};
+      return std::string{};
+    });
+
+    std::error_code ec;
+    const fs::path compiler_path = fs::weakly_canonical(flags.front(), ec);
+    const fs::path compiler_root = compiler_path.parent_path().parent_path();
+
+    if (fs::is_directory(compiler_root / "include/c++/v1")) {
+      std::array ordered = {
+        compiler_root / "include/c++/v1",
+        compiler_root / "include",
+      };
+
+      std::ranges::copy(ordered | std::views::filter([](const fs::path &path) {
+        return fs::is_directory(path);
+      }), std::back_inserter(paths));
+
+      const fs::path clang_root = compiler_root / "lib/clang";
+      if (fs::is_directory(clang_root)) {
+        std::vector<fs::path> candidates;
+        std::ranges::copy(fs::directory_iterator(clang_root)
+            | std::views::filter([](const fs::directory_entry &entry) {
+                return entry.is_directory();
+              })
+            | std::views::transform(&fs::directory_entry::path),
+          std::back_inserter(candidates));
+
+        std::ranges::sort(candidates);
+        if (!candidates.empty()
+          && fs::is_directory(candidates.back() / "include"))
+          paths.emplace_back(candidates.back() / "include");
+      }
+
+      return paths;
+    }
+
+    if (gcc_machine.empty())
+      return paths;
+
+    const std::string compiler_variant =
+      compiler_path.filename().string().contains("posix") ? "posix" : "win32";
+
+    const fs::path gcc_root = fs::path("/usr/lib/gcc") / gcc_machine;
+    if (!fs::is_directory(gcc_root))
+      return paths;
+
+    std::vector<fs::path> candidates;
+    std::ranges::copy(fs::directory_iterator(gcc_root)
+        | std::views::filter([](const fs::directory_entry &entry) {
+            return entry.is_directory();
+          })
+        | std::views::transform(&fs::directory_entry::path),
+      std::back_inserter(candidates));
+
+    std::ranges::sort(candidates);
+
+    if (candidates.empty())
+      return paths;
+
+    const auto found = std::ranges::find_if(candidates,
+      [&compiler_variant](const fs::path &candidate) {
+        return candidate.filename().string().contains(compiler_variant);
+      });
+
+    const fs::path &gcc_dir =
+      candidates.end() == found ? candidates.back() : *found;
+
+    std::array ordered = {
+      gcc_dir / "include/c++",
+      gcc_dir / "include/c++" / gcc_machine,
+      gcc_dir / "include/c++/backward",
+      gcc_dir / "include",
+      gcc_dir / "include-fixed",
+    };
+
+    std::ranges::copy(ordered | std::views::filter([](const fs::path &path) {
+      return fs::is_directory(path);
+    }), std::back_inserter(paths));
+
+    return paths;
+  });
+
   const std::vector<std::string> cc1_driver_args =
     std::invoke([&] -> std::vector<std::string> {
       // MSVC/clang-cl: pass through the original driver args to preserve
@@ -1353,8 +1481,21 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
       out.emplace_back(
         std::format("-resource-dir={}", resource_dir.generic_string()));
 
-      // prevents from picking up on another compiler's C++ < std libs
-      out.emplace_back("-nostdinc++");
+      if (!mingw_used) {
+        // prevents from picking up on another compiler's C++ < std libs
+        out.emplace_back("-nostdinc++");
+      } else if (!mingw_include_paths.empty()) {
+        // MinGW GCC already provides builtin C headers in its GCC include dir.
+        // MSYS2 clang64 provides its own builtin headers too. Mixing Clang's
+        // packaged builtin headers with either chain breaks CRT headers such as
+        // stddef.h/max_align_t and float.h include_next.
+        out.emplace_back("-nobuiltininc");
+      }
+
+      std::ranges::for_each(mingw_include_paths, [&out](const fs::path &p) {
+        out.emplace_back("-isystem");
+        out.emplace_back(p.generic_string());
+      });
 
       const std::vector<std::string> ast_related_args =
         filter_ast_related_args(*normalized_args);
@@ -1367,37 +1508,6 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
         std::back_inserter(out));
 
       return out;
-    });
-
-  const std::string driver_triple =
-    std::invoke([msvc_used, &normalized_args, &flags] {
-      const std::string target_triple = std::invoke([&normalized_args] {
-        if (const auto *opt =
-              normalized_args->getLastArgNoClaim(options::OPT_target))
-          return llvm::Triple::normalize(opt->getValue());
-        return llvm::sys::getProcessTriple();
-      });
-
-      llvm::Triple triple(target_triple);
-      if (msvc_used) {
-        triple.setOS(llvm::Triple::Win32);
-        triple.setEnvironment(llvm::Triple::MSVC);
-      }
-
-      if (!msvc_used
-        && !normalized_args->getLastArgNoClaim(options::OPT_target)
-        && !flags.empty()) {
-        // refactorme(cc1_flags): infer the target from GCC-style cross compiler
-        // names until compiler-driver mapping is split out of omnirefl.
-        const std::string compiler =
-          fs::path(flags.front()).filename().string();
-        if (compiler.starts_with("x86_64-w64-mingw32-"))
-          return std::string{"x86_64-w64-windows-gnu"};
-        if (compiler.starts_with("i686-w64-mingw32-"))
-          return std::string{"i686-w64-windows-gnu"};
-      }
-
-      return triple.str();
     });
 
   // ad hoc: this is a heavy-weight solution just to get proper argument
@@ -1440,31 +1550,38 @@ auto pipeline::to_compiler_invocation(cli::options cli_args) noexcept
   {
     clang::HeaderSearchOptions &o = clang_invocation->getHeaderSearchOpts();
 
-    // own libc++ includes are bundled
-    if (!msvc_used)
+    // Original intent: bundle libc++ so native Linux instrumentation can work
+    // as a mostly standalone tool even when no usable host C++ standard library
+    // is discovered. This is not a target-independent C++ library setup:
+    // libc/CRT and compiler builtin headers still come from the active target
+    // toolchain. MinGW/MSVC-style targets must keep their own matched
+    // C++/CRT/builtin include chain instead of mixing it with bundled libc++.
+    if (!msvc_used && !mingw_used)
       o.UseStandardCXXIncludes = false;
     o.ResourceDir = resource_dir.generic_string();
 
-    o.AddPath(
+    if (!msvc_used && !mingw_used) {
+      o.AddPath(
+        // todo: this should be configured at compile time
+        (resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
+          .generic_string(),
+        clang::frontend::IncludeDirGroup::CXXSystem,
+        // todo: I have no idea what are these parameters. comment
+        /*IsFramework=*/false,
+        /*IgnoreSysRoot=*/false);
+
       // todo: this should be configured at compile time
-      (resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
-        .generic_string(),
-      clang::frontend::IncludeDirGroup::CXXSystem,
-      // todo: I have no idea what are these parameters. comment
-      /*IsFramework=*/false,
-      /*IgnoreSysRoot=*/false);
+      o.AddPath((resource_dir / "include/c++/v1").generic_string(),
+        clang::frontend::IncludeDirGroup::CXXSystem,
+        // todo: I have no idea what are these parameters. comment
+        /*IsFramework=*/false,
+        /*IgnoreSysRoot=*/false);
 
-    // todo: this should be configured at compile time
-    o.AddPath((resource_dir / "include/c++/v1").generic_string(),
-      clang::frontend::IncludeDirGroup::CXXSystem,
-      // todo: I have no idea what are these parameters. comment
-      /*IsFramework=*/false,
-      /*IgnoreSysRoot=*/false);
-
-    // ad hoc: C++ headers must be included before C's
-    std::rotate(o.UserEntries.rbegin(),
-      o.UserEntries.rbegin() + 2,
-      o.UserEntries.rend());
+      // ad hoc: C++ headers must be included before C's
+      std::rotate(o.UserEntries.rbegin(),
+        o.UserEntries.rbegin() + 2,
+        o.UserEntries.rend());
+    }
   }
 
   {
@@ -2709,16 +2826,28 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
       [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
 
     // refactorme: clean up
-    // ad hoc: special case for 'tuple<T...>', 'variant<T...>'.
+    // Dependency route only:
+    //   struct r { std::tuple<a, b> v; };
+    //   struct r { variant<a, b> v; };
+    // This does not mean compound inputs are reflected-call arguments:
+    //   reflected_call(f, std::tuple<a, b>{}); //< unsupported
+    // A visitor receives meta_t<T> or binding_t<T>; the argument type itself
+    // must be reflected, which is not true for tuple/variant wrapper types.
     if (is_supported_template_specialization(cur_decl)) {
-      const auto arg_list =
+      const auto raw_args =
         clang::cast<clang::ClassTemplateSpecializationDecl>(cur_decl)
-          ->getTemplateInstantiationArgs()
+          ->getTemplateArgs()
           .asArray();
 
-      if (1 != arg_list.size()
-        || clang::TemplateArgument::Pack != arg_list.front().getKind()
-        || std::ranges::any_of(arg_list.front().getPackAsArray()
+      const llvm::ArrayRef<clang::TemplateArgument> arg_list =
+        std::invoke([raw_args] -> llvm::ArrayRef<clang::TemplateArgument> {
+          return 1 == raw_args.size()
+              && clang::TemplateArgument::Pack == raw_args.front().getKind()
+            ? raw_args.front().getPackAsArray()
+            : raw_args;
+        });
+
+      if (std::ranges::any_of(arg_list
             | std::views::transform(&clang::TemplateArgument::getKind),
           std::bind_front(std::not_equal_to{},
             clang::TemplateArgument::Type))) {
@@ -2730,7 +2859,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
       }
 
       std::ranges::move(
-        template_specialization_types(arg_list.front().getPackAsArray()) //
+        template_specialization_types(arg_list) //
           | std::views::filter(&clang::Type::isEnumeralType) //
           | std::views::transform(to_tag_type) //
           | std::views::filter(not_in_std) //
@@ -2738,7 +2867,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
         std::inserter(collected, collected.begin()));
 
       std::ranges::for_each(
-        template_specialization_types(arg_list.front().getPackAsArray()) //
+        template_specialization_types(arg_list) //
           | std::views::filter(&clang::Type::isRecordType)
           | std::views::transform(&clang::Type::getAsCXXRecordDecl),
         [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });

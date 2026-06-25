@@ -63,15 +63,6 @@ jobs:
       matrix:
         platform: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
         toolchain: [gcc, clang, mingw]
-        exclude:
-          # FIXME(high): enable Alpine clang package tests once the package-test
-          # image has a clang toolchain installed and configured.
-          - platform: alpine
-            toolchain: clang
-          # FIXME(high): Ubuntu 18.04 MinGW currently fails during omnirefl AST
-          # generation in MinGW's `float.h` include_next chain.
-          - platform: ubuntu-18.04
-            toolchain: mingw
 
     steps:
       - name: Checkout Repository
@@ -129,10 +120,6 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
-        exclude:
-          # FIXME(high): enable MSYS2 clang package tests once the bundled
-          # Clang/libc++ resource setup works with the clang64 MinGW CRT.
-          - toolchain: msys2-clang
 
     steps:
       - name: Checkout Repository
