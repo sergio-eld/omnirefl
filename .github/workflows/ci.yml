@@ -177,7 +177,14 @@ jobs:
           $env:TOOLCHAIN = "${{ matrix.toolchain }}"
           $env:WINDOWS_PACKAGE_DIR = (Resolve-Path "artifacts/packages/windows").Path
           $env:TEST_RESULTS_DIR = $results.FullName
-          docker compose run --rm $service
+          docker compose --project-name "${{ env.WORK_DIR }}" run --rm $service
+
+      - name: Cleanup Docker Compose Project
+        if: always()
+        shell: powershell
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          docker compose --project-name "${{ env.WORK_DIR }}" down --remove-orphans
 
       - name: Normalize Test Result Permissions
         if: always()
