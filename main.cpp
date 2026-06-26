@@ -254,10 +254,6 @@ struct diagnostics {
     llvm::errs() << text;
   }
 
-  void operator()(log_level requested, const std::string &text) const {
-    (*this)(requested, std::string_view{text});
-  }
-
   template <typename F>
     requires std::invocable<const F &>
   void operator()(log_level requested, F &&format) const {
