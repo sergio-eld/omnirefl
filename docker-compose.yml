@@ -204,6 +204,10 @@ services:
 
   test-windows-msvc:
     image: ghcr.io/sergio-eld/test-windows-${TOOLCHAIN:-msvc}
+    # Windows Docker Compose creates a new NAT network per project by default.
+    # On the self-hosted runner those per-run networks can lose outbound
+    # connectivity, so Windows package tests use Docker's existing `nat`.
+    network_mode: nat
     build:
       context: .
       dockerfile: test-windows-msvc.Dockerfile
@@ -278,6 +282,10 @@ services:
 
   test-windows-msys2:
     image: ghcr.io/sergio-eld/test-windows-msys2
+    # Windows Docker Compose creates a new NAT network per project by default.
+    # On the self-hosted runner those per-run networks can lose outbound
+    # connectivity, so Windows package tests use Docker's existing `nat`.
+    network_mode: nat
     build:
       context: .
       dockerfile: test-windows-msys2.Dockerfile

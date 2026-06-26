@@ -72,7 +72,7 @@ function(omni_reflected_target target)
     cmake_parse_arguments(
         OMNIREFL
         "ENABLE_INDEX_MODE;NO_ANNOTATIONS;_DISABLE_PREVIEW_AD_HOC"
-        ""
+        "LOG_LEVEL"
         "INCLUDE;EXCLUDE"
         ${ARGN})
 
@@ -84,6 +84,35 @@ function(omni_reflected_target target)
         message(FATAL_ERROR
             "omni_reflected_target: unexpected arguments: ${OMNIREFL_UNPARSED_ARGUMENTS}")
     endif()
+
+    if(NOT OMNIREFL_LOG_LEVEL)
+        if(CMAKE_MESSAGE_LOG_LEVEL)
+            string(TOUPPER "${CMAKE_MESSAGE_LOG_LEVEL}" _omni_cmake_log_level)
+            if("ERROR" STREQUAL _omni_cmake_log_level)
+                set(OMNIREFL_LOG_LEVEL "error")
+            elseif("WARNING" STREQUAL _omni_cmake_log_level)
+                set(OMNIREFL_LOG_LEVEL "warning")
+            elseif("DEBUG" STREQUAL _omni_cmake_log_level
+                    OR "TRACE" STREQUAL _omni_cmake_log_level)
+                set(OMNIREFL_LOG_LEVEL "debug")
+            elseif("NOTICE" STREQUAL _omni_cmake_log_level
+                    OR "STATUS" STREQUAL _omni_cmake_log_level
+                    OR "VERBOSE" STREQUAL _omni_cmake_log_level)
+                set(OMNIREFL_LOG_LEVEL "info")
+            else()
+                set(OMNIREFL_LOG_LEVEL "info")
+            endif()
+        else()
+            set(OMNIREFL_LOG_LEVEL "info")
+        endif()
+    endif()
+
+    if(NOT OMNIREFL_LOG_LEVEL MATCHES "^(silent|error|warning|info|debug)$")
+        message(FATAL_ERROR
+            "omni_reflected_target: LOG_LEVEL must be one of "
+            "silent, error, warning, info, debug")
+    endif()
+
     if(NOT TARGET ${target})
         message(SEND_ERROR "${target} is not a valid CMake target")
         return()
@@ -216,6 +245,7 @@ function(omni_reflected_target target)
                 -D "OUT=${_generated_header}"
                 -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
                 -D "NO_ANNOTATIONS=${_no_annotations}"
+                -D "LOG_LEVEL=${OMNIREFL_LOG_LEVEL}"
                 -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
