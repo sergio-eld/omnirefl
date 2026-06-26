@@ -22,6 +22,9 @@ endif()
 if(NOT DEFINED NO_ANNOTATIONS)
     set(NO_ANNOTATIONS 0)
 endif()
+if(NOT DEFINED LOG_LEVEL)
+    set(LOG_LEVEL "info")
+endif()
 if(NOT DEFINED MSVC_CXX23_PREVIEW_AD_HOC)
     set(MSVC_CXX23_PREVIEW_AD_HOC 0)
 endif()
@@ -65,6 +68,7 @@ endif()
 set(_omnirefl_args
     "${OMNIREFL}"
     --resource-dir "${RESOURCE_DIR}"
+    --log-level "${LOG_LEVEL}"
     -o "${OUT}"
     --source "${SOURCE}")
 
