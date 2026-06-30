@@ -1,14 +1,9 @@
 name: Benchmark
 
 on:
-  pull_request:
-    branches:
-      - master
   workflow_run:
     workflows:
       - CI
-    branches:
-      - master
     types:
       - completed
   workflow_dispatch:
@@ -25,7 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       ${{
-        'pull_request' == github.event_name ||
         'workflow_dispatch' == github.event_name ||
         'success' == github.event.workflow_run.conclusion
       }}
@@ -47,27 +41,28 @@ jobs:
             const owner = context.repo.owner
             const repo = context.repo.repo
             const workflow_id = 'ci.yml'
-            const wantedSha = 'workflow_run' === context.eventName
-              ? context.payload.workflow_run.head_sha
-              : context.sha
-            const artifactName =
-              `packages-${{ matrix.os }}-${{ matrix.arch }}-${wantedSha.substring(0, 12)}`
-            core.setOutput('artifact_name', artifactName)
+            const artifactPrefix = 'packages-${{ matrix.os }}-${{ matrix.arch }}-'
 
             const hasPackage = async (run_id) => {
               const artifacts = await github.paginate(
                 github.rest.actions.listWorkflowRunArtifacts,
                 {owner, repo, run_id, per_page: 100})
 
-              return artifacts.some((artifact) =>
-                artifactName === artifact.name && !artifact.expired)
+              return artifacts.find((artifact) =>
+                artifact.name.startsWith(artifactPrefix) && !artifact.expired)
             }
 
             if ('workflow_run' === context.eventName) {
               const run_id = context.payload.workflow_run.id
-              core.setOutput('run_id', await hasPackage(run_id) ? run_id : '')
+              const artifact = await hasPackage(run_id)
+              core.setOutput('artifact_name', artifact ? artifact.name : '')
+              core.setOutput('run_id', artifact ? run_id : '')
               return
             }
+
+            const wantedSha = context.sha
+            const artifactName = `${artifactPrefix}${wantedSha.substring(0, 12)}`
+            core.setOutput('artifact_name', artifactName)
 
             const runs = await github.paginate(
               github.rest.actions.listWorkflowRuns,
@@ -81,7 +76,8 @@ jobs:
               })
 
             for (const run of runs) {
-              if (await hasPackage(run.id)) {
+              const artifact = await hasPackage(run.id)
+              if (artifact && artifactName === artifact.name) {
                 core.setOutput('run_id', run.id)
                 return
               }
@@ -113,27 +109,48 @@ jobs:
           run-id: ${{ steps.package_run.outputs.run_id }}
 
       - name: Pull build image for fallback package
-        if: ${{ '' == steps.package_run.outputs.run_id }}
+        if: >-
+          ${{
+            '' == steps.package_run.outputs.run_id &&
+            'workflow_dispatch' == github.event_name
+          }}
         run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine:latest
 
       - name: Build fallback package
-        if: ${{ '' == steps.package_run.outputs.run_id }}
+        if: >-
+          ${{
+            '' == steps.package_run.outputs.run_id &&
+            'workflow_dispatch' == github.event_name
+          }}
         run: |
           sha="${{ github.event.workflow_run.head_sha || github.sha }}"
           PACKAGE_COMMIT="${sha:0:12}" \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
             docker compose run --rm build-${{ matrix.os }}
 
+      - name: Require CI package artifact
+        if: >-
+          ${{
+            '' == steps.package_run.outputs.run_id &&
+            'workflow_run' == github.event_name
+          }}
+        run: |
+          echo "CI package artifact was not found for completed run ${{ github.event.workflow_run.id }}" >&2
+          exit 1
+
       - name: Pull benchmark image
         run: docker pull ghcr.io/sergio-eld/test-ubuntu-22.04-gcc:latest
 
       - name: Run benchmark
         run: |
-          mkdir -p ./artifacts/benchmarks ./build-benchmark/${{ matrix.os }}-${{ matrix.arch }}
+          results_dir="$RUNNER_TEMP/omnirefl-benchmark-results"
+          work_dir="$RUNNER_TEMP/omnirefl-benchmark-${{ matrix.os }}-${{ matrix.arch }}"
+          rm -rf "$results_dir" "$work_dir"
+          mkdir -p "$results_dir" "$work_dir"
           docker run --rm \
             -v "${PWD}/artifacts/packages/${{ matrix.os }}:/packages:ro" \
-            -v "${PWD}/artifacts/benchmarks:/results:rw" \
-            -v "${PWD}/build-benchmark/${{ matrix.os }}-${{ matrix.arch }}:/benchmark:rw" \
+            -v "${results_dir}:/results:rw" \
+            -v "${work_dir}:/benchmark:rw" \
             -w /benchmark \
             ghcr.io/sergio-eld/test-ubuntu-22.04-gcc \
             /bin/bash -euxo pipefail -c '
@@ -187,6 +204,8 @@ jobs:
                 printf "\n]\n"
               } > /results/benchmark.json
             '
+          mkdir -p ./artifacts/benchmarks
+          cp -a "$results_dir"/. ./artifacts/benchmarks/
 
       - name: Find benchmark history artifact
         id: history_run
@@ -257,7 +276,11 @@ jobs:
             --count 5
 
       - name: Store benchmark data
-        if: ${{ 'workflow_run' == github.event_name }}
+        if: >-
+          ${{
+            'workflow_run' == github.event_name &&
+            'master' == github.event.workflow_run.head_branch
+          }}
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: customSmallerIsBetter
@@ -269,7 +292,10 @@ jobs:
       - name: Update benchmark history
         if: >-
           ${{
-            'workflow_run' == github.event_name ||
+            (
+              'workflow_run' == github.event_name &&
+              'master' == github.event.workflow_run.head_branch
+            ) ||
             ('workflow_dispatch' == github.event_name && inputs.update)
           }}
         run: |
@@ -288,7 +314,10 @@ jobs:
           ${{
             success() &&
             (
-              'workflow_run' == github.event_name ||
+              (
+                'workflow_run' == github.event_name &&
+                'master' == github.event.workflow_run.head_branch
+              ) ||
               ('workflow_dispatch' == github.event_name && inputs.update)
             )
           }}
