@@ -54,6 +54,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <cstdint>
 #include <expected>
@@ -64,6 +65,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -296,6 +298,8 @@ struct options {
   bool annotations = true;
 
   log_level level = log_level::info;
+
+  bool timings = true;
 };
 
 std::expected<options, app_error> parse(int argc,
@@ -793,6 +797,32 @@ std::string format_options(const cli::options &args);
 std::string format_instrumented_source(const cli::options &args);
 std::string format_reduced_matches(const pipeline::reduced_matches &rm);
 std::string format_success(const pipeline::run_report &out);
+std::string format_timings(
+  const std::map<std::string, std::chrono::microseconds> &timing_by_action);
+
+struct action_timer {
+  const std::map<std::string, std::chrono::microseconds> &
+    timing_by_action() const {
+    return _timing_by_action;
+  }
+
+  auto operator()(std::string action, auto f) {
+    return //
+      [this, action = std::move(action), f = std::move(f)](auto &&...args) {
+        const std::chrono::time_point start = std::chrono::steady_clock::now();
+        auto result = std::invoke(f, std::forward<decltype(args)>(args)...);
+
+        _timing_by_action.emplace(action,
+          std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start));
+
+        return result;
+      };
+  }
+
+  private:
+  std::map<std::string, std::chrono::microseconds> _timing_by_action;
+};
 
 } // namespace
 
@@ -846,23 +876,60 @@ int main(int argc, char **argv) {
     return format_instrumented_source(args);
   });
 
-  return pipeline::to_compiler_invocation(log, std::move(*args))
-    .and_then(std::bind_front(pipeline::to_parsed_ast, std::cref(log)))
-    .and_then(std::bind_front(pipeline::reduce_matches, std::cref(log)))
-    .transform(fn::with([&log](const pipeline::reduced_matches &rm) {
+  action_timer measured;
+
+  const auto to_compiler_invocation = std::bind_front(
+    measured("compiler invocation", pipeline::to_compiler_invocation),
+    std::cref(log));
+
+  const auto to_parsed_ast = std::bind_front(
+    measured("parsed ast", pipeline::to_parsed_ast),
+    std::cref(log));
+
+  const auto reduce_matches = std::bind_front(
+    measured("reduce matches", pipeline::reduce_matches),
+    std::cref(log));
+
+  const auto resolve_reflection_context = std::bind_front(
+    measured("resolve reflection context",
+      pipeline::resolve_reflection_context),
+    std::cref(log));
+
+  const auto emit_outputs = std::bind_front(
+    measured("emit outputs", pipeline::emit_outputs),
+    std::cref(log));
+
+  const auto with_print_reduced_matches =
+    fn::with([&log](const pipeline::reduced_matches &rm) {
       log(log_level::debug, [&rm] { return format_reduced_matches(rm); });
-    }))
-    .and_then(
-      std::bind_front(pipeline::resolve_reflection_context, std::cref(log)))
-    .and_then(std::bind_front(pipeline::emit_outputs, std::cref(log)))
-    .transform([&log](const pipeline::run_report &report) {
+    });
+
+  const auto report_success = //
+    [&log, timings = args->timings, &measured](
+      const pipeline::run_report &report) {
       log(log_level::info, [&report] { return format_success(report); });
+      if (timings)
+        llvm::errs() << format_timings(measured.timing_by_action());
       return 0;
-    })
-    .or_else([&log](app_error error) -> std::expected<int, app_error> {
-      log(log_level::error, error.message);
-      return error.code;
-    })
+    };
+
+  const auto report_error = //
+    [&log, timings = args->timings, &measured](
+      app_error error) -> std::expected<int, app_error> {
+    log(log_level::error, error.message);
+    if (timings)
+      llvm::errs() << format_timings(measured.timing_by_action());
+    return error.code;
+  };
+
+  return to_compiler_invocation(std::move(*args))
+    .and_then(to_parsed_ast)
+    .and_then(reduce_matches)
+    .transform(with_print_reduced_matches)
+    .and_then(resolve_reflection_context)
+    .and_then(emit_outputs)
+    .transform(report_success)
+    .or_else(report_error)
     .value();
 }
 
@@ -1285,6 +1352,13 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     ->default_val(std::format("{}", log_level::info))
     ->configurable(false);
 
+  CLI::Option *const timings = //
+    app
+    .add_flag("--timings",
+      "Print action timings. Defaults to enabled unless --log-level silent is "
+      "selected.")
+    ->configurable(false);
+
   app.allow_extras();
 
   try {
@@ -1336,6 +1410,9 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     .resource_dir = std::move(*parsed_resource_dir),
     .annotations = !no_annotations->as<bool>(),
     .level = *parsed_level,
+    .timings = 0 == timings->count()
+      ? log_level::silent != *parsed_level
+      : timings->as<bool>(),
   };
 }
 
@@ -2646,6 +2723,55 @@ std::string format_success(const pipeline::run_report &out) {
     out.indexed_type_count,
     out.file_dependency_count)
     + "\ndone.\n";
+}
+
+std::string format_scaled_duration(std::chrono::microseconds duration,
+  std::chrono::microseconds scale,
+  std::string_view unit) {
+  const auto whole = duration / scale;
+  const auto fractional = duration % scale;
+  std::string suffix = std::format("{:03}",
+    1000 * fractional.count() / scale.count());
+
+  while (!suffix.empty() && '0' == suffix.back())
+    suffix.pop_back();
+
+  return suffix.empty()
+    ? std::format("{} {}", whole, unit)
+    : std::format("{}.{} {}",
+        whole,
+        suffix,
+        unit);
+}
+
+std::string format_duration(std::chrono::microseconds duration) {
+  if (std::chrono::milliseconds{1} > duration)
+    return std::format("{} microseconds", duration.count());
+
+  if (std::chrono::seconds{1} > duration) {
+    return format_scaled_duration(duration,
+      std::chrono::milliseconds{1},
+      "milliseconds"sv);
+  }
+
+  return format_scaled_duration(duration, std::chrono::seconds{1}, "seconds"sv);
+}
+
+std::string format_timings(
+  const std::map<std::string, std::chrono::microseconds> &timing_by_action) {
+  return std::format("\ntimings:\n{}\n",
+    timing_by_action //
+      | std::views::transform([](const auto &timing) {
+          const auto &[action, duration] = timing;
+          // Keep the raw microsecond value stable for benchmark parsing; the
+          // preceding duration is for human-readable diagnostics.
+          return std::format("{}: {} ({} microseconds)",
+            action,
+            format_duration(duration),
+            duration.count());
+        })
+      | std::views::join_with("\n"sv) //
+      | util::format_range);
 }
 
 } // namespace
