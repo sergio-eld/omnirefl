@@ -140,7 +140,7 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
             "(host: ${CMAKE_HOST_SYSTEM_NAME}, target: ${CMAKE_SYSTEM_NAME})"
         )
     endif()
-elseif(ENABLE_TESTING OR ENABLE_PACKAGE OR ENABLE_BENCH)
+elseif(ENABLE_BENCH OR ENABLE_TESTING)
     enable_testing()
 
     # Tests in the subdir are packaged and expect to work with `find_package(omnirefl)`.
@@ -149,7 +149,6 @@ elseif(ENABLE_TESTING OR ENABLE_PACKAGE OR ENABLE_BENCH)
     include(cmake/reflected_target.cmake)
 
     add_subdirectory(tests/tool tests)
-
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
 endif()
 
