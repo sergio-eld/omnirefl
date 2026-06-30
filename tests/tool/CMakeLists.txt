@@ -4,6 +4,8 @@ project(omnirefl_tests LANGUAGES CXX)
 
 enable_testing()
 
+option(ENABLE_BENCH "Enable omnirefl benchmark targets" OFF)
+
 if (NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
@@ -140,6 +142,30 @@ endif()
 
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
 
+if(ENABLE_BENCH)
+    set(_benchmark_cpp_standard "")
+    foreach(_n IN LISTS _supported_cpp_standards)
+        if(_n LESS_EQUAL 23)
+            set(_benchmark_cpp_standard "${_n}")
+        endif()
+    endforeach()
+
+    if(NOT _benchmark_cpp_standard)
+        message(FATAL_ERROR "omnirefl: no C++ standard up to C++23 is available for benchmark.baseline")
+    endif()
+
+    add_library(benchmark.baseline STATIC baseline_test.cpp)
+    set_target_properties(benchmark.baseline PROPERTIES
+        CXX_STANDARD ${_benchmark_cpp_standard}
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO
+    )
+
+    target_compile_definitions(benchmark.baseline PRIVATE CXX_STANDARD=${_benchmark_cpp_standard})
+    target_link_libraries(benchmark.baseline PRIVATE GTest::GTest std_compat)
+    omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
+endif()
+
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
 
@@ -163,7 +189,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         example_test.cpp
         usage_guide_test.cpp
         indexed_types.cpp
-        inplace_test.cpp
+        baseline_test.cpp
     )
 
     add_executable(${_test_tgt} ${_test_sources})

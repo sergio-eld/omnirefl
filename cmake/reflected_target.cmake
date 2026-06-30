@@ -71,7 +71,7 @@ function(omni_reflected_target target)
 
     cmake_parse_arguments(
         OMNIREFL
-        "ENABLE_INDEX_MODE;NO_ANNOTATIONS;_DISABLE_PREVIEW_AD_HOC"
+        "ENABLE_INDEX_MODE;NO_ANNOTATIONS;TIMINGS;_DISABLE_PREVIEW_AD_HOC"
         "LOG_LEVEL"
         "INCLUDE;EXCLUDE"
         ${ARGN})
@@ -227,6 +227,10 @@ function(omni_reflected_target target)
         if(OMNIREFL_NO_ANNOTATIONS)
             set(_no_annotations 1)
         endif()
+        set(_timings 0)
+        if(OMNIREFL_TIMINGS)
+            set(_timings 1)
+        endif()
 
         # The compiler command is only available at build time from
         # compile_commands.json, so this cannot be expressed as a static
@@ -246,6 +250,7 @@ function(omni_reflected_target target)
                 -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
                 -D "NO_ANNOTATIONS=${_no_annotations}"
                 -D "LOG_LEVEL=${OMNIREFL_LOG_LEVEL}"
+                -D "TIMINGS=${_timings}"
                 -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"

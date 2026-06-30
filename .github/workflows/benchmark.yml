@@ -1,0 +1,307 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_run:
+    workflows:
+      - CI
+    branches:
+      - master
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      update:
+        description: Update benchmark history
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  benchmark:
+    name: Benchmark / ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        'pull_request' == github.event_name ||
+        'workflow_dispatch' == github.event_name ||
+        'success' == github.event.workflow_run.conclusion
+      }}
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux]
+        arch: [x86_64]
+
+    steps:
+      - name: Find matching package artifact
+        id: package_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const workflow_id = 'ci.yml'
+            const wantedSha = 'workflow_run' === context.eventName
+              ? context.payload.workflow_run.head_sha
+              : context.sha
+            const artifactName =
+              `packages-${{ matrix.os }}-${{ matrix.arch }}-${wantedSha.substring(0, 12)}`
+            core.setOutput('artifact_name', artifactName)
+
+            const hasPackage = async (run_id) => {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id, per_page: 100})
+
+              return artifacts.some((artifact) =>
+                artifactName === artifact.name && !artifact.expired)
+            }
+
+            if ('workflow_run' === context.eventName) {
+              const run_id = context.payload.workflow_run.id
+              core.setOutput('run_id', await hasPackage(run_id) ? run_id : '')
+              return
+            }
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id,
+                head_sha: wantedSha,
+                status: 'success',
+                per_page: 20,
+              })
+
+            for (const run of runs) {
+              if (await hasPackage(run.id)) {
+                core.setOutput('run_id', run.id)
+                return
+              }
+            }
+
+            core.setOutput('run_id', '')
+
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_DOCKER_READ }}
+
+      - name: Download matching package artifact
+        if: ${{ '' != steps.package_run.outputs.run_id }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.package_run.outputs.artifact_name }}
+          path: ./artifacts/packages/${{ matrix.os }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.package_run.outputs.run_id }}
+
+      - name: Pull build image for fallback package
+        if: ${{ '' == steps.package_run.outputs.run_id }}
+        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine:latest
+
+      - name: Build fallback package
+        if: ${{ '' == steps.package_run.outputs.run_id }}
+        run: |
+          sha="${{ github.event.workflow_run.head_sha || github.sha }}"
+          PACKAGE_COMMIT="${sha:0:12}" \
+          PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
+            docker compose run --rm build-${{ matrix.os }}
+
+      - name: Pull benchmark image
+        run: docker pull ghcr.io/sergio-eld/test-ubuntu-22.04-gcc:latest
+
+      - name: Run benchmark
+        run: |
+          mkdir -p ./artifacts/benchmarks ./build-benchmark/${{ matrix.os }}-${{ matrix.arch }}
+          docker run --rm \
+            -v "${PWD}/artifacts/packages/${{ matrix.os }}:/packages:ro" \
+            -v "${PWD}/artifacts/benchmarks:/results:rw" \
+            -v "${PWD}/build-benchmark/${{ matrix.os }}-${{ matrix.arch }}:/benchmark:rw" \
+            -w /benchmark \
+            ghcr.io/sergio-eld/test-ubuntu-22.04-gcc \
+            /bin/bash -euxo pipefail -c '
+              rm -rf /benchmark/run
+              mkdir -p /benchmark/run/build
+              apt install -y /packages/omnirefl*.deb
+
+              cmake -S /usr/share/omnirefl/tests \
+                -B /benchmark/run/build \
+                -GNinja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DENABLE_BENCH=ON \
+                > /results/configure.log 2>&1
+
+              reflection_start="$(date +%s%N)"
+              cmake --build /benchmark/run/build -t benchmark.baseline.omni \
+                > /results/reflection.log 2>&1
+              reflection_end="$(date +%s%N)"
+              reflection_ms="$(awk \
+                -v start="$reflection_start" \
+                -v end="$reflection_end" \
+                '"'"'BEGIN { printf "%.3f", (end - start) / 1000000 }'"'"')"
+
+              build_start="$(date +%s%N)"
+              cmake --build /benchmark/run/build \
+                -t benchmark.baseline \
+                --parallel "$(nproc --ignore=2)" \
+                > /results/build.log 2>&1
+              build_end="$(date +%s%N)"
+              build_ms="$(awk \
+                -v start="$build_start" \
+                -v end="$build_end" \
+                '"'"'BEGIN { printf "%.3f", (end - start) / 1000000 }'"'"')"
+
+              tool_build="$(awk -v tool="$reflection_ms" -v build="$build_ms" \
+                '"'"'BEGIN { printf "%.6f", 0 == build ? 0 : 100 * tool / build }'"'"')"
+
+              {
+                printf "[\n"
+                printf "  {\"name\": \"reflection wall\", \"unit\": \"ms\", \"value\": %s},\n" "$reflection_ms"
+                printf "  {\"name\": \"build wall\", \"unit\": \"ms\", \"value\": %s},\n" "$build_ms"
+                printf "  {\"name\": \"tool/build\", \"unit\": \"%%\", \"value\": %s}" "$tool_build"
+                grep -E "^[^:]+: .+ \\([0-9]+ microseconds\\)$" /results/reflection.log \
+                  | while IFS= read -r line; do
+                    name="${line%%:*}"
+                    us="$(printf "%s\n" "$line" \
+                      | sed -E "s/.*\\(([0-9]+) microseconds\\)$/\\1/")"
+                    ms="$(awk -v us="$us" '"'"'BEGIN { printf "%.3f", us / 1000 }'"'"')"
+                    printf ",\n  {\"name\": \"tool %s\", \"unit\": \"ms\", \"value\": %s}" "$name" "$ms"
+                  done
+                printf "\n]\n"
+              } > /results/benchmark.json
+            '
+
+      - name: Find benchmark history artifact
+        id: history_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const workflow_id = 'benchmark.yml'
+            const branch = context.payload.repository.default_branch
+            const historyArtifactName =
+              `benchmark-history-${{ matrix.os }}-${{ matrix.arch }}`
+
+            const hasHistory = async (run_id) => {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id, per_page: 100})
+
+              return artifacts.some((artifact) =>
+                historyArtifactName === artifact.name && !artifact.expired)
+            }
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id,
+                branch,
+                status: 'success',
+                per_page: 20,
+              })
+
+            for (const run of runs) {
+              if (context.runId === run.id) {
+                continue
+              }
+
+              if (await hasHistory(run.id)) {
+                core.setOutput('run_id', run.id)
+                return
+              }
+            }
+
+            core.setOutput('run_id', '')
+
+      - name: Download benchmark history
+        if: ${{ '' != steps.history_run.outputs.run_id }}
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-history-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./artifacts/benchmark-history
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.history_run.outputs.run_id }}
+
+      - name: Prepare benchmark history
+        run: mkdir -p ./artifacts/benchmark-history
+
+      - name: Check benchmark regression
+        if: ${{ 'workflow_dispatch' != github.event_name || !inputs.update }}
+        run: |
+          python3 ci/benchmark_history.py compare \
+            --current ./artifacts/benchmarks/benchmark.json \
+            --history ./artifacts/benchmark-history/history.json \
+            --os ${{ matrix.os }}-${{ matrix.arch }} \
+            --threshold 1.2 \
+            --count 5
+
+      - name: Store benchmark data
+        if: ${{ 'workflow_run' == github.event_name }}
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: ./artifacts/benchmarks/benchmark.json
+          external-data-json-path: ./artifacts/benchmark-history/data.json
+          fail-on-alert: false
+          max-items-in-chart: 200
+
+      - name: Update benchmark history
+        if: >-
+          ${{
+            'workflow_run' == github.event_name ||
+            ('workflow_dispatch' == github.event_name && inputs.update)
+          }}
+        run: |
+          python3 ci/benchmark_history.py update \
+            --current ./artifacts/benchmarks/benchmark.json \
+            --history ./artifacts/benchmark-history/history.json \
+            --commit "${{ github.event.workflow_run.head_sha || github.sha }}" \
+            --os ${{ matrix.os }}-${{ matrix.arch }} \
+            --max-runs 200
+
+      # TODO: after release or once the repository is public, move benchmark
+      # history away from artifact storage. GitHub artifacts are easy to delete,
+      # so this is only a temporary private-repo storage workaround.
+      - name: Upload benchmark history
+        if: >-
+          ${{
+            success() &&
+            (
+              'workflow_run' == github.event_name ||
+              ('workflow_dispatch' == github.event_name && inputs.update)
+            )
+          }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-history-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./artifacts/benchmark-history
+          if-no-files-found: error
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./artifacts/benchmarks
+          if-no-files-found: error

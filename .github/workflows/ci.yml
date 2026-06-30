@@ -25,12 +25,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [linux, windows]
+        arch: [x86_64]
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      - name: Resolve Short SHA
+        id: commit
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
@@ -44,13 +49,14 @@ jobs:
 
       - name: Build and package omnirefl tool
         run: |
+          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
             docker compose run --rm build-${{ matrix.os }}
 
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: packages-${{ matrix.os }}
+          name: packages-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.os }}
           if-no-files-found: error
 
@@ -67,6 +73,10 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+
+      - name: Resolve Short SHA
+        id: commit
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
@@ -86,7 +96,7 @@ jobs:
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
-          name: packages-linux
+          name: packages-linux-x86_64-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/linux
 
       - name: Run Package Test
@@ -132,6 +142,13 @@ jobs:
           # only its own previous state.
           path: ${{ env.WORK_DIR }}
 
+      - name: Resolve Short SHA
+        id: commit
+        shell: powershell
+        run: |
+          "short_sha=$($env:GITHUB_SHA.Substring(0, 12))" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Login to Docker Registry
         uses: docker/login-action@v4
         with:
@@ -154,7 +171,7 @@ jobs:
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
-          name: packages-windows
+          name: packages-windows-x86_64-${{ steps.commit.outputs.short_sha }}
           path: ./${{ env.WORK_DIR }}/artifacts/packages/windows
 
       - name: Run Package Test

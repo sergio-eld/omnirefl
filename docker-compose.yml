@@ -31,7 +31,8 @@ services:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DENABLE_PACKAGE=ON \
           -DENABLE_TESTING=OFF \
-          -DENABLE_BENCH=ON \
+          -DENABLE_BENCH=OFF \
+          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
           -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
         cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
 
@@ -62,8 +63,10 @@ services:
           cmake /src -GNinja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_SYSTEM_NAME=Windows \
+          -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
           -DENABLE_PACKAGE=ON \
           -DENABLE_TESTING=OFF \
+          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
           -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
 
         cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
