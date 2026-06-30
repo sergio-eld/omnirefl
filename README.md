@@ -163,7 +163,7 @@ Current state is reported by the
 ### Continuous Benchmark
 
 Benchmark runs are reported by the
-[Benchmark workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/benchmark.yml).
+[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
 
 - Target: `linux-x86_64`
 - Environment: Ubuntu 22.04 GCC package-test image

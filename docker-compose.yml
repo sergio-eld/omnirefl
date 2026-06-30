@@ -3,7 +3,7 @@
 #   TEST_PLATFORM=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows>
 #   TOOLCHAIN=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
 #
-# Linux package tests use TEST_PLATFORM + TOOLCHAIN to select the image.
+# Linux package tests and benchmarks use TEST_PLATFORM + TOOLCHAIN to select the image.
 # Alpine has a dedicated service because it unpacks the TGZ package instead of
 # installing the DEB package. Windows tests use separate services where a
 # matrix row needs a different image or shell, but still receive only TOOLCHAIN.
@@ -204,6 +204,70 @@ services:
         fi
 
         exit $$rc
+
+  benchmark:
+    image: ghcr.io/sergio-eld/test-${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}
+    volumes:
+      - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/benchmarks}:/results:rw
+      - ${BUILD_DIR:-./artifacts/benchmark-build}:/benchmark:rw
+    working_dir: /benchmark
+    entrypoint:
+      - /bin/bash
+      - -euxo
+      - pipefail
+      - -c
+      - |
+        trap 'chmod -R a+rwX /results /benchmark 2>/dev/null || true' EXIT
+        rm -rf /benchmark/run
+        mkdir -p /benchmark/run/build /results
+        apt install -y /packages/omnirefl*.deb
+
+        cmake -S /usr/share/omnirefl/tests \
+          -B /benchmark/run/build \
+          -GNinja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_BENCH=ON \
+          > /results/configure.log 2>&1
+
+        reflection_start="$$(date +%s%N)"
+        cmake --build /benchmark/run/build -t benchmark.baseline.omni \
+          > /results/reflection.log 2>&1
+        reflection_end="$$(date +%s%N)"
+        reflection_ms="$$(awk \
+          -v start="$$reflection_start" \
+          -v end="$$reflection_end" \
+          'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
+
+        build_start="$$(date +%s%N)"
+        cmake --build /benchmark/run/build \
+          -t benchmark.baseline \
+          --parallel "$$(nproc --ignore=2)" \
+          > /results/build.log 2>&1
+        build_end="$$(date +%s%N)"
+        build_ms="$$(awk \
+          -v start="$$build_start" \
+          -v end="$$build_end" \
+          'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
+
+        tool_build="$$(awk -v tool="$$reflection_ms" -v build="$$build_ms" \
+          'BEGIN { printf "%.6f", 0 == build ? 0 : 100 * tool / build }')"
+
+        {
+          printf "[\n"
+          printf "  {\"name\": \"reflection wall\", \"unit\": \"ms\", \"value\": %s},\n" "$$reflection_ms"
+          printf "  {\"name\": \"build wall\", \"unit\": \"ms\", \"value\": %s},\n" "$$build_ms"
+          printf "  {\"name\": \"tool/build\", \"unit\": \"%%\", \"value\": %s}" "$$tool_build"
+          grep -E "^[^:]+: .+ \\([0-9]+ microseconds\\)$$" /results/reflection.log \
+            | while IFS= read -r line; do
+              name="$${line%%:*}"
+              us="$$(printf "%s\n" "$$line" \
+                | sed -E "s/.*\\(([0-9]+) microseconds\\)$$/\\1/")"
+              ms="$$(awk -v us="$$us" 'BEGIN { printf "%.3f", us / 1000 }')"
+              printf ",\n  {\"name\": \"tool %s\", \"unit\": \"ms\", \"value\": %s}" "$$name" "$$ms"
+            done
+          printf "\n]\n"
+        } > /results/benchmark.json
 
   test-windows-msvc:
     image: ghcr.io/sergio-eld/test-windows-${TOOLCHAIN:-msvc}
