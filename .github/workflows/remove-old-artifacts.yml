@@ -1,23 +1,80 @@
 name: Remove old artifacts
 
-# there should be an option to retain artifacts for selected branches
 on:
   schedule:
-    # Every day at 1am
+    # Every day at 1am.
     - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
   remove-old-artifacts:
     runs-on: ubuntu-latest
-    permissions: write-all
+    permissions:
+      actions: write
+      contents: read
     timeout-minutes: 10
 
     steps:
-    - name: Remove old artifacts
-      uses: c-hive/gha-remove-artifacts@v1
-      with:
-        age: '90 seconds' # '<number> <unit>', e.g. 5 days, 2 years, 90 seconds, parsed by Moment.js
-        # Optional inputs
-        skip-tags: true
-        skip-recent: 3
+      - name: Remove old artifacts
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const master = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: 'heads/master',
+            })
+            const masterShortSha = master.data.object.sha.substring(0, 12)
+            const cutoffMs = Date.now() - 90 * 1000
+
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {owner, repo, per_page: 100})
+            const packageSha = (artifact) =>
+              artifact.name.startsWith('packages-')
+                ? artifact.name.substring(artifact.name.lastIndexOf('-') + 1)
+                : ''
+            const packageCommitDate = new Map()
+            for (const artifact of artifacts) {
+              const sha = packageSha(artifact)
+              if ('' === sha || masterShortSha === sha) {
+                continue
+              }
+
+              const createdAt = new Date(artifact.created_at).getTime()
+              if (!packageCommitDate.has(sha) || packageCommitDate.get(sha) < createdAt) {
+                packageCommitDate.set(sha, createdAt)
+              }
+            }
+
+            const retainedPackageShas = new Set([...packageCommitDate.entries()]
+              .sort((lhs, rhs) => rhs[1] - lhs[1])
+              .slice(0, 5)
+              .map(([sha]) => sha))
+
+            for (const artifact of artifacts) {
+              const isPackage = artifact.name.startsWith('packages-')
+              const sha = packageSha(artifact)
+              const keep =
+                artifact.name.startsWith('benchmark-history') ||
+                (
+                  isPackage &&
+                  masterShortSha === sha
+                ) ||
+                retainedPackageShas.has(sha) ||
+                (!isPackage && cutoffMs <= new Date(artifact.created_at).getTime())
+
+              if (keep) {
+                core.info(`keeping artifact: ${artifact.name}`)
+                continue
+              }
+
+              core.info(`deleting artifact: ${artifact.name}`)
+              await github.rest.actions.deleteArtifact({
+                owner,
+                repo,
+                artifact_id: artifact.id,
+              })
+            }

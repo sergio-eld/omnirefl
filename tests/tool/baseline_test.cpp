@@ -17,20 +17,22 @@
 #endif
 #include <vector>
 
-// This file is intentionally large to exercise generated-header reflection
-// across a broad translation unit.
+// This file is the continuous benchmark baseline for generated-header
+// reflection. It is intentionally large and remains part of the mandatory test
+// suite, but ordinary new tests should usually go into smaller focused files.
+// Change this file intentionally when updating the benchmark baseline.
 
 #if defined(__has_cpp_attribute)
 #  if __has_cpp_attribute(maybe_unused) \
     && (!defined CXX_STANDARD || 17 <= CXX_STANDARD)
-#    define OMNI_INPLACE_MAYBE_UNUSED [[maybe_unused]]
+#    define OMNI_BASELINE_MAYBE_UNUSED [[maybe_unused]]
 #  endif
 #endif
-#ifndef OMNI_INPLACE_MAYBE_UNUSED
+#ifndef OMNI_BASELINE_MAYBE_UNUSED
 #  if defined(__GNUC__) || defined(__clang__)
-#    define OMNI_INPLACE_MAYBE_UNUSED __attribute__((unused))
+#    define OMNI_BASELINE_MAYBE_UNUSED __attribute__((unused))
 #  else
-#    define OMNI_INPLACE_MAYBE_UNUSED
+#    define OMNI_BASELINE_MAYBE_UNUSED
 #  endif
 #endif
 
@@ -429,7 +431,7 @@ class in_cpp_mixed_access {
   double in_cpp_public_field_2;
 
   private:
-  int in_cpp_private_field OMNI_INPLACE_MAYBE_UNUSED;
+  int in_cpp_private_field OMNI_BASELINE_MAYBE_UNUSED;
 
   protected:
   double in_cpp_protected_field;
@@ -511,7 +513,7 @@ struct in_cpp_crtp_base_with_header_base: in_header_struct {
 
 template <typename Derived>
 class in_cpp_crtp_mixed_access_base {
-  int in_cpp_hidden_crtp_base_field OMNI_INPLACE_MAYBE_UNUSED;
+  int in_cpp_hidden_crtp_base_field OMNI_BASELINE_MAYBE_UNUSED;
 
   public:
   int in_cpp_visible_crtp_base_field;
@@ -623,19 +625,19 @@ struct: example::in_header_struct {
   std::string unnamed_global_header_base_field_0;
   int unnamed_global_header_base_field_1;
   double unnamed_global_header_base_field_2;
-} const unnamed_global_with_header_base OMNI_INPLACE_MAYBE_UNUSED{};
+} const unnamed_global_with_header_base OMNI_BASELINE_MAYBE_UNUSED{};
 
 struct: example::in_cpp_struct {
   std::string unnamed_global_cpp_base_field_0;
   int unnamed_global_cpp_base_field_1;
   double unnamed_global_cpp_base_field_2;
-} const unnamed_global_with_cpp_base OMNI_INPLACE_MAYBE_UNUSED{};
+} const unnamed_global_with_cpp_base OMNI_BASELINE_MAYBE_UNUSED{};
 
 struct: example::in_header_struct, example::in_cpp_struct {
   std::string unnamed_global_multi_base_field_0;
   int unnamed_global_multi_base_field_1;
   double unnamed_global_multi_base_field_2;
-} const unnamed_global_with_multi_base OMNI_INPLACE_MAYBE_UNUSED{};
+} const unnamed_global_with_multi_base OMNI_BASELINE_MAYBE_UNUSED{};
 
 TEST(print_names, not_reflected_int_path_returns_empty_names) {
   ASSERT_EQ((std::vector<std::string>{}),

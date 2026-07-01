@@ -160,6 +160,23 @@ Current state is reported by the
 - TODO(High): investigate switching the tool build to Cosmopolitan after a
   baseline benchmark is in place.
 
+### Continuous Benchmark
+
+Benchmark runs are reported by the
+[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+
+- Target: `linux-x86_64`
+- Environment: Ubuntu 22.04 GCC package-test image
+- Baseline target: `benchmark.baseline`
+- Raw history artifact: `benchmark-history-linux-x86_64`
+- Reported baseline: average of the last 5 stored runs
+- Tracked metrics:
+  - reflection/tool wall time for `benchmark.baseline.omni`
+  - build wall time for `benchmark.baseline`
+  - reflection/tool wall time as percentage of build wall time
+- TODO: when the repository goes public, render or link the benchmark history
+  directly from the README instead of requiring artifact lookup.
+
 ## Might Be Considered Later
 
 - (-) unnamed non-local types addressable from namespace scope via

@@ -11,9 +11,10 @@ message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
 option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
 
-# todo: enable when benches are fixed/implemented
-# option(ENABLE_BENCH "Enable benchmarks" OFF)
-# message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
+option(ENABLE_BENCH "Enable benchmarks" OFF)
+message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
+
+set(OMNIREFL_PACKAGE_COMMIT "" CACHE STRING "Commit id suffix for package file names")
 
 
 # -- Scripts --------
@@ -139,7 +140,7 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
             "(host: ${CMAKE_HOST_SYSTEM_NAME}, target: ${CMAKE_SYSTEM_NAME})"
         )
     endif()
-elseif(ENABLE_TESTING OR ENABLE_PACKAGE)
+elseif(ENABLE_BENCH OR ENABLE_TESTING)
     enable_testing()
 
     # Tests in the subdir are packaged and expect to work with `find_package(omnirefl)`.
@@ -148,7 +149,6 @@ elseif(ENABLE_TESTING OR ENABLE_PACKAGE)
     include(cmake/reflected_target.cmake)
 
     add_subdirectory(tests/tool tests)
-
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
 endif()
 
@@ -222,11 +222,36 @@ if(ENABLE_PACKAGE)
         endif()
     endif()
 
-    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGE_CONTACT "sergey.kolesnik.ld@gmail.com")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sergei Kolesnik")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS NO)
+
+    string(TOLOWER "${CMAKE_SYSTEM_NAME}" OMNIREFL_PACKAGE_OS)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" OMNIREFL_PACKAGE_ARCH)
+    if(OMNIREFL_PACKAGE_OS STREQUAL "" OR OMNIREFL_PACKAGE_ARCH STREQUAL "")
+        message(FATAL_ERROR
+            "Package target requires CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR")
+    endif()
+
+    if(OMNIREFL_PACKAGE_ARCH MATCHES "^(x86_64|amd64)$")
+        set(OMNIREFL_PACKAGE_ARCH "x86_64")
+    elseif(OMNIREFL_PACKAGE_ARCH MATCHES "^(aarch64|arm64)$")
+        set(OMNIREFL_PACKAGE_ARCH "aarch64")
+    elseif(OMNIREFL_PACKAGE_ARCH MATCHES "^i[3-6]86$")
+        set(OMNIREFL_PACKAGE_ARCH "x86")
+    endif()
+
+    set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_OS}-${OMNIREFL_PACKAGE_ARCH}")
+    set(CPACK_PACKAGE_FILE_NAME
+        "${PROJECT_NAME}-${OMNIREFL_PACKAGE_TARGET}-${PROJECT_VERSION}")
+
+    if(NOT OMNIREFL_PACKAGE_COMMIT STREQUAL "")
+        set(CPACK_PACKAGE_FILE_NAME
+            "${CPACK_PACKAGE_FILE_NAME}-${OMNIREFL_PACKAGE_COMMIT}")
+    endif()
+
+    set(CPACK_DEBIAN_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}.deb")
 
     include(CPack)
 endif()
