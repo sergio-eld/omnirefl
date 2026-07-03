@@ -1,9 +1,11 @@
 diff --git a/libcxx/include/__config_site.in b/libcxx/include/__config_site.in
-index 67022146c..f9648be26 100644
+index 4b90a9dc3..7a439a31e 100644
 --- a/libcxx/include/__config_site.in
 +++ b/libcxx/include/__config_site.in
-@@ -33,6 +33,17 @@
- #cmakedefine _LIBCPP_HAS_NO_STD_MODULES
+@@ -32,6 +32,17 @@
+ #cmakedefine01 _LIBCPP_HAS_LOCALIZATION
+ #cmakedefine01 _LIBCPP_HAS_UNICODE
+ #cmakedefine01 _LIBCPP_HAS_WIDE_CHARACTERS
  #cmakedefine01 _LIBCPP_HAS_TIME_ZONE_DATABASE
  #cmakedefine01 _LIBCPP_INSTRUMENTED_WITH_ASAN
 +// Package headers built on musl, but usable on glibc and vice-versa.

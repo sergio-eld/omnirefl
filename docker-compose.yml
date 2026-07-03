@@ -13,9 +13,17 @@
 # TEST_RESULTS_DIR, and TOOLCHAIN through WSLENV. Windows containers cannot bind
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 
+x-build-alpine-image: &build-alpine-image
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine:llvm-${LLVM_VERSION:-22.1.8}
+  build:
+    context: .
+    dockerfile: build-alpine.Dockerfile
+    args:
+      LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
+
 services:
   build-linux:
-    image: ghcr.io/sergio-eld/omnirefl-build-alpine
+    <<: *build-alpine-image
     volumes:
       - ./:/src:ro
       - ./build-alpine/linux:/build:rw
@@ -47,7 +55,7 @@ services:
         mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
   build-windows:
-    image: ghcr.io/sergio-eld/omnirefl-build-alpine
+    <<: *build-alpine-image
     volumes:
       - ./:/src:ro
       - ./build-alpine/windows:/build:rw
@@ -99,7 +107,7 @@ services:
       - |
         set -o pipefail
         mkdir -p /results /tmp/build /tmp/src /opt/omnirefl
-        pkg=$$(find /packages -maxdepth 1 -name 'omnirefl-*.tar.gz' | sort | tail -n 1)
+        pkg=$$(find /packages -maxdepth 1 -name 'omnirefl-linux-*.tar.gz' | sort | tail -n 1)
         test -n "$$pkg"
         tar -xzf "$$pkg" -C /opt/omnirefl --strip-components=1
         cp -r /opt/omnirefl/share/omnirefl/tests/* /tmp/src/
@@ -165,7 +173,7 @@ services:
       - -c
       - |
         mkdir -p /results
-        apt install /packages/omnirefl*.deb
+        apt install -y /packages/omnirefl-linux-*.deb
 
         CMAKE_FLAGS=""
         case $${TOOLCHAIN:-gcc} in
@@ -221,7 +229,7 @@ services:
         trap 'chmod -R a+rwX /results /benchmark 2>/dev/null || true' EXIT
         rm -rf /benchmark/run
         mkdir -p /benchmark/run/build /results
-        apt install -y /packages/omnirefl*.deb
+        apt install -y /packages/omnirefl-linux-*.deb
 
         cmake -S /usr/share/omnirefl/tests \
           -B /benchmark/run/build \

@@ -31,8 +31,10 @@ RUN apk update && apk upgrade && \
         tar \
         &&:
 
+ARG LLVM_VERSION
 RUN mkdir $LLVM_DIR; cd $LLVM_DIR; \
-    git clone --depth 1 --branch llvmorg-21.1.8 https://github.com/llvm/llvm-project.git \
+    test -n "$LLVM_VERSION"; \
+    git clone --depth 1 --branch llvmorg-$LLVM_VERSION https://github.com/llvm/llvm-project.git \
     &&:
 
 # should it be passed as an argument?
