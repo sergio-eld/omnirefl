@@ -27,7 +27,6 @@
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
 #include <clang/Driver/Job.h>
-#include <clang/Driver/Options.h>
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
@@ -35,6 +34,7 @@
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/Frontend/Utils.h>
 #include <clang/Lex/PreprocessorOptions.h>
+#include <clang/Options/Options.h>
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
@@ -441,8 +441,13 @@ using map_decl_to_type = typename map_decl_to_type_t<Decl>::type;
 const auto map_decl_to_canonical_type = //
   []<typename Decl>(const clang::ASTContext &ast,
     const Decl *d) -> const map_decl_to_type<std::remove_cvref_t<Decl>> * {
-  return ast.getCanonicalType(ast.getTypeDeclType(d))
-    ->template getAs<map_decl_to_type<std::remove_cvref_t<Decl>>>();
+  if constexpr (std::derived_from<std::remove_cvref_t<Decl>, clang::TagDecl>) {
+    return ast.getCanonicalTagType(d)
+      ->template getAs<map_decl_to_type<std::remove_cvref_t<Decl>>>();
+  } else {
+    return ast.getCanonicalType(ast.getTypeDeclType(d))
+      ->template getAs<map_decl_to_type<std::remove_cvref_t<Decl>>>();
+  }
 };
 
 // mappings
@@ -1428,7 +1433,7 @@ std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
 
   // ad hoc: this allows to translate to cc1 options (i.e. msvc -> cc1)
   llvm::opt::InputArgList argList =
-    clang::driver::getDriverOptTable().ParseArgs(
+    clang::getDriverOptTable().ParseArgs(
       llvm::ArrayRef(cli_ref.data(), cli_ref.data() + cli_ref.size()),
       missing_arg,
       missing_arg_c);
@@ -1444,7 +1449,7 @@ std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
 /// leave only the args needed for ast parsing
 std::vector<std::string> filter_ast_related_args(
   const llvm::opt::InputArgList &args) {
-  namespace options = clang::driver::options;
+  namespace options = clang::options;
 
   // -- only flags related to ast creation
   // single-value / boolean flags (last-wins or toggles)
@@ -1534,7 +1539,7 @@ std::vector<std::string> filter_ast_related_args(
 auto pipeline::to_compiler_invocation(const diagnostics &log,
   cli::options cli_args) noexcept
   -> std::expected<compiler_invocation, app_error> {
-  namespace options = clang::driver::options;
+  namespace options = clang::options;
   const fs::path &resource_dir = cli_args.resource_dir;
   source_file sf = cli_args.source;
 
@@ -2968,15 +2973,14 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
       if (!id)
         return std::nullopt;
 
-      // "no qualifiers" (not const, not volatile, not restrict).
-      const unsigned qual_flags = 0;
       std::string name =
         // fixme:
         // ad hoc: for template specializations use the printing
         // policy to render <template args> properly.
         !llvm::isa<clang::ClassTemplateSpecializationDecl>(td)
         ? id->getName().str()
-        : clang::QualType{td->getTypeForDecl(), qual_flags}.getAsString(
+        : clang::QualType(td->getASTContext().getCanonicalTagType(td))
+            .getAsString(
             std::invoke([] {
               clang::PrintingPolicy p{{}};
 
@@ -3245,8 +3249,9 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
 
   return {
     .public_bases = cxx_decl ? public_bases_view(cxx_decl)
-        | std::views::transform([](const clang::CXXRecordDecl *rd) {
-            return clang::cast<clang::TagType>(rd->getTypeForDecl());
+        | std::views::transform([&ast](const clang::CXXRecordDecl *rd) {
+            return clang::cast<clang::TagType>(
+              ast.getCanonicalTagType(rd).getTypePtr());
           })
         | std::views::transform(
           std::bind_front(render_reflectable_id, std::cref(ast)))

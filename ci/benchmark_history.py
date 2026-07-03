@@ -114,13 +114,17 @@ def update_history(args):
             and args.os == run.get("os")
         )
     ]
-    runs.append({
+    run = {
         "commit": args.commit,
         "os": args.os,
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "benchmarks": current,
-    })
+    }
+    if args.commit_title:
+        run["commit_title"] = args.commit_title
+
+    runs.append(run)
     history["runs"] = runs[-args.max_runs:]
 
     history_path.write_text(json.dumps(history, indent=2) + "\n")
@@ -142,6 +146,7 @@ def main():
     update_parser.add_argument("--current", required=True)
     update_parser.add_argument("--history", required=True)
     update_parser.add_argument("--commit", required=True)
+    update_parser.add_argument("--commit-title", default="")
     update_parser.add_argument("--os", required=True)
     update_parser.add_argument("--max-runs", type=int, default=200)
     update_parser.set_defaults(func=update_history)

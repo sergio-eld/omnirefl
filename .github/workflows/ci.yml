@@ -10,6 +10,9 @@ on:
       - master
   workflow_dispatch:
 
+env:
+  LLVM_VERSION: 22.1.8
+
 jobs:
   # Package tests use the same public shape as docker-compose.yml:
   #
@@ -37,7 +40,9 @@ jobs:
 
       - name: Resolve Short SHA
         id: commit
-        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
@@ -47,7 +52,7 @@ jobs:
           password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull build-alpine Image
-        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine:latest
+        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine:llvm-${LLVM_VERSION}
 
       - name: Build and package omnirefl tool
         run: |
@@ -237,11 +242,14 @@ jobs:
 
       - name: Update benchmark history
         if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
+        env:
+          COMMIT_TITLE: ${{ steps.commit.outputs.title }}
         run: |
           python3 ci/benchmark_history.py update \
             --current ./artifacts/benchmarks/benchmark.json \
             --history ./artifacts/benchmark-history/history.json \
             --commit "${{ github.sha }}" \
+            --commit-title "$COMMIT_TITLE" \
             --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
             --max-runs 200
 

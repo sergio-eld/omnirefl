@@ -16,6 +16,15 @@ message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
 set(OMNIREFL_PACKAGE_COMMIT "" CACHE STRING "Commit id suffix for package file names")
 
+# ad hoc: when using the MinGW GCC cross compiler directly, CMake may leave
+# CMAKE_SYSTEM_PROCESSOR empty unless configured through a toolchain file.
+# Infer the target processor from the compiler triplet so package metadata and
+# downstream project logic see a consistent target architecture.
+if("" STREQUAL CMAKE_SYSTEM_PROCESSOR AND
+   CMAKE_CXX_COMPILER MATCHES "x86_64-w64-mingw32")
+    set(CMAKE_SYSTEM_PROCESSOR "x86_64")
+endif()
+
 
 # -- Scripts --------
 include(cmake/clean_build.cmake)
