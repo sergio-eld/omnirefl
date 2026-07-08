@@ -104,29 +104,25 @@ struct field_binding_t;
 // interface types; the tags keep C++20 visitor syntax stable if internals
 // change, and accept cv/ref-qualified arguments.
 template <typename T>
-concept meta = requires {
-  typename compat::remove_cvref_t<T>::omni_meta_tag;
-};
+concept meta = requires { typename compat::remove_cvref_t<T>::omni_meta_tag; };
 
 template <typename T>
-concept binding = requires {
-  typename compat::remove_cvref_t<T>::omni_binding_tag;
-};
+concept binding =
+  requires { typename compat::remove_cvref_t<T>::omni_binding_tag; };
 
 template <typename T>
-concept field_meta = requires {
-  typename compat::remove_cvref_t<T>::omni_field_meta_tag;
-};
+concept field_meta =
+  requires { typename compat::remove_cvref_t<T>::omni_field_meta_tag; };
 
 template <typename T>
-concept field_binding = requires {
-  typename compat::remove_cvref_t<T>::omni_field_binding_tag;
-};
+concept field_binding =
+  requires { typename compat::remove_cvref_t<T>::omni_field_binding_tag; };
 #endif
 
 struct reflected_call_t {
   private:
-#if !defined(OMNI_TOOL_RUN) && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+#if !defined(OMNI_TOOL_RUN) \
+  && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
   // Ad hoc for normal IDE/clangd parsing before the first tool run.
   //
   // Reflected source files force-include a generated header. During CMake
@@ -145,8 +141,8 @@ struct reflected_call_t {
   // visitor invocation is compiled instead.
   struct _ungenerated_result {
     template <typename T>
-    constexpr operator T() const noexcept(
-      std::is_nothrow_default_constructible<T>::value) {
+    constexpr operator T() const
+      noexcept(std::is_nothrow_default_constructible<T>::value) {
       return T{};
     }
   };
@@ -187,11 +183,14 @@ struct reflected_call_t {
   }
 
   public:
+  // todo: decide whether `reflected_call` should ever support constexpr
+  // evaluation. It currently cannot be constexpr as a whole: during the tool
+  // run the call is parsed and matched, but intentionally does not evaluate the
+  // visitor before generated reflection exists.
   template <typename Impl, typename... Args>
   auto operator()(Impl &&impl, Args &&...args) const
 #if defined(OMNI_TOOL_RUN)
-    -> decltype(std::declval<Impl &&>()(
-      _tool_arg(std::declval<Args &&>())...));
+    -> decltype(std::declval<Impl &&>()(_tool_arg(std::declval<Args &&>())...));
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
     -> _ungenerated_result;
 #else
@@ -220,9 +219,9 @@ struct reflected_arg_type<type_t<T>> {
 #if defined(OMNI_TOOL_RUN)
 // Tool-run operator definition must stay available in this translation unit:
 // reflected_call can receive local/unnamed visitor types, and Clang rejects a
-// used-but-undefined function template specialization whose type has no linkage.
-// The body is still unevaluated for tool purposes, hence the return warning
-// suppression below.
+// used-but-undefined function template specialization whose type has no
+// linkage. The body is still unevaluated for tool purposes, hence the return
+// warning suppression below.
 #  if defined(__clang__)
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wreturn-type"
@@ -238,8 +237,7 @@ struct reflected_arg_type<type_t<T>> {
 template <typename Impl, typename... Args>
 auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #if defined(OMNI_TOOL_RUN)
-  -> decltype(std::declval<Impl &&>()(
-    _tool_arg(std::declval<Args &&>())...)) {
+  -> decltype(std::declval<Impl &&>()(_tool_arg(std::declval<Args &&>())...)) {
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
   -> reflected_call_t::_ungenerated_result {
 #else
@@ -248,9 +246,8 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #endif
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
   int registered[] = {0,
-    ((void)detail::_reflected_indexed_type<
-       typename detail::reflected_arg_type<
-         typename std::decay<Args>::type>::type>{},
+    ((void)detail::_reflected_indexed_type<typename detail::reflected_arg_type<
+        typename std::decay<Args>::type>::type>{},
       0)...};
   (void)registered;
 #else
@@ -263,11 +260,11 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
   // Tool-run calls are parsed and matched, but never evaluated. The missing
   // return is intentional there: constructing an arbitrary visitor result would
   // instantiate exactly the user code reflected_call is meant to defer.
-#if !defined(OMNI_TOOL_RUN) && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+#if !defined(OMNI_TOOL_RUN) \
+  && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
   return {};
 #elif !defined(OMNI_TOOL_RUN)
-  return std::forward<Impl>(impl)(
-    _reflect_arg(std::forward<Args>(args))...);
+  return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
 }
 
@@ -452,9 +449,10 @@ struct meta_t<T, reflected_entity::record> {
   }
 
   template <typename U,
-    typename Binding = compat::conditional_t<std::is_lvalue_reference<U &&>::value,
-      U &&,
-      compat::decay_t<U>>>
+    typename Binding =
+      compat::conditional_t<std::is_lvalue_reference<U &&>::value,
+        U &&,
+        compat::decay_t<U>>>
   static constexpr auto bind(U &&t) noexcept(
     noexcept(binding_t<Binding>{std::forward<U>(t)}))
     -> decltype(binding_t<Binding>{std::forward<U>(t)}) {
@@ -534,7 +532,7 @@ struct binding_t<T, reflected_entity::record> {
 
   // todo: add an explicit interface to `std::move` an owned value out of a
   // binding_t<T> without exposing the storage member.
-  storage_t _value;
+  storage_t value;
 
   static constexpr const char *type_name() noexcept {
     return reflected::type_name();
@@ -549,22 +547,22 @@ struct binding_t<T, reflected_entity::record> {
   }
 
   constexpr operator const type &() const {
-    return _value;
+    return value;
   }
 
   // C++11 does not allow non-const constexpr member functions.
-#if OMNI_CPLUSPLUS >= 201402L
+#  if OMNI_CPLUSPLUS >= 201402L
   constexpr
-#endif
-  auto public_fields() & -> decltype(meta_t<type>::_public_fields(
-    std::declval<storage_t &>())) {
-    return meta_t<type>::_public_fields(_value);
+#  endif
+    auto public_fields() & -> decltype(meta_t<type>::_public_fields(
+      std::declval<storage_t &>())) {
+    return meta_t<type>::_public_fields(value);
   }
 
-  constexpr auto public_fields() const &
-    -> decltype(meta_t<type>::_public_fields(
+  constexpr auto
+    public_fields() const & -> decltype(meta_t<type>::_public_fields(
       std::declval<const storage_t &>())) {
-    return meta_t<type>::_public_fields(_value);
+    return meta_t<type>::_public_fields(value);
   }
 
   auto public_fields() && -> decltype(meta_t<type>::_public_fields(
@@ -582,7 +580,7 @@ struct binding_t<T, reflected_entity::record> {
     typename std::enable_if<!owning::value
         && std::is_convertible<U &, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: _value(u) {}
+  constexpr explicit binding_t(U &u) noexcept: value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
@@ -591,7 +589,7 @@ struct binding_t<T, reflected_entity::record> {
       int>::type = 0>
   constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_move_constructible<type>::value)
-      : _value(std::forward<U>(u)) {}
+      : value(std::forward<U>(u)) {}
 };
 
 template <typename T>
@@ -611,7 +609,7 @@ struct binding_t<T, reflected_entity::enumeration> {
 
   // todo: add an explicit interface to `std::move` an owned value out of a
   // binding_t<T> without exposing the storage member.
-  storage_t _value;
+  storage_t value;
 
   static constexpr const char *type_name() noexcept {
     return reflected::type_name();
@@ -626,7 +624,7 @@ struct binding_t<T, reflected_entity::enumeration> {
   }
 
   operator const type &() const {
-    return _value;
+    return value;
   }
 
   static constexpr auto enumerators() -> decltype(reflected::enumerators()) {
@@ -641,7 +639,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     typename std::enable_if<!owning::value
         && std::is_convertible<U &, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: _value(u) {}
+  constexpr explicit binding_t(U &u) noexcept: value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
@@ -650,7 +648,7 @@ struct binding_t<T, reflected_entity::enumeration> {
       int>::type = 0>
   constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_move_constructible<type>::value)
-      : _value(std::forward<U>(u)) {}
+      : value(std::forward<U>(u)) {}
 };
 #endif
 

@@ -421,6 +421,7 @@ constexpr std::array k_supported_member_aliases = //
   std::to_array<std::string_view>({
     "error_type",
     "key_type",
+    "mapped_type",
     "type",
     "value",
     "value_type",
@@ -3127,6 +3128,9 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
   const auto to_tag_type = //
     [](const clang::Type *t) { return t->getAs<clang::TagType>(); };
 
+  const auto not_null = //
+    [](const auto *t) { return nullptr != t; };
+
   const auto not_in_std = //
     [](const clang::TagType *t) { return !t->getDecl()->isInStdNamespace(); };
 
@@ -3155,6 +3159,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
     std::ranges::move(member_aliases_view(ast, *cur_decl) //
         | std::views::filter(&clang::Type::isEnumeralType) //
         | std::views::transform(to_tag_type) //
+        | std::views::filter(not_null) //
         | std::views::filter(not_in_std) //
         | std::views::filter(not_resolved),
       std::inserter(collected, collected.begin()));
@@ -3197,6 +3202,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
         template_specialization_types(arg_list) //
           | std::views::filter(&clang::Type::isEnumeralType) //
           | std::views::transform(to_tag_type) //
+          | std::views::filter(not_null) //
           | std::views::filter(not_in_std) //
           | std::views::filter(not_resolved),
         std::inserter(collected, collected.begin()));
@@ -3211,6 +3217,13 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
       continue;
     }
 
+    // Standard-library wrappers may expose dependency protocol aliases above,
+    // but unsupported wrappers are not themselves reflectable records. Do not
+    // traverse their bases/fields: some declarations visible through bundled
+    // headers have no definition data, and Clang's `bases()` requires it.
+    if (cur_decl->isInStdNamespace())
+      continue;
+
     // bases
     std::ranges::for_each(public_bases_view(cur_decl),
       [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
@@ -3221,6 +3234,7 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
         | std::views::transform(&clang::QualType::getTypePtr)
         | std::views::filter(&clang::Type::isEnumeralType)
         | std::views::transform(to_tag_type) //
+        | std::views::filter(not_null) //
         | std::views::filter(not_in_std) //
         | std::views::filter(not_resolved),
       std::inserter(collected, collected.begin()));

@@ -122,7 +122,7 @@ list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
 # C++26 has standard reflection. Keep omnirefl release/package validation on the
-# pre-reflection language modes it targets.
+# pre-reflection language standards it targets.
 list(REMOVE_ITEM _supported_cpp_standards "26")
 
 # MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
@@ -166,6 +166,10 @@ if(ENABLE_BENCH)
     omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
 endif()
 
+if("20" IN_LIST _supported_cpp_standards)
+    add_subdirectory(comprehensive_guide)
+endif()
+
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
 
@@ -187,7 +191,6 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         dependent_types_test.cpp
         interface_test.cpp
         example_test.cpp
-        usage_guide_test.cpp
         indexed_types.cpp
         baseline_test.cpp
     )
