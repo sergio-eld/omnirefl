@@ -16,6 +16,10 @@ def run_libc(run):
     return run.get("libc", "musl")
 
 
+def run_arch(run):
+    return run.get("arch", "x86_64")
+
+
 def github_escape(value):
     return str(value).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
@@ -57,6 +61,9 @@ def compare_history(args):
             continue
 
         if args.libc != run_libc(run):
+            continue
+
+        if args.arch != run_arch(run):
             continue
 
         for entry in run.get("benchmarks", []):
@@ -175,12 +182,14 @@ def update_history(args):
         if not (
             args.commit == run.get("commit")
             and args.os == run.get("os")
+            and args.arch == run_arch(run)
             and args.libc == run_libc(run)
         )
     ]
     run = {
         "commit": args.commit,
         "os": args.os,
+        "arch": args.arch,
         "libc": args.libc,
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -203,6 +212,7 @@ def main():
     compare_parser.add_argument("--current", required=True)
     compare_parser.add_argument("--history", required=True)
     compare_parser.add_argument("--os", required=True)
+    compare_parser.add_argument("--arch", default="x86_64")
     compare_parser.add_argument("--libc", default="musl")
     compare_parser.add_argument("--threshold", type=float, default=1.2)
     compare_parser.add_argument("--min-delta-ms", type=float, default=500)
@@ -215,6 +225,7 @@ def main():
     update_parser.add_argument("--commit", required=True)
     update_parser.add_argument("--commit-title", default="")
     update_parser.add_argument("--os", required=True)
+    update_parser.add_argument("--arch", default="x86_64")
     update_parser.add_argument("--libc", default="musl")
     update_parser.add_argument("--max-runs", type=int, default=200)
     update_parser.set_defaults(func=update_history)

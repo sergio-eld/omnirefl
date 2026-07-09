@@ -93,7 +93,8 @@ The snippet above is available as [tests/tool/example.cpp](tests/tool/example.cp
 It is part of the packaged test/example source tree, but it is not a CTest
 test.
 See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
-for the full executable guide.
+for the full executable guide. It targets limited C++20 support: omnirefl
+concepts are used, but `<concepts>` and C++20 ranges algorithms are avoided.
 
 ## Seamless Experience
 
@@ -194,16 +195,21 @@ for an unpacked `.zip` package.
 
 ## Build and Develop Locally
 
-The repository uses the
-[`ghcr.io/sergio-eld/omnirefl-build-alpine`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine)
-Alpine Docker image for local and CI builds. The image
-contains prebuilt LLVM/Clang installs for both Linux and Windows targets;
-building that layer from source can take close to an hour, so using the
-prepared image is the simplest way to get reproducible local and CI builds.
+The repository uses Alpine Docker images for local and CI builds:
+
+- [`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-x86_64-musl)
+- [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-aarch64-musl)
+  for ARM64 cross-compilation
+
+The images contain prebuilt LLVM/Clang installs for both Linux and Windows
+targets; building that layer from source can take close to an hour, so using
+the prepared images is the simplest way to get reproducible local and CI
+builds.
 
 The same Alpine image is used for the MinGW Windows cross-build. The Linux tool
 build uses static musl linking, so the packaged executable has no runtime libc
-dependency on the target Linux distribution.
+dependency on the target Linux distribution. The Windows package targets UCRT;
+no other runtime dependency is expected.
 
 Build Linux and Windows packages:
 
@@ -211,6 +217,8 @@ Build Linux and Windows packages:
 docker compose run --rm build-linux
 docker compose run --rm build-windows
 ```
+
+Use `ARCH=aarch64` to select the ARM64 build image and package target.
 
 The packages are written to `artifacts/packages/linux` and
 `artifacts/packages/windows`. To work inside the same build image:
@@ -246,7 +254,8 @@ docker compose run --rm --entrypoint /bin/ash build-linux
   example.
 - [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
   is the executable usage guide with C++20, compatibility, dependency,
-  template, annotation, schema, and write examples.
+  template, annotation, schema, and write examples. It is written for limited
+  C++20 support and avoids `<concepts>` plus C++20 ranges algorithms.
 
 ## Tested Toolchains
 

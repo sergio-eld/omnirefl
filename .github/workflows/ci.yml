@@ -22,7 +22,7 @@ jobs:
   # Alpine and Windows still dispatch to dedicated compose services because
   # their package install/runtime shells differ from Ubuntu.
   build-package:
-    name: Build package / ${{ matrix.os }}
+    name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,7 +30,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [linux, windows]
-        arch: [x86_64]
+        arch: [x86_64, aarch64]
+
+    # ARM64 package artifacts are cross-built here, but not package-tested yet.
+    # Native GitHub ARM64 runners may be useful later, depending on private repo
+    # availability/cost.
+    # TODO: enable native ARM64 package tests when the repository is public.
 
     steps:
       - name: Checkout Repository
@@ -52,10 +57,11 @@ jobs:
           password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull build-alpine Image
-        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl:llvm-${LLVM_VERSION}
+        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-${{ matrix.arch }}-musl:llvm-${LLVM_VERSION}
 
       - name: Build and package omnirefl tool
         run: |
+          ARCH=${{ matrix.arch }} \
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
             docker compose run --rm build-${{ matrix.os }}
@@ -63,7 +69,7 @@ jobs:
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '' }}-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.os }}
           if-no-files-found: error
 
@@ -240,6 +246,7 @@ jobs:
             --current ./artifacts/benchmarks/benchmark.json \
             --history ./artifacts/benchmark-history/history.json \
             --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            --arch ${{ matrix.arch }} \
             --libc ${{ matrix.libc }} \
             --threshold 1.2 \
             --min-delta-ms 500 \
@@ -256,6 +263,7 @@ jobs:
             --commit "${{ github.sha }}" \
             --commit-title "$COMMIT_TITLE" \
             --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            --arch ${{ matrix.arch }} \
             --libc ${{ matrix.libc }} \
             --max-runs 200
 
@@ -327,7 +335,7 @@ jobs:
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
-          name: packages-windows-x86_64-${{ steps.commit.outputs.short_sha }}
+          name: packages-windows-x86_64-ucrt-${{ steps.commit.outputs.short_sha }}
           path: ./${{ env.WORK_DIR }}/artifacts/packages/windows
 
       - name: Run Package Test
