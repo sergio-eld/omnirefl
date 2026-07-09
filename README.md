@@ -17,9 +17,7 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(example LANGUAGES CXX)
 
-if(NOT TARGET omni::tool)
-    find_package(omnirefl CONFIG REQUIRED)
-endif()
+find_package(omnirefl CONFIG REQUIRED)
 
 add_executable(example example.cpp)
 set_property(TARGET example PROPERTY CXX_STANDARD 20)
@@ -30,8 +28,8 @@ set_property(TARGET example PROPERTY CXX_STANDARD 20)
 omni_reflected_target(example)
 ```
 
-See [tests/tool/comprehensive_guide/CMakeLists.txt](tests/tool/comprehensive_guide/CMakeLists.txt)
-for runnable example and guide targets.
+The same target shape is used by
+[tests/tool/comprehensive_guide/CMakeLists.txt](tests/tool/comprehensive_guide/CMakeLists.txt).
 
 An equivalent direct tool invocation is:
 
@@ -94,12 +92,15 @@ int main() {
 
 The snippet above is available as
 [tests/tool/comprehensive_guide/example.cpp](tests/tool/comprehensive_guide/example.cpp).
+It is added as a normal reflected target when package tests/examples are
+configured with `ENABLE_TESTING`, but it is not a CTest test.
 See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 for the full executable guide.
 
 ## Seamless Experience
 
 - CMake integration via `omni_reflected_target(...)`.
+- Packaged runnable example and guide sources.
 - Generated reflection headers are force-included for the reflected translation
   unit.
 - Dependency files are emitted for generated headers, so build tools rerun
@@ -147,27 +148,6 @@ workflows.
 Linters and language servers such as clangd can report temporary "ghost"
 diagnostics between edits/tool runs, because reflected `.cpp` files depend on
 the generated header that is force-included during normal compilation.
-
-## Bug Reports
-
-For tool crashes on Linux, please include the command line, stderr/stdout, the
-input `.cpp`, the generated header if one was produced, and a backtrace.
-
-```bash
-# Enable core dumps for the current shell, then rerun the exact failing command.
-ulimit -c unlimited
-omnirefl -o out.omnirefl.hpp --source source.cpp -- <compiler command...>
-
-# If your system writes core files into the working directory:
-gdb --batch -ex "thread apply all bt full" ./omnirefl ./core > omnirefl.bt.txt
-
-# If your system uses systemd-coredump:
-coredumpctl gdb omnirefl --batch \
-  -ex "thread apply all bt full" > omnirefl.bt.txt
-```
-
-If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
-systems route core dumps to a crash service instead of the current directory.
 
 ## Install
 
@@ -391,3 +371,24 @@ Benchmark runs are reported by the
 - (-) local/block-scope types
 - (-) arbitrary composed `reflected_call` instrumentation
 - (-) recursive reflection
+
+## Bug Reports
+
+For tool crashes on Linux, please include the command line, stderr/stdout, the
+input `.cpp`, the generated header if one was produced, and a backtrace.
+
+```bash
+# Enable core dumps for the current shell, then rerun the exact failing command.
+ulimit -c unlimited
+omnirefl -o out.omnirefl.hpp --source source.cpp -- <compiler command...>
+
+# If your system writes core files into the working directory:
+gdb --batch -ex "thread apply all bt full" ./omnirefl ./core > omnirefl.bt.txt
+
+# If your system uses systemd-coredump:
+coredumpctl gdb omnirefl --batch \
+  -ex "thread apply all bt full" > omnirefl.bt.txt
+```
+
+If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
+systems route core dumps to a crash service instead of the current directory.

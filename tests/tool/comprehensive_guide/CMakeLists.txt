@@ -4,18 +4,22 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(comprehensive_guide LANGUAGES CXX)
 
-if(NOT TARGET omni::tool)
-    find_package(omnirefl CONFIG REQUIRED)
-endif()
+find_package(omnirefl CONFIG REQUIRED)
+
+add_executable(example example.cpp)
+set_property(TARGET example PROPERTY CXX_STANDARD 20)
+
+# Reflection is not transitive: only this target's own .cpp files are
+# instrumented. Call omni_reflected_target for each target that should be
+# reflected.
+omni_reflected_target(example)
 
 add_executable(comprehensive_guide comprehensive_guide.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(comprehensive_guide PRIVATE GTest::GTest gtest_main)
 
-# Reflection is not transitive: only this target's own .cpp files are
-# instrumented. Call omni_reflected_target for each target that should be
-# reflected.
+# Index mode is experimental and not expected to be stable across compilers.
 omni_reflected_target(comprehensive_guide ENABLE_INDEX_MODE)
 
 add_test(NAME "comprehensive_guide.run_omni"

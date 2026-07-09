@@ -181,7 +181,8 @@ if(ENABLE_PACKAGE)
         ${CLANG_RESOURCE_DIR}/include
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
 
-    # Ship tests as source so they can be run on other platforms.
+    # Ship tests and runnable examples as source so they can be used on other
+    # platforms.
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/tests/tool/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
