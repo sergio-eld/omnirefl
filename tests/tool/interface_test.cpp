@@ -315,6 +315,84 @@ TEST(fields, sized_integer_field_qualified_type_names) {
     f::record_type_field_qualified_type_names);
 }
 
+TEST(fields, field_qualification_metadata) {
+  using interface_test::field_qualification_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  static const std::vector<std::string> k_expected{
+    "normal:const=false:mutable=false",
+    "constant:const=true:mutable=false",
+    "cache:const=false:mutable=true",
+    "flags:const=false:mutable=false",
+  };
+
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(fq::field_flags_from_meta,
+      omni::type_t<field_qualification_record_t>{}));
+
+  field_qualification_record_t value{1, 2, 3, 4};
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(fq::field_flags_from_binding, value));
+}
+
+TEST(fields, field_qualification_qualified_type_names) {
+  using interface_test::field_qualification_record_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "int",
+    "int",
+    "int",
+    "unsigned int",
+  };
+
+  value_categories_test<field_qualification_record_t>(k_expected,
+    f::record_type_field_qualified_type_names);
+}
+
+TEST(fields, field_meta_write_availability) {
+  using interface_test::field_qualification_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  static const std::vector<std::string> k_expected{
+    "normal:mutable_owner=true:const_owner=false",
+    "constant:mutable_owner=false:const_owner=false",
+    "cache:mutable_owner=true:const_owner=true",
+    "flags:mutable_owner=true:const_owner=false",
+  };
+
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(fq::meta_write_availability,
+      omni::type_t<field_qualification_record_t>{}));
+}
+
+TEST(fields, field_binding_write_availability) {
+  using interface_test::field_qualification_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  static const std::vector<std::string> k_mutable_expected{
+    "normal:set_value=true",
+    "constant:set_value=false",
+    "cache:set_value=true",
+    "flags:set_value=true",
+  };
+
+  static const std::vector<std::string> k_const_expected{
+    "normal:set_value=false",
+    "constant:set_value=false",
+    "cache:set_value=true",
+    "flags:set_value=false",
+  };
+
+  field_qualification_record_t value{1, 2, 3, 4};
+  const field_qualification_record_t const_value{1, 2, 3, 4};
+
+  EXPECT_EQ(k_mutable_expected,
+    omni::reflected_call(fq::binding_write_availability, value));
+  EXPECT_EQ(k_const_expected,
+    omni::reflected_call(fq::binding_write_availability, const_value));
+}
+
 TEST(enumerators, enum_type_t) {
   using interface_test::enum_type_t;
   namespace en = interface_test::enumerators;
@@ -346,7 +424,8 @@ TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
   static const std::vector<std::string> k_expected{"815", "oceanic"};
 
   EXPECT_EQ(k_expected,
-    omni::reflected_call(interface_test::inline_examples::rvalue_binding_can_be_named,
+    omni::reflected_call(
+      interface_test::inline_examples::rvalue_binding_can_be_named,
       record_type_t{}));
 
   // Direct rvalue field access is intentionally invalid:

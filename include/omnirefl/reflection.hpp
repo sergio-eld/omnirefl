@@ -95,6 +95,17 @@ struct field_meta_t;
 template <typename Record, typename FieldMeta>
 struct field_binding_t;
 
+namespace detail {
+
+template <typename Owner, typename FieldMeta>
+struct _is_writable_field:
+    std::integral_constant<bool,
+      !FieldMeta::is_const()
+        && (!std::is_const<typename std::remove_reference<Owner>::type>::value
+          || FieldMeta::is_mutable())> {};
+
+} // namespace detail
+
 #if defined(__cpp_concepts)
 // refactorme: consider replacing tag-only concepts with structural
 // public-interface concepts. They would advertise the callable surface
@@ -315,13 +326,26 @@ struct field_meta_t {
     return reflected::index();
   }
 
+  static constexpr bool is_const() noexcept {
+    return reflected::is_const();
+  }
+
+  static constexpr bool is_mutable() noexcept {
+    return reflected::is_mutable();
+  }
+
   template <typename T>
   static constexpr auto value(T &&t) noexcept
     -> decltype(reflected::value(std::forward<T>(t))) {
     return reflected::value(std::forward<T>(t));
   }
 
-  template <typename T, typename V>
+  template <typename T,
+    typename V,
+    typename OwnerRef = T &&,
+    typename std::enable_if<
+      detail::_is_writable_field<OwnerRef, reflected>::value,
+      int>::type = 0>
   static void set_value(T &&t, V &&v) {
     reflected::set_value(std::forward<T>(t), std::forward<V>(v));
   }
@@ -358,6 +382,14 @@ struct field_binding_t {
     return meta::index();
   }
 
+  static constexpr bool is_const() noexcept {
+    return meta::is_const();
+  }
+
+  static constexpr bool is_mutable() noexcept {
+    return meta::is_mutable();
+  }
+
   constexpr auto value() const noexcept -> decltype(meta::value(_owner)) {
     return meta::value(_owner);
   }
@@ -370,8 +402,10 @@ struct field_binding_t {
     return value();
   }
 
-  // todo: enable_if is_mutable
-  template <typename V>
+  template <typename V,
+    typename OwnerRef = Record &,
+    typename std::enable_if<detail::_is_writable_field<OwnerRef, meta>::value,
+      int>::type = 0>
   void set_value(V &&v) {
     meta::set_value(_owner, std::forward<V>(v));
   }

@@ -3210,8 +3210,8 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   });
   clang::PrintingPolicy qualified_policy = ast.getPrintingPolicy();
   qualified_policy.FullyQualifiedName = true;
-  const std::string qualified_type_name = field_type.getAsString(
-    qualified_policy);
+  const std::string qualified_type_name =
+    field_type.getUnqualifiedType().getAsString(qualified_policy);
   const std::string type_name = std::invoke([&] {
     if (const auto *type_decl = field_type->getAsTagDecl()) {
       if (llvm::isa<clang::ClassTemplateSpecializationDecl>(type_decl))

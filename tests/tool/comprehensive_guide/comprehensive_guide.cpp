@@ -122,6 +122,12 @@ struct record {
   /// enabled field annotation
   bool enabled;
 
+  /// version field annotation
+  const int version;
+
+  /// cache field annotation
+  mutable int cache;
+
   /// scores field annotation
   std::vector<std::string> scores;
 };
@@ -131,6 +137,8 @@ struct field_summary {
   std::string_view type_name;
   std::string_view qualified_type_name;
   std::string_view annotation;
+  bool is_const;
+  bool is_mutable;
 
   bool operator==(const field_summary &) const = default;
 };
@@ -184,6 +192,8 @@ TEST(exposition, reflected_scope_overview) {
                // identify the declaration.
                .qualified_type_name = field.qualified_type_name(),
                .annotation = field.annotation(),
+               .is_const = field.is_const(),
+               .is_mutable = field.is_mutable(),
              }),
               ...);
           },
@@ -207,12 +217,32 @@ TEST(exposition, reflected_scope_overview) {
           .type_name = "int"sv,
           .qualified_type_name = "int"sv,
           .annotation = "foo field annotation"sv,
+          .is_const = false,
+          .is_mutable = false,
         },
         {
           .name = "enabled"sv,
           .type_name = "bool"sv,
           .qualified_type_name = "bool"sv,
           .annotation = "enabled field annotation"sv,
+          .is_const = false,
+          .is_mutable = false,
+        },
+        {
+          .name = "version"sv,
+          .type_name = "int"sv,
+          .qualified_type_name = "int"sv,
+          .annotation = "version field annotation"sv,
+          .is_const = true,
+          .is_mutable = false,
+        },
+        {
+          .name = "cache"sv,
+          .type_name = "int"sv,
+          .qualified_type_name = "int"sv,
+          .annotation = "cache field annotation"sv,
+          .is_const = false,
+          .is_mutable = true,
         },
         {
           .name = "scores"sv,
@@ -221,6 +251,8 @@ TEST(exposition, reflected_scope_overview) {
           .type_name = "vector<std::string>"sv,
           .qualified_type_name = "std::vector<std::string>"sv,
           .annotation = "scores field annotation"sv,
+          .is_const = false,
+          .is_mutable = false,
         },
       },
     .enumerators = {},

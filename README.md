@@ -234,8 +234,9 @@ docker compose run --rm --entrypoint /bin/ash build-linux
   `public_fields()`.
 - Enum metadata/bindings expose type metadata and `enumerators()`.
 - Field metadata/bindings expose `name()`, `type_name()`,
-  `qualified_type_name()`, `annotation()`, `index()`, `value(...)`, and
-  `set_value(...)` where the generated accessor supports mutation.
+  `qualified_type_name()`, `annotation()`, `index()`, `is_const()`,
+  `is_mutable()`, `value(...)`, and `set_value(...)` where the field is
+  writable.
 - C++20 concepts `omni::meta`, `omni::binding`, `omni::field_meta`, and
   `omni::field_binding` are available for readable generic visitors.
 
@@ -390,9 +391,6 @@ Current package/install coverage is listed in
   spelling.
 - (-) refine the public interface
 - (-) replace `reflected_call`
-- TODO(High): expose field mutability metadata, at least as a constexpr
-  `is_mutable` on field metadata/bindings, so users can filter writable fields
-  before calling `set_value`.
 - (-) separate const and mutable public-field accessors in the public interface
 - (-) recoverable reflection query/fallback branch for non-reflected types
 - (-) type-erased field wrappers, likely short `field_t`-style names
