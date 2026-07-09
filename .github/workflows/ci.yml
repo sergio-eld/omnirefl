@@ -52,7 +52,7 @@ jobs:
           password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull build-alpine Image
-        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine:llvm-${LLVM_VERSION}
+        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl:llvm-${LLVM_VERSION}
 
       - name: Build and package omnirefl tool
         run: |
@@ -63,7 +63,7 @@ jobs:
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: packages-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '' }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.os }}
           if-no-files-found: error
 
@@ -105,7 +105,7 @@ jobs:
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
-          name: packages-linux-x86_64-${{ steps.commit.outputs.short_sha }}
+          name: packages-linux-x86_64-musl-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/linux
 
       - name: Run Package Test
@@ -132,7 +132,7 @@ jobs:
           if-no-files-found: error
 
   benchmark:
-    name: Benchmark / ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}
+    name: Benchmark / ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ubuntu-latest
     needs: build-package
     permissions:
@@ -143,6 +143,7 @@ jobs:
       matrix:
         os: [linux]
         arch: [x86_64]
+        libc: [musl]
         toolchain: [gcc]
 
     steps:
@@ -163,7 +164,7 @@ jobs:
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
-          name: packages-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ matrix.os }}-${{ matrix.arch }}-musl-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.os }}
 
       - name: Run benchmark
@@ -172,7 +173,7 @@ jobs:
           TOOLCHAIN=${{ matrix.toolchain }} \
           LINUX_PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
           TEST_RESULTS_DIR=./artifacts/benchmarks \
-          BUILD_DIR=./artifacts/benchmark-build/${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+          BUILD_DIR=./artifacts/benchmark-build/${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
             docker compose run --rm benchmark
 
       - name: Find benchmark history artifact
@@ -239,6 +240,7 @@ jobs:
             --current ./artifacts/benchmarks/benchmark.json \
             --history ./artifacts/benchmark-history/history.json \
             --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            --libc ${{ matrix.libc }} \
             --threshold 1.2 \
             --min-delta-ms 500 \
             --count 5
@@ -254,6 +256,7 @@ jobs:
             --commit "${{ github.sha }}" \
             --commit-title "$COMMIT_TITLE" \
             --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            --libc ${{ matrix.libc }} \
             --max-runs 200
 
       # TODO: after release or once the repository is public, move benchmark
@@ -271,7 +274,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}
+          name: benchmark-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}
           path: ./artifacts/benchmarks
           if-no-files-found: error
 

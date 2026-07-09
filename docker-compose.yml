@@ -14,7 +14,9 @@
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 
 x-build-alpine-image: &build-alpine-image
-  image: ghcr.io/sergio-eld/omnirefl-build-alpine:llvm-${LLVM_VERSION:-22.1.8}
+  # TODO: add ARM64/Cosmopolitan build images as separate target-specific image
+  # names instead of overloading this musl/x86_64 build environment.
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl:llvm-${LLVM_VERSION:-22.1.8}
   build:
     context: .
     dockerfile: build-alpine.Dockerfile

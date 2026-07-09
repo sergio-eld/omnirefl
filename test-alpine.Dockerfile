@@ -1,4 +1,4 @@
-FROM ghcr.io/sergio-eld/omnirefl-build-alpine:latest
+FROM ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl:llvm-22.1.8
 
 RUN apk --no-cache add clang21 \
     && rm -rf /var/cache/apk/*
