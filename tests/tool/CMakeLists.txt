@@ -189,7 +189,43 @@ if(ENABLE_BENCH)
     omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
 endif()
 
+set(_has_cxx20_reflected_guide_features OFF)
 if("20" IN_LIST _supported_cpp_standards)
+    file(WRITE
+        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features.cpp"
+        [[
+#if !defined(__cpp_concepts) || __cpp_concepts < 201907L
+#  error "C++20 concepts are required"
+#endif
+
+#if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201707L
+#  error "explicit template parameter lists for lambdas are required"
+#endif
+
+static_assert(201907L <= __cpp_concepts);
+static_assert(201707L <= __cpp_generic_lambdas);
+
+int main() {
+  return 0;
+}
+]])
+    try_compile(_has_cxx20_reflected_guide_features
+        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features"
+        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features.cpp"
+        CMAKE_FLAGS
+            "-DCMAKE_CXX_STANDARD=20"
+            "-DCMAKE_CXX_STANDARD_REQUIRED=ON"
+            "-DCMAKE_CXX_EXTENSIONS=OFF"
+        OUTPUT_VARIABLE _cxx20_reflected_guide_check_output)
+
+    if(NOT _has_cxx20_reflected_guide_features)
+        message(STATUS
+            "omnirefl: skipping C++20 examples: required C++20 language features are not available")
+        message(VERBOSE "${_cxx20_reflected_guide_check_output}")
+    endif()
+endif()
+
+if(_has_cxx20_reflected_guide_features)
     add_executable(example example.cpp)
     set_property(TARGET example PROPERTY CXX_STANDARD 20)
 

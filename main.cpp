@@ -1326,6 +1326,10 @@ std::expected<cli::options, app_error> cli::parse(int argc,
 
   CLI::Option *const source = //
     app
+      // refactorme: replace `--source` with repurposed `-c <source.cpp>`,
+      // matching `-o` as a tool-level compiler-like flag. Also sanitize the
+      // compiler args after `--`: if they contain `-c <other.cpp>`, warn that
+      // the tool source and compiler source disagree.
       .add_option("-s,--source", ".cpp file path to run the tool on.")
     ->type_name("FILE")
     ->check(CLI::ExistingFile)

@@ -1,9 +1,14 @@
+// The guide is written for compilers with the C++20 features used by
+// omnirefl's public concepts. It deliberately avoids <concepts>; the package
+// matrix still covers toolchains where C++20 is partial. Similar small
+// substitutions are preferred here, such as std::find_if instead of
+// std::ranges::find_if.
+
 #include <gtest/gtest.h>
 
 #include <omnirefl/reflection.hpp>
 
 #include <algorithm>
-#include <concepts>
 #include <functional>
 #include <map>
 #include <memory>
@@ -28,7 +33,7 @@ template <template <typename...> typename Template, typename... T>
 struct is_template<Template, Template<T...>>: std::true_type {};
 
 template <template <typename...> typename Template, typename T>
-consteval bool is() noexcept {
+constexpr bool is() noexcept {
   return is_template<Template, T>::value;
 }
 
@@ -140,7 +145,14 @@ struct field_summary {
   bool is_const;
   bool is_mutable;
 
-  bool operator==(const field_summary &) const = default;
+  bool operator==(const field_summary &rhs) const {
+    return name == rhs.name //
+      && type_name == rhs.type_name
+      && qualified_type_name == rhs.qualified_type_name
+      && annotation == rhs.annotation
+      && is_const == rhs.is_const
+      && is_mutable == rhs.is_mutable;
+  }
 };
 
 struct reflected_summary {
@@ -151,7 +163,14 @@ struct reflected_summary {
   std::vector<field_summary> fields;
   std::vector<std::string_view> enumerators;
 
-  bool operator==(const reflected_summary &) const = default;
+  bool operator==(const reflected_summary &rhs) const {
+    return entity == rhs.entity //
+      && type_name == rhs.type_name
+      && qualified_type_name == rhs.qualified_type_name
+      && annotation == rhs.annotation
+      && fields == rhs.fields
+      && enumerators == rhs.enumerators;
+  }
 };
 
 struct foobar_record {
@@ -328,9 +347,12 @@ TEST(example, enum_names) {
     omni::reflected_call(
       [](const omni::binding auto status) -> std::string_view {
         const auto enumerators = status.enumerators();
-        const auto it = std::ranges::find(enumerators,
-          status.value,
-          [](const auto &value_name) { return value_name.first; });
+        const auto it = std::find_if(
+          enumerators.begin(),
+          enumerators.end(),
+          [&status](const auto &value_name) {
+            return value_name.first == status.value;
+          });
 
         return enumerators.end() == it ? "unknown"sv : it->second;
       },
@@ -455,7 +477,11 @@ TEST(example, primary_template_read_data) {
     std::string_view annotation;
     std::string value;
 
-    bool operator==(const rendered_field &) const = default;
+    bool operator==(const rendered_field &rhs) const {
+      return name == rhs.name //
+        && annotation == rhs.annotation
+        && value == rhs.value;
+    }
   };
 
   const primary_template::text_record<char> record{
@@ -602,7 +628,7 @@ TEST(example, primary_template_from_map) {
       // those as errors.
       return std::visit(
         []<typename From>(const From &from) -> T {
-          if constexpr (std::same_as<From, T>) {
+          if constexpr (std::is_same_v<From, T>) {
             return from;
           } else if constexpr (meta::is<std::basic_string, From>()
             && meta::is<std::basic_string, T>()) {
@@ -738,14 +764,21 @@ TEST(example, annotated_dependencies) {
     std::string_view qualified_type_name;
     std::string_view annotation;
 
-    bool operator==(const rendered_type &) const = default;
+    bool operator==(const rendered_type &rhs) const {
+      return type_name == rhs.type_name //
+        && qualified_type_name == rhs.qualified_type_name
+        && annotation == rhs.annotation;
+    }
   };
 
   struct rendered_protocol_type {
     std::string_view protocol;
     rendered_type type;
 
-    bool operator==(const rendered_protocol_type &) const = default;
+    bool operator==(const rendered_protocol_type &rhs) const {
+      return protocol == rhs.protocol //
+        && type == rhs.type;
+    }
   };
 
   struct rendered_field {
@@ -753,7 +786,11 @@ TEST(example, annotated_dependencies) {
     std::string_view type_name;
     std::string_view annotation;
 
-    bool operator==(const rendered_field &) const = default;
+    bool operator==(const rendered_field &rhs) const {
+      return name == rhs.name //
+        && type_name == rhs.type_name
+        && annotation == rhs.annotation;
+    }
   };
 
   struct rendered_context {
@@ -1155,11 +1192,11 @@ void render_schema(std::ostringstream &out,
     render_schema(out, omni::reflected<T>(), indent);
   } else if constexpr (meta::is<std::basic_string, T>()) {
     out << indent << "type: string\n";
-  } else if constexpr (std::same_as<bool, T>) {
+  } else if constexpr (std::is_same_v<bool, T>) {
     out << indent << "type: boolean\n";
-  } else if constexpr (std::integral<T>) {
+  } else if constexpr (std::is_integral_v<T>) {
     out << indent << "type: integer\n";
-  } else if constexpr (std::floating_point<T>) {
+  } else if constexpr (std::is_floating_point_v<T>) {
     out << indent << "type: number\n";
   } else if constexpr (meta::map_like<T>) {
     out << indent << "type: object\n";
