@@ -515,6 +515,13 @@ struct invalid_reflection_query {
   std::string note;
 };
 
+struct invalid_reflected_call_arg {
+  source_location location{};
+  type_id type;
+  std::string reason;
+  std::string suggestion;
+};
+
 // refactorme: source_file and location should be separated into
 // `struct source_location`
 struct type_definition {
@@ -673,6 +680,8 @@ struct source_file_context {
     callsites_by_type_id{};
 
   std::vector<meta::invalid_reflection_query> invalid_reflection_queries{};
+  std::vector<meta::invalid_reflected_call_arg>
+    invalid_reflected_call_args{};
 
   std::vector<std::string> errors{};
 
@@ -2125,7 +2134,8 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
       .pattern = ast::pattern(cxxOperatorCallExpr,
         hasOverloadedOperatorName("()")),
       .reduce =
-        [&ast = wast.ast->getASTContext()](meta::source_file_context a,
+        [&ast = wast.ast->getASTContext(),
+          source_location_from](meta::source_file_context a,
           const clang::CXXOperatorCallExpr &call) {
           if (call.getNumArgs() <= 2)
             return a;
@@ -2142,20 +2152,14 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
             return a;
           }
 
-          const clang::SourceManager &sm = ast.getSourceManager();
           const clang::SourceLocation loc = call.getExprLoc();
-          const clang::PresumedLoc presumed = sm.getPresumedLoc(loc);
-          if (!presumed.isValid()) {
-            a.errors.emplace_back(
-              "tool error: reflected_call matcher could not resolve a source location");
+          std::expected callsite = source_location_from(ast, loc);
+          if (!callsite) {
+            a.errors.emplace_back(std::format(
+              "tool error: reflected_call matcher could not resolve a source location: {}",
+              std::move(callsite).error()));
             return a;
           }
-
-          meta::source_location callsite{
-            .source_file = presumed.getFilename(),
-            .line = sm.getSpellingLineNumber(loc),
-            .column = sm.getSpellingColumnNumber(loc),
-          };
 
           const auto reflected_arg_type =
             [](clang::QualType type) -> clang::QualType {
@@ -2184,9 +2188,135 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
             return args.get(0).getAsType();
           };
 
+          const auto reflected_arg_error =
+            [&ast](clang::QualType type)
+            -> std::optional<meta::invalid_reflected_call_arg> {
+            while (type->isReferenceType())
+              type = type->getPointeeType();
+
+            const clang::QualType unqualified = type.getUnqualifiedType();
+            const clang::Type &canonical =
+              *ast.getCanonicalType(unqualified).getTypePtr();
+            clang::PrintingPolicy p(ast.getLangOpts());
+            p.FullyQualifiedName = true;
+            p.SuppressScope = false;
+            p.SuppressUnwrittenScope = false;
+            p.SuppressTagKeyword = false;
+            const meta::type_id rendered = unqualified.getAsString(p);
+
+            if (canonical.isPointerType()) {
+              return meta::invalid_reflected_call_arg{
+                .type = rendered,
+                .reason =
+                  "reflected_call argument is a pointer; pointer types are not reflected directly",
+                .suggestion =
+                  "dereference the pointer and pass the referenced record/enum, or wrap pointer data in a reflectable record",
+              };
+            }
+
+            if (canonical.isArrayType()) {
+              return meta::invalid_reflected_call_arg{
+                .type = rendered,
+                .reason =
+                  "reflected_call argument is a raw array; raw arrays are not reflected directly",
+                .suggestion =
+                  "wrap the array in a reflectable record, or prefer std::array/std::span where appropriate",
+              };
+            }
+
+            if (!clang::isa<clang::TagType>(canonical)) {
+              return meta::invalid_reflected_call_arg{
+                .type = rendered,
+                .reason =
+                  "reflected_call argument is not a C++ record or enum type",
+                .suggestion =
+                  "pass a directly reflectable record/enum, or wrap scalar/fundamental values in a reflectable record",
+              };
+            }
+
+            const auto &tag = clang::cast<clang::TagType>(canonical);
+            if (tag.getDecl()->isInStdNamespace()) {
+              return meta::invalid_reflected_call_arg{
+                .type = rendered,
+                .reason =
+                  "reflected_call argument is a standard-library type; std:: types are not reflected directly",
+                .suggestion =
+                  "pass a user record/enum directly; std:: wrappers may still be used as reflected fields or supported dependency routes",
+              };
+            }
+
+            if (const auto *enum_type =
+                  llvm::dyn_cast<clang::EnumType>(&tag)) {
+              (void)enum_type;
+              return std::nullopt;
+            }
+
+            const auto *record_type =
+              llvm::dyn_cast<clang::RecordType>(&tag);
+            const clang::RecordDecl *record_definition = record_type
+              ? record_type->getDecl()->getDefinition()
+              : nullptr;
+            const clang::CXXRecordDecl *record_decl = record_definition
+              ? llvm::dyn_cast<clang::CXXRecordDecl>(record_definition)
+              : nullptr;
+            if (!record_decl)
+              record_decl = record_type
+                ? llvm::dyn_cast<clang::CXXRecordDecl>(
+                    record_type->getDecl())
+                : nullptr;
+
+            if (!record_decl) {
+              return meta::invalid_reflected_call_arg{
+                .type = rendered,
+                .reason =
+                  "reflected_call argument is not a C++ record or enum type",
+                .suggestion =
+                  "pass a directly reflectable C++ record/enum type",
+              };
+            }
+
+            if (llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(
+                  record_decl)) {
+              return meta::invalid_reflected_call_arg{
+                .type = rendered,
+                .reason =
+                  "reflected_call argument is a partial template specialization; partial specializations are not supported",
+                .suggestion =
+                  "sanitize the type before reflection or use a supported primary record template instantiation",
+              };
+            }
+
+            if (const auto *spec =
+                  llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+                    record_decl)) {
+              const auto specialized =
+                spec->getSpecializedTemplateOrPartial();
+              if (specialized.dyn_cast<
+                    clang::ClassTemplatePartialSpecializationDecl *>()) {
+                return meta::invalid_reflected_call_arg{
+                  .type = rendered,
+                  .reason =
+                    "reflected_call argument is a partial template specialization; partial specializations are not supported",
+                  .suggestion =
+                    "sanitize the type before reflection or use a supported primary record template instantiation",
+                };
+              }
+            }
+
+            return std::nullopt;
+          };
+
           for (unsigned i = 2; call.getNumArgs() > i; ++i) {
+            const clang::QualType arg_type =
+              reflected_arg_type(call.getArg(i)->getType());
+            if (std::optional invalid = reflected_arg_error(arg_type)) {
+              invalid->location = *callsite;
+              a.invalid_reflected_call_args.push_back(std::move(*invalid));
+              continue;
+            }
+
             std::expected resolved = meta::resolve_reflected_type(
-              reflected_arg_type(call.getArg(i)->getType()),
+              arg_type,
               ast,
               a.resolved_types);
 
@@ -2202,7 +2332,7 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
               },
               info.type);
 
-            a.callsites_by_type_id[id].emplace(callsite);
+            a.callsites_by_type_id[id].emplace(*callsite);
 
             std::visit(
               [&a]<typename T>(T t) {
@@ -2213,12 +2343,9 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
                   a.type_name_by_id.emplace(r.id, r.definition.type_name);
                   a.reflected.emplace_back(std::move(r));
                 } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                  // TODO(high): report non-direct reflected_call arguments as
-                  // tool errors and add negative tool-run tests. The public
-                  // interface only supports directly reflectable records/enums
-                  // and `omni::type_t<T>` inputs. Compound arguments such as
-                  // `std::tuple<a, b>` or other wrapper types should be rejected
-                  // instead of silently resolving as non-reflectable.
+                  // Validation before resolution should reject non-reflectable
+                  // direct reflected_call arguments. Keep the branch for
+                  // defensive compatibility with resolver changes.
                 } else {
                   static_assert(std::same_as<meta::already_reflected, T>);
                   // todo: log for info?
@@ -2318,6 +2445,29 @@ std::expected<pipeline::reflection_context, app_error>
       "Move the query into a reflected_call visitor body, make the visitor "
       "dependent/deferred, and add an explicit trailing return type when "
       "deduced return type would instantiate the body during the tool run.";
+
+    return std::unexpected(processing_error(source, std::move(message)));
+  }
+
+  if (!rm.ctx.invalid_reflected_call_args.empty()) {
+    std::string message =
+      "invalid reflected_call argument";
+    for (const meta::invalid_reflected_call_arg &arg :
+      rm.ctx.invalid_reflected_call_args) {
+      message += std::format(
+        "\n  {}:{}:{}: reflected_call argument '{}' is unsupported: {}. Suggestion: {}.",
+        arg.location.source_file.generic_string(),
+        arg.location.line,
+        arg.location.column,
+        arg.type,
+        arg.reason,
+        arg.suggestion);
+    }
+    message +=
+      "\nreflected_call inputs must be directly reflectable records/enums or "
+      "omni::type_t<T>. Compound and wrapper types may still be discovered "
+      "through supported dependency routes when they appear as reflected "
+      "fields, bases, or protocol aliases.";
 
     return std::unexpected(processing_error(source, std::move(message)));
   }

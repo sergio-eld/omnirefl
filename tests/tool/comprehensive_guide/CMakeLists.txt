@@ -6,14 +6,6 @@ project(comprehensive_guide LANGUAGES CXX)
 
 find_package(omnirefl CONFIG REQUIRED)
 
-add_executable(example example.cpp)
-set_property(TARGET example PROPERTY CXX_STANDARD 20)
-
-# Reflection is not transitive: only this target's own .cpp files are
-# instrumented. Call omni_reflected_target for each target that should be
-# reflected.
-omni_reflected_target(example)
-
 add_executable(comprehensive_guide comprehensive_guide.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
 

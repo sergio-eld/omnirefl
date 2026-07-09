@@ -82,6 +82,15 @@ endforeach()
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source min_diagnostics)
         set(_target "cpp_17.negative.${name}")
+        set(_expected_message "${ARGV3}")
+        set(_diagnostic_regex "${ARGV4}")
+        if("" STREQUAL "${_expected_message}")
+            set(_expected_message "reflection query instantiated during the tool run")
+        endif()
+        if("" STREQUAL "${_diagnostic_regex}")
+            set(_diagnostic_regex ":[0-9]+:[0-9]+: omni::")
+        endif()
+
         add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
         set_target_properties(${_target} PROPERTIES
             CXX_STANDARD 17
@@ -97,6 +106,8 @@ if("17" IN_LIST _supported_cpp_standards)
                 -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
                 -D "TARGET=${_target}.omni"
                 -D "MIN_DIAGNOSTICS=${min_diagnostics}"
+                -D "EXPECTED_MESSAGE=${_expected_message}"
+                -D "DIAGNOSTIC_REGEX=${_diagnostic_regex}"
                 -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
     endfunction()
 
@@ -116,6 +127,18 @@ if("17" IN_LIST _supported_cpp_standards)
         "query_multiple"
         negative_run/query_multiple.cpp
         7)
+    _omnirefl_negative_tool_run(
+        "reflected_call_args"
+        negative_run/reflected_call_args.cpp
+        4
+        "invalid reflected_call argument"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_partial_specialization"
+        negative_run/reflected_call_partial_specialization.cpp
+        1
+        "partial template specialization"
+        ":[0-9]+:[0-9]+: reflected_call argument")
 endif()
 
 list(REMOVE_DUPLICATES _supported_cpp_standards)
@@ -167,6 +190,14 @@ if(ENABLE_BENCH)
 endif()
 
 if("20" IN_LIST _supported_cpp_standards)
+    add_executable(example example.cpp)
+    set_property(TARGET example PROPERTY CXX_STANDARD 20)
+
+    # Reflection is not transitive: only this target's own .cpp files are
+    # instrumented. Call omni_reflected_target for each target that should be
+    # reflected.
+    omni_reflected_target(example)
+
     add_subdirectory(comprehensive_guide)
 endif()
 

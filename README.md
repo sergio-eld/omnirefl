@@ -1,7 +1,7 @@
 # Omnirefl
 
 <p align="center">
-  <img src="omnirefl-banner.png" alt="Omnirefl" width="720">
+  <img src="omnirefl-banner.png" alt="Omnirefl" width="640">
 </p>
 
 A C++ reflection tool built for a seamless experience without macros or UB.
@@ -28,8 +28,7 @@ set_property(TARGET example PROPERTY CXX_STANDARD 20)
 omni_reflected_target(example)
 ```
 
-The same target shape is used by
-[tests/tool/comprehensive_guide/CMakeLists.txt](tests/tool/comprehensive_guide/CMakeLists.txt).
+The same target shape is used by [tests/tool/CMakeLists.txt](tests/tool/CMakeLists.txt).
 
 An equivalent direct tool invocation is:
 
@@ -90,10 +89,9 @@ int main() {
 }
 ```
 
-The snippet above is available as
-[tests/tool/comprehensive_guide/example.cpp](tests/tool/comprehensive_guide/example.cpp).
-It is added as a normal reflected target when package tests/examples are
-configured with `ENABLE_TESTING`, but it is not a CTest test.
+The snippet above is available as [tests/tool/example.cpp](tests/tool/example.cpp).
+It is part of the packaged test/example source tree, but it is not a CTest
+test.
 See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 for the full executable guide.
 
@@ -129,21 +127,32 @@ workflows.
 
 ### Limits
 
-- `reflected_call` is the instrumentation boundary. Visitor implementations
-  must be templates, and lambdas must use trailing return types so the body is
-  not instantiated during the tool run before generated metadata exists.
+- `reflected_call` is the instrumentation boundary. The visitor must be either
+  a generic lambda or a type with a templated `operator()`. Its return type must
+  not depend on instantiating the visitor body during the tool run; for lambdas,
+  this means an explicit trailing return type, including `-> void`.
   `constexpr auto result = reflected_call(...)` is not supported: it forces
   evaluation and breaks that instrumentation boundary.
+- `reflected_call` arguments must be direct reflectable record/enum values or
+  `omni::type<T>`. Pointers, raw arrays, fundamental values, standard-library
+  records, partial template specializations, and compound inputs such as
+  `std::tuple<T...>` or `std::vector<T>` are rejected on a best-effort basis.
+  Use sanitized values, dereference pointers, or wrap arrays. Some compound
+  types are still supported as dependencies when discovered through the
+  supported routes listed above.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
-  instantiated independently; do not rely on recursion as an instrumentation
-  mechanism.
+  instantiated independently.
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
 - Public data members only. Private/protected fields are skipped, including
   fields inherited through public bases. Member functions are not reflected.
 - Local and unnamed types are not supported. Experimental indexed support exists
-  for investigation, but is not part of the release contract.
+  for investigation (`omni_reflected_target(... ENABLE_INDEX_MODE)`), but is
+  not part of the release contract: it has proven unstable because function
+  template specializations are instantiated lazily, and a dependent return type
+  can postpone instantiating the function body until the specialization is
+  required.
 
 Linters and language servers such as clangd can report temporary "ghost"
 diagnostics between edits/tool runs, because reflected `.cpp` files depend on
@@ -151,21 +160,98 @@ the generated header that is force-included during normal compilation.
 
 ## Install
 
-TODO: document package installation / unpacking.
+Use the packaged archive for your platform:
+
+- Linux: install the `.deb` package or unpack the `.tar.gz`.
+- Windows: unpack the `.zip`.
+
+The examples below assume a standard install prefix such as `/usr/local`. For
+an unpacked package, use the unpacked directory as `prefix`.
+
+## Packaged Tests and Examples
+
+Assuming a standard install, the packaged test/example sources are available
+under `share/omnirefl/tests`. Copy them into a writable directory before
+configuring:
+
+```bash
+prefix=/usr/local
+cp -R "$prefix/share/omnirefl/tests" ./omnirefl-tests
+
+mkdir build && cd build
+
+cmake ../omnirefl-tests -GNinja
+
+ctest . --output-on-failure
+```
+
+The copied tree also contains the runnable example and comprehensive guide
+sources. For an unpacked package, set `prefix` to the unpacked install root.
+The tests fetch their own test-only dependencies during CMake configuration. If
+CMake does not find a non-standard install, pass
+`-Domnirefl_DIR="$prefix/lib/cmake/omnirefl"`; on Windows this is usually needed
+for an unpacked `.zip` package.
+
+## Build and Develop Locally
+
+The repository uses the
+[`ghcr.io/sergio-eld/omnirefl-build-alpine`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine)
+Alpine Docker image for local and CI builds. The image
+contains prebuilt LLVM/Clang installs for both Linux and Windows targets;
+building that layer from source can take close to an hour, so using the
+prepared image is the simplest way to get reproducible local and CI builds.
+
+The same Alpine image is used for the MinGW Windows cross-build. The Linux tool
+build uses static musl linking, so the packaged executable has no runtime libc
+dependency on the target Linux distribution.
+
+Build Linux and Windows packages:
+
+```bash
+docker compose run --rm build-linux
+docker compose run --rm build-windows
+```
+
+The packages are written to `artifacts/packages/linux` and
+`artifacts/packages/windows`. To work inside the same build image:
+
+```bash
+docker compose run --rm --entrypoint /bin/ash build-linux
+```
 
 ## API Overview
 
-TODO: document `reflected_call`, reflected scope visitors, `meta_t`,
-`binding_t`, field metadata, field bindings, and C++20 concepts.
+- `omni::reflected_call(visitor, args...)` opens a reflected scope.
+- `omni::type<T>` passes type metadata into a reflected scope as
+  `omni::meta_t<T>`.
+- A reflected value argument is passed as `omni::binding_t<T&>`,
+  `omni::binding_t<const T&>`, or owning `omni::binding_t<T>`.
+- `omni::reflected<T>()` and `omni::reflected(value)` are query helpers for
+  dependency types or values already reachable inside a reflected scope.
+- Record metadata exposes `type_name()`, `qualified_type_name()`,
+  `annotation()`, `entity()`, `public_fields()`, and `bind(...)`.
+- Record bindings expose the same type metadata plus `value` and
+  `public_fields()`.
+- Enum metadata/bindings expose type metadata and `enumerators()`.
+- Field metadata/bindings expose `name()`, `type_name()`,
+  `qualified_type_name()`, `annotation()`, `index()`, `value(...)`, and
+  `set_value(...)` where the generated accessor supports mutation.
+- C++20 concepts `omni::meta`, `omni::binding`, `omni::field_meta`, and
+  `omni::field_binding` are available for readable generic visitors.
 
 ## Examples
 
-TODO: link to the executable usage guide once
-`tests/tool/comprehensive_guide/comprehensive_guide.cpp` is implemented.
+- [tests/tool/example.cpp](tests/tool/example.cpp) is the small runnable README
+  example.
+- [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
+  is the executable usage guide with C++20, compatibility, dependency,
+  template, annotation, schema, and write examples.
 
 ## Tested Toolchains
 
-TODO: summarize CI coverage and link to the workflow.
+Current package/install coverage is listed in
+[Supported Toolchains](#supported-toolchains) and reported by the
+[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
 
 # Release Scope
 
@@ -253,16 +339,24 @@ TODO: summarize CI coverage and link to the workflow.
 - (+) `meta_t`, `binding_t`, `field_meta_t`, and `field_binding_t` public
   reflection interfaces
 - (+) C++20 `meta`, `binding`, `field_meta`, and `field_binding` concepts
+- (+) best-effort tool diagnostics for invalid `reflected_call` arguments
+  including pointers, arrays, fundamentals, standard-library records, and
+  partial template specializations
+- (+) best-effort tool diagnostics for reflection query instantiation outside a
+  reflected scope
 
 ### Build/Release
 
-- TODO(High): add a dedicated usage/comprehensive guide `.cpp` as gtest tests,
-  and reference it from this README for in-depth usage demonstrations.
 - (+) generated-header reflection
 - (+) CMake integration
+- (+) packaged runnable example
+- (+) packaged executable comprehensive guide
 - (+) annotations enabled by default
 - (+) annotations can be disabled with `--no-annotations` or CMake
   `NO_ANNOTATIONS`
+- (+) `omnirefl -o <reflection.hpp> --source <source.cpp> -- <compiler command...>`
+- (+) helper `ccdb_query <compile_commands.json> <source.cpp> [output-contains]`
+  for CMake integration
 - (+) Linux package/install matrix
 - (+) Windows package/install test
 - (+) GCC and Clang package/install tests
@@ -290,16 +384,12 @@ TODO: summarize CI coverage and link to the workflow.
   deferred visitor implementation, reliable detection is not practically
   possible without instantiating visitor bodies or adding a broader semantic
   analysis pass.
-- TODO(High): detect reflection query instantiation outside a reflected scope as
-  a tool error when possible, and add dedicated negative tool-run tests.
 - TODO: consider extending reflected entity metadata for fundamental types.
   Currently canonical metadata is available for reflectable record/enum field
   types; fundamental field types are reported only through field declaration
   spelling.
 - (-) refine the public interface
 - (-) replace `reflected_call`
-- (-) document why reflected-scope visitors sometimes need explicit trailing
-  return types to avoid premature instantiation during the tool run
 - TODO(High): expose field mutability metadata, at least as a constexpr
   `is_mutable` on field metadata/bindings, so users can filter writable fields
   before calling `set_value`.
@@ -307,9 +397,6 @@ TODO: summarize CI coverage and link to the workflow.
 - (-) recoverable reflection query/fallback branch for non-reflected types
 - (-) type-erased field wrappers, likely short `field_t`-style names
 - (-) refine the CLI interface
-- (-) remove dependency on compilation database
-- (-) make the tool callable like a compiler instance with limited support for
-  compilation-meaningful flags
 - (-) Unix-like invocation: `omnirefl -o <reflection.hpp> -MF <deps.d> -- <cc1 args...>`
 - (-) split compiler-driver/compile-db args to cc1 mapping into a separate
   composable tool
