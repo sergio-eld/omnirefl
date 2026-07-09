@@ -20,7 +20,7 @@ x-build-alpine-image: &build-alpine-image
   image: ghcr.io/sergio-eld/omnirefl-build-alpine-${ARCH:-x86_64}-musl:llvm-${LLVM_VERSION:-22.1.8}
   build:
     context: .
-    dockerfile: build-alpine.Dockerfile
+    dockerfile: docker/build-alpine.Dockerfile
     args:
       ARCH: ${ARCH:-x86_64}
       LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
@@ -150,7 +150,7 @@ services:
     image: ghcr.io/sergio-eld/test-alpine
     build:
       context: .
-      dockerfile: test-alpine.Dockerfile
+      dockerfile: docker/test-alpine.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
@@ -211,7 +211,7 @@ services:
     image: ghcr.io/sergio-eld/test-${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}
     build:
       context: .
-      dockerfile: test-ubuntu.Dockerfile
+      dockerfile: docker/test-ubuntu.Dockerfile
       args:
         UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
         COMPILER: ${TOOLCHAIN:-gcc}
@@ -356,7 +356,7 @@ services:
     network_mode: nat
     build:
       context: .
-      dockerfile: test-windows-msvc.Dockerfile
+      dockerfile: docker/test-windows-msvc.Dockerfile
       args:
         TOOLCHAIN: ${TOOLCHAIN:-msvc}
     environment:
@@ -434,7 +434,7 @@ services:
     network_mode: nat
     build:
       context: .
-      dockerfile: test-windows-msys2.Dockerfile
+      dockerfile: docker/test-windows-msys2.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}

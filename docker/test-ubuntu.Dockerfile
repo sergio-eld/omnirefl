@@ -1,5 +1,5 @@
 # Usage example:
-#   docker build -f test-ubuntu.Dockerfile \
+#   docker build -f docker/test-ubuntu.Dockerfile \
 #     --build-arg UBUNTU_VERSION=18.04 \
 #     --build-arg COMPILER=gcc \
 #     -t ghcr.io/sergio-eld/test-ubuntu-18.04-gcc .
