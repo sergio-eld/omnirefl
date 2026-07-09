@@ -33,6 +33,7 @@
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/Frontend/Utils.h>
+#include <clang/Lex/Lexer.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Options/Options.h>
 #include <clang/Serialization/PCHContainerOperations.h>
@@ -55,6 +56,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <concepts>
 #include <cstdint>
 #include <expected>
@@ -537,6 +539,7 @@ std::string annotation_from_decl(const clang::ASTContext &ast,
 struct field_data {
   std::string name;
   std::string type_name;
+  std::string qualified_type_name;
   std::string annotation;
   bool is_bitfield;
 
@@ -547,19 +550,7 @@ struct field_data {
   } qualified;
 
   static field_data from_decl(const clang::ASTContext &ast,
-    const clang::FieldDecl *d) {
-    assert(d);
-    return {
-      .name = std::string(fn::as<std::string_view>(d->getName())),
-      .type_name = d->getType().getCanonicalType().getAsString(
-        ast.getPrintingPolicy()),
-      .annotation = annotation_from_decl(ast, d),
-      .is_bitfield = d->isBitField(),
-      .qualified = d->isMutable()
-        ? as_mutable
-        : (d->getType().isConstQualified() ? as_const : none),
-    };
-  }
+    const clang::FieldDecl *d);
 };
 
 struct template_type_param {
@@ -2222,9 +2213,12 @@ std::expected<pipeline::reduced_matches, app_error> pipeline::reduce_matches(
                   a.type_name_by_id.emplace(r.id, r.definition.type_name);
                   a.reflected.emplace_back(std::move(r));
                 } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                  // todo:
-                  // Only a limited set of reflected_call arguments is
-                  // supported, and it should be reported as error diagnostics.
+                  // TODO(high): report non-direct reflected_call arguments as
+                  // tool errors and add negative tool-run tests. The public
+                  // interface only supports directly reflectable records/enums
+                  // and `omni::type_t<T>` inputs. Compound arguments such as
+                  // `std::tuple<a, b>` or other wrapper types should be rejected
+                  // instead of silently resolving as non-reflectable.
                 } else {
                   static_assert(std::same_as<meta::already_reflected, T>);
                   // todo: log for info?
@@ -3007,6 +3001,91 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
     }),
     .namespaces = std::move(namespaces),
     .enclosing_records = std::move(enclosing_records),
+  };
+}
+
+meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
+  const clang::FieldDecl *d) {
+  assert(d);
+
+  const clang::TypeSourceInfo *type_source_info = d->getTypeSourceInfo();
+  const clang::QualType field_type = type_source_info
+    ? type_source_info->getType()
+    : d->getType();
+
+  const auto short_type_name =
+    [](std::string_view qualified) -> std::string {
+    const std::size_t template_args = qualified.find('<');
+    const std::size_t end =
+      std::string_view::npos == template_args ? qualified.size()
+                                              : template_args;
+    const std::size_t qualifier = qualified.rfind("::", end);
+    return std::string{qualified.substr(
+      std::string_view::npos == qualifier ? 0 : qualifier + 2)};
+  };
+
+  const auto type_name_from_decl = [](const clang::NamedDecl *decl) {
+    if (const auto *tag = llvm::dyn_cast<clang::TagDecl>(decl)) {
+      const meta::nm_qual_type type_name =
+        meta::nm_qual_type::from_decl(tag);
+      std::vector<std::string> elems;
+      elems.reserve(type_name.enclosing_records.size() + std::size_t{1});
+      std::ranges::copy(type_name.enclosing_records,
+        std::back_inserter(elems));
+      elems.emplace_back(*type_name.name);
+      return std::format("{}",
+        elems | std::views::join_with("::"sv) | util::format_range);
+    }
+
+    return decl->getNameAsString();
+  };
+
+  const std::string source_type_name = std::invoke([&] {
+    if (type_source_info) {
+      const clang::SourceRange range =
+        type_source_info->getTypeLoc().getSourceRange();
+      const llvm::StringRef text = clang::Lexer::getSourceText(
+        clang::CharSourceRange::getTokenRange(range),
+        ast.getSourceManager(),
+        ast.getLangOpts());
+      std::string source = text.str();
+      while (!source.empty()
+        && std::isspace(static_cast<unsigned char>(source.back())))
+        source.pop_back();
+      if (!source.empty())
+        return source;
+    }
+
+    return field_type.getAsString(ast.getPrintingPolicy());
+  });
+  clang::PrintingPolicy qualified_policy = ast.getPrintingPolicy();
+  qualified_policy.FullyQualifiedName = true;
+  const std::string qualified_type_name = field_type.getAsString(
+    qualified_policy);
+  const std::string type_name = std::invoke([&] {
+    if (const auto *type_decl = field_type->getAsTagDecl()) {
+      if (llvm::isa<clang::ClassTemplateSpecializationDecl>(type_decl))
+        return short_type_name(source_type_name);
+
+      return type_name_from_decl(type_decl);
+    }
+
+    if (const auto *typedef_type =
+          field_type->getAs<clang::TypedefType>())
+      return type_name_from_decl(typedef_type->getDecl());
+
+    return short_type_name(source_type_name);
+  });
+
+  return {
+    .name = std::string(fn::as<std::string_view>(d->getName())),
+    .type_name = type_name,
+    .qualified_type_name = qualified_type_name,
+    .annotation = annotation_from_decl(ast, d),
+    .is_bitfield = d->isBitField(),
+    .qualified = d->isMutable()
+      ? as_mutable
+      : (d->getType().isConstQualified() ? as_const : none),
   };
 }
 
@@ -3809,7 +3888,12 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n      -> const char(&)[sizeof(\"{5}\")] {{"
         "\n      return \"{5}\";"
         "\n    }}"
-        "{6}"
+        "\n"
+        "\n    static constexpr auto qualified_type_name() noexcept"
+        "\n      -> const char(&)[sizeof(\"{6}\")] {{"
+        "\n      return \"{6}\";"
+        "\n    }}"
+        "{7}"
         "\n"
         "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
         "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
@@ -3845,6 +3929,9 @@ std::string reflectable_body(const meta::record_data &d) {
         escaped_string_literal_content(f.type_name),
 
         // 6
+        escaped_string_literal_content(f.qualified_type_name),
+
+        // 7
         annotation_method(f.annotation));
     };
 

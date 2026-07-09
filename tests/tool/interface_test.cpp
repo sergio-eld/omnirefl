@@ -227,15 +227,43 @@ TEST(fields, namespaced_field_type_names) {
   namespace f = interface_test::fields;
 
   static const std::vector<std::string> k_expected{
-    "interface_test::nested::namespaced_record_t",
-    "interface_test::nested::namespaced_enum_t",
+    "namespaced_record_t",
+    "namespaced_enum_t",
+    "parent_record_t::nested_record_t",
   };
 
   value_categories_test<namespaced_field_types_t>(k_expected,
     f::record_type_field_type_names);
 }
 
+TEST(fields, namespaced_field_qualified_type_names) {
+  using interface_test::nested::namespaced_field_types_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "interface_test::nested::namespaced_record_t",
+    "interface_test::nested::namespaced_enum_t",
+    "interface_test::nested::parent_record_t::nested_record_t",
+  };
+
+  value_categories_test<namespaced_field_types_t>(k_expected,
+    f::record_type_field_qualified_type_names);
+}
+
 TEST(fields, fully_qualified_duplicate_leaf_field_type_names) {
+  using interface_test::nested::duplicate_leaf_field_types_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "duplicate_name_t",
+    "duplicate_name_t",
+  };
+
+  value_categories_test<duplicate_leaf_field_types_t>(k_expected,
+    f::record_type_field_type_names);
+}
+
+TEST(fields, fully_qualified_duplicate_leaf_field_qualified_type_names) {
   using interface_test::nested::duplicate_leaf_field_types_t;
   namespace f = interface_test::fields;
 
@@ -245,25 +273,18 @@ TEST(fields, fully_qualified_duplicate_leaf_field_type_names) {
   };
 
   value_categories_test<duplicate_leaf_field_types_t>(k_expected,
-    f::record_type_field_type_names);
+    f::record_type_field_qualified_type_names);
 }
 
 TEST(fields, sized_integer_field_types) {
   using interface_test::nested::sized_integer_field_types_t;
   namespace f = interface_test::fields;
 
-  // These are canonical type-name strings reported by the tool. The source
-  // fields use `std::uint16_t` and friends, but those are typedef aliases, not
-  // canonical type names.
   static const std::vector<std::string> k_expected{
-    "unsigned short",
-    "int",
-#if defined _WIN32
-    "unsigned long long *",
-#else
-    "unsigned long *",
-#endif
-    "short **",
+    "uint16_t",
+    "int32_t",
+    "uint64_t *",
+    "int16_t **",
   };
 
   sized_integer_field_types_t lvalue{};
@@ -276,6 +297,22 @@ TEST(fields, sized_integer_field_types) {
   EXPECT_EQ(k_expected,
     omni::reflected_call(f::record_type_field_type_names,
       sized_integer_field_types_t{}));
+}
+
+TEST(fields, sized_integer_field_qualified_type_names) {
+  using interface_test::nested::sized_integer_field_types_t;
+  namespace f = interface_test::fields;
+
+  // Qualified field type names preserve the source declaration spelling.
+  static const std::vector<std::string> k_expected{
+    "std::uint16_t",
+    "std::int32_t",
+    "std::uint64_t *",
+    "std::int16_t **",
+  };
+
+  value_categories_test<sized_integer_field_types_t>(k_expected,
+    f::record_type_field_qualified_type_names);
 }
 
 TEST(enumerators, enum_type_t) {

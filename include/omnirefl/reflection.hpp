@@ -47,6 +47,9 @@ enum class reflected_entity {
   enumeration, // enum | enum class
 };
 
+// todo: consider extending reflected entity metadata for fundamental/scalar
+// field types.
+
 // todo: what about field pointer? `reflected_field<T::name>` is a valid
 // use-case, to get a string "name" for example
 
@@ -298,6 +301,10 @@ struct field_meta_t {
     return reflected::type_name();
   }
 
+  static constexpr const char *qualified_type_name() noexcept {
+    return reflected::qualified_type_name();
+  }
+
   static constexpr const char *annotation() noexcept {
     return reflected::annotation();
   }
@@ -337,6 +344,10 @@ struct field_binding_t {
 
   static constexpr const char *type_name() noexcept {
     return meta::type_name();
+  }
+
+  static constexpr const char *qualified_type_name() noexcept {
+    return meta::qualified_type_name();
   }
 
   static constexpr const char *annotation() noexcept {

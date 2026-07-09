@@ -1,6 +1,8 @@
 # Omnirefl
 
-![Omnirefl](omnirefl-banner.png)
+<p align="center">
+  <img src="omnirefl-banner.png" alt="Omnirefl" width="720">
+</p>
 
 A C++ reflection tool built for a seamless experience without macros or UB.
 
@@ -13,131 +15,87 @@ Minimal CMake setup:
 # reflected target integration.
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
-project(comprehensive_guide LANGUAGES CXX)
+project(example LANGUAGES CXX)
 
-find_package(omnirefl CONFIG REQUIRED)
+if(NOT TARGET omni::tool)
+    find_package(omnirefl CONFIG REQUIRED)
+endif()
 
-add_executable(comprehensive_guide comprehensive_guide.cpp)
-set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
-target_link_libraries(comprehensive_guide PRIVATE GTest::GTest gtest_main)
+add_executable(example example.cpp)
+set_property(TARGET example PROPERTY CXX_STANDARD 20)
 
 # Reflection is not transitive: only this target's own .cpp files are
 # instrumented. Call omni_reflected_target for each target that should be
 # reflected.
-omni_reflected_target(comprehensive_guide)
+omni_reflected_target(example)
 ```
 
 See [tests/tool/comprehensive_guide/CMakeLists.txt](tests/tool/comprehensive_guide/CMakeLists.txt)
-for the executable guide CMake setup.
+for runnable example and guide targets.
 
 An equivalent direct tool invocation is:
 
 ```bash
 # Generate the reflection header, then force-include it when compiling the same
 # translation unit.
-flags="-std=c++20 -I/path/to/omnirefl/include -I/path/to/gtest/include"
-omnirefl -o main.omnirefl.hpp --source main.cpp -- c++ $flags -c main.cpp -o main.o
-c++ $flags -include main.omnirefl.hpp main.cpp -lgtest -lgtest_main -pthread -o example && ./example
+flags="-std=c++20 -I/path/to/omnirefl/include"
+omnirefl -o example.omnirefl.hpp --source example.cpp -- c++ $flags -c example.cpp -o example.o
+c++ $flags -include example.omnirefl.hpp example.cpp -o example && ./example
 ```
 
 ```cpp
-#include <gtest/gtest.h>
-
 #include <omnirefl/reflection.hpp>
 
-#include <algorithm>
+#include <iostream>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <vector>
-
-namespace example {
-
-enum class status {
-  draft,
-  active,
+#include <tuple>
+struct record {
+  int foo;
+  std::string bar;
 };
 
-struct foobar_record {
-  int foo_count;
-  int bar_count;
-  int untouched_count;
-};
-
-} // namespace example
-
-TEST(example, foobar) {
-  const auto write_foobar = [](omni::binding auto b)
-    // The trailing return type keeps the visitor body from being instantiated
-    // during the tool run, before generated reflection metadata exists.
-    -> example::foobar_record {
-      // Reflected scope: this body is instantiated after `reflected_call`
-      // instruments the argument type and omnirefl generates its metadata.
-      omni::compat::apply(
-        [](omni::field_binding auto... field) {
-          const auto write = [](omni::field_binding auto field) {
-            if constexpr (std::string_view{field.name()}.find("foo")
-              != std::string_view::npos)
-              field.set_value(8);
-
-            if constexpr (std::string_view{field.name()}.find("bar")
-              != std::string_view::npos)
-              field.set_value(15);
-          };
-
-          (write(field), ...);
-        },
-        b.public_fields());
-
-      return std::move(b.value);
-    };
-
-  const auto record = omni::reflected_call(write_foobar,
-    example::foobar_record{
-      .foo_count = 1,
-      .bar_count = 2,
-      .untouched_count = 3,
-    });
-
-  EXPECT_EQ(8, record.foo_count);
-  EXPECT_EQ(15, record.bar_count);
-  EXPECT_EQ(3, record.untouched_count);
-}
-
-TEST(example, enum_names) {
+int main() {
   using namespace std::string_view_literals;
 
-  EXPECT_EQ("draft"sv,
-    omni::reflected_call(
-      [](const omni::binding auto status) -> std::string_view {
-        const auto enumerators = status.enumerators();
-        const auto it = std::ranges::find(enumerators,
-          status.value,
-          [](const auto &value_name) { return value_name.first; });
+  record value{
+    .foo = 1,
+    .bar = "before",
+  };
 
-        return enumerators.end() == it ? "unknown"sv : it->second;
-      },
-      example::status::draft));
+  std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
 
-  const std::vector<std::pair<example::status, std::string_view>>
-    k_expected_pairs{
-      {example::status::draft, "draft"sv},
-      {example::status::active, "active"sv},
+  const auto write =
+    [](omni::binding auto b)
+    // Generic lambdas used as reflected visitors must spell the return type.
+    -> void {
+      std::apply(
+        [](omni::field_binding auto... field) -> void {
+          const auto set = [](omni::field_binding auto field) -> void {
+            constexpr std::string_view name = field.name();
+
+            if constexpr ("foo"sv == name)
+              field.set_value(8);
+
+            if constexpr ("bar"sv == name)
+              field.set_value("after");
+          };
+
+          (set(field), ...);
+        },
+        b.public_fields());
     };
 
-  EXPECT_EQ(k_expected_pairs,
-    omni::reflected_call(
-      [](omni::meta auto status)
-        -> std::vector<std::pair<example::status, std::string_view>> {
-        const auto enumerators = status.enumerators();
-        return {enumerators.begin(), enumerators.end()};
-      },
-      omni::type<example::status>));
+  omni::reflected_call(write, value);
+
+  std::cout << "after: foo=" << value.foo << " bar=" << value.bar << '\n';
 }
 ```
 
+The snippet above is available as
+[tests/tool/comprehensive_guide/example.cpp](tests/tool/comprehensive_guide/example.cpp).
 See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
-for the executable guide.
+for the full executable guide.
 
 ## Seamless Experience
 
@@ -190,6 +148,27 @@ Linters and language servers such as clangd can report temporary "ghost"
 diagnostics between edits/tool runs, because reflected `.cpp` files depend on
 the generated header that is force-included during normal compilation.
 
+## Bug Reports
+
+For tool crashes on Linux, please include the command line, stderr/stdout, the
+input `.cpp`, the generated header if one was produced, and a backtrace.
+
+```bash
+# Enable core dumps for the current shell, then rerun the exact failing command.
+ulimit -c unlimited
+omnirefl -o out.omnirefl.hpp --source source.cpp -- <compiler command...>
+
+# If your system writes core files into the working directory:
+gdb --batch -ex "thread apply all bt full" ./omnirefl ./core > omnirefl.bt.txt
+
+# If your system uses systemd-coredump:
+coredumpctl gdb omnirefl --batch \
+  -ex "thread apply all bt full" > omnirefl.bt.txt
+```
+
+If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
+systems route core dumps to a crash service instead of the current directory.
+
 ## Install
 
 TODO: document package installation / unpacking.
@@ -235,9 +214,11 @@ TODO: summarize CI coverage and link to the workflow.
 - (+) non-public fields are not reflected
 - (+) field names
 - (+) field types
-- (+) canonical field type names
-- (+) only canonical field type names are collected; alias spelling such as
-  `std::uint16_t` is not preserved
+- (+) field `type_name()` without namespaces, including enclosing records when
+  available
+- (+) field `qualified_type_name()` preserves source declaration spelling when
+  available
+- (+) canonical metadata is available when the field type itself is reflectable
 - (+) field count / iteration
 - (+) field index is local to the declaring record, not the flattened inherited
   field tuple
@@ -273,7 +254,7 @@ TODO: summarize CI coverage and link to the workflow.
 
 - (+) reflect record field names
 - (+) reflect record field types
-- (+) reflect canonical record field type names
+- (+) reflect record field type names and qualified type names
 - (+) reflect record and field annotations
 - (+) reflect documentation comment annotations from `///`, `//!`,
   `/** */`, `/*! */`, `///<`, and `//!<`
@@ -331,6 +312,10 @@ TODO: summarize CI coverage and link to the workflow.
   analysis pass.
 - TODO(High): detect reflection query instantiation outside a reflected scope as
   a tool error when possible, and add dedicated negative tool-run tests.
+- TODO: consider extending reflected entity metadata for fundamental types.
+  Currently canonical metadata is available for reflectable record/enum field
+  types; fundamental field types are reported only through field declaration
+  spelling.
 - (-) refine the public interface
 - (-) replace `reflected_call`
 - (-) document why reflected-scope visitors sometimes need explicit trailing

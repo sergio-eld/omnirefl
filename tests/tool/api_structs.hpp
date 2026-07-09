@@ -44,6 +44,7 @@ enum class namespaced_enum_t {
 struct namespaced_field_types_t {
   namespaced_record_t record;
   namespaced_enum_t state;
+  parent_record_t::nested_record_t nested;
 };
 
 namespace left {
@@ -139,6 +140,13 @@ struct field_type_names_visitor {
   }
 };
 
+struct qualified_field_type_names_visitor {
+  template <typename... Field>
+  std::vector<std::string> operator()(const Field &...) const {
+    return std::vector<std::string>{Field::qualified_type_name()...};
+  }
+};
+
 struct record_type_fields_t {
   template <typename T>
   std::vector<std::string> operator()(omni::binding_t<T> binding) const {
@@ -155,6 +163,14 @@ struct record_type_field_type_names_t {
       binding.public_fields());
   }
 } const static record_type_field_type_names{};
+
+struct record_type_field_qualified_type_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return omni::compat::apply(qualified_field_type_names_visitor{},
+      binding.public_fields());
+  }
+} const static record_type_field_qualified_type_names{};
 
 } // namespace fields
 

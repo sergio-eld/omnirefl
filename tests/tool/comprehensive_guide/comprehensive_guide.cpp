@@ -46,30 +46,207 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
 
 } // namespace
 
-namespace example {
+/**
+ * Invocation
+ *
+ * Conceptual signature:
+ *   template <typename Visit, typename... T>
+ *   auto reflected_call(Visit visit, T... args)
+ *     -> result of `visit(reflected argument for each T...)`;
+ *
+ * `auto` is the visitor result. `reflected_call` only maps every input `T` to
+ * the corresponding reflected argument before invoking `visit`.
+ *
+ * `Visit` must be a template callable, for example a generic lambda or a
+ * struct with templated `operator()`.
+ *
+ * The caller is expected to pass sanitized reflected inputs: a directly
+ * reflectable record/enum or `omni::type_t<T>`. `reflected_call` does not
+ * unwrap compound arguments like `std::tuple<a, b>`, `std::vector<a>`, or raw
+ * arrays. They can still be dependency routes when they appear as reflected
+ * fields or supported protocol typedefs.
+ *
+ * Reflected argument examples:
+ *   foo f = ...;
+ *   reflected_call(visit, omni::type<foo>);  // omni::meta_t<foo>
+ *   reflected_call(visit, foo{});            // omni::binding_t<foo>
+ *   reflected_call(visit, f);                // omni::binding_t<foo &>
+ *   reflected_call(visit, std::as_const(f)); // omni::binding_t<const foo &>
+ *   reflected_call(visit, std::move(f));     // omni::binding_t<foo>
+ *
+ *   const bar b = ...;
+ *   reflected_call(visit, f, b); // omni::binding_t<foo &>,
+ *                               // omni::binding_t<const bar &>
+ *
+ * NOTE: `constexpr auto result = reflected_call(...)` is not supported as of
+ * this writing because it triggers visitor body instantiation. The `visit`
+ * object itself can still be constexpr, including its internal calculations.
+ *
+ * Reflected scope
+ *
+ * Only generic lambdas or callable types with templated `operator()` are
+ * allowed, so the visitor body is not instantiated during the tool run.
+ *
+ *   []<typename... Meta>(Meta... reflected_args) -> result_type {
+ *     // reflected scope: reflection queries are available here
+ *   }
+ *
+ * The lambda form must use an explicit trailing return type, including
+ * `-> void`. A deduced return type can instantiate the lambda body during tool
+ * run, before generated metadata exists.
+ *
+ * Field tuple mapping:
+ *   omni::meta_t<T>::public_fields()    -> omni::field_meta_t<...>
+ *   omni::binding_t<T>::public_fields() -> omni::field_binding_t<...>
+ *
+ * The first test below shows the stable reflected-scope interface. The rest of
+ * this file covers enums, bindings, dependency routes, annotations, bitfields,
+ * primary templates, and schema-style traversal.
+ */
 
-enum class status {
-  draft,
-  active,
+/// API exposition -------------------------------------------------------------
+
+namespace exposition {
+
+/// exposition record annotation
+struct record {
+  /// exposition enum annotation
+  enum class state {
+    ready,
+    paused,
+  };
+
+  /// foo field annotation
+  int foo;
+
+  /// enabled field annotation
+  bool enabled;
+
+  /// scores field annotation
+  std::vector<std::string> scores;
+};
+
+struct field_summary {
+  std::string_view name;
+  std::string_view type_name;
+  std::string_view qualified_type_name;
+  std::string_view annotation;
+
+  bool operator==(const field_summary &) const = default;
+};
+
+struct reflected_summary {
+  std::string_view entity;
+  std::string_view type_name;
+  std::string_view qualified_type_name;
+  std::string_view annotation;
+  std::vector<field_summary> fields;
+  std::vector<std::string_view> enumerators;
+
+  bool operator==(const reflected_summary &) const = default;
 };
 
 struct foobar_record {
   int foo_count;
-  int bar_count;
+  unsigned bar_count : 5;
   int untouched_count;
 };
 
-} // namespace example
+} // namespace exposition
 
-TEST(example, foobar) {
-  // C++20 and later: concepts give reflected visitors readable argument
-  // constraints while keeping the reflected type generic.
+TEST(exposition, reflected_scope_overview) {
+  using namespace std::string_view_literals;
+
+  exposition::reflected_summary ctx;
+
+  // Prefer captures for extra arguments that should not be reflected. This
+  // exposition is artificial; a summary-only visitor should usually return by
+  // value.
+  const auto render =
+    [&ctx]<typename Meta>(Meta m) -> void {
+      ctx.entity =
+        omni::reflected_entity::record == m.entity() ? "record"sv : "enum"sv;
+      ctx.type_name = m.type_name();
+      ctx.qualified_type_name = m.qualified_type_name();
+      ctx.annotation = m.annotation();
+
+      if constexpr (omni::reflected_entity::record == m.entity()) {
+        // `omni::compat::apply` provides the same shape for earlier standards.
+        std::apply(
+          [&ctx]<omni::field_meta... FieldMeta>(FieldMeta... field) -> void {
+            (ctx.fields.push_back({
+               .name = field.name(),
+               // Field declaration spelling with the outer namespace omitted.
+               // Reflectable field types can be queried separately through
+               // `omni::reflected<FieldMeta::type>()`.
+               .type_name = field.type_name(),
+               // Source spelling with namespaces restored when Clang can
+               // identify the declaration.
+               .qualified_type_name = field.qualified_type_name(),
+               .annotation = field.annotation(),
+             }),
+              ...);
+          },
+          m.public_fields());
+      } else {
+        static_assert(omni::reflected_entity::enumeration == m.entity());
+        for (const auto &value_name : m.enumerators())
+          ctx.enumerators.push_back(value_name.second);
+      }
+    };
+
+  const exposition::reflected_summary k_expected_record{
+    .entity = "record"sv,
+    .type_name = "record"sv,
+    .qualified_type_name = "exposition::record"sv,
+    .annotation = "exposition record annotation"sv,
+    .fields =
+      {
+        {
+          .name = "foo"sv,
+          .type_name = "int"sv,
+          .qualified_type_name = "int"sv,
+          .annotation = "foo field annotation"sv,
+        },
+        {
+          .name = "enabled"sv,
+          .type_name = "bool"sv,
+          .qualified_type_name = "bool"sv,
+          .annotation = "enabled field annotation"sv,
+        },
+        {
+          .name = "scores"sv,
+          // Template arguments keep their source spelling; only the outer
+          // namespace qualifier is omitted from `type_name()`.
+          .type_name = "vector<std::string>"sv,
+          .qualified_type_name = "std::vector<std::string>"sv,
+          .annotation = "scores field annotation"sv,
+        },
+      },
+    .enumerators = {},
+  };
+
+  omni::reflected_call(render, omni::type<exposition::record>);
+  EXPECT_EQ(k_expected_record, ctx);
+
+  ctx = {};
+  const exposition::reflected_summary k_expected_state{
+    .entity = "enum"sv,
+    .type_name = "record::state"sv,
+    .qualified_type_name = "exposition::record::state"sv,
+    .annotation = "exposition enum annotation"sv,
+    .fields = {},
+    .enumerators = std::vector<std::string_view>{"ready"sv, "paused"sv},
+  };
+
+  omni::reflected_call(render, omni::type<exposition::record::state>);
+  EXPECT_EQ(k_expected_state, ctx);
+}
+
+// Field bindings allow mutation of public data members, including bitfields.
+TEST(exposition, write_foobar) {
   const auto write_foobar = [](omni::binding auto b)
-    // The trailing return type keeps the visitor body from being instantiated
-    // during the tool run, before generated reflection metadata exists.
-    -> example::foobar_record {
-      // Reflected scope: this body is instantiated after `reflected_call`
-      // instruments the argument type and omnirefl generates its metadata.
+    -> exposition::foobar_record {
       omni::compat::apply(
         [](omni::field_binding auto... field) {
           const auto write = [](omni::field_binding auto field) {
@@ -90,16 +267,27 @@ TEST(example, foobar) {
     };
 
   const auto record = omni::reflected_call(write_foobar,
-    example::foobar_record{
+    exposition::foobar_record{
       .foo_count = 1,
       .bar_count = 2,
       .untouched_count = 3,
     });
 
   EXPECT_EQ(8, record.foo_count);
-  EXPECT_EQ(15, record.bar_count);
+  EXPECT_EQ(15u, record.bar_count);
   EXPECT_EQ(3, record.untouched_count);
 }
+
+/// Examples -------------------------------------------------------------------
+
+namespace example {
+
+enum class status {
+  draft,
+  active,
+};
+
+} // namespace example
 
 TEST(example, enum_names) {
   using namespace std::string_view_literals;
@@ -132,59 +320,14 @@ TEST(example, enum_names) {
       omni::type<example::status>));
 }
 
-TEST(example, cpp14_cpp17_binding_name) {
-  using namespace std::string_view_literals;
-
-  const auto read_name = [](const auto _binding) -> std::string_view {
-    // Generic `auto` lambda arguments are available since C++14.
-    //
-    // `const omni::binding_t binding = _binding;` uses omitted class-template
-    // specialization, which is available since C++17. It gives the binding a
-    // concrete interface type without spelling the reflected type.
-    const omni::binding_t binding = _binding;
-    return binding.type_name();
-  };
-
-  EXPECT_EQ("foobar_record"sv,
-    omni::reflected_call(read_name, example::foobar_record{}));
-}
-
-namespace cpp11 {
-
-struct binding_name {
-  template <typename T>
-  const char *operator()(omni::binding_t<T> binding) const {
-    return binding.type_name();
-  }
-};
-
-struct meta_name {
-  template <typename T>
-  const char *operator()(omni::meta_t<T> type) const {
-    return type.type_name();
-  }
-};
-
-} // namespace cpp11
-
-TEST(example, cpp11_struct_visitors) {
-  // C++11 has no generic lambdas. Use a named visitor with a templated
-  // `operator()` instead.
-  EXPECT_STREQ("foobar_record",
-    omni::reflected_call(cpp11::binding_name{}, example::foobar_record{}));
-
-  EXPECT_STREQ("status",
-    omni::reflected_call(cpp11::meta_name{}, omni::type<example::status>));
-}
-
 TEST(example, binding_storage_forms) {
-  example::foobar_record mutable_record{
+  exposition::foobar_record mutable_record{
     .foo_count = 1,
     .bar_count = 2,
     .untouched_count = 3,
   };
 
-  const example::foobar_record const_record{
+  const exposition::foobar_record const_record{
     .foo_count = 4,
     .bar_count = 5,
     .untouched_count = 6,
@@ -202,7 +345,8 @@ TEST(example, binding_storage_forms) {
 
     mutable_binding.value.foo_count = 8;
 
-    return mutable_binding.value.foo_count + const_binding.value.bar_count
+    return mutable_binding.value.foo_count //
+      + const_binding.value.bar_count
       + owning_binding.value.untouched_count;
   };
 
@@ -210,7 +354,7 @@ TEST(example, binding_storage_forms) {
     omni::reflected_call(inspect,
       mutable_record,
       const_record,
-      example::foobar_record{
+      exposition::foobar_record{
         .foo_count = 7,
         .bar_count = 8,
         .untouched_count = 9,
@@ -229,7 +373,7 @@ TEST(example, reflected_value_query) {
   };
 
   EXPECT_EQ("foobar_record"sv,
-    omni::reflected_call(query_value, example::foobar_record{}));
+    omni::reflected_call(query_value, exposition::foobar_record{}));
 }
 
 TEST(example, meta_bind_and_field_metadata) {
@@ -254,256 +398,213 @@ TEST(example, meta_bind_and_field_metadata) {
   };
 
   EXPECT_EQ(6,
-    omni::reflected_call(inspect, omni::type<example::foobar_record>));
+    omni::reflected_call(inspect, omni::type<exposition::foobar_record>));
 }
 
-namespace schema {
+namespace primary_template {
 
-/// user profile
-struct profile {
-  /// account tier enum
-  enum class tier {
-    basic,
-    premium,
+template <typename Char>
+struct text_record {
+  /// display title
+  std::basic_string<Char> title;
+
+  /// number of revisions
+  int revisions;
+};
+
+} // namespace primary_template
+
+TEST(example, primary_template_read_data) {
+  using namespace std::string_literals;
+  using namespace std::string_view_literals;
+
+  struct rendered_field {
+    std::string_view name;
+    std::string_view annotation;
+    std::string value;
+
+    bool operator==(const rendered_field &) const = default;
   };
 
-  /// mailing address
-  struct address {
-    /// city name
-    std::string city;
-
-    /// postal code
-    int postal_code;
+  const primary_template::text_record<char> record{
+    .title = "Guide"s,
+    .revisions = 2,
   };
 
-  /// database id
-  int id;
-
-  /// account enabled
-  bool active;
-
-  /// display name
-  std::string name;
-
-  /// account tier
-  tier account_tier;
-};
-
-/// address collection
-struct address_book {
-  /// known addresses
-  std::vector<profile::address> addresses;
-
-  /// public labels
-  std::set<std::string> tags;
-
-  /// named addresses
-  std::map<std::string, profile::address> address_by_name;
-};
-
-/// feature toggle
-struct feature_toggle {
-  /// enabled flag
-  bool enabled;
-
-  /// rollout percentage
-  double rollout;
-
-  /// owner aliases
-  std::set<std::string> owners;
-};
-
-template <typename T>
-void render_schema(std::ostringstream &out,
-  omni::type_t<T>,
-  std::string_view indent);
-
-void render_schema(std::ostringstream &out,
-  omni::meta auto schema,
-  std::string_view indent) {
-  if constexpr (omni::reflected_entity::record == schema.entity()) {
-    out << indent << "type: object\n";
-    out << indent << "name: " << schema.type_name() << '\n';
-    out << indent << "annotation: " << schema.annotation() << '\n';
-    out << indent << "properties:\n";
+  const auto read_fields =
+    [](omni::binding auto b) -> std::vector<rendered_field> {
+    std::vector<rendered_field> out;
 
     omni::compat::apply(
-      [&out, indent](omni::field_meta auto... field) {
-        const auto render_field = //
-          [&out, indent]<omni::field_meta Field>(Field field) {
-          out << indent << "  - name: " << field.name() << '\n';
-          out << indent << "    annotation: " << field.annotation() << '\n';
-          out << indent << "    schema:\n";
-          render_schema(out,
-            omni::type<typename Field::type>,
-            std::string{indent} + "      ");
+      [&out](omni::field_binding auto... field) {
+        const auto render = [&out](omni::field_binding auto field) {
+          constexpr std::string_view field_name = field.name();
+
+          if constexpr ("title"sv == field_name) {
+            out.push_back({
+              .name = field.name(),
+              .annotation = field.annotation(),
+              .value = field.value(),
+            });
+          }
+
+          if constexpr ("revisions"sv == field_name) {
+            out.push_back({
+              .name = field.name(),
+              .annotation = field.annotation(),
+              .value = std::to_string(field.value()),
+            });
+          }
         };
 
-        (render_field(field), ...);
+        (render(field), ...);
       },
-      schema.public_fields());
-  } else {
-    static_assert(omni::reflected_entity::enumeration == schema.entity());
+      b.public_fields());
 
-    out << indent << "type: string\n";
-    out << indent << "name: " << schema.type_name() << '\n';
-    out << indent << "annotation: " << schema.annotation() << '\n';
-    out << indent << "enum:\n";
-
-    for (const auto &value_name : schema.enumerators()) {
-      out << indent << "  - " << value_name.second << '\n';
-    }
-  }
-}
-
-template <typename T>
-void render_schema(std::ostringstream &out,
-  omni::type_t<T>,
-  std::string_view indent) {
-  if constexpr (omni::is_reflected<T>::value) {
-    render_schema(out, omni::reflected<T>(), indent);
-  } else if constexpr (meta::is<std::basic_string, T>()) {
-    out << indent << "type: string\n";
-  } else if constexpr (std::same_as<bool, T>) {
-    out << indent << "type: boolean\n";
-  } else if constexpr (std::integral<T>) {
-    out << indent << "type: integer\n";
-  } else if constexpr (std::floating_point<T>) {
-    out << indent << "type: number\n";
-  } else if constexpr (meta::map_like<T>) {
-    out << indent << "type: object\n";
-    out << indent << "additionalProperties:\n";
-    render_schema(out,
-      omni::type<typename T::mapped_type>,
-      std::string{indent} + "  ");
-  } else if constexpr (meta::range_like<T>) {
-    out << indent << "type: array\n";
-    out << indent << "items:\n";
-    render_schema(out,
-      omni::type<typename T::value_type>,
-      std::string{indent} + "  ");
-  }
-}
-
-template <typename T>
-std::string annotate_schema(omni::type_t<T>) {
-  const auto annotate = [](omni::meta auto) -> std::string {
-    std::ostringstream out;
-    render_schema(out, omni::type<T>, "");
-    return out.str();
+    return out;
   };
 
-  return omni::reflected_call(annotate, omni::type<T>);
+  const std::vector<rendered_field> k_expected{
+    {
+      .name = "title"sv,
+      .annotation = "display title"sv,
+      .value = "Guide"s,
+    },
+    {
+      .name = "revisions"sv,
+      .annotation = "number of revisions"sv,
+      .value = "2"s,
+    },
+  };
+
+  EXPECT_EQ(k_expected, omni::reflected_call(read_fields, record));
 }
 
-} // namespace schema
+namespace primary_template {
 
-TEST(example, annotated_schema_profile) {
-  const std::string k_expected_profile =
-    "type: object\n"
-    "name: profile\n"
-    "annotation: user profile\n"
-    "properties:\n"
-    "  - name: id\n"
-    "    annotation: database id\n"
-    "    schema:\n"
-    "      type: integer\n"
-    "  - name: active\n"
-    "    annotation: account enabled\n"
-    "    schema:\n"
-    "      type: boolean\n"
-    "  - name: name\n"
-    "    annotation: display name\n"
-    "    schema:\n"
-    "      type: string\n"
-    "  - name: account_tier\n"
-    "    annotation: account tier\n"
-    "    schema:\n"
-    "      type: string\n"
-    "      name: profile::tier\n"
-    "      annotation: account tier enum\n"
-    "      enum:\n"
-    "        - basic\n"
-    "        - premium\n";
+// Dummy arena shape for the primary-template example. It deliberately delegates
+// to std::allocator; the example is about reflecting a record template that
+// uses an allocator-shaped template argument, not about allocation strategy.
+struct arena_allocator {
+  template <typename T>
+  T *allocate(std::size_t n) {
+    return std::allocator<T>{}.allocate(n);
+  }
 
-  EXPECT_EQ(k_expected_profile,
-    schema::annotate_schema(omni::type<schema::profile>));
+  template <typename T>
+  void deallocate(T *p, std::size_t n) noexcept {
+    std::allocator<T>{}.deallocate(p, n);
+  }
+
+  template <typename T>
+  struct allocator {
+    using value_type = T;
+
+    template <typename U>
+    struct rebind {
+      using other = allocator<U>;
+    };
+
+    allocator() noexcept = default;
+
+    template <typename U>
+    allocator(const allocator<U> &) noexcept {}
+
+    T *allocate(std::size_t n) {
+      return arena_allocator{}.allocate<T>(n);
+    }
+
+    void deallocate(T *p, std::size_t n) noexcept {
+      arena_allocator{}.deallocate(p, n);
+    }
+  };
+};
+
+template <typename T, typename U>
+bool operator==(const arena_allocator::allocator<T> &,
+  const arena_allocator::allocator<U> &) noexcept {
+  return true;
 }
 
-TEST(example, annotated_schema_address_book) {
-  const std::string k_expected_address_book =
-    "type: object\n"
-    "name: address_book\n"
-    "annotation: address collection\n"
-    "properties:\n"
-    "  - name: addresses\n"
-    "    annotation: known addresses\n"
-    "    schema:\n"
-    "      type: array\n"
-    "      items:\n"
-    "        type: object\n"
-    "        name: profile::address\n"
-    "        annotation: mailing address\n"
-    "        properties:\n"
-    "          - name: city\n"
-    "            annotation: city name\n"
-    "            schema:\n"
-    "              type: string\n"
-    "          - name: postal_code\n"
-    "            annotation: postal code\n"
-    "            schema:\n"
-    "              type: integer\n"
-    "  - name: tags\n"
-    "    annotation: public labels\n"
-    "    schema:\n"
-    "      type: array\n"
-    "      items:\n"
-    "        type: string\n"
-    "  - name: address_by_name\n"
-    "    annotation: named addresses\n"
-    "    schema:\n"
-    "      type: object\n"
-    "      additionalProperties:\n"
-    "        type: object\n"
-    "        name: profile::address\n"
-    "        annotation: mailing address\n"
-    "        properties:\n"
-    "          - name: city\n"
-    "            annotation: city name\n"
-    "            schema:\n"
-    "              type: string\n"
-    "          - name: postal_code\n"
-    "            annotation: postal code\n"
-    "            schema:\n"
-    "              type: integer\n";
-
-  EXPECT_EQ(k_expected_address_book,
-    schema::annotate_schema(omni::type<schema::address_book>));
+template <typename T, typename U>
+bool operator!=(const arena_allocator::allocator<T> &,
+  const arena_allocator::allocator<U> &) noexcept {
+  return false;
 }
 
-TEST(example, annotated_schema_small_record) {
-  const std::string k_expected_feature_toggle =
-    "type: object\n"
-    "name: feature_toggle\n"
-    "annotation: feature toggle\n"
-    "properties:\n"
-    "  - name: enabled\n"
-    "    annotation: enabled flag\n"
-    "    schema:\n"
-    "      type: boolean\n"
-    "  - name: rollout\n"
-    "    annotation: rollout percentage\n"
-    "    schema:\n"
-    "      type: number\n"
-    "  - name: owners\n"
-    "    annotation: owner aliases\n"
-    "    schema:\n"
-    "      type: array\n"
-    "      items:\n"
-    "        type: string\n";
+template <typename Alloc>
+struct allocated_record {
+  std::basic_string<char,
+    std::char_traits<char>,
+    typename Alloc::template rebind<char>::other>
+    name;
+  std::vector<int, Alloc> scores;
+  int count;
+};
 
-  EXPECT_EQ(k_expected_feature_toggle,
-    schema::annotate_schema(omni::type<schema::feature_toggle>));
+using result = allocated_record<arena_allocator::allocator<int>>;
+using runtime_value = std::variant<int, std::string, std::vector<int>>;
+using runtime_table = std::map<std::string, runtime_value, std::less<>>;
+
+} // namespace primary_template
+
+TEST(example, primary_template_from_map) {
+  using namespace std::string_literals;
+
+  const primary_template::runtime_table table{
+    {"name"s, "Ada"s},
+    {"scores"s, std::vector{1, 2, 3}},
+    {"count"s, 8},
+  };
+
+  const auto from_map =
+    [&table]<omni::meta Result>(Result result_type) -> primary_template::result {
+    const auto init =
+      [&table]<typename T>(omni::type_t<T>, std::string_view name) -> T {
+      const auto it = table.find(name);
+      if (table.end() == it)
+        return {};
+
+      // Minimal example policy: missing keys and incompatible runtime values
+      // become default field values. Real deserialization would usually report
+      // those as errors.
+      return std::visit(
+        []<typename From>(const From &from) -> T {
+          if constexpr (std::same_as<From, T>) {
+            return from;
+          } else if constexpr (meta::is<std::basic_string, From>()
+            && meta::is<std::basic_string, T>()) {
+            // Convert between different `std::basic_string` specializations,
+            // for example when the target record uses a custom allocator.
+            return {from.begin(), from.end()};
+          } else if constexpr (meta::is<std::vector, From>()
+            && meta::is<std::vector, T>()) {
+            return {from.begin(), from.end()};
+          } else {
+            return {};
+          }
+        },
+        it->second);
+    };
+
+    return std::apply(
+      [&init]<omni::field_meta... Field>(Field... field)
+        -> primary_template::result {
+        return {
+          init(omni::type<typename Field::type>, field.name())...,
+        };
+      },
+      result_type.public_fields());
+  };
+
+  const primary_template::result record =
+    omni::reflected_call(from_map, omni::type<primary_template::result>);
+  const std::string name{record.name.begin(), record.name.end()};
+  const std::vector<int> scores{record.scores.begin(), record.scores.end()};
+
+  EXPECT_EQ("Ada", name);
+  EXPECT_EQ((std::vector{1, 2, 3}), scores);
+  EXPECT_EQ(8, record.count);
 }
 
 namespace dependency {
@@ -799,29 +900,27 @@ TEST(example, annotated_dependencies) {
   const std::vector<rendered_field> k_expected_public_fields{
     {
       .name = "base"sv,
-      .type_name = "dependency::from_base"sv,
+      .type_name = "from_base"sv,
       .annotation = "field from public base"sv,
     },
     {
       .name = "field"sv,
-      .type_name = "dependency::from_field"sv,
+      .type_name = "from_field"sv,
       .annotation = "direct field route"sv,
     },
     {
       .name = "tuple_route"sv,
-      .type_name = "std::tuple<dependency::from_tuple, "
-                   "dependency::box<dependency::from_tuple>>"sv,
+      .type_name = "tuple<from_tuple, box<from_tuple>>"sv,
       .annotation = "tuple route"sv,
     },
     {
       .name = "variant_route"sv,
-      .type_name = "std::variant<dependency::from_variant, "
-                   "dependency::box<dependency::from_variant>>"sv,
+      .type_name = "variant<from_variant, box<from_variant>>"sv,
       .annotation = "variant route"sv,
     },
     {
       .name = "vector_route"sv,
-      .type_name = "std::vector<dependency::from_vector>"sv,
+      .type_name = "vector<from_vector>"sv,
       .annotation = "vector value_type route"sv,
     },
   };
@@ -868,250 +967,300 @@ TEST(example, annotated_dependencies) {
   EXPECT_EQ(k_expected_from_vector, rendered.from_vector);
 }
 
-namespace bitfield {
+/// Compatibility ---------------------------------------------------------------
 
-struct flags {
-  unsigned enabled : 1;
-  unsigned retries : 3;
-  unsigned mode : 2;
-};
-
-} // namespace bitfield
-
-TEST(example, write_bitfields) {
+TEST(example, cpp14_cpp17_binding_name) {
   using namespace std::string_view_literals;
 
-  const auto set_flags = [](omni::binding auto b) -> bitfield::flags {
-    omni::compat::apply(
-      [](omni::field_binding auto... field) {
-        const auto write = [](omni::field_binding auto field) {
-          constexpr std::string_view field_name = field.name();
-
-          if constexpr ("enabled"sv == field_name)
-            field.set_value(1u);
-
-          if constexpr ("retries"sv == field_name)
-            field.set_value(5u);
-
-          if constexpr ("mode"sv == field_name)
-            field.set_value(3u);
-        };
-
-        (write(field), ...);
-      },
-      b.public_fields());
-
-    return std::move(b.value);
+  const auto read_name = [](const auto _binding) -> std::string_view {
+    // Generic `auto` lambda arguments are available since C++14.
+    //
+    // `const omni::binding_t binding = _binding;` uses omitted class-template
+    // specialization, which is available since C++17. It gives the binding a
+    // concrete interface type without spelling the reflected type.
+    const omni::binding_t binding = _binding;
+    return binding.type_name();
   };
 
-  const bitfield::flags flags =
-    omni::reflected_call(set_flags, bitfield::flags{});
-
-  EXPECT_EQ(1u, flags.enabled);
-  EXPECT_EQ(5u, flags.retries);
-  EXPECT_EQ(3u, flags.mode);
+  EXPECT_EQ("foobar_record"sv,
+    omni::reflected_call(read_name, exposition::foobar_record{}));
 }
 
-namespace primary_template {
+namespace cpp11 {
 
-template <typename Char>
-struct text_record {
-  /// display title
-  std::basic_string<Char> title;
-
-  /// number of revisions
-  int revisions;
-};
-
-} // namespace primary_template
-
-TEST(example, primary_template_read_data) {
-  using namespace std::string_literals;
-  using namespace std::string_view_literals;
-
-  struct rendered_field {
-    std::string_view name;
-    std::string_view annotation;
-    std::string value;
-
-    bool operator==(const rendered_field &) const = default;
-  };
-
-  const primary_template::text_record<char> record{
-    .title = "Guide"s,
-    .revisions = 2,
-  };
-
-  const auto read_fields =
-    [](omni::binding auto b) -> std::vector<rendered_field> {
-    std::vector<rendered_field> out;
-
-    omni::compat::apply(
-      [&out](omni::field_binding auto... field) {
-        const auto render = [&out](omni::field_binding auto field) {
-          constexpr std::string_view field_name = field.name();
-
-          if constexpr ("title"sv == field_name) {
-            out.push_back({
-              .name = field.name(),
-              .annotation = field.annotation(),
-              .value = field.value(),
-            });
-          }
-
-          if constexpr ("revisions"sv == field_name) {
-            out.push_back({
-              .name = field.name(),
-              .annotation = field.annotation(),
-              .value = std::to_string(field.value()),
-            });
-          }
-        };
-
-        (render(field), ...);
-      },
-      b.public_fields());
-
-    return out;
-  };
-
-  const std::vector<rendered_field> k_expected{
-    {
-      .name = "title"sv,
-      .annotation = "display title"sv,
-      .value = "Guide"s,
-    },
-    {
-      .name = "revisions"sv,
-      .annotation = "number of revisions"sv,
-      .value = "2"s,
-    },
-  };
-
-  EXPECT_EQ(k_expected, omni::reflected_call(read_fields, record));
-}
-
-namespace primary_template {
-
-// Dummy arena shape for the primary-template example. It deliberately delegates
-// to std::allocator; the example is about reflecting a record template that
-// uses an allocator-shaped template argument, not about allocation strategy.
-struct arena_allocator {
+// C++11 has no generic lambdas. Use a named visitor with a templated
+// `operator()` instead.
+struct type_name {
   template <typename T>
-  T *allocate(std::size_t n) {
-    return std::allocator<T>{}.allocate(n);
+  const char *operator()(omni::binding_t<const T &> binding) const {
+    return binding.type_name();
   }
 
-  template <typename T>
-  void deallocate(T *p, std::size_t n) noexcept {
-    std::allocator<T>{}.deallocate(p, n);
+  template <typename Meta>
+  const char *operator()(omni::meta_t<Meta> type) const {
+    return type.type_name();
   }
-
-  template <typename T>
-  struct allocator {
-    using value_type = T;
-
-    template <typename U>
-    struct rebind {
-      using other = allocator<U>;
-    };
-
-    allocator() noexcept = default;
-
-    template <typename U>
-    allocator(const allocator<U> &) noexcept {}
-
-    T *allocate(std::size_t n) {
-      return arena_allocator{}.allocate<T>(n);
-    }
-
-    void deallocate(T *p, std::size_t n) noexcept {
-      arena_allocator{}.deallocate(p, n);
-    }
-  };
 };
 
-template <typename T, typename U>
-bool operator==(const arena_allocator::allocator<T> &,
-  const arena_allocator::allocator<U> &) noexcept {
-  return true;
+} // namespace cpp11
+
+TEST(example, cpp11_struct_visitors) {
+  const exposition::foobar_record record{};
+
+  EXPECT_STREQ("foobar_record",
+    omni::reflected_call(cpp11::type_name{}, record));
+
+  EXPECT_STREQ("status",
+    omni::reflected_call(cpp11::type_name{}, omni::type<example::status>));
 }
 
-template <typename T, typename U>
-bool operator!=(const arena_allocator::allocator<T> &,
-  const arena_allocator::allocator<U> &) noexcept {
-  return false;
-}
+/// Advanced examples ----------------------------------------------------------
 
-template <typename Alloc>
-struct allocated_record {
-  std::basic_string<char,
-    std::char_traits<char>,
-    typename Alloc::template rebind<char>::other>
-    name;
-  std::vector<int, Alloc> scores;
-  int count;
-};
+namespace schema {
 
-using result = allocated_record<arena_allocator::allocator<int>>;
-using runtime_value = std::variant<int, std::string, std::vector<int>>;
-using runtime_table = std::map<std::string, runtime_value, std::less<>>;
-
-} // namespace primary_template
-
-TEST(example, primary_template_from_map) {
-  using namespace std::string_literals;
-
-  const primary_template::runtime_table table{
-    {"name"s, "Ada"s},
-    {"scores"s, std::vector{1, 2, 3}},
-    {"count"s, 8},
+/// user profile
+struct profile {
+  /// account tier enum
+  enum class tier {
+    basic,
+    premium,
   };
 
-  const auto from_map =
-    [&table]<omni::meta Result>(Result result_type) -> primary_template::result {
-    const auto init =
-      [&table]<typename T>(omni::type_t<T>, std::string_view name) -> T {
-      const auto it = table.find(name);
-      if (table.end() == it)
-        return {};
+  /// mailing address
+  struct address {
+    /// city name
+    std::string city;
 
-      // Minimal example policy: missing keys and incompatible runtime values
-      // become default field values. Real deserialization would usually report
-      // those as errors.
-      return std::visit(
-        []<typename From>(const From &from) -> T {
-          if constexpr (std::same_as<T, From>) {
-            return from;
-          } else if constexpr (meta::is<std::basic_string, T>()
-            && meta::is<std::basic_string, From>()) {
-            return {from.begin(), from.end()};
-          } else if constexpr (meta::is<std::vector, T>()
-            && meta::is<std::vector, From>()) {
-            return {from.begin(), from.end()};
-          } else {
-            return {};
-          }
-        },
-        it->second);
-    };
+    /// postal code
+    int postal_code;
+  };
 
-    return std::apply(
-      [&init]<omni::field_meta... Field>(Field... field)
-        -> primary_template::result {
-        return {
-          init(omni::type<typename Field::type>, field.name())...,
+  /// database id
+  int id;
+
+  /// account enabled
+  bool active;
+
+  /// display name
+  std::string name;
+
+  /// account tier
+  tier account_tier;
+};
+
+/// address collection
+struct address_book {
+  /// known addresses
+  std::vector<profile::address> addresses;
+
+  /// public labels
+  std::set<std::string> tags;
+
+  /// named addresses
+  std::map<std::string, profile::address> address_by_name;
+};
+
+/// feature toggle
+struct feature_toggle {
+  /// enabled flag
+  bool enabled;
+
+  /// rollout percentage
+  double rollout;
+
+  /// owner aliases
+  std::set<std::string> owners;
+};
+
+template <typename T>
+void render_schema(std::ostringstream &out,
+  omni::type_t<T>,
+  std::string_view indent);
+
+void render_schema(std::ostringstream &out,
+  omni::meta auto schema,
+  std::string_view indent) {
+  if constexpr (omni::reflected_entity::record == schema.entity()) {
+    out << indent << "type: object\n";
+    out << indent << "name: " << schema.type_name() << '\n';
+    out << indent << "annotation: " << schema.annotation() << '\n';
+    out << indent << "properties:\n";
+
+    omni::compat::apply(
+      [&out, indent](omni::field_meta auto... field) {
+        const auto render_field = //
+          [&out, indent]<omni::field_meta Field>(Field field) {
+          out << indent << "  - name: " << field.name() << '\n';
+          out << indent << "    annotation: " << field.annotation() << '\n';
+          out << indent << "    schema:\n";
+          render_schema(out,
+            omni::type<typename Field::type>,
+            std::string{indent} + "      ");
         };
+
+        (render_field(field), ...);
       },
-      result_type.public_fields());
+      schema.public_fields());
+  } else {
+    static_assert(omni::reflected_entity::enumeration == schema.entity());
+
+    out << indent << "type: string\n";
+    out << indent << "name: " << schema.type_name() << '\n';
+    out << indent << "annotation: " << schema.annotation() << '\n';
+    out << indent << "enum:\n";
+
+    for (const auto &value_name : schema.enumerators()) {
+      out << indent << "  - " << value_name.second << '\n';
+    }
+  }
+}
+
+template <typename T>
+void render_schema(std::ostringstream &out,
+  omni::type_t<T>,
+  std::string_view indent) {
+  if constexpr (omni::is_reflected<T>::value) {
+    render_schema(out, omni::reflected<T>(), indent);
+  } else if constexpr (meta::is<std::basic_string, T>()) {
+    out << indent << "type: string\n";
+  } else if constexpr (std::same_as<bool, T>) {
+    out << indent << "type: boolean\n";
+  } else if constexpr (std::integral<T>) {
+    out << indent << "type: integer\n";
+  } else if constexpr (std::floating_point<T>) {
+    out << indent << "type: number\n";
+  } else if constexpr (meta::map_like<T>) {
+    out << indent << "type: object\n";
+    out << indent << "additionalProperties:\n";
+    render_schema(out,
+      omni::type<typename T::mapped_type>,
+      std::string{indent} + "  ");
+  } else if constexpr (meta::range_like<T>) {
+    out << indent << "type: array\n";
+    out << indent << "items:\n";
+    render_schema(out,
+      omni::type<typename T::value_type>,
+      std::string{indent} + "  ");
+  }
+}
+
+template <typename T>
+std::string annotate_schema(omni::type_t<T>) {
+  const auto annotate = [](omni::meta auto) -> std::string {
+    std::ostringstream out;
+    render_schema(out, omni::type<T>, "");
+    return out.str();
   };
 
-  const primary_template::result record =
-    omni::reflected_call(from_map, omni::type<primary_template::result>);
-  const std::string name{record.name.begin(), record.name.end()};
-  const std::vector<int> scores{record.scores.begin(), record.scores.end()};
+  return omni::reflected_call(annotate, omni::type<T>);
+}
 
-  EXPECT_EQ("Ada", name);
-  EXPECT_EQ((std::vector{1, 2, 3}), scores);
-  EXPECT_EQ(8, record.count);
+} // namespace schema
+
+TEST(example, annotated_schema_profile) {
+  const std::string k_expected_profile =
+    "type: object\n"
+    "name: profile\n"
+    "annotation: user profile\n"
+    "properties:\n"
+    "  - name: id\n"
+    "    annotation: database id\n"
+    "    schema:\n"
+    "      type: integer\n"
+    "  - name: active\n"
+    "    annotation: account enabled\n"
+    "    schema:\n"
+    "      type: boolean\n"
+    "  - name: name\n"
+    "    annotation: display name\n"
+    "    schema:\n"
+    "      type: string\n"
+    "  - name: account_tier\n"
+    "    annotation: account tier\n"
+    "    schema:\n"
+    "      type: string\n"
+    "      name: profile::tier\n"
+    "      annotation: account tier enum\n"
+    "      enum:\n"
+    "        - basic\n"
+    "        - premium\n";
+
+  EXPECT_EQ(k_expected_profile,
+    schema::annotate_schema(omni::type<schema::profile>));
+}
+
+TEST(example, annotated_schema_address_book) {
+  const std::string k_expected_address_book =
+    "type: object\n"
+    "name: address_book\n"
+    "annotation: address collection\n"
+    "properties:\n"
+    "  - name: addresses\n"
+    "    annotation: known addresses\n"
+    "    schema:\n"
+    "      type: array\n"
+    "      items:\n"
+    "        type: object\n"
+    "        name: profile::address\n"
+    "        annotation: mailing address\n"
+    "        properties:\n"
+    "          - name: city\n"
+    "            annotation: city name\n"
+    "            schema:\n"
+    "              type: string\n"
+    "          - name: postal_code\n"
+    "            annotation: postal code\n"
+    "            schema:\n"
+    "              type: integer\n"
+    "  - name: tags\n"
+    "    annotation: public labels\n"
+    "    schema:\n"
+    "      type: array\n"
+    "      items:\n"
+    "        type: string\n"
+    "  - name: address_by_name\n"
+    "    annotation: named addresses\n"
+    "    schema:\n"
+    "      type: object\n"
+    "      additionalProperties:\n"
+    "        type: object\n"
+    "        name: profile::address\n"
+    "        annotation: mailing address\n"
+    "        properties:\n"
+    "          - name: city\n"
+    "            annotation: city name\n"
+    "            schema:\n"
+    "              type: string\n"
+    "          - name: postal_code\n"
+    "            annotation: postal code\n"
+    "            schema:\n"
+    "              type: integer\n";
+
+  EXPECT_EQ(k_expected_address_book,
+    schema::annotate_schema(omni::type<schema::address_book>));
+}
+
+TEST(example, annotated_schema_small_record) {
+  const std::string k_expected_feature_toggle =
+    "type: object\n"
+    "name: feature_toggle\n"
+    "annotation: feature toggle\n"
+    "properties:\n"
+    "  - name: enabled\n"
+    "    annotation: enabled flag\n"
+    "    schema:\n"
+    "      type: boolean\n"
+    "  - name: rollout\n"
+    "    annotation: rollout percentage\n"
+    "    schema:\n"
+    "      type: number\n"
+    "  - name: owners\n"
+    "    annotation: owner aliases\n"
+    "    schema:\n"
+    "      type: array\n"
+    "      items:\n"
+    "        type: string\n";
+
+  EXPECT_EQ(k_expected_feature_toggle,
+    schema::annotate_schema(omni::type<schema::feature_toggle>));
 }

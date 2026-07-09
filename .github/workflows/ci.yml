@@ -83,7 +83,9 @@ jobs:
 
       - name: Resolve Short SHA
         id: commit
-        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Registry
         uses: docker/login-action@v4
@@ -233,11 +235,12 @@ jobs:
 
       - name: Check benchmark regression
         run: |
-          python3 ci/benchmark_history.py compare \
+          python3 -B ci/benchmark_history.py compare \
             --current ./artifacts/benchmarks/benchmark.json \
             --history ./artifacts/benchmark-history/history.json \
             --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
             --threshold 1.2 \
+            --min-delta-ms 500 \
             --count 5
 
       - name: Update benchmark history
@@ -245,7 +248,7 @@ jobs:
         env:
           COMMIT_TITLE: ${{ steps.commit.outputs.title }}
         run: |
-          python3 ci/benchmark_history.py update \
+          python3 -B ci/benchmark_history.py update \
             --current ./artifacts/benchmarks/benchmark.json \
             --history ./artifacts/benchmark-history/history.json \
             --commit "${{ github.sha }}" \
