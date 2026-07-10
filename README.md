@@ -49,7 +49,6 @@ c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
 #include <string_view>
 #include <tuple>
 
-
 struct record {
   int foo;
   std::string bar;
