@@ -19,7 +19,7 @@ project(example LANGUAGES CXX)
 
 find_package(omnirefl CONFIG REQUIRED)
 
-add_executable(example example.cpp)
+add_executable(example main.cpp)
 set_property(TARGET example PROPERTY CXX_STANDARD 20)
 
 # Reflection is not transitive: only this target's own .cpp files are
@@ -28,7 +28,8 @@ set_property(TARGET example PROPERTY CXX_STANDARD 20)
 omni_reflected_target(example)
 ```
 
-The same target shape is used by [tests/tool/CMakeLists.txt](tests/tool/CMakeLists.txt).
+The same target shape is used by
+[tests/tool/example/CMakeLists.txt](tests/tool/example/CMakeLists.txt).
 
 An equivalent direct tool invocation is:
 
@@ -36,8 +37,8 @@ An equivalent direct tool invocation is:
 # Generate the reflection header, then force-include it when compiling the same
 # translation unit.
 flags="-std=c++20 -I/path/to/omnirefl/include"
-omnirefl -o example.omnirefl.hpp --source example.cpp -- c++ $flags -c example.cpp -o example.o
-c++ $flags -include example.omnirefl.hpp example.cpp -o example && ./example
+omnirefl -o example.omnirefl.hpp --source main.cpp -- c++ $flags -c main.cpp -o example.o
+c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
 ```
 
 ```cpp
@@ -47,6 +48,8 @@ c++ $flags -include example.omnirefl.hpp example.cpp -o example && ./example
 #include <string>
 #include <string_view>
 #include <tuple>
+
+
 struct record {
   int foo;
   std::string bar;
@@ -89,9 +92,9 @@ int main() {
 }
 ```
 
-The snippet above is available as [tests/tool/example.cpp](tests/tool/example.cpp).
-It is part of the packaged test/example source tree, but it is not a CTest
-test.
+The snippet above is available as
+[tests/tool/example/main.cpp](tests/tool/example/main.cpp). It is part of
+the packaged test/example source tree, but it is not a CTest test.
 See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 for the full executable guide. It targets limited C++20 support: omnirefl
 concepts are used, but `<concepts>` and C++20 ranges algorithms are avoided.
@@ -239,8 +242,8 @@ docker compose run --rm --entrypoint /bin/ash build-linux
 
 ## Examples
 
-- [tests/tool/example.cpp](tests/tool/example.cpp) is the small runnable README
-  example.
+- [tests/tool/example/main.cpp](tests/tool/example/main.cpp) is the small
+  runnable README example.
 - [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
   is the executable usage guide with C++20, compatibility, dependency,
   template, annotation, schema, and write examples. It is written for limited
