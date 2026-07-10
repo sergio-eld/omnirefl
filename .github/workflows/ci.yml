@@ -30,12 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [linux, windows]
-        arch: [x86_64, aarch64]
-
-    # ARM64 package artifacts are cross-built here, but not package-tested yet.
-    # Native GitHub ARM64 runners may be useful later, depending on private repo
-    # availability/cost.
-    # TODO: enable native ARM64 package tests when the repository is public.
+        arch: [x86_64]
 
     steps:
       - name: Checkout Repository
@@ -57,11 +52,10 @@ jobs:
           password: ${{ secrets.GH_DOCKER_READ }}
 
       - name: Pull build-alpine Image
-        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-${{ matrix.arch }}-musl:llvm-${LLVM_VERSION}
+        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
 
       - name: Build and package omnirefl tool
         run: |
-          ARCH=${{ matrix.arch }} \
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
             docker compose run --rm build-${{ matrix.os }}

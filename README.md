@@ -195,16 +195,12 @@ for an unpacked `.zip` package.
 
 ## Build and Develop Locally
 
-The repository uses Alpine Docker images for local and CI builds:
-
-- [`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-x86_64-musl)
-- [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-aarch64-musl)
-  for ARM64 cross-compilation
-
-The images contain prebuilt LLVM/Clang installs for both Linux and Windows
-targets; building that layer from source can take close to an hour, so using
-the prepared images is the simplest way to get reproducible local and CI
-builds.
+The repository uses the
+[`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-x86_64-musl-ucrt)
+Alpine Docker image for local and CI builds. The image contains prebuilt
+LLVM/Clang installs for both Linux and Windows targets; building that layer
+from source can take close to an hour, so using the prepared image is the
+simplest way to get reproducible local and CI builds.
 
 The same Alpine image is used for the MinGW Windows cross-build. The Linux tool
 build uses static musl linking, so the packaged executable has no runtime libc
@@ -217,8 +213,6 @@ Build Linux and Windows packages:
 docker compose run --rm build-linux
 docker compose run --rm build-windows
 ```
-
-Use `ARCH=aarch64` to select the ARM64 build image and package target.
 
 The packages are written to `artifacts/packages/linux` and
 `artifacts/packages/windows`. To work inside the same build image:

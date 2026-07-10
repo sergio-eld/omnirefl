@@ -14,15 +14,13 @@
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 
 x-build-alpine-image: &build-alpine-image
-  # ARCH selects the output processor architecture for both Linux and
-  # Windows packages produced by this Alpine/musl build environment.
-  # TODO: keep Cosmopolitan builds in a separate Dockerfile/image family.
-  image: ghcr.io/sergio-eld/omnirefl-build-alpine-${ARCH:-x86_64}-musl:llvm-${LLVM_VERSION:-22.1.8}
+  # TODO: keep ARM64 and Cosmopolitan builds in separate target-specific
+  # Dockerfile/image families.
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION:-22.1.8}
   build:
     context: .
-    dockerfile: docker/build-alpine.Dockerfile
+    dockerfile: docker/build-alpine-x86_64-musl-ucrt.Dockerfile
     args:
-      ARCH: ${ARCH:-x86_64}
       LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
 
 services:
@@ -37,29 +35,6 @@ services:
       - /bin/ash
       - -euxc
       - |
-        case $${ARCH:-x86_64} in
-          x86_64)
-            CMAKE_SYSTEM_FLAGS=""
-            OBJCOPY=objcopy
-            STRIP=strip
-            ;;
-          aarch64)
-            export CXXFLAGS="-stdlib=libstdc++"
-            export LDFLAGS="-static -fuse-ld=lld"
-            CMAKE_SYSTEM_FLAGS="\
-              -DCMAKE_SYSTEM_NAME=Linux \
-              -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-              -DCMAKE_C_COMPILER=clang-21 \
-              -DCMAKE_CXX_COMPILER=clang++-21 \
-              -DCMAKE_C_COMPILER_TARGET=aarch64-alpine-linux-musl \
-              -DCMAKE_CXX_COMPILER_TARGET=aarch64-alpine-linux-musl \
-              -DCMAKE_SYSROOT=$${AARCH64_ALPINE_SYSROOT}"
-            OBJCOPY=llvm-objcopy
-            STRIP=llvm-strip
-            ;;
-          *) echo "Unsupported ARCH='$${ARCH}'" >&2; exit 1 ;;
-        esac
-
         # Package validation runs from installed artifacts in test containers.
         # This build only needs to produce the tool and package files.
         cmake /src -GNinja \
@@ -68,15 +43,14 @@ services:
           -DENABLE_TESTING=OFF \
           -DENABLE_BENCH=OFF \
           -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          $$CMAKE_SYSTEM_FLAGS \
           -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
         cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
 
         mkdir -p symbols &&
-        $$OBJCOPY --only-keep-debug omnirefl symbols/omnirefl.debug &&
-        $$STRIP --strip-unneeded omnirefl &&
-        ($$OBJCOPY --remove-section .gnu_debuglink omnirefl 2>/dev/null || true) &&
-        $$OBJCOPY --add-gnu-debuglink=symbols/omnirefl.debug omnirefl &&
+        objcopy --only-keep-debug omnirefl symbols/omnirefl.debug &&
+        strip --strip-unneeded omnirefl &&
+        (objcopy --remove-section .gnu_debuglink omnirefl 2>/dev/null || true) &&
+        objcopy --add-gnu-debuglink=symbols/omnirefl.debug omnirefl &&
 
         mkdir -p /tmp/package /packages &&
         cpack -G "DEB;TGZ" -B /tmp/package &&
@@ -93,54 +67,25 @@ services:
       - /bin/ash
       - -euxc
       - |
-        case $${ARCH:-x86_64} in
-          x86_64)
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
-            export LDFLAGS=-static
-            CMAKE_SYSTEM_FLAGS="\
-              -DCMAKE_SYSTEM_NAME=Windows \
-              -DCMAKE_SYSTEM_PROCESSOR=x86_64"
-            OBJCOPY=x86_64-w64-mingw32-objcopy
-            STRIP=x86_64-w64-mingw32-strip
-            ;;
-          aarch64)
-            MINGW_RESOURCE_DIR="$$(find "$${LLVM_MINGW_ROOT}/lib/clang" \
-              -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
-            export CC=clang-21
-            export CXX=clang++-21
-            export CFLAGS="-resource-dir $${MINGW_RESOURCE_DIR} -rtlib=compiler-rt"
-            export CXXFLAGS="-resource-dir $${MINGW_RESOURCE_DIR} -stdlib=libc++ -rtlib=compiler-rt"
-            export LDFLAGS="-fuse-ld=lld -rtlib=compiler-rt -unwindlib=libunwind"
-            CMAKE_SYSTEM_FLAGS="\
-              -DCMAKE_SYSTEM_NAME=Windows \
-              -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-              -DCMAKE_C_COMPILER_TARGET=aarch64-w64-windows-gnu \
-              -DCMAKE_CXX_COMPILER_TARGET=aarch64-w64-windows-gnu \
-              -DCMAKE_SYSROOT=$${LLVM_MINGW_ROOT}/aarch64-w64-mingw32"
-            OBJCOPY=llvm-objcopy
-            STRIP=llvm-strip
-            ;;
-          *) echo "Unsupported ARCH='$${ARCH}'" >&2; exit 1 ;;
-        esac
-
         # Package validation runs from installed artifacts in test containers.
         # This build only needs to produce the tool and package files.
-        cmake /src -GNinja \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DENABLE_PACKAGE=ON \
-          -DENABLE_TESTING=OFF \
-          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          $$CMAKE_SYSTEM_FLAGS \
-          -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
+        CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ LDFLAGS=-static \
+          cmake /src -GNinja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+            -DENABLE_PACKAGE=ON \
+            -DENABLE_TESTING=OFF \
+            -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+            -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
 
         cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
 
         mkdir -p symbols &&
-        $$OBJCOPY --only-keep-debug omnirefl.exe symbols/omnirefl.exe.debug &&
-        $$STRIP --strip-unneeded omnirefl.exe &&
-        ($$OBJCOPY --remove-section .gnu_debuglink omnirefl.exe 2>/dev/null || true) &&
-        $$OBJCOPY --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe &&
+        x86_64-w64-mingw32-objcopy --only-keep-debug omnirefl.exe symbols/omnirefl.exe.debug &&
+        x86_64-w64-mingw32-strip --strip-unneeded omnirefl.exe &&
+        (x86_64-w64-mingw32-objcopy --remove-section .gnu_debuglink omnirefl.exe 2>/dev/null || true) &&
+        x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe &&
 
         mkdir -p /tmp/package /packages &&
         cpack -G "ZIP" -B /tmp/package &&
