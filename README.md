@@ -161,10 +161,21 @@ the generated header that is force-included during normal compilation.
 
 ## Install
 
-Use the packaged archive for your platform:
+Install options:
 
-- Linux: install the `.deb` package or unpack the `.tar.gz`.
-- Windows: unpack the `.zip`.
+- Latest release:
+  [download the packaged archive for your platform](https://github.com/sergio-eld/omnirefl/releases/latest).
+  Linux packages are published as `.deb` and `.tar.gz`; Windows packages are
+  published as `.zip`.
+- Latest CI artifact:
+  open the latest successful `CI` run on `master` and use the artifacts
+  produced by `Build package / linux-x86_64` or
+  `Build package / windows-x86_64`. GitHub Actions artifacts do not provide a
+  stable direct "latest artifact" download URL; look for
+  `packages-linux-x86_64-musl-<short-sha>` or
+  `packages-windows-x86_64-ucrt-<short-sha>`.
+- Build locally using the prepared Docker image; see
+  [Build and Develop Locally](#build-and-develop-locally).
 
 The examples below assume a standard install prefix such as `/usr/local`. For
 an unpacked package, use the unpacked directory as `prefix`.
@@ -200,12 +211,17 @@ The repository uses the
 Alpine Docker image for local and CI builds. The image contains prebuilt
 LLVM/Clang installs for both Linux and Windows targets; building that layer
 from source can take close to an hour, so using the prepared image is the
-simplest way to get reproducible local and CI builds.
+simplest way to get reproducible local and CI builds. The image is defined by
+[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile).
 
 The same Alpine image is used for the MinGW Windows cross-build. The Linux tool
 build uses static musl linking, so the packaged executable has no runtime libc
 dependency on the target Linux distribution. The Windows package targets UCRT;
 no other runtime dependency is expected.
+
+If configuring the build directly on the host instead of using the image, use a
+C++23 compiler. As of now, the prepared build image uses GCC for the native
+Linux tool build.
 
 Build Linux and Windows packages:
 
@@ -221,27 +237,6 @@ The packages are written to `artifacts/packages/linux` and
 docker compose run --rm --entrypoint /bin/ash build-linux
 ```
 
-## API Overview
-
-- `omni::reflected_call(visitor, args...)` opens a reflected scope.
-- `omni::type<T>` passes type metadata into a reflected scope as
-  `omni::meta_t<T>`.
-- A reflected value argument is passed as `omni::binding_t<T&>`,
-  `omni::binding_t<const T&>`, or owning `omni::binding_t<T>`.
-- `omni::reflected<T>()` and `omni::reflected(value)` are query helpers for
-  dependency types or values already reachable inside a reflected scope.
-- Record metadata exposes `type_name()`, `qualified_type_name()`,
-  `annotation()`, `entity()`, `public_fields()`, and `bind(...)`.
-- Record bindings expose the same type metadata plus `value` and
-  `public_fields()`.
-- Enum metadata/bindings expose type metadata and `enumerators()`.
-- Field metadata/bindings expose `name()`, `type_name()`,
-  `qualified_type_name()`, `annotation()`, `index()`, `is_const()`,
-  `is_mutable()`, `value(...)`, and `set_value(...)` where the field is
-  writable.
-- C++20 concepts `omni::meta`, `omni::binding`, `omni::field_meta`, and
-  `omni::field_binding` are available for readable generic visitors.
-
 ## Examples
 
 - [tests/tool/example.cpp](tests/tool/example.cpp) is the small runnable README
@@ -253,9 +248,46 @@ docker compose run --rm --entrypoint /bin/ash build-linux
 
 ## Tested Toolchains
 
-Current package/install coverage is listed in
-[Supported Toolchains](#supported-toolchains) and reported by the
+Current package/install coverage is reported by the
 [CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+
+- (+) `Linux:Alpine GCC` covered by CI package matrix
+- (+) `Linux:Alpine Clang` covered by CI package matrix
+- (+) `Linux:Alpine MinGW GCC` covered by CI package matrix
+  (build-only for Windows test binaries)
+- (+) `Linux:Ubuntu 18.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 18.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 20.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 20.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
+- (+) `Linux:Ubuntu MinGW GCC` covered by CI package matrix
+  (build-only for Windows test binaries)
+- (+) `Windows:MSVC` covered by CI package matrix
+- (+) `Windows:clang-cl` covered by CI package matrix
+- (+) `Windows:MSYS2 MinGW` covered by CI package matrix
+- (+) `Windows:MSYS2 clang` covered by CI package matrix
+- TODO(High): cross-build the tool for `macOS`.
+- TODO(High): cross-build the tool for `ARM64` targets.
+- TODO(High): investigate switching the tool build to Cosmopolitan after a
+  baseline benchmark is in place.
+
+## Continuous Benchmark
+
+Benchmark runs are reported by the
+[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+
+- Target: `linux-x86_64`
+- Environment: Ubuntu 22.04 GCC package-test image
+- Baseline target: `benchmark.baseline`
+- Raw history artifact: `benchmark-history-linux-x86_64`
+- Reported baseline: average of the last 5 stored runs
+- Tracked metrics:
+  - reflection/tool wall time for `benchmark.baseline.omni`
+  - build wall time for `benchmark.baseline`
+  - reflection/tool wall time as percentage of build wall time
+- TODO: when the repository goes public, render or link the benchmark history
+  directly from the README instead of requiring artifact lookup.
 
 # Release Scope
 
@@ -402,63 +434,12 @@ Current package/install coverage is listed in
 - (-) split compiler-driver/compile-db args to cc1 mapping into a separate
   composable tool
 
-### Supported Toolchains
-
-Current state is reported by the
-[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
-
-- (+) `Linux:Alpine GCC` covered by CI package matrix
-- (+) `Linux:Alpine Clang` covered by CI package matrix
-- (+) `Linux:Alpine MinGW GCC` covered by CI package matrix
-  (build-only for Windows test binaries)
-- (+) `Linux:Ubuntu 18.04 GCC` covered by CI package matrix
-- (+) `Linux:Ubuntu 18.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu 20.04 GCC` covered by CI package matrix
-- (+) `Linux:Ubuntu 20.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu 22.04 GCC` covered by CI package matrix
-- (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu MinGW GCC` covered by CI package matrix
-  (build-only for Windows test binaries)
-- (+) `Windows:MSVC` covered by CI package matrix
-- (+) `Windows:clang-cl` covered by CI package matrix
-- (+) `Windows:MSYS2 MinGW` covered by CI package matrix
-- (+) `Windows:MSYS2 clang` covered by CI package matrix
-- TODO(High): cross-build the tool for `macOS`.
-- TODO(High): cross-build the tool for `ARM64` targets.
-- TODO(High): investigate switching the tool build to Cosmopolitan after a
-  baseline benchmark is in place.
-
-### Continuous Benchmark
-
-Benchmark runs are reported by the
-[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
-
-- Target: `linux-x86_64`
-- Environment: Ubuntu 22.04 GCC package-test image
-- Baseline target: `benchmark.baseline`
-- Raw history artifact: `benchmark-history-linux-x86_64`
-- Reported baseline: average of the last 5 stored runs
-- Tracked metrics:
-  - reflection/tool wall time for `benchmark.baseline.omni`
-  - build wall time for `benchmark.baseline`
-  - reflection/tool wall time as percentage of build wall time
-- TODO: when the repository goes public, render or link the benchmark history
-  directly from the README instead of requiring artifact lookup.
-
 ## Might Be Considered Later
 
 - (-) unnamed non-local types addressable from namespace scope via
   `decltype(symbol)`
 - (-) unnamed non-local types addressable through function return type
 - (-) other globally addressable unnamed cases
-
-## Out
-
-- (-) private/protected fields
-- (-) methods
-- (-) local/block-scope types
-- (-) arbitrary composed `reflected_call` instrumentation
-- (-) recursive reflection
 
 ## Bug Reports
 
