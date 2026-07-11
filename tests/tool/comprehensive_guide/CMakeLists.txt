@@ -11,7 +11,10 @@ endif()
 add_executable(comprehensive_guide comprehensive_guide.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
 
-target_link_libraries(comprehensive_guide PRIVATE GTest::GTest gtest_main)
+target_link_libraries(comprehensive_guide PRIVATE
+    GTest::GTest
+    gtest_main
+    std_compat)
 
 # Index mode is experimental and not expected to be stable across compilers.
 omni_reflected_target(comprehensive_guide ENABLE_INDEX_MODE)

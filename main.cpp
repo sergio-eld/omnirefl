@@ -200,21 +200,6 @@ struct std::formatter<util::format_range_t<V, CharT>, CharT> {
 
 namespace {
 
-struct source_file {
-  fs::path path;
-  std::vector<std::string> flags;
-
-  // for transforms
-  static std::string path_as_string(const source_file &sf) {
-    return sf.path.generic_string();
-  }
-};
-
-struct app_error {
-  int code;
-  std::string message;
-};
-
 enum class log_level {
   silent,
   error,
@@ -231,18 +216,20 @@ constexpr std::array log_levels{
   std::pair{log_level::debug, "debug"sv},
 };
 
-std::optional<log_level> parse_log_level(std::string_view name) {
-  static const std::flat_map<std::string_view, log_level> log_level_by_name =
-    log_levels //
-    | std::views::transform(
-      [](const auto &level) { return std::pair{level.second, level.first}; }) //
-    | std::ranges::to<std::flat_map>();
+struct source_file {
+  fs::path path;
+  std::vector<std::string> flags;
 
-  if (!log_level_by_name.contains(name))
-    return std::nullopt;
+  // for transforms
+  static std::string path_as_string(const source_file &sf) {
+    return sf.path.generic_string();
+  }
+};
 
-  return log_level_by_name.at(name);
-}
+struct app_error {
+  int code;
+  std::string message;
+};
 
 struct diagnostics {
   log_level level;
@@ -339,25 +326,25 @@ constexpr auto pattern(
   };
 }
 
-template <typename Match, typename Node, typename Reduce>
+template <typename Match, typename Node, typename Fold>
 struct rule {
   pattern_t<Match, Node> pattern;
-  Reduce reduce;
+  Fold fold;
   clang::TraversalKind traversal_kind = clang::TraversalKind::TK_AsIs;
 };
 
 // todo: use concept `of_template<rule>`
 template <typename Accum, typename... Rule>
-Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
-                                          // a mutable ASTContext&. SMH...
+Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
+                                        // a mutable ASTContext&. SMH...
   Accum a,
   Rule... rule) {
   using namespace clang::ast_matchers;
   constexpr std::string_view binding_tag = "binding_tag";
 
   constexpr auto callback_from_rule = //
-    [binding_tag]<typename Match, typename Node, typename Reduce>(Accum &accum,
-      const ast::rule<Match, Node, Reduce> &rule) {
+    [binding_tag]<typename Match, typename Node, typename Fold>(Accum &accum,
+      const ast::rule<Match, Node, Fold> &rule) {
       const auto bound_matcher =
         traverse(rule.traversal_kind, rule.pattern.match.bind(binding_tag));
       using matcher_t = decltype(bound_matcher);
@@ -365,7 +352,7 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
       struct _callback: MatchFinder::MatchCallback {
         matcher_t matcher;
         Accum &accum;
-        Reduce reduce;
+        Fold fold;
 
         std::string_view binding_tag;
 
@@ -384,20 +371,20 @@ Accum reduce_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
             return;
           }
 
-          accum = reduce(std::move(accum), *node);
+          accum = fold(std::move(accum), *node);
         }
 
         _callback(const matcher_t &m,
           Accum &a,
-          const Reduce &r,
+          const Fold &f,
           std::string_view binding_tag)
             : matcher(m)
             , accum(a)
-            , reduce(r)
+            , fold(f)
             , binding_tag(binding_tag) {}
       };
 
-      return _callback(bound_matcher, accum, rule.reduce, binding_tag);
+      return _callback(bound_matcher, accum, rule.fold, binding_tag);
     };
 
   // MatchFinder doesn't own the callbacks, so they need to outlive the finder.
@@ -440,16 +427,6 @@ struct source_excerpt {
   std::uint32_t width;
 };
 
-struct callsite {
-  source_location location;
-  std::vector<std::string> callstack;
-
-  friend bool operator<(const callsite &lhs, const callsite &rhs) {
-    return std::tie(lhs.location, lhs.callstack)
-      < std::tie(rhs.location, rhs.callstack);
-  }
-};
-
 struct source_error {
   source_location location;
   source_excerpt source;
@@ -466,18 +443,22 @@ namespace meta {
 constexpr std::array k_supported_member_aliases = //
   std::to_array<std::string_view>({
     "error_type",
+    "first_type",
     "key_type",
     "mapped_type",
+    "second_type",
     "type",
     "value",
     "value_type",
   });
 
-constexpr std::array k_supported_template_names = //
+constexpr std::array k_compound_dependency_route_names = //
   std::to_array<std::string_view>({
     "tuple",
     "variant",
   });
+
+bool is_compound_dependency_route(const clang::CXXRecordDecl *record);
 
 template <typename>
 struct map_decl_to_type_t;
@@ -525,6 +506,23 @@ struct map_decl_to_type_t<clang::TypeDecl>: std::type_identity<clang::Type> {};
 // especially clang::index::generateUSRForDecl for declaration-backed ids.
 using type_id = std::string;
 
+// Dependent route from an enclosing public root to a non-public nested type.
+struct type_access_path {
+  struct field {
+    std::string name;
+  };
+
+  struct member_type {
+    std::string name;
+  };
+
+  struct template_arg {
+    std::size_t index;
+  };
+
+  std::vector<std::variant<field, member_type, template_arg>> steps;
+};
+
 struct nm_qual_type {
   /// nullopt for unnamed types
   std::optional<std::string> name;
@@ -545,11 +543,6 @@ struct type_definition {
   nm_qual_type type_name;
   diag::source_location location;
 
-  // refactorme: diagnostic state is stored here ad hoc because source
-  // extraction happens while the AST is alive, before emission decides whether
-  // an excerpt is needed. Separate it from semantic type-definition metadata.
-  std::expected<diag::source_excerpt, std::string> source;
-
   enum {
     none = 0x0,
 
@@ -560,9 +553,6 @@ struct type_definition {
     local = 0x1 << 1,
   } definition_flags;
 };
-
-std::string annotation_from_decl(const clang::ASTContext &ast,
-  const clang::Decl *decl);
 
 // as of now - public only
 struct field_data {
@@ -606,6 +596,12 @@ struct template_template_param {
 };
 
 struct template_data {
+  enum support_t {
+    supported,
+    partial_specialization,
+    explicit_specialization,
+  } support;
+
   std::string primary_name;
   std::vector<template_param> params;
 
@@ -613,9 +609,14 @@ struct template_data {
     const clang::ClassTemplateSpecializationDecl *spec);
 };
 
+struct reflectable_reference {
+  type_id id;
+  type_id concrete_id;
+};
+
 struct record_data {
   // only public-nonvirtual bases
-  std::vector<type_id> public_bases;
+  std::vector<reflectable_reference> public_bases;
 
   /// protected and private are not supported now (too complicated)
   std::vector<field_data> public_fields;
@@ -626,6 +627,7 @@ struct record_data {
     is_union,
   } type;
 
+  bool has_template_parent;
   std::optional<template_data> template_info;
 
   static record_data from_type(const clang::ASTContext &ast,
@@ -646,7 +648,17 @@ concept reflectable_data =
   std::same_as<record_data, Data> || std::same_as<enum_data, Data>;
 
 struct reflectable {
+  // Generated metadata identity. Primary template instantiations intentionally
+  // share this id.
   type_id id;
+
+  // Concrete observed type identity used for dependency graph traversal and
+  // support classification before generated metadata is deduplicated.
+  type_id concrete_id;
+
+  // Public member path that exposes an otherwise non-public nested type.
+  type_access_path public_access_path;
+
   std::string annotation;
 
   // refactorme: Consider having template arg `reflectable_data` instead
@@ -661,6 +673,7 @@ struct reflectable {
 
 struct already_reflected {
   type_id id;
+  type_id concrete_id;
 };
 
 // todo: store the type info, since only a limited set of non_relfectable types
@@ -668,47 +681,91 @@ struct already_reflected {
 // std::vector<A>, ...
 struct non_reflectable {
   type_id id;
+  type_id concrete_id;
 };
 
 // refactorme: better name, now it differs in only one letter with the function
 struct reflected_type_info {
   std::variant<reflectable, non_reflectable, already_reflected> type;
   std::vector<reflectable> dependencies;
+  std::map<type_id, std::set<type_id>> dependencies_by_type;
+  std::map<type_id, type_access_path> public_access_path_by_type;
+};
+
+struct indexed_arg_candidate {
+  type_id type;
+  diag::source_error error;
 };
 
 std::expected<reflected_type_info, std::string> resolve_reflected_type(
   const diagnostics &log,
   clang::QualType type,
   const clang::ASTContext &ast,
-  const std::set<type_id> &resolved_types);
+  const std::set<type_id> &resolved_concrete_types);
 
 struct source_file_context {
   source_file sf;
 
   std::vector<meta::reflectable> reflected{};
 
-  // Reducer state used while resolving reflected calls. Tracks ids already
+  // Fold state used while resolving reflected calls. Tracks ids already
   // seen during direct and dependency resolution.
   std::set<meta::type_id> resolved_types{};
+  std::set<meta::type_id> resolved_concrete_types{};
+  std::set<meta::type_id> direct_concrete_types{};
   std::set<meta::type_id> resolved_as_dependency{};
   std::set<meta::type_id> non_reflectable_types{}; //< for debug or info
+
+  std::map<meta::type_id, std::set<meta::type_id>> dependencies_by_type{};
 
   // Render lookup for bases and other references by type id. Stored by value to
   // avoid coupling render lifetime to reflected collection layout.
   std::map<meta::type_id, meta::nm_qual_type> type_name_by_id{};
 
   std::map<meta::type_id, std::size_t> index_by_type_id{};
-  std::map<meta::type_id, std::set<diag::callsite>> callsites_by_type_id{};
+  std::vector<meta::indexed_arg_candidate> indexed_arg_candidates{};
 
-  std::vector<diag::source_error> invalid_reflection_queries{};
-  std::vector<diag::source_error> invalid_reflected_call_args{};
-
-  std::vector<std::string> internal_errors{};
+  struct {
+    std::vector<diag::source_error> reflection_queries;
+    std::vector<diag::source_error> reflected_call_args;
+    std::vector<std::string> internal;
+  } errors{};
 
   // Used to generate deps file for cmake, so it can rerun the tool upon changes
   // to those headers
   std::set<fs::path> file_dependencies;
 };
+
+namespace matches {
+
+enum class emission_route {
+  forward_declarable,
+  nested,
+  indexed,
+};
+
+emission_route emission_route_for(const reflectable &type);
+
+source_file_context fold_out_of_scope_type_query(clang::ASTContext &ast,
+  source_file_context a,
+  const clang::TypeLoc &type_loc);
+
+source_file_context fold_out_of_scope_function_query(clang::ASTContext &ast,
+  source_file_context a,
+  const clang::DeclRefExpr &query);
+
+source_file_context fold_reflected_call(const diagnostics &log,
+  clang::ASTContext &ast,
+  source_file_context a,
+  const clang::CXXOperatorCallExpr &call);
+
+source_file_context fold_index_registration(const clang::ASTContext &ast,
+  source_file_context a,
+  const clang::ClassTemplateSpecializationDecl &decl);
+
+source_file_context finalize(const diagnostics &log, source_file_context ctx);
+
+} // namespace matches
 
 } // namespace meta
 
@@ -752,16 +809,9 @@ std::expected<reflection_context, std::string>
 
 } // namespace render
 
-meta::type_id render_type_id(const clang::ASTContext &ast,
-  const clang::Type *type);
-
-meta::type_id render_reflectable_id(const clang::ASTContext &ast,
-  const clang::TagType *t);
-
 namespace pipeline {
 
 struct compiler_invocation {
-  cli::options args;
   source_file sf;
 
   std::shared_ptr<clang::CompilerInvocation> ci;
@@ -772,7 +822,6 @@ std::expected<compiler_invocation, app_error> to_compiler_invocation(
   cli::options cli_args) noexcept;
 
 struct parsed_ast {
-  cli::options args;
   source_file sf;
   std::unique_ptr<clang::ASTUnit> ast;
 
@@ -783,21 +832,12 @@ struct parsed_ast {
 std::expected<parsed_ast, app_error> to_parsed_ast(const diagnostics &log,
   compiler_invocation ci);
 
-struct reduced_matches {
-  cli::options args;
-  meta::source_file_context ctx;
-};
+std::expected<meta::source_file_context, app_error>
+  fold_matches(const diagnostics &log, parsed_ast ast);
 
-std::expected<reduced_matches, app_error> reduce_matches(const diagnostics &log,
-  parsed_ast ast);
-
-struct reflection_context {
-  cli::options args;
-  render::reflection_context ctx;
-};
-
-std::expected<reflection_context, app_error>
-  resolve_reflection_context(const diagnostics &log, reduced_matches rm);
+std::expected<render::reflection_context, app_error> resolve_reflection_context(
+  const diagnostics &log,
+  meta::source_file_context ctx);
 
 struct run_report {
   fs::path instrumented_source;
@@ -813,13 +853,13 @@ struct run_report {
 };
 
 std::expected<run_report, app_error> emit_outputs(const diagnostics &log,
-  reflection_context ctx);
+  fs::path out,
+  render::reflection_context ctx);
 
 } // namespace pipeline
 
 std::string format_options(const cli::options &args);
-std::string format_instrumented_source(const cli::options &args);
-std::string format_reduced_matches(const pipeline::reduced_matches &rm);
+std::string format_matches(const meta::source_file_context &ctx);
 std::string format_success(const pipeline::run_report &out);
 std::string format_timings(
   const std::map<std::string, std::chrono::microseconds> &timing_by_action);
@@ -870,6 +910,30 @@ struct std::formatter<meta::record_data::type_t, char>:
 };
 
 template <>
+struct std::formatter<meta::template_data::support_t, char>:
+    std::formatter<std::string_view, char> {
+  template <typename FormatContext>
+  auto format(meta::template_data::support_t support,
+    FormatContext &ctx) const {
+    switch (support) {
+    case meta::template_data::supported:
+      return std::formatter<std::string_view, char>::format("supported"sv, ctx);
+    case meta::template_data::partial_specialization:
+      return std::formatter<std::string_view, char>::format(
+        "partial_specialization"sv,
+        ctx);
+    case meta::template_data::explicit_specialization:
+      return std::formatter<std::string_view, char>::format(
+        "explicit_specialization"sv,
+        ctx);
+    }
+
+    assert(false && "unreachable");
+    return std::formatter<std::string_view, char>::format("supported"sv, ctx);
+  }
+};
+
+template <>
 struct std::formatter<log_level, char>: std::formatter<std::string_view, char> {
   template <typename FormatContext>
   auto format(log_level level, FormatContext &ctx) const {
@@ -895,8 +959,9 @@ int main(int argc, char **argv) {
   const diagnostics log = diagnostics::from(args->level);
 
   log(log_level::debug, [&args = *args] { return format_options(args); });
-  log(log_level::info,
-    [&args = *args] { return format_instrumented_source(args); });
+  log(log_level::info, [&source = args->source] {
+    return std::format("\nrunning for file: {}\t\r", source.path.string());
+  });
 
   action_timer measured;
 
@@ -908,8 +973,8 @@ int main(int argc, char **argv) {
     std::bind_front(measured("parsed ast", pipeline::to_parsed_ast),
       std::cref(log));
 
-  const auto reduce_matches =
-    std::bind_front(measured("reduce matches", pipeline::reduce_matches),
+  const auto fold_matches =
+    std::bind_front(measured("fold matches", pipeline::fold_matches),
       std::cref(log));
 
   const auto resolve_reflection_context =
@@ -919,11 +984,12 @@ int main(int argc, char **argv) {
 
   const auto emit_outputs =
     std::bind_front(measured("emit outputs", pipeline::emit_outputs),
-      std::cref(log));
+      std::cref(log),
+      args->out);
 
-  const auto with_print_reduced_matches =
-    fn::with([&log](const pipeline::reduced_matches &rm) {
-      log(log_level::debug, [&rm] { return format_reduced_matches(rm); });
+  const auto with_print_matches =
+    fn::with([&log](const meta::source_file_context &ctx) {
+      log(log_level::debug, [&ctx] { return format_matches(ctx); });
     });
 
   const auto report_success = //
@@ -946,8 +1012,8 @@ int main(int argc, char **argv) {
 
   return to_compiler_invocation(std::move(*args))
     .and_then(to_parsed_ast)
-    .and_then(reduce_matches)
-    .transform(with_print_reduced_matches)
+    .and_then(fold_matches)
+    .transform(with_print_matches)
     .and_then(resolve_reflection_context)
     .and_then(emit_outputs)
     .transform(report_success)
@@ -959,11 +1025,16 @@ namespace {
 
 namespace diag {
 
-std::string format(const source_error &error) {
-  std::string message = std::format("  {}:{}:{}: {}:\n    {}",
-    error.location.source_file.generic_string(),
-    error.location.line,
-    error.location.column,
+std::string format_location(const source_location &location) {
+  return std::format("{}:{}:{}",
+    location.source_file.generic_string(),
+    location.line,
+    location.column);
+}
+
+std::string format_error(const source_error &error) {
+  std::string message = std::format("  {}: {}:\n    {}",
+    format_location(error.location),
     error.subject,
     error.reason);
 
@@ -1004,6 +1075,8 @@ std::string format(const source_error &error) {
 
 } // namespace diag
 
+namespace meta {
+
 bool has_template_record_parent(const clang::DeclContext *dc) {
   for (const clang::DeclContext *cur = dc; cur; cur = cur->getParent()) {
     const auto *rd = llvm::dyn_cast<clang::CXXRecordDecl>(cur);
@@ -1018,11 +1091,100 @@ bool has_template_record_parent(const clang::DeclContext *dc) {
   return false;
 }
 
-namespace pipeline::impl {
+std::string annotation_from_decl(const clang::ASTContext &ast,
+  const clang::Decl *decl) {
+  assert(decl);
 
-// Clang can emit caret diagnostics directly, but omnirefl collects matcher and
-// resolver failures before reporting them together. Keep source and caret
-// geometry structured instead of emitting through DiagnosticsEngine here.
+  // Raw-comment lookup may be relatively expensive; skip it when annotations
+  // were explicitly disabled.
+  if (!ast.getLangOpts().CommentOpts.ParseAllComments)
+    return "";
+
+  const clang::Decl *canonical = decl->getCanonicalDecl();
+  const clang::RawComment *comment = ast.getRawCommentForDeclNoCache(canonical);
+  if (!comment)
+    comment = ast.getRawCommentForDeclNoCache(decl);
+  if (!comment)
+    return "";
+
+  return comment->getBriefText(ast);
+}
+
+type_id canonical_type_id(const clang::ASTContext &ast,
+  const clang::Type *type) {
+  clang::PrintingPolicy p(ast.getLangOpts());
+  p.FullyQualifiedName = true;
+  p.SuppressScope = false;
+  p.SuppressUnwrittenScope = false;
+  p.SuppressTagKeyword = false;
+  p.PrintAsCanonical = true;
+
+  // "no qualifiers" (not const, not volatile, not restrict).
+  const unsigned qual_flags = 0;
+  return clang::QualType(type, qual_flags).getAsString(p);
+}
+
+type_id reflectable_type_id(const clang::ASTContext &ast,
+  const clang::TagType *type) {
+  assert(type);
+
+  const auto *template_spec =
+    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(type->getDecl());
+
+  if (!template_spec)
+    return canonical_type_id(ast, type);
+
+  // ad hoc: type_id is still a rendered string, not a Clang-provided opaque
+  // identity. Prefix primary-template declaration ids so they cannot collide
+  // with rendered concrete type ids if full specializations are supported
+  // later.
+  // todo: replace this primary-template collapse with general template
+  // specialization reflection metadata. `crtp_base<X>` and `crtp_base<Y>` are
+  // treated as the same reflected template shape for now, which is only valid
+  // while full and partial specializations are unsupported/rejected.
+  return std::format("primary-template:{}",
+    template_spec->getSpecializedTemplate()
+      ->getCanonicalDecl()
+      ->getQualifiedNameAsString());
+}
+
+bool is_compound_dependency_route(const clang::CXXRecordDecl *record) {
+  assert(record);
+
+  return std::ranges::contains(
+           std::array{
+             clang::Decl::ClassTemplateSpecialization,
+             clang::Decl::ClassTemplatePartialSpecialization,
+           },
+           record->getKind())
+    && std::ranges::contains(k_compound_dependency_route_names,
+      fn::as<std::string_view>(
+        clang::cast<clang::ClassTemplateSpecializationDecl>(record)
+          ->getSpecializedTemplate()
+          ->getName()));
+}
+
+std::string format(const nm_qual_type &type) {
+  std::vector<std::string> elems;
+  elems.reserve(
+    type.namespaces.size() + type.enclosing_records.size() + std::size_t{1});
+  std::ranges::copy(type.namespaces, std::back_inserter(elems));
+  std::ranges::copy(type.enclosing_records, std::back_inserter(elems));
+  elems.emplace_back(type.name.value_or("(unnamed)"));
+
+  return std::format("{}",
+    elems //
+      | std::views::join_with("::"sv) //
+      | util::format_range);
+}
+
+} // namespace meta
+
+namespace meta::matches::impl {
+
+// Clang can emit caret diagnostics directly, but omnirefl collects matcher
+// failures before reporting them together. Keep source and caret geometry
+// structured instead of emitting through DiagnosticsEngine here.
 std::expected<diag::source_excerpt, std::string> source_excerpt_from(
   const clang::ASTContext &ast,
   clang::SourceRange context_range,
@@ -1237,17 +1399,10 @@ clang::QualType reflected_arg_type(clang::QualType type) {
 
 std::vector<std::string> callstack_from(clang::ASTContext &ast,
   clang::DynTypedNode node) {
-  const auto format_location = [](const diag::source_location &loc) {
-    return std::format("{}:{}:{}",
-      loc.source_file.generic_string(),
-      loc.line,
-      loc.column);
-  };
-
   std::vector<std::string> frames;
   std::set<std::string> emitted;
   const auto add_frame = //
-    [&ast, &emitted, &format_location, &frames](std::string_view prefix,
+    [&ast, &emitted, &frames](std::string_view prefix,
       std::string_view name,
       clang::SourceLocation loc) {
       std::expected location = source_location_from(ast, loc);
@@ -1255,8 +1410,10 @@ std::vector<std::string> callstack_from(clang::ASTContext &ast,
       if (!location)
         return;
 
-      const std::string frame =
-        std::format("{} '{}' at {}", prefix, name, format_location(*location));
+      const std::string frame = std::format("{} '{}' at {}",
+        prefix,
+        name,
+        diag::format_location(*location));
 
       if (emitted.emplace(frame).second)
         frames.push_back(frame);
@@ -1303,7 +1460,7 @@ meta::source_file_context append_invalid_reflection_query(
   std::expected source = source_excerpt_from(ast, context_range, query_range);
 
   if (!location || !source) {
-    a.internal_errors.emplace_back(std::format(
+    a.errors.internal.emplace_back(std::format(
       "reflection query matcher could not render source context: {}",
       !location ? location.error() : source.error()));
 
@@ -1315,14 +1472,14 @@ meta::source_file_context append_invalid_reflection_query(
 
   std::string subject = std::format("reflection query '{}' is invalid", query);
 
-  if (std::ranges::any_of(a.invalid_reflection_queries,
+  if (std::ranges::any_of(a.errors.reflection_queries,
         [&location, &subject](const diag::source_error &error) {
           return *location == error.location && subject == error.subject;
         })) {
     return a;
   }
 
-  a.invalid_reflection_queries.push_back({
+  a.errors.reflection_queries.push_back({
     .location = *std::move(location),
     .source = *std::move(source),
     .callstack = callstack_from(ast, std::move(query_node)),
@@ -1337,7 +1494,58 @@ meta::source_file_context append_invalid_reflection_query(
   return a;
 }
 
-std::expected<clang::QualType, std::variant<diag::source_error, std::string>>
+std::expected<diag::source_error, std::string> reflected_call_arg_error_from(
+  clang::ASTContext &ast,
+  const clang::CXXOperatorCallExpr &call,
+  const clang::Expr &arg,
+  std::string rendered_type,
+  std::string reason,
+  std::string suggestion) {
+  std::expected location = source_location_from(ast, arg.getExprLoc());
+
+  if (!location) {
+    return std::unexpected(std::format(
+      "reflected_call matcher could not resolve an argument source location: {}",
+      std::move(location).error()));
+  }
+
+  std::expected source =
+    source_excerpt_from(ast, call.getSourceRange(), arg.getSourceRange());
+
+  if (!source) {
+    return std::unexpected(std::format(
+      "reflected_call matcher could not render an argument source excerpt: {}",
+      std::move(source).error()));
+  }
+
+  return diag::source_error{
+    .location = *location,
+    .source = std::move(*source),
+    .callstack = callstack_from(ast, clang::DynTypedNode::create(call)),
+    .subject =
+      std::format("reflected_call argument '{}' is unsupported", rendered_type),
+    .reason = std::move(reason),
+    .suggestion = std::move(suggestion),
+  };
+}
+
+std::string reflected_call_arg_name(const clang::ASTContext &ast,
+  clang::QualType type) {
+  clang::PrintingPolicy p(ast.getLangOpts());
+  p.FullyQualifiedName = true;
+  p.SuppressScope = false;
+  p.SuppressUnwrittenScope = false;
+  p.SuppressTagKeyword = false;
+
+  return type.getUnqualifiedType().getAsString(p);
+}
+
+struct reflected_call_arg {
+  clang::QualType type;
+  const clang::Expr *reflected_call_expr;
+};
+
+std::expected<reflected_call_arg, std::variant<diag::source_error, std::string>>
   validate_reflected_call_arg(clang::ASTContext &ast,
     const clang::CXXOperatorCallExpr &call,
     const clang::Expr *arg_expr) {
@@ -1349,46 +1557,22 @@ std::expected<clang::QualType, std::variant<diag::source_error, std::string>>
   const clang::Type &canonical =
     *ast.getCanonicalType(unqualified).getTypePtr();
 
-  clang::PrintingPolicy p(ast.getLangOpts());
-  p.FullyQualifiedName = true;
-  p.SuppressScope = false;
-  p.SuppressUnwrittenScope = false;
-  p.SuppressTagKeyword = false;
-
-  const meta::type_id rendered = unqualified.getAsString(p);
+  const std::string rendered = reflected_call_arg_name(ast, unqualified);
 
   const auto invalid_arg_error = //
-    [&ast, &call, arg_expr, rendered](std::string reason,
+    [&ast, &call, &arg = *arg_expr, &rendered](std::string reason,
       std::string suggestion) -> std::variant<diag::source_error, std::string> {
-    std::expected location = source_location_from(ast, arg_expr->getExprLoc());
+    std::expected error = reflected_call_arg_error_from(ast,
+      call,
+      arg,
+      rendered,
+      std::move(reason),
+      std::move(suggestion));
 
-    if (!location) {
-      return std::format(
-        "reflected_call matcher could not resolve "
-        "an argument source location: {}",
-        std::move(location).error());
-    }
+    if (!error)
+      return std::move(error).error();
 
-    std::expected source_excerpt = source_excerpt_from(ast,
-      call.getSourceRange(),
-      arg_expr->getSourceRange());
-
-    if (!source_excerpt) {
-      return std::format(
-        "reflected_call matcher could not render "
-        "an argument source excerpt: {}",
-        std::move(source_excerpt).error());
-    }
-
-    return diag::source_error{
-      .location = *location,
-      .source = std::move(*source_excerpt),
-      .callstack = callstack_from(ast, clang::DynTypedNode::create(call)),
-      .subject =
-        std::format("reflected_call argument '{}' is unsupported", rendered),
-      .reason = std::move(reason),
-      .suggestion = std::move(suggestion),
-    };
+    return std::move(*error);
   };
 
   if (canonical.isPointerType()) {
@@ -1432,8 +1616,12 @@ std::expected<clang::QualType, std::variant<diag::source_error, std::string>>
         "be used as reflected fields or supported dependency routes"));
   }
 
-  if (llvm::isa<clang::EnumType>(&tag))
-    return type;
+  if (llvm::isa<clang::EnumType>(&tag)) {
+    return reflected_call_arg{
+      .type = type,
+      .reflected_call_expr = arg_expr,
+    };
+  }
 
   const auto *record_type = llvm::dyn_cast<clang::RecordType>(&tag);
   const clang::RecordDecl *record_definition =
@@ -1482,43 +1670,545 @@ std::expected<clang::QualType, std::variant<diag::source_error, std::string>>
         "pass an instantiation of the primary record template or a "
         "non-template reflectable wrapper"));
     }
+  }
 
-    if (has_template_record_parent(record_decl->getDeclContext())) {
-      return std::unexpected(invalid_arg_error(
-        "reflected_call argument is a record template nested inside a "
-        "template record; this nesting is not supported",
-        "move the nested template to namespace scope or wrap the instantiated "
-        "type in a supported record"));
+  if (has_template_record_parent(record_decl->getDeclContext())) {
+    return std::unexpected(invalid_arg_error(
+      "records nested inside template records are not supported as "
+      "reflected_call inputs",
+      "move the nested record to namespace scope or wrap the instantiated "
+      "type in a supported record"));
+  }
+
+  return reflected_call_arg{
+    .type = type,
+    .reflected_call_expr = arg_expr,
+  };
+}
+
+} // namespace meta::matches::impl
+
+namespace meta::matches {
+
+emission_route emission_route_for(const reflectable &type) {
+  const nm_qual_type &name = type.definition.type_name;
+  const auto flags = type.definition.definition_flags;
+
+  if (!name.name || type_definition::local & flags)
+    return emission_route::indexed;
+
+  if (!name.enclosing_records.empty())
+    return name.enclosing_records.front().empty()
+        || (type_definition::non_public & flags
+          && type.public_access_path.steps.empty()) //
+      ? emission_route::indexed
+      : emission_route::nested;
+
+  if (type_definition::non_public & flags)
+    return emission_route::indexed;
+
+  return std::visit(
+    []<reflectable_data Data>(const Data &data) {
+      if constexpr (std::same_as<record_data, Data>) {
+        return emission_route::forward_declarable;
+      } else {
+        static_assert(std::same_as<enum_data, Data>);
+        return data.is_scoped || data.is_fixed //
+          ? emission_route::forward_declarable
+          : emission_route::indexed;
+      }
+    },
+    type.data);
+}
+
+} // namespace meta::matches
+
+meta::source_file_context meta::matches::fold_out_of_scope_type_query(
+  clang::ASTContext &ast,
+  meta::source_file_context a,
+  const clang::TypeLoc &type_loc) {
+  // Generic visitor placeholders are substituted with binding_t during
+  // overload resolution; the spelled `auto` is not a reflection query.
+  if (std::invoke([&ast, &type_loc] {
+        clang::Token token;
+        return !clang::Lexer::getRawToken(type_loc.getBeginLoc(),
+                 token,
+                 ast.getSourceManager(),
+                 ast.getLangOpts())
+          && (token.is(clang::tok::kw_auto)
+            // Raw lexing may preserve a keyword as a raw identifier.
+            || (token.is(clang::tok::raw_identifier)
+              && "auto" == token.getRawIdentifier()));
+      })) {
+    return a;
+  }
+
+  const auto *record = type_loc.getType()->getAs<clang::RecordType>();
+  const auto *decl = record
+    ? llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl())
+    : nullptr;
+
+  if (!decl) {
+    a.errors.internal.emplace_back(
+      "reflection query TypeLoc did not resolve to a class template "
+      "specialization");
+
+    return a;
+  }
+
+  const clang::TemplateArgumentList &args = decl->getTemplateArgs();
+
+  if (!std::ranges::all_of(args.asArray(), impl::is_concrete_template_arg)) {
+    return a;
+  }
+
+  const clang::ClassTemplateDecl *tmpl = decl->getSpecializedTemplate();
+  const std::string query =
+    tmpl ? tmpl->getQualifiedNameAsString() : decl->getQualifiedNameAsString();
+
+  return impl::append_invalid_reflection_query(std::move(a),
+    ast,
+    query,
+    type_loc.getSourceRange(),
+    type_loc.getSourceRange(),
+    clang::DynTypedNode::create(type_loc),
+    "reflection query class template instantiated during the tool run");
+}
+
+meta::source_file_context meta::matches::fold_out_of_scope_function_query(
+  clang::ASTContext &ast,
+  meta::source_file_context a,
+  const clang::DeclRefExpr &query) {
+  const auto *decl = llvm::dyn_cast<clang::FunctionDecl>(query.getDecl());
+
+  if (!decl) {
+    a.errors.internal.emplace_back(
+      "reflection query DeclRefExpr did not resolve to a function template "
+      "specialization");
+
+    return a;
+  }
+
+  return impl::append_invalid_reflection_query(std::move(a),
+    ast,
+    decl->getQualifiedNameAsString(),
+    query.getSourceRange(),
+    query.getSourceRange(),
+    clang::DynTypedNode::create(query),
+    "reflection query function instantiated during the tool run");
+}
+
+meta::source_file_context meta::matches::fold_reflected_call(
+  const diagnostics &log,
+  clang::ASTContext &ast,
+  meta::source_file_context a,
+  const clang::CXXOperatorCallExpr &call) {
+  if (call.getNumArgs() <= 2)
+    return a;
+
+  const clang::Type *call_object_type =
+    ast.getCanonicalType(call.getArg(0)->getType())
+      .getUnqualifiedType()
+      .getTypePtr();
+
+  const auto *call_object_decl = call_object_type->getAsCXXRecordDecl();
+
+  if (!call_object_decl
+    || "omni::reflected_call_t"
+      != call_object_decl->getQualifiedNameAsString()) {
+    return a;
+  }
+
+  for (std::expected arg : call.arguments()
+      // Skip the reflected_call object and visitor arguments.
+      | std::views::drop(2)
+      | std::views::transform(std::bind_front(impl::validate_reflected_call_arg,
+        std::ref(ast),
+        std::cref(call)))) {
+    if (!arg) {
+      std::visit(
+        [&a]<typename Error>(Error error) {
+          if constexpr (std::same_as<diag::source_error, Error>) {
+            a.errors.reflected_call_args.push_back(std::move(error));
+          } else {
+            static_assert(std::same_as<std::string, Error>);
+            a.errors.internal.emplace_back(std::move(error));
+          }
+        },
+        std::move(arg).error());
+
+      continue;
+    }
+
+    std::expected reflected = meta::resolve_reflected_type(log,
+      arg->type,
+      ast,
+      a.resolved_concrete_types);
+
+    if (!reflected) {
+      a.errors.internal.emplace_back(std::move(reflected).error());
+
+      continue;
+    }
+
+    const meta::type_id id =
+      std::visit([](const auto &type) { return type.id; }, reflected->type);
+    const meta::type_id concrete_id =
+      std::visit([](const auto &type) { return type.concrete_id; },
+        reflected->type);
+
+    const meta::reflectable *resolved_type = std::visit(
+      [&a]<typename Type>(const Type &type) -> const meta::reflectable * {
+        if constexpr (std::same_as<meta::reflectable, Type>) {
+          return &type;
+        } else if constexpr (std::same_as<meta::already_reflected, Type>) {
+          const auto found = std::ranges::find(a.reflected,
+            type.concrete_id,
+            &meta::reflectable::concrete_id);
+
+          return a.reflected.end() == found ? nullptr : &*found;
+        } else {
+          static_assert(std::same_as<meta::non_reflectable, Type>);
+          return nullptr;
+        }
+      },
+      reflected->type);
+
+    if (!resolved_type) {
+      a.errors.internal.emplace_back(std::format(
+        "validated reflected_call argument '{}' did not resolve to reflected "
+        "metadata",
+        id));
+
+      continue;
+    }
+
+    a.direct_concrete_types.emplace(concrete_id);
+
+    if (emission_route::indexed == emission_route_for(*resolved_type)) {
+      const auto [reason, suggestion] = std::invoke([resolved_type] {
+        const meta::type_definition &definition = resolved_type->definition;
+
+        if (meta::type_definition::local & definition.definition_flags) {
+          return std::pair{
+            "local types are not supported as reflected_call inputs"sv,
+            "move the type to namespace or public class scope"sv,
+          };
+        }
+
+        if (meta::type_definition::non_public & definition.definition_flags) {
+          return std::pair{
+            "non-public types cannot be named by generated metadata"sv,
+            "make the type public or pass a public reflectable wrapper"sv,
+          };
+        }
+
+        if (!definition.type_name.name) {
+          return std::pair{
+            "unnamed types are not supported as reflected_call inputs"sv,
+            "give the type a name or pass a named reflectable wrapper"sv,
+          };
+        }
+
+        if (!definition.type_name.enclosing_records.empty()
+          && definition.type_name.enclosing_records.front().empty()) {
+          return std::pair{
+            "types enclosed by unnamed records cannot be named by generated "
+            "metadata"sv,
+            "name the enclosing record or pass a named reflectable wrapper"sv,
+          };
+        }
+
+        return std::pair{
+          "this enum cannot be forward-declared by generated metadata"sv,
+          "use a scoped enum or specify a fixed underlying type"sv,
+        };
+      });
+
+      std::expected error = impl::reflected_call_arg_error_from(ast,
+        call,
+        *arg->reflected_call_expr,
+        impl::reflected_call_arg_name(ast, arg->type),
+        std::string{reason},
+        std::string{suggestion});
+
+      if (!error) {
+        a.errors.internal.emplace_back(std::move(error).error());
+      } else {
+        a.indexed_arg_candidates.push_back({
+          .type = id,
+          .error = std::move(*error),
+        });
+      }
+    }
+
+    std::visit(
+      [&a]<typename Type>(Type type) {
+        a.resolved_types.emplace(type.id);
+        a.resolved_concrete_types.emplace(type.concrete_id);
+
+        if constexpr (std::same_as<meta::reflectable, Type>) {
+          a.type_name_by_id.emplace(type.id, type.definition.type_name);
+          a.reflected.emplace_back(std::move(type));
+        } else if constexpr (std::same_as<meta::non_reflectable, Type>) {
+          // Validation should reject non-reflectable direct arguments.
+        } else {
+          static_assert(std::same_as<meta::already_reflected, Type>);
+        }
+      },
+      std::move(reflected->type));
+
+    std::ranges::copy(reflected->dependencies
+        | std::views::transform(&meta::reflectable::id),
+      std::inserter(a.resolved_types, a.resolved_types.begin()));
+
+    std::ranges::copy(reflected->dependencies
+        | std::views::transform(&meta::reflectable::concrete_id),
+      std::inserter(a.resolved_concrete_types,
+        a.resolved_concrete_types.begin()));
+
+    std::ranges::copy(reflected->dependencies
+        | std::views::transform([](const meta::reflectable &dependency) {
+            return std::pair{dependency.id, dependency.definition.type_name};
+          }),
+      std::inserter(a.type_name_by_id, a.type_name_by_id.end()));
+
+    for (auto &[type, dependencies] : reflected->dependencies_by_type) {
+      std::ranges::move(dependencies,
+        std::inserter(a.dependencies_by_type[type],
+          a.dependencies_by_type[type].end()));
+    }
+
+    for (const auto &[type, public_access_path] :
+      reflected->public_access_path_by_type) {
+      const auto found =
+        std::ranges::find(a.reflected, type, &meta::reflectable::concrete_id);
+
+      if (a.reflected.end() != found
+        && (meta::type_definition::non_public
+          & found->definition.definition_flags)
+        && found->public_access_path.steps.empty()) {
+        found->public_access_path = public_access_path;
+      }
+    }
+
+    std::ranges::move(reflected->dependencies, std::back_inserter(a.reflected));
+  }
+
+  return a;
+}
+
+meta::source_file_context meta::matches::fold_index_registration(
+  const clang::ASTContext &ast,
+  meta::source_file_context a,
+  const clang::ClassTemplateSpecializationDecl &decl) {
+  const clang::TemplateArgumentList &args = decl.getTemplateArgs();
+
+  if (args.size() <= 1) {
+    a.errors.internal.emplace_back("invalid _reflected_indexed_type signature");
+
+    return a;
+  }
+
+  const clang::TemplateArgument &type_arg = args.get(0);
+
+  if (clang::TemplateArgument::Type != type_arg.getKind()) {
+    a.errors.internal.emplace_back(
+      "invalid _reflected_indexed_type signature: non-type first argument");
+
+    return a;
+  }
+
+  const clang::TemplateArgument &index_arg = args.get(1);
+
+  if (clang::TemplateArgument::Integral != index_arg.getKind()) {
+    a.errors.internal.emplace_back(
+      "invalid _reflected_indexed_type signature: non-integral index argument");
+
+    return a;
+  }
+
+  const clang::Type &type = *type_arg.getAsType();
+  const meta::type_id id = clang::isa<clang::TagType>(type)
+    ? meta::reflectable_type_id(ast, clang::cast<clang::TagType>(&type))
+    : meta::canonical_type_id(ast, &type);
+
+  a.index_by_type_id.emplace(id, index_arg.getAsIntegral().getExtValue());
+
+  return a;
+}
+
+meta::source_file_context meta::matches::finalize(const diagnostics &log,
+  meta::source_file_context ctx) {
+  for (meta::indexed_arg_candidate &&candidate :
+    ctx.indexed_arg_candidates | std::views::as_rvalue) {
+    if (!ctx.index_by_type_id.contains(candidate.type))
+      ctx.errors.reflected_call_args.push_back(std::move(candidate.error));
+  }
+
+  const auto unsupported_record_reason =
+    [](const meta::reflectable &type) -> std::optional<std::string_view> {
+    return std::visit(
+      []<meta::reflectable_data Data>(const Data &data) //
+      -> std::optional<std::string_view> {
+        if constexpr (std::same_as<meta::record_data, Data>) {
+          if (data.has_template_parent)
+            return "records nested inside template records are not supported"sv;
+
+          if (!data.template_info)
+            return std::nullopt;
+
+          switch (data.template_info->support) {
+          case meta::template_data::supported:
+            return std::nullopt;
+          case meta::template_data::partial_specialization:
+            return "partial template specializations are not supported"sv;
+          case meta::template_data::explicit_specialization:
+            return "explicit template specializations are not supported"sv;
+          }
+
+          assert(false && "unreachable");
+          return std::nullopt;
+        } else {
+          static_assert(std::same_as<meta::enum_data, Data>);
+          return std::nullopt;
+        }
+      },
+      type.data);
+  };
+
+  const auto is_public_base = [&ctx](const meta::type_id &concrete_id) {
+    return std::ranges::any_of(ctx.reflected,
+      [&concrete_id](const meta::reflectable &type) {
+        return std::visit(
+          [&concrete_id](const meta::reflectable_data auto &data) {
+            if constexpr (std::same_as<meta::record_data,
+                            std::remove_cvref_t<decltype(data)>>) {
+              return std::ranges::contains(data.public_bases,
+                concrete_id,
+                &meta::reflectable_reference::concrete_id);
+            } else {
+              return false;
+            }
+          },
+          type.data);
+      });
+  };
+
+  std::set<meta::type_id> skipped_concrete_types;
+
+  for (const meta::reflectable &type : ctx.reflected) {
+    if (ctx.direct_concrete_types.contains(type.concrete_id))
+      continue;
+
+    const std::optional record_reason = unsupported_record_reason(type);
+    const std::optional reason = //
+      record_reason.or_else([&type]() -> std::optional<std::string_view> {
+        if (emission_route::indexed != emission_route_for(type)) {
+          return std::nullopt;
+        }
+
+        return "the type cannot be named by a supported generated metadata route"sv;
+      });
+
+    if (!reason)
+      continue;
+
+    if (!record_reason && ctx.index_by_type_id.contains(type.id))
+      continue;
+
+    const bool public_base = is_public_base(type.concrete_id);
+    log(log_level::warning, [&type, reason, public_base] {
+      return public_base
+        ? std::format(
+            "\nunsupported public base dependency '{}' skipped "
+            "(declared at {}): {}. "
+            "Inherited fields from this base will not be reflected.",
+            meta::format(type.definition.type_name),
+            diag::format_location(type.definition.location),
+            *reason)
+        : std::format(
+            "\nunsupported reflection dependency '{}' skipped "
+            "(declared at {}): {}.",
+            meta::format(type.definition.type_name),
+            diag::format_location(type.definition.location),
+            *reason);
+    });
+
+    skipped_concrete_types.emplace(type.concrete_id);
+  }
+
+  std::set reachable_types = ctx.direct_concrete_types;
+  std::vector<meta::type_id> to_visit{ctx.direct_concrete_types.begin(),
+    ctx.direct_concrete_types.end()};
+
+  while (!to_visit.empty()) {
+    const meta::type_id type = std::move(to_visit.back());
+    to_visit.pop_back();
+
+    if (!ctx.dependencies_by_type.contains(type))
+      continue;
+
+    for (const meta::type_id &dependency : ctx.dependencies_by_type.at(type)) {
+      if (skipped_concrete_types.contains(dependency))
+        continue;
+
+      if (reachable_types.emplace(dependency).second)
+        to_visit.push_back(dependency);
     }
   }
 
-  return type;
-}
+  std::set<meta::type_id> retained_concrete_types;
+  std::erase_if(ctx.reflected, [&](const meta::reflectable &type) {
+    return skipped_concrete_types.contains(type.concrete_id)
+      || !reachable_types.contains(type.concrete_id)
+      || !retained_concrete_types.emplace(type.concrete_id).second;
+  });
 
-} // namespace pipeline::impl
+  const std::set retained_types = ctx.reflected
+    | std::views::transform(&meta::reflectable::id)
+    | std::ranges::to<std::set>();
+
+  // todo(high): add a CLI option to promote omitted unsupported public bases
+  // from warnings to errors.
+  for (meta::reflectable &type : ctx.reflected) {
+    std::visit(
+      [&retained_concrete_types](meta::reflectable_data auto &data) {
+        if constexpr (std::same_as<meta::record_data,
+                        std::remove_cvref_t<decltype(data)>>) {
+          std::erase_if(data.public_bases,
+            [&retained_concrete_types](const auto &base) {
+              return !retained_concrete_types.contains(base.concrete_id);
+            });
+        }
+      },
+      type.data);
+  }
+
+  ctx.resolved_types = retained_types;
+  std::ranges::copy(ctx.non_reflectable_types,
+    std::inserter(ctx.resolved_types, ctx.resolved_types.end()));
+
+  ctx.resolved_concrete_types = std::move(retained_concrete_types);
+  ctx.resolved_as_dependency = ctx.reflected
+    | std::views::filter([&ctx](const meta::reflectable &type) {
+        return !ctx.direct_concrete_types.contains(type.concrete_id);
+      })
+    | std::views::transform(&meta::reflectable::id)
+    | std::ranges::to<std::set>();
+
+  ctx.type_name_by_id.clear();
+  std::ranges::copy(ctx.reflected
+      | std::views::transform([](const meta::reflectable &type) {
+          return std::pair{type.id, type.definition.type_name};
+        }),
+    std::inserter(ctx.type_name_by_id, ctx.type_name_by_id.end()));
+
+  ctx.indexed_arg_candidates.clear();
+  return ctx;
+}
 
 namespace render::impl {
-
-std::string format_location(const diag::source_location &d) {
-  return std::format("{}:{}:{}",
-    d.source_file.generic_string(),
-    d.line,
-    d.column);
-}
-
-std::string format_nm_qual_type(const meta::nm_qual_type &t) {
-  std::vector<std::string> elems;
-  elems.reserve(
-    t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
-  std::ranges::copy(t.namespaces, std::back_inserter(elems));
-  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
-  elems.emplace_back(t.name.value_or("(unnamed)"));
-
-  return std::format("{}",
-    elems //
-      | std::views::join_with("::"sv) //
-      | util::format_range);
-}
 
 std::string format_type_name(const meta::nm_qual_type &t) {
   std::vector<std::string> elems;
@@ -1689,7 +2379,7 @@ std::string forward_declaration(const meta::reflectable &t) {
           return std::format(
             "// declared at: {}"
             "\n{}",
-            render::impl::format_location(r.definition.location),
+            diag::format_location(r.definition.location),
             format_data_sum(r.data));
         }),
     std::back_inserter(lines));
@@ -1858,6 +2548,19 @@ std::expected<fs::path, app_error> infer_resource_dir(const char *argv0) {
         : std::format("\nSkipped entries:\n{}\n",
             scan.skipped | std::views::join_with("\n"sv) | util::format_range)),
   });
+}
+
+std::optional<log_level> parse_log_level(std::string_view name) {
+  static const std::flat_map<std::string_view, log_level> log_level_by_name =
+    log_levels //
+    | std::views::transform(
+      [](const auto &level) { return std::pair{level.second, level.first}; }) //
+    | std::ranges::to<std::flat_map>();
+
+  if (!log_level_by_name.contains(name))
+    return std::nullopt;
+
+  return log_level_by_name.at(name);
 }
 
 std::expected<cli::options, app_error> cli::parse(int argc,
@@ -2481,7 +3184,6 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   clang_invocation->getDiagnosticOpts().IgnoreWarnings = 1;
 
   return compiler_invocation{
-    .args = std::move(cli_args),
     .sf = std::move(sf),
     .ci = std::move(clang_invocation),
   };
@@ -2517,7 +3219,6 @@ std::expected<pipeline::parsed_ast, app_error>
       processing_error(ci.sf, "Failed to build AST Unit."));
 
   return parsed_ast{
-    .args = std::move(ci.args),
     .sf = std::move(ci.sf),
     .ast = std::move(ast),
 
@@ -2526,337 +3227,109 @@ std::expected<pipeline::parsed_ast, app_error>
   };
 }
 
-// refactorme: make match rules immediately visible as `pattern |> reducer`.
-// Keep this wrapper until the AST ownership model is settled (lazy vs eager)
-// and match chains can be composed into the same reduced context type without
-// hiding the concrete rules behind a premature generic abstraction.
-std::expected<pipeline::reduced_matches, app_error>
-  pipeline::reduce_matches(const diagnostics &log, parsed_ast wast) {
-  (void)log;
+std::expected<meta::source_file_context, app_error>
+  pipeline::fold_matches(const diagnostics &log, parsed_ast parsed) {
   using namespace clang::ast_matchers;
 
-  meta::source_file_context ctx = ast::reduce_matches(*wast.ast,
-    meta::source_file_context{
-      .sf = std::move(wast.sf),
-      .file_dependencies = std::move(wast.includes_deps),
-    },
+  return meta::matches::finalize(log,
+    ast::fold_matches(*parsed.ast,
+      meta::source_file_context{
+        .sf = std::move(parsed.sf),
+        .file_dependencies = std::move(parsed.includes_deps),
+      },
 
-    ast::rule{
-      .pattern = ast::pattern(typeLoc,
-        isExpansionInMainFile(),
-        loc(qualType(hasDeclaration(
-          classTemplateSpecializationDecl(isTemplateInstantiation(),
+      ast::rule{
+        .pattern = ast::pattern(typeLoc,
+          isExpansionInMainFile(),
+          loc(qualType(hasDeclaration(
+            classTemplateSpecializationDecl(isTemplateInstantiation(),
+              isDefinition(),
+              anyOf(hasName("::omni::is_reflected"),
+                hasName("::omni::meta_t"),
+                hasName("::omni::binding_t"),
+                hasName("::omni::field_meta_t"),
+                hasName("::omni::field_binding_t")))))),
+          // For example:
+          //   struct visitor {
+          //     template <typename T>
+          //     auto operator()(omni::binding_t<T &>) const -> void;
+          //   };
+          //   omni::reflected_call(visitor{}, value);
+          // Clang instantiates the visitor parameter signature while selecting
+          // reflected_call, but the explicitly returned body remains deferred.
+          unless(hasParent(
+            parmVarDecl(hasAncestor(cxxMethodDecl(isTemplateInstantiation(),
+              hasOverloadedOperatorName("()")))))),
+          unless(hasParent(typeLoc()))),
+        .fold = std::bind_front(meta::matches::fold_out_of_scope_type_query,
+          std::ref(parsed.ast->getASTContext())),
+      },
+
+      ast::rule{
+        .pattern = ast::pattern(declRefExpr,
+          isExpansionInMainFile(),
+          to(functionDecl(isTemplateInstantiation(),
             isDefinition(),
-            anyOf(hasName("::omni::is_reflected"),
-              hasName("::omni::meta_t"),
-              hasName("::omni::binding_t"),
-              hasName("::omni::field_meta_t"),
-              hasName("::omni::field_binding_t")))))),
-        // A templated visitor may spell binding_t<T>/meta_t<T> in its
-        // operator() parameters. Clang instantiates that signature while
-        // selecting the reflected_call overload; the visitor body stays
-        // deferred.
-        unless(hasParent(
-          parmVarDecl(hasAncestor(cxxMethodDecl(isTemplateInstantiation(),
-            hasOverloadedOperatorName("()")))))),
-        unless(hasParent(typeLoc()))),
-      .reduce =
-        [&ast = wast.ast->getASTContext()](meta::source_file_context a,
-          const clang::TypeLoc &type_loc) {
-          // Generic visitor placeholders are substituted with binding_t during
-          // overload resolution; the spelled `auto` is not a reflection query.
-          if (std::invoke([&ast, &type_loc] {
-                clang::Token token;
-                return !clang::Lexer::getRawToken(type_loc.getBeginLoc(),
-                         token,
-                         ast.getSourceManager(),
-                         ast.getLangOpts())
-                  && (token.is(clang::tok::kw_auto)
-                    // Raw lexing may preserve a keyword as a raw identifier.
-                    || (token.is(clang::tok::raw_identifier)
-                      && "auto" == token.getRawIdentifier()));
-              })) {
-            return a;
-          }
+            hasName("::omni::reflected")))),
+        .fold = std::bind_front(meta::matches::fold_out_of_scope_function_query,
+          std::ref(parsed.ast->getASTContext())),
+      },
 
-          const auto *record = type_loc.getType()->getAs<clang::RecordType>();
-          const auto *decl = record
-            ? llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
-                record->getDecl())
-            : nullptr;
+      ast::rule{
+        .pattern =
+          ast::pattern(cxxOperatorCallExpr, hasOverloadedOperatorName("()")),
+        .fold = std::bind_front(meta::matches::fold_reflected_call,
+          std::cref(log),
+          std::ref(parsed.ast->getASTContext())),
+      },
 
-          if (!decl) {
-            a.internal_errors.emplace_back(
-              "reflection query TypeLoc did not resolve to a class template "
-              "specialization");
-
-            return a;
-          }
-
-          const clang::TemplateArgumentList &args = decl->getTemplateArgs();
-
-          if (!std::ranges::all_of(args.asArray(),
-                pipeline::impl::is_concrete_template_arg))
-            return a;
-
-          const clang::ClassTemplateDecl *tmpl = decl->getSpecializedTemplate();
-          const std::string query = tmpl ? tmpl->getQualifiedNameAsString()
-                                         : decl->getQualifiedNameAsString();
-
-          return pipeline::impl::append_invalid_reflection_query(std::move(a),
-            ast,
-            query,
-            type_loc.getSourceRange(),
-            type_loc.getSourceRange(),
-            clang::DynTypedNode::create(type_loc),
-            "reflection query class template instantiated during the tool run");
-        },
-    },
-
-    ast::rule{
-      .pattern = ast::pattern(declRefExpr,
-        isExpansionInMainFile(),
-        to(functionDecl(isTemplateInstantiation(),
-          isDefinition(),
-          hasName("::omni::reflected")))),
-      .reduce =
-        [&ast = wast.ast->getASTContext()](meta::source_file_context a,
-          const clang::DeclRefExpr &query) {
-          const auto *decl =
-            llvm::dyn_cast<clang::FunctionDecl>(query.getDecl());
-
-          if (!decl) {
-            a.internal_errors.emplace_back(
-              "reflection query DeclRefExpr did not resolve to a function "
-              "template specialization");
-
-            return a;
-          }
-
-          return pipeline::impl::append_invalid_reflection_query(std::move(a),
-            ast,
-            decl->getQualifiedNameAsString(),
-            query.getSourceRange(),
-            query.getSourceRange(),
-            clang::DynTypedNode::create(query),
-            "reflection query function instantiated during the tool run");
-        },
-    },
-
-    ast::rule{
-      .pattern =
-        ast::pattern(cxxOperatorCallExpr, hasOverloadedOperatorName("()")),
-      .reduce =
-        [&log, &ast = wast.ast->getASTContext()](meta::source_file_context a,
-          const clang::CXXOperatorCallExpr &call) {
-          if (call.getNumArgs() <= 2)
-            return a;
-
-          const clang::Type *call_object_type =
-            ast.getCanonicalType(call.getArg(0)->getType())
-              .getUnqualifiedType()
-              .getTypePtr();
-
-          const auto *call_object_decl = call_object_type->getAsCXXRecordDecl();
-
-          if (!call_object_decl
-            || "omni::reflected_call_t"
-              != call_object_decl->getQualifiedNameAsString()) {
-            return a;
-          }
-
-          const clang::SourceLocation loc = call.getExprLoc();
-          std::expected callsite_location =
-            pipeline::impl::source_location_from(ast, loc);
-
-          if (!callsite_location) {
-            a.internal_errors.emplace_back(
-              std::format("reflected_call matcher could not resolve "
-                          "a source location: {}",
-                std::move(callsite_location).error()));
-
-            return a;
-          }
-
-          const diag::callsite callsite{
-            .location = *callsite_location,
-            .callstack = pipeline::impl::callstack_from(ast,
-              clang::DynTypedNode::create(call)),
-          };
-
-          for (std::expected valid_arg : call.arguments()
-              // Skip the reflected_call object and visitor arguments.
-              | std::views::drop(2)
-              | std::views::transform(
-                std::bind_front(pipeline::impl::validate_reflected_call_arg,
-                  std::ref(ast),
-                  std::cref(call)))) {
-            if (!valid_arg) {
-              std::visit(
-                [&a]<typename Error>(Error error) {
-                  if constexpr (std::same_as<diag::source_error, Error>) {
-                    a.invalid_reflected_call_args.push_back(std::move(error));
-                  } else {
-                    static_assert(std::same_as<std::string, Error>);
-                    a.internal_errors.emplace_back(std::move(error));
-                  }
-                },
-                std::move(valid_arg).error());
-
-              continue;
-            }
-
-            std::expected info = meta::resolve_reflected_type(log,
-              *valid_arg,
-              ast,
-              a.resolved_types);
-
-            if (!info) {
-              a.internal_errors.emplace_back(std::move(info).error());
-
-              continue;
-            }
-
-            const meta::type_id id =
-              std::visit([](const auto &t) { return t.id; }, info->type);
-
-            a.callsites_by_type_id[id].emplace(callsite);
-
-            for (const meta::reflectable &dependency : info->dependencies)
-              a.callsites_by_type_id[dependency.id].emplace(callsite);
-
-            std::visit(
-              [&a]<typename T>(T t) {
-                a.resolved_types.emplace(t.id);
-
-                if constexpr (std::same_as<meta::reflectable, T>) {
-                  a.type_name_by_id.emplace(t.id, t.definition.type_name);
-                  a.reflected.emplace_back(std::move(t));
-                } else if constexpr (std::same_as<meta::non_reflectable, T>) {
-                  // Validation before resolution should reject non-reflectable
-                  // direct reflected_call arguments. Keep the branch for
-                  // defensive compatibility with resolver changes.
-                } else {
-                  static_assert(std::same_as<meta::already_reflected, T>);
-                  // todo: log for info?
-                }
-              },
-              std::move(info->type));
-
-            std::ranges::copy(info->dependencies
-                | std::views::transform(&meta::reflectable::id),
-              std::inserter(a.resolved_types, a.resolved_types.begin()));
-
-            std::ranges::copy(info->dependencies
-                | std::views::transform(&meta::reflectable::id),
-              std::inserter(a.resolved_as_dependency,
-                a.resolved_as_dependency.begin()));
-
-            std::ranges::copy(info->dependencies
-                | std::views::transform([](const meta::reflectable &dep) {
-                    return std::pair{dep.id, dep.definition.type_name};
-                  }),
-              std::inserter(a.type_name_by_id, a.type_name_by_id.end()));
-
-            std::ranges::move(info->dependencies,
-              std::back_inserter(a.reflected));
-          }
-
-          return a;
-        },
-    },
-
-    ast::rule{
-      .pattern = ast::pattern(classTemplateSpecializationDecl,
-        unless(isInStdNamespace()),
-        hasAncestor(namespaceDecl(hasName("omni"))),
-        hasAncestor(namespaceDecl(hasName("detail"))),
-        hasName("_reflected_indexed_type"),
-        isTemplateInstantiation(),
-        isDefinition()),
-      .reduce =
-        [&ast = wast.ast->getASTContext()](meta::source_file_context a,
-          const clang::ClassTemplateSpecializationDecl &decl) {
-          const clang::TemplateArgumentList &args = decl.getTemplateArgs();
-
-          if (args.size() <= 1) {
-            a.internal_errors.emplace_back(
-              "invalid _reflected_indexed_type signature");
-
-            return a;
-          }
-
-          const clang::TemplateArgument &type_arg = args.get(0);
-
-          if (clang::TemplateArgument::Type != type_arg.getKind()) {
-            a.internal_errors.emplace_back(
-              "invalid _reflected_indexed_type signature: "
-              "non-type first argument");
-
-            return a;
-          }
-
-          const clang::TemplateArgument &index_arg = args.get(1);
-
-          if (clang::TemplateArgument::Integral != index_arg.getKind()) {
-            a.internal_errors.emplace_back(
-              "invalid _reflected_indexed_type signature: "
-              "non-integral index argument");
-
-            return a;
-          }
-
-          const clang::Type &type = *type_arg.getAsType();
-          const meta::type_id id = clang::isa<clang::TagType>(type)
-            ? render_reflectable_id(ast, clang::cast<clang::TagType>(&type))
-            : render_type_id(ast, &type);
-
-          a.index_by_type_id.emplace(std::move(id),
-            index_arg.getAsIntegral().getExtValue());
-
-          return a;
-        },
-    });
-
-  return reduced_matches{
-    .args = std::move(wast.args),
-    .ctx = std::move(ctx),
-  };
+      ast::rule{
+        .pattern = ast::pattern(classTemplateSpecializationDecl,
+          unless(isInStdNamespace()),
+          hasAncestor(namespaceDecl(hasName("omni"))),
+          hasAncestor(namespaceDecl(hasName("detail"))),
+          hasName("_reflected_indexed_type"),
+          isTemplateInstantiation(),
+          isDefinition()),
+        .fold = std::bind_front(meta::matches::fold_index_registration,
+          std::cref(parsed.ast->getASTContext())),
+      }));
 }
 
-std::expected<pipeline::reflection_context, app_error>
+std::expected<render::reflection_context, app_error>
   pipeline::resolve_reflection_context(const diagnostics &log,
-    reduced_matches rm) {
+    meta::source_file_context ctx) {
   using render_context = render::reflection_context;
 
-  const source_file source = rm.ctx.sf;
+  const source_file source = ctx.sf;
 
   std::vector<std::string> input_errors;
 
-  if (!rm.ctx.invalid_reflection_queries.empty()) {
+  if (!ctx.errors.reflection_queries.empty()) {
     input_errors.emplace_back(std::format("invalid reflection queries:\n{}",
-      rm.ctx.invalid_reflection_queries //
-        | std::views::transform(diag::format) //
+      ctx.errors.reflection_queries //
+        | std::views::transform(diag::format_error) //
         | std::views::join_with("\n"sv) //
         | util::format_range));
   }
 
-  if (!rm.ctx.invalid_reflected_call_args.empty()) {
+  if (!ctx.errors.reflected_call_args.empty()) {
     input_errors.emplace_back(std::format(
       "invalid reflected_call arguments:\n{}"
       "\nreflected_call inputs must be directly reflectable records/enums or "
-      "omni::type_t<T>. Compound and wrapper types may still be discovered "
+      "omni::type_t<T>. Callers are responsible for sanitizing semantic "
+      "compound inputs. Compound types may still be discovered "
       "through supported dependency routes when they appear as reflected "
       "fields, bases, or protocol aliases",
-      rm.ctx.invalid_reflected_call_args //
-        | std::views::transform(diag::format) //
+      ctx.errors.reflected_call_args //
+        | std::views::transform(diag::format_error) //
         | std::views::join_with("\n"sv) //
         | util::format_range));
   }
 
-  if (!rm.ctx.internal_errors.empty()) {
+  if (!ctx.errors.internal.empty()) {
     input_errors.emplace_back(std::format("internal errors:\n{}",
-      rm.ctx.internal_errors //
+      ctx.errors.internal //
         | std::views::transform([](const std::string &error) {
             return std::format("  {}", error);
           }) //
@@ -2874,51 +3347,21 @@ std::expected<pipeline::reflection_context, app_error>
   std::vector<render_context::forward_declarable> fwd;
   std::vector<render_context::nested_type> nested;
   std::vector<render_context::indexed_type> indexed;
-  std::vector<meta::reflectable> errors;
 
-  for (meta::reflectable &&t : rm.ctx.reflected | std::views::as_rvalue) {
-    const std::optional index = rm.ctx.index_by_type_id.contains(t.id)
-      ? std::optional(rm.ctx.index_by_type_id.at(t.id))
+  for (meta::reflectable &&t : ctx.reflected | std::views::as_rvalue) {
+    const std::optional index = ctx.index_by_type_id.contains(t.id)
+      ? std::optional(ctx.index_by_type_id.at(t.id))
       : std::nullopt;
 
-    const bool as_dependency = rm.ctx.resolved_as_dependency.contains(t.id);
+    const bool as_dependency = ctx.resolved_as_dependency.contains(t.id);
 
-    const bool is_nested = !t.definition.type_name.enclosing_records.empty();
-    const bool is_unnamed = !t.definition.type_name.name;
-    const bool is_public_non_local =
-      meta::type_definition::none == t.definition.definition_flags;
-
-    if (is_nested && is_unnamed) {
-      // todo: report source location and reflected-call stack. Unnamed nested
-      // types need `decltype(std::declval<root>().field)`-style access, which
-      // is not implemented yet.
-      errors.push_back(std::move(t));
-
-      continue;
-    }
-
-    // A generated fallback type that can be forward-declared is promoted to a
-    // named specialization. This avoids emitting competing fallback metadata.
-    if (std::visit(
-          [is_nested,
-            is_unnamed,
-            is_public_non_local]<meta::reflectable_data Data>(
-            const Data &data) {
-            if (is_nested || is_unnamed || !is_public_non_local)
-              return false;
-
-            if constexpr (std::same_as<meta::enum_data, Data>)
-              return data.is_scoped || data.is_fixed;
-            else {
-              static_assert(std::same_as<meta::record_data, Data>);
-              return true;
-            }
-          },
-          t.data)) {
+    switch (meta::matches::emission_route_for(t)) {
+    case meta::matches::emission_route::forward_declarable:
       if (index) {
         log(log_level::debug, [index, id = t.id] {
           return std::format(
-            "\ngenerated fallback '{}' type '{}' will be rendered as forward-declarable.",
+            "\ngenerated fallback '{}' type '{}' will be rendered as "
+            "forward-declarable.",
             *index,
             id);
         });
@@ -2930,33 +3373,16 @@ std::expected<pipeline::reflection_context, app_error>
         .as_dependent = as_dependency,
       });
 
-      continue;
-    }
-
-    // todo: fail with diagnostics if the enclosing root type is not reflected.
-    // todo: fail with diagnostics if the enclosing root is not
-    // public/non-local. As of now this info is not collected/resolved: only
-    // names are collected.
-    if (is_nested
-      // ad hoc to distinguish from fallback-specialized types that has
-      // non-empty enclosing_records. Unnamed nested types can be supported,
-      // but the distinction should be stronger.
-      && !is_unnamed && is_public_non_local
-      && !t.definition.type_name.enclosing_records.front().empty()) {
+      break;
+    case meta::matches::emission_route::nested:
       if (index) {
         log(log_level::debug, [index, id = t.id] {
           return std::format(
-            "\ngenerated fallback '{}' type '{}' will be rendered as nested forward-declarable.",
+            "\ngenerated fallback '{}' type '{}' will be rendered as nested "
+            "forward-declarable.",
             *index,
             id);
         });
-        log(log_level::debug,
-          [is_nested] { return std::format("\nis_nested: {}", is_nested); });
-        log(log_level::debug,
-          [&records = t.definition.type_name.enclosing_records] {
-            return std::format("\nenclosing_records: [{}]",
-              records | std::views::join_with(", "sv) | util::format_range);
-          });
       }
 
       nested.push_back({
@@ -2965,23 +3391,23 @@ std::expected<pipeline::reflection_context, app_error>
         .as_dependent = as_dependency,
       });
 
-      continue;
-    }
+      break;
+    case meta::matches::emission_route::indexed:
+      if (!index) {
+        return std::unexpected(processing_error(source,
+          std::format(
+            "internal error: non-emittable reflected type escaped matcher "
+            "finalization: '{}'",
+            t.id)));
+      }
 
-    if (index) {
       indexed.push_back({
         .type = std::move(t),
         .index = *index,
       });
 
-      continue;
+      break;
     }
-
-    // todo: fail with diagnostics explaining why this type cannot be emitted
-    // and how to make it reflectable. Typical fixes: make the type
-    // forward-declarable, move the enclosing type out of a local scope, or
-    // avoid unsupported non-forward-declarable dependency routes.
-    errors.push_back(std::move(t));
   }
 
   // std::ranges::to<std::vector>() can precompute size for filtered ranges,
@@ -2993,15 +3419,15 @@ std::expected<pipeline::reflection_context, app_error>
   });
 
   const auto missing_base =
-    [&rm](const meta::reflectable &r) -> std::optional<meta::type_id> {
+    [&ctx](const meta::reflectable &r) -> std::optional<meta::type_id> {
     return std::visit(
-      [&rm](const meta::reflectable_data auto &data)
+      [&ctx](const meta::reflectable_data auto &data)
         -> std::optional<meta::type_id> {
         if constexpr (std::same_as<meta::record_data,
                         std::remove_cvref_t<decltype(data)>>) {
-          for (const meta::type_id &base_id : data.public_bases)
-            if (!rm.ctx.type_name_by_id.contains(base_id))
-              return base_id;
+          for (const meta::reflectable_reference &base : data.public_bases)
+            if (!ctx.type_name_by_id.contains(base.id))
+              return base.id;
         }
 
         return std::nullopt;
@@ -3019,8 +3445,8 @@ std::expected<pipeline::reflection_context, app_error>
           "\nThis is an internal consistency failure; report it with the "
           "instrumented source file",
           *base_id,
-          render::impl::format_location(t.type.definition.location),
-          render::impl::format_nm_qual_type(t.type.definition.type_name))));
+          diag::format_location(t.type.definition.location),
+          meta::format(t.type.definition.type_name))));
   }
 
   for (const render_context::nested_type &t : nested) {
@@ -3033,8 +3459,8 @@ std::expected<pipeline::reflection_context, app_error>
           "\nThis is an internal consistency failure; report it with the "
           "instrumented source file",
           *base_id,
-          render::impl::format_location(t.type.definition.location),
-          render::impl::format_nm_qual_type(t.type.definition.type_name))));
+          diag::format_location(t.type.definition.location),
+          meta::format(t.type.definition.type_name))));
   }
 
   for (const render_context::indexed_type &t : indexed) {
@@ -3047,101 +3473,8 @@ std::expected<pipeline::reflection_context, app_error>
           "\nThis is an internal consistency failure; report it with the "
           "instrumented source file",
           *base_id,
-          render::impl::format_location(t.type.definition.location),
-          render::impl::format_nm_qual_type(t.type.definition.type_name))));
-  }
-
-  if (!errors.empty()) {
-    const auto reason_for = [](const meta::reflectable &t)
-      -> std::pair<std::string_view, std::string_view> {
-      const bool is_unnamed = !t.definition.type_name.name;
-
-      if (is_unnamed && !t.definition.type_name.enclosing_records.empty()) {
-        return {
-          "unnamed nested dependency types are not supported yet",
-          "give the nested type a name or avoid exposing it through a "
-          "reflected public field",
-        };
-      }
-
-      if (meta::type_definition::non_public & t.definition.definition_flags) {
-        return {
-          "non-public dependency types cannot be named by generated metadata",
-          "make the dependency type public or expose a public reflectable "
-          "wrapper",
-        };
-      }
-
-      if (meta::type_definition::local & t.definition.definition_flags) {
-        return {
-          "local dependency types cannot be forward-declared by generated metadata",
-          "move the type to namespace or public class scope",
-        };
-      }
-
-      if (is_unnamed) {
-        return {
-          "unnamed dependency types are not supported yet",
-          "give the type a name or avoid this dependency route",
-        };
-      }
-
-      return {
-        "dependency type cannot be emitted by any supported reflection route",
-        "make the type forward-declarable or avoid this dependency route",
-      };
-    };
-
-    if (std::ranges::any_of(errors, [](const meta::reflectable &type) {
-          return !type.definition.source;
-        })) {
-      return std::unexpected(processing_error(source,
-        std::format(
-          "internal error: could not render dependency diagnostics:\n{}",
-          errors //
-            | std::views::filter([](const meta::reflectable &type) {
-                return !type.definition.source;
-              }) //
-            | std::views::transform([](const meta::reflectable &type) {
-                return std::format("  {}", type.definition.source.error());
-              }) //
-            | std::views::join_with("\n"sv) //
-            | util::format_range)));
-    }
-
-    return std::unexpected(processing_error(source,
-      std::format("unsupported reflected dependency types:\n{}",
-        errors //
-          | std::views::transform(
-            [&reason_for, &rm](const meta::reflectable &type) {
-              const auto [reason, suggestion] = reason_for(type);
-              return diag::format({
-                .location = type.definition.location,
-                .source = *type.definition.source,
-                .callstack = rm.ctx.callsites_by_type_id.contains(type.id)
-                  ? rm.ctx.callsites_by_type_id.at(type.id) //
-                    | std::views::transform([](const diag::callsite &site) {
-                        std::vector<std::string> frames{
-                          std::format("reflected from {}",
-                            render::impl::format_location(site.location)),
-                        };
-
-                        std::ranges::copy(site.callstack,
-                          std::back_inserter(frames));
-
-                        return frames;
-                      }) //
-                    | std::views::join //
-                    | std::ranges::to<std::vector>()
-                  : std::vector<std::string>{},
-                .subject = std::format("dependency type '{}' cannot be emitted",
-                  render::impl::format_nm_qual_type(type.definition.type_name)),
-                .reason = std::string{reason},
-                .suggestion = std::string{suggestion},
-              });
-            }) //
-          | std::views::join_with("\n"sv) //
-          | util::format_range)));
+          diag::format_location(t.type.definition.location),
+          meta::format(t.type.definition.type_name))));
   }
 
   std::map<std::string, const meta::reflectable *> emitted_by_target;
@@ -3163,10 +3496,10 @@ std::expected<pipeline::reflection_context, app_error>
         "\n  first: {} '{}'"
         "\n  second: {} '{}'",
         target,
-        render::impl::format_location(first.definition.location),
-        render::impl::format_nm_qual_type(first.definition.type_name),
-        render::impl::format_location(type.definition.location),
-        render::impl::format_nm_qual_type(type.definition.type_name)));
+        diag::format_location(first.definition.location),
+        meta::format(first.definition.type_name),
+        diag::format_location(type.definition.location),
+        meta::format(type.definition.type_name)));
   };
 
   const auto template_or_type_target =
@@ -3179,11 +3512,11 @@ std::expected<pipeline::reflection_context, app_error>
 
           return std::format("direct:{}:{}",
             data.type,
-            render::impl::format_nm_qual_type(t.definition.type_name));
+            meta::format(t.definition.type_name));
         } else {
           static_assert(std::same_as<meta::enum_data, Data>);
           return std::format("direct:enum:{}",
-            render::impl::format_nm_qual_type(t.definition.type_name));
+            meta::format(t.definition.type_name));
         }
       },
       t.data);
@@ -3198,8 +3531,7 @@ std::expected<pipeline::reflection_context, app_error>
 
   for (const render_context::nested_type &t : nested) {
     if (std::optional error = validate_target(
-          std::format("nested:{}",
-            render::impl::format_nm_qual_type(t.type.definition.type_name)),
+          std::format("nested:{}", meta::format(t.type.definition.type_name)),
           t.type)) {
       return std::unexpected(std::move(*error));
     }
@@ -3214,8 +3546,10 @@ std::expected<pipeline::reflection_context, app_error>
 
   constexpr auto cmp_roots = //
     [](const meta::nm_qual_type &lhs, const meta::nm_qual_type &rhs) -> bool {
-    return std::tie(lhs.namespaces, lhs.name)
-      < std::tie(rhs.namespaces, rhs.name);
+    assert(!lhs.enclosing_records.empty());
+    assert(!rhs.enclosing_records.empty());
+    return std::tie(lhs.namespaces, lhs.enclosing_records.front())
+      < std::tie(rhs.namespaces, rhs.enclosing_records.front());
   };
 
   std::vector enclosing_roots = nested //
@@ -3226,55 +3560,44 @@ std::expected<pipeline::reflection_context, app_error>
     | std::views::as_rvalue //
     | std::ranges::to<std::vector>();
 
-  return reflection_context{
-    .args = std::move(rm.args),
-    .ctx =
-      {
-        .instrumented_source_file = std::move(rm.ctx.sf),
+  return render::reflection_context{
+    .instrumented_source_file = std::move(ctx.sf),
 
-        .fwd_declarables = std::move(fwd),
-        .nested = std::move(nested),
-        .indexed = std::move(indexed),
-        .enclosing_roots = std::move(enclosing_roots),
+    .fwd_declarables = std::move(fwd),
+    .nested = std::move(nested),
+    .indexed = std::move(indexed),
+    .enclosing_roots = std::move(enclosing_roots),
 
-        .type_name_by_id = std::move(rm.ctx.type_name_by_id),
-        .file_dependencies = std::move(rm.ctx.file_dependencies),
-      },
+    .type_name_by_id = std::move(ctx.type_name_by_id),
+    .file_dependencies = std::move(ctx.file_dependencies),
   };
 }
 
-std::expected<pipeline::run_report, app_error>
-  pipeline::emit_outputs(const diagnostics &log, reflection_context rc) {
-  const auto reflection_header_path = //
-    [&o = rc.args.out](const source_file &instrumented_source) {
-      // ad hoc to disable fs exception throwing
-      return std::invoke([&o] {
-        std::error_code ec;
-        return fs::is_directory(o, ec);
-      }) //
-        ? fs::path(o)
-          / std::format("{}_omni_reflection_header.h",
-            instrumented_source.path.string())
-        : o;
-    };
-
-  const fs::path out = reflection_header_path(rc.ctx.instrumented_source_file);
+std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
+  const diagnostics &log,
+  fs::path out,
+  render::reflection_context ctx) {
+  // Avoid filesystem exceptions when the output path does not exist yet.
+  if (std::error_code ec; fs::is_directory(out, ec)) {
+    out /= std::format("{}_omni_reflection_header.h",
+      ctx.instrumented_source_file.path.string());
+  }
 
   log(log_level::info, [&out] {
     return std::format("\ncreating reflection header: {}",
       out.generic_string());
   });
 
-  const source_file sf = rc.ctx.instrumented_source_file;
-  const std::size_t forward_declarable_count = rc.ctx.fwd_declarables.size();
-  const std::size_t nested_type_count = rc.ctx.nested.size();
-  const std::size_t indexed_type_count = rc.ctx.indexed.size();
-  const std::size_t file_dependency_count = rc.ctx.file_dependencies.size();
+  const source_file sf = ctx.instrumented_source_file;
+  const std::size_t forward_declarable_count = ctx.fwd_declarables.size();
+  const std::size_t nested_type_count = ctx.nested.size();
+  const std::size_t indexed_type_count = ctx.indexed.size();
+  const std::size_t file_dependency_count = ctx.file_dependencies.size();
   const std::size_t reflected_type_count =
     forward_declarable_count + nested_type_count + indexed_type_count;
 
   return util::create_file_for_writing(out) //
-    .and_then(std::bind_front(render::generate_reflection, std::move(rc.ctx)))
+    .and_then(std::bind_front(render::generate_reflection, std::move(ctx)))
     .and_then([=](render::reflection_context ctx) {
       log(log_level::info, [out] {
         return std::format("\nwriting deps file for: {}", out.generic_string());
@@ -3302,13 +3625,13 @@ std::expected<pipeline::run_report, app_error>
 std::string format_definition_flags(int flags) {
   std::string out;
 
-  if (flags & meta::type_definition::non_public) {
+  if (meta::type_definition::non_public & flags) {
     if (!out.empty())
       out += " | ";
     out += "non_public";
   }
 
-  if (flags & meta::type_definition::local) {
+  if (meta::type_definition::local & flags) {
     if (!out.empty())
       out += " | ";
     out += "local";
@@ -3321,24 +3644,31 @@ std::string format_type_definition(const meta::type_definition &d) {
   return std::format(
     "declared at: {}{}"
     "\n  {}",
-    render::impl::format_location(d.location),
+    diag::format_location(d.location),
     std::invoke([f = format_definition_flags(d.definition_flags)] {
       return f.empty() ? std::string() : std::format("\n  [{}]", f);
     }),
 
-    render::impl::format_nm_qual_type(d.type_name));
+    meta::format(d.type_name));
 }
 
 std::string format_record_data(const meta::record_data &d) {
-  if (d.public_fields.empty())
-    return std::format("{} {{}}", d.type);
-
-  return std::format("{} {{ {} }}",
+  return std::format("{}{}{}",
     d.type,
-    d.public_fields //
-      | std::views::transform(&meta::field_data::name) //
-      | std::views::join_with(", "sv) //
-      | util::format_range);
+    d.template_info
+      .transform([](const meta::template_data &t) {
+        return meta::template_data::supported == t.support
+          ? std::string{}
+          : std::format(" [{}]", t.support);
+      })
+      .value_or(""),
+    d.public_fields.empty() //
+      ? " {}"
+      : std::format(" {{ {} }}",
+          d.public_fields //
+            | std::views::transform(&meta::field_data::name) //
+            | std::views::join_with(", "sv) //
+            | util::format_range));
 }
 
 std::string format_enum_data(const meta::enum_data &d) {
@@ -3397,25 +3727,21 @@ std::string format_options(const cli::options &args) {
     args.resource_dir.generic_string());
 }
 
-std::string format_instrumented_source(const cli::options &args) {
-  return std::format("\nrunning for file: {}\t\r", args.source.path.string());
-}
-
-std::string format_reduced_matches(const pipeline::reduced_matches &rm) {
+std::string format_matches(const meta::source_file_context &ctx) {
   return std::format(
     "\nprocessed source: {}"
     "\n\n-- types --------\n{}"
     "\n\n-- includes --------\n{}",
-    source_file::path_as_string(rm.ctx.sf),
+    source_file::path_as_string(ctx.sf),
 
-    rm.ctx.reflected //
+    ctx.reflected //
       | std::views::transform(std::bind_front(format_reflectable,
-        std::cref(rm.ctx.resolved_as_dependency),
-        std::cref(rm.ctx.index_by_type_id))) //
+        std::cref(ctx.resolved_as_dependency),
+        std::cref(ctx.index_by_type_id))) //
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    rm.ctx.file_dependencies //
+    ctx.file_dependencies //
       | std::views::transform([](const fs::path &p) { return p.string(); })
       | std::views::join_with("\n"sv) //
       | util::format_range);
@@ -3488,52 +3814,6 @@ std::string format_timings(
       | util::format_range);
 }
 
-} // namespace
-
-namespace {
-
-// used for unique ids.
-meta::type_id render_type_id(const clang::ASTContext &ast,
-  const clang::Type *type) {
-  clang::PrintingPolicy p(ast.getLangOpts());
-  p.FullyQualifiedName = true;
-  p.SuppressScope = false;
-  p.SuppressUnwrittenScope = false;
-  p.SuppressTagKeyword = false;
-  p.PrintAsCanonical = true;
-  // P.PrintTemplateArguments = true;
-
-  // "no qualifiers" (not const, not volatile, not restrict).
-  const unsigned qual_flags = 0;
-  return clang::QualType(type, qual_flags).getAsString(p);
-}
-
-meta::type_id render_primary_template_id(
-  const clang::ClassTemplateDecl *template_decl) {
-  assert(template_decl);
-  // ad hoc: type_id is still a rendered string, not a Clang-provided opaque
-  // identity. Prefix primary-template declaration ids so they cannot collide
-  // with rendered concrete type ids if full specializations are supported
-  // later.
-  return std::format("primary-template:{}",
-    template_decl->getCanonicalDecl()->getQualifiedNameAsString());
-}
-
-meta::type_id render_reflectable_id(const clang::ASTContext &ast,
-  const clang::TagType *t) {
-  assert(t);
-
-  const auto *template_spec =
-    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(t->getDecl());
-  // todo: replace this ad hoc primary-template collapse with general template
-  // specialization reflection metadata. `crtp_base<X>` and `crtp_base<Y>` are
-  // treated as the same reflected template shape for now, which is only valid
-  // while full and partial specializations are unsupported/rejected.
-  return template_spec
-    ? render_primary_template_id(template_spec->getSpecializedTemplate())
-    : render_type_id(ast, t);
-}
-
 // todo: use expected
 std::string get_declaration_source_file(const clang::Decl &d,
   const clang::SourceManager &sm) noexcept {
@@ -3547,25 +3827,6 @@ std::string get_declaration_source_file(const clang::Decl &d,
 
   std::string filename = pm.getFilename();
   return filename;
-}
-
-std::string meta::annotation_from_decl(const clang::ASTContext &ast,
-  const clang::Decl *decl) {
-  assert(decl);
-
-  // Raw-comment lookup may be relatively expensive; skip it when annotations
-  // were explicitly disabled.
-  if (!ast.getLangOpts().CommentOpts.ParseAllComments)
-    return "";
-
-  const clang::Decl *canonical = decl->getCanonicalDecl();
-  const clang::RawComment *comment = ast.getRawCommentForDeclNoCache(canonical);
-  if (!comment)
-    comment = ast.getRawCommentForDeclNoCache(decl);
-  if (!comment)
-    return "";
-
-  return comment->getBriefText(ast);
 }
 
 meta::template_param map_template_param(const clang::ASTContext &ast,
@@ -3614,6 +3875,17 @@ auto meta::template_data::from_decl(const clang::ASTContext &ast,
 
   const clang::ClassTemplateDecl *primary = spec->getSpecializedTemplate();
   return meta::template_data{
+    .support = std::invoke([spec] {
+      if (llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(spec) //
+        || spec->getSpecializedTemplateOrPartial()
+          .dyn_cast<clang::ClassTemplatePartialSpecializationDecl *>())
+        return partial_specialization;
+
+      if (clang::TSK_ExplicitSpecialization == spec->getSpecializationKind())
+        return explicit_specialization;
+
+      return supported;
+    }),
     .primary_name = primary->getNameAsString(),
     .params = *primary->getTemplateParameters() //
       | std::views::transform(
@@ -3820,15 +4092,6 @@ meta::type_definition resolve_definition(const clang::ASTContext &ast,
         .column = sm.getSpellingColumnNumber(loc),
       },
 
-    .source = pipeline::impl::source_excerpt_from(ast,
-      clang::SourceRange{loc, loc},
-      clang::SourceRange{loc, loc})
-      .transform_error([td](std::string error) {
-        return std::format("could not render source for declaration '{}': {}",
-          td->getQualifiedNameAsString(),
-          std::move(error));
-      }),
-
     // refactorme: enable bitwise operations
     .definition_flags = td_flags(td_local | td_non_public),
   };
@@ -3836,15 +4099,8 @@ meta::type_definition resolve_definition(const clang::ASTContext &ast,
 
 // view of alias declarations considered for reflections, like
 // using type = user_struct;
-util::viewable_range_of<const clang::Type *> auto member_aliases_view(
-  const clang::ASTContext &ast,
-  const clang::CXXRecordDecl &rd) {
-  const auto to_canonical_type =
-    [&ast](const clang::TypedefNameDecl *d) -> const clang::Type * {
-    return ast.getCanonicalType(d->getUnderlyingType().getUnqualifiedType())
-      .getTypePtr();
-  };
-
+util::viewable_range_of<const clang::TypedefNameDecl *> auto
+  member_aliases_view(const clang::CXXRecordDecl &rd) {
   const auto is_supported_alias = //
     [](const clang::TypedefNameDecl *d) {
       return std::ranges::any_of(meta::k_supported_member_aliases,
@@ -3860,8 +4116,7 @@ util::viewable_range_of<const clang::Type *> auto member_aliases_view(
     | std::views::transform([](const clang::Decl *d) {
         return llvm::cast<clang::TypedefNameDecl>(d);
       }) //
-    | std::views::filter(is_supported_alias)
-    | std::views::transform(to_canonical_type);
+    | std::views::filter(is_supported_alias);
 }
 
 util::viewable_range_of<const clang::CXXRecordDecl *> auto public_bases_view(
@@ -3876,9 +4131,7 @@ util::viewable_range_of<const clang::CXXRecordDecl *> auto public_bases_view(
     | std::views::transform(&clang::CXXBaseSpecifier::getType)
     | std::views::transform(&clang::QualType::getTypePtr)
     | std::views::transform(&clang::Type::getAsCXXRecordDecl)
-    | std::views::filter([](const clang::CXXRecordDecl *base) {
-        return base && !base->isInStdNamespace();
-      });
+    | std::views::filter([](const auto *base) { return nullptr != base; });
 }
 
 util::viewable_range_of<const clang::FieldDecl *> auto public_fields_view(
@@ -3893,29 +4146,18 @@ util::viewable_range_of<const clang::FieldDecl *> auto public_fields_view(
     | std::views::filter(std::not_fn(&clang::FieldDecl::isUnnamedBitField));
 }
 
-std::vector<const clang::TagType *> recursively_collect_dependency_types(
+struct collected_dependencies {
+  std::vector<const clang::TagType *> types;
+  std::map<meta::type_id, std::set<meta::type_id>> dependencies_by_type;
+  std::map<meta::type_id, meta::type_access_path> public_access_path_by_type;
+};
+
+collected_dependencies recursively_collect_dependency_types(
   const diagnostics &log,
   const clang::ASTContext &ast,
-  const std::set<meta::type_id> &resolved_types,
+  const std::set<meta::type_id> &resolved_concrete_types,
   const clang::CXXRecordDecl &root) {
   // todo: monadic return.
-  const auto is_supported_template_specialization = //
-    [](const clang::CXXRecordDecl *rd) {
-      assert(rd);
-      return //
-        std::ranges::contains(
-          std::array{
-            clang::Decl::ClassTemplateSpecialization,
-            clang::Decl::ClassTemplatePartialSpecialization,
-          },
-          rd->getKind())
-        && std::ranges::contains(meta::k_supported_template_names,
-          fn::as<std::string_view>(
-            clang::cast<clang::ClassTemplateSpecializationDecl>(rd)
-              ->getSpecializedTemplate()
-              ->getName()));
-    };
-
   const auto template_specialization_types = //
     [](const util::viewable_range_of<clang::TemplateArgument> auto &args)
     -> util::viewable_range_of<const clang::Type *> auto {
@@ -3924,29 +4166,102 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
       | std::views::transform(&clang::QualType::getTypePtr);
   };
 
-  const auto to_tag_type = //
-    [](const clang::Type *t) { return t->getAs<clang::TagType>(); };
+  struct pending_record {
+    const clang::TagType *parent;
+    const clang::CXXRecordDecl *record;
+    std::optional<meta::type_access_path> public_access_path;
+    bool is_root;
+  };
 
-  const auto not_null = //
-    [](const auto *t) { return nullptr != t; };
-
-  const auto not_in_std = //
-    [](const clang::TagType *t) { return !t->getDecl()->isInStdNamespace(); };
-
-  const auto not_resolved = //
-    [&ast, &resolved_types](const clang::TagType *t) {
-      return !resolved_types.contains(render_reflectable_id(ast, t));
-    };
+  const clang::TagType *root_type =
+    meta::map_decl_to_canonical_type(ast, &root);
 
   std::set<const clang::TagType *> collected;
+  std::map<meta::type_id, std::set<meta::type_id>> dependencies_by_type;
+  std::map<meta::type_id, meta::type_access_path> public_access_path_by_type;
+  std::set<std::pair<const clang::TagType *, const clang::CXXRecordDecl *>>
+    visited;
 
-  // only CXXRecordDecl may have dependencies
-  std::stack<const clang::CXXRecordDecl *> to_visit;
-  to_visit.push(&root);
+  // Only CXXRecordDecl may have dependencies.
+  std::stack<pending_record> to_visit;
+  to_visit.push({
+    .parent = root_type,
+    .record = &root,
+    .public_access_path = meta::type_access_path{},
+    .is_root = true,
+  });
+
+  const auto concrete_id = [&ast](const clang::TagType *type) {
+    return meta::canonical_type_id(ast, type);
+  };
+
+  const auto connect = //
+    [&concrete_id, &dependencies_by_type](const clang::TagType *parent,
+      const clang::TagType *dependency) {
+      dependencies_by_type[concrete_id(parent)].emplace(
+        concrete_id(dependency));
+    };
+
+  const auto enqueue = //
+    [&ast,
+      &collected,
+      &connect,
+      &public_access_path_by_type,
+      &resolved_concrete_types,
+      &to_visit](const clang::TagType *parent,
+      const clang::Type *type,
+      std::optional<meta::type_access_path> public_access_path) {
+      const clang::TagType *dependency = type->getAs<clang::TagType>();
+
+      if (!dependency)
+        return;
+
+      const auto *record = dependency->getAsCXXRecordDecl();
+
+      if (dependency->getDecl()->isInStdNamespace()
+        || (record && meta::is_compound_dependency_route(record))) {
+        if (record) {
+          to_visit.push({
+            .parent = parent,
+            .record = record,
+            .public_access_path = std::move(public_access_path),
+            .is_root = false,
+          });
+        }
+
+        return;
+      }
+
+      connect(parent, dependency);
+
+      const meta::type_id id = meta::canonical_type_id(ast, dependency);
+
+      if (public_access_path && !public_access_path->steps.empty()) {
+        public_access_path_by_type.try_emplace(id, *public_access_path);
+      }
+
+      if (resolved_concrete_types.contains(id))
+        return;
+
+      collected.emplace(dependency);
+
+      if (record) {
+        to_visit.push({
+          .parent = parent,
+          .record = record,
+          .public_access_path = std::move(public_access_path),
+          .is_root = false,
+        });
+      }
+    };
 
   while (!to_visit.empty()) {
-    const clang::CXXRecordDecl *cur_decl = to_visit.top();
+    const pending_record pending = to_visit.top();
+    const clang::CXXRecordDecl *cur_decl = pending.record;
     const clang::CXXRecordDecl *cur_definition = cur_decl->getDefinition();
+
+    to_visit.pop();
+
     if (!cur_definition) {
       log(log_level::info, [cur_decl] {
         return std::format(
@@ -3954,42 +4269,56 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
           "Include the definition if this dependency should be reflected.",
           cur_decl->getQualifiedNameAsString());
       });
-      to_visit.pop();
+
       continue;
     }
 
     cur_decl = cur_definition;
     const clang::TagType *cur_type =
       meta::map_decl_to_canonical_type(ast, cur_decl);
-    const meta::type_id cur_id = render_reflectable_id(ast, cur_type);
+    const bool in_std = cur_decl->isInStdNamespace();
+    const bool is_compound_dependency =
+      meta::is_compound_dependency_route(cur_decl);
+    const clang::TagType *dependency_parent =
+      in_std || is_compound_dependency ? pending.parent : cur_type;
 
-    to_visit.pop();
+    if (!pending.is_root && !in_std && !is_compound_dependency) {
+      connect(pending.parent, cur_type);
 
-    if (collected.contains(cur_type) || resolved_types.contains(cur_id))
+      if (resolved_concrete_types.contains(concrete_id(cur_type)))
+        continue;
+
+      collected.emplace(cur_type);
+    }
+
+    if (!visited.emplace(dependency_parent, cur_decl).second)
       continue;
 
-    std::ranges::move(member_aliases_view(ast, *cur_decl) //
-        | std::views::filter(&clang::Type::isEnumeralType) //
-        | std::views::transform(to_tag_type) //
-        | std::views::filter(not_null) //
-        | std::views::filter(not_in_std) //
-        | std::views::filter(not_resolved),
-      std::inserter(collected, collected.begin()));
+    for (const clang::TypedefNameDecl *alias : member_aliases_view(*cur_decl)) {
+      std::optional public_access_path = pending.public_access_path;
 
-    std::ranges::for_each(member_aliases_view(ast, *cur_decl) //
-        | std::views::filter(&clang::Type::isRecordType) //
-        | std::views::transform(&clang::Type::getAsCXXRecordDecl),
-      [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
+      if (public_access_path) {
+        public_access_path->steps.emplace_back(
+          meta::type_access_path::member_type{
+            .name = alias->getNameAsString(),
+          });
+      }
+
+      enqueue(dependency_parent,
+        ast.getCanonicalType(alias->getUnderlyingType().getUnqualifiedType())
+          .getTypePtr(),
+        std::move(public_access_path));
+    }
 
     // refactorme: clean up
     // Dependency route only:
     //   struct r { std::tuple<a, b> v; };
     //   struct r { variant<a, b> v; };
-    // This does not mean compound inputs are reflected-call arguments:
+    // This does not make compound inputs reflected-call arguments:
     //   reflected_call(f, std::tuple<a, b>{}); //< unsupported
     // A visitor receives meta_t<T> or binding_t<T>; the argument type itself
-    // must be reflected, which is not true for tuple/variant wrapper types.
-    if (is_supported_template_specialization(cur_decl)) {
+    // must be reflected, which is not promised for compound dependency types.
+    if (is_compound_dependency) {
       const auto raw_args =
         clang::cast<clang::ClassTemplateSpecializationDecl>(cur_decl)
           ->getTemplateArgs()
@@ -4010,18 +4339,19 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
         continue;
       }
 
-      std::ranges::move(template_specialization_types(arg_list) //
-          | std::views::filter(&clang::Type::isEnumeralType) //
-          | std::views::transform(to_tag_type) //
-          | std::views::filter(not_null) //
-          | std::views::filter(not_in_std) //
-          | std::views::filter(not_resolved),
-        std::inserter(collected, collected.begin()));
+      for (const auto &[index, type] :
+        template_specialization_types(arg_list) | std::views::enumerate) {
+        std::optional public_access_path = pending.public_access_path;
 
-      std::ranges::for_each(template_specialization_types(arg_list) //
-          | std::views::filter(&clang::Type::isRecordType)
-          | std::views::transform(&clang::Type::getAsCXXRecordDecl),
-        [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
+        if (public_access_path) {
+          public_access_path->steps.emplace_back(
+            meta::type_access_path::template_arg{
+              .index = static_cast<std::size_t>(index),
+            });
+        }
+
+        enqueue(dependency_parent, type, std::move(public_access_path));
+      }
 
       // not collecting fields or bases.
       continue;
@@ -4031,37 +4361,50 @@ std::vector<const clang::TagType *> recursively_collect_dependency_types(
     // but unsupported wrappers are not themselves reflectable records. Do not
     // traverse their bases/fields: some declarations visible through bundled
     // headers have no definition data, and Clang's `bases()` requires it.
-    if (cur_decl->isInStdNamespace())
+    if (in_std)
       continue;
 
     // bases
-    std::ranges::for_each(public_bases_view(cur_decl),
-      [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
+    for (const clang::CXXRecordDecl *base : public_bases_view(cur_decl)) {
+      if (base->isInStdNamespace()) {
+        log(log_level::warning, [base, cur_decl] {
+          return std::format(
+            "\nstandard-library public base '{}' of '{}' ignored. "
+            "Inherited fields from this base will not be reflected.",
+            base->getQualifiedNameAsString(),
+            cur_decl->getQualifiedNameAsString());
+        });
+
+        continue;
+      }
+
+      enqueue(dependency_parent,
+        ast.getCanonicalTagType(base).getTypePtr(),
+        std::nullopt);
+    }
 
     // public fields
-    std::ranges::move(public_fields_view(cur_decl) //
-        | std::views::transform(&clang::FieldDecl::getType)
-        | std::views::transform(&clang::QualType::getTypePtr)
-        | std::views::filter(&clang::Type::isEnumeralType)
-        | std::views::transform(to_tag_type) //
-        | std::views::filter(not_null) //
-        | std::views::filter(not_in_std) //
-        | std::views::filter(not_resolved),
-      std::inserter(collected, collected.begin()));
+    for (const clang::FieldDecl *field : public_fields_view(cur_decl)) {
+      std::optional public_access_path = pending.public_access_path;
 
-    std::ranges::for_each(public_fields_view(cur_decl) //
-        | std::views::transform(&clang::FieldDecl::getType)
-        | std::views::transform(&clang::QualType::getTypePtr)
-        | std::views::filter(&clang::Type::isRecordType)
-        | std::views::transform(&clang::Type::getAsCXXRecordDecl),
-      [&to_visit](const clang::CXXRecordDecl *rd) { to_visit.push(rd); });
+      if (public_access_path) {
+        public_access_path->steps.emplace_back(meta::type_access_path::field{
+          .name = field->getNameAsString(),
+        });
+      }
 
-    if (not_in_std(cur_type))
-      collected.insert(cur_type);
+      enqueue(dependency_parent,
+        field->getType().getTypePtr(),
+        std::move(public_access_path));
+    }
   }
 
-  collected.erase(meta::map_decl_to_canonical_type(ast, &root));
-  return {collected.begin(), collected.end()};
+  collected.erase(root_type);
+  return {
+    .types = {collected.begin(), collected.end()},
+    .dependencies_by_type = std::move(dependencies_by_type),
+    .public_access_path_by_type = std::move(public_access_path_by_type),
+  };
 }
 
 auto meta::record_data::from_type(const clang::ASTContext &ast,
@@ -4073,14 +4416,20 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
 
   return {
     .public_bases = cxx_decl ? public_bases_view(cxx_decl)
-        | std::views::transform([&ast](const clang::CXXRecordDecl *rd) {
-            return clang::cast<clang::TagType>(
-              ast.getCanonicalTagType(rd).getTypePtr());
+        | std::views::filter([](const clang::CXXRecordDecl *base) {
+            return !base->isInStdNamespace();
           })
-        | std::views::transform(
-          std::bind_front(render_reflectable_id, std::cref(ast)))
+        | std::views::transform([&ast](const clang::CXXRecordDecl *rd) {
+            const auto *type = clang::cast<clang::TagType>(
+              ast.getCanonicalTagType(rd).getTypePtr());
+
+            return meta::reflectable_reference{
+              .id = meta::reflectable_type_id(ast, type),
+              .concrete_id = meta::canonical_type_id(ast, type),
+            };
+          })
         | std::ranges::to<std::vector>()
-                             : std::vector<std::string>{},
+                             : std::vector<meta::reflectable_reference>{},
 
     .public_fields = public_fields_view(&r_decl)
       | std::views::transform(
@@ -4092,6 +4441,9 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
       : r_decl.isClass() //
         ? meta::record_data::is_class
         : meta::record_data::is_union,
+
+    .has_template_parent =
+      cxx_decl && has_template_record_parent(cxx_decl->getDeclContext()),
 
     .template_info =
       fn::maybe(llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(&r_decl))
@@ -4127,7 +4479,9 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
     "Inconsistency for reflectable types detected.");
 
   return {
-    .id = render_reflectable_id(ast, t),
+    .id = meta::reflectable_type_id(ast, t),
+    .concrete_id = meta::canonical_type_id(ast, t),
+    .public_access_path = {},
     .annotation = std::invoke([&ast, t] {
       const auto *spec =
         llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(t->getDecl());
@@ -4147,13 +4501,16 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
 auto meta::resolve_reflected_type(const diagnostics &log,
   clang::QualType template_arg,
   const clang::ASTContext &ast,
-  const std::set<type_id> &resolved_types)
+  const std::set<type_id> &resolved_concrete_types)
   -> std::expected<reflected_type_info, std::string> {
   const auto match_record_type = //
     [&ast](const std::string &id, const clang::RecordType *t)
     -> std::variant<reflectable, non_reflectable, already_reflected> {
     if (t->getDecl()->isInStdNamespace())
-      return non_reflectable{.id = id};
+      return non_reflectable{
+        .id = id,
+        .concrete_id = canonical_type_id(ast, t),
+      };
 
     return match_reflectable_type(ast, t);
   };
@@ -4167,18 +4524,34 @@ auto meta::resolve_reflected_type(const diagnostics &log,
 
   // not a struct|class|union|enum
   if (!clang::isa<clang::TagType>(template_arg_type)) {
+    const type_id type = canonical_type_id(ast, &template_arg_type);
+
     return reflected_type_info{
-      .type = non_reflectable{.id = render_type_id(ast, &template_arg_type)},
+      .type =
+        non_reflectable{
+          .id = type,
+          .concrete_id = type,
+        },
       .dependencies = {},
+      .dependencies_by_type = {},
+      .public_access_path_by_type = {},
     };
   }
 
   const auto *tag_type = clang::cast<clang::TagType>(&template_arg_type);
-  const meta::type_id id = render_reflectable_id(ast, tag_type);
-  if (resolved_types.contains(id)) {
+  const meta::type_id id = reflectable_type_id(ast, tag_type);
+  const meta::type_id concrete_id = canonical_type_id(ast, tag_type);
+
+  if (resolved_concrete_types.contains(concrete_id)) {
     return reflected_type_info{
-      .type = already_reflected{.id = id},
+      .type =
+        already_reflected{
+          .id = id,
+          .concrete_id = concrete_id,
+        },
       .dependencies = {}, //< refactorme: dependencies here make no sense
+      .dependencies_by_type = {},
+      .public_access_path_by_type = {},
     };
   }
 
@@ -4188,11 +4561,15 @@ auto meta::resolve_reflected_type(const diagnostics &log,
       .type =
         reflectable{
           .id = id,
+          .concrete_id = concrete_id,
+          .public_access_path = {},
           .annotation = annotation_from_decl(ast, enum_type->getDecl()),
           .data = enum_data::from_type(enum_type),
           .definition = resolve_definition(ast, enum_type->getDecl()),
         },
       .dependencies = {},
+      .dependencies_by_type = {},
+      .public_access_path_by_type = {},
     };
   }
 
@@ -4213,24 +4590,42 @@ auto meta::resolve_reflected_type(const diagnostics &log,
         "reached resolution after reflected_call argument validation",
         id));
     }
-
-    if (has_template_record_parent(record_decl->getDeclContext())) {
-      return std::unexpected(std::format(
-        "unsupported record template '{}' nested inside a template "
-        "record reached resolution after reflected_call argument validation",
-        id));
-    }
   }
+
+  if (has_template_record_parent(record_decl->getDeclContext())) {
+    return std::unexpected(std::format(
+      "unsupported record '{}' nested inside a template record reached "
+      "resolution after reflected_call argument validation",
+      id));
+  }
+
+  collected_dependencies dependencies =
+    recursively_collect_dependency_types(log,
+      ast,
+      resolved_concrete_types,
+      *record_type->getAsCXXRecordDecl());
 
   return reflected_type_info{
     .type = match_record_type(id, record_type),
-    .dependencies = recursively_collect_dependency_types(log,
-                      ast,
-                      resolved_types,
-                      *record_type->getAsCXXRecordDecl())
+    .dependencies = dependencies.types
       | std::views::transform(
-        std::bind_front(match_reflectable_type, std::cref(ast)))
+        [&ast, &dependencies](const clang::TagType *type) {
+          meta::reflectable reflected = match_reflectable_type(ast, type);
+
+          if ((meta::type_definition::non_public
+                & reflected.definition.definition_flags)
+            && dependencies.public_access_path_by_type.contains(
+              reflected.concrete_id)) {
+            reflected.public_access_path =
+              dependencies.public_access_path_by_type.at(reflected.concrete_id);
+          }
+
+          return reflected;
+        })
       | std::ranges::to<std::vector>(),
+    .dependencies_by_type = std::move(dependencies.dependencies_by_type),
+    .public_access_path_by_type =
+      std::move(dependencies.public_access_path_by_type),
   };
 }
 
@@ -4490,7 +4885,7 @@ std::string reflectable_head(const meta::nm_qual_type &t,
     reflectable_tag(d),
 
     // 1
-    format_nm_qual_type(t),
+    meta::format(t),
 
     // 2
     reflectable_entity(d),
@@ -4499,28 +4894,59 @@ std::string reflectable_head(const meta::nm_qual_type &t,
     format_type_name(t),
 
     // 4
-    format_nm_qual_type(t),
+    meta::format(t),
 
     // 5
     annotation_method(annotation));
 }
 
+std::string format_accessed_type(std::string root,
+  const meta::type_access_path &path) {
+  return std::ranges::fold_left(path.steps,
+    std::move(root),
+    [](std::string type, const auto &step) -> std::string {
+      return std::visit(
+        [&type]<typename Step>(const Step &access) -> std::string {
+          if constexpr (std::same_as<meta::type_access_path::field, Step>) {
+            return std::format("decltype(std::declval<{}>().{})",
+              type,
+              access.name);
+          } else if constexpr (std::same_as<meta::type_access_path::member_type,
+                                 Step>) {
+            return type.starts_with("typename ")
+              ? std::format("{}::{}", type, access.name)
+              : std::format("typename {}::{}", type, access.name);
+          } else {
+            static_assert(
+              std::same_as<meta::type_access_path::template_arg, Step>);
+            return std::format("typename _omni_template_arg<{}, {}>::type",
+              access.index,
+              type);
+          }
+        },
+        step);
+    });
+}
+
 // SFINAE specialization for inner types of forward-declared types.
 template <meta::reflectable_data Data>
 std::string inner_reflectable_head(const meta::nm_qual_type &t,
+  const meta::type_access_path &public_access_path,
   std::string_view annotation,
   const Data &d) {
-  // to support, I need to store the decl field name for
-  // `decltype(std::declval<root>().inner)
   assert(t.name && "unnamed inner structs not supported");
 
   const std::string access_root_for =
     std::format("{}<T>", enclosing_root_as_dependent(t));
+  const std::string matched_type = public_access_path.steps.empty()
+    ? std::format("typename {}",
+        format_qualified_inner_type_from_root(access_root_for, t))
+    : format_accessed_type(access_root_for, public_access_path);
 
   return std::format(
     "template <typename T>"
     "\nstruct _reflected<T, typename std::enable_if<"
-    "\n  std::is_same<T, typename {0}>::value, T>::type> {{"
+    "\n  std::is_same<T, {0}>::value, T>::type> {{"
     "\n  "
     "\n  using type = T;"
     "\n"
@@ -4539,10 +4965,10 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t,
     "\n  }}"
     "{4}",
 
-    format_qualified_inner_type_from_root(access_root_for, t),
+    matched_type,
     reflectable_entity(d),
     format_type_name(t),
-    format_nm_qual_type(t),
+    meta::format(t),
     annotation_method(annotation));
 }
 
@@ -4576,7 +5002,7 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
     index,
     reflectable_entity(d),
     format_type_name(t),
-    format_nm_qual_type(t),
+    meta::format(t),
     annotation_method(annotation));
 }
 
@@ -4700,6 +5126,7 @@ std::string render_reflectable_head(const S &r) {
         return render::impl::reflectable_head(type_name, r.type.annotation, d);
       else if constexpr (std::same_as<rc::nested_type, S>)
         return render::impl::inner_reflectable_head(type_name,
+          r.type.public_access_path,
           r.type.annotation,
           d);
       else {
@@ -4724,12 +5151,13 @@ std::string render_public_bases(
   const auto format = //
     [](const meta::nm_qual_type &t) {
       if (t.enclosing_records.empty())
-        return render::impl::format_nm_qual_type(t);
+        return meta::format(t);
       return render::impl::qualified_inner_type_from_fwd_root(t, "T");
     };
 
   return std::format("\n  using public_bases_t = std::tuple<{}>;",
     r.public_bases //
+      | std::views::transform(&meta::reflectable_reference::id)
       | std::views::transform(fetch) //
       | std::views::transform(format) //
       | std::views::join_with(",\n    "sv) //
@@ -4802,6 +5230,16 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\nstruct _wrt {{ using type = U; }};"
     "\n"
     "\n{1}"
+    "\n"
+    "\n// Keeps template-argument lookup dependent for private nested types"
+    "\n// reached through tuple/variant fields."
+    "\ntemplate <std::size_t I, typename T>"
+    "\nstruct _omni_template_arg;"
+    "\n"
+    "\ntemplate <std::size_t I, template <typename...> class Template,"
+    "\n  typename... T>"
+    "\nstruct _omni_template_arg<I, Template<T...>>:"
+    "\n    std::tuple_element<I, std::tuple<T...>> {{}};"
     "\n"
     "\n// -- forward declarable reflected types --------"
     "\n{2}"

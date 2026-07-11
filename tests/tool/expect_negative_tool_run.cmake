@@ -41,6 +41,13 @@ if(DEFINED EXPECTED_MESSAGE_2 AND NOT output MATCHES "${EXPECTED_MESSAGE_2}")
         "Expected '${TARGET}' to report '${EXPECTED_MESSAGE_2}'.\n${output}")
 endif()
 
+if(DEFINED UNEXPECTED_MESSAGE
+        AND NOT "" STREQUAL "${UNEXPECTED_MESSAGE}"
+        AND output MATCHES "${UNEXPECTED_MESSAGE}")
+    message(FATAL_ERROR
+        "Expected '${TARGET}' not to report '${UNEXPECTED_MESSAGE}'.\n${output}")
+endif()
+
 if(NOT output MATCHES "\\^")
     message(FATAL_ERROR
         "Expected '${TARGET}' to render a source caret.\n${output}")

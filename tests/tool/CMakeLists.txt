@@ -100,7 +100,11 @@ if("17" IN_LIST _supported_cpp_standards)
         )
         target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
         target_link_libraries(${_target} PRIVATE std_compat)
-        omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+        if("NO_INDEX" STREQUAL "${ARGV6}")
+            omni_reflected_target(${_target})
+        else()
+            omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+        endif()
 
         add_test(NAME "${_target}.run_omni"
             COMMAND ${CMAKE_COMMAND}
@@ -110,7 +114,50 @@ if("17" IN_LIST _supported_cpp_standards)
                 -D "EXPECTED_MESSAGE=${_expected_message}"
                 -D "DIAGNOSTIC_REGEX=${_diagnostic_regex}"
                 -D "EXPECTED_MESSAGE_2=${_expected_message_2}"
+                -D "UNEXPECTED_MESSAGE=${ARGV7}"
                 -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
+    endfunction()
+
+    function(_omnirefl_diagnostic_tool_run name source expected_message)
+        set(_target "cpp_17.diagnostic.${name}")
+        set(_expected_message_2 "${ARGV3}")
+        set(_log_level "${ARGV4}")
+        if("" STREQUAL "${_log_level}")
+            set(_log_level info)
+        endif()
+
+        add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+        )
+        target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
+        target_link_libraries(${_target} PRIVATE
+            GTest::GTest
+            gtest_main
+            std_compat)
+        omni_reflected_target(${_target} LOG_LEVEL ${_log_level})
+
+        add_test(NAME "${_target}.run_omni"
+            COMMAND ${CMAKE_COMMAND}
+                -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                -D "TARGET=${_target}.omni"
+                -D "EXPECTED_MESSAGE=${expected_message}"
+                -D "EXPECTED_MESSAGE_2=${_expected_message_2}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/expect_tool_run.cmake")
+
+        add_test(NAME "${_target}.build"
+            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+                -t "${_target}" --parallel)
+        set_tests_properties("${_target}.build" PROPERTIES
+            DEPENDS "${_target}.run_omni")
+
+        if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+            add_test(NAME "${_target}" COMMAND ${_target})
+            set_tests_properties("${_target}" PROPERTIES
+                DEPENDS "${_target}.build")
+        endif()
     endfunction()
 
     _omnirefl_negative_tool_run(
@@ -160,19 +207,23 @@ if("17" IN_LIST _supported_cpp_standards)
         "instantiated from"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
-        "reflected_dependency_unnamed_nested"
-        negative_run/reflected_dependency_unnamed_nested.cpp
-        1
-        "unnamed nested dependency types are not supported yet"
-        ":[0-9]+:[0-9]+: dependency type"
-        "reflected from")
+        "reflected_call_local_unnamed"
+        negative_run/reflected_call_local_unnamed.cpp
+        3
+        "local types are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument"
+        "unnamed types are not supported"
+        NO_INDEX
+        "ENABLE_INDEX_MODE|indexed support|index mode")
     _omnirefl_negative_tool_run(
-        "reflected_dependency_private_nested"
-        negative_run/reflected_dependency_private_nested.cpp
+        "reflected_call_unscoped_enum"
+        negative_run/reflected_call_unscoped_enum.cpp
         1
-        "non-public dependency types cannot be named by generated metadata"
-        ":[0-9]+:[0-9]+: dependency type"
-        "reflected from")
+        "enum cannot be forward-declared"
+        ":[0-9]+:[0-9]+: reflected_call argument"
+        ""
+        NO_INDEX
+        "ENABLE_INDEX_MODE|indexed support|index mode")
     _omnirefl_negative_tool_run(
         "reflected_call_explicit_specialization"
         negative_run/reflected_call_explicit_specialization.cpp
@@ -183,7 +234,7 @@ if("17" IN_LIST _supported_cpp_standards)
         "reflected_call_nested_template_parent"
         negative_run/reflected_call_nested_template_parent.cpp
         1
-        "record template nested inside a template record"
+        "records nested inside template records are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "query_and_reflected_call_arg"
@@ -192,6 +243,58 @@ if("17" IN_LIST _supported_cpp_standards)
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: (reflection query|reflected_call argument)"
         "invalid reflected_call arguments")
+    _omnirefl_negative_tool_run(
+        "reflected_call_non_template_nested_in_template"
+        negative_run/reflected_call_non_template_nested_in_template.cpp
+        1
+        "records nested inside template records are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_diagnostic_tool_run(
+        "reflected_dependency_unnamed_nested"
+        diagnostic_run/reflected_dependency_unnamed_nested.cpp
+        "unsupported reflection dependency .* skipped")
+    _omnirefl_diagnostic_tool_run(
+        "std_public_base"
+        diagnostic_run/std_public_base.cpp
+        "standard-library public base 'std::enable_shared_from_this"
+        ""
+        warning)
+    _omnirefl_diagnostic_tool_run(
+        "unsupported_public_base"
+        diagnostic_run/unsupported_public_base.cpp
+        "unsupported public base dependency .* skipped"
+        "Inherited fields from this base will not be reflected")
+    _omnirefl_diagnostic_tool_run(
+        "partial_specialization_does_not_prune_primary"
+        regressions/partial_specialization_does_not_prune_primary.cpp
+        "partial template specializations are not supported"
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "partial_specialization_base_collision"
+        regressions/partial_specialization_base_collision.cpp
+        "unsupported public base dependency"
+        "reflected types: 3")
+    _omnirefl_diagnostic_tool_run(
+        "skipped_dependency_prunes_orphans"
+        regressions/skipped_dependency_prunes_orphans.cpp
+        "partial template specializations are not supported"
+        "reflected types: 1")
+    _omnirefl_diagnostic_tool_run(
+        "private_nested_type_is_reflectable"
+        regressions/private_nested_type_is_reflectable.cpp
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "private_nested_type_through_wrappers"
+        regressions/private_nested_type_through_wrappers.cpp
+        "reflected types: 4")
+    _omnirefl_diagnostic_tool_run(
+        "public_nested_direct_input"
+        regressions/public_nested_direct_input.cpp
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "variant_named_record_is_reflected"
+        regressions/variant_named_record_is_reflected.cpp
+        "reflected types:")
 endif()
 
 list(REMOVE_DUPLICATES _supported_cpp_standards)

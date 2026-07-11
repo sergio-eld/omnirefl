@@ -8,6 +8,8 @@
 
 #include <omnirefl/reflection.hpp>
 
+#include <mpark/variant.hpp>
+
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -65,10 +67,13 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  * `Visit` must be a template callable, for example a generic lambda or a
  * struct with templated `operator()`.
  *
- * The caller is expected to pass sanitized reflected inputs: a directly
- * reflectable record/enum or `omni::type_t<T>`. `reflected_call` does not
- * unwrap compound arguments like `std::tuple<a, b>`, `std::vector<a>`, or raw
- * arrays. They can still be dependency routes when they appear as reflected
+ * The caller is responsible for passing sanitized reflected inputs: a directly
+ * reflectable record/enum or `omni::type_t<T>`. Compound arguments such as
+ * tuple, vector, variant, or raw arrays are unsupported. Arbitrary compound
+ * class templates cannot be distinguished reliably from ordinary record
+ * templates, so enforcement is best effort. For variants, use `std::visit` or
+ * `mpark::visit` to pass the active alternative, as shown in the advanced
+ * examples. Compound types can still expose dependencies through reflected
  * fields or supported protocol typedefs.
  *
  * Reflected argument examples:
@@ -677,6 +682,16 @@ struct protocol_value_type {
   int value;
 };
 
+/// protocol first_type alias dependency
+struct protocol_first_type {
+  int value;
+};
+
+/// protocol second_type alias dependency
+struct protocol_second_type {
+  int value;
+};
+
 /// protocol key_type alias dependency
 struct protocol_key_type {
   int value;
@@ -736,6 +751,8 @@ struct public_base {
 struct supported_routes: public_base {
   using type = protocol_type;
   using value_type = protocol_value_type;
+  using first_type = protocol_first_type;
+  using second_type = protocol_second_type;
   using key_type = protocol_key_type;
   using error_type = protocol_error_type;
   using value = protocol_value;
@@ -828,6 +845,22 @@ TEST(example, annotated_dependencies) {
           .protocol = "value_type",
           .type =
             render_type(omni::reflected<typename Record::type::value_type>()),
+        });
+      }
+
+      if constexpr (requires { typename Record::type::first_type; }) {
+        out.protocol_types.push_back({
+          .protocol = "first_type",
+          .type =
+            render_type(omni::reflected<typename Record::type::first_type>()),
+        });
+      }
+
+      if constexpr (requires { typename Record::type::second_type; }) {
+        out.protocol_types.push_back({
+          .protocol = "second_type",
+          .type = render_type(
+            omni::reflected<typename Record::type::second_type>()),
         });
       }
 
@@ -930,6 +963,22 @@ TEST(example, annotated_dependencies) {
         .type_name = "protocol_value_type"sv,
         .qualified_type_name = "dependency::protocol_value_type"sv,
         .annotation = "protocol value_type alias dependency"sv,
+      },
+    },
+    {
+      .protocol = "first_type"sv,
+      .type = {
+        .type_name = "protocol_first_type"sv,
+        .qualified_type_name = "dependency::protocol_first_type"sv,
+        .annotation = "protocol first_type alias dependency"sv,
+      },
+    },
+    {
+      .protocol = "second_type"sv,
+      .type = {
+        .type_name = "protocol_second_type"sv,
+        .qualified_type_name = "dependency::protocol_second_type"sv,
+        .annotation = "protocol second_type alias dependency"sv,
       },
     },
     {
@@ -1084,6 +1133,58 @@ TEST(example, cpp11_struct_visitors) {
 }
 
 /// Advanced examples ----------------------------------------------------------
+
+namespace variant_visitation {
+
+struct a {
+  int value;
+};
+
+struct b {
+  bool value;
+};
+
+struct c {
+  std::string value;
+};
+
+struct reflected_type_name {
+  template <typename T>
+  std::string_view operator()(const T &value) const {
+    return omni::reflected_call(
+      [](omni::binding auto binding) -> std::string_view {
+        return binding.type_name();
+      },
+      value);
+  }
+};
+
+template <typename... T>
+std::string_view type_name(const std::variant<T...> &value) {
+  return std::visit(reflected_type_name{}, value);
+}
+
+template <typename... T>
+std::string_view type_name(const mpark::variant<T...> &value) {
+  return mpark::visit(reflected_type_name{}, value);
+}
+
+} // namespace variant_visitation
+
+TEST(example, visit_compound_variant_inputs) {
+  using namespace std::string_view_literals;
+  using namespace variant_visitation;
+
+  using std_value = std::variant<a, b, c>;
+  EXPECT_EQ("a"sv, type_name(std_value{a{}}));
+  EXPECT_EQ("b"sv, type_name(std_value{b{}}));
+  EXPECT_EQ("c"sv, type_name(std_value{c{}}));
+
+  using mpark_value = mpark::variant<a, b, c>;
+  EXPECT_EQ("a"sv, type_name(mpark_value{a{}}));
+  EXPECT_EQ("b"sv, type_name(mpark_value{b{}}));
+  EXPECT_EQ("c"sv, type_name(mpark_value{c{}}));
+}
 
 namespace schema {
 

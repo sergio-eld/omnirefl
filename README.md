@@ -124,9 +124,10 @@ workflows.
 - Enumerator names, values, and annotations.
 - Dependency discovery through public field types, public bases, transitive
   public bases, template-record fields, CRTP bases, supported member aliases
-  (`error_type`, `key_type`, `mapped_type`, `type`, `value`, `value_type`),
-  and template-pack routes named `tuple` or `variant`. Standard-library record
-  types are not traversed as reflectable records outside those protocol routes.
+  (`error_type`, `first_type`, `key_type`, `mapped_type`, `second_type`, `type`,
+  `value`, `value_type`), and template-pack routes named `tuple` or `variant`.
+  Standard-library record types are not traversed as reflectable records
+  outside those protocol routes.
 
 ### Limits
 
@@ -136,15 +137,20 @@ workflows.
   this means an explicit trailing return type, including `-> void`.
   `constexpr auto result = reflected_call(...)` is not supported: it forces
   evaluation and breaks that instrumentation boundary.
-- `reflected_call` arguments must be direct reflectable record/enum values or
-  `omni::type<T>`. Pointers, raw arrays, fundamental values, standard-library
-  records, forward declarations without definitions, partial template
-  specializations, and compound inputs such as `std::tuple<T...>` or
-  `std::vector<T>` are rejected on a best-effort basis. Use sanitized values,
-  include definitions, dereference pointers, or wrap arrays. Some compound types
-  are still supported as dependencies when discovered through the supported
+- `reflected_call` arguments must be reflected record/enum values, for which
+  `meta_t<T>` or `binding_t<T>` is generated, or `omni::type<T>`. Pointers, raw
+  arrays, fundamental values, standard-library records, forward declarations
+  without definitions, partial template specializations, and compound inputs
+  such as `std::tuple<T...>` or `std::vector<T>` are unsupported. Detection is
+  best effort because arbitrary compound class templates cannot be reliably
+  distinguished from ordinary record templates. The caller is responsible for
+  sanitizing inputs: include definitions, dereference pointers, wrap arrays,
+  and use `std::visit` or `mpark::visit` to pass a variant's active alternative.
+  Compound types may still expose reflected dependencies through the supported
   routes listed above. Incomplete dependency records are skipped with an info
-  diagnostic instead of failing the tool run.
+  diagnostic instead of failing the tool run. Unsupported complete dependencies
+  are skipped with a warning. When the dependency is a public base, its
+  inherited fields are omitted from the generated metadata.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.
@@ -349,8 +355,9 @@ Benchmark runs are reported by the
 - (+) standard-library public bases are ignored as reflection dependencies
 - (+) template record field dependencies
 - (+) CRTP base dependencies
-- (+) supported member alias dependencies: `error_type`, `key_type`,
-  `mapped_type`, `type`, `value`, `value_type`
+- (+) supported member alias dependencies: `error_type`, `first_type`,
+  `key_type`, `mapped_type`, `second_type`, `type`, `value`, `value_type`
+- (+) `std::pair` dependencies through `first_type` and `second_type`
 - (+) supported template-pack dependencies for template names exactly `tuple`
   and `variant`
 - (+) `std::` record types are ignored outside the supported protocol routes
@@ -424,6 +431,8 @@ Benchmark runs are reported by the
   deferred visitor implementation, reliable detection is not practically
   possible without instantiating visitor bodies or adding a broader semantic
   analysis pass.
+- TODO(High): add a CLI option that treats skipped unsupported public bases as
+  errors instead of warnings.
 - TODO: consider extending reflected entity metadata for fundamental types.
   Currently canonical metadata is available for reflectable record/enum field
   types; fundamental field types are reported only through field declaration
