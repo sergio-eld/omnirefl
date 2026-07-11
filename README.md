@@ -138,11 +138,13 @@ workflows.
   evaluation and breaks that instrumentation boundary.
 - `reflected_call` arguments must be direct reflectable record/enum values or
   `omni::type<T>`. Pointers, raw arrays, fundamental values, standard-library
-  records, partial template specializations, and compound inputs such as
-  `std::tuple<T...>` or `std::vector<T>` are rejected on a best-effort basis.
-  Use sanitized values, dereference pointers, or wrap arrays. Some compound
-  types are still supported as dependencies when discovered through the
-  supported routes listed above.
+  records, forward declarations without definitions, partial template
+  specializations, and compound inputs such as `std::tuple<T...>` or
+  `std::vector<T>` are rejected on a best-effort basis. Use sanitized values,
+  include definitions, dereference pointers, or wrap arrays. Some compound types
+  are still supported as dependencies when discovered through the supported
+  routes listed above. Incomplete dependency records are skipped with an info
+  diagnostic instead of failing the tool run.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.

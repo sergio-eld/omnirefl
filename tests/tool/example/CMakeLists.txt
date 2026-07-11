@@ -4,7 +4,9 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(example LANGUAGES CXX)
 
-find_package(omnirefl CONFIG REQUIRED)
+if(NOT TARGET omni::tool)
+    find_package(omnirefl CONFIG REQUIRED)
+endif()
 
 add_executable(example main.cpp)
 set_property(TARGET example PROPERTY CXX_STANDARD 20)

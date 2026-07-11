@@ -12,8 +12,6 @@ else()
 \"${@PROJECT_NAME@_RESOURCE_DIR}\"\
 ")
 endif()
-# todo: (? handled automatically?) ensure `reflected_target.cmake` exists
-
 include("${CMAKE_CURRENT_LIST_DIR}/reflected_target.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@Targets.cmake")
 
@@ -27,4 +25,3 @@ check_required_components(@PROJECT_NAME@)
 #   generate and compile a simple program from samples.
 #   This infers configuring a CMakeLists.txt script. CMake checks should be omitted,
 #   since they have been already performed at this point.
-

@@ -80,15 +80,16 @@ foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
 endforeach()
 
 if("17" IN_LIST _supported_cpp_standards)
-    function(_omnirefl_negative_tool_run name source min_diagnostics)
+    function(_omnirefl_negative_tool_run name source expected_diagnostics)
         set(_target "cpp_17.negative.${name}")
         set(_expected_message "${ARGV3}")
         set(_diagnostic_regex "${ARGV4}")
+        set(_expected_message_2 "${ARGV5}")
         if("" STREQUAL "${_expected_message}")
-            set(_expected_message "reflection query instantiated during the tool run")
+            set(_expected_message "invalid reflection queries")
         endif()
         if("" STREQUAL "${_diagnostic_regex}")
-            set(_diagnostic_regex ":[0-9]+:[0-9]+: omni::")
+            set(_diagnostic_regex ":[0-9]+:[0-9]+: reflection query")
         endif()
 
         add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
@@ -105,9 +106,10 @@ if("17" IN_LIST _supported_cpp_standards)
             COMMAND ${CMAKE_COMMAND}
                 -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
                 -D "TARGET=${_target}.omni"
-                -D "MIN_DIAGNOSTICS=${min_diagnostics}"
+                -D "EXPECTED_DIAGNOSTICS=${expected_diagnostics}"
                 -D "EXPECTED_MESSAGE=${_expected_message}"
                 -D "DIAGNOSTIC_REGEX=${_diagnostic_regex}"
+                -D "EXPECTED_MESSAGE_2=${_expected_message_2}"
                 -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
     endfunction()
 
@@ -118,11 +120,17 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_negative_tool_run(
         "query_non_template_visitor"
         negative_run/query_non_template_visitor.cpp
-        1)
+        2
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: reflection query"
+        "call stack:")
     _omnirefl_negative_tool_run(
         "query_lambda_deduced_return"
         negative_run/query_lambda_deduced_return.cpp
-        1)
+        2
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: reflection query"
+        "call stack:")
     _omnirefl_negative_tool_run(
         "query_multiple"
         negative_run/query_multiple.cpp
@@ -131,7 +139,7 @@ if("17" IN_LIST _supported_cpp_standards)
         "reflected_call_args"
         negative_run/reflected_call_args.cpp
         4
-        "invalid reflected_call argument"
+        "invalid reflected_call arguments"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_partial_specialization"
@@ -139,6 +147,51 @@ if("17" IN_LIST _supported_cpp_standards)
         1
         "partial template specialization"
         ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_forward_declaration"
+        negative_run/reflected_call_forward_declaration.cpp
+        1
+        "forward declarations without definitions"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_template_callstack"
+        negative_run/reflected_call_template_callstack.cpp
+        1
+        "instantiated from"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_dependency_unnamed_nested"
+        negative_run/reflected_dependency_unnamed_nested.cpp
+        1
+        "unnamed nested dependency types are not supported yet"
+        ":[0-9]+:[0-9]+: dependency type"
+        "reflected from")
+    _omnirefl_negative_tool_run(
+        "reflected_dependency_private_nested"
+        negative_run/reflected_dependency_private_nested.cpp
+        1
+        "non-public dependency types cannot be named by generated metadata"
+        ":[0-9]+:[0-9]+: dependency type"
+        "reflected from")
+    _omnirefl_negative_tool_run(
+        "reflected_call_explicit_specialization"
+        negative_run/reflected_call_explicit_specialization.cpp
+        1
+        "explicit specializations are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_nested_template_parent"
+        negative_run/reflected_call_nested_template_parent.cpp
+        1
+        "record template nested inside a template record"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "query_and_reflected_call_arg"
+        negative_run/query_and_reflected_call_arg.cpp
+        2
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: (reflection query|reflected_call argument)"
+        "invalid reflected_call arguments")
 endif()
 
 list(REMOVE_DUPLICATES _supported_cpp_standards)

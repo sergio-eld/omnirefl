@@ -1,8 +1,9 @@
-#pragma once
-
-// todo: copiright notice (MIT)
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Sergei Kolesnik
 
 // Public reflection interface and generated metadata contract.
+
+#pragma once
 
 #include <tuple>
 #include <type_traits>

@@ -60,12 +60,8 @@ function(_omni_get_target_sources target_name out_sources)
     set(${out_sources} "${result}" PARENT_SCOPE)
 endfunction()
 
-# todo: implement include|exclude handling
 # -- Reflected target helper --------
-# args: INCLUDE <...> | EXCLUDE <...>
 # Generated sources are ignored by the tool.
-# Use INCLUDE or EXCLUDE to refine inputs; entries are file paths or regexes.
-# INCLUDE and EXCLUDE are mutually exclusive.
 function(omni_reflected_target target)
     _omni_checkhealth()
 
@@ -73,12 +69,8 @@ function(omni_reflected_target target)
         OMNIREFL
         "ENABLE_INDEX_MODE;NO_ANNOTATIONS;TIMINGS;_DISABLE_PREVIEW_AD_HOC"
         "LOG_LEVEL"
-        "INCLUDE;EXCLUDE"
+        ""
         ${ARGN})
-
-    if(OMNIREFL_INCLUDE AND OMNIREFL_EXCLUDE)
-        message(FATAL_ERROR "omni_reflected_target: INCLUDE and EXCLUDE are mutually exclusive")
-    endif()
 
     if(OMNIREFL_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR

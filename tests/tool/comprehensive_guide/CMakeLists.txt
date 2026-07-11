@@ -4,7 +4,9 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(comprehensive_guide LANGUAGES CXX)
 
-find_package(omnirefl CONFIG REQUIRED)
+if(NOT TARGET omni::tool)
+    find_package(omnirefl CONFIG REQUIRED)
+endif()
 
 add_executable(comprehensive_guide comprehensive_guide.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
