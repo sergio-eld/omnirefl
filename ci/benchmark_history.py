@@ -9,7 +9,13 @@ from pathlib import Path
 
 
 def benchmark_key(entry):
-    return (entry["name"], entry.get("unit", ""))
+    # Preserve the stage history across the reduce_matches -> fold_matches
+    # terminology change without rewriting retained artifact data.
+    return (
+        {"tool reduce matches": "tool fold matches"}.get(
+            entry["name"], entry["name"]),
+        entry.get("unit", ""),
+    )
 
 
 def run_libc(run):
