@@ -197,6 +197,17 @@ if("17" IN_LIST _supported_cpp_standards)
         endif()
     endfunction()
 
+    # Keep unresolved compile-time targets available without building them in
+    # package tests. Their tool-run diagnostics remain covered.
+    function(_omnirefl_disable_diagnostic_build name)
+        set(_target "cpp_17.diagnostic.${name}")
+        set_tests_properties("${_target}.build" PROPERTIES DISABLED TRUE)
+
+        if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+            set_tests_properties("${_target}" PROPERTIES DISABLED TRUE)
+        endif()
+    endfunction()
+
     _omnirefl_negative_tool_run(
         "query_out_of_scope"
         negative_run/query_out_of_scope.cpp
@@ -328,14 +339,20 @@ if("17" IN_LIST _supported_cpp_standards)
         "private_alias_shadows_public_field"
         regressions/private_alias_shadows_public_field.cpp
         "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "private_alias_shadows_public_field")
     _omnirefl_diagnostic_tool_run(
         "public_nested_in_private_parent"
         regressions/public_nested_in_private_parent.cpp
         "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "public_nested_in_private_parent")
     _omnirefl_diagnostic_tool_run(
         "private_nested_type_through_public_base"
         regressions/private_nested_type_through_public_base.cpp
         "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "private_nested_type_through_public_base")
     _omnirefl_diagnostic_tool_run(
         "public_nested_direct_input"
         regressions/public_nested_direct_input.cpp
