@@ -44,6 +44,7 @@
 #include <llvm/Option/ArgList.h>
 #include <llvm/Option/Option.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
 #pragma GCC diagnostic pop
 
@@ -132,10 +133,11 @@ namespace util {
 
 std::expected<std::ofstream, std::string> create_file_for_writing(
   const fs::path &file) {
-  if (std::error_code ec;
-    (fs::create_directories(file.parent_path(), ec), ec)) {
-    return std::unexpected(std::format("invalid parent path: {}",
-      file.parent_path().generic_string()));
+  if (const fs::path parent = file.parent_path(); !parent.empty()) {
+    if (std::error_code ec; (fs::create_directories(parent, ec), ec)) {
+      return std::unexpected(
+        std::format("invalid parent path: {}", parent.generic_string()));
+    }
   }
 
   std::ofstream out{file, std::ios::binary};
@@ -153,9 +155,7 @@ concept viewable_range_of = std::ranges::viewable_range<R>
 
 bool is_subpath(const std::filesystem::path &path,
   const std::filesystem::path &base) {
-  return std::mismatch(path.begin(), path.end(), base.begin(), base.end())
-           .second
-    == base.end();
+  return base.end() == std::ranges::mismatch(path, base).in2;
 }
 
 template <typename V, typename CharT = char>
@@ -167,8 +167,8 @@ struct format_range_adaptor {
   template <std::ranges::viewable_range R>
     requires std::ranges::input_range<std::views::all_t<R>>
   constexpr auto operator()(R &&r) const {
-    using V = std::views::all_t<R>;
-    return format_range_t<V, char>{std::views::all(std::forward<R>(r))};
+    return format_range_t<std::views::all_t<R>, char>{
+      std::views::all(std::forward<R>(r))};
   }
 
   template <std::ranges::viewable_range R>
@@ -214,16 +214,6 @@ constexpr std::array log_levels{
   std::pair{log_level::warning, "warning"sv},
   std::pair{log_level::info, "info"sv},
   std::pair{log_level::debug, "debug"sv},
-};
-
-struct source_file {
-  fs::path path;
-  std::vector<std::string> flags;
-
-  // for transforms
-  static std::string path_as_string(const source_file &sf) {
-    return sf.path.generic_string();
-  }
 };
 
 struct app_error {
@@ -273,20 +263,17 @@ namespace cli {
 // parsed cli args (in correct state)
 struct options {
   // .cpp source
-  source_file source;
+  fs::path source;
+  std::vector<std::string> flags;
 
   // output dir or generated header path
   fs::path out;
-
   fs::path resource_dir;
 
   // todo: implement parsing
   bool generate_dep_file = true;
-
   bool annotations = true;
-
   log_level level = log_level::info;
-
   bool timings = true;
 };
 
@@ -704,7 +691,7 @@ std::expected<reflected_type_info, std::string> resolve_reflected_type(
   const std::set<type_id> &resolved_concrete_types);
 
 struct source_file_context {
-  source_file sf;
+  fs::path source;
 
   std::vector<meta::reflectable> reflected{};
 
@@ -738,14 +725,6 @@ struct source_file_context {
 
 namespace matches {
 
-enum class emission_route {
-  forward_declarable,
-  nested,
-  indexed,
-};
-
-emission_route emission_route_for(const reflectable &type);
-
 source_file_context fold_out_of_scope_type_query(clang::ASTContext &ast,
   source_file_context a,
   const clang::TypeLoc &type_loc);
@@ -766,7 +745,6 @@ source_file_context fold_index_registration(const clang::ASTContext &ast,
 source_file_context finalize(const diagnostics &log, source_file_context ctx);
 
 } // namespace matches
-
 } // namespace meta
 
 namespace render {
@@ -792,7 +770,7 @@ struct reflection_context {
     std::size_t index;
   };
 
-  source_file instrumented_source_file;
+  fs::path instrumented_source;
 
   std::vector<forward_declarable> fwd_declarables;
   std::vector<nested_type> nested;
@@ -812,17 +790,16 @@ std::expected<reflection_context, std::string>
 namespace pipeline {
 
 struct compiler_invocation {
-  source_file sf;
-
+  fs::path source;
   std::shared_ptr<clang::CompilerInvocation> ci;
 };
 
 std::expected<compiler_invocation, app_error> to_compiler_invocation(
   const diagnostics &log,
-  cli::options cli_args) noexcept;
+  const cli::options &cli_args) noexcept;
 
 struct parsed_ast {
-  source_file sf;
+  fs::path source;
   std::unique_ptr<clang::ASTUnit> ast;
 
   // will be populated during ASTUnit creation
@@ -960,7 +937,7 @@ int main(int argc, char **argv) {
 
   log(log_level::debug, [&args = *args] { return format_options(args); });
   log(log_level::info, [&source = args->source] {
-    return std::format("\nrunning for file: {}\t\r", source.path.string());
+    return std::format("\nrunning for file: {}\t\r", source.string());
   });
 
   action_timer measured;
@@ -1010,7 +987,7 @@ int main(int argc, char **argv) {
     return error.code;
   };
 
-  return to_compiler_invocation(std::move(*args))
+  return to_compiler_invocation(*args)
     .and_then(to_parsed_ast)
     .and_then(fold_matches)
     .transform(with_print_matches)
@@ -1401,48 +1378,50 @@ std::vector<std::string> callstack_from(clang::ASTContext &ast,
   clang::DynTypedNode node) {
   std::vector<std::string> frames;
   std::set<std::string> emitted;
-  const auto add_frame = //
-    [&ast, &emitted, &frames](std::string_view prefix,
+  const auto frame_from = //
+    [&ast](std::string_view prefix,
       std::string_view name,
-      clang::SourceLocation loc) {
-      std::expected location = source_location_from(ast, loc);
+      clang::SourceLocation loc) -> std::optional<std::string> {
+    std::expected location = source_location_from(ast, loc);
 
-      if (!location)
-        return;
+    if (!location)
+      return std::nullopt;
 
-      const std::string frame = std::format("{} '{}' at {}",
-        prefix,
-        name,
-        diag::format_location(*location));
+    return std::format("{} '{}' at {}",
+      prefix,
+      name,
+      diag::format_location(*location));
+  };
 
-      if (emitted.emplace(frame).second)
-        frames.push_back(frame);
-    };
-
-  for (std::size_t i = 0; 32 > i; ++i) {
+  for (auto parents = ast.getParents(node); //
+    !parents.empty(); //
+    node = parents[0], parents = ast.getParents(node)) {
     if (const auto *decl = node.get<clang::FunctionDecl>()) {
-      add_frame("in function",
+      const std::optional frame = frame_from("in function",
         decl->getQualifiedNameAsString(),
         decl->getLocation());
+
+      if (frame && emitted.emplace(*frame).second)
+        frames.push_back(*frame);
 
       const clang::SourceLocation instantiation =
         decl->getPointOfInstantiation();
 
       if (instantiation.isValid()) {
-        add_frame("instantiated from",
+        const std::optional frame = frame_from("instantiated from",
           decl->getQualifiedNameAsString(),
           instantiation);
+
+        if (frame && emitted.emplace(*frame).second)
+          frames.push_back(*frame);
       }
     } else if (const auto *lambda = node.get<clang::LambdaExpr>()) {
-      add_frame("in lambda", "<lambda>"sv, lambda->getBeginLoc());
+      const std::optional frame =
+        frame_from("in lambda", "<lambda>"sv, lambda->getBeginLoc());
+
+      if (frame && emitted.emplace(*frame).second)
+        frames.push_back(*frame);
     }
-
-    const auto parents = ast.getParents(node);
-
-    if (parents.empty())
-      break;
-
-    node = parents[0];
   }
 
   return frames;
@@ -1451,7 +1430,7 @@ std::vector<std::string> callstack_from(clang::ASTContext &ast,
 meta::source_file_context append_invalid_reflection_query(
   meta::source_file_context a,
   clang::ASTContext &ast,
-  std::string query,
+  std::string_view query,
   clang::SourceRange context_range,
   clang::SourceRange query_range,
   clang::DynTypedNode query_node,
@@ -1686,42 +1665,45 @@ std::expected<reflected_call_arg, std::variant<diag::source_error, std::string>>
   };
 }
 
-} // namespace meta::matches::impl
-
-namespace meta::matches {
-
-emission_route emission_route_for(const reflectable &type) {
+bool is_forward_declarable(const meta::reflectable &type) {
   const nm_qual_type &name = type.definition.type_name;
   const auto flags = type.definition.definition_flags;
 
-  if (!name.name || type_definition::local & flags)
-    return emission_route::indexed;
-
-  if (!name.enclosing_records.empty())
-    return name.enclosing_records.front().empty()
-        || (type_definition::non_public & flags
-          && type.public_access_path.steps.empty()) //
-      ? emission_route::indexed
-      : emission_route::nested;
-
-  if (type_definition::non_public & flags)
-    return emission_route::indexed;
+  if (!name.name //
+    || !name.enclosing_records.empty() //
+    || type_definition::local & flags //
+    || type_definition::non_public & flags) {
+    return false;
+  }
 
   return std::visit(
     []<reflectable_data Data>(const Data &data) {
       if constexpr (std::same_as<record_data, Data>) {
-        return emission_route::forward_declarable;
+        return true;
       } else {
         static_assert(std::same_as<enum_data, Data>);
-        return data.is_scoped || data.is_fixed //
-          ? emission_route::forward_declarable
-          : emission_route::indexed;
+        return data.is_scoped || data.is_fixed;
       }
     },
     type.data);
 }
 
-} // namespace meta::matches
+bool is_nested_declarable(const meta::reflectable &type) {
+  const nm_qual_type &name = type.definition.type_name;
+  const auto flags = type.definition.definition_flags;
+
+  if (!name.name //
+    || name.enclosing_records.empty() //
+    || name.enclosing_records.front().empty() //
+    || type_definition::local & flags) {
+    return false;
+  }
+
+  return !(type_definition::non_public & flags)
+    || !type.public_access_path.steps.empty();
+}
+
+} // namespace meta::matches::impl
 
 meta::source_file_context meta::matches::fold_out_of_scope_type_query(
   clang::ASTContext &ast,
@@ -1885,7 +1867,8 @@ meta::source_file_context meta::matches::fold_reflected_call(
 
     a.direct_concrete_types.emplace(concrete_id);
 
-    if (emission_route::indexed == emission_route_for(*resolved_type)) {
+    if (!impl::is_forward_declarable(*resolved_type)
+      && !impl::is_nested_declarable(*resolved_type)) {
       const auto [reason, suggestion] = std::invoke([resolved_type] {
         const meta::type_definition &definition = resolved_type->definition;
 
@@ -2104,7 +2087,8 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
     const std::optional record_reason = unsupported_record_reason(type);
     const std::optional reason = //
       record_reason.or_else([&type]() -> std::optional<std::string_view> {
-        if (emission_route::indexed != emission_route_for(type)) {
+        if (impl::is_forward_declarable(type)
+          || impl::is_nested_declarable(type)) {
           return std::nullopt;
         }
 
@@ -2461,11 +2445,11 @@ std::expected<fs::path, std::string> write_dependencies_file(
 
 } // namespace render
 
-app_error processing_error(const source_file &sf, std::string error) {
+app_error processing_error(const fs::path &source, std::string error) {
   return {
     .code = -1,
     .message = std::format("\nFailed to process '{}' with error: {}",
-      sf.path.string(),
+      source.string(),
       std::move(error)),
   };
 }
@@ -2573,7 +2557,7 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     "\nGenerates a .hpp header containing reflection metadata for a given .cpp file."
     "\nThe header must be implicitly included at the start of the translation unit."
     "\n"
-    "\nUsage: omnirefl -o <reflection.hpp> --source <source.cpp> -- <compiler command...>"
+    "\nUsage: omnirefl -o <reflection.hpp> -c <source.cpp> -- <compiler command...>"
     "\n  WARNING: Uses compile time counters via friend injection, which is not guaranteed"
     "\n           by the C++ Standard to be consistent between compiler implementations.",
   };
@@ -2585,12 +2569,7 @@ std::expected<cli::options, app_error> cli::parse(int argc,
       ->check(CLI::ExistingDirectory);
 
   CLI::Option *const source = //
-    app
-      // refactorme: replace `--source` with repurposed `-c <source.cpp>`,
-      // matching `-o` as a tool-level compiler-like flag. Also sanitize the
-      // compiler args after `--`: if they contain `-c <other.cpp>`, warn that
-      // the tool source and compiler source disagree.
-      .add_option("-s,--source", ".cpp file path to run the tool on.")
+    app.add_option("-c", ".cpp file path to run the tool on.")
       ->type_name("FILE")
       ->check(CLI::ExistingFile)
       ->required();
@@ -2649,6 +2628,32 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     });
   }
 
+  const fs::path parsed_source =
+    fs::absolute(source->as<fs::path>()).lexically_normal();
+
+  const std::vector compiler_sources = flags //
+    | std::views::adjacent<2> //
+    | std::views::filter([](const auto &args) {
+        return "-c"sv == std::get<0>(args) || "/c"sv == std::get<0>(args);
+      })
+    | std::views::transform([](const auto &args) {
+        return fs::absolute(std::get<1>(args)).lexically_normal();
+      })
+    | std::ranges::to<std::vector>();
+
+  const auto conflicting_source = std::ranges::find_if(compiler_sources,
+    [&parsed_source](const fs::path &compiler_source) {
+      return parsed_source != compiler_source;
+    });
+
+  if (compiler_sources.end() != conflicting_source) {
+    std::cerr << std::format(
+      "warning: compiler source after `--` differs from omnirefl `-c`; "
+      "ignoring '{}', using '{}'\n",
+      conflicting_source->generic_string(),
+      parsed_source.generic_string());
+  }
+
   const std::string level = cli_log_level->as<std::string>();
   const std::optional parsed_level = parse_log_level(level);
   if (!parsed_level) {
@@ -2666,11 +2671,8 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     return std::unexpected(std::move(parsed_resource_dir).error());
 
   return options{
-    .source =
-      {
-        .path = fs::absolute(source->as<fs::path>()).lexically_normal(),
-        .flags = std::move(flags),
-      },
+    .source = parsed_source,
+    .flags = std::move(flags),
     .out = out->as<fs::path>(),
     .resource_dir = std::move(*parsed_resource_dir),
     .annotations = !no_annotations->as<bool>(),
@@ -2795,11 +2797,37 @@ std::vector<std::string> filter_ast_related_args(
 
 // refactorme: this is an ugly shite
 auto pipeline::to_compiler_invocation(const diagnostics &log,
-  cli::options cli_args) noexcept
+  const cli::options &cli_args) noexcept
   -> std::expected<compiler_invocation, app_error> {
   namespace options = clang::options;
   const fs::path &resource_dir = cli_args.resource_dir;
-  source_file sf = cli_args.source;
+  const fs::path &source = cli_args.source;
+  const std::vector<std::string> &raw_flags = cli_args.flags;
+
+  // The tool's -c supplies the source; compiler action/output arguments do not
+  // affect frontend AST construction.
+  static constexpr std::array k_ignored_options_with_values{
+    "-c"sv,
+    "/c"sv,
+    "-o"sv,
+    "/Fo"sv,
+    "/Fo:"sv,
+  };
+
+  const std::vector<std::string> flags = raw_flags //
+    | std::views::enumerate //
+    | std::views::filter([&raw_flags](const auto &indexed) {
+        const auto &[index, arg] = indexed;
+        const bool ignored_value = 0 != index
+          && std::ranges::contains(k_ignored_options_with_values,
+            std::string_view{raw_flags[index - 1]});
+
+        return !ignored_value
+          && !std::ranges::contains(k_ignored_options_with_values,
+            std::string_view{arg})
+          && !arg.starts_with("/Fo"sv);
+      })
+    | std::views::values | std::ranges::to<std::vector>();
 
   const auto to_vector_of_raw_pointers =
     [](const std::vector<std::string> &v) -> std::vector<const char *> {
@@ -2808,16 +2836,14 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       | std::ranges::to<std::vector>();
   };
 
-  const auto &[source, flags] = sf;
-
-  log(log_level::debug, [&flags] {
+  log(log_level::debug, [&raw_flags] {
     return std::format("\ninput flags:\n{}",
-      flags | std::views::join_with("\n"sv) | util::format_range);
+      raw_flags | std::views::join_with("\n"sv) | util::format_range);
   });
 
   const std::expected normalized_args = parse_driver_args(flags);
   if (!normalized_args)
-    return std::unexpected(processing_error(sf, normalized_args.error()));
+    return std::unexpected(processing_error(source, normalized_args.error()));
 
   const bool driver_mode_cl = std::invoke([&normalized_args] {
     if (const auto *dm =
@@ -2993,6 +3019,8 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
             | std::views::filter([](std::string_view s) { return !s.empty(); }),
           std::back_inserter(out));
 
+        out.emplace_back(source.generic_string());
+
         // force AST-only and tool resource-dir (last-wins)
         out.emplace_back("-fsyntax-only");
         out.emplace_back(
@@ -3053,7 +3081,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       llvm::ArrayRef(to_vector_of_raw_pointers(cc1_driver_args))));
 
   if (!compilation || compilation->getJobs().empty()) {
-    return std::unexpected(processing_error(sf,
+    return std::unexpected(processing_error(source,
       std::format("Failed to build compilatioin for: {}.\n",
         source.generic_string())));
   }
@@ -3074,7 +3102,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         compilation_args,
         *log.clang_engine)) {
     return std::unexpected(
-      processing_error(sf, "Failed to create CompilerInvocation."));
+      processing_error(source, "Failed to create CompilerInvocation."));
   }
 
   {
@@ -3184,7 +3212,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   clang_invocation->getDiagnosticOpts().IgnoreWarnings = 1;
 
   return compiler_invocation{
-    .sf = std::move(sf),
+    .source = source,
     .ci = std::move(clang_invocation),
   };
 }
@@ -3216,10 +3244,10 @@ std::expected<pipeline::parsed_ast, app_error>
 
   if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
     return std::unexpected(
-      processing_error(ci.sf, "Failed to build AST Unit."));
+      processing_error(ci.source, "Failed to build AST Unit."));
 
   return parsed_ast{
-    .sf = std::move(ci.sf),
+    .source = std::move(ci.source),
     .ast = std::move(ast),
 
     .includes_deps = deps_collector.getDependencies()
@@ -3234,7 +3262,7 @@ std::expected<meta::source_file_context, app_error>
   return meta::matches::finalize(log,
     ast::fold_matches(*parsed.ast,
       meta::source_file_context{
-        .sf = std::move(parsed.sf),
+        .source = std::move(parsed.source),
         .file_dependencies = std::move(parsed.includes_deps),
       },
 
@@ -3301,7 +3329,7 @@ std::expected<render::reflection_context, app_error>
     meta::source_file_context ctx) {
   using render_context = render::reflection_context;
 
-  const source_file source = ctx.sf;
+  const fs::path &source = ctx.source;
 
   std::vector<std::string> input_errors;
 
@@ -3355,8 +3383,7 @@ std::expected<render::reflection_context, app_error>
 
     const bool as_dependency = ctx.resolved_as_dependency.contains(t.id);
 
-    switch (meta::matches::emission_route_for(t)) {
-    case meta::matches::emission_route::forward_declarable:
+    if (meta::matches::impl::is_forward_declarable(t)) {
       if (index) {
         log(log_level::debug, [index, id = t.id] {
           return std::format(
@@ -3372,9 +3399,7 @@ std::expected<render::reflection_context, app_error>
         .index = index,
         .as_dependent = as_dependency,
       });
-
-      break;
-    case meta::matches::emission_route::nested:
+    } else if (meta::matches::impl::is_nested_declarable(t)) {
       if (index) {
         log(log_level::debug, [index, id = t.id] {
           return std::format(
@@ -3390,9 +3415,7 @@ std::expected<render::reflection_context, app_error>
         .index = index,
         .as_dependent = as_dependency,
       });
-
-      break;
-    case meta::matches::emission_route::indexed:
+    } else {
       if (!index) {
         return std::unexpected(processing_error(source,
           std::format(
@@ -3405,8 +3428,6 @@ std::expected<render::reflection_context, app_error>
         .type = std::move(t),
         .index = *index,
       });
-
-      break;
     }
   }
 
@@ -3561,7 +3582,7 @@ std::expected<render::reflection_context, app_error>
     | std::ranges::to<std::vector>();
 
   return render::reflection_context{
-    .instrumented_source_file = std::move(ctx.sf),
+    .instrumented_source = std::move(ctx.source),
 
     .fwd_declarables = std::move(fwd),
     .nested = std::move(nested),
@@ -3580,7 +3601,7 @@ std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
   // Avoid filesystem exceptions when the output path does not exist yet.
   if (std::error_code ec; fs::is_directory(out, ec)) {
     out /= std::format("{}_omni_reflection_header.h",
-      ctx.instrumented_source_file.path.string());
+      ctx.instrumented_source.string());
   }
 
   log(log_level::info, [&out] {
@@ -3588,7 +3609,7 @@ std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
       out.generic_string());
   });
 
-  const source_file sf = ctx.instrumented_source_file;
+  const fs::path source = ctx.instrumented_source;
   const std::size_t forward_declarable_count = ctx.fwd_declarables.size();
   const std::size_t nested_type_count = ctx.nested.size();
   const std::size_t indexed_type_count = ctx.indexed.size();
@@ -3606,7 +3627,7 @@ std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
       return render::write_dependencies_file(out, ctx.file_dependencies)
         .transform([=](fs::path deps) {
           return run_report{
-            .instrumented_source = sf.path,
+            .instrumented_source = source,
             .reflection_header = out,
             .dependencies = std::move(deps),
             .reflected_type_count = reflected_type_count,
@@ -3617,8 +3638,8 @@ std::expected<pipeline::run_report, app_error> pipeline::emit_outputs(
           };
         });
     })
-    .transform_error([&sf](std::string error) {
-      return processing_error(sf, std::move(error));
+    .transform_error([&source](std::string error) {
+      return processing_error(source, std::move(error));
     });
 }
 
@@ -3722,7 +3743,7 @@ std::string format_options(const cli::options &args) {
     "\nsource:{}"
     "\nout:{}"
     "\nresource_dir:{}",
-    source_file::path_as_string(args.source),
+    args.source.generic_string(),
     args.out.generic_string(),
     args.resource_dir.generic_string());
 }
@@ -3732,7 +3753,7 @@ std::string format_matches(const meta::source_file_context &ctx) {
     "\nprocessed source: {}"
     "\n\n-- types --------\n{}"
     "\n\n-- includes --------\n{}",
-    source_file::path_as_string(ctx.sf),
+    ctx.source.generic_string(),
 
     ctx.reflected //
       | std::views::transform(std::bind_front(format_reflectable,
@@ -4633,31 +4654,7 @@ namespace render::impl {
 
 std::string escaped_string_literal_content(std::string_view s) {
   std::string out;
-  for (const unsigned char c : s) {
-    switch (c) {
-    case '\n':
-      out += "\\n";
-      break;
-    case '\r':
-      out += "\\r";
-      break;
-    case '\t':
-      out += "\\t";
-      break;
-    case '\\':
-      out += "\\\\";
-      break;
-    case '"':
-      out += "\\\"";
-      break;
-    default:
-      if (0x20 <= c && 0x7f > c)
-        out += static_cast<char>(c);
-      else
-        out += std::format("\\{:03o}", static_cast<unsigned int>(c));
-      break;
-    }
-  }
+  llvm::raw_string_ostream{out}.write_escaped(s);
   return out;
 }
 

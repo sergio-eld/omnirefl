@@ -20,8 +20,9 @@ int main() {
 
   std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
 
-  const auto write =
-    [](omni::binding auto b) -> void {
+  const auto write = [](omni::binding auto b)
+    // Generic lambdas used as reflected visitors must spell the return type.
+    -> void {
       std::apply(
         [](omni::field_binding auto... field) -> void {
           const auto set = [](omni::field_binding auto field) -> void {

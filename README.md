@@ -28,18 +28,30 @@ set_property(TARGET example PROPERTY CXX_STANDARD 20)
 omni_reflected_target(example)
 ```
 
+Instrumentation can also be triggered explicitly through `<target>.omni`
+(`example.omni` here):
+
+```bash
+cmake --build build -t example.omni
+```
+
 The same target shape is used by
 [tests/tool/example/CMakeLists.txt](tests/tool/example/CMakeLists.txt).
 
-An equivalent direct tool invocation is:
+`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
+require CMake. An equivalent direct invocation is:
 
 ```bash
 # Generate the reflection header, then force-include it when compiling the same
 # translation unit.
 flags="-std=c++20 -I/path/to/omnirefl/include"
-omnirefl -o example.omnirefl.hpp --source main.cpp -- c++ $flags -c main.cpp -o example.o
+omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
 c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
 ```
+
+`-c` selects the instrumented source; compiler output options after `--` are
+ignored. When a compilation database is available, `ccdb_query` can select its
+matching compiler command for use after `--`.
 
 ```cpp
 #include <omnirefl/reflection.hpp>
@@ -64,8 +76,7 @@ int main() {
 
   std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
 
-  const auto write =
-    [](omni::binding auto b)
+  const auto write = [](omni::binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
       std::apply(
@@ -92,40 +103,50 @@ int main() {
 ```
 
 The snippet above is available as
-[tests/tool/example/main.cpp](tests/tool/example/main.cpp). It is part of
-the packaged test/example source tree, but it is not a CTest test.
+[tests/tool/example/main.cpp](tests/tool/example/main.cpp) and is included in
+the package.
 See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 for the full executable guide. It targets limited C++20 support: omnirefl
 concepts are used, but `<concepts>` and C++20 ranges algorithms are avoided.
 
 ## Seamless Experience
 
-- CMake integration via `omni_reflected_target(...)`.
-- Packaged runnable example and guide sources.
-- Generated reflection headers are force-included for the reflected translation
-  unit.
-- Dependency files are emitted for generated headers, so build tools rerun
-  omnirefl when the source file or included reflection-relevant headers change
-  (tested with Ninja only as of this writing).
-- No user macros and no reliance on compiler-specific UB for the supported
-  release path.
+1. Add `omni_reflected_target(...)` for the CMake target.
+2. Use `omni::reflected_call(...)` where reflection is needed.
+
+Everything else remains regular C++. Omnirefl discovers the argument types and
+supported dependencies, force-includes the generated header, and emits
+compiler-style dependency files (`.d`) so Ninja reruns it when the source or
+any included header changes (tested with Ninja only as of this writing). No
+macros, compiler-specific UB, or manual regeneration are required.
 
 ## Supported Scope
 
-Omnirefl focuses on POD-like records and enums for serialization-style
-workflows.
+Omnirefl focuses on POD-like records and enums.
 
-- C++11 through C++23, with the most ergonomic visitor syntax in C++20.
+- C++11 through C++23; C++20 concepts provide the most ergonomic interface.
 - Globally accessible named records and enums.
 - Nested named records/enums of supported globally accessible parents.
 - Primary record templates.
-- Public data fields: names, type names, annotations, read access, and write
-  access for mutable fields.
+- Public data fields: names, type names, annotations, value retrieval, mutation
+  of writable fields, and `is_const()`/`is_mutable()` traits.
 - Enumerator names, values, and annotations.
-- Dependency discovery through public field types, public bases, transitive
-  public bases, template-record fields, CRTP bases, supported member aliases
-  (`error_type`, `first_type`, `key_type`, `mapped_type`, `second_type`, `type`,
-  `value`, `value_type`), and template-pack routes named `tuple` or `variant`.
+- Dependency discovery through:
+  - public field types
+  - public bases and transitive public bases
+  - template-record fields
+  - CRTP bases
+  - supported member aliases:
+    - `error_type`
+    - `first_type`
+    - `key_type`
+    - `mapped_type`
+    - `second_type`
+    - `type`
+    - `value`
+    - `value_type`
+  - template-pack routes named `tuple` or `variant`
+
   Standard-library record types are not traversed as reflectable records
   outside those protocol routes.
 
@@ -137,20 +158,10 @@ workflows.
   this means an explicit trailing return type, including `-> void`.
   `constexpr auto result = reflected_call(...)` is not supported: it forces
   evaluation and breaks that instrumentation boundary.
-- `reflected_call` arguments must be reflected record/enum values, for which
-  `meta_t<T>` or `binding_t<T>` is generated, or `omni::type<T>`. Pointers, raw
-  arrays, fundamental values, standard-library records, forward declarations
-  without definitions, partial template specializations, and compound inputs
-  such as `std::tuple<T...>` or `std::vector<T>` are unsupported. Detection is
-  best effort because arbitrary compound class templates cannot be reliably
-  distinguished from ordinary record templates. The caller is responsible for
-  sanitizing inputs: include definitions, dereference pointers, wrap arrays,
-  and use `std::visit` or `mpark::visit` to pass a variant's active alternative.
-  Compound types may still expose reflected dependencies through the supported
-  routes listed above. Incomplete dependency records are skipped with an info
-  diagnostic instead of failing the tool run. Unsupported complete dependencies
-  are skipped with a warning. When the dependency is a public base, its
-  inherited fields are omitted from the generated metadata.
+- `reflected_call` accepts reflected records and enums only. The caller must
+  sanitize pointers, arrays, and compound inputs before the call; use
+  `std::visit` or `mpark::visit` for variants. Compound types remain valid
+  dependency routes as listed above. Invalid-input detection is best effort.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.
@@ -167,7 +178,12 @@ workflows.
 
 Linters and language servers such as clangd can report temporary "ghost"
 diagnostics between edits/tool runs, because reflected `.cpp` files depend on
-the generated header that is force-included during normal compilation.
+the generated header that is force-included during normal compilation. Build
+the affected `.cpp` file normally, or refresh its metadata explicitly through
+the `<target>.omni` CMake target.
+
+During AST creation, invalid C++ in the reflected translation unit is reported
+as Clang compilation errors. Compiler warnings are not reported by omnirefl.
 
 ## Install
 
@@ -178,8 +194,10 @@ Install options:
   Linux packages are published as `.deb` and `.tar.gz`; Windows packages are
   published as `.zip`.
 - Latest CI artifact:
-  open the latest successful `CI` run on `master` and use the artifacts
-  produced by `Build package / linux-x86_64` or
+  open the latest successful
+  [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
+  run on `master` and use the artifacts produced by
+  `Build package / linux-x86_64` or
   `Build package / windows-x86_64`. GitHub Actions artifacts do not provide a
   stable direct "latest artifact" download URL; look for
   `packages-linux-x86_64-musl-<short-sha>` or
@@ -187,8 +205,7 @@ Install options:
 - Build locally using the prepared Docker image; see
   [Build and Develop Locally](#build-and-develop-locally).
 
-The examples below assume a standard install prefix such as `/usr/local`. For
-an unpacked package, use the unpacked directory as `prefix`.
+The examples below assume a standard install under `/usr/local`.
 
 ## Packaged Tests and Examples
 
@@ -197,20 +214,19 @@ under `share/omnirefl/tests`. Copy them into a writable directory before
 configuring:
 
 ```bash
-prefix=/usr/local
+prefix=/usr/local # Or the unpacked install root.
 cp -R "$prefix/share/omnirefl/tests" ./omnirefl-tests
 
 mkdir build && cd build
 
 cmake ../omnirefl-tests -GNinja
 
-ctest . --output-on-failure
+ctest --output-on-failure
 ```
 
 The copied tree also contains the runnable example and comprehensive guide
-sources. For an unpacked package, set `prefix` to the unpacked install root.
-The tests fetch their own test-only dependencies during CMake configuration. If
-CMake does not find a non-standard install, pass
+sources. The tests fetch their own test-only dependencies during CMake
+configuration. If CMake cannot find omnirefl in a non-standard install, pass
 `-Domnirefl_DIR="$prefix/lib/cmake/omnirefl"`; on Windows this is usually needed
 for an unpacked `.zip` package.
 
@@ -271,7 +287,7 @@ Current package/install coverage is reported by the
 - (+) `Linux:Ubuntu 20.04 Clang` covered by CI package matrix
 - (+) `Linux:Ubuntu 22.04 GCC` covered by CI package matrix
 - (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu MinGW GCC` covered by CI package matrix
+- (+) `Linux:Ubuntu 18.04/20.04/22.04 MinGW GCC` covered by CI package matrix
   (build-only for Windows test binaries)
 - (+) `Windows:MSVC` covered by CI package matrix
 - (+) `Windows:clang-cl` covered by CI package matrix
@@ -290,33 +306,36 @@ Benchmark runs are reported by the
 - Target: `linux-x86_64`
 - Environment: Ubuntu 22.04 GCC package-test image
 - Baseline target: `benchmark.baseline`
-- Raw history artifact: `benchmark-history-linux-x86_64`
+- Raw history artifact: `benchmark-history-linux-x86_64-gcc`
 - Reported baseline: average of the last 5 stored runs
 - Tracked metrics:
   - reflection/tool wall time for `benchmark.baseline.omni`
   - build wall time for `benchmark.baseline`
   - reflection/tool wall time as percentage of build wall time
+- Regression warnings require an increase above 20% for reflection wall time
+  or the tool/build percentage; wall time also requires at least a 500 ms
+  increase. Internal stage and build timings are retained as diagnostic detail.
 - TODO: when the repository goes public, render or link the benchmark history
   directly from the README instead of requiring artifact lookup.
 
-# Release Scope
+## Release Scope
 
-## Minimal Release
+### Minimal Release
 
-### Types
+#### Types
 
 - (+) named globally accessible records
 - (+) named globally accessible enums
 - (+) nested named records/enums of supported globally accessible parents
 - (+) primary record templates, including type, value, and template-template
   parameters
-- (+) observed concrete instantiations of supported primary record templates
 
-### Records
+#### Records
 
 - (+) public data fields
 - (+) read public fields
-- (+) write public non-const fields
+- (+) write public writable fields, including mutable fields through const
+  bindings
 - (+) inherited public fields
 - (+) transitive public base fields
 - (+) public CRTP base fields through supported primary templates
@@ -331,13 +350,14 @@ Benchmark runs are reported by the
 - (+) field `qualified_type_name()` preserves source declaration spelling when
   available
 - (+) canonical metadata is available when the field type itself is reflectable
+- (+) field `is_const()` and `is_mutable()` traits
 - (+) field count / iteration
 - (+) field index is local to the declaring record, not the flattened inherited
   field tuple
 - (+) record `type_name()` without namespaces, including enclosing records
 - (+) record `qualified_type_name()` with namespaces and enclosing records
 
-### Enums
+#### Enums
 
 - (+) enumerator names
 - (+) enumerator values
@@ -345,9 +365,9 @@ Benchmark runs are reported by the
 - (+) fixed-underlying enums
 - (+) enum `type_name()` without namespaces
 - (+) enum `qualified_type_name()` with namespaces
-- (?) plain unscoped enum field dependencies
+- (-) plain unscoped enum field dependencies cannot be forward-declared
 
-### Dependency Routes
+#### Dependency Routes
 
 - (+) public field type dependencies
 - (+) public base type dependencies
@@ -363,7 +383,7 @@ Benchmark runs are reported by the
 - (+) `std::` record types are ignored outside the supported protocol routes
 - (+) recursive dependency walk through supported routes
 
-### Serialization Completeness
+#### Serialization Completeness
 
 - (+) reflect record field names
 - (+) reflect record field types
@@ -380,7 +400,7 @@ Benchmark runs are reported by the
 - (+) recurse into reflected record fields
 - (+) recurse through supported dependency routes
 
-### Frontend/API
+#### Frontend/API
 
 - (+) `reflected_call` as the supported reflection instrumentation interface
 - (+) `meta_t`, `binding_t`, `field_meta_t`, and `field_binding_t` public
@@ -388,29 +408,26 @@ Benchmark runs are reported by the
 - (+) C++20 `meta`, `binding`, `field_meta`, and `field_binding` concepts
 - (+) best-effort tool diagnostics for invalid `reflected_call` arguments
   including pointers, arrays, fundamentals, standard-library records, and
-  partial template specializations
+  explicit or partial template specializations
 - (+) best-effort tool diagnostics for reflection query instantiation outside a
   reflected scope
 
-### Build/Release
+#### Build/Release
 
 - (+) generated-header reflection
 - (+) CMake integration
-- (+) packaged runnable example
-- (+) packaged executable comprehensive guide
+- (+) packaged runnable example and comprehensive guide sources
 - (+) annotations enabled by default
 - (+) annotations can be disabled with `--no-annotations` or CMake
   `NO_ANNOTATIONS`
-- (+) `omnirefl -o <reflection.hpp> --source <source.cpp> -- <compiler command...>`
+- (+) `omnirefl -o <reflection.hpp> -c <source.cpp> -- <compiler command...>`
 - (+) helper `ccdb_query <compile_commands.json> <source.cpp> [output-contains]`
   for CMake integration
-- (+) Linux package/install matrix
-- (+) Windows package/install test
-- (+) GCC and Clang package/install tests
+- (+) Linux and Windows package/install matrices
 
-## Planned After Minimal Release
+### Planned After Minimal Release
 
-### Types
+#### Types
 
 - (-) nested records inside record template parents
 - (-) explicit record template specializations
@@ -418,14 +435,14 @@ Benchmark runs are reported by the
 - (-) specialization-specific record template metadata
 - (-) specialization-specific CRTP base metadata
 
-### Metadata
+#### Metadata
 
 - (-) OpenAPI-like schema table generation from reflected structs/enums using
   type, field, enum, and annotation metadata
 - (-) specialization-aware reflected type names when/if explicit or partial
   specializations are implemented
 
-### Frontend/API
+#### Frontend/API
 
 - TODO(High): forbid `reflected_call` inside a reflected scope. With the current
   deferred visitor implementation, reliable detection is not practically
@@ -447,7 +464,7 @@ Benchmark runs are reported by the
 - (-) split compiler-driver/compile-db args to cc1 mapping into a separate
   composable tool
 
-## Might Be Considered Later
+### Might Be Considered Later
 
 - (-) unnamed non-local types addressable from namespace scope via
   `decltype(symbol)`
@@ -462,7 +479,7 @@ input `.cpp`, the generated header if one was produced, and a backtrace.
 ```bash
 # Enable core dumps for the current shell, then rerun the exact failing command.
 ulimit -c unlimited
-omnirefl -o out.omnirefl.hpp --source source.cpp -- <compiler command...>
+omnirefl -o out.omnirefl.hpp -c source.cpp -- <compiler command...>
 
 # If your system writes core files into the working directory:
 gdb --batch -ex "thread apply all bt full" ./omnirefl ./core > omnirefl.bt.txt

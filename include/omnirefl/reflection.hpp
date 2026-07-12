@@ -75,6 +75,10 @@ template <typename T>
 constexpr type_t<T> type{};
 #endif
 
+// todo(high): introduce record/enum type aliases for meta_t and binding_t so
+// visitors do not spell reflected_entity. First make OMNI_TOOL_RUN infer enum
+// versus record from T; its current record default would break enum-specific
+// alias overloads before generated metadata exists.
 #if defined(OMNI_TOOL_RUN)
 template <typename T, reflected_entity = reflected_entity::record>
 struct meta_t;

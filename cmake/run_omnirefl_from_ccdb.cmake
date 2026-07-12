@@ -73,7 +73,7 @@ set(_omnirefl_args
     --resource-dir "${RESOURCE_DIR}"
     --log-level "${LOG_LEVEL}"
     -o "${OUT}"
-    --source "${SOURCE}")
+    -c "${SOURCE}")
 
 if(NO_ANNOTATIONS)
     list(APPEND _omnirefl_args --no-annotations)

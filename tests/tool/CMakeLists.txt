@@ -10,6 +10,43 @@ if (NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
 
+add_test(NAME omnirefl.cli.help COMMAND $<TARGET_FILE:omni::tool> --help)
+set_tests_properties(omnirefl.cli.help PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "Usage: omnirefl -o <reflection.hpp> -c <source.cpp>")
+
+set(_omnirefl_cli_compile_source -c)
+if(MSVC)
+    set(_omnirefl_cli_compile_source /c)
+endif()
+
+add_test(NAME omnirefl.cli.conflicting_compile_source
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o conflicting-source.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -- "${CMAKE_CXX_COMPILER}"
+        "${_omnirefl_cli_compile_source}"
+        "${CMAKE_CURRENT_LIST_DIR}/cli_other_source.cpp")
+set_tests_properties(omnirefl.cli.conflicting_compile_source PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "warning: compiler source after `--` differs from omnirefl `-c`"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_test(NAME omnirefl.cli.relative_output
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o relative-output.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -- "${CMAKE_CXX_COMPILER}"
+        "${_omnirefl_cli_compile_source}"
+        "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -o ignored-object-file)
+set_tests_properties(omnirefl.cli.relative_output PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
 # -- Dependencies --------
 include(FetchContent)
 
