@@ -1,3 +1,8 @@
+# This patch modifies LLVM libc++ source and remains under the upstream LLVM
+# project license.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# See https://llvm.org/LICENSE.txt.
+
 diff --git a/libcxx/include/__config_site.in b/libcxx/include/__config_site.in
 index 4b90a9dc3..7a439a31e 100644
 --- a/libcxx/include/__config_site.in

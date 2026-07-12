@@ -167,6 +167,137 @@ if(ENABLE_PACKAGE)
     message(STATUS "Generating ${PROJECT_NAME} package")
     include(GNUInstallDirs)
 
+    set(_package_license_dir
+        "${CMAKE_CURRENT_BINARY_DIR}/package-licenses/${LLVM_PACKAGE_VERSION}")
+    file(MAKE_DIRECTORY "${_package_license_dir}")
+
+    function(_omnirefl_package_license name url)
+        set(_license_path "${_package_license_dir}/${name}")
+        file(DOWNLOAD
+            "${url}"
+            "${_license_path}"
+            STATUS _status
+            TIMEOUT 30
+            TLS_VERIFY ON)
+        list(GET _status 0 _status_code)
+        list(GET _status 1 _status_message)
+
+        if(0 EQUAL _status_code)
+            file(SIZE "${_license_path}" _license_size)
+            if(0 LESS _license_size)
+                install(FILES "${_license_path}"
+                    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
+                return()
+            endif()
+
+            set(_status_message "downloaded an empty file")
+        endif()
+
+        file(REMOVE "${_license_path}")
+        message(WARNING
+            "Package will omit ${name}: ${_status_message}")
+    endfunction()
+
+    # LLVM and Clang installations expose their version through find_package,
+    # but do not reliably install or export their project license paths.
+    set(_llvm_license_base
+        "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-${LLVM_PACKAGE_VERSION}")
+    _omnirefl_package_license(
+        "LLVM.txt" "${_llvm_license_base}/llvm/LICENSE.TXT")
+    _omnirefl_package_license(
+        "Clang.txt" "${_llvm_license_base}/clang/LICENSE.TXT")
+    _omnirefl_package_license(
+        "libcxx.txt" "${_llvm_license_base}/libcxx/LICENSE.TXT")
+    _omnirefl_package_license(
+        "libcxxabi.txt" "${_llvm_license_base}/libcxxabi/LICENSE.TXT")
+
+    # target_link_static_crt() sets this property when it embeds libgcc or
+    # libstdc++ into a packaged executable.
+    get_target_property(_tool_static_gcc_runtime
+        tool OMNIREFL_STATIC_GCC_RUNTIME)
+    get_target_property(_ccdb_query_static_gcc_runtime
+        ccdb_query OMNIREFL_STATIC_GCC_RUNTIME)
+    if(_tool_static_gcc_runtime OR _ccdb_query_static_gcc_runtime)
+        # Static libgcc/libstdc++ code is covered by GPLv3 as modified by the
+        # GCC Runtime Library Exception, so a package embedding it needs both.
+        set(_gcc_license_base
+            "https://gcc.gnu.org/git/?p=gcc.git&a=blob_plain&hb=releases/gcc-${CMAKE_CXX_COMPILER_VERSION}")
+        _omnirefl_package_license(
+            "GCC-GPL-3.0.txt" "${_gcc_license_base}&f=COPYING3")
+        _omnirefl_package_license(
+            "GCC-Runtime-Library-Exception.txt"
+            "${_gcc_license_base}&f=COPYING.RUNTIME")
+    endif()
+
+    # target_link_static_crt() sets this property when it applies a fully
+    # static musl link to a packaged executable.
+    get_target_property(_tool_static_musl tool OMNIREFL_STATIC_MUSL)
+    get_target_property(_ccdb_query_static_musl
+        ccdb_query OMNIREFL_STATIC_MUSL)
+    if(_tool_static_musl OR _ccdb_query_static_musl)
+        execute_process(
+            COMMAND ldd --version
+            OUTPUT_VARIABLE _musl_version_output
+            ERROR_VARIABLE _musl_version_error)
+        string(REGEX MATCH
+            "Version[ \t]+([0-9]+\\.[0-9]+\\.[0-9]+)"
+            _musl_version_match
+            "${_musl_version_output}\n${_musl_version_error}")
+        if("" STREQUAL _musl_version_match)
+            message(WARNING
+                "Package will omit musl.txt: failed to detect musl version")
+        else()
+            _omnirefl_package_license(
+                "musl.txt"
+                "https://raw.githubusercontent.com/ifduyue/musl/v${CMAKE_MATCH_1}/COPYRIGHT")
+        endif()
+    endif()
+
+    if(MINGW)
+        set(_mingw_version_source
+            "${CMAKE_CURRENT_BINARY_DIR}/mingw-version.c")
+        file(WRITE "${_mingw_version_source}" "#include <_mingw.h>\n")
+        execute_process(
+            COMMAND "${CMAKE_C_COMPILER}" -dM -E "${_mingw_version_source}"
+            RESULT_VARIABLE _mingw_version_result
+            OUTPUT_VARIABLE _mingw_version_defines
+            ERROR_VARIABLE _mingw_version_error)
+        if(NOT 0 EQUAL _mingw_version_result)
+            message(WARNING
+                "Package will omit MinGW notices: ${_mingw_version_error}")
+        else()
+            set(_mingw_version_components)
+            foreach(_component MAJOR MINOR BUGFIX)
+                string(REGEX MATCH
+                    "#define __MINGW64_VERSION_${_component}[ \t]+([0-9]+)"
+                    _component_match
+                    "${_mingw_version_defines}")
+                if("" STREQUAL _component_match)
+                    break()
+                endif()
+
+                list(APPEND _mingw_version_components "${CMAKE_MATCH_1}")
+            endforeach()
+
+            list(LENGTH _mingw_version_components _mingw_component_count)
+            if(3 EQUAL _mingw_component_count)
+                list(JOIN _mingw_version_components "." _mingw_version)
+                set(_mingw_license_base
+                    "https://raw.githubusercontent.com/mingw-w64/mingw-w64/v${_mingw_version}")
+                _omnirefl_package_license(
+                    "MinGW-w64-runtime.txt"
+                    "${_mingw_license_base}/COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt")
+                _omnirefl_package_license(
+                    "winpthreads.txt"
+                    "${_mingw_license_base}/mingw-w64-libraries/winpthreads/COPYING")
+            else()
+                message(WARNING
+                    "Package will omit MinGW notices: failed to detect "
+                    "MinGW-w64 version")
+            endif()
+        endif()
+    endif()
+
     install(TARGETS tool ccdb_query refl
         EXPORT "${PROJECT_NAME}Targets"
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -180,6 +311,15 @@ if(ENABLE_PACKAGE)
     install(DIRECTORY
         ${CLANG_RESOURCE_DIR}/include
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
+
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+
+    install(FILES
+        "${cli11_proj_SOURCE_DIR}/LICENSE"
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
+        RENAME "CLI11.txt")
 
     # Ship tests and runnable examples as source so they can be used on other
     # platforms.
