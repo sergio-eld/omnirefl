@@ -2,6 +2,8 @@
 
 <p align="center">
   <img src="omnirefl-banner.png" alt="Omnirefl" width="640">
+  <br>
+  <sub>Obligatory self-reflection meta joke.</sub>
 </p>
 
 A C++ reflection tool built for a seamless experience without macros or UB.
@@ -297,6 +299,29 @@ Current package/install coverage is reported by the
 - TODO(High): cross-build the tool for `ARM64` targets.
 - TODO(High): investigate switching the tool build to Cosmopolitan after a
   baseline benchmark is in place.
+
+## Is It Slow?
+
+Omnirefl uses a Clang frontend action: it preprocesses the translation unit and
+builds its AST, but does not perform object-code optimization or code
+generation. Frontend work commonly accounts for around 30% of a complete object
+build, although the ratio depends on the source, included headers, compiler, and
+optimization level.
+
+The [benchmark baseline](tests/tool/baseline_test.cpp) is intentionally large
+enough to represent a meaningful translation unit and contains a reasonable
+amount of ordinary and reflected code. As of this writing, its complete
+omnirefl run takes about 20-25% of the subsequent Release object build in CI.
+These percentages are relative to the object build alone: a five-second
+compilation gains roughly one additional second when instrumentation runs,
+which is generally negligible at whole-build scale.
+
+Only instrumented targets pay this cost, and reflected translation units can be
+isolated in dedicated targets. The impact is therefore most noticeable during
+initial generation. Omnirefl emits dependency files for the source and all its
+included headers, so Ninja reruns instrumentation only when one of those inputs
+changes. See the [continuous benchmark](#continuous-benchmark) for measured
+stages and regression tracking.
 
 ## Continuous Benchmark
 

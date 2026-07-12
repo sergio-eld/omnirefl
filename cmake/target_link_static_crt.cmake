@@ -35,6 +35,8 @@ try_run(
     "${CMAKE_BINARY_DIR}/musl_test.c"
 )
 
+# Keep the configure-time probe result in directory scope for
+# target_link_static_crt() below.
 if (RESULT_VAR EQUAL 0)
     message(STATUS "Detected musl libc.")
     add_definitions(-DUSING_MUSL)
@@ -52,12 +54,21 @@ function (target_link_static_crt target)
     if (MUSL_DETECTED)
         message(STATUS "Fully static link with musl libc for target '${target}'")
         target_link_options(${target} PRIVATE -static)
+        # Packaging queries target properties so notices follow actual link
+        # behavior rather than this file's global probe state.
+        set_property(TARGET ${target} PROPERTY OMNIREFL_STATIC_MUSL TRUE)
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            set_property(TARGET ${target} PROPERTY
+                OMNIREFL_STATIC_GCC_RUNTIME TRUE)
+        endif()
         return()
     endif()
 
     if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         # target_link_libraries(${target} PRIVATE -static gcc stdc++ $<$<PLATFORM_ID:Windows>:winpthread> -dynamic)
         target_link_options(${target} PRIVATE -static-libgcc -static-libstdc++)
+        set_property(TARGET ${target} PROPERTY
+            OMNIREFL_STATIC_GCC_RUNTIME TRUE)
                                 
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
             target_link_libraries(${target} PRIVATE -static -lpthread)
