@@ -309,6 +309,38 @@ static const struct get_tuple_second_value_name_t {
   }
 } get_tuple_second_value_name;
 
+static const struct get_pair_first_value_name_t {
+  template <typename T>
+  std::string operator()(const T &v) const {
+    const auto fields = v.public_fields();
+    const auto f = std::get<0>(fields);
+    typedef typename decltype(f)::type pair_type;
+    typedef typename pair_type::first_type value_type;
+
+    static_assert(omni::is_reflected<value_type>::value,
+      "Pair first type is not reflected");
+
+    return std::string(v.type_name())
+      + "::pair::" + omni::meta_t<value_type>::type_name();
+  }
+} get_pair_first_value_name;
+
+static const struct get_pair_second_value_name_t {
+  template <typename T>
+  std::string operator()(const T &v) const {
+    const auto fields = v.public_fields();
+    const auto f = std::get<0>(fields);
+    typedef typename decltype(f)::type pair_type;
+    typedef typename pair_type::second_type value_type;
+
+    static_assert(omni::is_reflected<value_type>::value,
+      "Pair second type is not reflected");
+
+    return std::string(v.type_name())
+      + "::pair::" + omni::meta_t<value_type>::type_name();
+  }
+} get_pair_second_value_name;
+
 static const struct get_variant_value_name_t {
   template <typename Variant>
   struct first_variant_arg;
@@ -414,6 +446,14 @@ struct as_sequence_vector {
 };
 
 struct as_sequence_tuple {
+  int value;
+};
+
+struct as_sequence_pair_first {
+  int value;
+};
+
+struct as_sequence_pair_second {
   int value;
 };
 
@@ -654,6 +694,11 @@ struct vector_dep_level_1 {
 
 struct tuple_dep_two_values {
   std::tuple<resolved::as_sequence_tuple, resolved::as_field> tuple_field;
+};
+
+struct pair_dep_two_values {
+  std::pair<resolved::as_sequence_pair_first, resolved::as_sequence_pair_second>
+    pair_field;
 };
 
 struct variant_dep_level_1 {

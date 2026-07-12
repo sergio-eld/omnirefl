@@ -10,6 +10,43 @@ if (NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
 
+add_test(NAME omnirefl.cli.help COMMAND $<TARGET_FILE:omni::tool> --help)
+set_tests_properties(omnirefl.cli.help PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "Usage: omnirefl -o <reflection.hpp> -c <source.cpp>")
+
+set(_omnirefl_cli_compile_source -c)
+if(MSVC)
+    set(_omnirefl_cli_compile_source /c)
+endif()
+
+add_test(NAME omnirefl.cli.conflicting_compile_source
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o conflicting-source.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -- "${CMAKE_CXX_COMPILER}"
+        "${_omnirefl_cli_compile_source}"
+        "${CMAKE_CURRENT_LIST_DIR}/cli_other_source.cpp")
+set_tests_properties(omnirefl.cli.conflicting_compile_source PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "warning: compiler source after `--` differs from omnirefl `-c`"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_test(NAME omnirefl.cli.relative_output
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o relative-output.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -- "${CMAKE_CXX_COMPILER}"
+        "${_omnirefl_cli_compile_source}"
+        "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -o ignored-object-file)
+set_tests_properties(omnirefl.cli.relative_output PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
 # -- Dependencies --------
 include(FetchContent)
 
@@ -80,8 +117,18 @@ foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
 endforeach()
 
 if("17" IN_LIST _supported_cpp_standards)
-    function(_omnirefl_negative_tool_run name source min_diagnostics)
+    function(_omnirefl_negative_tool_run name source expected_diagnostics)
         set(_target "cpp_17.negative.${name}")
+        set(_expected_message "${ARGV3}")
+        set(_diagnostic_regex "${ARGV4}")
+        set(_expected_message_2 "${ARGV5}")
+        if("" STREQUAL "${_expected_message}")
+            set(_expected_message "invalid reflection queries")
+        endif()
+        if("" STREQUAL "${_diagnostic_regex}")
+            set(_diagnostic_regex ":[0-9]+:[0-9]+: reflection query")
+        endif()
+
         add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
         set_target_properties(${_target} PROPERTIES
             CXX_STANDARD 17
@@ -90,14 +137,75 @@ if("17" IN_LIST _supported_cpp_standards)
         )
         target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
         target_link_libraries(${_target} PRIVATE std_compat)
-        omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+        if("NO_INDEX" STREQUAL "${ARGV6}")
+            omni_reflected_target(${_target})
+        else()
+            omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+        endif()
 
         add_test(NAME "${_target}.run_omni"
             COMMAND ${CMAKE_COMMAND}
                 -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
                 -D "TARGET=${_target}.omni"
-                -D "MIN_DIAGNOSTICS=${min_diagnostics}"
+                -D "EXPECTED_DIAGNOSTICS=${expected_diagnostics}"
+                -D "EXPECTED_MESSAGE=${_expected_message}"
+                -D "DIAGNOSTIC_REGEX=${_diagnostic_regex}"
+                -D "EXPECTED_MESSAGE_2=${_expected_message_2}"
+                -D "UNEXPECTED_MESSAGE=${ARGV7}"
                 -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
+    endfunction()
+
+    function(_omnirefl_diagnostic_tool_run name source expected_message)
+        set(_target "cpp_17.diagnostic.${name}")
+        set(_expected_message_2 "${ARGV3}")
+        set(_log_level "${ARGV4}")
+        if("" STREQUAL "${_log_level}")
+            set(_log_level info)
+        endif()
+
+        add_executable(${_target} EXCLUDE_FROM_ALL "${source}")
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO
+        )
+        target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
+        target_link_libraries(${_target} PRIVATE
+            GTest::GTest
+            gtest_main
+            std_compat)
+        omni_reflected_target(${_target} LOG_LEVEL ${_log_level})
+
+        add_test(NAME "${_target}.run_omni"
+            COMMAND ${CMAKE_COMMAND}
+                -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                -D "TARGET=${_target}.omni"
+                -D "EXPECTED_MESSAGE=${expected_message}"
+                -D "EXPECTED_MESSAGE_2=${_expected_message_2}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/expect_tool_run.cmake")
+
+        add_test(NAME "${_target}.build"
+            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+                -t "${_target}" --parallel)
+        set_tests_properties("${_target}.build" PROPERTIES
+            DEPENDS "${_target}.run_omni")
+
+        if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+            add_test(NAME "${_target}" COMMAND ${_target})
+            set_tests_properties("${_target}" PROPERTIES
+                DEPENDS "${_target}.build")
+        endif()
+    endfunction()
+
+    # Keep unresolved compile-time targets available without building them in
+    # package tests. Their tool-run diagnostics remain covered.
+    function(_omnirefl_disable_diagnostic_build name)
+        set(_target "cpp_17.diagnostic.${name}")
+        set_tests_properties("${_target}.build" PROPERTIES DISABLED TRUE)
+
+        if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+            set_tests_properties("${_target}" PROPERTIES DISABLED TRUE)
+        endif()
     endfunction()
 
     _omnirefl_negative_tool_run(
@@ -107,22 +215,159 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_negative_tool_run(
         "query_non_template_visitor"
         negative_run/query_non_template_visitor.cpp
-        1)
+        2
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: reflection query"
+        "call stack:")
     _omnirefl_negative_tool_run(
         "query_lambda_deduced_return"
         negative_run/query_lambda_deduced_return.cpp
-        1)
+        2
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: reflection query"
+        "call stack:")
     _omnirefl_negative_tool_run(
         "query_multiple"
         negative_run/query_multiple.cpp
         7)
+    _omnirefl_negative_tool_run(
+        "reflected_call_args"
+        negative_run/reflected_call_args.cpp
+        4
+        "invalid reflected_call arguments"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_partial_specialization"
+        negative_run/reflected_call_partial_specialization.cpp
+        1
+        "partial template specialization"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_forward_declaration"
+        negative_run/reflected_call_forward_declaration.cpp
+        1
+        "forward declarations without definitions"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_template_callstack"
+        negative_run/reflected_call_template_callstack.cpp
+        1
+        "instantiated from"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_local_unnamed"
+        negative_run/reflected_call_local_unnamed.cpp
+        3
+        "local types are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument"
+        "unnamed types are not supported"
+        NO_INDEX
+        "ENABLE_INDEX_MODE|indexed support|index mode")
+    _omnirefl_negative_tool_run(
+        "reflected_call_unscoped_enum"
+        negative_run/reflected_call_unscoped_enum.cpp
+        1
+        "enum cannot be forward-declared"
+        ":[0-9]+:[0-9]+: reflected_call argument"
+        ""
+        NO_INDEX
+        "ENABLE_INDEX_MODE|indexed support|index mode")
+    _omnirefl_negative_tool_run(
+        "reflected_call_explicit_specialization"
+        negative_run/reflected_call_explicit_specialization.cpp
+        1
+        "explicit specializations are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "reflected_call_nested_template_parent"
+        negative_run/reflected_call_nested_template_parent.cpp
+        1
+        "records nested inside template records are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "query_and_reflected_call_arg"
+        negative_run/query_and_reflected_call_arg.cpp
+        2
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: (reflection query|reflected_call argument)"
+        "invalid reflected_call arguments")
+    _omnirefl_negative_tool_run(
+        "reflected_call_non_template_nested_in_template"
+        negative_run/reflected_call_non_template_nested_in_template.cpp
+        1
+        "records nested inside template records are not supported"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_diagnostic_tool_run(
+        "reflected_dependency_unnamed_nested"
+        diagnostic_run/reflected_dependency_unnamed_nested.cpp
+        "unsupported reflection dependency .* skipped")
+    _omnirefl_diagnostic_tool_run(
+        "std_public_base"
+        diagnostic_run/std_public_base.cpp
+        "standard-library public base 'std::enable_shared_from_this"
+        ""
+        warning)
+    _omnirefl_diagnostic_tool_run(
+        "unsupported_public_base"
+        diagnostic_run/unsupported_public_base.cpp
+        "unsupported public base dependency .* skipped"
+        "Inherited fields from this base will not be reflected")
+    _omnirefl_diagnostic_tool_run(
+        "partial_specialization_does_not_prune_primary"
+        regressions/partial_specialization_does_not_prune_primary.cpp
+        "partial template specializations are not supported"
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "partial_specialization_base_collision"
+        regressions/partial_specialization_base_collision.cpp
+        "unsupported public base dependency"
+        "reflected types: 3")
+    _omnirefl_diagnostic_tool_run(
+        "skipped_dependency_prunes_orphans"
+        regressions/skipped_dependency_prunes_orphans.cpp
+        "partial template specializations are not supported"
+        "reflected types: 1")
+    _omnirefl_diagnostic_tool_run(
+        "private_nested_type_is_reflectable"
+        regressions/private_nested_type_is_reflectable.cpp
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "private_nested_type_through_wrappers"
+        regressions/private_nested_type_through_wrappers.cpp
+        "reflected types: 4")
+    _omnirefl_diagnostic_tool_run(
+        "private_alias_shadows_public_field"
+        regressions/private_alias_shadows_public_field.cpp
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "private_alias_shadows_public_field")
+    _omnirefl_diagnostic_tool_run(
+        "public_nested_in_private_parent"
+        regressions/public_nested_in_private_parent.cpp
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "public_nested_in_private_parent")
+    _omnirefl_diagnostic_tool_run(
+        "private_nested_type_through_public_base"
+        regressions/private_nested_type_through_public_base.cpp
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "private_nested_type_through_public_base")
+    _omnirefl_diagnostic_tool_run(
+        "public_nested_direct_input"
+        regressions/public_nested_direct_input.cpp
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "variant_named_record_is_reflected"
+        regressions/variant_named_record_is_reflected.cpp
+        "reflected types:")
 endif()
 
 list(REMOVE_DUPLICATES _supported_cpp_standards)
 list(SORT _supported_cpp_standards)
 
 # C++26 has standard reflection. Keep omnirefl release/package validation on the
-# pre-reflection language modes it targets.
+# pre-reflection language standards it targets.
 list(REMOVE_ITEM _supported_cpp_standards "26")
 
 # MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
@@ -166,6 +411,47 @@ if(ENABLE_BENCH)
     omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
 endif()
 
+set(_has_cxx20_reflected_guide_features OFF)
+if("20" IN_LIST _supported_cpp_standards)
+    file(WRITE
+        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features.cpp"
+        [[
+#if !defined(__cpp_concepts) || __cpp_concepts < 201907L
+#  error "C++20 concepts are required"
+#endif
+
+#if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201707L
+#  error "explicit template parameter lists for lambdas are required"
+#endif
+
+static_assert(201907L <= __cpp_concepts);
+static_assert(201707L <= __cpp_generic_lambdas);
+
+int main() {
+  return 0;
+}
+]])
+    try_compile(_has_cxx20_reflected_guide_features
+        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features"
+        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features.cpp"
+        CMAKE_FLAGS
+            "-DCMAKE_CXX_STANDARD=20"
+            "-DCMAKE_CXX_STANDARD_REQUIRED=ON"
+            "-DCMAKE_CXX_EXTENSIONS=OFF"
+        OUTPUT_VARIABLE _cxx20_reflected_guide_check_output)
+
+    if(NOT _has_cxx20_reflected_guide_features)
+        message(STATUS
+            "omnirefl: skipping C++20 examples: required C++20 language features are not available")
+        message(VERBOSE "${_cxx20_reflected_guide_check_output}")
+    endif()
+endif()
+
+if(_has_cxx20_reflected_guide_features)
+    add_subdirectory(example)
+    add_subdirectory(comprehensive_guide)
+endif()
+
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
 
@@ -187,7 +473,6 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         dependent_types_test.cpp
         interface_test.cpp
         example_test.cpp
-        usage_guide_test.cpp
         indexed_types.cpp
         baseline_test.cpp
     )

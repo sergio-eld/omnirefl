@@ -482,6 +482,22 @@ TEST(sequence_dependency, tuple_field_names) {
     omni::reflected_call(dt::inspect::field_names, dt::tuple_dep_two_values{}));
 }
 
+TEST(sequence_dependency, pair_first_type) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("pair_dep_two_values::pair::as_sequence_pair_first",
+    omni::reflected_call(dt::as_sequence_arg::get_pair_first_value_name,
+      dt::pair_dep_two_values{}));
+}
+
+TEST(sequence_dependency, pair_second_type) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("pair_dep_two_values::pair::as_sequence_pair_second",
+    omni::reflected_call(dt::as_sequence_arg::get_pair_second_value_name,
+      dt::pair_dep_two_values{}));
+}
+
 TEST(sequence_dependency, compat_variant_value_type) {
   namespace dt = dependency_types;
 

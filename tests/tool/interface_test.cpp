@@ -227,15 +227,43 @@ TEST(fields, namespaced_field_type_names) {
   namespace f = interface_test::fields;
 
   static const std::vector<std::string> k_expected{
-    "interface_test::nested::namespaced_record_t",
-    "interface_test::nested::namespaced_enum_t",
+    "namespaced_record_t",
+    "namespaced_enum_t",
+    "parent_record_t::nested_record_t",
   };
 
   value_categories_test<namespaced_field_types_t>(k_expected,
     f::record_type_field_type_names);
 }
 
+TEST(fields, namespaced_field_qualified_type_names) {
+  using interface_test::nested::namespaced_field_types_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "interface_test::nested::namespaced_record_t",
+    "interface_test::nested::namespaced_enum_t",
+    "interface_test::nested::parent_record_t::nested_record_t",
+  };
+
+  value_categories_test<namespaced_field_types_t>(k_expected,
+    f::record_type_field_qualified_type_names);
+}
+
 TEST(fields, fully_qualified_duplicate_leaf_field_type_names) {
+  using interface_test::nested::duplicate_leaf_field_types_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "duplicate_name_t",
+    "duplicate_name_t",
+  };
+
+  value_categories_test<duplicate_leaf_field_types_t>(k_expected,
+    f::record_type_field_type_names);
+}
+
+TEST(fields, fully_qualified_duplicate_leaf_field_qualified_type_names) {
   using interface_test::nested::duplicate_leaf_field_types_t;
   namespace f = interface_test::fields;
 
@@ -245,25 +273,18 @@ TEST(fields, fully_qualified_duplicate_leaf_field_type_names) {
   };
 
   value_categories_test<duplicate_leaf_field_types_t>(k_expected,
-    f::record_type_field_type_names);
+    f::record_type_field_qualified_type_names);
 }
 
 TEST(fields, sized_integer_field_types) {
   using interface_test::nested::sized_integer_field_types_t;
   namespace f = interface_test::fields;
 
-  // These are canonical type-name strings reported by the tool. The source
-  // fields use `std::uint16_t` and friends, but those are typedef aliases, not
-  // canonical type names.
   static const std::vector<std::string> k_expected{
-    "unsigned short",
-    "int",
-#if defined _WIN32
-    "unsigned long long *",
-#else
-    "unsigned long *",
-#endif
-    "short **",
+    "uint16_t",
+    "int32_t",
+    "uint64_t *",
+    "int16_t **",
   };
 
   sized_integer_field_types_t lvalue{};
@@ -276,6 +297,100 @@ TEST(fields, sized_integer_field_types) {
   EXPECT_EQ(k_expected,
     omni::reflected_call(f::record_type_field_type_names,
       sized_integer_field_types_t{}));
+}
+
+TEST(fields, sized_integer_field_qualified_type_names) {
+  using interface_test::nested::sized_integer_field_types_t;
+  namespace f = interface_test::fields;
+
+  // Qualified field type names preserve the source declaration spelling.
+  static const std::vector<std::string> k_expected{
+    "std::uint16_t",
+    "std::int32_t",
+    "std::uint64_t *",
+    "std::int16_t **",
+  };
+
+  value_categories_test<sized_integer_field_types_t>(k_expected,
+    f::record_type_field_qualified_type_names);
+}
+
+TEST(fields, field_qualification_metadata) {
+  using interface_test::field_qualification_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  static const std::vector<std::string> k_expected{
+    "normal:const=false:mutable=false",
+    "constant:const=true:mutable=false",
+    "cache:const=false:mutable=true",
+    "flags:const=false:mutable=false",
+  };
+
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(fq::field_flags_from_meta,
+      omni::type_t<field_qualification_record_t>{}));
+
+  field_qualification_record_t value{1, 2, 3, 4};
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(fq::field_flags_from_binding, value));
+}
+
+TEST(fields, field_qualification_qualified_type_names) {
+  using interface_test::field_qualification_record_t;
+  namespace f = interface_test::fields;
+
+  static const std::vector<std::string> k_expected{
+    "int",
+    "int",
+    "int",
+    "unsigned int",
+  };
+
+  value_categories_test<field_qualification_record_t>(k_expected,
+    f::record_type_field_qualified_type_names);
+}
+
+TEST(fields, field_meta_write_availability) {
+  using interface_test::field_qualification_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  static const std::vector<std::string> k_expected{
+    "normal:mutable_owner=true:const_owner=false",
+    "constant:mutable_owner=false:const_owner=false",
+    "cache:mutable_owner=true:const_owner=true",
+    "flags:mutable_owner=true:const_owner=false",
+  };
+
+  EXPECT_EQ(k_expected,
+    omni::reflected_call(fq::meta_write_availability,
+      omni::type_t<field_qualification_record_t>{}));
+}
+
+TEST(fields, field_binding_write_availability) {
+  using interface_test::field_qualification_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  static const std::vector<std::string> k_mutable_expected{
+    "normal:set_value=true",
+    "constant:set_value=false",
+    "cache:set_value=true",
+    "flags:set_value=true",
+  };
+
+  static const std::vector<std::string> k_const_expected{
+    "normal:set_value=false",
+    "constant:set_value=false",
+    "cache:set_value=true",
+    "flags:set_value=false",
+  };
+
+  field_qualification_record_t value{1, 2, 3, 4};
+  const field_qualification_record_t const_value{1, 2, 3, 4};
+
+  EXPECT_EQ(k_mutable_expected,
+    omni::reflected_call(fq::binding_write_availability, value));
+  EXPECT_EQ(k_const_expected,
+    omni::reflected_call(fq::binding_write_availability, const_value));
 }
 
 TEST(enumerators, enum_type_t) {
@@ -309,7 +424,8 @@ TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
   static const std::vector<std::string> k_expected{"815", "oceanic"};
 
   EXPECT_EQ(k_expected,
-    omni::reflected_call(interface_test::inline_examples::rvalue_binding_can_be_named,
+    omni::reflected_call(
+      interface_test::inline_examples::rvalue_binding_can_be_named,
       record_type_t{}));
 
   // Direct rvalue field access is intentionally invalid:

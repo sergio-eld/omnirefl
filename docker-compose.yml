@@ -14,10 +14,12 @@
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 
 x-build-alpine-image: &build-alpine-image
-  image: ghcr.io/sergio-eld/omnirefl-build-alpine:llvm-${LLVM_VERSION:-22.1.8}
+  # TODO: keep ARM64 and Cosmopolitan builds in separate target-specific
+  # Dockerfile/image families.
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION:-22.1.8}
   build:
     context: .
-    dockerfile: build-alpine.Dockerfile
+    dockerfile: docker/build-alpine-x86_64-musl-ucrt.Dockerfile
     args:
       LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
 
@@ -69,13 +71,13 @@ services:
         # This build only needs to produce the tool and package files.
         CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ LDFLAGS=-static \
           cmake /src -GNinja \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_SYSTEM_NAME=Windows \
-          -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-          -DENABLE_PACKAGE=ON \
-          -DENABLE_TESTING=OFF \
-          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+            -DENABLE_PACKAGE=ON \
+            -DENABLE_TESTING=OFF \
+            -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+            -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
 
         cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
 
@@ -93,7 +95,7 @@ services:
     image: ghcr.io/sergio-eld/test-alpine
     build:
       context: .
-      dockerfile: test-alpine.Dockerfile
+      dockerfile: docker/test-alpine.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
@@ -154,7 +156,7 @@ services:
     image: ghcr.io/sergio-eld/test-${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}
     build:
       context: .
-      dockerfile: test-ubuntu.Dockerfile
+      dockerfile: docker/test-ubuntu.Dockerfile
       args:
         UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
         COMPILER: ${TOOLCHAIN:-gcc}
@@ -299,7 +301,7 @@ services:
     network_mode: nat
     build:
       context: .
-      dockerfile: test-windows-msvc.Dockerfile
+      dockerfile: docker/test-windows-msvc.Dockerfile
       args:
         TOOLCHAIN: ${TOOLCHAIN:-msvc}
     environment:
@@ -377,7 +379,7 @@ services:
     network_mode: nat
     build:
       context: .
-      dockerfile: test-windows-msys2.Dockerfile
+      dockerfile: docker/test-windows-msys2.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}

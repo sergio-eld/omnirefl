@@ -1,3 +1,5 @@
+# 3.18.2 is the current project floor for CMake APIs used by the package and
+# reflected target integration.
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl 
@@ -179,7 +181,8 @@ if(ENABLE_PACKAGE)
         ${CLANG_RESOURCE_DIR}/include
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/clang/${LLVM_VERSION}")
 
-    # Ship tests as source so they can be run on other platforms.
+    # Ship tests and runnable examples as source so they can be used on other
+    # platforms.
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/tests/tool/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
@@ -208,7 +211,6 @@ if(ENABLE_PACKAGE)
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_omnirefl_from_ccdb.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
-    # fixme: do not print message when building for windows
     # Debian architecture: required because Alpine has no dpkg to auto-detect.
     if(NOT CPACK_DEBIAN_PACKAGE_ARCHITECTURE)
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
@@ -252,6 +254,12 @@ if(ENABLE_PACKAGE)
     endif()
 
     set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_OS}-${OMNIREFL_PACKAGE_ARCH}")
+    if(OMNIREFL_PACKAGE_OS STREQUAL "linux")
+        set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_TARGET}-musl")
+    elseif(OMNIREFL_PACKAGE_OS STREQUAL "windows")
+        set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_TARGET}-ucrt")
+    endif()
+
     set(CPACK_PACKAGE_FILE_NAME
         "${PROJECT_NAME}-${OMNIREFL_PACKAGE_TARGET}-${PROJECT_VERSION}")
 

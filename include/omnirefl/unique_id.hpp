@@ -1,6 +1,5 @@
-#pragma once
-
-// todo: copyright and detailed explanation
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Sergei Kolesnik
 //
 // Friend-injection based indexing used by the experimental indexed reflection
 // path. This is instrumentation machinery, not the public reflection interface.
@@ -12,6 +11,8 @@
 //
 // Limitation: if a reflected type `T` has member field types that are not
 // forward-declarable, those member types are not available for reflection.
+
+#pragma once
 
 #include <type_traits>
 

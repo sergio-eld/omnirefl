@@ -51,7 +51,7 @@ RUN mkdir $CLANG_BUILD_LINUX; \
         &&:
 RUN cmake --build $CLANG_BUILD_LINUX -j$(nproc)
 RUN cmake --install $CLANG_BUILD_LINUX
-    
+
 RUN mkdir $CLANG_BUILD_WINDOWS; \
     cd $CLANG_BUILD_WINDOWS; \
     CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ LDFLAGS=-static \

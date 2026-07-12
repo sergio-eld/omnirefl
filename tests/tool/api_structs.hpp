@@ -13,6 +13,13 @@ struct record_type_t {
   std::string second;
 };
 
+struct field_qualification_record_t {
+  int normal;
+  const int constant;
+  mutable int cache;
+  unsigned flags : 3;
+};
+
 struct parent_record_t {
   struct nested_record_t {
     int value;
@@ -44,6 +51,7 @@ enum class namespaced_enum_t {
 struct namespaced_field_types_t {
   namespaced_record_t record;
   namespaced_enum_t state;
+  parent_record_t::nested_record_t nested;
 };
 
 namespace left {
@@ -139,6 +147,13 @@ struct field_type_names_visitor {
   }
 };
 
+struct qualified_field_type_names_visitor {
+  template <typename... Field>
+  std::vector<std::string> operator()(const Field &...) const {
+    return std::vector<std::string>{Field::qualified_type_name()...};
+  }
+};
+
 struct record_type_fields_t {
   template <typename T>
   std::vector<std::string> operator()(omni::binding_t<T> binding) const {
@@ -155,6 +170,14 @@ struct record_type_field_type_names_t {
       binding.public_fields());
   }
 } const static record_type_field_type_names{};
+
+struct record_type_field_qualified_type_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return omni::compat::apply(qualified_field_type_names_visitor{},
+      binding.public_fields());
+  }
+} const static record_type_field_qualified_type_names{};
 
 } // namespace fields
 
@@ -189,6 +212,118 @@ record_type_field_values_t const static record_type_field_values{};
 record_type_field_values_t const static record_type_field_values_own{};
 
 } // namespace field_value_read
+
+namespace field_qualification {
+
+template <typename Field, typename Owner, typename V>
+struct can_set_meta {
+  template <typename F>
+  static auto test(int)
+    -> decltype(F::set_value(std::declval<Owner>(), std::declval<V>()),
+      std::true_type{});
+
+  template <typename>
+  static std::false_type test(...);
+
+  static const bool value = decltype(test<Field>(0))::value;
+};
+
+template <typename Binding, typename V>
+struct can_set_binding {
+  template <typename B>
+  static auto test(int)
+    -> decltype(std::declval<B &>().set_value(std::declval<V>()),
+      std::true_type{});
+
+  template <typename>
+  static std::false_type test(...);
+
+  static const bool value = decltype(test<Binding>(0))::value;
+};
+
+inline std::string bool_name(bool value) {
+  return value ? "true" : "false";
+}
+
+template <typename Field>
+std::string flags_for() {
+  return std::string{Field::name()} //
+    + ":const=" + bool_name(Field::is_const()) //
+    + ":mutable=" + bool_name(Field::is_mutable());
+}
+
+template <typename Field>
+std::string meta_write_for() {
+  return std::string{Field::name()} //
+    + ":mutable_owner="
+    + bool_name(can_set_meta<Field, field_qualification_record_t &, int>::value)
+    + ":const_owner="
+    + bool_name(
+      can_set_meta<Field, const field_qualification_record_t &, int>::value);
+}
+
+template <typename Binding>
+std::string binding_write_for() {
+  return std::string{Binding::name()} //
+    + ":set_value=" + bool_name(can_set_binding<Binding, int>::value);
+}
+
+struct field_flags_visitor {
+  template <typename... Field>
+  std::vector<std::string> operator()(Field...) const {
+    return std::vector<std::string>{flags_for<Field>()...};
+  }
+};
+
+struct meta_write_visitor {
+  template <typename... Field>
+  std::vector<std::string> operator()(Field...) const {
+    return std::vector<std::string>{meta_write_for<Field>()...};
+  }
+};
+
+struct binding_write_visitor {
+  template <typename... Binding>
+  std::vector<std::string> operator()(Binding...) const {
+    return std::vector<std::string>{binding_write_for<Binding>()...};
+  }
+};
+
+struct field_flags_from_meta_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::meta_t<T> meta) const {
+    return omni::compat::apply(field_flags_visitor{}, meta.public_fields());
+  }
+};
+
+struct field_flags_from_binding_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return omni::compat::apply(field_flags_visitor{}, binding.public_fields());
+  }
+};
+
+struct meta_write_availability_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::meta_t<T> meta) const {
+    return omni::compat::apply(meta_write_visitor{}, meta.public_fields());
+  }
+};
+
+struct binding_write_availability_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+    return omni::compat::apply(binding_write_visitor{},
+      binding.public_fields());
+  }
+};
+
+field_flags_from_meta_t const static field_flags_from_meta{};
+field_flags_from_binding_t const static field_flags_from_binding{};
+meta_write_availability_t const static meta_write_availability{};
+binding_write_availability_t const static binding_write_availability{};
+
+} // namespace field_qualification
 
 namespace field_value_write {
 
