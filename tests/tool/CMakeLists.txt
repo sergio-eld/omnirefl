@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
-project(omnirefl_tests LANGUAGES CXX)
+project(omnirefl_tests LANGUAGES C CXX)
 
 enable_testing()
 
@@ -14,6 +14,46 @@ add_test(NAME omnirefl.cli.help COMMAND $<TARGET_FILE:omni::tool> --help)
 set_tests_properties(omnirefl.cli.help PROPERTIES
     PASS_REGULAR_EXPRESSION
         "Usage: omnirefl -o <reflection.hpp> -c <source.cpp>")
+
+# FIXME(high): expose `--version` as a tool option. It currently enters normal
+# instrumentation parsing (and may fall through to compiler arguments), but it
+# should print the package version and compiled commit identifier by itself.
+add_test(NAME omnirefl.cli.version
+    COMMAND $<TARGET_FILE:omni::tool> --version)
+set_tests_properties(omnirefl.cli.version PROPERTIES
+    DISABLED TRUE
+    PASS_REGULAR_EXPRESSION "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+")
+
+if(DEFINED omnirefl_DIR)
+    # FIXME(low): CMake escapes `$` as `$$` in compile_commands.json. The
+    # package wrapper currently compares that spelling literally and emits a
+    # false compiler-source mismatch warning, although generation succeeds.
+    add_test(NAME omnirefl.regression.dollar_path_source
+        COMMAND ${CMAKE_COMMAND}
+            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/regressions/dollar_path"
+            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/regressions"
+            -D "GENERATOR=${CMAKE_GENERATOR}"
+            -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            -D "OMNIREFL_DIR=${omnirefl_DIR}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/regressions/dollar_path/run.cmake")
+    set_tests_properties(omnirefl.regression.dollar_path_source PROPERTIES
+        DISABLED TRUE)
+
+    # FIXME(low): add_custom_command outputs are target-owned C++ sources, but
+    # the wrapper filters their GENERATED property and reports that the target
+    # has no C/C++ sources. Pre-generating the file is a workable alternative.
+    add_test(NAME omnirefl.regression.generated_source
+        COMMAND ${CMAKE_COMMAND}
+            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/regressions/generated_source"
+            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/regressions/generated_source"
+            -D "GENERATOR=${CMAKE_GENERATOR}"
+            -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            -D "OMNIREFL_DIR=${omnirefl_DIR}"
+            -P
+                "${CMAKE_CURRENT_LIST_DIR}/regressions/generated_source/run.cmake")
+    set_tests_properties(omnirefl.regression.generated_source PROPERTIES
+        DISABLED TRUE)
+endif()
 
 set(_omnirefl_cli_compile_source -c)
 if(MSVC)
@@ -45,6 +85,23 @@ add_test(NAME omnirefl.cli.relative_output
         "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
         -o ignored-object-file)
 set_tests_properties(omnirefl.cli.relative_output PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+set(_compiler_response_file
+    "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file.rsp")
+file(WRITE "${_compiler_response_file}" "-DOMNI_RESPONSE_FILE_EXPANDED\n")
+
+# FIXME(high): compiler response files are parsed as opaque input arguments, so
+# frontend-relevant options inside @file never reach AST construction.
+add_test(NAME omnirefl.regression.compiler_response_file
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o compiler-response-file.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/regressions/compiler_response_file.cpp"
+        -- "${CMAKE_CXX_COMPILER}" "@${_compiler_response_file}")
+set_tests_properties(omnirefl.regression.compiler_response_file PROPERTIES
+    DISABLED TRUE
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # -- Dependencies --------
@@ -361,6 +418,308 @@ if("17" IN_LIST _supported_cpp_standards)
         "variant_named_record_is_reflected"
         regressions/variant_named_record_is_reflected.cpp
         "reflected types:")
+    _omnirefl_diagnostic_tool_run(
+        "inline_namespace"
+        regressions/inline_namespace.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "inline_namespace")
+    _omnirefl_diagnostic_tool_run(
+        "enum_fixed_underlying_alias"
+        regressions/enum_fixed_underlying_alias.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "enum_fixed_underlying_alias")
+    _omnirefl_diagnostic_tool_run(
+        "deprecated_public_field"
+        regressions/deprecated_public_field.cpp
+        "reflected types: 1")
+    target_compile_options(
+        cpp_17.diagnostic.deprecated_public_field PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Werror=deprecated-declarations>
+        $<$<CXX_COMPILER_ID:MSVC>:/we4996>)
+    _omnirefl_disable_diagnostic_build(
+        "deprecated_public_field")
+    _omnirefl_diagnostic_tool_run(
+        "inherited_field_name_hiding"
+        regressions/inherited_field_name_hiding.cpp
+        "reflected types: 3")
+    _omnirefl_diagnostic_tool_run(
+        "virtual_diamond_fields"
+        regressions/virtual_diamond_fields.cpp
+        "reflected types: 4")
+    _omnirefl_diagnostic_tool_run(
+        "anonymous_union_members"
+        regressions/anonymous_union_members.cpp
+        "unsupported reflection dependency")
+    _omnirefl_disable_diagnostic_build(
+        "anonymous_union_members")
+    _omnirefl_diagnostic_tool_run(
+        "field_set_value_assignability"
+        regressions/field_set_value_assignability.cpp
+        "reflected types: 2")
+    _omnirefl_diagnostic_tool_run(
+        "packed_field_reference"
+        regressions/packed_field_reference.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "packed_field_reference")
+    _omnirefl_diagnostic_tool_run(
+        "nested_template_field_name"
+        regressions/nested_template_field_name.cpp
+        "reflected types:")
+    _omnirefl_diagnostic_tool_run(
+        "volatile_binding_qualifiers"
+        regressions/volatile_binding_qualifiers.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "volatile_binding_qualifiers")
+    _omnirefl_diagnostic_tool_run(
+        "reflected_call_reference_return"
+        regressions/reflected_call_reference_return.cpp
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "reflected_call_reference_return")
+    set_tests_properties(
+        "cpp_17.diagnostic.reflected_call_reference_return.run_omni"
+        PROPERTIES DISABLED TRUE)
+    _omnirefl_diagnostic_tool_run(
+        "primary_template_type_only"
+        regressions/primary_template_type_only.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "primary_template_type_only")
+    set_tests_properties(
+        "cpp_17.diagnostic.primary_template_type_only.run_omni"
+        PROPERTIES DISABLED TRUE)
+    _omnirefl_diagnostic_tool_run(
+        "variadic_primary_template"
+        regressions/variadic_primary_template.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "variadic_primary_template")
+    _omnirefl_diagnostic_tool_run(
+        "dependent_nontype_template"
+        regressions/dependent_nontype_template.cpp
+        "reflected types: 1")
+    _omnirefl_disable_diagnostic_build(
+        "dependent_nontype_template")
+    _omnirefl_diagnostic_tool_run(
+        "multiple_primary_template_bases"
+        regressions/multiple_primary_template_bases.cpp
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "multiple_primary_template_bases")
+    _omnirefl_diagnostic_tool_run(
+        "template_template_argument"
+        regressions/template_template_argument.cpp
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "template_template_argument")
+    set_tests_properties(
+        "cpp_17.diagnostic.template_template_argument.run_omni"
+        PROPERTIES DISABLED TRUE)
+    _omnirefl_diagnostic_tool_run(
+        "mixed_language_target"
+        "regressions/mixed_language_target.cpp;regressions/mixed_language_helper.c"
+        "reflected types:")
+    _omnirefl_disable_diagnostic_build(
+        "mixed_language_target")
+    _omnirefl_diagnostic_tool_run(
+        "ccdb_backslash_definition"
+        regressions/ccdb_backslash_definition.cpp
+        "reflected types:")
+    target_compile_definitions(
+        cpp_17.diagnostic.ccdb_backslash_definition PRIVATE
+        "OMNI_OPTION_TEXT=R\"(left\\right)\"")
+    _omnirefl_disable_diagnostic_build(
+        "ccdb_backslash_definition")
+    set_tests_properties(
+        "cpp_17.diagnostic.ccdb_backslash_definition.run_omni"
+        PROPERTIES DISABLED TRUE)
+
+    function(_omnirefl_disabled_driver_option name selector)
+        set(_target "cpp_17.diagnostic.${name}")
+        _omnirefl_diagnostic_tool_run(
+            "${name}"
+            regressions/driver_option_fidelity.cpp
+            "reflected types:")
+        target_compile_definitions(${_target} PRIVATE "${selector}=1")
+        target_compile_options(${_target} PRIVATE ${ARGN})
+        _omnirefl_disable_diagnostic_build("${name}")
+        set_tests_properties("${_target}.run_omni" PROPERTIES DISABLED TRUE)
+    endfunction()
+
+    _omnirefl_disabled_driver_option(
+        "driver_option_imacros"
+        OMNI_REGRESSION_IMACROS
+        -imacros
+        "${CMAKE_CURRENT_LIST_DIR}/regressions/driver_imacros_config.h")
+    _omnirefl_disabled_driver_option(
+        "driver_option_pthread"
+        OMNI_REGRESSION_PTHREAD
+        -pthread)
+    _omnirefl_disabled_driver_option(
+        "driver_option_openmp"
+        OMNI_REGRESSION_OPENMP
+        -fopenmp)
+    _omnirefl_disabled_driver_option(
+        "driver_option_no_exceptions"
+        OMNI_REGRESSION_NO_EXCEPTIONS
+        -fno-exceptions)
+    _omnirefl_disabled_driver_option(
+        "driver_option_no_rtti"
+        OMNI_REGRESSION_NO_RTTI
+        -fno-rtti)
+    _omnirefl_disabled_driver_option(
+        "driver_option_short_wchar"
+        OMNI_REGRESSION_SHORT_WCHAR
+        -fshort-wchar)
+    _omnirefl_disabled_driver_option(
+        "driver_option_unsigned_char"
+        OMNI_REGRESSION_UNSIGNED_CHAR
+        -funsigned-char)
+    _omnirefl_disabled_driver_option(
+        "driver_option_pack_struct"
+        OMNI_REGRESSION_PACK_STRUCT
+        -fpack-struct=1)
+    _omnirefl_disabled_driver_option(
+        "driver_option_no_operator_names"
+        OMNI_REGRESSION_NO_OPERATOR_NAMES
+        -fno-operator-names)
+    _omnirefl_disabled_driver_option(
+        "driver_option_avx2"
+        OMNI_REGRESSION_AVX2
+        -mavx2)
+    _omnirefl_disabled_driver_option(
+        "driver_option_no_access_control"
+        OMNI_REGRESSION_NO_ACCESS_CONTROL
+        -fno-access-control)
+    _omnirefl_disabled_driver_option(
+        "driver_option_no_sized_deallocation"
+        OMNI_REGRESSION_NO_SIZED_DEALLOCATION
+        -fno-sized-deallocation)
+
+    foreach(_target IN ITEMS
+            regression_ccdb_output_suffix
+            myregression_ccdb_output_suffix)
+        add_executable(${_target} EXCLUDE_FROM_ALL
+            regressions/ccdb_output_suffix.cpp)
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO)
+        target_link_libraries(${_target} PRIVATE
+            GTest::GTest
+            gtest_main
+            std_compat)
+        omni_reflected_target(${_target} LOG_LEVEL warning)
+    endforeach()
+
+    add_test(NAME "cpp_17.diagnostic.ccdb_output_suffix.run_omni"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "regression_ccdb_output_suffix.omni" --parallel 1)
+    set_tests_properties(
+        "cpp_17.diagnostic.ccdb_output_suffix.run_omni"
+        PROPERTIES DISABLED TRUE)
+endif()
+
+if("20" IN_LIST _supported_cpp_standards)
+    function(_omnirefl_disabled_configure_regression name)
+        set(_source_dir
+            "${CMAKE_CURRENT_LIST_DIR}/regressions/cmake/${name}")
+        set(_build_dir
+            "${CMAKE_CURRENT_BINARY_DIR}/regressions/cmake/${name}")
+
+        add_test(NAME "cpp_20.regression.${name}.configure"
+            COMMAND ${CMAKE_COMMAND}
+                -S "${_source_dir}"
+                -B "${_build_dir}"
+                -GNinja
+                -D "omnirefl_DIR=${omnirefl_DIR}")
+        set_tests_properties("cpp_20.regression.${name}.configure"
+            PROPERTIES DISABLED TRUE)
+    endfunction()
+
+    _omnirefl_disabled_configure_regression(uppercase_cpp_source)
+    _omnirefl_disabled_configure_regression(generator_expression_source)
+
+    set(_no_char8_target "cpp_20.diagnostic.driver_option_no_char8_t")
+    add_executable(${_no_char8_target} EXCLUDE_FROM_ALL
+        regressions/driver_option_fidelity.cpp)
+    set_target_properties(${_no_char8_target} PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO)
+    target_compile_definitions(${_no_char8_target} PRIVATE
+        OMNI_REGRESSION_NO_CHAR8_T=1)
+    target_compile_options(${_no_char8_target} PRIVATE -fno-char8_t)
+    target_link_libraries(${_no_char8_target} PRIVATE
+        GTest::GTest
+        gtest_main
+        std_compat)
+    omni_reflected_target(${_no_char8_target} LOG_LEVEL warning)
+
+    add_test(NAME "${_no_char8_target}.run_omni"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "${_no_char8_target}.omni" --parallel 1)
+    set_tests_properties("${_no_char8_target}.run_omni"
+        PROPERTIES DISABLED TRUE)
+
+    set(_concept_sfinae_target
+        "cpp_20.regression.binding_concept_sfinae")
+    add_executable(${_concept_sfinae_target} EXCLUDE_FROM_ALL
+        regressions/binding_concept_sfinae.cpp)
+    set_target_properties(${_concept_sfinae_target} PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO)
+    target_link_libraries(${_concept_sfinae_target} PRIVATE
+        GTest::GTest
+        gtest_main
+        std_compat)
+    omni_reflected_target(${_concept_sfinae_target} LOG_LEVEL warning)
+
+    add_test(NAME "${_concept_sfinae_target}.run_omni"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "${_concept_sfinae_target}.omni" --parallel 1)
+    add_test(NAME "${_concept_sfinae_target}.build"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "${_concept_sfinae_target}" --parallel)
+    add_test(NAME "${_concept_sfinae_target}"
+        COMMAND ${_concept_sfinae_target})
+    set_tests_properties(
+        "${_concept_sfinae_target}.run_omni"
+        "${_concept_sfinae_target}.build"
+        "${_concept_sfinae_target}"
+        PROPERTIES DISABLED TRUE)
+
+    set(_constrained_template_target
+        "cpp_20.regression.constrained_primary_template")
+    add_executable(${_constrained_template_target} EXCLUDE_FROM_ALL
+        regressions/constrained_primary_template.cpp)
+    set_target_properties(${_constrained_template_target} PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO)
+    target_link_libraries(${_constrained_template_target} PRIVATE
+        GTest::GTest
+        gtest_main
+        std_compat)
+    omni_reflected_target(${_constrained_template_target} LOG_LEVEL warning)
+
+    add_test(NAME "${_constrained_template_target}.run_omni"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "${_constrained_template_target}.omni" --parallel 1)
+    add_test(NAME "${_constrained_template_target}.build"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "${_constrained_template_target}" --parallel)
+    add_test(NAME "${_constrained_template_target}"
+        COMMAND ${_constrained_template_target})
+    set_tests_properties(
+        "${_constrained_template_target}.build"
+        "${_constrained_template_target}"
+        PROPERTIES DISABLED TRUE)
 endif()
 
 list(REMOVE_DUPLICATES _supported_cpp_standards)

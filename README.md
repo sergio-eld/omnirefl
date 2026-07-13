@@ -148,8 +148,7 @@ Omnirefl focuses on POD-like records and enums.
     - `value`
     - `value_type`
   - template-pack routes named `tuple` or `variant`
-
-  Standard-library record types are not traversed as reflectable records
+- Standard-library record types are not traversed as reflectable records
   outside those protocol routes.
 
 ### Limits
