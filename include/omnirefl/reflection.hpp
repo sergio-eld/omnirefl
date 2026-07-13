@@ -210,6 +210,11 @@ struct reflected_call_t {
       noexcept(std::is_nothrow_default_constructible<T>::value) {
       return T{};
     }
+
+    // Declaration only: this placeholder is parsed but never executed before
+    // reflection generation.
+    template <typename T>
+    operator T &() const noexcept;
   };
 #endif
 
@@ -220,9 +225,9 @@ struct reflected_call_t {
   //
   // The reflected_call return type still has to look like
   // `impl(meta_t<T>...)` / `impl(binding_t<T>...)` so Clang can parse and match
-  // user calls. Declarations are enough for this unevaluated trailing return
-  // type; the functions are never defined or called during the tool run, and
-  // the visitor body remains uninstantiated until the generated header exists.
+  // user calls. These declaration-only functions are used exclusively in this
+  // unevaluated return type; the visitor body remains uninstantiated until the
+  // generated header exists.
   template <typename T>
   static constexpr meta_t<T> _tool_arg(type_t<T>) noexcept;
 
@@ -230,7 +235,7 @@ struct reflected_call_t {
     typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
       T,
       compat::decay_t<T>>>
-  static constexpr binding_t<Binding> _tool_arg(T &&) noexcept;
+  static binding_t<Binding> _tool_arg(T &&) noexcept;
 #endif
 
   template <typename T>
@@ -259,8 +264,7 @@ struct reflected_call_t {
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
     -> _ungenerated_result;
 #else
-    -> decltype(std::declval<Impl &&>()(
-      _reflect_arg(std::declval<Args &&>())...));
+    -> decltype(std::declval<Impl &&>()(_reflect_arg(std::declval<Args &&>())...));
 #endif
 };
 
@@ -306,8 +310,7 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
   -> reflected_call_t::_ungenerated_result {
 #else
-  -> decltype(std::declval<Impl &&>()(
-    _reflect_arg(std::declval<Args &&>())...)) {
+  -> decltype(std::declval<Impl &&>()(_reflect_arg(std::declval<Args &&>())...)) {
 #endif
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
   int registered[] = {0,
@@ -478,6 +481,13 @@ template <typename T, reflected_entity Entity>
 struct binding_t {
   using omni_binding_tag = void;
   using type = compat::decay_t<T>;
+  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+    std::false_type,
+    std::true_type>::type;
+  using storage_t = typename std::conditional<owning::value, type, T>::type;
+
+  // Preserve the public storage shape for unevaluated visitor return types.
+  storage_t value;
 
   template <typename U, reflected_entity E>
   constexpr operator binding_t<U, E>() const noexcept;

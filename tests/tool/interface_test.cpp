@@ -56,6 +56,18 @@ struct name_values {
 };
 
 } // namespace field_visibility
+
+namespace reference_return {
+
+struct first_field {
+  template <typename T>
+  auto operator()(omni::binding_t<T> binding) const
+    -> decltype((binding.value.first)) {
+    return binding.value.first;
+  }
+};
+
+} // namespace reference_return
 } // namespace interface_test
 
 TEST(odr_test, inside_interface_test_cpp) {
@@ -509,6 +521,17 @@ TEST(record_type_t, field_value_read) {
   EXPECT_EQ(k_expected,
     omni::reflected_call(fv::record_type_field_values_own,
       record_type_t{k_input}));
+}
+
+TEST(record_type_t, reflected_call_preserves_reference_return) {
+  using interface_test::record_type_t;
+
+  record_type_t input{7, {}};
+  int &result = omni::reflected_call(
+    interface_test::reference_return::first_field{}, input);
+  result = 19;
+
+  EXPECT_EQ(19, input.first);
 }
 
 TEST(record_type_t, reflected_rvalue_binding_can_be_named) {

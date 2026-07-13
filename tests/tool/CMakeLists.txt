@@ -471,15 +471,6 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_disable_diagnostic_build(
         "volatile_binding_qualifiers")
     _omnirefl_diagnostic_tool_run(
-        "reflected_call_reference_return"
-        regressions/reflected_call_reference_return.cpp
-        "reflected types:")
-    _omnirefl_disable_diagnostic_build(
-        "reflected_call_reference_return")
-    set_tests_properties(
-        "cpp_17.diagnostic.reflected_call_reference_return.run_omni"
-        PROPERTIES DISABLED TRUE)
-    _omnirefl_diagnostic_tool_run(
         "primary_template_type_only"
         regressions/primary_template_type_only.cpp
         "reflected types: 1")
