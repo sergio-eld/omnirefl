@@ -4,7 +4,59 @@
 
 #include <omnirefl/reflection.hpp>
 
+#include <string>
 #include <utility> // IWYU pragma: keep
+#include <vector>
+
+namespace interface_test {
+namespace field_visibility {
+
+struct left_base {
+  int shared;
+  int left;
+};
+
+struct right_base {
+  int shared;
+  int right;
+};
+
+struct derived_hides_bases: left_base, right_base {
+  int shared;
+  int own;
+};
+
+struct root_base {
+  int shared;
+  int root;
+};
+
+struct middle_base: root_base {
+  int shared;
+  int middle;
+};
+
+struct base_hides_base: middle_base {
+  int own;
+};
+
+struct collect_name_values {
+  template <typename... Field>
+  std::vector<std::pair<std::string, int>> operator()(Field... field) const {
+    return {{field.name(), field.value()}...};
+  }
+};
+
+struct name_values {
+  template <typename T>
+  std::vector<std::pair<std::string, int>> operator()(
+    omni::binding_t<T> binding) const {
+    return omni::compat::apply(collect_name_values{}, binding.public_fields());
+  }
+};
+
+} // namespace field_visibility
+} // namespace interface_test
 
 TEST(odr_test, inside_interface_test_cpp) {
   static const odr_test::input k_input{815,
@@ -220,6 +272,47 @@ TEST(fields, record_type_t) {
   static const std::vector<std::string> k_expected{"first", "second"};
 
   value_categories_test<record_type_t>(k_expected, f::record_type_fields);
+}
+
+TEST(fields, own_field_hides_inherited_fields) {
+  using namespace interface_test::field_visibility;
+
+  derived_hides_bases input{};
+  input.left_base::shared = 1;
+  input.left = 2;
+  input.right_base::shared = 3;
+  input.right = 4;
+  input.shared = 5;
+  input.own = 6;
+
+  static const std::vector<std::pair<std::string, int>> k_expected{
+    {"left", 2},
+    {"right", 4},
+    {"shared", 5},
+    {"own", 6},
+  };
+
+  EXPECT_EQ(k_expected, omni::reflected_call(name_values{}, input));
+}
+
+TEST(fields, base_field_hides_its_inherited_field) {
+  using namespace interface_test::field_visibility;
+
+  base_hides_base input{};
+  input.root_base::shared = 1;
+  input.root = 2;
+  input.middle_base::shared = 3;
+  input.middle = 4;
+  input.own = 5;
+
+  static const std::vector<std::pair<std::string, int>> k_expected{
+    {"root", 2},
+    {"shared", 3},
+    {"middle", 4},
+    {"own", 5},
+  };
+
+  EXPECT_EQ(k_expected, omni::reflected_call(name_values{}, input));
 }
 
 TEST(fields, namespaced_field_type_names) {

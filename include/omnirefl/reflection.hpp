@@ -27,18 +27,64 @@ struct _reflected;
 template <typename T>
 using _meta = detail::_reflected<compat::decay_t<T>>;
 
-template <typename Meta, typename = typename Meta::public_bases_t>
+constexpr bool _same_field_name(const char *lhs, const char *rhs) noexcept {
+  return *lhs == *rhs && ('\0' == *lhs || _same_field_name(lhs + 1, rhs + 1));
+}
+
+template <typename Field, typename Fields>
+struct _contains_field_name;
+
+template <typename Field>
+struct _contains_field_name<Field, std::tuple<>>: std::false_type {};
+
+template <typename Field, typename Head, typename... Tail>
+struct _contains_field_name<Field, std::tuple<Head, Tail...>>:
+    std::conditional<_same_field_name(Field::name(), Head::name()),
+      std::true_type,
+      _contains_field_name<Field, std::tuple<Tail...>>>::type {};
+
+template <typename OwnFields,
+  typename RemainingBaseFields,
+  typename Collected = std::tuple<>>
 struct _all_public_fields;
 
-template <typename Meta, typename... Bases>
-struct _all_public_fields<Meta, std::tuple<Bases...>> {
-  using type = decltype(std::tuple_cat(
-    std::declval<typename _all_public_fields<_meta<Bases>>::type>()...,
-    std::declval<typename Meta::own_public_fields_t>()));
+template <typename... OwnField,
+  typename BaseField,
+  typename... Tail,
+  typename... Collected>
+struct _all_public_fields<std::tuple<OwnField...>,
+  std::tuple<BaseField, Tail...>,
+  std::tuple<Collected...>>:
+    _all_public_fields<std::tuple<OwnField...>,
+      std::tuple<Tail...>,
+      typename std::conditional<
+        _contains_field_name<BaseField, std::tuple<OwnField...>>::value,
+        std::tuple<Collected...>,
+        std::tuple<Collected..., BaseField>>::type> {};
+
+template <typename... OwnField, typename... Collected>
+struct _all_public_fields<std::tuple<OwnField...>,
+  std::tuple<>,
+  std::tuple<Collected...>> {
+  using type = std::tuple<Collected..., OwnField...>;
+};
+
+template <typename Bases>
+struct _expand_bases;
+
+template <typename... Bases>
+struct _expand_bases<std::tuple<Bases...>> {
+  using type = decltype(std::tuple_cat(std::declval<std::tuple<>>(),
+    std::declval<
+      typename _all_public_fields<typename _meta<Bases>::own_public_fields_t,
+        typename _expand_bases<
+          typename _meta<Bases>::public_bases_t>::type>::type>()...));
 };
 
 template <typename Meta>
-using _all_public_fields_t = typename _all_public_fields<Meta>::type;
+using _all_public_fields_t =
+  typename _all_public_fields<typename Meta::own_public_fields_t,
+    typename _expand_bases<typename Meta::public_bases_t>::type>::type;
 
 } // namespace
 } // namespace detail
@@ -444,6 +490,7 @@ struct meta_t<T, reflected_entity::record> {
   using reflected = detail::_meta<T>;
   using type = typename reflected::type;
 
+  /// Public fields visible through `type`; hidden inherited fields are omitted.
   using public_fields_t =
     detail::_all_public_fields_t<reflected>; //< yields std::tuple<...>
 
@@ -494,6 +541,7 @@ struct meta_t<T, reflected_entity::record> {
     return reflected::entity();
   }
 
+  /// Metadata for public fields visible through the reflected record.
   static constexpr public_fields_t public_fields() noexcept {
     return {};
   }
@@ -604,7 +652,8 @@ struct binding_t<T, reflected_entity::record> {
 #  if OMNI_CPLUSPLUS >= 201402L
   constexpr
 #  endif
-    auto public_fields() & -> decltype(meta_t<type>::_public_fields(
+  /// Bindings for public fields visible through the reflected record.
+  auto public_fields() & -> decltype(meta_t<type>::_public_fields(
       std::declval<storage_t &>())) {
     return meta_t<type>::_public_fields(value);
   }

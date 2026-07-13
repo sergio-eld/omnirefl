@@ -1134,6 +1134,59 @@ TEST(example, cpp11_struct_visitors) {
 
 /// Advanced examples ----------------------------------------------------------
 
+namespace field_visibility {
+
+struct root_base {
+  int shared;
+  int root;
+};
+
+struct middle_base: root_base {
+  int shared;
+  int middle;
+};
+
+struct record: middle_base {
+  int own;
+};
+
+} // namespace field_visibility
+
+TEST(example, public_fields_follow_member_visibility) {
+  using namespace std::string_view_literals;
+
+  field_visibility::record input{};
+  input.root_base::shared = 1;
+  input.root = 2;
+  input.middle_base::shared = 3;
+  input.middle = 4;
+  input.own = 5;
+
+  const std::vector expected{
+    std::pair{"root"sv, 2},
+    std::pair{"shared"sv, 3},
+    std::pair{"middle"sv, 4},
+    std::pair{"own"sv, 5},
+  };
+
+  // `middle_base::shared` hides `root_base::shared`, so `public_fields()`
+  // exposes only the member visible through `record`. Accessing hidden base
+  // storage through a derived binding is not considered a worthwhile scenario
+  // for the current implementation.
+  EXPECT_EQ(expected,
+    omni::reflected_call(
+      [](omni::binding auto binding)
+        -> std::vector<std::pair<std::string_view, int>> {
+        return std::apply(
+          [](omni::field_binding auto... field)
+            -> std::vector<std::pair<std::string_view, int>> {
+            return {{field.name(), field.value()}...};
+          },
+          binding.public_fields());
+      },
+      input));
+}
+
 namespace variant_visitation {
 
 struct a {

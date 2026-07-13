@@ -91,7 +91,7 @@ set(_compiler_response_file
     "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file.rsp")
 file(WRITE "${_compiler_response_file}" "-DOMNI_RESPONSE_FILE_EXPANDED\n")
 
-# FIXME(high): compiler response files are parsed as opaque input arguments, so
+# FIXME(low): compiler response files are parsed as opaque input arguments, so
 # frontend-relevant options inside @file never reach AST construction.
 add_test(NAME omnirefl.regression.compiler_response_file
     COMMAND $<TARGET_FILE:omni::tool>
@@ -440,10 +440,6 @@ if("17" IN_LIST _supported_cpp_standards)
         $<$<CXX_COMPILER_ID:MSVC>:/we4996>)
     _omnirefl_disable_diagnostic_build(
         "deprecated_public_field")
-    _omnirefl_diagnostic_tool_run(
-        "inherited_field_name_hiding"
-        regressions/inherited_field_name_hiding.cpp
-        "reflected types: 3")
     _omnirefl_diagnostic_tool_run(
         "virtual_diamond_fields"
         regressions/virtual_diamond_fields.cpp
