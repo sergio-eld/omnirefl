@@ -2,6 +2,7 @@
 
 #include <omnirefl/reflection.hpp>
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -490,6 +491,18 @@ enum class scoped_fixed_status : unsigned {
   low,
   medium,
   high,
+};
+
+enum class std_alias_fixed_status : std::uint64_t {
+  ready,
+  done,
+};
+
+using quint64 = unsigned long long;
+
+enum class custom_alias_fixed_status : quint64 {
+  waiting,
+  complete,
 };
 
 template <typename T>

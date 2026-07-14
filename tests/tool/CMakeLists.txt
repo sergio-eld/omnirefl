@@ -425,12 +425,6 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_disable_diagnostic_build(
         "inline_namespace")
     _omnirefl_diagnostic_tool_run(
-        "enum_fixed_underlying_alias"
-        regressions/enum_fixed_underlying_alias.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "enum_fixed_underlying_alias")
-    _omnirefl_diagnostic_tool_run(
         "deprecated_public_field"
         regressions/deprecated_public_field.cpp
         "reflected types: 1")
@@ -581,8 +575,7 @@ if("17" IN_LIST _supported_cpp_standards)
     foreach(_target IN ITEMS
             regression_ccdb_output_suffix
             myregression_ccdb_output_suffix)
-        add_executable(${_target} EXCLUDE_FROM_ALL
-            regressions/ccdb_output_suffix.cpp)
+        add_executable(${_target} EXCLUDE_FROM_ALL example_test.cpp)
         set_target_properties(${_target} PROPERTIES
             CXX_STANDARD 17
             CXX_STANDARD_REQUIRED YES
@@ -597,9 +590,23 @@ if("17" IN_LIST _supported_cpp_standards)
     add_test(NAME "cpp_17.diagnostic.ccdb_output_suffix.run_omni"
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
             -t "regression_ccdb_output_suffix.omni" --parallel 1)
+
+    add_test(NAME "cpp_17.diagnostic.ccdb_output_suffix.build"
+        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            -t "regression_ccdb_output_suffix" --parallel)
     set_tests_properties(
-        "cpp_17.diagnostic.ccdb_output_suffix.run_omni"
-        PROPERTIES DISABLED TRUE)
+        "cpp_17.diagnostic.ccdb_output_suffix.build"
+        PROPERTIES
+            DEPENDS "cpp_17.diagnostic.ccdb_output_suffix.run_omni")
+
+    if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+        add_test(NAME "cpp_17.diagnostic.ccdb_output_suffix"
+            COMMAND regression_ccdb_output_suffix)
+        set_tests_properties(
+            "cpp_17.diagnostic.ccdb_output_suffix"
+            PROPERTIES
+                DEPENDS "cpp_17.diagnostic.ccdb_output_suffix.build")
+    endif()
 endif()
 
 if("20" IN_LIST _supported_cpp_standards)

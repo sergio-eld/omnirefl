@@ -229,6 +229,8 @@ function(omni_reflected_target target)
         # add_custom_command argument list. The -P bridge runs ccdb_query,
         # tokenizes its shell-quoted output, then invokes omnirefl with those
         # compiler args after `--` while preserving diagnostics.
+        # Slash delimiters make the target's `.dir` a complete output-path
+        # component instead of a suffix that can match another target name.
         add_custom_command(
             OUTPUT "${_stamp}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
@@ -237,7 +239,7 @@ function(omni_reflected_target target)
                 -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
                 -D "COMP_DB=${_comp_db}"
                 -D "SOURCE=${_src}"
-                -D "OUTPUT_CONTAINS=${target}.dir"
+                -D "OUTPUT_CONTAINS=/${target}.dir/"
                 -D "OUT=${_generated_header}"
                 -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
                 -D "NO_ANNOTATIONS=${_no_annotations}"
@@ -247,7 +249,7 @@ function(omni_reflected_target target)
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
             COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
-            DEPENDS "${_src}" omni::tool omni::ccdb_query
+            DEPENDS "${_src}" "${_comp_db}" omni::tool omni::ccdb_query
             BYPRODUCTS "${_generated_header}" "${_depfile}"
             DEPFILE "${_depfile}"
             VERBATIM

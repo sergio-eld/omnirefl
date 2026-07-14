@@ -4581,10 +4581,16 @@ auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
     | std::views::transform(&clang::EnumDecl::getName)
     | std::views::transform(fn::as<std::string_view>);
 
+  // `underlying_type` is emitted into a private, target-specific generated
+  // header which, as of this writing, is not intended for distribution. Using
+  // the canonical target spelling is assumed safe and avoids aliases whose
+  // declarations appear only after the header is force-included.
   return {
     .is_scoped = ed.isScoped(),
     .is_fixed = ed.isFixed(),
-    .underlying_type = ed.isFixed() ? ed.getIntegerType().getAsString() : "",
+    .underlying_type = ed.isFixed() //
+      ? ed.getIntegerType().getCanonicalType().getAsString()
+      : "",
     .enumerators = names | std::ranges::to<std::vector<std::string>>(),
   };
 }

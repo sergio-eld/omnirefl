@@ -689,6 +689,18 @@ TEST(enum_dependency, scoped_fixed_enum_is_reflected_directly) {
       dt::scoped_fixed_status::low));
 }
 
+TEST(enum_dependency, fixed_underlying_aliases_are_canonicalized) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"ready", "done"}),
+    omni::reflected_call(dt::inspect::enum_names,
+      dt::std_alias_fixed_status::ready));
+
+  EXPECT_EQ((std::vector<std::string>{"waiting", "complete"}),
+    omni::reflected_call(dt::inspect::enum_names,
+      dt::custom_alias_fixed_status::waiting));
+}
+
 TEST(enum_dependency, forward_declarable_enum_holder_field_names) {
   namespace dt = dependency_types;
 
