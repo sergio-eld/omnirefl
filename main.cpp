@@ -2660,6 +2660,13 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     "\n           by the C++ Standard to be consistent between compiler implementations.",
   };
 
+  app.set_version_flag("--version",
+    std::format("omnirefl {} (commit {})",
+      OMNIREFL_VERSION,
+      std::string_view{OMNIREFL_COMMIT}.empty() //
+        ? "unknown"
+        : OMNIREFL_COMMIT));
+
   CLI::Option *const resource_dir = //
     app
       .add_option("--resource-dir",

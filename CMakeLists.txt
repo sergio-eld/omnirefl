@@ -108,6 +108,10 @@ target_include_directories(tool PRIVATE
     ${LLVM_INCLUDE_DIRS}
     ${PROJECT_SOURCE_DIR})
 
+target_compile_definitions(tool PRIVATE
+    OMNIREFL_VERSION="${PROJECT_VERSION}"
+    OMNIREFL_COMMIT="${OMNIREFL_PACKAGE_COMMIT}")
+
 target_link_libraries(tool PRIVATE CLI11::CLI11 clangTooling)
 add_static_compile_options(tool)
 

@@ -15,14 +15,11 @@ set_tests_properties(omnirefl.cli.help PROPERTIES
     PASS_REGULAR_EXPRESSION
         "Usage: omnirefl -o <reflection.hpp> -c <source.cpp>")
 
-# FIXME(high): expose `--version` as a tool option. It currently enters normal
-# instrumentation parsing (and may fall through to compiler arguments), but it
-# should print the package version and compiled commit identifier by itself.
 add_test(NAME omnirefl.cli.version
     COMMAND $<TARGET_FILE:omni::tool> --version)
 set_tests_properties(omnirefl.cli.version PROPERTIES
-    DISABLED TRUE
-    PASS_REGULAR_EXPRESSION "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+")
+    PASS_REGULAR_EXPRESSION
+        "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)")
 
 if(DEFINED omnirefl_DIR)
     # FIXME(low): CMake escapes `$` as `$$` in compile_commands.json. The
