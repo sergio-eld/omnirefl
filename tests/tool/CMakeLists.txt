@@ -474,12 +474,6 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_disable_diagnostic_build(
         "dependent_nontype_template")
     _omnirefl_diagnostic_tool_run(
-        "multiple_primary_template_bases"
-        regressions/multiple_primary_template_bases.cpp
-        "reflected types:")
-    _omnirefl_disable_diagnostic_build(
-        "multiple_primary_template_bases")
-    _omnirefl_diagnostic_tool_run(
         "mixed_language_target"
         "regressions/mixed_language_target.cpp;regressions/mixed_language_helper.c"
         "reflected types:")

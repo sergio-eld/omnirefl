@@ -1150,6 +1150,15 @@ struct record: middle_base {
   int own;
 };
 
+template <typename T>
+struct repeated_base {
+  T value;
+};
+
+struct ambiguous_bases: repeated_base<int>, repeated_base<double> {
+  int own;
+};
+
 } // namespace field_visibility
 
 TEST(example, public_fields_follow_member_visibility) {
@@ -1173,6 +1182,34 @@ TEST(example, public_fields_follow_member_visibility) {
   // exposes only the member visible through `record`. Accessing hidden base
   // storage through a derived binding is not considered a worthwhile scenario
   // for the current implementation.
+  EXPECT_EQ(expected,
+    omni::reflected_call(
+      [](omni::binding auto binding)
+        -> std::vector<std::pair<std::string_view, int>> {
+        return std::apply(
+          [](omni::field_binding auto... field)
+            -> std::vector<std::pair<std::string_view, int>> {
+            return {{field.name(), field.value()}...};
+          },
+          binding.public_fields());
+      },
+      input));
+}
+
+TEST(example, public_fields_omit_ambiguous_base_members) {
+  using namespace std::string_view_literals;
+
+  field_visibility::ambiguous_bases input{};
+  static_cast<field_visibility::repeated_base<int> &>(input).value = 3;
+  static_cast<field_visibility::repeated_base<double> &>(input).value = 4.5;
+  input.own = 5;
+
+  const std::vector expected{
+    std::pair{"own"sv, 5},
+  };
+
+  // Both inherited `value` members require explicit base qualification, so
+  // neither is visible through `ambiguous_bases` or exposed by public_fields().
   EXPECT_EQ(expected,
     omni::reflected_call(
       [](omni::binding auto binding)

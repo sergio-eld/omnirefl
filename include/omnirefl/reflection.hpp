@@ -43,27 +43,44 @@ struct _contains_field_name<Field, std::tuple<Head, Tail...>>:
       std::true_type,
       _contains_field_name<Field, std::tuple<Tail...>>>::type {};
 
-template <typename OwnFields,
+// Generated field accessors use unqualified member access, so substitution
+// reflects C++ lookup from the final record, including base ambiguity.
+template <typename Record, typename Field, typename = void>
+struct _is_public_field_visible_from: std::false_type {};
+
+template <typename Record, typename Field>
+struct _is_public_field_visible_from<Record,
+  Field,
+  compat::void_t<decltype(Field::value(std::declval<Record &>()))>>:
+    std::true_type {};
+
+template <typename Record,
+  typename OwnFields,
   typename RemainingBaseFields,
   typename Collected = std::tuple<>>
-struct _all_public_fields;
+struct _all_visible_public_fields;
 
-template <typename... OwnField,
+template <typename Record,
+  typename... OwnField,
   typename BaseField,
   typename... Tail,
   typename... Collected>
-struct _all_public_fields<std::tuple<OwnField...>,
+struct _all_visible_public_fields<Record,
+  std::tuple<OwnField...>,
   std::tuple<BaseField, Tail...>,
   std::tuple<Collected...>>:
-    _all_public_fields<std::tuple<OwnField...>,
+    _all_visible_public_fields<Record,
+      std::tuple<OwnField...>,
       std::tuple<Tail...>,
       typename std::conditional<
-        _contains_field_name<BaseField, std::tuple<OwnField...>>::value,
-        std::tuple<Collected...>,
-        std::tuple<Collected..., BaseField>>::type> {};
+        _is_public_field_visible_from<Record, BaseField>::value
+          && !_contains_field_name<BaseField, std::tuple<OwnField...>>::value,
+        std::tuple<Collected..., BaseField>,
+        std::tuple<Collected...>>::type> {};
 
-template <typename... OwnField, typename... Collected>
-struct _all_public_fields<std::tuple<OwnField...>,
+template <typename Record, typename... OwnField, typename... Collected>
+struct _all_visible_public_fields<Record,
+  std::tuple<OwnField...>,
   std::tuple<>,
   std::tuple<Collected...>> {
   using type = std::tuple<Collected..., OwnField...>;
@@ -76,14 +93,16 @@ template <typename... Bases>
 struct _expand_bases<std::tuple<Bases...>> {
   using type = decltype(std::tuple_cat(std::declval<std::tuple<>>(),
     std::declval<
-      typename _all_public_fields<typename _meta<Bases>::own_public_fields_t,
+      typename _all_visible_public_fields<typename _meta<Bases>::type,
+        typename _meta<Bases>::own_public_fields_t,
         typename _expand_bases<
           typename _meta<Bases>::public_bases_t>::type>::type>()...));
 };
 
 template <typename Meta>
-using _all_public_fields_t =
-  typename _all_public_fields<typename Meta::own_public_fields_t,
+using _all_visible_public_fields_t =
+  typename _all_visible_public_fields<typename Meta::type,
+    typename Meta::own_public_fields_t,
     typename _expand_bases<typename Meta::public_bases_t>::type>::type;
 
 } // namespace
@@ -502,7 +521,7 @@ struct meta_t<T, reflected_entity::record> {
 
   /// Public fields visible through `type`; hidden inherited fields are omitted.
   using public_fields_t =
-    detail::_all_public_fields_t<reflected>; //< yields std::tuple<...>
+    detail::_all_visible_public_fields_t<reflected>; //< yields std::tuple<...>
 
   private:
   friend struct reflected_call_t;
