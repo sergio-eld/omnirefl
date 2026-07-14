@@ -2443,8 +2443,13 @@ std::string format_template_args(const meta::template_data &t) {
   return std::format("{}",
     t.params //
       | std::views::enumerate //
-      | std::views::transform([](const auto &param_index) {
-          return std::format("_T{}", std::get<0>(param_index));
+      | std::views::transform([](const auto &indexed_param) {
+          const auto &[index, param] = indexed_param;
+          return std::visit(
+            [index](const auto &p) {
+              return std::format("_T{}{}", index, p.is_pack ? "..." : "");
+            },
+            param);
         }) //
       | std::views::join_with(", "sv) //
       | util::format_range);

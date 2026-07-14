@@ -450,12 +450,6 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_disable_diagnostic_build(
         "volatile_binding_qualifiers")
     _omnirefl_diagnostic_tool_run(
-        "variadic_primary_template"
-        regressions/variadic_primary_template.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "variadic_primary_template")
-    _omnirefl_diagnostic_tool_run(
         "dependent_nontype_template"
         regressions/dependent_nontype_template.cpp
         "reflected types: 1")

@@ -28,6 +28,11 @@ struct template_template_record {
   Container<int> value;
 };
 
+template <typename... T>
+struct variadic_primary_template {
+  std::tuple<T...> value;
+};
+
 struct private_alias_and_public_field {
   private:
   struct private_child {
@@ -335,6 +340,14 @@ TEST(record_template, metadata_for_template_template_parameter) {
   EXPECT_EQ(1,
     omni::reflected_call(dt::inspect::field_count,
       omni::type_t<dt::template_template_record<dt::template_template_box>>{}));
+}
+
+TEST(record_template, metadata_for_variadic_primary_template) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(1,
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::variadic_primary_template<int, double>>{}));
 }
 
 TEST(annotations, record_type_annotation) {
