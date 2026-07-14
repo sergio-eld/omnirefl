@@ -7,6 +7,18 @@
 #include <string>
 #include <vector>
 
+namespace dependency_types {
+
+// Keep this template otherwise unused. The test below verifies that a visible
+// primary definition is sufficient when no specialization was instantiated
+// beforehand.
+template <typename T>
+struct uninstantiated_primary_template {
+  T value;
+};
+
+} // namespace dependency_types
+
 namespace {
 
 TEST(example_value, field_names) {
@@ -257,6 +269,16 @@ TEST(record_template, type_parameter_field_names) {
   using record = dt::primary_template_record<dt::resolved::as_template_arg>;
   EXPECT_EQ((std::vector<std::string>{"value", "count"}),
     omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, metadata_for_uninstantiated_primary_template) {
+  namespace dt = dependency_types;
+
+  // This must remain the specialization's first reference in this translation
+  // unit; omni::type_t itself does not instantiate the specialization.
+  EXPECT_EQ(1,
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::uninstantiated_primary_template<int>>{}));
 }
 
 TEST(annotations, record_type_annotation) {

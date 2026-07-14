@@ -36,6 +36,7 @@
 #include <clang/Lex/Lexer.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Options/Options.h>
+#include <clang/Sema/Sema.h>
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
@@ -420,7 +421,7 @@ struct source_error {
   std::vector<std::string> callstack;
   std::string subject;
   std::string reason;
-  std::string suggestion;
+  std::optional<std::string> suggestion;
 };
 
 } // namespace diag
@@ -734,6 +735,7 @@ source_file_context fold_out_of_scope_function_query(clang::ASTContext &ast,
   const clang::DeclRefExpr &query);
 
 source_file_context fold_reflected_call(const diagnostics &log,
+  clang::Sema &sema,
   clang::ASTContext &ast,
   source_file_context a,
   const clang::CXXOperatorCallExpr &call);
@@ -1045,7 +1047,13 @@ std::string format_error(const source_error &error) {
       message += std::format("\n      {}", frame);
   }
 
-  message += std::format("\n    Suggestion: {}", error.suggestion);
+  message += //
+    error.suggestion
+      .and_then(
+        [](const std::string &suggestion) -> std::optional<std::string> {
+          return std::format("\n    Suggestion: {}", suggestion);
+        })
+      .value_or("");
 
   return message;
 }
@@ -1346,14 +1354,20 @@ bool is_concrete_template_arg(const clang::TemplateArgument &arg) {
   return false;
 }
 
-clang::QualType reflected_arg_type(clang::QualType type) {
+clang::QualType unreferenced_type(clang::QualType type) {
   while (type->isReferenceType())
     type = type->getPointeeType();
+
+  return type;
+}
+
+std::optional<clang::QualType> type_t_arg_type(clang::QualType type) {
+  type = unreferenced_type(type);
 
   const auto *record = type->getAs<clang::RecordType>();
 
   if (!record)
-    return type;
+    return std::nullopt;
 
   const auto *spec =
     llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl());
@@ -1361,17 +1375,56 @@ clang::QualType reflected_arg_type(clang::QualType type) {
   if (!spec
     || "omni::type_t"
       != spec->getSpecializedTemplate()->getQualifiedNameAsString()) {
-    return type;
+    return std::nullopt;
   }
 
   const clang::TemplateArgumentList &args = spec->getTemplateArgs();
 
   if (1 != args.size()
     || clang::TemplateArgument::Type != args.get(0).getKind()) {
-    return type;
+    return std::nullopt;
   }
 
   return args.get(0).getAsType();
+}
+
+std::expected<clang::QualType, std::string> instantiate_type_t_arg(
+  clang::Sema &sema,
+  clang::QualType type,
+  clang::SourceLocation point_of_instantiation) {
+  const clang::Type &canonical =
+    *sema.Context.getCanonicalType(type.getUnqualifiedType()).getTypePtr();
+
+  const auto *record = llvm::dyn_cast<clang::RecordType>(&canonical);
+  auto *specialization = record
+    ? llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl())
+    : nullptr;
+
+  if (!specialization || specialization->getDefinition()
+    || specialization->isInStdNamespace()
+    || clang::TSK_ExplicitSpecialization
+      == specialization->getSpecializationKind()) {
+    return type;
+  }
+
+  // omni::type_t<T> does not otherwise require T to be complete. Instantiate
+  // only its visible primary specialization; the visitor remains deferred.
+  if (!specialization->getSpecializedTemplate()
+        ->getTemplatedDecl()
+        ->getDefinition()) {
+    return type;
+  }
+
+  if (sema.InstantiateClassTemplateSpecialization(point_of_instantiation,
+        specialization,
+        clang::TSK_ImplicitInstantiation,
+        /*Complain=*/true,
+        specialization->hasStrictPackMatch())) {
+    return std::unexpected(
+      "the concrete primary-template argument could not be instantiated");
+  }
+
+  return type;
 }
 
 std::vector<std::string> callstack_from(clang::ASTContext &ast,
@@ -1473,38 +1526,47 @@ meta::source_file_context append_invalid_reflection_query(
   return a;
 }
 
-std::expected<diag::source_error, std::string> reflected_call_arg_error_from(
-  clang::ASTContext &ast,
-  const clang::CXXOperatorCallExpr &call,
-  const clang::Expr &arg,
-  std::string rendered_type,
-  std::string reason,
-  std::string suggestion) {
-  std::expected location = source_location_from(ast, arg.getExprLoc());
+using reflected_call_arg_error = std::variant<diag::source_error, std::string>;
+
+struct reflected_call_arg_error_input {
+  clang::ASTContext &ast;
+  const clang::CXXOperatorCallExpr &call;
+  const clang::Expr &arg;
+  std::string rendered_type;
+  std::string reason;
+  std::optional<std::string> suggestion = std::nullopt;
+};
+
+reflected_call_arg_error reflected_call_arg_error_from(
+  reflected_call_arg_error_input input) {
+  std::expected location =
+    source_location_from(input.ast, input.arg.getExprLoc());
 
   if (!location) {
-    return std::unexpected(std::format(
+    return std::format(
       "reflected_call matcher could not resolve an argument source location: {}",
-      std::move(location).error()));
+      std::move(location).error());
   }
 
-  std::expected source =
-    source_excerpt_from(ast, call.getSourceRange(), arg.getSourceRange());
+  std::expected source = source_excerpt_from(input.ast,
+    input.call.getSourceRange(),
+    input.arg.getSourceRange());
 
   if (!source) {
-    return std::unexpected(std::format(
+    return std::format(
       "reflected_call matcher could not render an argument source excerpt: {}",
-      std::move(source).error()));
+      std::move(source).error());
   }
 
   return diag::source_error{
     .location = *location,
     .source = std::move(*source),
-    .callstack = callstack_from(ast, clang::DynTypedNode::create(call)),
-    .subject =
-      std::format("reflected_call argument '{}' is unsupported", rendered_type),
-    .reason = std::move(reason),
-    .suggestion = std::move(suggestion),
+    .callstack =
+      callstack_from(input.ast, clang::DynTypedNode::create(input.call)),
+    .subject = std::format("reflected_call argument '{}' is unsupported",
+      input.rendered_type),
+    .reason = std::move(input.reason),
+    .suggestion = std::move(input.suggestion),
   };
 }
 
@@ -1524,13 +1586,12 @@ struct reflected_call_arg {
   const clang::Expr *reflected_call_expr;
 };
 
-std::expected<reflected_call_arg, std::variant<diag::source_error, std::string>>
+std::expected<reflected_call_arg, reflected_call_arg_error>
   validate_reflected_call_arg(clang::ASTContext &ast,
     const clang::CXXOperatorCallExpr &call,
-    const clang::Expr *arg_expr) {
+    const clang::Expr *arg_expr,
+    clang::QualType type) {
   assert(arg_expr);
-
-  const clang::QualType type = reflected_arg_type(arg_expr->getType());
 
   const clang::QualType unqualified = type.getUnqualifiedType();
   const clang::Type &canonical =
@@ -1540,18 +1601,15 @@ std::expected<reflected_call_arg, std::variant<diag::source_error, std::string>>
 
   const auto invalid_arg_error = //
     [&ast, &call, &arg = *arg_expr, &rendered](std::string reason,
-      std::string suggestion) -> std::variant<diag::source_error, std::string> {
-    std::expected error = reflected_call_arg_error_from(ast,
-      call,
-      arg,
-      rendered,
-      std::move(reason),
-      std::move(suggestion));
-
-    if (!error)
-      return std::move(error).error();
-
-    return std::move(*error);
+      std::string suggestion) -> reflected_call_arg_error {
+    return reflected_call_arg_error_from({
+      .ast = ast,
+      .call = call,
+      .arg = arg,
+      .rendered_type = rendered,
+      .reason = std::move(reason),
+      .suggestion = std::move(suggestion),
+    });
   };
 
   if (canonical.isPointerType()) {
@@ -1663,6 +1721,38 @@ std::expected<reflected_call_arg, std::variant<diag::source_error, std::string>>
     .type = type,
     .reflected_call_expr = arg_expr,
   };
+}
+
+std::expected<reflected_call_arg, reflected_call_arg_error>
+  validate_reflected_call_expression(clang::Sema &sema,
+    clang::ASTContext &ast,
+    const clang::CXXOperatorCallExpr &call,
+    const clang::Expr *arg_expr) {
+  assert(arg_expr);
+
+  const auto validate_arg = std::bind_front(validate_reflected_call_arg,
+    std::ref(ast),
+    std::cref(call),
+    arg_expr);
+
+  const std::optional type_arg = type_t_arg_type(arg_expr->getType());
+
+  if (!type_arg)
+    return validate_arg(unreferenced_type(arg_expr->getType()));
+
+  return instantiate_type_t_arg(sema, *type_arg, arg_expr->getExprLoc())
+    .transform_error( //
+      [&ast, &call, arg_expr, type = *type_arg](std::string reason) //
+      -> reflected_call_arg_error {
+        return reflected_call_arg_error_from({
+          .ast = ast,
+          .call = call,
+          .arg = *arg_expr,
+          .rendered_type = reflected_call_arg_name(ast, type),
+          .reason = std::move(reason),
+        });
+      })
+    .and_then(validate_arg);
 }
 
 bool is_forward_declarable(const meta::reflectable &type) {
@@ -1782,6 +1872,7 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
 
 meta::source_file_context meta::matches::fold_reflected_call(
   const diagnostics &log,
+  clang::Sema &sema,
   clang::ASTContext &ast,
   meta::source_file_context a,
   const clang::CXXOperatorCallExpr &call) {
@@ -1804,9 +1895,11 @@ meta::source_file_context meta::matches::fold_reflected_call(
   for (std::expected arg : call.arguments()
       // Skip the reflected_call object and visitor arguments.
       | std::views::drop(2)
-      | std::views::transform(std::bind_front(impl::validate_reflected_call_arg,
-        std::ref(ast),
-        std::cref(call)))) {
+      | std::views::transform(
+        std::bind_front(impl::validate_reflected_call_expression,
+          std::ref(sema),
+          std::ref(ast),
+          std::cref(call)))) {
     if (!arg) {
       std::visit(
         [&a]<typename Error>(Error error) {
@@ -1908,21 +2001,26 @@ meta::source_file_context meta::matches::fold_reflected_call(
         };
       });
 
-      std::expected error = impl::reflected_call_arg_error_from(ast,
-        call,
-        *arg->reflected_call_expr,
-        impl::reflected_call_arg_name(ast, arg->type),
-        std::string{reason},
-        std::string{suggestion});
-
-      if (!error) {
-        a.errors.internal.emplace_back(std::move(error).error());
-      } else {
-        a.indexed_arg_candidates.push_back({
-          .type = id,
-          .error = std::move(*error),
-        });
-      }
+      std::visit(
+        [&a, id]<typename Error>(Error error) {
+          if constexpr (std::same_as<diag::source_error, Error>) {
+            a.indexed_arg_candidates.push_back({
+              .type = id,
+              .error = std::move(error),
+            });
+          } else {
+            static_assert(std::same_as<std::string, Error>);
+            a.errors.internal.emplace_back(std::move(error));
+          }
+        },
+        impl::reflected_call_arg_error_from({
+          .ast = ast,
+          .call = call,
+          .arg = *arg->reflected_call_expr,
+          .rendered_type = impl::reflected_call_arg_name(ast, arg->type),
+          .reason = std::string{reason},
+          .suggestion = std::string{suggestion},
+        }));
     }
 
     std::visit(
@@ -3308,6 +3406,7 @@ std::expected<meta::source_file_context, app_error>
           ast::pattern(cxxOperatorCallExpr, hasOverloadedOperatorName("()")),
         .fold = std::bind_front(meta::matches::fold_reflected_call,
           std::cref(log),
+          std::ref(parsed.ast->getSema()),
           std::ref(parsed.ast->getASTContext())),
       },
 

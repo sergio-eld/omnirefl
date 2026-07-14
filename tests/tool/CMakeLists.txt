@@ -302,7 +302,7 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_negative_tool_run(
         "reflected_call_forward_declaration"
         negative_run/reflected_call_forward_declaration.cpp
-        1
+        3
         "forward declarations without definitions"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
@@ -470,15 +470,6 @@ if("17" IN_LIST _supported_cpp_standards)
         "reflected types: 1")
     _omnirefl_disable_diagnostic_build(
         "volatile_binding_qualifiers")
-    _omnirefl_diagnostic_tool_run(
-        "primary_template_type_only"
-        regressions/primary_template_type_only.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "primary_template_type_only")
-    set_tests_properties(
-        "cpp_17.diagnostic.primary_template_type_only.run_omni"
-        PROPERTIES DISABLED TRUE)
     _omnirefl_diagnostic_tool_run(
         "variadic_primary_template"
         regressions/variadic_primary_template.cpp
