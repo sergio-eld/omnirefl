@@ -4259,11 +4259,12 @@ meta::type_definition resolve_definition(const clang::ASTContext &ast,
 // using type = user_struct;
 util::viewable_range_of<const clang::TypedefNameDecl *> auto
   member_aliases_view(const clang::CXXRecordDecl &rd) {
-  const auto is_supported_alias = //
+  const auto is_supported_public_alias = //
     [](const clang::TypedefNameDecl *d) {
-      return std::ranges::any_of(meta::k_supported_member_aliases,
-        std::bind_front(std::equal_to<std::string_view>{},
-          fn::as<std::string_view>(d->getName())));
+      return clang::AccessSpecifier::AS_public == d->getAccess()
+        && std::ranges::any_of(meta::k_supported_member_aliases,
+          std::bind_front(std::equal_to<std::string_view>{},
+            fn::as<std::string_view>(d->getName())));
     };
 
   return rd.decls() //
@@ -4274,7 +4275,7 @@ util::viewable_range_of<const clang::TypedefNameDecl *> auto
     | std::views::transform([](const clang::Decl *d) {
         return llvm::cast<clang::TypedefNameDecl>(d);
       }) //
-    | std::views::filter(is_supported_alias);
+    | std::views::filter(is_supported_public_alias);
 }
 
 util::viewable_range_of<const clang::CXXRecordDecl *> auto public_bases_view(

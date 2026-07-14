@@ -390,12 +390,6 @@ if("17" IN_LIST _supported_cpp_standards)
         regressions/private_nested_type_through_wrappers.cpp
         "reflected types: 4")
     _omnirefl_diagnostic_tool_run(
-        "private_alias_shadows_public_field"
-        regressions/private_alias_shadows_public_field.cpp
-        "reflected types:")
-    _omnirefl_disable_diagnostic_build(
-        "private_alias_shadows_public_field")
-    _omnirefl_diagnostic_tool_run(
         "public_nested_in_private_parent"
         regressions/public_nested_in_private_parent.cpp
         "reflected types:")

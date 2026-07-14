@@ -129,16 +129,15 @@ Omnirefl focuses on POD-like records and enums.
 - C++11 through C++23; C++20 concepts provide the most ergonomic interface.
 - Globally accessible named records and enums.
 - Nested named records/enums of supported globally accessible parents.
-- Unconstrained primary record templates.
+- Unconstrained primary record templates, including use as CRTP bases.
 - Public data fields: names, type names, annotations, value retrieval, mutation
   of writable fields, and `is_const()`/`is_mutable()` traits.
 - Enumerator names, values, and annotations.
 - Dependency discovery through:
   - public field types
   - public bases and transitive public bases
-  - template-record fields
-  - CRTP bases
-  - supported member aliases:
+  - public fields of primary template records
+  - supported public member aliases:
     - `error_type`
     - `first_type`
     - `key_type`
@@ -355,8 +354,8 @@ Benchmark runs are reported by the
 - (+) named globally accessible records
 - (+) named globally accessible enums
 - (+) nested named records/enums of supported globally accessible parents
-- (+) primary record templates, including type, value, and template-template
-  parameters
+- (+) primary record templates with type, value, and template-template
+  parameters, including use as CRTP bases
 
 #### Records
 
@@ -366,7 +365,6 @@ Benchmark runs are reported by the
   bindings
 - (+) inherited public fields
 - (+) transitive public base fields
-- (+) public CRTP base fields through supported primary templates
 - (+) multiple public base fields
 - (+) public base fields from template records
 - (+) private/protected base fields are not reflected through derived records
@@ -401,9 +399,8 @@ Benchmark runs are reported by the
 - (+) public base type dependencies
 - (+) transitive public base dependencies
 - (+) standard-library public bases are ignored as reflection dependencies
-- (+) template record field dependencies
-- (+) CRTP base dependencies
-- (+) supported member alias dependencies: `error_type`, `first_type`,
+- (+) public field dependencies of primary template records
+- (+) supported public member alias dependencies: `error_type`, `first_type`,
   `key_type`, `mapped_type`, `second_type`, `type`, `value`, `value_type`
 - (+) `std::pair` dependencies through `first_type` and `second_type`
 - (+) supported template-pack dependencies for template names exactly `tuple`

@@ -5,6 +5,7 @@
 #include <omnirefl/reflection.hpp>
 
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace dependency_types {
@@ -26,6 +27,32 @@ template <template <typename> class Container>
 struct template_template_record {
   Container<int> value;
 };
+
+struct private_alias_and_public_field {
+  private:
+  struct private_child {
+    int value;
+  };
+
+  using value_type = private_child;
+
+  public:
+  private_child exposed;
+};
+
+namespace inspect {
+
+static const struct first_field_type_is_reflected_t {
+  template <typename Binding>
+  bool operator()(const Binding &binding) const {
+    using field =
+      typename std::tuple_element<0, decltype(binding.public_fields())>::type;
+
+    return omni::is_reflected<typename field::type>::value;
+  }
+} first_field_type_is_reflected;
+
+} // namespace inspect
 
 } // namespace dependency_types
 
@@ -102,6 +129,15 @@ TEST(field_dependency, level_1_first_field_type) {
   EXPECT_EQ("as_field",
     omni::reflected_call(dt::inspect::first_field_type_name,
       dt::field_dep_level_1{dt::resolved::as_field{1}}));
+}
+
+TEST(field_dependency, private_alias_does_not_shadow_public_field_path) {
+  namespace dt = dependency_types;
+
+  dt::private_alias_and_public_field input{};
+
+  EXPECT_TRUE(
+    omni::reflected_call(dt::inspect::first_field_type_is_reflected, input));
 }
 
 TEST(field_dependency, level_2_value) {
