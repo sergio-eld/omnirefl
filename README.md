@@ -179,6 +179,12 @@ Omnirefl focuses on POD-like records and enums.
   template specializations are instantiated lazily, and a dependent return type
   can postpone instantiating the function body until the specialization is
   required.
+- CMake-generated sources are skipped by default. Targets commonly contain
+  helper translation units such as Qt moc output, which must not be
+  instrumented; explicit opt-in for generated sources is not available yet.
+- The CMake wrapper only instruments concrete C++ source entries. Source
+  generator expressions are rejected. C translation units are ignored; if no
+  C++ source remains, reflection is skipped with a configuration warning.
 
 Linters and language servers such as clangd can report temporary "ghost"
 diagnostics between edits/tool runs, because reflected `.cpp` files depend on

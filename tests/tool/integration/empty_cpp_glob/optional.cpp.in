@@ -11,6 +11,6 @@ struct read_value {
   }
 };
 
-int main() {
-  return 23 == omni::reflected_call(read_value{}, record{23}) ? 0 : 1;
+int reflected_value() {
+  return omni::reflected_call(read_value{}, record{29});
 }

@@ -36,20 +36,72 @@ if(DEFINED omnirefl_DIR)
     set_tests_properties(omnirefl.regression.dollar_path_source PROPERTIES
         DISABLED TRUE)
 
-    # FIXME(low): add_custom_command outputs are target-owned C++ sources, but
-    # the wrapper filters their GENERATED property and reports that the target
-    # has no C/C++ sources. Pre-generating the file is a workable alternative.
-    add_test(NAME omnirefl.regression.generated_source
+    add_test(NAME omnirefl.integration.source_shapes
         COMMAND ${CMAKE_COMMAND}
-            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/regressions/generated_source"
-            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/regressions/generated_source"
+            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/source_shapes"
+            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/source_shapes"
             -D "GENERATOR=${CMAKE_GENERATOR}"
+            -D "C_COMPILER=${CMAKE_C_COMPILER}"
+            -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            -D "OMNIREFL_DIR=${omnirefl_DIR}"
+            -D "EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+            -D "EXECUTABLES=generated_helpers;uppercase_cpp;language_cxx"
+            -D "OMITTED_REFLECTION_STEMS=generated_absolute;generated_relative"
+            -D "REQUIRED_REFLECTION_STEMS=generated_helpers;uppercase_cpp;language_cxx"
+            -P
+                "${CMAKE_CURRENT_LIST_DIR}/integration/run_project.cmake")
+
+    add_test(NAME omnirefl.integration.empty_cpp_glob
+        COMMAND ${CMAKE_COMMAND}
+            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/empty_cpp_glob"
+            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/empty_cpp_glob"
+            -D "GENERATOR=${CMAKE_GENERATOR}"
+            -D "C_COMPILER=${CMAKE_C_COMPILER}"
             -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
             -D "OMNIREFL_DIR=${omnirefl_DIR}"
             -P
-                "${CMAKE_CURRENT_LIST_DIR}/regressions/generated_source/run.cmake")
-    set_tests_properties(omnirefl.regression.generated_source PROPERTIES
-        DISABLED TRUE)
+                "${CMAKE_CURRENT_LIST_DIR}/integration/run_empty_cpp_glob.cmake")
+
+    function(_omnirefl_accepted_cmake_project name)
+        add_test(NAME "omnirefl.integration.${name}"
+            COMMAND ${CMAKE_COMMAND}
+                -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/${name}"
+                -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/${name}"
+                -D "GENERATOR=${CMAKE_GENERATOR}"
+                -D "C_COMPILER=${CMAKE_C_COMPILER}"
+                -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                -D "OMNIREFL_DIR=${omnirefl_DIR}"
+                ${ARGN}
+                -P
+                    "${CMAKE_CURRENT_LIST_DIR}/integration/run_project.cmake")
+    endfunction()
+
+    _omnirefl_accepted_cmake_project(mixed_language_target
+        -D "EXECUTABLES=mixed_language_target"
+        -D "EXPECTED_DIAGNOSTICS=ignoring C translation units"
+        -D "OMITTED_REFLECTION_STEMS=helper"
+        -D "REQUIRED_REFLECTION_STEMS=main")
+    _omnirefl_accepted_cmake_project(c_language_override
+        -D "EXECUTABLES=c_language_override"
+        -D "EXPECTED_DIAGNOSTICS=ignoring C translation units;skipped."
+        -D "OMITTED_REFLECTION_STEMS=main")
+
+    function(_omnirefl_rejected_cmake_project name expected_diagnostics)
+        add_test(NAME "omnirefl.integration.${name}"
+            COMMAND ${CMAKE_COMMAND}
+                -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/${name}"
+                -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/${name}"
+                -D "GENERATOR=${CMAKE_GENERATOR}"
+                -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                -D "OMNIREFL_DIR=${omnirefl_DIR}"
+                -D "EXPECTED_DIAGNOSTICS=${expected_diagnostics}"
+                -P
+                    "${CMAKE_CURRENT_LIST_DIR}/integration/expect_configure_error.cmake")
+    endfunction()
+
+    _omnirefl_rejected_cmake_project(
+        generator_expression_source
+        "source generator;separate C++ target")
 endif()
 
 set(_omnirefl_cli_compile_source -c)
@@ -83,6 +135,35 @@ add_test(NAME omnirefl.cli.relative_output
         -o ignored-object-file)
 set_tests_properties(omnirefl.cli.relative_output PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+set(_omnirefl_cli_c_language -x c)
+set(_omnirefl_cli_cxx_language -x c++)
+if(MSVC)
+    set(_omnirefl_cli_c_language /TC)
+    set(_omnirefl_cli_cxx_language /TP)
+endif()
+
+function(_omnirefl_cli_language_test name source compiler expect_success)
+    add_test(NAME "omnirefl.cli.${name}"
+        COMMAND ${CMAKE_COMMAND}
+            -D "TOOL=$<TARGET_FILE:omni::tool>"
+            -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
+            -D "SOURCE=${CMAKE_CURRENT_LIST_DIR}/${source}"
+            -D "COMPILER=${compiler}"
+            -D "OUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.omnirefl.hpp"
+            -D "EXPECT_SUCCESS=${expect_success}"
+            -D "LANGUAGE_ARGS=${ARGN}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/expect_cli_language.cmake")
+endfunction()
+
+_omnirefl_cli_language_test(
+    implicit_c_language cli_language_source.c "${CMAKE_C_COMPILER}" FALSE)
+_omnirefl_cli_language_test(
+    explicit_c_language cli_source.cpp "${CMAKE_CXX_COMPILER}" FALSE
+    ${_omnirefl_cli_c_language})
+_omnirefl_cli_language_test(
+    explicit_cxx_language cli_language_source.c "${CMAKE_C_COMPILER}" TRUE
+    ${_omnirefl_cli_cxx_language})
 
 set(_compiler_response_file
     "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file.rsp")
@@ -456,12 +537,6 @@ if("17" IN_LIST _supported_cpp_standards)
     _omnirefl_disable_diagnostic_build(
         "dependent_nontype_template")
     _omnirefl_diagnostic_tool_run(
-        "mixed_language_target"
-        "regressions/mixed_language_target.cpp;regressions/mixed_language_helper.c"
-        "reflected types:")
-    _omnirefl_disable_diagnostic_build(
-        "mixed_language_target")
-    _omnirefl_diagnostic_tool_run(
         "ccdb_backslash_definition"
         regressions/ccdb_backslash_definition.cpp
         "reflected types:")
@@ -574,25 +649,6 @@ if("17" IN_LIST _supported_cpp_standards)
 endif()
 
 if("20" IN_LIST _supported_cpp_standards)
-    function(_omnirefl_disabled_configure_regression name)
-        set(_source_dir
-            "${CMAKE_CURRENT_LIST_DIR}/regressions/cmake/${name}")
-        set(_build_dir
-            "${CMAKE_CURRENT_BINARY_DIR}/regressions/cmake/${name}")
-
-        add_test(NAME "cpp_20.regression.${name}.configure"
-            COMMAND ${CMAKE_COMMAND}
-                -S "${_source_dir}"
-                -B "${_build_dir}"
-                -GNinja
-                -D "omnirefl_DIR=${omnirefl_DIR}")
-        set_tests_properties("cpp_20.regression.${name}.configure"
-            PROPERTIES DISABLED TRUE)
-    endfunction()
-
-    _omnirefl_disabled_configure_regression(uppercase_cpp_source)
-    _omnirefl_disabled_configure_regression(generator_expression_source)
-
     set(_no_char8_target "cpp_20.diagnostic.driver_option_no_char8_t")
     add_executable(${_no_char8_target} EXCLUDE_FROM_ALL
         regressions/driver_option_fidelity.cpp)

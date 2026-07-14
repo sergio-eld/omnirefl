@@ -31,33 +31,89 @@ macro(_omni_checkhealth)
 endmacro()
 
 # -- Target sources helper --------
-function(_omni_get_target_sources target_name out_sources)
+function(_omni_classify_target_sources
+        target_name
+        out_cxx_sources
+        out_c_sources
+        out_generator_expressions)
     get_target_property(srcs "${target_name}" SOURCES)
     if(srcs STREQUAL "srcs-NOTFOUND")
-        set(${out_sources} "" PARENT_SCOPE)
+        set(${out_cxx_sources} "" PARENT_SCOPE)
+        set(${out_c_sources} "" PARENT_SCOPE)
+        set(${out_generator_expressions} "" PARENT_SCOPE)
         return()
     endif()
 
-    set(result)
+    set(cxx_sources)
+    set(c_sources)
+    set(generator_expressions)
+    get_target_property(target_source_dir "${target_name}" SOURCE_DIR)
+    get_target_property(target_binary_dir "${target_name}" BINARY_DIR)
+
     foreach(s IN LISTS srcs)
-        # Keep genex entries (cannot absolutize/filter at configure time)
         if(s MATCHES "\\$<")
-            list(APPEND result "${s}")
+            list(APPEND generator_expressions "${s}")
             continue()
         endif()
 
-        get_filename_component(abs "${s}" ABSOLUTE)
+        get_filename_component(abs "${s}" ABSOLUTE
+            BASE_DIR "${target_source_dir}")
 
-        # Filter generated sources (only for non-genex)
-        get_source_file_property(is_gen "${abs}" GENERATED)
+        set(source_candidates "${abs}")
+        if(NOT IS_ABSOLUTE "${s}")
+            get_filename_component(generated_abs "${s}" ABSOLUTE
+                BASE_DIR "${target_binary_dir}")
+            list(APPEND source_candidates "${generated_abs}")
+        endif()
+
+        set(is_gen FALSE)
+        foreach(candidate IN LISTS source_candidates)
+            get_source_file_property(candidate_is_gen "${candidate}"
+                TARGET_DIRECTORY "${target_name}" GENERATED)
+            if(candidate_is_gen)
+                set(is_gen TRUE)
+                break()
+            endif()
+        endforeach()
+
         if(is_gen)
+            # TODO(low): add an explicit per-source opt-in for reflecting
+            # generated translation units. They are excluded by default because
+            # targets commonly contain generated helper sources such as Qt moc
+            # output, which must not be instrumented.
             continue()
         endif()
 
-        list(APPEND result "${abs}")
+        get_source_file_property(header_only "${abs}"
+            TARGET_DIRECTORY "${target_name}" HEADER_FILE_ONLY)
+        if(header_only)
+            continue()
+        endif()
+
+        get_source_file_property(language "${abs}"
+            TARGET_DIRECTORY "${target_name}" LANGUAGE)
+
+        if("NOTFOUND" STREQUAL language)
+            get_filename_component(extension "${s}" EXT)
+            string(REGEX REPLACE "^\\." "" extension "${extension}")
+
+            if(extension IN_LIST CMAKE_CXX_SOURCE_FILE_EXTENSIONS)
+                set(language CXX)
+            elseif(extension IN_LIST CMAKE_C_SOURCE_FILE_EXTENSIONS)
+                set(language C)
+            endif()
+        endif()
+
+        if("CXX" STREQUAL language)
+            list(APPEND cxx_sources "${abs}")
+        elseif("C" STREQUAL language)
+            list(APPEND c_sources "${abs}")
+        endif()
     endforeach()
 
-    set(${out_sources} "${result}" PARENT_SCOPE)
+    set(${out_cxx_sources} "${cxx_sources}" PARENT_SCOPE)
+    set(${out_c_sources} "${c_sources}" PARENT_SCOPE)
+    set(${out_generator_expressions} "${generator_expressions}" PARENT_SCOPE)
 endfunction()
 
 # -- Reflected target helper --------
@@ -145,18 +201,31 @@ function(omni_reflected_target target)
         target_compile_definitions(${target} PRIVATE OMNI_ENABLE_INDEX_MODE=1)
     endif()
 
-    _omni_get_target_sources(${target} _all_sources)
+    _omni_classify_target_sources(
+        ${target}
+        _tu_sources
+        _c_sources
+        _generator_expression_sources)
 
-    set(_refl_sources)
-    foreach(src IN LISTS _all_sources)
-        if(src MATCHES "\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$")
-            list(APPEND _refl_sources "${src}")
-        endif()
-    endforeach()
+    if(_generator_expression_sources)
+        message(FATAL_ERROR
+            "omnirefl: target ${target} contains source generator expressions, "
+            "which cannot be classified at configure time. Collect the sources "
+            "requiring reflection in a separate C++ target and apply "
+            "omni_reflected_target(...) to that target.")
+    endif()
 
-    if(NOT _refl_sources)
-        message(SEND_ERROR
-            "omnirefl: no C/C++ source or header files found for target ${target}")
+    if(_c_sources)
+        list(JOIN _c_sources ", " _c_sources_text)
+        message(STATUS
+            "omnirefl: target ${target}: ignoring C translation units: "
+            "${_c_sources_text}")
+    endif()
+
+    if(NOT _tu_sources)
+        message(WARNING
+            "omnirefl: target ${target} has no C++ translation units. "
+            "Reflection skipped.")
         return()
     endif()
 
@@ -164,20 +233,6 @@ function(omni_reflected_target target)
     set(_comp_db "${CMAKE_BINARY_DIR}/compile_commands.json")
 
     message(STATUS "omnirefl: reflected target `${target}`")
-
-    # Common: require at least one TU source (headers-only targets not supported)
-    set(_tu_sources)
-    foreach(src IN LISTS _refl_sources)
-        if(src MATCHES "\\.(c|cc|cpp|cxx)$")
-            list(APPEND _tu_sources "${src}")
-        endif()
-    endforeach()
-    if(NOT _tu_sources)
-        message(SEND_ERROR
-            "omnirefl: target ${target} has no C/C++ source files (.c/.cc/.cpp/.cxx). "
-            "Headers-only targets are not supported.")
-        return()
-    endif()
 
     get_target_property(_target_cxx_standard ${target} CXX_STANDARD)
     if(_target_cxx_standard STREQUAL "_target_cxx_standard-NOTFOUND")

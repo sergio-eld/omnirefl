@@ -23,6 +23,7 @@
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Basic/FileManager.h>
+#include <clang/Basic/LangStandard.h>
 #include <clang/Basic/SourceLocation.h>
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
@@ -3176,10 +3177,6 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       out.reserve(16 + normalized_args->size());
 
       out.emplace_back("omnirefl");
-      out.emplace_back(source.generic_string());
-      out.emplace_back("-fsyntax-only"); //< AST only
-      out.emplace_back(
-        std::format("-resource-dir={}", resource_dir.generic_string()));
 
       if (!mingw_used) {
         // prevents from picking up on another compiler's C++ < std libs
@@ -3207,16 +3204,23 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
             }),
         std::back_inserter(out));
 
+      out.emplace_back("-fsyntax-only"); //< AST only
+      out.emplace_back(
+        std::format("-resource-dir={}", resource_dir.generic_string()));
+      out.emplace_back(source.generic_string());
+
       return out;
     });
 
   // ad hoc: this is a heavy-weight solution just to get proper argument
   // translations (for other compilers' commands) and to resolve system
   // include paths...
-  clang::driver::Driver driver(msvc_used ? "clang-cl" : "clang",
+  clang::driver::Driver driver(
+    msvc_used ? "clang-cl" : fs::path(flags.front()).filename().string(),
     driver_triple,
     *log.clang_engine,
     "omnirefl reflection tool");
+
   driver.setCheckInputsExist(false);
 
   const std::unique_ptr<clang::driver::Compilation> compilation(
@@ -3246,6 +3250,23 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         *log.clang_engine)) {
     return std::unexpected(
       processing_error(source, "Failed to create CompilerInvocation."));
+  }
+
+  const auto &frontend_inputs = clang_invocation->getFrontendOpts().Inputs;
+  if (1 != frontend_inputs.size()) {
+    return std::unexpected(processing_error(source,
+      std::format("expected one frontend input, resolved {}",
+        frontend_inputs.size())));
+  }
+
+  const clang::Language input_language =
+    frontend_inputs.front().getKind().getLanguage();
+
+  if (clang::Language::CXX != input_language) {
+    return std::unexpected(processing_error(source,
+      std::format("omnirefl requires a C++ translation unit, but the compiler "
+                  "command selects {}",
+        clang::languageToString(input_language).str())));
   }
 
   {
