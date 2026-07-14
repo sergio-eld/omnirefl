@@ -1613,24 +1613,30 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
   };
 
   if (canonical.isPointerType()) {
-    return std::unexpected(
-      invalid_arg_error("reflected_call argument is a pointer; "
-                        "pointer types are not reflected directly",
-        "dereference the pointer and pass the referenced record/enum, "
-        "or wrap pointer data in a reflectable record"));
+    return std::unexpected(invalid_arg_error(
+      /*reason*/ //
+      "reflected_call argument is a pointer; "
+      "pointer types are not reflected directly",
+      /*suggestion*/ //
+      "dereference the pointer and pass the referenced record/enum, "
+      "or wrap pointer data in a reflectable record"));
   }
 
   if (canonical.isArrayType()) {
-    return std::unexpected(
-      invalid_arg_error("reflected_call argument is a raw array; "
-                        "raw arrays are not reflected directly",
-        "wrap the array in a reflectable record, "
-        "or prefer std::array/std::span where appropriate"));
+    return std::unexpected(invalid_arg_error(
+      /*reason*/ //
+      "reflected_call argument is a raw array; "
+      "raw arrays are not reflected directly",
+      /*suggestion*/ //
+      "wrap the array in a reflectable record, "
+      "or prefer std::array/std::span where appropriate"));
   }
 
   if (!clang::isa<clang::TagType>(canonical)) {
     return std::unexpected(invalid_arg_error(
+      /*reason*/ //
       "reflected_call argument is not a C++ record or enum type",
+      /*suggestion*/ //
       "pass a directly reflectable record/enum, "
       "or wrap scalar/fundamental values in a reflectable record"));
   }
@@ -1639,18 +1645,22 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
 
   if (!tag.getDecl()->getDefinition()) {
     return std::unexpected(invalid_arg_error(
+      /*reason*/ //
       "forward declarations without definitions are not allowed "
       "as reflected_call inputs",
+      /*suggestion*/ //
       "include the definition before the reflected_call "
       "or pass a different reflectable type"));
   }
 
   if (tag.getDecl()->isInStdNamespace()) {
-    return std::unexpected(
-      invalid_arg_error("reflected_call argument is a standard-library type; "
-                        "std:: types are not reflected directly",
-        "pass a user record/enum directly; std:: wrappers may still "
-        "be used as reflected fields or supported dependency routes"));
+    return std::unexpected(invalid_arg_error(
+      /*reason*/ //
+      "reflected_call argument is a standard-library type; "
+      "std:: types are not reflected directly",
+      /*suggestion*/ //
+      "pass a user record/enum directly; std:: wrappers may still be used "
+      "as reflected fields or supported dependency routes"));
   }
 
   if (llvm::isa<clang::EnumType>(&tag)) {
@@ -1675,14 +1685,18 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
 
   if (!record_decl) {
     return std::unexpected(invalid_arg_error(
+      /*reason*/ //
       "reflected_call argument is not a C++ record or enum type",
+      /*suggestion*/ //
       "pass a directly reflectable C++ record/enum type"));
   }
 
   if (llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(record_decl)) {
     return std::unexpected(invalid_arg_error(
+      /*reason*/ //
       "reflected_call argument is a partial template specialization; "
       "partial specializations are not supported",
+      /*suggestion*/ //
       "sanitize the type before reflection or use a supported "
       "primary record template instantiation"));
   }
@@ -1694,25 +1708,42 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
     if (specialized
           .dyn_cast<clang::ClassTemplatePartialSpecializationDecl *>()) {
       return std::unexpected(invalid_arg_error(
+        /*reason*/ //
         "reflected_call argument is a partial template specialization; "
         "partial specializations are not supported",
+        /*suggestion*/ //
         "sanitize the type before reflection or use a supported "
         "primary record template instantiation"));
     }
 
     if (clang::TSK_ExplicitSpecialization == spec->getSpecializationKind()) {
       return std::unexpected(invalid_arg_error(
+        /*reason*/ //
         "reflected_call argument is an explicit record template "
         "specialization; explicit specializations are not supported",
+        /*suggestion*/ //
         "pass an instantiation of the primary record template or a "
         "non-template reflectable wrapper"));
+    }
+
+    // todo: consider routing constrained primary-template arguments through
+    // indexed mode. That requires avoiding the normal primary-template
+    // declaration/emission path and is not a local validation change.
+    if (spec->getSpecializedTemplate()->hasAssociatedConstraints()) {
+      return std::unexpected(invalid_arg_error(
+        /*reason*/ //
+        "constrained templates are not supported",
+        /*suggestion*/ //
+        "pass an unconstrained record type to reflected_call"));
     }
   }
 
   if (has_template_record_parent(record_decl->getDeclContext())) {
     return std::unexpected(invalid_arg_error(
+      /*reason*/ //
       "records nested inside template records are not supported as "
       "reflected_call inputs",
+      /*suggestion*/ //
       "move the nested record to namespace scope or wrap the instantiated "
       "type in a supported record"));
   }

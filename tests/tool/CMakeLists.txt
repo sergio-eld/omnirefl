@@ -668,31 +668,24 @@ if("20" IN_LIST _supported_cpp_standards)
         PROPERTIES DISABLED TRUE)
 
     set(_constrained_template_target
-        "cpp_20.regression.constrained_primary_template")
+        "cpp_20.negative.reflected_call_constrained_primary_template")
     add_executable(${_constrained_template_target} EXCLUDE_FROM_ALL
-        regressions/constrained_primary_template.cpp)
+        negative_run/reflected_call_constrained_primary_template.cpp)
     set_target_properties(${_constrained_template_target} PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO)
-    target_link_libraries(${_constrained_template_target} PRIVATE
-        GTest::GTest
-        gtest_main
-        std_compat)
+    target_link_libraries(${_constrained_template_target} PRIVATE std_compat)
     omni_reflected_target(${_constrained_template_target} LOG_LEVEL warning)
 
     add_test(NAME "${_constrained_template_target}.run_omni"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
-            -t "${_constrained_template_target}.omni" --parallel 1)
-    add_test(NAME "${_constrained_template_target}.build"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
-            -t "${_constrained_template_target}" --parallel)
-    add_test(NAME "${_constrained_template_target}"
-        COMMAND ${_constrained_template_target})
-    set_tests_properties(
-        "${_constrained_template_target}.build"
-        "${_constrained_template_target}"
-        PROPERTIES DISABLED TRUE)
+        COMMAND ${CMAKE_COMMAND}
+            -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+            -D "TARGET=${_constrained_template_target}.omni"
+            -D "EXPECTED_DIAGNOSTICS=2"
+            -D "EXPECTED_MESSAGE=constrained templates are not supported"
+            -D "DIAGNOSTIC_REGEX=:[0-9]+:[0-9]+: reflected_call argument"
+            -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
 endif()
 
 list(REMOVE_DUPLICATES _supported_cpp_standards)

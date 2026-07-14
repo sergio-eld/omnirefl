@@ -129,7 +129,7 @@ Omnirefl focuses on POD-like records and enums.
 - C++11 through C++23; C++20 concepts provide the most ergonomic interface.
 - Globally accessible named records and enums.
 - Nested named records/enums of supported globally accessible parents.
-- Primary record templates.
+- Unconstrained primary record templates.
 - Public data fields: names, type names, annotations, value retrieval, mutation
   of writable fields, and `is_const()`/`is_mutable()` traits.
 - Enumerator names, values, and annotations.
@@ -163,6 +163,10 @@ Omnirefl focuses on POD-like records and enums.
   sanitize pointers, arrays, and compound inputs before the call; use
   `std::visit` or `mpark::visit` for variants. Compound types remain valid
   dependency routes as listed above. Invalid-input detection is best effort.
+- Constrained primary record templates are not supported. The force-included
+  generated header would have to repeat equivalent constraints before their
+  source-level dependencies are declared, and concepts cannot be
+  forward-declared.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.
@@ -432,7 +436,7 @@ Benchmark runs are reported by the
 - (+) C++20 `meta`, `binding`, `field_meta`, and `field_binding` concepts
 - (+) best-effort tool diagnostics for invalid `reflected_call` arguments
   including pointers, arrays, fundamentals, standard-library records, and
-  explicit or partial template specializations
+  constrained primary templates or explicit/partial template specializations
 - (+) best-effort tool diagnostics for reflection query instantiation outside a
   reflected scope
 
