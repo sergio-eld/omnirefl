@@ -17,6 +17,16 @@ struct uninstantiated_primary_template {
   T value;
 };
 
+template <typename T>
+struct template_template_box {
+  T value;
+};
+
+template <template <typename> class Container>
+struct template_template_record {
+  Container<int> value;
+};
+
 } // namespace dependency_types
 
 namespace {
@@ -279,6 +289,16 @@ TEST(record_template, metadata_for_uninstantiated_primary_template) {
   EXPECT_EQ(1,
     omni::reflected_call(dt::inspect::field_count,
       omni::type_t<dt::uninstantiated_primary_template<int>>{}));
+}
+
+TEST(record_template, metadata_for_template_template_parameter) {
+  namespace dt = dependency_types;
+
+  // This must remain the specialization's first reference in this translation
+  // unit; a template-template argument must not make it appear incomplete.
+  EXPECT_EQ(1,
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::template_template_record<dt::template_template_box>>{}));
 }
 
 TEST(annotations, record_type_annotation) {
