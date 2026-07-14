@@ -68,6 +68,20 @@ struct first_field {
 };
 
 } // namespace reference_return
+
+inline namespace v1 {
+
+struct inline_namespace_record {
+  int value;
+};
+
+struct inline_namespace_parent {
+  struct nested {
+    int value;
+  };
+};
+
+} // namespace v1
 } // namespace interface_test
 
 TEST(odr_test, inside_interface_test_cpp) {
@@ -173,6 +187,22 @@ TEST(type_names, namespaced_record_qualified_type_name_t) {
   value_categories_test<namespaced_record_t>(
     "interface_test::nested::namespaced_record_t",
     interface_test::qualified_type_name);
+}
+
+TEST(type_names, inline_namespace_record_qualified_type_name) {
+  using interface_test::inline_namespace_record;
+
+  EXPECT_EQ("interface_test::v1::inline_namespace_record",
+    omni::reflected_call(interface_test::qualified_type_name,
+      omni::type_t<inline_namespace_record>{}));
+}
+
+TEST(type_names, inline_namespace_nested_record_qualified_type_name) {
+  using nested = interface_test::inline_namespace_parent::nested;
+
+  EXPECT_EQ("interface_test::v1::inline_namespace_parent::nested",
+    omni::reflected_call(interface_test::qualified_type_name,
+      omni::type_t<nested>{}));
 }
 
 TEST(type_names, nested_record_type_t) {

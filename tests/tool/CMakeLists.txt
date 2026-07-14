@@ -117,7 +117,7 @@ set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_Declare(googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-     # The "newest" gtest that supports C++11. 
+     # The "newest" gtest that supports C++11.
      # Otherwize will force its C++ version upon the test targets.
     GIT_TAG release-1.12.1)
 
@@ -409,12 +409,6 @@ if("17" IN_LIST _supported_cpp_standards)
         "variant_named_record_is_reflected"
         regressions/variant_named_record_is_reflected.cpp
         "reflected types:")
-    _omnirefl_diagnostic_tool_run(
-        "inline_namespace"
-        regressions/inline_namespace.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "inline_namespace")
     _omnirefl_diagnostic_tool_run(
         "deprecated_public_field"
         regressions/deprecated_public_field.cpp

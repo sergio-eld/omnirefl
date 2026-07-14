@@ -59,6 +59,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <compare>
 #include <concepts>
 #include <cstdint>
 #include <expected>
@@ -191,7 +192,7 @@ struct std::formatter<util::format_range_t<V, CharT>, CharT> {
   }
 
   template <typename FormatContext>
-  static constexpr auto format(util::format_range_t<V, CharT> x,
+  static constexpr auto format(util::format_range_t<V, CharT> &x,
     FormatContext &ctx) {
     return std::ranges::fold_left(x.rng, ctx.out(), [&](auto out, auto &&e) {
       return std::format_to(out, "{}", e);
@@ -511,13 +512,20 @@ struct type_access_path {
   std::vector<std::variant<field, member_type, template_arg>> steps;
 };
 
+struct namespace_component {
+  std::string name;
+  bool is_inline = false;
+
+  auto operator<=>(const namespace_component &) const = default;
+};
+
 struct nm_qual_type {
   /// nullopt for unnamed types
   std::optional<std::string> name;
 
   /// chain of namespaces. may start with empty string if declared in anonymous
   /// namespace
-  std::vector<std::string> namespaces;
+  std::vector<namespace_component> namespaces;
 
   // todo: store type_id instead
   /// non-empty for nested types `struct foo { struct bar{}; };`
@@ -1150,15 +1158,18 @@ bool is_compound_dependency_route(const clang::CXXRecordDecl *record) {
 }
 
 std::string format(const nm_qual_type &type) {
-  std::vector<std::string> elems;
-  elems.reserve(
-    type.namespaces.size() + type.enclosing_records.size() + std::size_t{1});
-  std::ranges::copy(type.namespaces, std::back_inserter(elems));
-  std::ranges::copy(type.enclosing_records, std::back_inserter(elems));
-  elems.emplace_back(type.name.value_or("(unnamed)"));
+  const std::vector namespace_names = type.namespaces //
+    | std::views::transform(&namespace_component::name)
+    | std::ranges::to<std::vector>();
 
+  const std::string type_name = type.name.value_or("(unnamed)");
   return std::format("{}",
-    elems //
+    std::array{
+      std::span{namespace_names},
+      std::span{type.enclosing_records},
+      std::span{&type_name, std::size_t{1}},
+    } //
+      | std::views::join //
       | std::views::join_with("::"sv) //
       | util::format_range);
 }
@@ -2324,55 +2335,56 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
 namespace render::impl {
 
 std::string format_type_name(const meta::nm_qual_type &t) {
-  std::vector<std::string> elems;
-  elems.reserve(t.enclosing_records.size() + std::size_t{1});
-  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
-  elems.emplace_back(t.name.value_or("(unnamed)"));
-
+  const std::string type_name = t.name.value_or("(unnamed)");
   return std::format("{}",
-    elems //
+    std::array{
+      std::span{t.enclosing_records},
+      std::span{&type_name, std::size_t{1}},
+    } //
+      | std::views::join //
       | std::views::join_with("::"sv) //
       | util::format_range);
 }
 
 std::string format_primary_template_type_name(const meta::nm_qual_type &t,
-  std::string_view primary_name) {
-  std::vector<std::string> elems;
-  elems.reserve(t.enclosing_records.size() + std::size_t{1});
-  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
-  elems.emplace_back(primary_name);
-
+  const std::string &primary_name) {
   return std::format("{}",
-    elems //
+    std::array{
+      std::span{t.enclosing_records},
+      std::span{&primary_name, std::size_t{1}},
+    } //
+      | std::views::join //
       | std::views::join_with("::"sv) //
       | util::format_range);
 }
 
 std::string format_primary_template_qualified_type_name(
   const meta::nm_qual_type &t,
-  std::string_view primary_name) {
-  std::vector<std::string> elems;
-  elems.reserve(
-    t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
-  std::ranges::copy(t.namespaces, std::back_inserter(elems));
-  std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
-  elems.emplace_back(primary_name);
+  const std::string &primary_name) {
+  const std::vector namespace_names = t.namespaces //
+    | std::views::transform(&meta::namespace_component::name)
+    | std::ranges::to<std::vector>();
 
   return std::format("{}",
-    elems //
+    std::array{
+      std::span{namespace_names},
+      std::span{t.enclosing_records},
+      std::span{&primary_name, std::size_t{1}},
+    } //
+      | std::views::join //
       | std::views::join_with("::"sv) //
       | util::format_range);
+}
+
+std::string indentation(std::size_t level) {
+  return std::string(level * 2, ' ');
 }
 
 std::string format_template_params(
   const std::vector<meta::template_param> &params,
   std::size_t indent_level) {
-  const auto indent = [](std::size_t level) {
-    return std::string(level * 2, ' ');
-  };
-
   const auto format_list = //
-    [&indent](auto self,
+    [](auto self,
       const std::vector<meta::template_param> &params,
       std::size_t level,
       bool with_names) -> std::string {
@@ -2380,10 +2392,10 @@ std::string format_template_params(
 
     for (const auto &[index, param] : params | std::views::enumerate) {
       if (0 != index)
-        out += std::format(",\n{}", indent(level));
+        out += std::format(",\n{}", indentation(level));
 
       out += std::visit(
-        [&indent, self, index, level, with_names]<typename Param>(
+        [self, index, level, with_names]<typename Param>(
           const Param &p) -> std::string {
           const std::string name =
             with_names ? std::format("_T{}", index) : std::string();
@@ -2404,16 +2416,16 @@ std::string format_template_params(
 
             if (!with_names) {
               return std::format("template <\n{0}{1}\n{2}> class{3}",
-                indent(level + 1),
+                indentation(level + 1),
                 self(self, p.params, level + 1, false),
-                indent(level),
+                indentation(level),
                 p.is_pack ? "..." : "");
             }
 
             return std::format("template <\n{0}{1}\n{2}> class{3}{4}",
-              indent(level + 1),
+              indentation(level + 1),
               self(self, p.params, level + 1, false),
-              indent(level),
+              indentation(level),
               p.is_pack ? "..." : " ",
               name);
           }
@@ -2438,22 +2450,16 @@ std::string format_template_args(const meta::template_data &t) {
       | util::format_range);
 }
 
+std::string namespace_opening(const meta::namespace_component &ns) {
+  return std::format("{}namespace {} {{",
+    ns.is_inline ? "inline " : "",
+    ns.name);
+}
+
 std::string forward_declaration(const meta::reflectable &t) {
   assert(t.definition.type_name.name);
 
-  std::vector<std::string> lines = t.definition.type_name.namespaces
-    | std::views::transform(
-      [](const std::string &n) { return std::format("namespace {} {{", n); })
-    | std::ranges::to<std::vector>();
-
-  const std::string name = std::format("{}{}{}",
-    t.definition.type_name.enclosing_records //
-      | std::views::transform(fn::as<std::string_view>)
-      | std::views::join_with("::"sv) //
-      | util::format_range,
-    t.definition.type_name.enclosing_records.empty() ? ""sv : "::"sv,
-    *t.definition.type_name.name);
-
+  const std::string name = format_type_name(t.definition.type_name);
   const auto format_data_sum =
     [&name, &t]<typename... U>(const std::variant<U...> &data) -> std::string {
     return std::visit(
@@ -2471,13 +2477,7 @@ std::string forward_declaration(const meta::reflectable &t) {
             return std::format("template <\n  {}\n>\n{} {};",
               format_template_params(struct_data.template_info->params, 1),
               struct_data.type,
-              std::format("{}{}{}",
-                t.definition.type_name.enclosing_records //
-                  | std::views::transform(fn::as<std::string_view>)
-                  | std::views::join_with("::"sv) //
-                  | util::format_range,
-                t.definition.type_name.enclosing_records.empty() ? ""sv
-                                                                 : "::"sv,
+              format_primary_template_type_name(t.definition.type_name,
                 struct_data.template_info->primary_name));
           }
 
@@ -2487,26 +2487,28 @@ std::string forward_declaration(const meta::reflectable &t) {
       data);
   };
 
-  std::ranges::copy(std::views::single(t) //
-      | std::views::transform([&](const meta::reflectable &r) -> std::string {
-          return std::format(
-            "// declared at: {}"
-            "\n{}",
-            diag::format_location(r.definition.location),
-            format_data_sum(r.data));
-        }),
-    std::back_inserter(lines));
+  return //
+    std::ranges::to<std::string>( //
+      std::array{
+        t.definition.type_name.namespaces //
+          | std::views::transform(namespace_opening) //
+          | std::views::join_with("\n"sv) //
+          | std::ranges::to<std::string>(),
 
-  std::ranges::copy(t.definition.type_name.namespaces
-      | std::views::transform([](const std::string &n) {
-          return std::format("}} // namespace {}", n);
-        }),
-    std::back_inserter(lines));
+        std::format("// declared at: {}\n{}",
+          diag::format_location(t.definition.location),
+          format_data_sum(t.data)),
 
-  return std::format("{}",
-    lines //
-      | std::views::join_with("\n"sv) //
-      | util::format_range);
+        t.definition.type_name.namespaces //
+          | std::views::reverse //
+          | std::views::transform([](const meta::namespace_component &ns) {
+              return std::format("}} // namespace {}", ns.name);
+            }) //
+          | std::views::join_with("\n"sv) //
+          | std::ranges::to<std::string>(),
+      } //
+      | std::views::filter([](std::string_view s) { return !s.empty(); }) //
+      | std::views::join_with("\n"sv));
 }
 
 } // namespace render::impl
@@ -4059,20 +4061,27 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
   // need to introduce a sum type like {namespace|struct|function}.
   auto [namespaces, enclosing_records] =
     std::invoke([&decl_ctx = *td->getDeclContext()] {
-      std::array<std::vector<std::string>, 2> result{};
+      std::pair result{
+        std::vector<meta::namespace_component>{},
+        std::vector<std::string>{},
+      };
+
       auto &&[namespaces, enclosing_records] = result;
 
       const clang::DeclContext *dc = &decl_ctx;
       while (!llvm::isa<clang::TranslationUnitDecl>(dc)) {
         if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc)) {
           if (ns->isAnonymousNamespace()) {
-            namespaces.emplace_back("");
+            namespaces.push_back({.name = ""});
           } else if (ns->isStdNamespace() && ns->getName().starts_with("__")) {
             // fixme:
             // ad hoc: skip implementation-detail namespaces inside std (e.g.
             // std::__1) do nothing
           } else {
-            namespaces.emplace_back(ns->getName().str());
+            namespaces.push_back({
+              .name = ns->getName().str(),
+              .is_inline = ns->isInline(),
+            });
           }
         } else if (const auto *rec = llvm::dyn_cast<clang::RecordDecl>(dc)) {
           const clang::IdentifierInfo *id = rec->getIdentifier();
@@ -4803,13 +4812,12 @@ std::string escaped_string_literal_content(std::string_view s) {
 }
 
 std::string annotation_method(std::string_view annotation) {
-  const std::string escaped = escaped_string_literal_content(annotation);
   return std::format(
     "\n  static constexpr auto annotation() noexcept"
     "\n    -> const char(&)[sizeof(\"{0}\")] {{"
     "\n    return \"{0}\";"
     "\n  }}",
-    escaped);
+    escaped_string_literal_content(annotation));
 }
 
 // render `_omni_{root}_as_root` for `root::inner_type` as input
@@ -4818,10 +4826,13 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   assert(!inner_type.enclosing_records.front().empty()
     && "can't access unnamed root");
 
-  std::vector<std::string_view> elems = inner_type.namespaces
+  std::vector elems = //
+    inner_type.namespaces //
+    | std::views::transform(&meta::namespace_component::name)
     | std::views::transform(fn::as<std::string_view>)
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
+
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format("_omni_{}_as_root",
@@ -4834,10 +4845,13 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
 // Intended to defer nested-name lookup until the enclosing type is complete.
 std::string declaration_for_enclosing_root_as_dependent(
   const meta::nm_qual_type &inner_type) {
-  std::vector<std::string_view> elems = inner_type.namespaces
+  std::vector elems = //
+    inner_type.namespaces //
+    | std::views::transform(&meta::namespace_component::name)
     | std::views::transform(fn::as<std::string_view>)
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
+
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format(
@@ -4856,16 +4870,19 @@ std::string forward_declaration_for_enclosing_root(
     "{};"
     "{}",
     inner_type.namespaces //
-      | std::views::filter([](std::string_view ns) { return !ns.empty(); })
-      | std::views::transform([](std::string_view ns) {
-          return std::format("namespace {} {{\n", ns);
+      | std::views::filter(
+        [](const meta::namespace_component &ns) { return !ns.name.empty(); })
+      | std::views::transform([](const meta::namespace_component &ns) {
+          return std::format("{}\n", namespace_opening(ns));
         }) //
       | util::format_range,
     std::format("struct {}", inner_type.enclosing_records.front()),
     inner_type.namespaces //
-      | std::views::filter([](std::string_view ns) { return !ns.empty(); })
-      | std::views::transform([](std::string_view ns) {
-          return std::format("\n}} // namespace {}", ns);
+      | std::views::reverse //
+      | std::views::filter(
+        [](const meta::namespace_component &ns) { return !ns.name.empty(); })
+      | std::views::transform([](const meta::namespace_component &ns) {
+          return std::format("\n}} // namespace {}", ns.name);
         }) //
       | util::format_range);
 }
@@ -4883,7 +4900,9 @@ std::string format_qualified_inner_type_from_root(const std::string &root,
   };
 
   return std::format("{}",
-    spans | std::views::join | std::views::join_with("::"sv)
+    spans //
+      | std::views::join //
+      | std::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -4932,21 +4951,15 @@ std::string reflectable_head(const meta::nm_qual_type &t,
   if constexpr (std::same_as<meta::record_data, Data>) {
     if (d.template_info) {
       const std::string template_args = format_template_args(*d.template_info);
-      std::vector<std::string> elems;
-      elems.reserve(
-        t.namespaces.size() + t.enclosing_records.size() + std::size_t{1});
-      std::ranges::copy(t.namespaces, std::back_inserter(elems));
-      std::ranges::copy(t.enclosing_records, std::back_inserter(elems));
-      elems.emplace_back(d.template_info->primary_name);
-
       const std::string reflected_type_name =
         format_primary_template_type_name(t, d.template_info->primary_name);
+
       const std::string reflected_qualified_type_name =
         format_primary_template_qualified_type_name(t,
           d.template_info->primary_name);
-      const std::string generated_type_name = std::format("{}<{}>",
-        elems | std::views::join_with("::"sv) | util::format_range,
-        template_args);
+
+      const std::string generated_type_name =
+        std::format("{}<{}>", reflected_qualified_type_name, template_args);
 
       // todo: when/if explicit or partial specializations are implemented,
       // reflected type names and namespace-qualified names must describe the
@@ -5347,10 +5360,11 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     ctx.nested,
     ctx.indexed);
 
-  const std::vector required_includes = std::to_array<std::string_view>({
-                                          "omnirefl/reflection.hpp",
-                                          has_enums ? "array" : "",
-                                        }) //
+  const std::vector required_includes = //
+    std::to_array<std::string_view>({
+      "omnirefl/reflection.hpp",
+      has_enums ? "array" : "",
+    }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
 
