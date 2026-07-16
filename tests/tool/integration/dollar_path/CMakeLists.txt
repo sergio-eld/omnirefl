@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
-project(omnirefl_dollar_path_regression LANGUAGES CXX)
+project(omnirefl_dollar_path LANGUAGES CXX)
 
 find_package(omnirefl CONFIG REQUIRED)
 

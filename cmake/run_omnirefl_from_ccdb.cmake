@@ -84,8 +84,12 @@ endif()
 
 list(APPEND _omnirefl_args -- ${_compiler_args})
 
+# CMake compile commands use the top-level build directory as their working
+# directory. Preserve that context for relative include and response-file paths.
+get_filename_component(_compiler_directory "${COMP_DB}" DIRECTORY)
 execute_process(
     COMMAND ${_omnirefl_args}
+    WORKING_DIRECTORY "${_compiler_directory}"
     RESULT_VARIABLE _omnirefl_result
     OUTPUT_VARIABLE _omnirefl_out
     ERROR_VARIABLE _omnirefl_err)

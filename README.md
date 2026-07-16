@@ -131,7 +131,7 @@ Omnirefl focuses on POD-like records and enums.
 - Nested named records/enums of supported globally accessible parents.
 - Unconstrained primary record templates, including use as CRTP bases.
 - Public data fields: names, type names, annotations, value retrieval, mutation
-  of writable fields, and `is_const()`/`is_mutable()` traits.
+  of writable fields, and `is_const()`/`is_mutable()`/`is_volatile()` traits.
 - Enumerator names, values, and annotations.
 - Dependency discovery through:
   - public field types
@@ -183,8 +183,20 @@ Omnirefl focuses on POD-like records and enums.
   helper translation units such as Qt moc output, which must not be
   instrumented; explicit opt-in for generated sources is not available yet.
 - The CMake wrapper only instruments concrete C++ source entries. Source
-  generator expressions are rejected. C translation units are ignored; if no
-  C++ source remains, reflection is skipped with a configuration warning.
+  generator expressions such as this are not supported:
+
+  ```cmake
+  target_sources(example PRIVATE
+      "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/debug.cpp>")
+  omni_reflected_target(example)
+  ```
+
+  CMake resolves the selected source while generating the buildsystem, after
+  `omni_reflected_target()` has configured each source's generated header and
+  force-include option. Those source properties cannot be attached to the
+  resolved path retroactively.
+- C translation units are ignored; if no C++ source remains, reflection is
+  skipped with a configuration warning.
 
 Linters and language servers such as clangd can report temporary "ghost"
 diagnostics between edits/tool runs, because reflected `.cpp` files depend on
@@ -382,7 +394,7 @@ Benchmark runs are reported by the
 - (+) field `qualified_type_name()` preserves source declaration spelling when
   available
 - (+) canonical metadata is available when the field type itself is reflectable
-- (+) field `is_const()` and `is_mutable()` traits
+- (+) field `is_const()`, `is_mutable()`, and `is_volatile()` traits
 - (+) field count / iteration
 - (+) field index is local to the declaring record, not the flattened inherited
   field tuple

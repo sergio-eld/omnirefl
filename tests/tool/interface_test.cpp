@@ -455,10 +455,10 @@ TEST(fields, field_qualification_metadata) {
   namespace fq = interface_test::field_qualification;
 
   static const std::vector<std::string> k_expected{
-    "normal:const=false:mutable=false",
-    "constant:const=true:mutable=false",
-    "cache:const=false:mutable=true",
-    "flags:const=false:mutable=false",
+    "normal:const=false:mutable=false:volatile=false",
+    "constant:const=true:mutable=false:volatile=false",
+    "cache:const=false:mutable=true:volatile=false",
+    "flags:const=false:mutable=false:volatile=false",
   };
 
   EXPECT_EQ(k_expected,
@@ -528,12 +528,59 @@ TEST(fields, field_binding_write_availability) {
     omni::reflected_call(fq::binding_write_availability, const_value));
 }
 
+TEST(fields, additional_volatile_forms) {
+  using interface_test::volatile_field_record_t;
+  namespace fq = interface_test::field_qualification;
+
+  const volatile volatile_field_record_t const_volatile_value{1, 2, 3, 4};
+  volatile_field_record_t mutable_value{5, 6, 7, 0};
+
+  EXPECT_EQ(51,
+    omni::reflected_call(fq::additional_volatile_forms,
+      const_volatile_value,
+      mutable_value));
+  EXPECT_EQ(17, static_cast<int>(const_volatile_value.cache));
+  EXPECT_EQ(29, static_cast<int>(mutable_value.observed));
+  EXPECT_EQ(5, static_cast<unsigned>(mutable_value.flags));
+}
+
 TEST(enumerators, enum_type_t) {
   using interface_test::enum_type_t;
   namespace en = interface_test::enumerators;
 
   value_categories_test<enum_type_t>("zero,one",
     en::enum_type_enumerators);
+}
+
+TEST(bindings, conversion_qualifiers) {
+  using interface_test::enum_type_t;
+  using interface_test::field_qualification_record_t;
+  namespace b = interface_test::bindings;
+
+  field_qualification_record_t mutable_record{1, 2, 3, 4};
+  const field_qualification_record_t const_record{1, 2, 3, 4};
+  volatile field_qualification_record_t volatile_record{1, 2, 3, 4};
+  const volatile auto const_volatile_record =
+    field_qualification_record_t{1, 2, 3, 4};
+
+  EXPECT_TRUE(omni::reflected_call(b::conversion_qualifiers,
+    field_qualification_record_t{1, 2, 3, 4},
+    mutable_record,
+    const_record,
+    volatile_record,
+    const_volatile_record));
+
+  enum_type_t mutable_enum = enum_type_t::zero;
+  const enum_type_t const_enum = enum_type_t::zero;
+  volatile enum_type_t volatile_enum = enum_type_t::zero;
+  const volatile enum_type_t const_volatile_enum = enum_type_t::zero;
+
+  EXPECT_TRUE(omni::reflected_call(b::conversion_qualifiers,
+    enum_type_t::zero,
+    mutable_enum,
+    const_enum,
+    volatile_enum,
+    const_volatile_enum));
 }
 
 TEST(record_type_t, field_value_read) {

@@ -22,19 +22,14 @@ set_tests_properties(omnirefl.cli.version PROPERTIES
         "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)")
 
 if(DEFINED omnirefl_DIR)
-    # FIXME(low): CMake escapes `$` as `$$` in compile_commands.json. The
-    # package wrapper currently compares that spelling literally and emits a
-    # false compiler-source mismatch warning, although generation succeeds.
-    add_test(NAME omnirefl.regression.dollar_path_source
+    add_test(NAME omnirefl.integration.dollar_path_source
         COMMAND ${CMAKE_COMMAND}
-            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/regressions/dollar_path"
-            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/regressions"
+            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/dollar_path"
+            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration"
             -D "GENERATOR=${CMAKE_GENERATOR}"
             -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
             -D "OMNIREFL_DIR=${omnirefl_DIR}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/regressions/dollar_path/run.cmake")
-    set_tests_properties(omnirefl.regression.dollar_path_source PROPERTIES
-        DISABLED TRUE)
+            -P "${CMAKE_CURRENT_LIST_DIR}/integration/run_dollar_path.cmake")
 
     add_test(NAME omnirefl.integration.source_shapes
         COMMAND ${CMAKE_COMMAND}
@@ -85,6 +80,9 @@ if(DEFINED omnirefl_DIR)
         -D "EXECUTABLES=c_language_override"
         -D "EXPECTED_DIAGNOSTICS=ignoring C translation units;skipped."
         -D "OMITTED_REFLECTION_STEMS=main")
+    _omnirefl_accepted_cmake_project(relative_response_file
+        -D "EXECUTABLES=relative_response_file"
+        -D "REQUIRED_REFLECTION_STEMS=main")
 
     function(_omnirefl_rejected_cmake_project name expected_diagnostics)
         add_test(NAME "omnirefl.integration.${name}"
@@ -165,22 +163,134 @@ _omnirefl_cli_language_test(
     explicit_cxx_language cli_language_source.c "${CMAKE_C_COMPILER}" TRUE
     ${_omnirefl_cli_cxx_language})
 
-set(_compiler_response_file
-    "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file.rsp")
-file(WRITE "${_compiler_response_file}" "-DOMNI_RESPONSE_FILE_EXPANDED\n")
+# `/Fonts/include` intentionally follows the include option. A broad `/Fo*`
+# filter drops that value, leaving the include option to consume the first
+# response-file definition that compiler_response_file.cpp requires.
+if("MSVC" STREQUAL CMAKE_CXX_COMPILER_ID)
+    set(_msvc_response_file TRUE)
+    set(_compiler_response_file
+        "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file-msvc.rsp")
+    file(WRITE "${_compiler_response_file}"
+        "/DOMNI_RESPONSE_FILE_EXPANDED\n"
+        [=["/DOMNI_RESPONSE_TEXT=\"left right\""]=] "\n")
 
-# FIXME(low): compiler response files are parsed as opaque input arguments, so
-# frontend-relevant options inside @file never reach AST construction.
-add_test(NAME omnirefl.regression.compiler_response_file
+    add_test(NAME omnirefl.integration.compiler_response_file_msvc
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o compiler-response-file-msvc.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/compiler_response_file.cpp"
+            -- "${CMAKE_CXX_COMPILER}" /I /Fonts/include
+            @compiler-response-file-msvc.rsp)
+    set_tests_properties(omnirefl.integration.compiler_response_file_msvc
+        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+else()
+    set(_msvc_response_file FALSE)
+    set(_compiler_response_file
+        "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file.rsp")
+    set(_compiler_response_nested_file
+        "${CMAKE_CURRENT_BINARY_DIR}/compiler-response-file-nested.rsp")
+    file(WRITE "${_compiler_response_file}"
+        "@compiler-response-file-nested.rsp\n")
+    file(WRITE "${_compiler_response_nested_file}"
+        "-DOMNI_RESPONSE_FILE_EXPANDED\n"
+        [=["-DOMNI_RESPONSE_TEXT=\"left right\""]=] "\n")
+
+    add_test(NAME omnirefl.integration.compiler_response_file
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o compiler-response-file.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/compiler_response_file.cpp"
+            -- "${CMAKE_CXX_COMPILER}" -I /Fonts/include
+            @compiler-response-file.rsp)
+    set_tests_properties(omnirefl.integration.compiler_response_file PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
+add_test(NAME omnirefl.integration.response_file_after_compile_action
     COMMAND $<TARGET_FILE:omni::tool>
         --resource-dir "${omnirefl_RESOURCE_DIR}"
         --log-level silent
-        -o compiler-response-file.omnirefl.hpp
-        -c "${CMAKE_CURRENT_LIST_DIR}/regressions/compiler_response_file.cpp"
-        -- "${CMAKE_CXX_COMPILER}" "@${_compiler_response_file}")
-set_tests_properties(omnirefl.regression.compiler_response_file PROPERTIES
-    DISABLED TRUE
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        -o compiler-response-file-after-action.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/compiler_response_file.cpp"
+        -- "${CMAKE_CXX_COMPILER}"
+        "${_omnirefl_cli_compile_source}"
+        "@${_compiler_response_file}"
+        "${CMAKE_CURRENT_LIST_DIR}/compiler_response_file.cpp")
+set_tests_properties(omnirefl.integration.response_file_after_compile_action
+    PROPERTIES
+        FAIL_REGULAR_EXPRESSION
+            "compiler source after `--` differs from omnirefl `-c`"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+set(_gnu_tokenization_response_file
+    "${CMAKE_CURRENT_BINARY_DIR}/gnu-tokenization.rsp")
+file(WRITE "${_gnu_tokenization_response_file}"
+    "-DOMNI_RESPONSE_TOKENIZED='single quoted'\n"
+    "-DOMNI_RESPONSE_TOKENIZED_SIZE=14\n")
+add_test(NAME omnirefl.integration.response_file_gnu_tokenization
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o gnu-tokenization.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
+        -- clang++ "@${_gnu_tokenization_response_file}")
+set_tests_properties(omnirefl.integration.response_file_gnu_tokenization
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+set(_windows_tokenization_response_file
+    "${CMAKE_CURRENT_BINARY_DIR}/windows-tokenization.rsp")
+file(WRITE "${_windows_tokenization_response_file}"
+    "/DOMNI_RESPONSE_TOKENIZED='single'\n"
+    "/DOMNI_RESPONSE_TOKENIZED_SIZE=9\n")
+add_test(NAME omnirefl.integration.response_file_windows_tokenization
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o windows-tokenization.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
+        -- clang-cl "@${_windows_tokenization_response_file}")
+set_tests_properties(omnirefl.integration.response_file_windows_tokenization
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_test(NAME omnirefl.integration.response_file_windows_tokenization_uppercase
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o windows-tokenization-uppercase.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
+        -- CLANG-CL.EXE "@${_windows_tokenization_response_file}")
+set_tests_properties(
+    omnirefl.integration.response_file_windows_tokenization_uppercase
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+    add_test(NAME omnirefl.cli.overridden_separate_resource_dir
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o overridden-resource-dir.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+            -- "${CMAKE_CXX_COMPILER}"
+            -resource-dir ignored-driver-resource-dir)
+    set_tests_properties(omnirefl.cli.overridden_separate_resource_dir
+        PROPERTIES
+            FAIL_REGULAR_EXPRESSION "ignored-driver-resource-dir"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
+add_test(NAME omnirefl.cli.overridden_separate_resource_dir_windows
+    COMMAND $<TARGET_FILE:omni::tool>
+        --resource-dir "${omnirefl_RESOURCE_DIR}"
+        --log-level silent
+        -o overridden-resource-dir-windows.omnirefl.hpp
+        -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+        -- clang-cl -resource-dir ignored-driver-resource-dir-windows)
+set_tests_properties(omnirefl.cli.overridden_separate_resource_dir_windows
+    PROPERTIES
+        FAIL_REGULAR_EXPRESSION "ignored-driver-resource-dir-windows"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
 # -- Dependencies --------
 include(FetchContent)
@@ -188,6 +298,17 @@ include(FetchContent)
 if(NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
+
+add_test(NAME omnirefl.integration.compile_db_working_directory
+    COMMAND ${CMAKE_COMMAND}
+        -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
+        -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
+        -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
+        -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        -D "MSVC_RESPONSE_FILE=${_msvc_response_file}"
+        -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/compile db directory"
+        -P
+            "${CMAKE_CURRENT_LIST_DIR}/integration/run_compile_db_working_directory.cmake")
 
 # Enable FetchContent logging
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
@@ -515,21 +636,9 @@ if("17" IN_LIST _supported_cpp_standards)
         regressions/field_set_value_assignability.cpp
         "reflected types: 2")
     _omnirefl_diagnostic_tool_run(
-        "packed_field_reference"
-        regressions/packed_field_reference.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "packed_field_reference")
-    _omnirefl_diagnostic_tool_run(
         "nested_template_field_name"
         regressions/nested_template_field_name.cpp
         "reflected types:")
-    _omnirefl_diagnostic_tool_run(
-        "volatile_binding_qualifiers"
-        regressions/volatile_binding_qualifiers.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "volatile_binding_qualifiers")
     _omnirefl_diagnostic_tool_run(
         "dependent_nontype_template"
         regressions/dependent_nontype_template.cpp
@@ -538,78 +647,66 @@ if("17" IN_LIST _supported_cpp_standards)
         "dependent_nontype_template")
     _omnirefl_diagnostic_tool_run(
         "ccdb_backslash_definition"
-        regressions/ccdb_backslash_definition.cpp
+        ccdb_backslash_definition.cpp
         "reflected types:")
     target_compile_definitions(
         cpp_17.diagnostic.ccdb_backslash_definition PRIVATE
         "OMNI_OPTION_TEXT=R\"(left\\right)\"")
-    _omnirefl_disable_diagnostic_build(
-        "ccdb_backslash_definition")
-    set_tests_properties(
-        "cpp_17.diagnostic.ccdb_backslash_definition.run_omni"
-        PROPERTIES DISABLED TRUE)
 
-    function(_omnirefl_disabled_driver_option name selector)
-        set(_target "cpp_17.diagnostic.${name}")
-        _omnirefl_diagnostic_tool_run(
-            "${name}"
-            regressions/driver_option_fidelity.cpp
-            "reflected types:")
+    function(_omnirefl_driver_option cpp_standard name selector)
+        set(_target "cpp_${cpp_standard}.driver_option.${name}")
+        add_library(${_target} STATIC EXCLUDE_FROM_ALL
+            driver_option_fidelity.cpp)
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD ${cpp_standard}
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO)
         target_compile_definitions(${_target} PRIVATE "${selector}=1")
         target_compile_options(${_target} PRIVATE ${ARGN})
-        _omnirefl_disable_diagnostic_build("${name}")
-        set_tests_properties("${_target}.run_omni" PROPERTIES DISABLED TRUE)
+        omni_reflected_target(${_target})
+
+        add_test(NAME "${_target}.run_omni"
+            COMMAND ${CMAKE_COMMAND}
+                -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                -D "TARGET=${_target}.omni"
+                -D "EXPECTED_MESSAGE=reflected types: 0"
+                -P "${CMAKE_CURRENT_LIST_DIR}/expect_tool_run.cmake")
+
+        add_test(NAME "${_target}.build"
+            COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+                -t "${_target}" --parallel)
+        set_tests_properties("${_target}.build" PROPERTIES
+            DEPENDS "${_target}.run_omni")
     endfunction()
 
-    _omnirefl_disabled_driver_option(
-        "driver_option_imacros"
-        OMNI_REGRESSION_IMACROS
-        -imacros
-        "${CMAKE_CURRENT_LIST_DIR}/regressions/driver_imacros_config.h")
-    _omnirefl_disabled_driver_option(
-        "driver_option_pthread"
-        OMNI_REGRESSION_PTHREAD
-        -pthread)
-    _omnirefl_disabled_driver_option(
-        "driver_option_openmp"
-        OMNI_REGRESSION_OPENMP
-        -fopenmp)
-    _omnirefl_disabled_driver_option(
-        "driver_option_no_exceptions"
-        OMNI_REGRESSION_NO_EXCEPTIONS
-        -fno-exceptions)
-    _omnirefl_disabled_driver_option(
-        "driver_option_no_rtti"
-        OMNI_REGRESSION_NO_RTTI
-        -fno-rtti)
-    _omnirefl_disabled_driver_option(
-        "driver_option_short_wchar"
-        OMNI_REGRESSION_SHORT_WCHAR
-        -fshort-wchar)
-    _omnirefl_disabled_driver_option(
-        "driver_option_unsigned_char"
-        OMNI_REGRESSION_UNSIGNED_CHAR
-        -funsigned-char)
-    _omnirefl_disabled_driver_option(
-        "driver_option_pack_struct"
-        OMNI_REGRESSION_PACK_STRUCT
-        -fpack-struct=1)
-    _omnirefl_disabled_driver_option(
-        "driver_option_no_operator_names"
-        OMNI_REGRESSION_NO_OPERATOR_NAMES
-        -fno-operator-names)
-    _omnirefl_disabled_driver_option(
-        "driver_option_avx2"
-        OMNI_REGRESSION_AVX2
-        -mavx2)
-    _omnirefl_disabled_driver_option(
-        "driver_option_no_access_control"
-        OMNI_REGRESSION_NO_ACCESS_CONTROL
-        -fno-access-control)
-    _omnirefl_disabled_driver_option(
-        "driver_option_no_sized_deallocation"
-        OMNI_REGRESSION_NO_SIZED_DEALLOCATION
-        -fno-sized-deallocation)
+    if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+        _omnirefl_driver_option(
+            17 imacros OMNI_DRIVER_IMACROS
+            -imacros "${CMAKE_CURRENT_LIST_DIR}/driver_imacros_config.h")
+        _omnirefl_driver_option(17 pthread OMNI_DRIVER_PTHREAD -pthread)
+        _omnirefl_driver_option(17 openmp OMNI_DRIVER_OPENMP -fopenmp)
+        _omnirefl_driver_option(
+            17 no_exceptions OMNI_DRIVER_NO_EXCEPTIONS -fno-exceptions)
+        _omnirefl_driver_option(17 no_rtti OMNI_DRIVER_NO_RTTI -fno-rtti)
+        _omnirefl_driver_option(
+            17 short_wchar OMNI_DRIVER_SHORT_WCHAR -fshort-wchar)
+        _omnirefl_driver_option(
+            17 unsigned_char OMNI_DRIVER_UNSIGNED_CHAR -funsigned-char)
+        _omnirefl_driver_option(
+            17 pack_struct OMNI_DRIVER_PACK_STRUCT -fpack-struct=1)
+        _omnirefl_driver_option(
+            17 no_operator_names OMNI_DRIVER_NO_OPERATOR_NAMES
+            -fno-operator-names)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|i.86|x86_64)$")
+            _omnirefl_driver_option(17 avx2 OMNI_DRIVER_AVX2 -mavx2)
+        endif()
+        _omnirefl_driver_option(
+            17 no_access_control OMNI_DRIVER_NO_ACCESS_CONTROL
+            -fno-access-control)
+        _omnirefl_driver_option(
+            17 no_sized_deallocation OMNI_DRIVER_NO_SIZED_DEALLOCATION
+            -fno-sized-deallocation)
+    endif()
 
     foreach(_target IN ITEMS
             regression_ccdb_output_suffix
@@ -649,27 +746,10 @@ if("17" IN_LIST _supported_cpp_standards)
 endif()
 
 if("20" IN_LIST _supported_cpp_standards)
-    set(_no_char8_target "cpp_20.diagnostic.driver_option_no_char8_t")
-    add_executable(${_no_char8_target} EXCLUDE_FROM_ALL
-        regressions/driver_option_fidelity.cpp)
-    set_target_properties(${_no_char8_target} PROPERTIES
-        CXX_STANDARD 20
-        CXX_STANDARD_REQUIRED YES
-        CXX_EXTENSIONS NO)
-    target_compile_definitions(${_no_char8_target} PRIVATE
-        OMNI_REGRESSION_NO_CHAR8_T=1)
-    target_compile_options(${_no_char8_target} PRIVATE -fno-char8_t)
-    target_link_libraries(${_no_char8_target} PRIVATE
-        GTest::GTest
-        gtest_main
-        std_compat)
-    omni_reflected_target(${_no_char8_target} LOG_LEVEL warning)
-
-    add_test(NAME "${_no_char8_target}.run_omni"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
-            -t "${_no_char8_target}.omni" --parallel 1)
-    set_tests_properties("${_no_char8_target}.run_omni"
-        PROPERTIES DISABLED TRUE)
+    if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+        _omnirefl_driver_option(
+            20 no_char8_t OMNI_DRIVER_NO_CHAR8_T -fno-char8_t)
+    endif()
 
     set(_concept_sfinae_target
         "cpp_20.regression.binding_concept_sfinae")
@@ -830,6 +910,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         dependent_types_test.cpp
         interface_test.cpp
         example_test.cpp
+        packed_field_test.cpp
         indexed_types.cpp
         baseline_test.cpp
     )

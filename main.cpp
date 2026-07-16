@@ -45,6 +45,9 @@
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
 #include <llvm/Option/Option.h>
+#include <llvm/Support/Allocator.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
@@ -557,7 +560,15 @@ struct field_data {
   std::string type_name;
   std::string qualified_type_name;
   std::string annotation;
-  bool is_bitfield;
+
+  enum class value_access {
+    reference,
+    copy,
+    array_copy,
+  } access;
+
+  std::vector<std::size_t> array_extents;
+  bool is_volatile;
 
   enum {
     none = 0,
@@ -2778,10 +2789,25 @@ std::expected<cli::options, app_error> cli::parse(int argc,
   const std::vector compiler_sources = flags //
     | std::views::adjacent<2> //
     | std::views::filter([](const auto &args) {
-        return "-c"sv == std::get<0>(args) || "/c"sv == std::get<0>(args);
+        return !std::string_view{std::get<1>(args)}.starts_with('@')
+          && ("-c"sv == std::get<0>(args) || "/c"sv == std::get<0>(args));
       })
-    | std::views::transform([](const auto &args) {
-        return fs::absolute(std::get<1>(args)).lexically_normal();
+    | std::views::transform([&parsed_source](const auto &args) {
+        const fs::path compiler_source =
+          fs::absolute(std::get<1>(args)).lexically_normal();
+        if (parsed_source == compiler_source)
+          return compiler_source;
+
+        // CMake escapes a literal '$' as '$$' in compile_commands.json. Try
+        // the exact spelling first so a real '$$' path remains unchanged.
+        std::string cmake_unescaped = std::get<1>(args);
+        for (std::size_t dollar = cmake_unescaped.find("$$");
+          std::string::npos != dollar;
+          dollar = cmake_unescaped.find("$$", dollar + 1)) {
+          cmake_unescaped.erase(dollar, 1);
+        }
+
+        return fs::absolute(cmake_unescaped).lexically_normal();
       })
     | std::ranges::to<std::vector>();
 
@@ -2827,7 +2853,7 @@ std::expected<cli::options, app_error> cli::parse(int argc,
 }
 
 std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
-  const std::vector<std::string> &flags) {
+  std::span<const std::string> flags) {
   std::vector<const char *> cli_ref;
   cli_ref.reserve(flags.size());
   std::ranges::transform(flags,
@@ -2850,93 +2876,53 @@ std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
   return argList;
 }
 
-/// leave only the args needed for ast parsing
-std::vector<std::string> filter_ast_related_args(
+std::vector<std::string> filter_tool_irrelevant_args(
   const llvm::opt::InputArgList &args) {
   namespace options = clang::options;
 
-  // -- only flags related to ast creation
-  // single-value / boolean flags (last-wins or toggles)
-  constexpr std::array k_single_value_ids = {
-    // -- toggles
-    // options::OPT_nostdinc, //< ignored, used by the tool
-    // options::OPT_nostdincxx, //< ignored, used by the tool
-    // options::OPT_nostdlibinc, //< ignored, used by the tool
-    options::OPT_fms_extensions,
-    options::OPT_fno_ms_extensions,
-    options::OPT_fmodules,
-    options::OPT_fno_modules,
-    options::OPT_fborland_extensions,
-    options::OPT_fno_borland_extensions,
-    options::OPT_fgnu_keywords,
-    options::OPT_fno_gnu_keywords,
-    options::OPT_fms_compatibility,
-    options::OPT_fno_ms_compatibility,
-
-    // -- single-value
-    options::OPT_std_EQ, // -std=<...>
-    options::OPT_x, // -x <lang>
-    options::OPT_target, // --target=<triple>
-    options::OPT_isysroot, // -isysroot <dir>
-    options::OPT_resource_dir, // -resource-dir <dir>
-    options::OPT_fmodules_cache_path, // -fmodules-cache-path <dir>
+  // Frontend feature flags and their predefined macros can change reflected
+  // declarations. Preserve options by default and remove only categories that
+  // cannot contribute to the instrumentation AST or conflict with tool setup.
+  static constexpr std::array k_pch_option_ids{
+    options::OPT_include_pch,
+    options::OPT_fpch_codegen,
+    options::OPT_fpch_debuginfo,
+    options::OPT_fpch_instantiate_templates,
+    options::OPT_fpch_preprocess,
+    options::OPT_fpch_validate_input_files_content,
+    options::OPT_pch_through_hdrstop_create,
+    options::OPT_pch_through_hdrstop_use,
+    options::OPT_pch_through_header_EQ,
+    options::OPT__SLASH_Fp,
+    options::OPT__SLASH_Yc,
+    options::OPT__SLASH_Yd,
+    options::OPT__SLASH_Yl,
+    options::OPT__SLASH_Yu,
   };
 
-  // repeatable, multi-value flags (accumulate all occurrences)
-  constexpr std::array k_multi_value_ids = {
-    // -- preprocessor
-    options::OPT_D, // -DNAME[=VAL]
-    options::OPT__SLASH_D, // /DNAME[=VAL]
-    options::OPT_U, // -UNAME
-    options::OPT__SLASH_U, // /UNAME
-    options::OPT_include, // -include <file>
-    options::OPT__SLASH_FI, // /FI <file>
+  llvm::opt::ArgStringList rendered;
+  for (const llvm::opt::Arg *arg : args) {
+    const llvm::opt::Option option = arg->getOption().getUnaliasedOption();
 
-    // -- header search
-    options::OPT_I, // -I <dir>
-    options::OPT__SLASH_I, // /I <dir>
-    options::OPT_isystem, // -isystem <dir>
-    options::OPT_isystem_after, // -isystem-after <dir>
-    options::OPT_idirafter, // -idirafter <dir>
-    options::OPT_iquote, // -iquote <dir>
-    options::OPT_iprefix, // -iprefix <prefix>
-    options::OPT_iwithprefix, // -iwithprefix <dir>
-    options::OPT_iwithprefixbefore, // -iwithprefixbefore <dir>
-    options::OPT_F, // -F <dir>
-    options::OPT_iframework, // -iframework <dir>
-    options::OPT_iframeworkwithsysroot, // -iframeworkwithsysroot <dir>
+    if (llvm::opt::Option::InputClass == option.getKind()
+      || option.hasFlag(options::LinkOption)
+      || option.hasFlag(options::LinkerInput)
+      || option.matches(options::OPT_Action_Group)
+      || option.matches(options::OPT_M_Group)
+      || option.matches(options::OPT_O_Group)
+      || options::OPT_o == option.getID()
+      || options::OPT__SLASH_Fo == option.getID()
+      || options::OPT_resource_dir == option.getID()
+      || std::ranges::contains(k_pch_option_ids, option.getID())) {
+      continue;
+    }
 
-    // -- modules
-    options::OPT_fmodule_map_file, // -fmodule-map-file=<path>
-    options::OPT_fmodule_file, // -fmodule-file=<path>
-  };
+    arg->render(args, rendered);
+  }
 
-  std::vector<std::string> result;
-  // handle single-value options
-  std::ranges::for_each(
-    k_single_value_ids | std::views::transform([&args](options::ID o) {
-      return args.getLastArgNoClaim(o);
-    }) | std::views::filter([](llvm::opt::Arg *a) { return nullptr != a; }),
-    [&result](const llvm::opt::Arg *a) {
-      const llvm::opt::Option &opt = a->getOption().getUnaliasedOption();
-      result.emplace_back(opt.getPrefixedName().str()) += a->getValue();
-    });
-
-  // Handle multi-value options
-  std::ranges::for_each(args.getArgs()
-      | std::views::filter([&k_multi_value_ids](const llvm::opt::Arg *a) {
-          return std::ranges::contains(k_multi_value_ids,
-            a->getOption().getID());
-        }),
-    [&result](const llvm::opt::Arg *a) {
-      const llvm::opt::Option &opt = a->getOption().getUnaliasedOption();
-      result.emplace_back(opt.getPrefixedName().str());
-      for (const auto &v : a->getValues()) {
-        result.emplace_back(v);
-      }
-    });
-
-  return result;
+  return rendered //
+    | std::views::transform(fn::as<std::string>) //
+    | std::ranges::to<std::vector>();
 }
 
 // refactorme: this is an ugly shite
@@ -2948,30 +2934,106 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const fs::path &source = cli_args.source;
   const std::vector<std::string> &raw_flags = cli_args.flags;
 
-  // The tool's -c supplies the source; compiler action/output arguments do not
-  // affect frontend AST construction.
-  static constexpr std::array k_ignored_options_with_values{
+  // Omnirefl supplies its own source and produces no compiler output.
+  static constexpr std::array k_ignored_action_options{
     "-c"sv,
     "/c"sv,
+  };
+  static constexpr std::array k_ignored_output_options{
     "-o"sv,
     "/Fo"sv,
     "/Fo:"sv,
   };
+  static constexpr std::array k_cl_driver_names{
+    "cl"sv,
+    "cl.exe"sv,
+    "clang-cl"sv,
+    "clang-cl.exe"sv,
+  };
 
-  const std::vector<std::string> flags = raw_flags //
+  const std::string compiler_name =
+    llvm::StringRef{fs::path(raw_flags.front()).filename().string()}.lower();
+  const bool invoked_as_cl =
+    std::ranges::contains(k_cl_driver_names, compiler_name);
+
+  const std::vector flags = raw_flags //
     | std::views::enumerate //
     | std::views::filter([&raw_flags](const auto &indexed) {
         const auto &[index, arg] = indexed;
-        const bool ignored_value = 0 != index
-          && std::ranges::contains(k_ignored_options_with_values,
+        const bool ignored_output_value = 0 != index
+          && std::ranges::contains(k_ignored_output_options,
             std::string_view{raw_flags[index - 1]});
 
-        return !ignored_value
-          && !std::ranges::contains(k_ignored_options_with_values,
+        return !ignored_output_value
+          && !std::ranges::contains(k_ignored_action_options,
             std::string_view{arg})
-          && !arg.starts_with("/Fo"sv);
+          && !std::ranges::contains(k_ignored_output_options,
+            std::string_view{arg});
       })
     | std::views::values | std::ranges::to<std::vector>();
+
+  const std::expected expanded_flags = //
+    std::invoke(
+      [&flags,
+        &raw_flags,
+        invoked_as_cl] -> std::expected<std::vector<std::string>, std::string> {
+        llvm::BumpPtrAllocator allocator;
+        llvm::SmallVector<const char *> args;
+        std::ranges::transform(flags,
+          std::back_inserter(args),
+          &std::string::c_str);
+
+        const bool windows_tokenization = invoked_as_cl
+          || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
+
+        llvm::cl::ExpansionContext expansion{allocator,
+          windows_tokenization //
+            ? llvm::cl::TokenizeWindowsCommandLine
+            : llvm::cl::TokenizeGNUCommandLine};
+
+        if (const std::optional working_directory =
+              std::invoke([&raw_flags] -> std::optional<std::string_view> {
+                const auto indexed_flags =
+                  raw_flags | std::views::enumerate | std::views::reverse;
+                const auto found = std::ranges::find_if(indexed_flags,
+                  [&raw_flags](const auto &indexed) {
+                    const auto &[index, arg] = indexed;
+                    return std::string_view{arg}.starts_with(
+                             "-working-directory="sv)
+                      || ("-working-directory"sv == arg
+                        && std::ssize(raw_flags) > index + 1);
+                  });
+                if (indexed_flags.end() == found)
+                  return std::nullopt;
+
+                const auto &[index, arg] = *found;
+                constexpr std::string_view k_joined = "-working-directory=";
+                return std::string_view{arg}.starts_with(k_joined)
+                  ? std::string_view{arg}.substr(k_joined.size())
+                  : std::string_view{raw_flags[index + 1]};
+              });
+          working_directory) {
+          expansion.setCurrentDir(*working_directory);
+        }
+
+        if (llvm::Error error = expansion.expandResponseFiles(args))
+          return std::unexpected(llvm::toString(std::move(error)));
+
+        if (const auto unexpanded = std::ranges::find_if(args,
+              [](std::string_view arg) { return arg.starts_with('@'); });
+          args.end() != unexpanded) {
+          return std::unexpected(
+            std::format("failed to expand compiler response file: {}",
+              *unexpanded));
+        }
+
+        return args //
+          | std::views::transform(fn::as<std::string>) //
+          | std::ranges::to<std::vector>();
+      });
+
+  if (!expanded_flags)
+    return std::unexpected(processing_error(source, expanded_flags.error()));
 
   const auto to_vector_of_raw_pointers =
     [](const std::vector<std::string> &v) -> std::vector<const char *> {
@@ -2985,9 +3047,12 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       raw_flags | std::views::join_with("\n"sv) | util::format_range);
   });
 
-  const std::expected normalized_args = parse_driver_args(flags);
+  const std::expected normalized_args =
+    parse_driver_args(std::span{*expanded_flags}.subspan(1));
   if (!normalized_args)
     return std::unexpected(processing_error(source, normalized_args.error()));
+
+  const std::vector driver_args = filter_tool_irrelevant_args(*normalized_args);
 
   const bool driver_mode_cl = std::invoke([&normalized_args] {
     if (const auto *dm =
@@ -2997,14 +3062,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   });
 
   const bool msvc_used =
-    std::invoke([&flags, &normalized_args, driver_mode_cl] {
-      const bool invoked_as_cl = std::invoke([&flags] {
-        if (flags.empty())
-          return false;
-        const std::string exe = fs::path(flags.front()).filename().string();
-        return exe == "cl.exe" || exe == "clang-cl" || exe == "clang-cl.exe";
-      });
-
+    std::invoke([&normalized_args, driver_mode_cl, invoked_as_cl] {
       const bool has_msvc_style_args =
         normalized_args->hasArg(options::OPT__SLASH_D,
           options::OPT__SLASH_U,
@@ -3015,7 +3073,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     });
 
   const std::string driver_triple =
-    std::invoke([msvc_used, &normalized_args, &flags] {
+    std::invoke([msvc_used, &normalized_args, &raw_flags] {
       const std::string target_triple = std::invoke([&normalized_args] {
         if (const auto *opt =
               normalized_args->getLastArgNoClaim(options::OPT_target))
@@ -3030,11 +3088,11 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       }
 
       if (!msvc_used && !normalized_args->getLastArgNoClaim(options::OPT_target)
-        && !flags.empty()) {
+        && !raw_flags.empty()) {
         // refactorme(cc1_flags): infer the target from GCC-style cross compiler
         // names until compiler-driver mapping is split out of omnirefl.
         const std::string compiler =
-          fs::path(flags.front()).filename().string();
+          fs::path(raw_flags.front()).filename().string();
         if (compiler.starts_with("x86_64-w64-mingw32-"))
           return std::string{"x86_64-w64-windows-gnu"};
         if (compiler.starts_with("i686-w64-mingw32-"))
@@ -3048,11 +3106,11 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::vector<fs::path> mingw_include_paths = std::invoke([&] {
     std::vector<fs::path> paths;
-    if (!mingw_used || flags.empty())
+    if (!mingw_used || raw_flags.empty())
       return paths;
 
     const std::string compiler_name =
-      fs::path(flags.front()).filename().string();
+      fs::path(raw_flags.front()).filename().string();
 
     const std::string gcc_machine = std::invoke([&] {
       if (compiler_name.starts_with("x86_64-w64-mingw32-"))
@@ -3062,9 +3120,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return std::string{};
     });
 
-    const fs::path compiler_path = std::invoke([&flags] {
+    const fs::path compiler_path = std::invoke([&raw_flags] {
       std::error_code ec;
-      return fs::weakly_canonical(flags.front(), ec);
+      return fs::weakly_canonical(raw_flags.front(), ec);
     });
     const fs::path compiler_root = compiler_path.parent_path().parent_path();
 
@@ -3146,20 +3204,18 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::vector<std::string> cc1_driver_args =
     std::invoke([&] -> std::vector<std::string> {
-      // MSVC/clang-cl: pass through the original driver args to preserve
-      // spellings (/I, /FI, -std:c++20, etc). Only drop argv0 and force AST
-      // mode.
+      // Preserve frontend-affecting driver arguments for every supported
+      // compiler spelling; source, output, linker, optimization, dependency,
+      // and PCH options were removed above.
       if (msvc_used) {
         std::vector<std::string> out;
-        out.reserve(8 + flags.size());
+        out.reserve(8 + driver_args.size());
 
         out.emplace_back("omnirefl");
         if (!driver_mode_cl)
           out.emplace_back("--driver-mode=cl");
 
-        // keep the rest verbatim (except argv0)
-        std::ranges::copy(flags //
-            | std::views::drop(1) //
+        std::ranges::copy(driver_args
             | std::views::filter([](std::string_view s) { return !s.empty(); }),
           std::back_inserter(out));
 
@@ -3172,7 +3228,6 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         return out;
       }
 
-      // GCC-like: keep only AST-relevant options.
       std::vector<std::string> out;
       out.reserve(16 + normalized_args->size());
 
@@ -3194,15 +3249,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         out.emplace_back(p.generic_string());
       });
 
-      const std::vector<std::string> ast_related_args =
-        filter_ast_related_args(*normalized_args);
-
-      // ensure tool-provided resource-dir wins
-      std::ranges::copy(ast_related_args
-          | std::views::filter([](std::string_view s) {
-              return !s.starts_with("-resource-dir"sv);
-            }),
-        std::back_inserter(out));
+      std::ranges::copy(driver_args, std::back_inserter(out));
 
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(
@@ -3216,7 +3263,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   // translations (for other compilers' commands) and to resolve system
   // include paths...
   clang::driver::Driver driver(
-    msvc_used ? "clang-cl" : fs::path(flags.front()).filename().string(),
+    msvc_used ? "clang-cl" : fs::path(raw_flags.front()).filename().string(),
     driver_triple,
     *log.clang_engine,
     "omnirefl reflection tool");
@@ -4245,12 +4292,55 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     return short_type_name(source_type_name);
   });
 
+  const value_access access = std::invoke([&ast, d] {
+    if (d->isBitField())
+      return value_access::copy;
+
+    if (d->getType()->isReferenceType())
+      return value_access::reference;
+
+    const clang::CharUnits field_alignment =
+      ast.getTypeAlignInChars(d->getType());
+
+    if (field_alignment.isOne()
+      || (field_alignment
+          <= ast.getTypeAlignInChars(ast.getCanonicalTagType(d->getParent()))
+        && ast.toCharUnitsFromBits(ast.getFieldOffset(d))
+          .isMultipleOf(field_alignment))) {
+      return value_access::reference;
+    }
+
+    if (nullptr != ast.getAsConstantArrayType(d->getType()))
+      return value_access::array_copy;
+
+    // todo(high): add copied access for misaligned dependent/flexible arrays.
+    return d->getType()->isArrayType() //
+      ? value_access::reference
+      : value_access::copy;
+  });
+
   return {
     .name = std::string(fn::as<std::string_view>(d->getName())),
     .type_name = type_name,
     .qualified_type_name = qualified_type_name,
     .annotation = annotation_from_decl(ast, d),
-    .is_bitfield = d->isBitField(),
+    .access = access,
+    .array_extents = std::invoke([&ast, d, access] {
+      std::vector<std::size_t> extents;
+      if (value_access::array_copy != access)
+        return extents;
+
+      for (const clang::ConstantArrayType *array =
+             ast.getAsConstantArrayType(d->getType());
+        nullptr != array;
+        array = ast.getAsConstantArrayType(array->getElementType())) {
+        extents.push_back(
+          static_cast<std::size_t>(array->getSize().getZExtValue()));
+      }
+
+      return extents;
+    }),
+    .is_volatile = d->getType().isVolatileQualified(),
     .qualified = d->isMutable()
       ? as_mutable
       : (d->getType().isConstQualified() ? as_const : none),
@@ -5208,8 +5298,54 @@ std::string reflectable_body(const meta::record_data &d) {
   constexpr auto format_field = //
     [](const auto &field_index) {
       const auto &[index, f] = field_index;
+
+      const auto [value_type, value_expression] = std::invoke([&f] {
+        if (meta::field_data::value_access::array_copy == f.access) {
+          const auto format_array_copy = //
+            [&f](auto self,
+              std::span<const std::size_t> extents,
+              std::string indexes) -> std::string {
+            return std::format(
+              "typename omni::detail::_packed_value<"
+              "omni::compat::remove_cvref_t<"
+              "decltype(t.{0}{1})>>::type{{{{{2}}}}}",
+              f.name,
+              indexes,
+              std::views::iota(std::size_t{0}, extents.front()) //
+                | std::views::transform(
+                  [&f, self, extents, &indexes](std::size_t index) {
+                    const std::string nested_indexes =
+                      std::format("{}[{}]", indexes, index);
+
+                    return 1 == extents.size() //
+                      ? std::format("t.{}{}", f.name, nested_indexes)
+                      : self(self, extents.subspan(1), nested_indexes);
+                  }) //
+                | std::views::join_with(", "sv) //
+                | util::format_range);
+          };
+
+          return std::pair{
+            std::format(
+              "typename omni::detail::_packed_value<decltype(t.{})>::type",
+              f.name),
+            format_array_copy(format_array_copy, f.array_extents, {}),
+          };
+        }
+
+        return std::pair{
+          meta::field_data::value_access::copy == f.access
+            ? std::format("decltype(t.{})", f.name)
+            : std::format("decltype((t.{}))", f.name),
+          std::format("t.{}", f.name),
+        };
+      });
+
       return std::format(
         "  struct {0}_t {{"
+        "\n    using type ="
+        "\n      decltype(std::declval<typename _reflected::type &>().{0});"
+        "\n"
         "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
         "\n"
         "\n    static constexpr auto name() noexcept"
@@ -5218,23 +5354,24 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n    }}"
         "\n"
         "\n    static constexpr auto type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{5}\")] {{"
-        "\n      return \"{5}\";"
-        "\n    }}"
-        "\n"
-        "\n    static constexpr auto qualified_type_name() noexcept"
         "\n      -> const char(&)[sizeof(\"{6}\")] {{"
         "\n      return \"{6}\";"
         "\n    }}"
-        "{7}"
+        "\n"
+        "\n    static constexpr auto qualified_type_name() noexcept"
+        "\n      -> const char(&)[sizeof(\"{7}\")] {{"
+        "\n      return \"{7}\";"
+        "\n    }}"
+        "{8}"
         "\n"
         "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
         "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
+        "\n    static constexpr bool is_volatile() noexcept {{ return {4}; }}"
         "\n"
         "\n    template <typename _T>"
         "\n    static constexpr auto value(const _T &t) noexcept"
-        "\n      -> {4} {{"
-        "\n      return t.{0};"
+        "\n      -> {5} {{"
+        "\n      return {9};"
         "\n    }}"
         "\n"
         "\n    template <typename _T, typename V>"
@@ -5255,17 +5392,22 @@ std::string reflectable_body(const meta::record_data &d) {
         bool(meta::field_data::as_mutable == f.qualified),
 
         // 4
-        f.is_bitfield ? std::format("decltype(t.{})", f.name)
-                      : std::format("const decltype(t.{})&", f.name),
+        f.is_volatile,
 
         // 5
-        escaped_string_literal_content(f.type_name),
+        value_type,
 
         // 6
-        escaped_string_literal_content(f.qualified_type_name),
+        escaped_string_literal_content(f.type_name),
 
         // 7
-        annotation_method(f.annotation));
+        escaped_string_literal_content(f.qualified_type_name),
+
+        // 8
+        annotation_method(f.annotation),
+
+        // 9
+        value_expression);
     };
 
   return std::format(
@@ -5386,10 +5528,25 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     ctx.nested,
     ctx.indexed);
 
+  const bool has_packed_array_copies = std::invoke(
+    [](const auto &...rs) {
+      return (std::ranges::any_of(rs, [](const auto &r) {
+        const auto *record = std::get_if<meta::record_data>(&r.type.data);
+        return nullptr != record
+          && std::ranges::any_of(record->public_fields,
+            [](const meta::field_data &field) {
+              return meta::field_data::value_access::array_copy == field.access;
+            });
+      }) || ...);
+    },
+    ctx.fwd_declarables,
+    ctx.nested,
+    ctx.indexed);
+
   const std::vector required_includes = //
     std::to_array<std::string_view>({
       "omnirefl/reflection.hpp",
-      has_enums ? "array" : "",
+      has_enums || has_packed_array_copies ? "array" : "",
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
@@ -5435,14 +5592,16 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\nnamespace detail {{"
     "\nnamespace {{"
     "\n"
-    "\n// -- reflected types --------"
     "\n{5}"
     "\n"
-    "\n// -- reflected inner types --------"
+    "\n// -- reflected types --------"
     "\n{6}"
     "\n"
-    "\n// -- generated fallback reflected types --------"
+    "\n// -- reflected inner types --------"
     "\n{7}"
+    "\n"
+    "\n// -- generated fallback reflected types --------"
+    "\n{8}"
     "\n" // todo: ^^^
     "\n}} // namespace"
     "\n}} // namespace detail"
@@ -5491,6 +5650,19 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | util::format_range,
 
     // 5:
+    has_packed_array_copies
+      ? "template <typename T>"
+        "\nstruct _packed_value {"
+        "\n  using type = typename std::remove_cv<T>::type;"
+        "\n};"
+        "\n"
+        "\ntemplate <typename T, std::size_t N>"
+        "\nstruct _packed_value<T[N]> {"
+        "\n  using type = std::array<typename _packed_value<T>::type, N>;"
+        "\n};"
+      : "",
+
+    // 6:
     ctx.fwd_declarables //
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::forward_declarable>,
@@ -5498,7 +5670,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 6:
+    // 7:
     ctx.nested //
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::nested_type>,
@@ -5506,7 +5678,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 7:
+    // 8:
     ctx.indexed //
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::indexed_type>,

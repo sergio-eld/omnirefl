@@ -138,6 +138,9 @@ struct record {
   /// cache field annotation
   mutable int cache;
 
+  /// observed field annotation
+  volatile int observed;
+
   /// scores field annotation
   std::vector<std::string> scores;
 };
@@ -149,6 +152,7 @@ struct field_summary {
   std::string_view annotation;
   bool is_const;
   bool is_mutable;
+  bool is_volatile;
 
   bool operator==(const field_summary &rhs) const {
     return name == rhs.name //
@@ -156,7 +160,8 @@ struct field_summary {
       && qualified_type_name == rhs.qualified_type_name
       && annotation == rhs.annotation
       && is_const == rhs.is_const
-      && is_mutable == rhs.is_mutable;
+      && is_mutable == rhs.is_mutable
+      && is_volatile == rhs.is_volatile;
   }
 };
 
@@ -218,6 +223,7 @@ TEST(exposition, reflected_scope_overview) {
                .annotation = field.annotation(),
                .is_const = field.is_const(),
                .is_mutable = field.is_mutable(),
+               .is_volatile = field.is_volatile(),
              }),
               ...);
           },
@@ -243,6 +249,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "foo field annotation"sv,
           .is_const = false,
           .is_mutable = false,
+          .is_volatile = false,
         },
         {
           .name = "enabled"sv,
@@ -251,6 +258,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "enabled field annotation"sv,
           .is_const = false,
           .is_mutable = false,
+          .is_volatile = false,
         },
         {
           .name = "version"sv,
@@ -259,6 +267,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "version field annotation"sv,
           .is_const = true,
           .is_mutable = false,
+          .is_volatile = false,
         },
         {
           .name = "cache"sv,
@@ -267,6 +276,16 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "cache field annotation"sv,
           .is_const = false,
           .is_mutable = true,
+          .is_volatile = false,
+        },
+        {
+          .name = "observed"sv,
+          .type_name = "int"sv,
+          .qualified_type_name = "int"sv,
+          .annotation = "observed field annotation"sv,
+          .is_const = false,
+          .is_mutable = false,
+          .is_volatile = true,
         },
         {
           .name = "scores"sv,
@@ -277,6 +296,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "scores field annotation"sv,
           .is_const = false,
           .is_mutable = false,
+          .is_volatile = false,
         },
       },
     .enumerators = {},

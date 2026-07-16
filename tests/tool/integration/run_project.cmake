@@ -53,8 +53,7 @@ if(NOT 0 EQUAL build_result)
         "stderr:\n${build_err}")
 endif()
 
-file(GLOB_RECURSE reflection_headers
-    "${ROOT}/omni_*/*.omnirefl.hpp")
+file(GLOB_RECURSE reflection_headers "${ROOT}/*.omnirefl.hpp")
 foreach(stem IN LISTS OMITTED_REFLECTION_STEMS)
     if(reflection_headers MATCHES "/${stem}_[^/]*\\.omnirefl\\.hpp")
         message(FATAL_ERROR

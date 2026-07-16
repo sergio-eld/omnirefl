@@ -338,8 +338,7 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
       0)...};
   (void)registered;
 #else
-  int unused_args[] = {0, ((void)args, 0)...};
-  (void)unused_args;
+  (void)sizeof...(args);
 #endif
 
   (void)impl;
@@ -374,8 +373,7 @@ struct field_meta_t {
   using omni_field_meta_tag = void;
   using owner_type = compat::decay_t<Owner>;
   using reflected = FieldMeta;
-  using type =
-    compat::remove_cvref_t<decltype(reflected::value(std::declval<Owner &>()))>;
+  using type = typename reflected::type;
 
   static constexpr const char *name() noexcept {
     return reflected::name();
@@ -405,6 +403,10 @@ struct field_meta_t {
 
   static constexpr bool is_mutable() noexcept {
     return reflected::is_mutable();
+  }
+
+  static constexpr bool is_volatile() noexcept {
+    return reflected::is_volatile();
   }
 
   template <typename T>
@@ -463,11 +465,15 @@ struct field_binding_t {
     return meta::is_mutable();
   }
 
+  static constexpr bool is_volatile() noexcept {
+    return meta::is_volatile();
+  }
+
   constexpr auto value() const noexcept -> decltype(meta::value(_owner)) {
     return meta::value(_owner);
   }
 
-  constexpr operator const type &() const noexcept {
+  constexpr operator decltype(meta::value(_owner))() const noexcept {
     return value();
   }
 
@@ -673,7 +679,8 @@ struct binding_t<T, reflected_entity::record> {
     return reflected::annotation();
   }
 
-  constexpr operator const type &() const {
+  constexpr operator decltype(
+    (std::declval<const binding_t &>().value))() const {
     return value;
   }
 
@@ -751,7 +758,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     return reflected::annotation();
   }
 
-  operator const type &() const {
+  operator decltype((std::declval<const binding_t &>().value))() const {
     return value;
   }
 
