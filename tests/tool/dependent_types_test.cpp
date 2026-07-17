@@ -33,6 +33,31 @@ struct variadic_primary_template {
   std::tuple<T...> value;
 };
 
+template <typename T, T Initial>
+struct dependent_value_record {
+  T value = Initial;
+};
+
+int dependent_pointer_initial = 37;
+
+template <typename T, T *Initial>
+struct dependent_pointer_record {
+  T value = *Initial;
+};
+
+template <typename T>
+using dependent_pointer = T *;
+
+template <typename T, dependent_pointer<T> Initial>
+struct aliased_dependent_pointer_record {
+  T value = *Initial;
+};
+
+template <template <typename T, T Initial> class Record>
+struct dependent_template_template_record {
+  Record<int, 41> value;
+};
+
 struct private_alias_and_public_field {
   private:
   struct private_child {
@@ -348,6 +373,41 @@ TEST(record_template, metadata_for_variadic_primary_template) {
   EXPECT_EQ(1,
     omni::reflected_call(dt::inspect::field_count,
       omni::type_t<dt::variadic_primary_template<int, double>>{}));
+}
+
+TEST(record_template, metadata_for_dependent_nontype_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::dependent_value_record<int, 31>>{}));
+}
+
+TEST(record_template, metadata_for_composed_dependent_nontype_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<
+        dt::dependent_pointer_record<int, &dt::dependent_pointer_initial>>{}));
+}
+
+TEST(record_template, metadata_for_aliased_dependent_nontype_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::aliased_dependent_pointer_record<int,
+        &dt::dependent_pointer_initial>>{}));
+}
+
+TEST(record_template, metadata_for_dependent_template_template_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<
+        dt::dependent_template_template_record<dt::dependent_value_record>>{}));
 }
 
 TEST(annotations, record_type_annotation) {

@@ -278,6 +278,16 @@ docker compose run --rm build-linux
 docker compose run --rm build-windows
 ```
 
+> [!NOTE]
+> If the configured image is unavailable, for example when building a commit
+> older than `master`, `docker compose run` may trigger a local image build.
+> Since that build can take close to an hour, run it explicitly before
+> packaging:
+>
+> ```bash
+> docker compose build build-linux
+> ```
+
 The packages are written to `artifacts/packages/linux` and
 `artifacts/packages/windows`. To work inside the same build image:
 
@@ -363,156 +373,31 @@ Benchmark runs are reported by the
 - TODO: when the repository goes public, render or link the benchmark history
   directly from the README instead of requiring artifact lookup.
 
-## Release Scope
+## Known Regressions
 
-### Minimal Release
+### Reflection Usage
 
-#### Types
+- [`field.set_value()` advertises writes for non-assignable fields or
+  values](tests/tool/regressions/field_set_value_assignability.cpp).
+- [Generated accessors trigger deprecation warnings for deprecated public
+  fields](tests/tool/regressions/deprecated_public_field.cpp), breaking
+  warning-as-error builds.
+- [A public nested type inside a private parent is emitted through an
+  inaccessible qualified
+  name](tests/tool/regressions/public_nested_in_private_parent.cpp).
+- [Public-base traversal loses a private nested type exposed through a public
+  field](tests/tool/regressions/private_nested_type_through_public_base.cpp).
+- [Anonymous unions emit an empty-named container field and omit promoted
+  members](tests/tool/regressions/anonymous_union_members.cpp).
+- [Pointer-wrapped nested template field types lose their enclosing-record
+  qualifier in `field.type_name()`](tests/tool/regressions/nested_template_field_name.cpp).
 
-- (+) named globally accessible records
-- (+) named globally accessible enums
-- (+) nested named records/enums of supported globally accessible parents
-- (+) primary record templates with type, value, and template-template
-  parameters, including use as CRTP bases
+### Candidate Explicit Limitations
 
-#### Records
-
-- (+) public data fields
-- (+) read public fields
-- (+) write public writable fields, including mutable fields through const
-  bindings
-- (+) inherited public fields
-- (+) transitive public base fields
-- (+) multiple public base fields
-- (+) public base fields from template records
-- (+) private/protected base fields are not reflected through derived records
-- (+) non-public fields are not reflected
-- (+) field names
-- (+) field types
-- (+) field `type_name()` without namespaces, including enclosing records when
-  available
-- (+) field `qualified_type_name()` preserves source declaration spelling when
-  available
-- (+) canonical metadata is available when the field type itself is reflectable
-- (+) field `is_const()`, `is_mutable()`, and `is_volatile()` traits
-- (+) field count / iteration
-- (+) field index is local to the declaring record, not the flattened inherited
-  field tuple
-- (+) record `type_name()` without namespaces, including enclosing records
-- (+) record `qualified_type_name()` with namespaces and enclosing records
-
-#### Enums
-
-- (+) enumerator names
-- (+) enumerator values
-- (+) scoped enums
-- (+) fixed-underlying enums
-- (+) enum `type_name()` without namespaces
-- (+) enum `qualified_type_name()` with namespaces
-- (-) plain unscoped enum field dependencies cannot be forward-declared
-
-#### Dependency Routes
-
-- (+) public field type dependencies
-- (+) public base type dependencies
-- (+) transitive public base dependencies
-- (+) standard-library public bases are ignored as reflection dependencies
-- (+) public field dependencies of primary template records
-- (+) supported public member alias dependencies: `error_type`, `first_type`,
-  `key_type`, `mapped_type`, `second_type`, `type`, `value`, `value_type`
-- (+) `std::pair` dependencies through `first_type` and `second_type`
-- (+) supported template-pack dependencies for template names exactly `tuple`
-  and `variant`
-- (+) `std::` record types are ignored outside the supported protocol routes
-- (+) recursive dependency walk through supported routes
-
-#### Serialization Completeness
-
-- (+) reflect record field names
-- (+) reflect record field types
-- (+) reflect record field type names and qualified type names
-- (+) reflect record and field annotations
-- (+) reflect documentation comment annotations from `///`, `//!`,
-  `/** */`, `/*! */`, `///<`, and `//!<`
-- (+) read field values
-- (+) write field values
-- (+) write inherited public field values
-- (+) reflect enum names
-- (+) reflect enum values
-- (+) reflect enum annotations
-- (+) recurse into reflected record fields
-- (+) recurse through supported dependency routes
-
-#### Frontend/API
-
-- (+) `reflected_call` as the supported reflection instrumentation interface
-- (+) `meta_t`, `binding_t`, `field_meta_t`, and `field_binding_t` public
-  reflection interfaces
-- (+) C++20 `meta`, `binding`, `field_meta`, and `field_binding` concepts
-- (+) best-effort tool diagnostics for invalid `reflected_call` arguments
-  including pointers, arrays, fundamentals, standard-library records, and
-  constrained primary templates or explicit/partial template specializations
-- (+) best-effort tool diagnostics for reflection query instantiation outside a
-  reflected scope
-
-#### Build/Release
-
-- (+) generated-header reflection
-- (+) CMake integration
-- (+) packaged runnable example and comprehensive guide sources
-- (+) annotations enabled by default
-- (+) annotations can be disabled with `--no-annotations` or CMake
-  `NO_ANNOTATIONS`
-- (+) `omnirefl -o <reflection.hpp> -c <source.cpp> -- <compiler command...>`
-- (+) helper `ccdb_query <compile_commands.json> <source.cpp> [output-contains]`
-  for CMake integration
-- (+) Linux and Windows package/install matrices
-
-### Planned After Minimal Release
-
-#### Types
-
-- (-) nested records inside record template parents
-- (-) explicit record template specializations
-- (-) partial record template specializations
-- (-) specialization-specific record template metadata
-- (-) specialization-specific CRTP base metadata
-
-#### Metadata
-
-- (-) OpenAPI-like schema table generation from reflected structs/enums using
-  type, field, enum, and annotation metadata
-- (-) specialization-aware reflected type names when/if explicit or partial
-  specializations are implemented
-
-#### Frontend/API
-
-- TODO(High): forbid `reflected_call` inside a reflected scope. With the current
-  deferred visitor implementation, reliable detection is not practically
-  possible without instantiating visitor bodies or adding a broader semantic
-  analysis pass.
-- TODO(High): add a CLI option that treats skipped unsupported public bases as
-  errors instead of warnings.
-- TODO: consider extending reflected entity metadata for fundamental types.
-  Currently canonical metadata is available for reflectable record/enum field
-  types; fundamental field types are reported only through field declaration
-  spelling.
-- (-) refine the public interface
-- (-) replace `reflected_call`
-- (-) separate const and mutable public-field accessors in the public interface
-- (-) recoverable reflection query/fallback branch for non-reflected types
-- (-) type-erased field wrappers, likely short `field_t`-style names
-- (-) refine the CLI interface
-- (-) Unix-like invocation: `omnirefl -o <reflection.hpp> -MF <deps.d> -- <cc1 args...>`
-- (-) split compiler-driver/compile-db args to cc1 mapping into a separate
-  composable tool
-
-### Might Be Considered Later
-
-- (-) unnamed non-local types addressable from namespace scope via
-  `decltype(symbol)`
-- (-) unnamed non-local types addressable through function return type
-- (-) other globally addressable unnamed cases
+- [Virtual-diamond traversal exposes the shared virtual-base field
+  twice](tests/tool/regressions/virtual_diamond_fields.cpp).
+- Primary templates with class-type non-type template parameters
+  (`template <Struct value>`) when `Struct` cannot itself be forward-declared.
 
 ## Bug Reports
 

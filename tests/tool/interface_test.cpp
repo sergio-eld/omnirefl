@@ -5,6 +5,8 @@
 #include <omnirefl/reflection.hpp>
 
 #include <string>
+#include <tuple>
+#include <type_traits>
 #include <utility> // IWYU pragma: keep
 #include <vector>
 
@@ -69,6 +71,81 @@ struct first_field {
 
 } // namespace reference_return
 
+namespace field_type_spelling {
+
+struct outer {
+  template <typename T>
+  struct nested {
+    T value;
+  };
+
+  struct holder {
+    nested<int> value;
+  };
+};
+
+struct record {
+  outer::nested<int> value;
+};
+
+template <typename T>
+using values = std::vector<T>;
+
+struct alias_template_record {
+  values<int> value;
+};
+
+struct alias_template_parent {
+  template <typename T>
+  using values = std::vector<T>;
+
+  struct holder {
+    values<int> value;
+  };
+};
+
+template <typename T>
+values<T> make_values();
+
+struct decltype_record {
+  decltype(make_values<int>()) value;
+};
+
+struct field_names {
+  template <typename Meta>
+  std::pair<std::string, std::string> operator()(Meta meta) const {
+    const auto field = std::get<0>(meta.public_fields());
+    return {field.type_name(), field.qualified_type_name()};
+  }
+};
+
+struct field_type_name {
+  template <typename Meta>
+  std::string operator()(Meta meta) const {
+    return std::get<0>(meta.public_fields()).type_name();
+  }
+};
+
+} // namespace field_type_spelling
+
+#if defined(__cpp_concepts)
+namespace binding_concept_sfinae {
+
+struct record {
+  int value;
+};
+
+struct visitor {
+  template <typename Binding>
+  auto operator()(Binding binding) const
+    -> std::enable_if_t<omni::binding<Binding>, int> {
+    return binding.value.value;
+  }
+};
+
+} // namespace binding_concept_sfinae
+#endif
+
 inline namespace v1 {
 
 struct inline_namespace_record {
@@ -83,6 +160,12 @@ struct inline_namespace_parent {
 
 } // namespace v1
 } // namespace interface_test
+
+namespace field_type_spelling_alias = interface_test::field_type_spelling;
+
+struct aliased_nested_template_field_record {
+  field_type_spelling_alias::outer::nested<int> value;
+};
 
 TEST(odr_test, inside_interface_test_cpp) {
   static const odr_test::input k_input{815,
@@ -171,6 +254,13 @@ TEST(cpp20_template_lambdas, record_binding) {
           fields);
       },
       value));
+}
+
+TEST(cpp20_template_lambdas, binding_concept_is_valid_in_sfinae_return) {
+  namespace s = interface_test::binding_concept_sfinae;
+
+  s::record input{17};
+  EXPECT_EQ(17, omni::reflected_call(s::visitor{}, input));
 }
 #endif
 
@@ -369,6 +459,64 @@ TEST(fields, namespaced_field_type_names) {
 
   value_categories_test<namespaced_field_types_t>(k_expected,
     f::record_type_field_type_names);
+}
+
+TEST(fields, nested_template_field_keeps_enclosing_record_name) {
+  namespace s = interface_test::field_type_spelling;
+
+  const std::pair<std::string, std::string> names =
+    omni::reflected_call(s::field_names{}, omni::type_t<s::record>{});
+
+  EXPECT_EQ("outer::nested<int>", names.first);
+  EXPECT_EQ("interface_test::field_type_spelling::outer::nested<int>",
+    names.second);
+}
+
+TEST(fields, nested_template_field_restores_omitted_enclosing_record) {
+  namespace s = interface_test::field_type_spelling;
+
+  const std::pair<std::string, std::string> names =
+    omni::reflected_call(s::field_names{}, omni::type_t<s::outer::holder>{});
+
+  EXPECT_EQ("outer::nested<int>", names.first);
+  EXPECT_EQ("interface_test::field_type_spelling::outer::nested<int>",
+    names.second);
+}
+
+TEST(fields, nested_template_field_strips_namespace_alias) {
+  namespace s = interface_test::field_type_spelling;
+
+  const std::pair<std::string, std::string> names =
+    omni::reflected_call(s::field_names{},
+      omni::type_t<aliased_nested_template_field_record>{});
+
+  EXPECT_EQ("outer::nested<int>", names.first);
+  EXPECT_EQ("interface_test::field_type_spelling::outer::nested<int>",
+    names.second);
+}
+
+TEST(fields, field_type_name_preserves_alias_template) {
+  namespace s = interface_test::field_type_spelling;
+
+  EXPECT_EQ("values<int>",
+    omni::reflected_call(s::field_type_name{},
+      omni::type_t<s::alias_template_record>{}));
+}
+
+TEST(fields, nested_alias_template_keeps_enclosing_record_name) {
+  namespace s = interface_test::field_type_spelling;
+
+  EXPECT_EQ("alias_template_parent::values<int>",
+    omni::reflected_call(s::field_type_name{},
+      omni::type_t<s::alias_template_parent::holder>{}));
+}
+
+TEST(fields, field_type_name_preserves_decltype) {
+  namespace s = interface_test::field_type_spelling;
+
+  EXPECT_EQ("decltype(make_values<int>())",
+    omni::reflected_call(s::field_type_name{},
+      omni::type_t<s::decltype_record>{}));
 }
 
 TEST(fields, namespaced_field_qualified_type_names) {

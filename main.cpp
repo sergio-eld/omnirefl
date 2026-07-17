@@ -78,6 +78,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <regex>
 #include <span>
 #include <sstream>
 #include <stack>
@@ -451,8 +452,6 @@ constexpr std::array k_compound_dependency_route_names = //
     "variant",
   });
 
-bool is_compound_dependency_route(const clang::CXXRecordDecl *record);
-
 template <typename>
 struct map_decl_to_type_t;
 
@@ -535,8 +534,7 @@ struct nm_qual_type {
   /// non-empty for nested types `struct foo { struct bar{}; };`
   std::vector<std::string> enclosing_records;
 
-  // todo: should it be just clang::Decl?
-  static meta::nm_qual_type from_decl(const clang::TagDecl *td) noexcept;
+  static meta::nm_qual_type from_decl(const clang::NamedDecl *decl) noexcept;
 };
 
 struct type_definition {
@@ -1314,9 +1312,11 @@ std::expected<diag::source_excerpt, std::string> source_excerpt_from(
         return lines;
       }),
 
-    .pointer_line = static_cast<std::uint32_t>(
-      std::ranges::count(validated_text->substr(first_line_begin,
-                           pointer_line_begin - first_line_begin),
+    .pointer_line = static_cast<std::uint32_t>( //
+      std::ranges::count( //
+        validated_text->substr( //
+          first_line_begin,
+          pointer_line_begin - first_line_begin),
         '\n')),
 
     .pointer_column = sm.getSpellingColumnNumber(subject_begin),
@@ -1385,30 +1385,26 @@ clang::QualType unreferenced_type(clang::QualType type) {
 }
 
 std::optional<clang::QualType> type_t_arg_type(clang::QualType type) {
-  type = unreferenced_type(type);
+  return fn::maybe(unreferenced_type(type)->getAs<clang::RecordType>())
+    .and_then([](const clang::RecordType *record) {
+      return fn::maybe(llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+        record->getDecl()));
+    })
+    .and_then([](const clang::ClassTemplateSpecializationDecl *spec)
+                -> std::optional<clang::QualType> {
+      if ("omni::type_t"
+        != spec->getSpecializedTemplate()->getQualifiedNameAsString()) {
+        return std::nullopt;
+      }
 
-  const auto *record = type->getAs<clang::RecordType>();
+      const clang::TemplateArgumentList &args = spec->getTemplateArgs();
+      if (1 != args.size()
+        || clang::TemplateArgument::Type != args.get(0).getKind()) {
+        return std::nullopt;
+      }
 
-  if (!record)
-    return std::nullopt;
-
-  const auto *spec =
-    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl());
-
-  if (!spec
-    || "omni::type_t"
-      != spec->getSpecializedTemplate()->getQualifiedNameAsString()) {
-    return std::nullopt;
-  }
-
-  const clang::TemplateArgumentList &args = spec->getTemplateArgs();
-
-  if (1 != args.size()
-    || clang::TemplateArgument::Type != args.get(0).getKind()) {
-    return std::nullopt;
-  }
-
-  return args.get(0).getAsType();
+      return args.get(0).getAsType();
+    });
 }
 
 std::expected<clang::QualType, std::string> instantiate_type_t_arg(
@@ -1418,20 +1414,25 @@ std::expected<clang::QualType, std::string> instantiate_type_t_arg(
   const clang::Type &canonical =
     *sema.Context.getCanonicalType(type.getUnqualifiedType()).getTypePtr();
 
-  const auto *record = llvm::dyn_cast<clang::RecordType>(&canonical);
-  auto *specialization = record
-    ? llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl())
-    : nullptr;
+  auto *const specialization = //
+    fn::maybe(llvm::dyn_cast<clang::RecordType>(&canonical))
+      .transform([](const clang::RecordType *record) {
+        return llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+          record->getDecl());
+      })
+      .value_or(nullptr);
 
-  if (!specialization || specialization->getDefinition()
-    || specialization->isInStdNamespace()
+  if (!specialization //
+    || specialization->getDefinition() //
+    || specialization->isInStdNamespace() //
     || clang::TSK_ExplicitSpecialization
       == specialization->getSpecializationKind()) {
     return type;
   }
 
-  // omni::type_t<T> does not otherwise require T to be complete. Instantiate
-  // only its visible primary specialization; the visitor remains deferred.
+  // ad hoc: omni::type_t<T> does not otherwise require T to be complete, but
+  // metadata collection needs the definition. Instantiate only its visible
+  // primary specialization; the visitor remains deferred.
   if (!specialization->getSpecializedTemplate()
         ->getTemplatedDecl()
         ->getDefinition()) {
@@ -1491,7 +1492,11 @@ std::vector<std::string> callstack_from(clang::ASTContext &ast,
         if (frame && emitted.emplace(*frame).second)
           frames.push_back(*frame);
       }
-    } else if (const auto *lambda = node.get<clang::LambdaExpr>()) {
+
+      continue;
+    }
+
+    if (const auto *lambda = node.get<clang::LambdaExpr>()) {
       const std::optional frame =
         frame_from("in lambda", "<lambda>"sv, lambda->getBeginLoc());
 
@@ -1527,6 +1532,8 @@ meta::source_file_context append_invalid_reflection_query(
 
   std::string subject = std::format("reflection query '{}' is invalid", query);
 
+  // ad hoc: reflection-query diagnostics have no structured identity yet, so
+  // deduplicate the same source location by its rendered subject.
   if (std::ranges::any_of(a.errors.reflection_queries,
         [&location, &subject](const diag::source_error &error) {
           return *location == error.location && subject == error.subject;
@@ -1853,6 +1860,12 @@ meta::source_file_context meta::matches::fold_out_of_scope_type_query(
   clang::ASTContext &ast,
   meta::source_file_context a,
   const clang::TypeLoc &type_loc) {
+  // ad hoc: Clang gives a substituted visitor constraint the semantic
+  // binding_t/meta_t type. Ignore it because the source names a template
+  // parameter rather than spelling a reflection query.
+  if (type_loc.getAs<clang::SubstTemplateTypeParmTypeLoc>())
+    return a;
+
   // Generic visitor placeholders are substituted with binding_t during
   // overload resolution; the spelled `auto` is not a reflection query.
   if (std::invoke([&ast, &type_loc] {
@@ -1869,10 +1882,13 @@ meta::source_file_context meta::matches::fold_out_of_scope_type_query(
     return a;
   }
 
-  const auto *record = type_loc.getType()->getAs<clang::RecordType>();
-  const auto *decl = record
-    ? llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl())
-    : nullptr;
+  const auto *const decl = //
+    fn::maybe(type_loc.getType()->getAs<clang::RecordType>())
+      .transform([](const clang::RecordType *record) {
+        return llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+          record->getDecl());
+      })
+      .value_or(nullptr);
 
   if (!decl) {
     a.errors.internal.emplace_back(
@@ -2396,10 +2412,9 @@ std::string format_template_params(
   const std::vector<meta::template_param> &params,
   std::size_t indent_level) {
   const auto format_list = //
-    [](auto self,
+    [](this auto self,
       const std::vector<meta::template_param> &params,
-      std::size_t level,
-      bool with_names) -> std::string {
+      std::size_t level) -> std::string {
     std::string out;
 
     for (const auto &[index, param] : params | std::views::enumerate) {
@@ -2407,39 +2422,24 @@ std::string format_template_params(
         out += std::format(",\n{}", indentation(level));
 
       out += std::visit(
-        [self, index, level, with_names]<typename Param>(
-          const Param &p) -> std::string {
-          const std::string name =
-            with_names ? std::format("_T{}", index) : std::string();
-
+        [self, level]<typename Param>(const Param &p) -> std::string {
           if constexpr (std::same_as<meta::template_type_param, Param>) {
-            if (!with_names)
-              return std::format("typename{}", p.is_pack ? "..." : "");
-
-            return std::format("typename{}{}", p.is_pack ? "..." : " ", name);
+            return std::format("typename{}{}", p.is_pack ? "..." : " ", p.name);
           } else if constexpr (std::same_as<meta::template_value_param,
                                  Param>) {
-            if (!with_names)
-              return std::format("{}{}", p.type, p.is_pack ? "..." : "");
-
-            return std::format("{}{}{}", p.type, p.is_pack ? "..." : " ", name);
+            return std::format("{}{}{}",
+              p.type,
+              p.is_pack ? "..." : " ",
+              p.name);
           } else {
             static_assert(std::same_as<meta::template_template_param, Param>);
 
-            if (!with_names) {
-              return std::format("template <\n{0}{1}\n{2}> class{3}",
-                indentation(level + 1),
-                self(self, p.params, level + 1, false),
-                indentation(level),
-                p.is_pack ? "..." : "");
-            }
-
             return std::format("template <\n{0}{1}\n{2}> class{3}{4}",
               indentation(level + 1),
-              self(self, p.params, level + 1, false),
+              self(p.params, level + 1),
               indentation(level),
               p.is_pack ? "..." : " ",
-              name);
+              p.name);
           }
         },
         param);
@@ -2448,18 +2448,16 @@ std::string format_template_params(
     return out;
   };
 
-  return format_list(format_list, params, indent_level, true);
+  return format_list(params, indent_level);
 }
 
 std::string format_template_args(const meta::template_data &t) {
   return std::format("{}",
     t.params //
-      | std::views::enumerate //
-      | std::views::transform([](const auto &indexed_param) {
-          const auto &[index, param] = indexed_param;
+      | std::views::transform([](const meta::template_param &param) {
           return std::visit(
-            [index](const auto &p) {
-              return std::format("_T{}{}", index, p.is_pack ? "..." : "");
+            [](const auto &p) {
+              return std::format("{}{}", p.name, p.is_pack ? "..." : "");
             },
             param);
         }) //
@@ -2798,8 +2796,9 @@ std::expected<cli::options, app_error> cli::parse(int argc,
         if (parsed_source == compiler_source)
           return compiler_source;
 
-        // CMake escapes a literal '$' as '$$' in compile_commands.json. Try
-        // the exact spelling first so a real '$$' path remains unchanged.
+        // ad hoc: CMake escapes a literal '$' as '$$' in
+        // compile_commands.json. Try the exact spelling first so a real '$$'
+        // path remains unchanged.
         std::string cmake_unescaped = std::get<1>(args);
         for (std::size_t dollar = cmake_unescaped.find("$$");
           std::string::npos != dollar;
@@ -2880,9 +2879,13 @@ std::vector<std::string> filter_tool_irrelevant_args(
   const llvm::opt::InputArgList &args) {
   namespace options = clang::options;
 
-  // Frontend feature flags and their predefined macros can change reflected
-  // declarations. Preserve options by default and remove only categories that
-  // cannot contribute to the instrumentation AST or conflict with tool setup.
+  // ad hoc: preserve frontend options by default, but treat driver action,
+  // linker, output and optimization groups as outside reflection fidelity.
+  // Optimization-defined macros are consequently not modeled.
+
+  // ad hoc: PCH state is not reusable after omnirefl replaces the source,
+  // resource directory and frontend action. Keep the manual option list close
+  // to the filter that discards it.
   static constexpr std::array k_pch_option_ids{
     options::OPT_include_pch,
     options::OPT_fpch_codegen,
@@ -2972,65 +2975,65 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       })
     | std::views::values | std::ranges::to<std::vector>();
 
+  // ad hoc: approximate driver response-file expansion by selecting the
+  // tokenizer from the invocation style and recovering its working directory.
   const std::expected expanded_flags = //
-    std::invoke(
-      [&flags,
-        &raw_flags,
-        invoked_as_cl] -> std::expected<std::vector<std::string>, std::string> {
-        llvm::BumpPtrAllocator allocator;
-        llvm::SmallVector<const char *> args;
-        std::ranges::transform(flags,
-          std::back_inserter(args),
-          &std::string::c_str);
+    std::invoke([&flags, &raw_flags, invoked_as_cl]
+      -> std::expected<std::vector<std::string>, std::string> {
+      llvm::BumpPtrAllocator allocator;
+      llvm::SmallVector<const char *> args;
+      std::ranges::transform(flags,
+        std::back_inserter(args),
+        &std::string::c_str);
 
-        const bool windows_tokenization = invoked_as_cl
-          || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
+      const bool windows_tokenization =
+        invoked_as_cl || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
 
-        llvm::cl::ExpansionContext expansion{allocator,
-          windows_tokenization //
-            ? llvm::cl::TokenizeWindowsCommandLine
-            : llvm::cl::TokenizeGNUCommandLine};
+      llvm::cl::ExpansionContext expansion{allocator,
+        windows_tokenization //
+          ? llvm::cl::TokenizeWindowsCommandLine
+          : llvm::cl::TokenizeGNUCommandLine};
 
-        if (const std::optional working_directory =
-              std::invoke([&raw_flags] -> std::optional<std::string_view> {
-                const auto indexed_flags =
-                  raw_flags | std::views::enumerate | std::views::reverse;
-                const auto found = std::ranges::find_if(indexed_flags,
-                  [&raw_flags](const auto &indexed) {
-                    const auto &[index, arg] = indexed;
-                    return std::string_view{arg}.starts_with(
-                             "-working-directory="sv)
-                      || ("-working-directory"sv == arg
-                        && std::ssize(raw_flags) > index + 1);
-                  });
-                if (indexed_flags.end() == found)
-                  return std::nullopt;
+      if (const std::optional working_directory =
+            std::invoke([&raw_flags] -> std::optional<std::string_view> {
+              const auto indexed_flags =
+                raw_flags | std::views::enumerate | std::views::reverse;
+              const auto found = std::ranges::find_if(indexed_flags,
+                [&raw_flags](const auto &indexed) {
+                  const auto &[index, arg] = indexed;
+                  return std::string_view{arg}.starts_with(
+                           "-working-directory="sv)
+                    || ("-working-directory"sv == arg
+                      && std::ssize(raw_flags) > index + 1);
+                });
+              if (indexed_flags.end() == found)
+                return std::nullopt;
 
-                const auto &[index, arg] = *found;
-                constexpr std::string_view k_joined = "-working-directory=";
-                return std::string_view{arg}.starts_with(k_joined)
-                  ? std::string_view{arg}.substr(k_joined.size())
-                  : std::string_view{raw_flags[index + 1]};
-              });
-          working_directory) {
-          expansion.setCurrentDir(*working_directory);
-        }
+              const auto &[index, arg] = *found;
+              constexpr std::string_view k_joined = "-working-directory=";
+              return std::string_view{arg}.starts_with(k_joined)
+                ? std::string_view{arg}.substr(k_joined.size())
+                : std::string_view{raw_flags[index + 1]};
+            });
+        working_directory) {
+        expansion.setCurrentDir(*working_directory);
+      }
 
-        if (llvm::Error error = expansion.expandResponseFiles(args))
-          return std::unexpected(llvm::toString(std::move(error)));
+      if (llvm::Error error = expansion.expandResponseFiles(args))
+        return std::unexpected(llvm::toString(std::move(error)));
 
-        if (const auto unexpanded = std::ranges::find_if(args,
-              [](std::string_view arg) { return arg.starts_with('@'); });
-          args.end() != unexpanded) {
-          return std::unexpected(
-            std::format("failed to expand compiler response file: {}",
-              *unexpanded));
-        }
+      if (const auto unexpanded = std::ranges::find_if(args,
+            [](std::string_view arg) { return arg.starts_with('@'); });
+        args.end() != unexpanded) {
+        return std::unexpected(
+          std::format("failed to expand compiler response file: {}",
+            *unexpanded));
+      }
 
-        return args //
-          | std::views::transform(fn::as<std::string>) //
-          | std::ranges::to<std::vector>();
-      });
+      return args //
+        | std::views::transform(fn::as<std::string>) //
+        | std::ranges::to<std::vector>();
+    });
 
   if (!expanded_flags)
     return std::unexpected(processing_error(source, expanded_flags.error()));
@@ -3259,9 +3262,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return out;
     });
 
-  // ad hoc: this is a heavy-weight solution just to get proper argument
-  // translations (for other compilers' commands) and to resolve system
-  // include paths...
+  // ad hoc: impersonate the original compiler basename so Clang's driver can
+  // infer its toolchain and language defaults; MSVC-style input must instead
+  // be normalized through clang-cl.
   clang::driver::Driver driver(
     msvc_used ? "clang-cl" : fs::path(raw_flags.front()).filename().string(),
     driver_triple,
@@ -4066,12 +4069,16 @@ meta::template_param map_template_param(const clang::ASTContext &ast,
   const clang::NamedDecl *decl) {
   assert(decl);
 
+  const auto emitted_name = [](const auto &param) -> std::string {
+    return std::format("omnirefl_T{}_{}", param.getDepth(), param.getIndex());
+  };
+
   // TemplateParameterList exposes parameters as NamedDecl*. The runtime domain
   // handled here is TemplateTypeParmDecl, NonTypeTemplateParmDecl, or
   // TemplateTemplateParmDecl.
   if (const auto *p = llvm::dyn_cast<clang::TemplateTypeParmDecl>(decl)) {
     return meta::template_type_param{
-      .name = p->getName().str(),
+      .name = emitted_name(*p),
       .is_pack = p->isParameterPack(),
     };
   }
@@ -4084,9 +4091,20 @@ meta::template_param map_template_param(const clang::ASTContext &ast,
     pp.SuppressTagKeyword = false;
     pp.PrintAsCanonical = true;
 
+    // ad hoc: Clang's canonical printer renders dependent parameters as
+    // `type-parameter-<depth>-<index>`. Map that stable identity to the names
+    // used by generated declarations instead of retaining source aliases that
+    // are unavailable before the force-included header.
+    static const std::regex dependent_parameter{
+      R"(\btype-parameter-([0-9]+)-([0-9]+)\b)",
+      std::regex_constants::optimize,
+    };
+
     return meta::template_value_param{
-      .type = p->getType().getAsString(pp),
-      .name = p->getName().str(),
+      .type = std::regex_replace(p->getType().getAsString(pp),
+        dependent_parameter,
+        "omnirefl_T$1_$2"),
+      .name = emitted_name(*p),
       .is_pack = p->isParameterPack(),
     };
   }
@@ -4097,7 +4115,7 @@ meta::template_param map_template_param(const clang::ASTContext &ast,
       | std::views::transform(
         std::bind_front(map_template_param, std::cref(ast)))
       | std::ranges::to<std::vector>(),
-    .name = p->getName().str(),
+    .name = emitted_name(*p),
     .is_pack = p->isParameterPack(),
   };
 }
@@ -4128,12 +4146,12 @@ auto meta::template_data::from_decl(const clang::ASTContext &ast,
 }
 
 meta::nm_qual_type meta::nm_qual_type::from_decl(
-  const clang::TagDecl *td) noexcept {
+  const clang::NamedDecl *decl) noexcept {
   // refactorme: function bodies are also captured as enclosing_records. I think
   // capturing them for rendering in diagnostics is somewhat useful, but I'd
   // need to introduce a sum type like {namespace|struct|function}.
   auto [namespaces, enclosing_records] =
-    std::invoke([&decl_ctx = *td->getDeclContext()] {
+    std::invoke([&decl_ctx = *decl->getDeclContext()] {
       std::pair result{
         std::vector<meta::namespace_component>{},
         std::vector<std::string>{},
@@ -4175,8 +4193,8 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
     });
 
   return {
-    .name = std::invoke([&td] -> std::optional<std::string> {
-      const clang::IdentifierInfo *id = td->getIdentifier();
+    .name = std::invoke([decl] -> std::optional<std::string> {
+      const clang::IdentifierInfo *id = decl->getIdentifier();
       if (!id)
         return std::nullopt;
 
@@ -4184,19 +4202,22 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
         // fixme:
         // ad hoc: for template specializations use the printing
         // policy to render <template args> properly.
-        !llvm::isa<clang::ClassTemplateSpecializationDecl>(td)
+        !llvm::isa<clang::ClassTemplateSpecializationDecl>(decl)
         ? id->getName().str()
-        : clang::QualType(td->getASTContext().getCanonicalTagType(td))
-            .getAsString(std::invoke([] {
-              clang::PrintingPolicy p{{}};
+        : std::invoke([tag = clang::cast<clang::TagDecl>(decl)] {
+            return clang::QualType(
+              tag->getASTContext().getCanonicalTagType(tag))
+              .getAsString(std::invoke([] {
+                clang::PrintingPolicy p{{}};
 
-              p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
-              p.SuppressScope = false; //< namespaces or enclosing records
-                                       // for <template args>
-              p.PrintAsCanonical = true;
+                p.SuppressTagKeyword = true; //< no 'struct', 'class' or 'enum'
+                p.SuppressScope = false; //< namespaces or enclosing records
+                                         // for <template args>
+                p.PrintAsCanonical = true;
 
-              return p;
-            }));
+                return p;
+              }));
+          });
 
       // ad hoc: (see above) for template specializations strip all scopes
       // to the left of the last '::' before '<', keeping template args
@@ -4236,17 +4257,13 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   };
 
   const auto type_name_from_decl = [](const clang::NamedDecl *decl) {
-    if (const auto *tag = llvm::dyn_cast<clang::TagDecl>(decl)) {
-      const meta::nm_qual_type type_name = meta::nm_qual_type::from_decl(tag);
-      std::vector<std::string> elems;
-      elems.reserve(type_name.enclosing_records.size() + std::size_t{1});
-      std::ranges::copy(type_name.enclosing_records, std::back_inserter(elems));
-      elems.emplace_back(type_name.name.value_or("(unnamed)"));
-      return std::format("{}",
-        elems | std::views::join_with("::"sv) | util::format_range);
-    }
-
-    return decl->getNameAsString();
+    const meta::nm_qual_type type_name = meta::nm_qual_type::from_decl(decl);
+    std::vector<std::string> elems;
+    elems.reserve(type_name.enclosing_records.size() + std::size_t{1});
+    std::ranges::copy(type_name.enclosing_records, std::back_inserter(elems));
+    elems.emplace_back(type_name.name.value_or("(unnamed)"));
+    return std::format("{}",
+      elems | std::views::join_with("::"sv) | util::format_range);
   };
 
   const std::string source_type_name = std::invoke([&] {
@@ -4279,10 +4296,38 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     field_type.getUnqualifiedType().getAsString(qualified_policy);
 
   const std::string type_name = std::invoke([&] {
-    if (const auto *type_decl = field_type->getAsTagDecl()) {
-      if (llvm::isa<clang::ClassTemplateSpecializationDecl>(type_decl))
-        return short_type_name(source_type_name);
+    if (type_source_info) {
+      const clang::UnqualTypeLoc source_type =
+        type_source_info->getTypeLoc().getUnqualifiedLoc();
 
+      if (const clang::TemplateSpecializationTypeLoc template_type =
+            source_type.getAs<clang::TemplateSpecializationTypeLoc>()) {
+        const clang::TemplateDecl *const template_decl =
+          template_type.getTypePtr()->getTemplateName().getAsTemplateDecl();
+
+        if (template_decl && template_decl->getTemplatedDecl()) {
+          // ad hoc: use semantic ownership for the outer template name, but
+          // preserve source-spelled arguments. This removes namespace aliases
+          // without losing enclosing records or alias-template names.
+          return std::format("{}{}",
+            type_name_from_decl(template_decl->getTemplatedDecl()),
+            clang::Lexer::getSourceText( //
+              clang::CharSourceRange::getTokenRange( //
+                template_type.getLAngleLoc(),
+                template_type.getRAngleLoc()),
+              ast.getSourceManager(),
+              ast.getLangOpts())
+              .str());
+        }
+
+        return source_type_name;
+      }
+
+      if (source_type.getAs<clang::DecltypeTypeLoc>())
+        return source_type_name;
+    }
+
+    if (const auto *type_decl = field_type->getAsTagDecl()) {
       return type_name_from_decl(type_decl);
     }
 
@@ -4292,6 +4337,8 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     return short_type_name(source_type_name);
   });
 
+  // ad hoc: packed fields cannot always bind to references. Infer safe access
+  // from the record layout and copy fields whose address may be misaligned.
   const value_access access = std::invoke([&ast, d] {
     if (d->isBitField())
       return value_access::copy;
@@ -4313,6 +4360,9 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     if (nullptr != ast.getAsConstantArrayType(d->getType()))
       return value_access::array_copy;
 
+    // ad hoc: dependent and flexible arrays cannot be materialized as the
+    // nested std::array value used for fixed arrays, so they retain reference
+    // access for now.
     // todo(high): add copied access for misaligned dependent/flexible arrays.
     return d->getType()->isArrayType() //
       ? value_access::reference
@@ -4745,10 +4795,11 @@ auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
     | std::views::transform(&clang::EnumDecl::getName)
     | std::views::transform(fn::as<std::string_view>);
 
-  // `underlying_type` is emitted into a private, target-specific generated
-  // header which, as of this writing, is not intended for distribution. Using
-  // the canonical target spelling is assumed safe and avoids aliases whose
-  // declarations appear only after the header is force-included.
+  // ad hoc: `underlying_type` is emitted into a private, target-specific
+  // generated header which, as of this writing, is not intended for
+  // distribution. Using the canonical target spelling is assumed safe and
+  // avoids aliases whose declarations appear only after the header is
+  // force-included.
   return {
     .is_scoped = ed.isScoped(),
     .is_fixed = ed.isFixed(),
@@ -5083,11 +5134,11 @@ std::string reflectable_head(const meta::nm_qual_type &t,
       // template name is intentional.
       return std::format(
         "{4}"
-        "\nstruct _reflected<{0} {1}, _omni_binding> {{"
-        "\n  static_assert(std::is_same<{0} {1}, _omni_binding>::value,"
+        "\nstruct _reflected<{0} {1}, omnirefl_binding> {{"
+        "\n  static_assert(std::is_same<{0} {1}, omnirefl_binding>::value,"
         "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
         "\n"
-        "\n  using type = _omni_binding;"
+        "\n  using type = omnirefl_binding;"
         "\n"
         "\n  static constexpr omni::reflected_entity entity() noexcept {{"
         "\n    return omni::reflected_entity::{2};"
@@ -5117,7 +5168,7 @@ std::string reflectable_head(const meta::nm_qual_type &t,
         reflected_type_name,
 
         // 4
-        std::format("template <\n  {},\n  typename _omni_binding\n>",
+        std::format("template <\n  {},\n  typename omnirefl_binding\n>",
           format_template_params(d.template_info->params, 1)),
 
         // 5
@@ -5301,10 +5352,12 @@ std::string reflectable_body(const meta::record_data &d) {
 
       const auto [value_type, value_expression] = std::invoke([&f] {
         if (meta::field_data::value_access::array_copy == f.access) {
+          // ad hoc: raw arrays cannot be returned by value. Copy packed fixed
+          // arrays into recursively nested std::array values instead.
           const auto format_array_copy = //
-            [&f](auto self,
+            [&f](this auto self,
               std::span<const std::size_t> extents,
-              std::string indexes) -> std::string {
+              std::string_view indexes) -> std::string {
             return std::format(
               "typename omni::detail::_packed_value<"
               "omni::compat::remove_cvref_t<"
@@ -5313,13 +5366,13 @@ std::string reflectable_body(const meta::record_data &d) {
               indexes,
               std::views::iota(std::size_t{0}, extents.front()) //
                 | std::views::transform(
-                  [&f, self, extents, &indexes](std::size_t index) {
+                  [&f, self, extents, indexes](std::size_t index) {
                     const std::string nested_indexes =
                       std::format("{}[{}]", indexes, index);
 
                     return 1 == extents.size() //
                       ? std::format("t.{}{}", f.name, nested_indexes)
-                      : self(self, extents.subspan(1), nested_indexes);
+                      : self(extents.subspan(1), nested_indexes);
                   }) //
                 | std::views::join_with(", "sv) //
                 | util::format_range);
@@ -5329,7 +5382,7 @@ std::string reflectable_body(const meta::record_data &d) {
             std::format(
               "typename omni::detail::_packed_value<decltype(t.{})>::type",
               f.name),
-            format_array_copy(format_array_copy, f.array_extents, {}),
+            format_array_copy(f.array_extents, ""sv),
           };
         }
 
@@ -5602,7 +5655,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\n"
     "\n// -- generated fallback reflected types --------"
     "\n{8}"
-    "\n" // todo: ^^^
+    "\n"
     "\n}} // namespace"
     "\n}} // namespace detail"
     "\n}} // namespace omni"
@@ -5649,7 +5702,9 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 5:
+    // 5: ad hoc: packed fixed-array copy accessors reference this helper only
+    // through generated source text, so emit it only when those accessors
+    // exist.
     has_packed_array_copies
       ? "template <typename T>"
         "\nstruct _packed_value {"

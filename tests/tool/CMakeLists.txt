@@ -636,16 +636,6 @@ if("17" IN_LIST _supported_cpp_standards)
         regressions/field_set_value_assignability.cpp
         "reflected types: 2")
     _omnirefl_diagnostic_tool_run(
-        "nested_template_field_name"
-        regressions/nested_template_field_name.cpp
-        "reflected types:")
-    _omnirefl_diagnostic_tool_run(
-        "dependent_nontype_template"
-        regressions/dependent_nontype_template.cpp
-        "reflected types: 1")
-    _omnirefl_disable_diagnostic_build(
-        "dependent_nontype_template")
-    _omnirefl_diagnostic_tool_run(
         "ccdb_backslash_definition"
         ccdb_backslash_definition.cpp
         "reflected types:")
@@ -750,34 +740,6 @@ if("20" IN_LIST _supported_cpp_standards)
         _omnirefl_driver_option(
             20 no_char8_t OMNI_DRIVER_NO_CHAR8_T -fno-char8_t)
     endif()
-
-    set(_concept_sfinae_target
-        "cpp_20.regression.binding_concept_sfinae")
-    add_executable(${_concept_sfinae_target} EXCLUDE_FROM_ALL
-        regressions/binding_concept_sfinae.cpp)
-    set_target_properties(${_concept_sfinae_target} PROPERTIES
-        CXX_STANDARD 20
-        CXX_STANDARD_REQUIRED YES
-        CXX_EXTENSIONS NO)
-    target_link_libraries(${_concept_sfinae_target} PRIVATE
-        GTest::GTest
-        gtest_main
-        std_compat)
-    omni_reflected_target(${_concept_sfinae_target} LOG_LEVEL warning)
-
-    add_test(NAME "${_concept_sfinae_target}.run_omni"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
-            -t "${_concept_sfinae_target}.omni" --parallel 1)
-    add_test(NAME "${_concept_sfinae_target}.build"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
-            -t "${_concept_sfinae_target}" --parallel)
-    add_test(NAME "${_concept_sfinae_target}"
-        COMMAND ${_concept_sfinae_target})
-    set_tests_properties(
-        "${_concept_sfinae_target}.run_omni"
-        "${_concept_sfinae_target}.build"
-        "${_concept_sfinae_target}"
-        PROPERTIES DISABLED TRUE)
 
     set(_constrained_template_target
         "cpp_20.negative.reflected_call_constrained_primary_template")
@@ -908,6 +870,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(_test_sources
         test_main.cpp
         dependent_types_test.cpp
+        regressions/nested_template_field_name.cpp
         interface_test.cpp
         example_test.cpp
         packed_field_test.cpp
