@@ -5,7 +5,86 @@
 #include <omnirefl/reflection.hpp>
 
 #include <string>
+#include <tuple>
 #include <vector>
+
+namespace dependency_types {
+
+// Keep this template otherwise unused. The test below verifies that a visible
+// primary definition is sufficient when no specialization was instantiated
+// beforehand.
+template <typename T>
+struct uninstantiated_primary_template {
+  T value;
+};
+
+template <typename T>
+struct template_template_box {
+  T value;
+};
+
+template <template <typename> class Container>
+struct template_template_record {
+  Container<int> value;
+};
+
+template <typename... T>
+struct variadic_primary_template {
+  std::tuple<T...> value;
+};
+
+template <typename T, T Initial>
+struct dependent_value_record {
+  T value = Initial;
+};
+
+int dependent_pointer_initial = 37;
+
+template <typename T, T *Initial>
+struct dependent_pointer_record {
+  T value = *Initial;
+};
+
+template <typename T>
+using dependent_pointer = T *;
+
+template <typename T, dependent_pointer<T> Initial>
+struct aliased_dependent_pointer_record {
+  T value = *Initial;
+};
+
+template <template <typename T, T Initial> class Record>
+struct dependent_template_template_record {
+  Record<int, 41> value;
+};
+
+struct private_alias_and_public_field {
+  private:
+  struct private_child {
+    int value;
+  };
+
+  using value_type = private_child;
+
+  public:
+  private_child exposed;
+};
+
+namespace inspect {
+
+static const struct first_field_type_is_reflected_t {
+  template <typename Binding>
+  bool operator()(const Binding &binding) const {
+    using field =
+      typename std::tuple_element<0, decltype(binding.public_fields())>::type;
+
+    return omni::is_reflected<typename field::type>::value;
+  }
+} first_field_type_is_reflected;
+
+} // namespace inspect
+
+} // namespace dependency_types
 
 namespace {
 
@@ -80,6 +159,15 @@ TEST(field_dependency, level_1_first_field_type) {
   EXPECT_EQ("as_field",
     omni::reflected_call(dt::inspect::first_field_type_name,
       dt::field_dep_level_1{dt::resolved::as_field{1}}));
+}
+
+TEST(field_dependency, private_alias_does_not_shadow_public_field_path) {
+  namespace dt = dependency_types;
+
+  dt::private_alias_and_public_field input{};
+
+  EXPECT_TRUE(
+    omni::reflected_call(dt::inspect::first_field_type_is_reflected, input));
 }
 
 TEST(field_dependency, level_2_value) {
@@ -257,6 +345,69 @@ TEST(record_template, type_parameter_field_names) {
   using record = dt::primary_template_record<dt::resolved::as_template_arg>;
   EXPECT_EQ((std::vector<std::string>{"value", "count"}),
     omni::reflected_call(dt::inspect::field_names, record{}));
+}
+
+TEST(record_template, metadata_for_uninstantiated_primary_template) {
+  namespace dt = dependency_types;
+
+  // This must remain the specialization's first reference in this translation
+  // unit; omni::type_t itself does not instantiate the specialization.
+  EXPECT_EQ(1,
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::uninstantiated_primary_template<int>>{}));
+}
+
+TEST(record_template, metadata_for_template_template_parameter) {
+  namespace dt = dependency_types;
+
+  // This must remain the specialization's first reference in this translation
+  // unit; a template-template argument must not make it appear incomplete.
+  EXPECT_EQ(1,
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::template_template_record<dt::template_template_box>>{}));
+}
+
+TEST(record_template, metadata_for_variadic_primary_template) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(1,
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::variadic_primary_template<int, double>>{}));
+}
+
+TEST(record_template, metadata_for_dependent_nontype_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::dependent_value_record<int, 31>>{}));
+}
+
+TEST(record_template, metadata_for_composed_dependent_nontype_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<
+        dt::dependent_pointer_record<int, &dt::dependent_pointer_initial>>{}));
+}
+
+TEST(record_template, metadata_for_aliased_dependent_nontype_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<dt::aliased_dependent_pointer_record<int,
+        &dt::dependent_pointer_initial>>{}));
+}
+
+TEST(record_template, metadata_for_dependent_template_template_parameter) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ(std::size_t{1},
+    omni::reflected_call(dt::inspect::field_count,
+      omni::type_t<
+        dt::dependent_template_template_record<dt::dependent_value_record>>{}));
 }
 
 TEST(annotations, record_type_annotation) {
@@ -665,6 +816,18 @@ TEST(enum_dependency, scoped_fixed_enum_is_reflected_directly) {
   EXPECT_EQ((std::vector<std::string>{"low", "medium", "high"}),
     omni::reflected_call(dt::inspect::enum_names,
       dt::scoped_fixed_status::low));
+}
+
+TEST(enum_dependency, fixed_underlying_aliases_are_canonicalized) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ((std::vector<std::string>{"ready", "done"}),
+    omni::reflected_call(dt::inspect::enum_names,
+      dt::std_alias_fixed_status::ready));
+
+  EXPECT_EQ((std::vector<std::string>{"waiting", "complete"}),
+    omni::reflected_call(dt::inspect::enum_names,
+      dt::custom_alias_fixed_status::waiting));
 }
 
 TEST(enum_dependency, forward_declarable_enum_holder_field_names) {

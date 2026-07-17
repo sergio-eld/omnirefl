@@ -36,14 +36,16 @@ std::string shell_quote(std::string_view arg) {
 
   const bool needs_quote = std::ranges::any_of(arg, [](const char c) {
     return std::isspace(static_cast<unsigned char>(c))
-      || "'\"$`|&;<>()[{}]*?!#"sv.contains(c);
+      || "'\"\\$`|&;<>()[{}]*?!#"sv.contains(c);
   });
 
   const auto escaped = arg //
     | std::views::transform([](const char &c) -> std::string_view {
-        if ('\\' == c)
-          return "/"sv;
-        return '\'' == c ? "'\\''"sv : std::string_view{&c, 1};
+        return '\\' == c //
+          ? "'\\\\'"sv
+          : '\'' == c //
+            ? "'\\''"sv
+            : std::string_view{&c, 1};
       }) //
     | std::views::join //
     | std::ranges::to<std::string>();
@@ -115,6 +117,7 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
     "\n"
     "\nUsage: ccdb_query <compile_commands.json> <source.cpp> [output-contains]",
   };
+  app.allow_windows_style_options(false);
 
   CLI::Option *compile_commands =
     app.add_option("compile_commands", "Path to compile_commands.json.")
@@ -165,11 +168,12 @@ int main(int argc, const char *const *argv) {
   return parse(argc, argv)
     .and_then(resolve_command)
     .transform([](const clang::tooling::CompileCommand &c) {
-      std::cout << (c.CommandLine //
-        | std::views::transform(shell_quote) //
-        | std::views::join_with(" "sv) //
-        | std::ranges::to<std::string>())
-                << '\n';
+      std::cout << std::format("{} -working-directory {}\n",
+        c.CommandLine //
+          | std::views::transform(shell_quote) //
+          | std::views::join_with(" "sv) //
+          | std::ranges::to<std::string>(),
+        shell_quote(c.Directory));
       return 0;
     })
     .or_else(

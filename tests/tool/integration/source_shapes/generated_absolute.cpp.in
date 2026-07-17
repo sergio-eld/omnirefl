@@ -1,0 +1,7 @@
+#if defined(OMNI_TOOL_RUN)
+#  error "generated source must not be instrumented"
+#endif
+
+int generated_absolute() {
+  return 11;
+}

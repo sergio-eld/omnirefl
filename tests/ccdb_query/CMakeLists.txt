@@ -34,8 +34,19 @@ _ccdb_query_pass(unique "${_ccdb_query_unique}")
 set_tests_properties(ccdb_query.unique PROPERTIES
     PASS_REGULAR_EXPRESSION "UNIQUE_TARGET")
 
+add_test(NAME ccdb_query.backslash_argument
+    COMMAND ${CMAKE_COMMAND}
+        -D "CCDB_QUERY=$<TARGET_FILE:ccdb_query>"
+        -D "COMPILE_DB=${_ccdb_query_db}"
+        -D "SOURCE=${_ccdb_query_unique}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/expect_backslash.cmake")
+
 _ccdb_query_pass(alpha "${_ccdb_query_shared}" "alpha.dir")
 set_tests_properties(ccdb_query.alpha PROPERTIES
+    PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
+
+_ccdb_query_pass(alpha_slash "${_ccdb_query_shared}" "/alpha.dir/")
+set_tests_properties(ccdb_query.alpha_slash PROPERTIES
     PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
 
 _ccdb_query_pass(beta "${_ccdb_query_shared}" "beta.dir")

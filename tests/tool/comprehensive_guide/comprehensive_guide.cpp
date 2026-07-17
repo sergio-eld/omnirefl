@@ -11,6 +11,7 @@
 #include <mpark/variant.hpp>
 
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
@@ -138,6 +139,9 @@ struct record {
   /// cache field annotation
   mutable int cache;
 
+  /// observed field annotation
+  volatile int observed;
+
   /// scores field annotation
   std::vector<std::string> scores;
 };
@@ -149,6 +153,7 @@ struct field_summary {
   std::string_view annotation;
   bool is_const;
   bool is_mutable;
+  bool is_volatile;
 
   bool operator==(const field_summary &rhs) const {
     return name == rhs.name //
@@ -156,7 +161,8 @@ struct field_summary {
       && qualified_type_name == rhs.qualified_type_name
       && annotation == rhs.annotation
       && is_const == rhs.is_const
-      && is_mutable == rhs.is_mutable;
+      && is_mutable == rhs.is_mutable
+      && is_volatile == rhs.is_volatile;
   }
 };
 
@@ -218,6 +224,7 @@ TEST(exposition, reflected_scope_overview) {
                .annotation = field.annotation(),
                .is_const = field.is_const(),
                .is_mutable = field.is_mutable(),
+               .is_volatile = field.is_volatile(),
              }),
               ...);
           },
@@ -243,6 +250,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "foo field annotation"sv,
           .is_const = false,
           .is_mutable = false,
+          .is_volatile = false,
         },
         {
           .name = "enabled"sv,
@@ -251,6 +259,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "enabled field annotation"sv,
           .is_const = false,
           .is_mutable = false,
+          .is_volatile = false,
         },
         {
           .name = "version"sv,
@@ -259,6 +268,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "version field annotation"sv,
           .is_const = true,
           .is_mutable = false,
+          .is_volatile = false,
         },
         {
           .name = "cache"sv,
@@ -267,6 +277,16 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "cache field annotation"sv,
           .is_const = false,
           .is_mutable = true,
+          .is_volatile = false,
+        },
+        {
+          .name = "observed"sv,
+          .type_name = "int"sv,
+          .qualified_type_name = "int"sv,
+          .annotation = "observed field annotation"sv,
+          .is_const = false,
+          .is_mutable = false,
+          .is_volatile = true,
         },
         {
           .name = "scores"sv,
@@ -277,6 +297,7 @@ TEST(exposition, reflected_scope_overview) {
           .annotation = "scores field annotation"sv,
           .is_const = false,
           .is_mutable = false,
+          .is_volatile = false,
         },
       },
     .enumerators = {},
@@ -1133,6 +1154,169 @@ TEST(example, cpp11_struct_visitors) {
 }
 
 /// Advanced examples ----------------------------------------------------------
+
+namespace writable_fields {
+
+struct nonassignable {
+  int value = 7;
+
+  nonassignable() = default;
+  nonassignable(const nonassignable &) = delete;
+  nonassignable &operator=(const nonassignable &) = delete;
+};
+
+struct record {
+  int writable;
+  const int fixed;
+  int raw[2];
+  std::array<int, 2> values;
+  nonassignable locked;
+  unsigned bitfield : 8;
+};
+
+} // namespace writable_fields
+
+TEST(example, filter_fields_before_set_value) {
+  writable_fields::record input{
+    .writable = 1,
+    .fixed = 2,
+    .raw = {3, 4},
+    .values = {5, 6},
+    .locked = {},
+    .bitfield = 5,
+  };
+
+  omni::reflected_call(
+    [](omni::binding auto binding) -> void {
+      std::apply(
+        [](omni::field_binding auto... field) -> void {
+          const auto set_if_assignable = //
+            []<omni::field_binding Field>(Field field) -> void {
+            constexpr std::string_view field_name = field.name();
+            constexpr auto replacement = std::array{42, 43};
+
+            // std::array supports whole-value assignment. Raw arrays need
+            // element access through the planned referenceable-field API.
+            if constexpr ("values" == field_name) {
+              if constexpr (std::is_assignable_v<typename Field::type &,
+                              decltype(replacement)>) {
+                field.set_value(replacement);
+              }
+            } else if constexpr (std::is_assignable_v<typename Field::type &,
+                                   int>) {
+              // set_value also supports bitfields, whose address cannot be
+              // taken.
+              field.set_value(42);
+            }
+          };
+
+          (set_if_assignable(field), ...);
+        },
+        binding.public_fields());
+    },
+    input);
+
+  EXPECT_EQ(42, input.writable);
+  EXPECT_EQ(2, input.fixed);
+  EXPECT_EQ(3, input.raw[0]);
+  EXPECT_EQ(4, input.raw[1]);
+
+  const auto k_expected_values = std::array{42, 43};
+  EXPECT_EQ(k_expected_values, input.values);
+
+  EXPECT_EQ(7, input.locked.value);
+  EXPECT_EQ(42u, input.bitfield);
+}
+
+namespace field_visibility {
+
+struct root_base {
+  int shared;
+  int root;
+};
+
+struct middle_base: root_base {
+  int shared;
+  int middle;
+};
+
+struct record: middle_base {
+  int own;
+};
+
+template <typename T>
+struct repeated_base {
+  T value;
+};
+
+struct ambiguous_bases: repeated_base<int>, repeated_base<double> {
+  int own;
+};
+
+} // namespace field_visibility
+
+TEST(example, public_fields_follow_member_visibility) {
+  using namespace std::string_view_literals;
+
+  field_visibility::record input{};
+  input.root_base::shared = 1;
+  input.root = 2;
+  input.middle_base::shared = 3;
+  input.middle = 4;
+  input.own = 5;
+
+  const std::vector expected{
+    std::pair{"root"sv, 2},
+    std::pair{"shared"sv, 3},
+    std::pair{"middle"sv, 4},
+    std::pair{"own"sv, 5},
+  };
+
+  // `middle_base::shared` hides `root_base::shared`, so `public_fields()`
+  // exposes only the member visible through `record`. Accessing hidden base
+  // storage through a derived binding is not considered a worthwhile scenario
+  // for the current implementation.
+  EXPECT_EQ(expected,
+    omni::reflected_call(
+      [](omni::binding auto binding)
+        -> std::vector<std::pair<std::string_view, int>> {
+        return std::apply(
+          [](omni::field_binding auto... field)
+            -> std::vector<std::pair<std::string_view, int>> {
+            return {{field.name(), field.value()}...};
+          },
+          binding.public_fields());
+      },
+      input));
+}
+
+TEST(example, public_fields_omit_ambiguous_base_members) {
+  using namespace std::string_view_literals;
+
+  field_visibility::ambiguous_bases input{};
+  static_cast<field_visibility::repeated_base<int> &>(input).value = 3;
+  static_cast<field_visibility::repeated_base<double> &>(input).value = 4.5;
+  input.own = 5;
+
+  const std::vector expected{
+    std::pair{"own"sv, 5},
+  };
+
+  // Both inherited `value` members require explicit base qualification, so
+  // neither is visible through `ambiguous_bases` or exposed by public_fields().
+  EXPECT_EQ(expected,
+    omni::reflected_call(
+      [](omni::binding auto binding)
+        -> std::vector<std::pair<std::string_view, int>> {
+        return std::apply(
+          [](omni::field_binding auto... field)
+            -> std::vector<std::pair<std::string_view, int>> {
+            return {{field.name(), field.value()}...};
+          },
+          binding.public_fields());
+      },
+      input));
+}
 
 namespace variant_visitation {
 

@@ -27,18 +27,83 @@ struct _reflected;
 template <typename T>
 using _meta = detail::_reflected<compat::decay_t<T>>;
 
-template <typename Meta, typename = typename Meta::public_bases_t>
-struct _all_public_fields;
+constexpr bool _same_field_name(const char *lhs, const char *rhs) noexcept {
+  return *lhs == *rhs && ('\0' == *lhs || _same_field_name(lhs + 1, rhs + 1));
+}
 
-template <typename Meta, typename... Bases>
-struct _all_public_fields<Meta, std::tuple<Bases...>> {
-  using type = decltype(std::tuple_cat(
-    std::declval<typename _all_public_fields<_meta<Bases>>::type>()...,
-    std::declval<typename Meta::own_public_fields_t>()));
+template <typename Field, typename Fields>
+struct _contains_field_name;
+
+template <typename Field>
+struct _contains_field_name<Field, std::tuple<>>: std::false_type {};
+
+template <typename Field, typename Head, typename... Tail>
+struct _contains_field_name<Field, std::tuple<Head, Tail...>>:
+    std::conditional<_same_field_name(Field::name(), Head::name()),
+      std::true_type,
+      _contains_field_name<Field, std::tuple<Tail...>>>::type {};
+
+// Generated field accessors use unqualified member access, so substitution
+// reflects C++ lookup from the final record, including base ambiguity.
+template <typename Record, typename Field, typename = void>
+struct _is_public_field_visible_from: std::false_type {};
+
+template <typename Record, typename Field>
+struct _is_public_field_visible_from<Record,
+  Field,
+  compat::void_t<decltype(Field::value(std::declval<Record &>()))>>:
+    std::true_type {};
+
+template <typename Record,
+  typename OwnFields,
+  typename RemainingBaseFields,
+  typename Collected = std::tuple<>>
+struct _all_visible_public_fields;
+
+template <typename Record,
+  typename... OwnField,
+  typename BaseField,
+  typename... Tail,
+  typename... Collected>
+struct _all_visible_public_fields<Record,
+  std::tuple<OwnField...>,
+  std::tuple<BaseField, Tail...>,
+  std::tuple<Collected...>>:
+    _all_visible_public_fields<Record,
+      std::tuple<OwnField...>,
+      std::tuple<Tail...>,
+      typename std::conditional<
+        _is_public_field_visible_from<Record, BaseField>::value
+          && !_contains_field_name<BaseField, std::tuple<OwnField...>>::value,
+        std::tuple<Collected..., BaseField>,
+        std::tuple<Collected...>>::type> {};
+
+template <typename Record, typename... OwnField, typename... Collected>
+struct _all_visible_public_fields<Record,
+  std::tuple<OwnField...>,
+  std::tuple<>,
+  std::tuple<Collected...>> {
+  using type = std::tuple<Collected..., OwnField...>;
+};
+
+template <typename Bases>
+struct _expand_bases;
+
+template <typename... Bases>
+struct _expand_bases<std::tuple<Bases...>> {
+  using type = decltype(std::tuple_cat(std::declval<std::tuple<>>(),
+    std::declval<
+      typename _all_visible_public_fields<typename _meta<Bases>::type,
+        typename _meta<Bases>::own_public_fields_t,
+        typename _expand_bases<
+          typename _meta<Bases>::public_bases_t>::type>::type>()...));
 };
 
 template <typename Meta>
-using _all_public_fields_t = typename _all_public_fields<Meta>::type;
+using _all_visible_public_fields_t =
+  typename _all_visible_public_fields<typename Meta::type,
+    typename Meta::own_public_fields_t,
+    typename _expand_bases<typename Meta::public_bases_t>::type>::type;
 
 } // namespace
 } // namespace detail
@@ -111,6 +176,9 @@ struct _is_writable_field:
 
 } // namespace detail
 
+// todo: provide QoL predicates and tuple filtering that combine field/owner
+// write eligibility with value assignability before calling set_value.
+
 #if defined(__cpp_concepts)
 // refactorme: consider replacing tag-only concepts with structural
 // public-interface concepts. They would advertise the callable surface
@@ -164,6 +232,11 @@ struct reflected_call_t {
       noexcept(std::is_nothrow_default_constructible<T>::value) {
       return T{};
     }
+
+    // Declaration only: this placeholder is parsed but never executed before
+    // reflection generation.
+    template <typename T>
+    operator T &() const noexcept;
   };
 #endif
 
@@ -174,9 +247,9 @@ struct reflected_call_t {
   //
   // The reflected_call return type still has to look like
   // `impl(meta_t<T>...)` / `impl(binding_t<T>...)` so Clang can parse and match
-  // user calls. Declarations are enough for this unevaluated trailing return
-  // type; the functions are never defined or called during the tool run, and
-  // the visitor body remains uninstantiated until the generated header exists.
+  // user calls. These declaration-only functions are used exclusively in this
+  // unevaluated return type; the visitor body remains uninstantiated until the
+  // generated header exists.
   template <typename T>
   static constexpr meta_t<T> _tool_arg(type_t<T>) noexcept;
 
@@ -184,7 +257,7 @@ struct reflected_call_t {
     typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
       T,
       compat::decay_t<T>>>
-  static constexpr binding_t<Binding> _tool_arg(T &&) noexcept;
+  static binding_t<Binding> _tool_arg(T &&) noexcept;
 #endif
 
   template <typename T>
@@ -213,8 +286,7 @@ struct reflected_call_t {
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
     -> _ungenerated_result;
 #else
-    -> decltype(std::declval<Impl &&>()(
-      _reflect_arg(std::declval<Args &&>())...));
+    -> decltype(std::declval<Impl &&>()(_reflect_arg(std::declval<Args &&>())...));
 #endif
 };
 
@@ -260,8 +332,7 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
   -> reflected_call_t::_ungenerated_result {
 #else
-  -> decltype(std::declval<Impl &&>()(
-    _reflect_arg(std::declval<Args &&>())...)) {
+  -> decltype(std::declval<Impl &&>()(_reflect_arg(std::declval<Args &&>())...)) {
 #endif
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
   int registered[] = {0,
@@ -270,8 +341,7 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
       0)...};
   (void)registered;
 #else
-  int unused_args[] = {0, ((void)args, 0)...};
-  (void)unused_args;
+  (void)sizeof...(args);
 #endif
 
   (void)impl;
@@ -306,8 +376,7 @@ struct field_meta_t {
   using omni_field_meta_tag = void;
   using owner_type = compat::decay_t<Owner>;
   using reflected = FieldMeta;
-  using type =
-    compat::remove_cvref_t<decltype(reflected::value(std::declval<Owner &>()))>;
+  using type = typename reflected::type;
 
   static constexpr const char *name() noexcept {
     return reflected::name();
@@ -337,6 +406,10 @@ struct field_meta_t {
 
   static constexpr bool is_mutable() noexcept {
     return reflected::is_mutable();
+  }
+
+  static constexpr bool is_volatile() noexcept {
+    return reflected::is_volatile();
   }
 
   template <typename T>
@@ -395,11 +468,18 @@ struct field_binding_t {
     return meta::is_mutable();
   }
 
+  static constexpr bool is_volatile() noexcept {
+    return meta::is_volatile();
+  }
+
+  // todo: provide reference() for safely addressable fields, including raw
+  // arrays. Bitfields and potentially unaligned packed fields must stay on the
+  // value()/set_value() path.
   constexpr auto value() const noexcept -> decltype(meta::value(_owner)) {
     return meta::value(_owner);
   }
 
-  constexpr operator const type &() const noexcept {
+  constexpr operator decltype(meta::value(_owner))() const noexcept {
     return value();
   }
 
@@ -432,6 +512,13 @@ template <typename T, reflected_entity Entity>
 struct binding_t {
   using omni_binding_tag = void;
   using type = compat::decay_t<T>;
+  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+    std::false_type,
+    std::true_type>::type;
+  using storage_t = typename std::conditional<owning::value, type, T>::type;
+
+  // Preserve the public storage shape for unevaluated visitor return types.
+  storage_t value;
 
   template <typename U, reflected_entity E>
   constexpr operator binding_t<U, E>() const noexcept;
@@ -444,8 +531,9 @@ struct meta_t<T, reflected_entity::record> {
   using reflected = detail::_meta<T>;
   using type = typename reflected::type;
 
+  /// Public fields visible through `type`; hidden inherited fields are omitted.
   using public_fields_t =
-    detail::_all_public_fields_t<reflected>; //< yields std::tuple<...>
+    detail::_all_visible_public_fields_t<reflected>; //< yields std::tuple<...>
 
   private:
   friend struct reflected_call_t;
@@ -494,6 +582,7 @@ struct meta_t<T, reflected_entity::record> {
     return reflected::entity();
   }
 
+  /// Metadata for public fields visible through the reflected record.
   static constexpr public_fields_t public_fields() noexcept {
     return {};
   }
@@ -596,7 +685,7 @@ struct binding_t<T, reflected_entity::record> {
     return reflected::annotation();
   }
 
-  constexpr operator const type &() const {
+  constexpr operator decltype((std::declval<const storage_t &>()))() const {
     return value;
   }
 
@@ -604,7 +693,8 @@ struct binding_t<T, reflected_entity::record> {
 #  if OMNI_CPLUSPLUS >= 201402L
   constexpr
 #  endif
-    auto public_fields() & -> decltype(meta_t<type>::_public_fields(
+  /// Bindings for public fields visible through the reflected record.
+  auto public_fields() & -> decltype(meta_t<type>::_public_fields(
       std::declval<storage_t &>())) {
     return meta_t<type>::_public_fields(value);
   }
@@ -673,7 +763,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     return reflected::annotation();
   }
 
-  operator const type &() const {
+  operator decltype((std::declval<const storage_t &>()))() const {
     return value;
   }
 

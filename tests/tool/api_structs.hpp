@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <tuple>
+#include <type_traits>
 #include <vector>
 
 #include <omnirefl/reflection.hpp>
@@ -18,6 +20,13 @@ struct field_qualification_record_t {
   const int constant;
   mutable int cache;
   unsigned flags : 3;
+};
+
+struct volatile_field_record_t {
+  int normal;
+  mutable volatile int cache;
+  volatile int observed;
+  volatile unsigned flags : 3;
 };
 
 struct parent_record_t {
@@ -129,6 +138,46 @@ struct enum_type_enumerators_t {
 enum_type_enumerators_t const static enum_type_enumerators{};
 
 } // namespace enumerators
+
+namespace bindings {
+
+struct conversion_qualifiers_t {
+  template <typename T>
+  bool operator()(omni::binding_t<T> owning,
+    omni::binding_t<T &> mutable_binding,
+    omni::binding_t<const T &> const_binding,
+    omni::binding_t<volatile T &> volatile_binding,
+    omni::binding_t<const volatile T &> const_volatile_binding) const {
+    static_assert(std::is_convertible<decltype(owning), const T &>::value,
+      "owning binding must provide const access");
+    static_assert(!std::is_convertible<decltype(owning), T &>::value,
+      "owning binding must not provide mutable access");
+    static_assert(std::is_convertible<decltype(mutable_binding), T &>::value,
+      "mutable binding must preserve mutable access");
+    static_assert(
+      std::is_convertible<decltype(const_binding), const T &>::value,
+      "const binding must preserve const access");
+    static_assert(!std::is_convertible<decltype(const_binding), T &>::value,
+      "const binding must not provide mutable access");
+    static_assert(
+      std::is_convertible<decltype(volatile_binding), volatile T &>::value,
+      "volatile binding must preserve volatile access");
+    static_assert(!std::is_convertible<decltype(volatile_binding), T &>::value,
+      "volatile binding must not discard volatile qualification");
+    static_assert(std::is_convertible<decltype(const_volatile_binding),
+                    const volatile T &>::value,
+      "const volatile binding must preserve both qualifications");
+    static_assert(
+      !std::is_convertible<decltype(const_volatile_binding), const T &>::value,
+      "const volatile binding must not discard volatile qualification");
+
+    return true;
+  }
+};
+
+conversion_qualifiers_t const static conversion_qualifiers{};
+
+} // namespace bindings
 
 namespace fields {
 
@@ -249,7 +298,8 @@ template <typename Field>
 std::string flags_for() {
   return std::string{Field::name()} //
     + ":const=" + bool_name(Field::is_const()) //
-    + ":mutable=" + bool_name(Field::is_mutable());
+    + ":mutable=" + bool_name(Field::is_mutable()) //
+    + ":volatile=" + bool_name(Field::is_volatile());
 }
 
 template <typename Field>
@@ -288,6 +338,50 @@ struct binding_write_visitor {
     return std::vector<std::string>{binding_write_for<Binding>()...};
   }
 };
+
+struct additional_volatile_forms_t {
+  template <typename T>
+  int operator()(omni::binding_t<const volatile T &> const_volatile_binding,
+    omni::binding_t<T &> mutable_binding) const {
+    auto const_volatile_fields = const_volatile_binding.public_fields();
+    auto mutable_fields = mutable_binding.public_fields();
+    typedef decltype(std::get<0>(const_volatile_fields)
+        .value()) const_volatile_reference;
+    typedef decltype(std::get<1>(const_volatile_fields)
+        .value()) mutable_volatile_reference;
+    typedef decltype(std::get<2>(mutable_fields)
+        .value()) volatile_reference;
+    typedef
+      typename std::tuple_element<1, decltype(const_volatile_fields)>::type
+        mutable_volatile_field;
+    typedef typename std::tuple_element<3, decltype(mutable_fields)>::type
+      volatile_bitfield;
+
+    static_assert(
+      std::is_same<const volatile int &, const_volatile_reference>::value,
+      "ordinary fields must preserve const-volatile owner qualification");
+    static_assert(
+      std::is_same<volatile int &, mutable_volatile_reference>::value,
+      "mutable fields must drop const and preserve volatile qualification");
+    static_assert(std::is_same<const volatile int &, volatile_reference>::value,
+      "volatile fields must preserve their declared qualification");
+    static_assert(mutable_volatile_field::is_mutable(),
+      "mutable-volatile fields must remain mutable");
+    static_assert(mutable_volatile_field::is_volatile(),
+      "mutable-volatile fields must remain volatile");
+    static_assert(volatile_bitfield::is_volatile(),
+      "volatile bitfields must retain volatile metadata");
+
+    std::get<1>(const_volatile_fields).set_value(17);
+    std::get<2>(mutable_fields).set_value(29);
+    std::get<3>(mutable_fields).set_value(5);
+    return std::get<1>(const_volatile_fields).value()
+      + std::get<2>(mutable_fields).value()
+      + std::get<3>(mutable_fields).value();
+  }
+};
+
+additional_volatile_forms_t const static additional_volatile_forms{};
 
 struct field_flags_from_meta_t {
   template <typename T>

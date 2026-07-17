@@ -28,11 +28,29 @@ if(NOT output MATCHES "${EXPECTED_MESSAGE}")
         "Expected '${TARGET}' to report '${EXPECTED_MESSAGE}'.\n${output}")
 endif()
 
+if(DEFINED EXPECTED_MATCHES AND NOT "" STREQUAL "${EXPECTED_MATCHES}")
+    string(REGEX MATCHALL "${EXPECTED_MESSAGE}" matched_messages "${output}")
+    list(LENGTH matched_messages matched_message_count)
+    if(NOT "${EXPECTED_MATCHES}" STREQUAL "${matched_message_count}")
+        message(FATAL_ERROR
+            "Expected '${TARGET}' to report '${EXPECTED_MESSAGE}' "
+            "${EXPECTED_MATCHES} times, observed ${matched_message_count}.\n"
+            "${output}")
+    endif()
+endif()
+
 if(DEFINED EXPECTED_MESSAGE_2
         AND NOT "" STREQUAL "${EXPECTED_MESSAGE_2}"
         AND NOT output MATCHES "${EXPECTED_MESSAGE_2}")
     message(FATAL_ERROR
         "Expected '${TARGET}' to report '${EXPECTED_MESSAGE_2}'.\n${output}")
+endif()
+
+if(DEFINED EXPECTED_MESSAGE_3
+        AND NOT "" STREQUAL "${EXPECTED_MESSAGE_3}"
+        AND NOT output MATCHES "${EXPECTED_MESSAGE_3}")
+    message(FATAL_ERROR
+        "Expected '${TARGET}' to report '${EXPECTED_MESSAGE_3}'.\n${output}")
 endif()
 
 message(STATUS "Observed expected diagnostics for '${TARGET}'")
