@@ -7,6 +7,23 @@ set(_ccdb_query_db "${CMAKE_BINARY_DIR}/compile_commands.json")
 set(_ccdb_query_unique "${CMAKE_CURRENT_LIST_DIR}/dummy/unique.cpp")
 set(_ccdb_query_shared "${CMAKE_CURRENT_LIST_DIR}/dummy/shared.cpp")
 set(_ccdb_query_missing "${CMAKE_CURRENT_LIST_DIR}/dummy/missing.cpp")
+set(_ccdb_query_backslash_db_dir
+    "${CMAKE_CURRENT_BINARY_DIR}/backslash-output")
+
+file(MAKE_DIRECTORY "${_ccdb_query_backslash_db_dir}")
+file(CONFIGURE
+    OUTPUT "${_ccdb_query_backslash_db_dir}/compile_commands.json"
+    CONTENT [=[
+[
+  {
+    "directory": "@CMAKE_CURRENT_BINARY_DIR@",
+    "arguments": ["c++", "-DALPHA_TARGET", "-c", "@_ccdb_query_shared@"],
+    "file": "@_ccdb_query_shared@",
+    "output": "C:\\build\\alpha.dir\\shared.cpp.o"
+  }
+]
+]=]
+    @ONLY)
 
 function(_ccdb_query_pass name source)
     add_test(NAME "ccdb_query.${name}"
@@ -47,6 +64,18 @@ set_tests_properties(ccdb_query.alpha PROPERTIES
 
 _ccdb_query_pass(alpha_slash "${_ccdb_query_shared}" "/alpha.dir/")
 set_tests_properties(ccdb_query.alpha_slash PROPERTIES
+    PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
+
+_ccdb_query_pass(alpha_backslash "${_ccdb_query_shared}" "\\alpha.dir\\")
+set_tests_properties(ccdb_query.alpha_backslash PROPERTIES
+    PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
+
+add_test(NAME ccdb_query.backslash_output
+    COMMAND ccdb_query
+        "${_ccdb_query_backslash_db_dir}/compile_commands.json"
+        "${_ccdb_query_shared}"
+        "/alpha.dir/")
+set_tests_properties(ccdb_query.backslash_output PROPERTIES
     PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
 
 _ccdb_query_pass(beta "${_ccdb_query_shared}" "beta.dir")

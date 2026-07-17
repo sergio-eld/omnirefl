@@ -408,20 +408,21 @@ jobs:
             $env:CXX = 'clang-cl'
           }
 
-          cmake -S "$env:OMNIREFL_TEST_SOURCE" `
-            -B "$env:OMNIREFL_TEST_BUILD" `
-            -GNinja `
+          New-Item -ItemType Directory -Force -Path $env:OMNIREFL_TEST_BUILD | Out-Null
+          Set-Location $env:OMNIREFL_TEST_BUILD
+
+          cmake ../tests -GNinja `
             -DCMAKE_BUILD_TYPE=Release `
             "-Domnirefl_DIR=$env:OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
             Tee-Object "$env:OMNIREFL_TEST_RESULTS/configure.log"
           if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
-          cmake --build "$env:OMNIREFL_TEST_BUILD" `
+          cmake --build . `
             --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
             Tee-Object "$env:OMNIREFL_TEST_RESULTS/build.log"
           if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
-          ctest --test-dir "$env:OMNIREFL_TEST_BUILD" `
+          ctest . `
             --output-junit "$env:OMNIREFL_TEST_RESULTS/windows-${{ matrix.toolchain }}.xml" `
             -V 2>&1 |
             Tee-Object "$env:OMNIREFL_TEST_RESULTS/windows-${{ matrix.toolchain }}.log"
@@ -436,22 +437,22 @@ jobs:
         run: |
           set -euo pipefail
           install_root="$(cygpath -u "$OMNIREFL_INSTALL_ROOT")"
-          source_dir="$(cygpath -u "$OMNIREFL_TEST_SOURCE")"
           build_dir="$(cygpath -u "$OMNIREFL_TEST_BUILD")"
           results_dir="$(cygpath -u "$OMNIREFL_TEST_RESULTS")"
 
-          cmake -S "$source_dir" \
-            -B "$build_dir" \
-            -GNinja \
+          mkdir -p "$build_dir"
+          cd "$build_dir"
+
+          cmake ../tests -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -Domnirefl_DIR="$install_root/lib/cmake/omnirefl" 2>&1 |
             tee "$results_dir/configure.log"
 
-          cmake --build "$build_dir" --parallel "$(nproc)" 2>&1 |
+          cmake --build . --parallel "$(nproc)" 2>&1 |
             tee "$results_dir/build.log"
 
           set +e
-          ctest --test-dir "$build_dir" \
+          ctest . \
             --output-junit "$results_dir/windows-${{ matrix.toolchain }}.xml" \
             -V 2>&1 |
             tee "$results_dir/windows-${{ matrix.toolchain }}.log"
