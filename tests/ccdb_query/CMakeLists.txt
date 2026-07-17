@@ -45,6 +45,10 @@ _ccdb_query_pass(alpha "${_ccdb_query_shared}" "alpha.dir")
 set_tests_properties(ccdb_query.alpha PROPERTIES
     PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
 
+_ccdb_query_pass(alpha_slash "${_ccdb_query_shared}" "/alpha.dir/")
+set_tests_properties(ccdb_query.alpha_slash PROPERTIES
+    PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
+
 _ccdb_query_pass(beta "${_ccdb_query_shared}" "beta.dir")
 set_tests_properties(ccdb_query.beta PROPERTIES
     PASS_REGULAR_EXPRESSION "BETA_TARGET")

@@ -15,6 +15,7 @@ set(source_dir "${ROOT}/source")
 set(build_dir "${ROOT}/build")
 file(MAKE_DIRECTORY "${source_dir}")
 file(COPY "${FIXTURE}/" DESTINATION "${source_dir}")
+file(MAKE_DIRECTORY "${source_dir}/optional")
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}"
@@ -64,7 +65,10 @@ if(initial_reflection_headers)
         "${initial_reflection_headers}")
 endif()
 
-file(MAKE_DIRECTORY "${source_dir}/optional")
+# Older Ninja versions need a new filesystem timestamp tick before checking
+# whether the configured glob changed.
+execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+
 configure_file(
     "${source_dir}/optional.cpp.in"
     "${source_dir}/optional/reflected.cpp"

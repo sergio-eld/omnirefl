@@ -162,6 +162,9 @@ Omnirefl focuses on POD-like records and enums.
   sanitize pointers, arrays, and compound inputs before the call; use
   `std::visit` or `mpark::visit` for variants. Compound types remain valid
   dependency routes as listed above. Invalid-input detection is best effort.
+- Records with direct or inherited virtual bases are not supported. They are
+  rejected as `reflected_call` inputs and skipped with a warning when found as
+  dependencies.
 - Constrained primary record templates are not supported. The force-included
   generated header would have to repeat equivalent constraints before their
   source-level dependencies are declared, and concepts cannot be
@@ -377,8 +380,6 @@ Benchmark runs are reported by the
 
 ### Reflection Usage
 
-- [`field.set_value()` advertises writes for non-assignable fields or
-  values](tests/tool/regressions/field_set_value_assignability.cpp).
 - [Generated accessors trigger deprecation warnings for deprecated public
   fields](tests/tool/regressions/deprecated_public_field.cpp), breaking
   warning-as-error builds.
@@ -391,11 +392,12 @@ Benchmark runs are reported by the
   members](tests/tool/regressions/anonymous_union_members.cpp).
 - [Pointer-wrapped nested template field types lose their enclosing-record
   qualifier in `field.type_name()`](tests/tool/regressions/nested_template_field_name.cpp).
+- [Pointer fields whose external pointee is only forward-declared are silently
+  ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
+  warning while the enclosing record is reflected best-effort.
 
 ### Candidate Explicit Limitations
 
-- [Virtual-diamond traversal exposes the shared virtual-base field
-  twice](tests/tool/regressions/virtual_diamond_fields.cpp).
 - Primary templates with class-type non-type template parameters
   (`template <Struct value>`) when `Struct` cannot itself be forward-declared.
 

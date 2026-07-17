@@ -117,6 +117,7 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
     "\n"
     "\nUsage: ccdb_query <compile_commands.json> <source.cpp> [output-contains]",
   };
+  app.allow_windows_style_options(false);
 
   CLI::Option *compile_commands =
     app.add_option("compile_commands", "Path to compile_commands.json.")

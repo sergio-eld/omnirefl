@@ -621,7 +621,7 @@ struct reflectable_reference {
 };
 
 struct record_data {
-  // only public-nonvirtual bases
+  // Records with virtual bases are rejected before metadata mapping.
   std::vector<reflectable_reference> public_bases;
 
   /// protected and private are not supported now (too complicated)
@@ -696,6 +696,7 @@ struct reflected_type_info {
   std::vector<reflectable> dependencies;
   std::map<type_id, std::set<type_id>> dependencies_by_type;
   std::map<type_id, type_access_path> public_access_path_by_type;
+  std::set<type_id> skipped_virtual_base_dependencies{};
 };
 
 struct indexed_arg_candidate {
@@ -723,6 +724,7 @@ struct source_file_context {
   std::set<meta::type_id> non_reflectable_types{}; //< for debug or info
 
   std::map<meta::type_id, std::set<meta::type_id>> dependencies_by_type{};
+  std::set<meta::type_id> skipped_virtual_base_dependencies{};
 
   // Render lookup for bases and other references by type id. Stored by value to
   // avoid coupling render lifetime to reflected collection layout.
@@ -1092,6 +1094,12 @@ bool has_template_record_parent(const clang::DeclContext *dc) {
   }
 
   return false;
+}
+
+bool has_virtual_bases(const clang::CXXRecordDecl &record) {
+  const clang::CXXRecordDecl *const definition = record.getDefinition();
+  // `vbases()` contains both direct and inherited virtual bases.
+  return definition && !definition->vbases().empty();
 }
 
 std::string annotation_from_decl(const clang::ASTContext &ast,
@@ -1721,6 +1729,15 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
       "pass a directly reflectable C++ record/enum type"));
   }
 
+  if (has_virtual_bases(*record_decl)) {
+    return std::unexpected(invalid_arg_error(
+      /*reason*/ //
+      "reflected_call argument has a virtual base; "
+      "records with virtual bases are not supported",
+      /*suggestion*/ //
+      "pass a record without virtual inheritance to reflected_call"));
+  }
+
   if (llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(record_decl)) {
     return std::unexpected(invalid_arg_error(
       /*reason*/ //
@@ -2093,6 +2110,9 @@ meta::source_file_context meta::matches::fold_reflected_call(
         }));
     }
 
+    a.skipped_virtual_base_dependencies.merge(
+      reflected->skipped_virtual_base_dependencies);
+
     std::visit(
       [&a]<typename Type>(Type type) {
         a.resolved_types.emplace(type.id);
@@ -2195,6 +2215,16 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
     ctx.indexed_arg_candidates | std::views::as_rvalue) {
     if (!ctx.index_by_type_id.contains(candidate.type))
       ctx.errors.reflected_call_args.push_back(std::move(candidate.error));
+  }
+
+  for (const meta::type_id &type_name :
+    ctx.skipped_virtual_base_dependencies) {
+    log(log_level::warning, [&type_name] {
+      return std::format(
+        "\nreflection dependency '{}' skipped: "
+        "records with virtual bases are not supported.",
+        type_name);
+    });
   }
 
   const auto unsupported_record_reason =
@@ -2784,45 +2814,6 @@ std::expected<cli::options, app_error> cli::parse(int argc,
   const fs::path parsed_source =
     fs::absolute(source->as<fs::path>()).lexically_normal();
 
-  const std::vector compiler_sources = flags //
-    | std::views::adjacent<2> //
-    | std::views::filter([](const auto &args) {
-        return !std::string_view{std::get<1>(args)}.starts_with('@')
-          && ("-c"sv == std::get<0>(args) || "/c"sv == std::get<0>(args));
-      })
-    | std::views::transform([&parsed_source](const auto &args) {
-        const fs::path compiler_source =
-          fs::absolute(std::get<1>(args)).lexically_normal();
-        if (parsed_source == compiler_source)
-          return compiler_source;
-
-        // ad hoc: CMake escapes a literal '$' as '$$' in
-        // compile_commands.json. Try the exact spelling first so a real '$$'
-        // path remains unchanged.
-        std::string cmake_unescaped = std::get<1>(args);
-        for (std::size_t dollar = cmake_unescaped.find("$$");
-          std::string::npos != dollar;
-          dollar = cmake_unescaped.find("$$", dollar + 1)) {
-          cmake_unescaped.erase(dollar, 1);
-        }
-
-        return fs::absolute(cmake_unescaped).lexically_normal();
-      })
-    | std::ranges::to<std::vector>();
-
-  const auto conflicting_source = std::ranges::find_if(compiler_sources,
-    [&parsed_source](const fs::path &compiler_source) {
-      return parsed_source != compiler_source;
-    });
-
-  if (compiler_sources.end() != conflicting_source) {
-    std::cerr << std::format(
-      "warning: compiler source after `--` differs from omnirefl `-c`; "
-      "ignoring '{}', using '{}'\n",
-      conflicting_source->generic_string(),
-      parsed_source.generic_string());
-  }
-
   const std::string level = cli_log_level->as<std::string>();
   const std::optional parsed_level = parse_log_level(level);
   if (!parsed_level) {
@@ -2851,8 +2842,8 @@ std::expected<cli::options, app_error> cli::parse(int argc,
   };
 }
 
-std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
-  std::span<const std::string> flags) {
+std::expected<llvm::opt::InputArgList, std::string>
+  parse_driver_args(std::span<const std::string> flags, bool cl_style) {
   std::vector<const char *> cli_ref;
   cli_ref.reserve(flags.size());
   std::ranges::transform(flags,
@@ -2865,7 +2856,10 @@ std::expected<llvm::opt::InputArgList, std::string> parse_driver_args(
   llvm::opt::InputArgList argList = clang::getDriverOptTable().ParseArgs(
     llvm::ArrayRef(cli_ref.data(), cli_ref.data() + cli_ref.size()),
     missing_arg,
-    missing_arg_c);
+    missing_arg_c,
+    llvm::opt::Visibility{static_cast<unsigned>(cl_style
+        ? clang::options::ClangOption | clang::options::CLOption
+        : clang::options::ClangOption)});
 
   if (missing_arg != missing_arg_c) {
     return std::unexpected(
@@ -2916,11 +2910,17 @@ std::vector<std::string> filter_tool_irrelevant_args(
       || options::OPT_o == option.getID()
       || options::OPT__SLASH_Fo == option.getID()
       || options::OPT_resource_dir == option.getID()
+      || options::OPT_working_directory == option.getID()
       || std::ranges::contains(k_pch_option_ids, option.getID())) {
       continue;
     }
 
-    arg->render(args, rendered);
+    // Preserve user-written aliases such as /external:I and /FI when the
+    // filtered arguments are passed back to clang-cl.
+    if (const llvm::opt::Arg *alias = arg->getAlias())
+      alias->render(args, rendered);
+    else
+      arg->render(args, rendered);
   }
 
   return rendered //
@@ -2958,6 +2958,8 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     llvm::StringRef{fs::path(raw_flags.front()).filename().string()}.lower();
   const bool invoked_as_cl =
     std::ranges::contains(k_cl_driver_names, compiler_name);
+  const bool cl_style =
+    invoked_as_cl || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
 
   const std::vector flags = raw_flags //
     | std::views::enumerate //
@@ -2975,10 +2977,35 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       })
     | std::views::values | std::ranges::to<std::vector>();
 
+  const std::optional<std::string> response_file_directory =
+    std::invoke([&raw_flags] -> std::optional<std::string> {
+      const auto indexed_flags =
+        raw_flags | std::views::enumerate | std::views::reverse;
+
+      const auto found =
+        std::ranges::find_if(indexed_flags, [&raw_flags](const auto &indexed) {
+          const auto &[index, arg] = indexed;
+          return std::string_view{arg}.starts_with("-working-directory="sv)
+            || ("-working-directory"sv == arg
+              && std::ssize(raw_flags) > index + 1);
+        });
+      if (indexed_flags.end() == found)
+        return std::nullopt;
+
+      const auto &[index, arg] = *found;
+      constexpr std::string_view k_joined = "-working-directory=";
+      const std::string_view directory = //
+        std::string_view{arg}.starts_with(k_joined) //
+        ? std::string_view{arg}.substr(k_joined.size())
+        : std::string_view{raw_flags[index + 1]};
+
+      return fs::absolute(directory).lexically_normal().generic_string();
+    });
+
   // ad hoc: approximate driver response-file expansion by selecting the
-  // tokenizer from the invocation style and recovering its working directory.
+  // tokenizer from the invocation style and compile-command directory.
   const std::expected expanded_flags = //
-    std::invoke([&flags, &raw_flags, invoked_as_cl]
+    std::invoke([&flags, response_file_directory, cl_style]
       -> std::expected<std::vector<std::string>, std::string> {
       llvm::BumpPtrAllocator allocator;
       llvm::SmallVector<const char *> args;
@@ -2986,38 +3013,13 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         std::back_inserter(args),
         &std::string::c_str);
 
-      const bool windows_tokenization =
-        invoked_as_cl || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
-
       llvm::cl::ExpansionContext expansion{allocator,
-        windows_tokenization //
+        cl_style //
           ? llvm::cl::TokenizeWindowsCommandLine
           : llvm::cl::TokenizeGNUCommandLine};
 
-      if (const std::optional working_directory =
-            std::invoke([&raw_flags] -> std::optional<std::string_view> {
-              const auto indexed_flags =
-                raw_flags | std::views::enumerate | std::views::reverse;
-              const auto found = std::ranges::find_if(indexed_flags,
-                [&raw_flags](const auto &indexed) {
-                  const auto &[index, arg] = indexed;
-                  return std::string_view{arg}.starts_with(
-                           "-working-directory="sv)
-                    || ("-working-directory"sv == arg
-                      && std::ssize(raw_flags) > index + 1);
-                });
-              if (indexed_flags.end() == found)
-                return std::nullopt;
-
-              const auto &[index, arg] = *found;
-              constexpr std::string_view k_joined = "-working-directory=";
-              return std::string_view{arg}.starts_with(k_joined)
-                ? std::string_view{arg}.substr(k_joined.size())
-                : std::string_view{raw_flags[index + 1]};
-            });
-        working_directory) {
-        expansion.setCurrentDir(*working_directory);
-      }
+      if (response_file_directory)
+        expansion.setCurrentDir(*response_file_directory);
 
       if (llvm::Error error = expansion.expandResponseFiles(args))
         return std::unexpected(llvm::toString(std::move(error)));
@@ -3051,9 +3053,62 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   });
 
   const std::expected normalized_args =
-    parse_driver_args(std::span{*expanded_flags}.subspan(1));
+    parse_driver_args(std::span{*expanded_flags}.subspan(1), cl_style);
   if (!normalized_args)
     return std::unexpected(processing_error(source, normalized_args.error()));
+
+  const std::optional<std::string> compile_directory =
+    std::invoke([&normalized_args] -> std::optional<std::string> {
+      const auto *working_directory =
+        normalized_args->getLastArgNoClaim(options::OPT_working_directory);
+      if (!working_directory)
+        return std::nullopt;
+
+      return fs::absolute(working_directory->getValue())
+        .lexically_normal()
+        .generic_string();
+    });
+
+  const std::vector compiler_sources =
+    normalized_args->getAllArgValues(options::OPT_INPUT) //
+    | std::views::transform(
+      [&compile_directory, &source](std::string_view input) {
+        const auto resolve = [&compile_directory](std::string_view input) {
+          return fs::absolute(compile_directory //
+              ? fs::path{*compile_directory} / input
+              : fs::path{input})
+            .lexically_normal();
+        };
+
+        const fs::path compiler_source = resolve(input);
+        if (source == compiler_source)
+          return compiler_source;
+
+        // ad hoc: CMake escapes a literal '$' as '$$' in
+        // compile_commands.json. Try the exact spelling first so a real '$$'
+        // path remains unchanged.
+        std::string cmake_unescaped{input};
+        for (std::size_t dollar = cmake_unescaped.find("$$");
+          std::string::npos != dollar;
+          dollar = cmake_unescaped.find("$$", dollar + 1)) {
+          cmake_unescaped.erase(dollar, 1);
+        }
+
+        return resolve(cmake_unescaped);
+      })
+    | std::ranges::to<std::vector>();
+
+  const auto conflicting_source = std::ranges::find_if(compiler_sources,
+    [&source](const auto &candidate) { return source != candidate; });
+
+  if (compiler_sources.end() != conflicting_source)
+    log(log_level::warning, [&conflicting_source, &source] {
+      return std::format(
+        "warning: compiler source after `--` differs from omnirefl `-c`; "
+        "ignoring '{}', using '{}'\n",
+        conflicting_source->generic_string(),
+        source.generic_string());
+    });
 
   const std::vector driver_args = filter_tool_irrelevant_args(*normalized_args);
 
@@ -3271,11 +3326,52 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     *log.clang_engine,
     "omnirefl reflection tool");
 
+  const std::expected<std::optional<std::string>, app_error>
+    driver_directory_to_restore =
+      std::invoke([&driver, &compile_directory, &source]
+        -> std::expected<std::optional<std::string>, app_error> {
+        if (!compile_directory)
+          return std::nullopt;
+
+        const llvm::ErrorOr<std::string> current_directory =
+          driver.getVFS().getCurrentWorkingDirectory();
+        if (!current_directory) {
+          return std::unexpected(processing_error(source,
+            std::format("failed to read the current working directory: {}",
+              current_directory.getError().message())));
+        }
+
+        if (const std::error_code ec =
+              driver.getVFS().setCurrentWorkingDirectory(*compile_directory);
+          ec) {
+          return std::unexpected(processing_error(source,
+            std::format("failed to use compiler working directory '{}': {}",
+              *compile_directory,
+              ec.message())));
+        }
+
+        return *current_directory;
+      });
+
+  if (!driver_directory_to_restore)
+    return std::unexpected(driver_directory_to_restore.error());
+
   driver.setCheckInputsExist(false);
 
   const std::unique_ptr<clang::driver::Compilation> compilation(
     driver.BuildCompilation(
       llvm::ArrayRef(to_vector_of_raw_pointers(cc1_driver_args))));
+
+  if (*driver_directory_to_restore) {
+    if (const std::error_code ec = driver.getVFS().setCurrentWorkingDirectory(
+          **driver_directory_to_restore);
+      ec) {
+      return std::unexpected(processing_error(source,
+        std::format("failed to restore compiler working directory '{}': {}",
+          **driver_directory_to_restore,
+          ec.message())));
+    }
+  }
 
   if (!compilation || compilation->getJobs().empty()) {
     return std::unexpected(processing_error(source,
@@ -3301,6 +3397,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     return std::unexpected(
       processing_error(source, "Failed to create CompilerInvocation."));
   }
+
+  if (compile_directory)
+    clang_invocation->getFileSystemOpts().WorkingDir = *compile_directory;
 
   const auto &frontend_inputs = clang_invocation->getFrontendOpts().Inputs;
   if (1 != frontend_inputs.size()) {
@@ -4484,6 +4583,7 @@ struct collected_dependencies {
   std::vector<const clang::TagType *> types;
   std::map<meta::type_id, std::set<meta::type_id>> dependencies_by_type;
   std::map<meta::type_id, meta::type_access_path> public_access_path_by_type;
+  std::set<meta::type_id> skipped_virtual_base_dependencies;
 };
 
 collected_dependencies recursively_collect_dependency_types(
@@ -4513,6 +4613,7 @@ collected_dependencies recursively_collect_dependency_types(
   std::set<const clang::TagType *> collected;
   std::map<meta::type_id, std::set<meta::type_id>> dependencies_by_type;
   std::map<meta::type_id, meta::type_access_path> public_access_path_by_type;
+  std::set<meta::type_id> skipped_virtual_base_dependencies;
   std::set<std::pair<const clang::TagType *, const clang::CXXRecordDecl *>>
     visited;
 
@@ -4536,12 +4637,17 @@ collected_dependencies recursively_collect_dependency_types(
         concrete_id(dependency));
     };
 
+  // refactorme: consider extracting reusable type-support classification. Most
+  // checks that reject reflected_call arguments also apply while resolving
+  // dependencies, where unsupported types are skipped instead of diagnosed as
+  // usage errors.
   const auto enqueue = //
     [&ast,
       &collected,
       &connect,
       &public_access_path_by_type,
       &resolved_concrete_types,
+      &skipped_virtual_base_dependencies,
       &to_visit](const clang::TagType *parent,
       const clang::Type *type,
       std::optional<meta::type_access_path> public_access_path) {
@@ -4566,9 +4672,15 @@ collected_dependencies recursively_collect_dependency_types(
         return;
       }
 
-      connect(parent, dependency);
-
       const meta::type_id id = meta::canonical_type_id(ast, dependency);
+
+      if (record && meta::has_virtual_bases(*record)) {
+        skipped_virtual_base_dependencies.emplace(id);
+
+        return;
+      }
+
+      connect(parent, dependency);
 
       if (public_access_path && !public_access_path->steps.empty()) {
         public_access_path_by_type.try_emplace(id, *public_access_path);
@@ -4738,6 +4850,8 @@ collected_dependencies recursively_collect_dependency_types(
     .types = {collected.begin(), collected.end()},
     .dependencies_by_type = std::move(dependencies_by_type),
     .public_access_path_by_type = std::move(public_access_path_by_type),
+    .skipped_virtual_base_dependencies =
+      std::move(skipped_virtual_base_dependencies),
   };
 }
 
@@ -4967,6 +5081,8 @@ auto meta::resolve_reflected_type(const diagnostics &log,
     .dependencies_by_type = std::move(dependencies.dependencies_by_type),
     .public_access_path_by_type =
       std::move(dependencies.public_access_path_by_type),
+    .skipped_virtual_base_dependencies =
+      std::move(dependencies.skipped_virtual_base_dependencies),
   };
 }
 

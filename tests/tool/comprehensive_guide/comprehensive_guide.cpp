@@ -11,6 +11,7 @@
 #include <mpark/variant.hpp>
 
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
@@ -1153,6 +1154,79 @@ TEST(example, cpp11_struct_visitors) {
 }
 
 /// Advanced examples ----------------------------------------------------------
+
+namespace writable_fields {
+
+struct nonassignable {
+  int value = 7;
+
+  nonassignable() = default;
+  nonassignable(const nonassignable &) = delete;
+  nonassignable &operator=(const nonassignable &) = delete;
+};
+
+struct record {
+  int writable;
+  const int fixed;
+  int raw[2];
+  std::array<int, 2> values;
+  nonassignable locked;
+  unsigned bitfield : 8;
+};
+
+} // namespace writable_fields
+
+TEST(example, filter_fields_before_set_value) {
+  writable_fields::record input{
+    .writable = 1,
+    .fixed = 2,
+    .raw = {3, 4},
+    .values = {5, 6},
+    .locked = {},
+    .bitfield = 5,
+  };
+
+  omni::reflected_call(
+    [](omni::binding auto binding) -> void {
+      std::apply(
+        [](omni::field_binding auto... field) -> void {
+          const auto set_if_assignable = //
+            []<omni::field_binding Field>(Field field) -> void {
+            constexpr std::string_view field_name = field.name();
+            constexpr auto replacement = std::array{42, 43};
+
+            // std::array supports whole-value assignment. Raw arrays need
+            // element access through the planned referenceable-field API.
+            if constexpr ("values" == field_name) {
+              if constexpr (std::is_assignable_v<typename Field::type &,
+                              decltype(replacement)>) {
+                field.set_value(replacement);
+              }
+            } else if constexpr (std::is_assignable_v<typename Field::type &,
+                                   int>) {
+              // set_value also supports bitfields, whose address cannot be
+              // taken.
+              field.set_value(42);
+            }
+          };
+
+          (set_if_assignable(field), ...);
+        },
+        binding.public_fields());
+    },
+    input);
+
+  EXPECT_EQ(42, input.writable);
+  EXPECT_EQ(2, input.fixed);
+  EXPECT_EQ(3, input.raw[0]);
+  EXPECT_EQ(4, input.raw[1]);
+
+  const auto k_expected_values = std::array{42, 43};
+  EXPECT_EQ(k_expected_values, input.values);
+
+  EXPECT_EQ(7, input.locked.value);
+  EXPECT_EQ(42u, input.bitfield);
+}
 
 namespace field_visibility {
 

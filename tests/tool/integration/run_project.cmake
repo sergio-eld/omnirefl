@@ -5,6 +5,7 @@ foreach(required
         C_COMPILER
         CXX_COMPILER
         OMNIREFL_DIR
+        CROSSCOMPILING
         EXECUTABLES)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "${required} is required")
@@ -70,12 +71,14 @@ foreach(stem IN LISTS REQUIRED_REFLECTION_STEMS)
     endif()
 endforeach()
 
-foreach(executable IN LISTS EXECUTABLES)
-    execute_process(
-        COMMAND "${ROOT}/${executable}${EXECUTABLE_SUFFIX}"
-        RESULT_VARIABLE run_result)
-    if(NOT 0 EQUAL run_result)
-        message(FATAL_ERROR
-            "${executable} exited with code ${run_result}")
-    endif()
-endforeach()
+if(NOT CROSSCOMPILING)
+    foreach(executable IN LISTS EXECUTABLES)
+        execute_process(
+            COMMAND "${ROOT}/${executable}${EXECUTABLE_SUFFIX}"
+            RESULT_VARIABLE run_result)
+        if(NOT 0 EQUAL run_result)
+            message(FATAL_ERROR
+                "${executable} exited with code ${run_result}")
+        endif()
+    endforeach()
+endif()

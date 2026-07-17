@@ -176,6 +176,9 @@ struct _is_writable_field:
 
 } // namespace detail
 
+// todo: provide QoL predicates and tuple filtering that combine field/owner
+// write eligibility with value assignability before calling set_value.
+
 #if defined(__cpp_concepts)
 // refactorme: consider replacing tag-only concepts with structural
 // public-interface concepts. They would advertise the callable surface
@@ -469,6 +472,9 @@ struct field_binding_t {
     return meta::is_volatile();
   }
 
+  // todo: provide reference() for safely addressable fields, including raw
+  // arrays. Bitfields and potentially unaligned packed fields must stay on the
+  // value()/set_value() path.
   constexpr auto value() const noexcept -> decltype(meta::value(_owner)) {
     return meta::value(_owner);
   }
@@ -679,8 +685,7 @@ struct binding_t<T, reflected_entity::record> {
     return reflected::annotation();
   }
 
-  constexpr operator decltype(
-    (std::declval<const binding_t &>().value))() const {
+  constexpr operator decltype((std::declval<const storage_t &>()))() const {
     return value;
   }
 
@@ -758,7 +763,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     return reflected::annotation();
   }
 
-  operator decltype((std::declval<const binding_t &>().value))() const {
+  operator decltype((std::declval<const storage_t &>()))() const {
     return value;
   }
 
