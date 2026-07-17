@@ -26,6 +26,8 @@ struct volatile_field_record_t {
   int normal;
   mutable volatile int cache;
   volatile int observed;
+  // FIXME(high): the generated copy accessor currently returns this
+  // volatile scalar by value, triggering -Wdeprecated-volatile in C++20.
   volatile unsigned flags : 3;
 };
 

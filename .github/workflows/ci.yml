@@ -14,13 +14,14 @@ env:
   LLVM_VERSION: 22.1.8
 
 jobs:
-  # Package tests use the same public shape as docker-compose.yml:
+  # Package tests use the same matrix vocabulary as docker-compose.yml:
   #
   #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows>
   #   toolchain=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
   #
-  # Alpine and Windows still dispatch to dedicated compose services because
-  # their package install/runtime shells differ from Ubuntu.
+  # Linux rows dispatch to Compose services. Windows rows install and test the
+  # package directly on GitHub-hosted runners; the Compose services remain the
+  # local package-test entrypoints.
   build-package:
     name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ubuntu-latest
@@ -282,24 +283,33 @@ jobs:
 
   test-windows:
     name: Windows test / ${{ matrix.toolchain }}
-    runs-on: [self-hosted, windows, x64]
+    runs-on: windows-2022
     needs: build-package
-    env:
-      WORK_DIR: ${{ matrix.toolchain }}-${{ github.run_id }}-${{ github.run_attempt }}
     strategy:
       fail-fast: false
       matrix:
         toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
+        include:
+          - toolchain: msys2-mingw
+            msystem: MINGW64
+            cc: gcc
+            cxx: g++
+            packages: >-
+              git
+              mingw-w64-x86_64-cmake
+              mingw-w64-x86_64-ninja
+              mingw-w64-x86_64-gcc
+          - toolchain: msys2-clang
+            msystem: CLANG64
+            cc: clang
+            cxx: clang++
+            packages: >-
+              git
+              mingw-w64-clang-x86_64-cmake
+              mingw-w64-clang-x86_64-ninja
+              mingw-w64-clang-x86_64-clang
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v7
-        with:
-          # Self-hosted Windows runners reuse the workspace between matrix rows.
-          # Keep rows in separate checkout directories so each checkout cleans
-          # only its own previous state.
-          path: ${{ env.WORK_DIR }}
-
       - name: Resolve Short SHA
         id: commit
         shell: powershell
@@ -307,71 +317,171 @@ jobs:
           "short_sha=$($env:GITHUB_SHA.Substring(0, 12))" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Login to Docker Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GH_DOCKER_READ }}
-
-      - name: Pull Docker Image
-        shell: powershell
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          switch ("${{ matrix.toolchain }}") {
-            "msvc" { docker pull ghcr.io/sergio-eld/test-windows-msvc }
-            "clang-cl" { docker pull ghcr.io/sergio-eld/test-windows-clang-cl }
-            "msys2-mingw" { docker pull ghcr.io/sergio-eld/test-windows-msys2 }
-            "msys2-clang" { docker pull ghcr.io/sergio-eld/test-windows-msys2 }
-            default { throw "unsupported Windows toolchain: ${{ matrix.toolchain }}" }
-          }
-
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
           name: packages-windows-x86_64-ucrt-${{ steps.commit.outputs.short_sha }}
-          path: ./${{ env.WORK_DIR }}/artifacts/packages/windows
+          path: ./artifacts/packages/windows
 
-      - name: Run Package Test
+      - name: Install Package
         shell: powershell
-        working-directory: ${{ env.WORK_DIR }}
         run: |
-          if ($null -eq (Get-ChildItem -Path "artifacts/packages/windows" -Filter "omnirefl-*.zip" | Select-Object -First 1)) {
-            throw "Windows package artifact was not found"
+          $ErrorActionPreference = 'Stop'
+          $package = Get-ChildItem -Path 'artifacts/packages/windows' -Filter 'omnirefl-*.zip' |
+            Sort-Object Name |
+            Select-Object -Last 1
+          if ($null -eq $package) {
+            throw 'Windows package artifact was not found'
           }
 
-          $service = switch ("${{ matrix.toolchain }}") {
-            "msvc" { "test-windows-msvc" }
-            "clang-cl" { "test-windows-msvc" }
-            "msys2-mingw" { "test-windows-msys2" }
-            "msys2-clang" { "test-windows-msys2" }
-            default { throw "unsupported Windows toolchain: ${{ matrix.toolchain }}" }
+          $root = Join-Path $env:RUNNER_TEMP 'with space'
+          $install = Join-Path $root 'omnirefl'
+          $source = Join-Path $root 'tests'
+          $build = Join-Path $root 'build'
+          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.toolchain }}'
+          New-Item -ItemType Directory -Force -Path $root, $results | Out-Null
+          Expand-Archive -Path $package.FullName -DestinationPath $root -Force
+
+          $packageRoot = Get-ChildItem -Path $root -Directory -Filter 'omnirefl-*' |
+            Sort-Object Name |
+            Select-Object -First 1
+          if ($null -eq $packageRoot) {
+            throw 'could not find extracted omnirefl package root'
           }
 
-          $results = New-Item -ItemType Directory -Force -Path "artifacts/test-results/windows-${{ matrix.toolchain }}"
-          $env:TOOLCHAIN = "${{ matrix.toolchain }}"
-          $env:WINDOWS_PACKAGE_DIR = (Resolve-Path "artifacts/packages/windows").Path
-          $env:TEST_RESULTS_DIR = $results.FullName
-          docker compose --project-name "${{ env.WORK_DIR }}" run --rm $service
+          Move-Item $packageRoot.FullName $install
+          Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $root
+          & (Join-Path $install 'bin/omnirefl.exe') -h
 
-      - name: Cleanup Docker Compose Project
+          @(
+            "OMNIREFL_INSTALL_ROOT=$($install.Replace('\', '/'))"
+            "OMNIREFL_TEST_SOURCE=$($source.Replace('\', '/'))"
+            "OMNIREFL_TEST_BUILD=$($build.Replace('\', '/'))"
+            "OMNIREFL_TEST_RESULTS=$($results.Replace('\', '/'))"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install MSYS2 Toolchain
+        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          release: false
+          update: true
+          install: ${{ matrix.packages }}
+
+      - name: Run MSVC-compatible Package Tests
+        if: ${{ 'msvc' == matrix.toolchain || 'clang-cl' == matrix.toolchain }}
+        # Windows PowerShell promotes ordinary native stderr (for example,
+        # Git's clone progress) to NativeCommandError under the runner's strict
+        # error preference. PowerShell 7 preserves it as process output; the
+        # explicit exit-code checks below still reject real command failures.
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vsInstall = & $vswhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            throw 'Visual Studio with the x64 C++ toolchain was not found'
+          }
+
+          $vsDevCmd = Join-Path $vsInstall 'Common7/Tools/VsDevCmd.bat'
+          $vsEnv = & $env:ComSpec /d /c "`"$vsDevCmd`" -arch=x64 >nul && set"
+          if (0 -ne $LASTEXITCODE) {
+            throw 'failed to initialize the Visual Studio environment'
+          }
+
+          foreach ($line in $vsEnv) {
+            if ($line -match '^(.*?)=(.*)$') {
+              Set-Item -Path ('Env:' + $Matches[1]) -Value $Matches[2]
+            }
+          }
+
+          if ('clang-cl' -eq '${{ matrix.toolchain }}') {
+            $llvmBin = 'C:/Program Files/LLVM/bin'
+            if (!(Test-Path (Join-Path $llvmBin 'clang-cl.exe'))) {
+              throw 'clang-cl was not found in the hosted runner LLVM installation'
+            }
+
+            $env:Path = "$llvmBin;$env:Path"
+            $env:CC = 'clang-cl'
+            $env:CXX = 'clang-cl'
+          }
+
+          New-Item -ItemType Directory -Force -Path $env:OMNIREFL_TEST_BUILD | Out-Null
+          Set-Location $env:OMNIREFL_TEST_BUILD
+
+          cmake ../tests -GNinja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-Domnirefl_DIR=$env:OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
+            Tee-Object "$env:OMNIREFL_TEST_RESULTS/configure.log"
+          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+
+          cmake --build . `
+            --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
+            Tee-Object "$env:OMNIREFL_TEST_RESULTS/build.log"
+          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+
+          ctest . `
+            --output-junit "$env:OMNIREFL_TEST_RESULTS/windows-${{ matrix.toolchain }}.xml" `
+            -V 2>&1 |
+            Tee-Object "$env:OMNIREFL_TEST_RESULTS/windows-${{ matrix.toolchain }}.log"
+          exit $LASTEXITCODE
+
+      - name: Run MSYS2 Package Tests
+        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
+        shell: msys2 {0}
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          set -euo pipefail
+          install_root="$(cygpath -u "$OMNIREFL_INSTALL_ROOT")"
+          build_dir="$(cygpath -u "$OMNIREFL_TEST_BUILD")"
+          results_dir="$(cygpath -u "$OMNIREFL_TEST_RESULTS")"
+
+          mkdir -p "$build_dir"
+          cd "$build_dir"
+
+          cmake ../tests -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Domnirefl_DIR="$install_root/lib/cmake/omnirefl" 2>&1 |
+            tee "$results_dir/configure.log"
+
+          cmake --build . --parallel "$(nproc)" 2>&1 |
+            tee "$results_dir/build.log"
+
+          set +e
+          ctest . \
+            --output-junit "$results_dir/windows-${{ matrix.toolchain }}.xml" \
+            -V 2>&1 |
+            tee "$results_dir/windows-${{ matrix.toolchain }}.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          exit "$rc"
+
+      - name: Collect Test Diagnostics
         if: always()
         shell: powershell
-        working-directory: ${{ env.WORK_DIR }}
         run: |
-          docker compose --project-name "${{ env.WORK_DIR }}" down --remove-orphans
+          $build = Join-Path $env:RUNNER_TEMP 'with space/build'
+          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.toolchain }}'
+          $diagnostics = Join-Path $results 'diagnostics'
+          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
 
-      - name: Normalize Test Result Permissions
-        if: always()
-        shell: powershell
-        working-directory: ${{ env.WORK_DIR }}
-        run: |
-          $results = "artifacts/test-results/windows-${{ matrix.toolchain }}"
-          if (Test-Path $results) {
-            $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-            Get-ChildItem -LiteralPath $results -Recurse -Force |
-              ForEach-Object { $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly) }
-            icacls $results /grant "${identity}:(OI)(CI)F" /T /C | Out-Host
+          Copy-Item -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
+            (Join-Path $build 'CMakeCache.txt')
+            (Join-Path $build 'compile_commands.json')
+            (Join-Path $build 'Testing/Temporary/LastTest.log')
+            (Join-Path $build 'CMakeFiles/CMakeError.log')
+          )
+
+          $generated = @(Get-ChildItem -ErrorAction SilentlyContinue -Recurse -File `
+            -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
+          if (0 -lt $generated.Count) {
+            Compress-Archive -Path $generated.FullName `
+              -DestinationPath (Join-Path $diagnostics 'generated-reflection.zip') `
+              -Force
           }
 
       - name: Upload Test Results
@@ -379,7 +489,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: test-windows-${{ matrix.toolchain }}
-          path: ./${{ env.WORK_DIR }}/artifacts/test-results/windows-${{ matrix.toolchain }}
+          path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
           if-no-files-found: error
 
   aggregate-test-results:

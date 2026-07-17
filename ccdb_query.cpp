@@ -84,9 +84,21 @@ std::expected<clang::tooling::CompileCommand, std::string> resolve_command(
   const std::vector commands =
     (*db)->getCompileCommands(o.source.generic_string());
 
+  // CMake may use either path separator in Windows compile databases.
+  const auto normalize_path_separators = [](std::string_view path) {
+    return path //
+      | std::views::transform(
+        [](const char c) { return '\\' == c ? '/' : c; }) //
+      | std::ranges::to<std::string>();
+  };
+
+  const std::string output_contains =
+    normalize_path_separators(o.output_contains);
+
   std::vector resolved = commands //
-    | std::views::filter([&o](const clang::tooling::CompileCommand &c) {
-        return c.Output.contains(o.output_contains);
+    | std::views::filter([&output_contains, normalize_path_separators](
+                           const clang::tooling::CompileCommand &c) {
+        return normalize_path_separators(c.Output).contains(output_contains);
       })
     | std::ranges::to<std::vector>();
 
