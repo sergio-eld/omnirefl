@@ -371,7 +371,11 @@ jobs:
 
       - name: Run MSVC-compatible Package Tests
         if: ${{ 'msvc' == matrix.toolchain || 'clang-cl' == matrix.toolchain }}
-        shell: powershell
+        # Windows PowerShell promotes ordinary native stderr (for example,
+        # Git's clone progress) to NativeCommandError under the runner's strict
+        # error preference. PowerShell 7 preserves it as process output; the
+        # explicit exit-code checks below still reject real command failures.
+        shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $vsInstall = & $vswhere -latest -products '*' `

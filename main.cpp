@@ -5502,6 +5502,10 @@ std::string reflectable_body(const meta::record_data &d) {
           };
         }
 
+        // FIXME(high): copy accessors retain top-level cv-qualification from
+        // volatile bitfields and packed scalar fields. C++20 deprecates
+        // volatile-qualified scalar return types; strip the copy's top-level
+        // cv without changing the volatile field read or metadata.
         return std::pair{
           meta::field_data::value_access::copy == f.access
             ? std::format("decltype(t.{})", f.name)

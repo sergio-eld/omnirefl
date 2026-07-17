@@ -380,6 +380,10 @@ Benchmark runs are reported by the
 
 ### Reflection Usage
 
+- **High:** [Volatile bitfields and other copy-accessed volatile scalar
+  fields](tests/tool/api_structs.hpp#L25) produce generated accessors with
+  volatile-qualified return types, triggering `-Wdeprecated-volatile` in
+  C++20 and breaking warning-as-error builds.
 - [Generated accessors trigger deprecation warnings for deprecated public
   fields](tests/tool/regressions/deprecated_public_field.cpp), breaking
   warning-as-error builds.
