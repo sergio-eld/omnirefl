@@ -460,6 +460,11 @@ FetchContent_Declare(mpark_variant
 FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant googletest)
 add_library(GTest::GTest ALIAS gtest)
 
+if(DEFINED omnirefl_DIR)
+    # Keep strict project warnings out of third-party FetchContent targets.
+    include("${omnirefl_DIR}/clean_build.cmake")
+endif()
+
 # todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
 add_library(std_compat INTERFACE)
 target_link_libraries(std_compat INTERFACE

@@ -22,6 +22,6 @@ TEST(ccdb_query, preserves_literal_backslashes) {
 
   EXPECT_EQ(1,
     omni::reflected_call(
-      [](auto binding) -> int { return binding.value.value; },
+      [](auto binding) -> int { return binding.record.value; },
       record{1}));
 }

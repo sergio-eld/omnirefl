@@ -22,7 +22,7 @@ struct field_like {
     return "int";
   }
 
-  static constexpr const char *annotation() noexcept {
+  static constexpr const char *documentation() noexcept {
     return "";
   }
 
@@ -42,10 +42,8 @@ struct field_like {
 static_assert(!omni::is_reflected<first_record>::value,
   "out-of-scope is_reflected query should be rejected by the tool");
 
-constexpr bool forced_meta =
-  0 < sizeof(omni::meta_t<first_record>);
-constexpr bool forced_binding =
-  0 < sizeof(omni::binding_t<second_record &>);
+constexpr bool forced_meta = 0 < sizeof(omni::meta_t<first_record>);
+constexpr bool forced_binding = 0 < sizeof(omni::binding_t<second_record &>);
 constexpr bool forced_field_meta =
   0 < sizeof(omni::field_meta_t<first_record, field_like>);
 constexpr bool forced_field_binding =

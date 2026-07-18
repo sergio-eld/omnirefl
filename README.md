@@ -81,19 +81,22 @@ int main() {
   const auto write = [](omni::binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
+      // Bindings and field bindings are trivial to copy.
       std::apply(
         [](omni::field_binding auto... field) -> void {
-          const auto set = [](omni::field_binding auto field) -> void {
+          const auto write = [](omni::field_binding auto field) -> void {
             constexpr std::string_view name = field.name();
 
+            // value() is read-only; ref() exposes a writable reference.
             if constexpr ("foo"sv == name)
-              field.set_value(8);
+              field.ref() = 8;
 
+            // operator* and operator-> are QoL accessors.
             if constexpr ("bar"sv == name)
-              field.set_value("after");
+              *field = "after";
           };
 
-          (set(field), ...);
+          (write(field), ...);
         },
         b.public_fields());
     };
@@ -130,9 +133,10 @@ Omnirefl focuses on POD-like records and enums.
 - Globally accessible named records and enums.
 - Nested named records/enums of supported globally accessible parents.
 - Unconstrained primary record templates, including use as CRTP bases.
-- Public data fields: names, type names, annotations, value retrieval, mutation
-  of writable fields, and `is_const()`/`is_mutable()`/`is_volatile()` traits.
-- Enumerator names, values, and annotations.
+- Public data fields: names, type names, documentation, value retrieval,
+  mutation of writable fields, reference access when safe, and
+  `is_const()`/`is_mutable()`/`is_volatile()`/`is_deprecated()` traits.
+- Enumerator names, values, and documentation.
 - Dependency discovery through:
   - public field types
   - public bases and transitive public bases
@@ -304,7 +308,7 @@ docker compose run --rm --entrypoint /bin/ash build-linux
   runnable README example.
 - [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
   is the executable usage guide with C++20, compatibility, dependency,
-  template, annotation, schema, and write examples. It is written for limited
+  template, documentation, schema, and write examples. It is written for limited
   C++20 support and avoids `<concepts>` plus C++20 ranges algorithms.
 
 ## Tested Toolchains
@@ -380,10 +384,6 @@ Benchmark runs are reported by the
 
 ### Reflection Usage
 
-- **High:** [Volatile bitfields and other copy-accessed volatile scalar
-  fields](tests/tool/api_structs.hpp#L25) produce generated accessors with
-  volatile-qualified return types, triggering `-Wdeprecated-volatile` in
-  C++20 and breaking warning-as-error builds.
 - [Generated accessors trigger deprecation warnings for deprecated public
   fields](tests/tool/regressions/deprecated_public_field.cpp), breaking
   warning-as-error builds.
@@ -394,6 +394,10 @@ Benchmark runs are reported by the
   field](tests/tool/regressions/private_nested_type_through_public_base.cpp).
 - [Anonymous unions emit an empty-named container field and omit promoted
   members](tests/tool/regressions/anonymous_union_members.cpp).
+- [Compiler-packed misaligned raw arrays have no safe whole-field accessor]
+  (tests/tool/packed_field_test.cpp); this is an implementation-dependent
+  layout case. Use an aligned field representation such as `std::array` when
+  whole-field access is required.
 - [Pointer-wrapped nested template field types lose their enclosing-record
   qualifier in `field.type_name()`](tests/tool/regressions/nested_template_field_name.cpp).
 - [Pointer fields whose external pointee is only forward-declared are silently

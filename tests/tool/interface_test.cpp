@@ -1,9 +1,10 @@
 #include "api_structs.hpp"
-#include <gtest/gtest.h>
 #include "odr_test.hpp"
+#include <gtest/gtest.h>
 
 #include <omnirefl/reflection.hpp>
 
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -64,12 +65,70 @@ namespace reference_return {
 struct first_field {
   template <typename T>
   auto operator()(omni::binding_t<T> binding) const
-    -> decltype((binding.value.first)) {
-    return binding.value.first;
+    -> decltype((binding.record.first)) {
+    return binding.record.first;
   }
 };
 
 } // namespace reference_return
+
+namespace field_access {
+
+struct nested {
+  int value;
+};
+
+struct record {
+  int scalar;
+  int values[2];
+  nested child;
+  std::unique_ptr<int> owned;
+};
+
+struct read_write_move {
+  template <typename T>
+  std::unique_ptr<int> operator()(omni::binding_t<T> binding) const {
+    auto fields = binding.public_fields();
+    typedef typename std::tuple_element<0, decltype(fields)>::type scalar_field;
+    typedef typename std::tuple_element<1, decltype(fields)>::type array_field;
+
+    static_assert(scalar_field::has_value_access(),
+      "ordinary fields must expose value access");
+    static_assert(scalar_field::has_reference_access(),
+      "ordinary fields must expose reference access");
+    static_assert(array_field::has_value_access(),
+      "aligned raw arrays must expose value access");
+    static_assert(array_field::has_reference_access(),
+      "aligned raw arrays must expose reference access");
+    static_assert(!scalar_field::is_deprecated(),
+      "ordinary fields must not report deprecation");
+    static_assert(
+      std::is_same<const int &, decltype(std::get<0>(fields).value())>::value,
+      "lvalue field access must be read-only");
+    static_assert(std::is_same<const int (&)[2],
+                    decltype(std::get<1>(fields).value())>::value,
+      "raw-array reads must preserve type and extent");
+    static_assert(
+      std::is_same<int (&)[2], decltype(std::get<1>(fields).ref())>::value,
+      "raw-array references must preserve type and extent");
+
+    *std::get<0>(fields) = 11;
+    std::get<1>(fields).ref()[1] = 12;
+    std::get<2>(fields)->value = 13;
+    return std::move(std::get<3>(fields)).value();
+  }
+};
+
+struct write_through_meta {
+  record &input;
+
+  template <typename T>
+  void operator()(omni::meta_t<T> meta) const {
+    std::get<0>(meta.public_fields()).ref(input) = 17;
+  }
+};
+
+} // namespace field_access
 
 namespace field_type_spelling {
 
@@ -139,7 +198,7 @@ struct visitor {
   template <typename Binding>
   auto operator()(Binding binding) const
     -> std::enable_if_t<omni::binding<Binding>, int> {
-    return binding.value.value;
+    return binding.record.value;
   }
 };
 
@@ -228,9 +287,7 @@ TEST(cpp20_template_lambdas, meta_type_token) {
 
   EXPECT_EQ("record_type_t",
     omni::reflected_call(
-      [](omni::meta auto type) -> std::string {
-        return type.type_name();
-      },
+      [](omni::meta auto type) -> std::string { return type.type_name(); },
       omni::type<record_type_t>));
 }
 
@@ -348,8 +405,7 @@ TEST(type_names, direct_type_token_variable_record_type_t) {
   using interface_test::record_type_t;
 
   EXPECT_EQ("record_type_t",
-    omni::reflected_call(interface_test::type_name,
-      omni::type<record_type_t>));
+    omni::reflected_call(interface_test::type_name, omni::type<record_type_t>));
 }
 #endif
 
@@ -696,8 +752,7 @@ TEST(enumerators, enum_type_t) {
   using interface_test::enum_type_t;
   namespace en = interface_test::enumerators;
 
-  value_categories_test<enum_type_t>("zero,one",
-    en::enum_type_enumerators);
+  value_categories_test<enum_type_t>("zero,one", en::enum_type_enumerators);
 }
 
 TEST(bindings, conversion_qualifiers) {
@@ -738,9 +793,7 @@ TEST(record_type_t, field_value_read) {
   static const std::vector<std::string> k_expected{"815", "oceanic"};
   static const record_type_t k_input{815, "oceanic"};
 
-  value_categories_read_test(k_expected,
-    k_input,
-    fv::record_type_field_values);
+  value_categories_read_test(k_expected, k_input, fv::record_type_field_values);
 
   // owning binding
   EXPECT_EQ(k_expected,
@@ -752,11 +805,36 @@ TEST(record_type_t, reflected_call_preserves_reference_return) {
   using interface_test::record_type_t;
 
   record_type_t input{7, {}};
-  int &result = omni::reflected_call(
-    interface_test::reference_return::first_field{}, input);
+  int &result =
+    omni::reflected_call(interface_test::reference_return::first_field{},
+      input);
   result = 19;
 
   EXPECT_EQ(19, input.first);
+}
+
+TEST(fields, reference_and_move_access) {
+  interface_test::field_access::record input{
+    1,
+    {2, 3},
+    {4},
+    std::unique_ptr<int>{new int{5}},
+  };
+
+  std::unique_ptr<int> moved =
+    omni::reflected_call(interface_test::field_access::read_write_move{},
+      input);
+
+  ASSERT_NE(nullptr, moved);
+  EXPECT_EQ(5, *moved);
+  EXPECT_EQ(nullptr, input.owned);
+  EXPECT_EQ(11, input.scalar);
+  EXPECT_EQ(12, input.values[1]);
+  EXPECT_EQ(13, input.child.value);
+
+  omni::reflected_call(interface_test::field_access::write_through_meta{input},
+    omni::type_t<interface_test::field_access::record>{});
+  EXPECT_EQ(17, input.scalar);
 }
 
 TEST(record_type_t, reflected_rvalue_binding_can_be_named) {

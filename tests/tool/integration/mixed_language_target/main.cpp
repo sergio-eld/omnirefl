@@ -9,7 +9,7 @@ struct record {
 struct read_value {
   template <typename Binding>
   int operator()(Binding binding) const {
-    return binding.value.value;
+    return binding.record.value;
   }
 };
 

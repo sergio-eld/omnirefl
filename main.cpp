@@ -562,11 +562,11 @@ struct field_data {
   enum class value_access {
     reference,
     copy,
-    array_copy,
+    misaligned_array,
   } access;
 
-  std::vector<std::size_t> array_extents;
   bool is_volatile;
+  bool is_deprecated;
 
   enum {
     none = 0,
@@ -2217,8 +2217,7 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
       ctx.errors.reflected_call_args.push_back(std::move(candidate.error));
   }
 
-  for (const meta::type_id &type_name :
-    ctx.skipped_virtual_base_dependencies) {
+  for (const meta::type_id &type_name : ctx.skipped_virtual_base_dependencies) {
     log(log_level::warning, [&type_name] {
       return std::format(
         "\nreflection dependency '{}' skipped: "
@@ -4456,16 +4455,8 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
       return value_access::reference;
     }
 
-    if (nullptr != ast.getAsConstantArrayType(d->getType()))
-      return value_access::array_copy;
-
-    // ad hoc: dependent and flexible arrays cannot be materialized as the
-    // nested std::array value used for fixed arrays, so they retain reference
-    // access for now.
-    // todo(high): add copied access for misaligned dependent/flexible arrays.
-    return d->getType()->isArrayType() //
-      ? value_access::reference
-      : value_access::copy;
+    return d->getType()->isArrayType() ? value_access::misaligned_array
+                                       : value_access::copy;
   });
 
   return {
@@ -4474,22 +4465,8 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     .qualified_type_name = qualified_type_name,
     .annotation = annotation_from_decl(ast, d),
     .access = access,
-    .array_extents = std::invoke([&ast, d, access] {
-      std::vector<std::size_t> extents;
-      if (value_access::array_copy != access)
-        return extents;
-
-      for (const clang::ConstantArrayType *array =
-             ast.getAsConstantArrayType(d->getType());
-        nullptr != array;
-        array = ast.getAsConstantArrayType(array->getElementType())) {
-        extents.push_back(
-          static_cast<std::size_t>(array->getSize().getZExtValue()));
-      }
-
-      return extents;
-    }),
     .is_volatile = d->getType().isVolatileQualified(),
+    .is_deprecated = d->hasAttr<clang::DeprecatedAttr>(),
     .qualified = d->isMutable()
       ? as_mutable
       : (d->getType().isConstQualified() ? as_const : none),
@@ -5094,13 +5071,13 @@ std::string escaped_string_literal_content(std::string_view s) {
   return out;
 }
 
-std::string annotation_method(std::string_view annotation) {
+std::string documentation_method(std::string_view documentation) {
   return std::format(
-    "\n  static constexpr auto annotation() noexcept"
+    "\n  static constexpr auto documentation() noexcept"
     "\n    -> const char(&)[sizeof(\"{0}\")] {{"
     "\n    return \"{0}\";"
     "\n  }}",
-    escaped_string_literal_content(annotation));
+    escaped_string_literal_content(documentation));
 }
 
 // render `_omni_{root}_as_root` for `root::inner_type` as input
@@ -5291,7 +5268,7 @@ std::string reflectable_head(const meta::nm_qual_type &t,
         reflected_qualified_type_name,
 
         // 6
-        annotation_method(annotation));
+        documentation_method(annotation));
     }
   }
 
@@ -5334,7 +5311,7 @@ std::string reflectable_head(const meta::nm_qual_type &t,
     meta::format(t),
 
     // 5
-    annotation_method(annotation));
+    documentation_method(annotation));
 }
 
 std::string format_accessed_type(std::string root,
@@ -5406,7 +5383,7 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t,
     reflectable_entity(d),
     format_type_name(t),
     meta::format(t),
-    annotation_method(annotation));
+    documentation_method(annotation));
 }
 
 template <meta::reflectable_data Data>
@@ -5440,7 +5417,7 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
     reflectable_entity(d),
     format_type_name(t),
     meta::format(t),
-    annotation_method(annotation));
+    documentation_method(annotation));
 }
 
 std::string reflectable_body(const meta::enum_data &d) {
@@ -5466,52 +5443,45 @@ std::string reflectable_body(const meta::record_data &d) {
     [](const auto &field_index) {
       const auto &[index, f] = field_index;
 
-      const auto [value_type, value_expression] = std::invoke([&f] {
-        if (meta::field_data::value_access::array_copy == f.access) {
-          // ad hoc: raw arrays cannot be returned by value. Copy packed fixed
-          // arrays into recursively nested std::array values instead.
-          const auto format_array_copy = //
-            [&f](this auto self,
-              std::span<const std::size_t> extents,
-              std::string_view indexes) -> std::string {
-            return std::format(
-              "typename omni::detail::_packed_value<"
-              "omni::compat::remove_cvref_t<"
-              "decltype(t.{0}{1})>>::type{{{{{2}}}}}",
-              f.name,
-              indexes,
-              std::views::iota(std::size_t{0}, extents.front()) //
-                | std::views::transform(
-                  [&f, self, extents, indexes](std::size_t index) {
-                    const std::string nested_indexes =
-                      std::format("{}[{}]", indexes, index);
+      const std::string accessors = std::invoke([&f] {
+        // Misaligned packed raw arrays emit metadata without accessors.
+        if (meta::field_data::value_access::misaligned_array == f.access)
+          return std::string{};
 
-                    return 1 == extents.size() //
-                      ? std::format("t.{}{}", f.name, nested_indexes)
-                      : self(extents.subspan(1), nested_indexes);
-                  }) //
-                | std::views::join_with(", "sv) //
-                | util::format_range);
-          };
-
-          return std::pair{
-            std::format(
-              "typename omni::detail::_packed_value<decltype(t.{})>::type",
-              f.name),
-            format_array_copy(f.array_extents, ""sv),
-          };
-        }
-
-        // FIXME(high): copy accessors retain top-level cv-qualification from
-        // volatile bitfields and packed scalar fields. C++20 deprecates
-        // volatile-qualified scalar return types; strip the copy's top-level
-        // cv without changing the volatile field read or metadata.
-        return std::pair{
-          meta::field_data::value_access::copy == f.access
-            ? std::format("decltype(t.{})", f.name)
-            : std::format("decltype((t.{}))", f.name),
+        const bool by_reference =
+          meta::field_data::value_access::reference == f.access;
+        const std::string value_type = //
+          by_reference
+          ? std::format("decltype((t.{}))", f.name)
+          : std::format("omni::compat::remove_cvref_t<decltype(t.{})>", f.name);
+        return std::format(
+          "\n\n    // Emitted for reference and copy access."
+          "\n    // Lvalue reads preserve owner qualification."
+          "\n    template <typename _T>"
+          "\n    static constexpr auto value(const _T &t) noexcept"
+          "\n      -> {1} {{"
+          "\n      return {2};"
+          "\n    }}"
+          "\n\n    // Emitted for reference and copy access."
+          "\n    // Supports assignment through the public writable-field wrapper."
+          "\n    template <typename _T, typename V>"
+          "\n    static void set_value(_T &t, V &&v) {{"
+          "\n      t.{0} = std::forward<V>(v);"
+          "\n    }}"
+          "{3}",
+          f.name,
+          value_type,
           std::format("t.{}", f.name),
-        };
+          by_reference
+            ? std::format(
+                "\n\n    // Emitted only for fields that can bind to a reference."
+                "\n    template <typename _T>"
+                "\n    static constexpr auto ref(_T &t) noexcept"
+                "\n      -> decltype((t.{0})) {{"
+                "\n      return t.{0};"
+                "\n    }}",
+                f.name)
+            : std::string{});
       });
 
       return std::format(
@@ -5527,30 +5497,26 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n    }}"
         "\n"
         "\n    static constexpr auto type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{6}\")] {{"
-        "\n      return \"{6}\";"
+        "\n      -> const char(&)[sizeof(\"{8}\")] {{"
+        "\n      return \"{8}\";"
         "\n    }}"
         "\n"
         "\n    static constexpr auto qualified_type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{7}\")] {{"
-        "\n      return \"{7}\";"
+        "\n      -> const char(&)[sizeof(\"{9}\")] {{"
+        "\n      return \"{9}\";"
         "\n    }}"
-        "{8}"
+        "{10}"
         "\n"
         "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
         "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
         "\n    static constexpr bool is_volatile() noexcept {{ return {4}; }}"
-        "\n"
-        "\n    template <typename _T>"
-        "\n    static constexpr auto value(const _T &t) noexcept"
-        "\n      -> {5} {{"
-        "\n      return {9};"
-        "\n    }}"
-        "\n"
-        "\n    template <typename _T, typename V>"
-        "\n    static void set_value(_T &t, V &&v) {{"
-        "\n      t.{0} = std::forward<V>(v);"
-        "\n    }}"
+        "\n    static constexpr bool has_value_access() noexcept"
+        " {{ return {5}; }}"
+        "\n    static constexpr bool has_reference_access() noexcept"
+        " {{ return {6}; }}"
+        "\n    static constexpr bool is_deprecated() noexcept"
+        " {{ return {7}; }}"
+        "{11}"
         "\n  }};",
         // 0
         f.name,
@@ -5568,19 +5534,25 @@ std::string reflectable_body(const meta::record_data &d) {
         f.is_volatile,
 
         // 5
-        value_type,
+        meta::field_data::value_access::misaligned_array != f.access,
 
         // 6
-        escaped_string_literal_content(f.type_name),
+        meta::field_data::value_access::reference == f.access,
 
         // 7
-        escaped_string_literal_content(f.qualified_type_name),
+        f.is_deprecated,
 
         // 8
-        annotation_method(f.annotation),
+        escaped_string_literal_content(f.type_name),
 
         // 9
-        value_expression);
+        escaped_string_literal_content(f.qualified_type_name),
+
+        // 10
+        documentation_method(f.annotation),
+
+        // 11
+        accessors);
     };
 
   return std::format(
@@ -5701,25 +5673,10 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     ctx.nested,
     ctx.indexed);
 
-  const bool has_packed_array_copies = std::invoke(
-    [](const auto &...rs) {
-      return (std::ranges::any_of(rs, [](const auto &r) {
-        const auto *record = std::get_if<meta::record_data>(&r.type.data);
-        return nullptr != record
-          && std::ranges::any_of(record->public_fields,
-            [](const meta::field_data &field) {
-              return meta::field_data::value_access::array_copy == field.access;
-            });
-      }) || ...);
-    },
-    ctx.fwd_declarables,
-    ctx.nested,
-    ctx.indexed);
-
   const std::vector required_includes = //
     std::to_array<std::string_view>({
       "omnirefl/reflection.hpp",
-      has_enums || has_packed_array_copies ? "array" : "",
+      has_enums ? "array" : "",
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
@@ -5822,20 +5779,8 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 5: ad hoc: packed fixed-array copy accessors reference this helper only
-    // through generated source text, so emit it only when those accessors
-    // exist.
-    has_packed_array_copies
-      ? "template <typename T>"
-        "\nstruct _packed_value {"
-        "\n  using type = typename std::remove_cv<T>::type;"
-        "\n};"
-        "\n"
-        "\ntemplate <typename T, std::size_t N>"
-        "\nstruct _packed_value<T[N]> {"
-        "\n  using type = std::array<typename _packed_value<T>::type, N>;"
-        "\n};"
-      : "",
+    // 5:
+    "",
 
     // 6:
     ctx.fwd_declarables //

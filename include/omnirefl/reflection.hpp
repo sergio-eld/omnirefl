@@ -286,7 +286,8 @@ struct reflected_call_t {
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
     -> _ungenerated_result;
 #else
-    -> decltype(std::declval<Impl &&>()(_reflect_arg(std::declval<Args &&>())...));
+    -> decltype(std::declval<Impl &&>()(
+      _reflect_arg(std::declval<Args &&>())...));
 #endif
 };
 
@@ -332,7 +333,8 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
   -> reflected_call_t::_ungenerated_result {
 #else
-  -> decltype(std::declval<Impl &&>()(_reflect_arg(std::declval<Args &&>())...)) {
+  -> decltype(std::declval<Impl &&>()(
+    _reflect_arg(std::declval<Args &&>())...)) {
 #endif
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
   int registered[] = {0,
@@ -382,16 +384,20 @@ struct field_meta_t {
     return reflected::name();
   }
 
+  /// Source-spelled field type without namespace prefixes, e.g. `outer::item`.
   static constexpr const char *type_name() noexcept {
     return reflected::type_name();
   }
 
+  /// Namespace-qualified source spelling, e.g. `app::outer::item`.
   static constexpr const char *qualified_type_name() noexcept {
     return reflected::qualified_type_name();
   }
 
-  static constexpr const char *annotation() noexcept {
-    return reflected::annotation();
+  /// Documentation text; empty when absent or generated with
+  /// `--no-annotations`.
+  static constexpr const char *documentation() noexcept {
+    return reflected::documentation();
   }
 
   // Index is local to the field's declaring record.
@@ -412,20 +418,58 @@ struct field_meta_t {
     return reflected::is_volatile();
   }
 
-  template <typename T>
-  static constexpr auto value(T &&t) noexcept
-    -> decltype(reflected::value(std::forward<T>(t))) {
-    return reflected::value(std::forward<T>(t));
+  /// True when a type-preserving read equivalent to
+  /// `const auto &value = object.field` is safe.
+  static constexpr bool has_value_access() noexcept {
+    return reflected::has_value_access();
   }
 
+  /// True when `auto &value = object.field` can bind directly and safely.
+  /// Bit-fields cannot bind directly; misaligned packed fields are unsafe.
+  static constexpr bool has_reference_access() noexcept {
+    return reflected::has_reference_access();
+  }
+
+  /// True when the field declaration has a deprecated attribute.
+  static constexpr bool is_deprecated() noexcept {
+    return reflected::is_deprecated();
+  }
+
+  /// Read the field through an lvalue owner.
+  ///
+  /// @details `R` keeps lookup dependent, so an unavailable generated accessor
+  /// fails only when used rather than while forming `public_fields()`.
+  template <typename T,
+    typename R = reflected,
+    typename std::enable_if<R::has_value_access(), int>::type = 0>
+  static constexpr auto value(T &t) noexcept -> decltype(R::value(t)) {
+    return R::value(t);
+  }
+
+  /// Return a field reference preserving owner cv-qualification.
+  ///
+  /// @details `R` keeps lookup dependent, so an unavailable generated accessor
+  /// fails only when used rather than while forming `public_fields()`.
+  template <typename T,
+    typename R = reflected,
+    typename std::enable_if<R::has_reference_access(), int>::type = 0>
+  static constexpr auto ref(T &t) noexcept -> decltype(R::ref(t)) {
+    return R::ref(t);
+  }
+
+  /// Assign fields that support assignment, including bitfields.
+  ///
+  /// @details `R` keeps generated assignment lookup and availability checks
+  /// dependent until use.
   template <typename T,
     typename V,
     typename OwnerRef = T &&,
-    typename std::enable_if<
-      detail::_is_writable_field<OwnerRef, reflected>::value,
+    typename R = reflected,
+    typename std::enable_if<R::has_value_access()
+        && detail::_is_writable_field<OwnerRef, R>::value,
       int>::type = 0>
   static void set_value(T &&t, V &&v) {
-    reflected::set_value(std::forward<T>(t), std::forward<V>(v));
+    R::set_value(std::forward<T>(t), std::forward<V>(v));
   }
 };
 
@@ -444,16 +488,20 @@ struct field_binding_t {
     return meta::name();
   }
 
+  /// Source-spelled field type without namespace prefixes, e.g. `outer::item`.
   static constexpr const char *type_name() noexcept {
     return meta::type_name();
   }
 
+  /// Namespace-qualified source spelling, e.g. `app::outer::item`.
   static constexpr const char *qualified_type_name() noexcept {
     return meta::qualified_type_name();
   }
 
-  static constexpr const char *annotation() noexcept {
-    return meta::annotation();
+  /// Documentation text; empty when absent or generated with
+  /// `--no-annotations`.
+  static constexpr const char *documentation() noexcept {
+    return meta::documentation();
   }
 
   static constexpr std::size_t index() noexcept {
@@ -472,27 +520,102 @@ struct field_binding_t {
     return meta::is_volatile();
   }
 
-  // todo: provide reference() for safely addressable fields, including raw
-  // arrays. Bitfields and potentially unaligned packed fields must stay on the
-  // value()/set_value() path.
-  constexpr auto value() const noexcept -> decltype(meta::value(_owner)) {
-    return meta::value(_owner);
+  /// True when a type-preserving read equivalent to
+  /// `const auto &value = object.field` is safe.
+  static constexpr bool has_value_access() noexcept {
+    return meta::has_value_access();
   }
 
-  constexpr operator decltype(meta::value(_owner))() const noexcept {
+  /// True when `auto &value = object.field` can bind directly and safely.
+  /// Bit-fields cannot bind directly; misaligned packed fields are unsafe.
+  static constexpr bool has_reference_access() noexcept {
+    return meta::has_reference_access();
+  }
+
+  /// True when the field declaration has a deprecated attribute.
+  static constexpr bool is_deprecated() noexcept {
+    return meta::is_deprecated();
+  }
+
+  /// Read the field without moving from the owner.
+  ///
+  /// @details `M` keeps lookup dependent until the accessor is used.
+  template <typename M = meta,
+    typename std::enable_if<M::has_value_access(), int>::type = 0>
+  constexpr auto value() const & noexcept -> decltype(M::value(_owner)) {
+    return M::value(_owner);
+  }
+
+  /// Move access for referenceable fields.
+  ///
+  /// @details `M` keeps lookup and the availability check dependent until use.
+  template <typename M = meta,
+    typename std::enable_if<M::has_value_access() && M::has_reference_access(),
+      int>::type = 0>
+  constexpr auto value() && noexcept -> decltype(std::move(M::ref(_owner))) {
+    return std::move(M::ref(_owner));
+  }
+
+  /// Copy access for fields without reference access.
+  ///
+  /// This overload covers bitfields and packed scalars.
+  ///
+  /// @details `M` keeps lookup and the availability check dependent until use.
+  template <typename M = meta,
+    typename std::enable_if<M::has_value_access() && !M::has_reference_access(),
+      int>::type = 0>
+  constexpr auto value() && noexcept -> decltype(M::value(_owner)) {
+    return M::value(_owner);
+  }
+
+  /// Return a field reference preserving owner cv-qualification.
+  ///
+  /// @details `M` keeps lookup and the availability check dependent until use.
+  template <typename M = meta,
+    typename std::enable_if<M::has_reference_access(), int>::type = 0>
+  constexpr auto ref() const noexcept -> decltype(M::ref(_owner)) {
+    return M::ref(_owner);
+  }
+
+  /// Preserve the existing implicit value conversion.
+  ///
+  /// @details `M` keeps lookup dependent until the conversion is used.
+  template <typename M = meta,
+    typename std::enable_if<M::has_value_access(), int>::type = 0>
+  constexpr operator decltype(M::value(_owner))() const noexcept {
     return value();
   }
 
-  constexpr auto operator*() const noexcept -> decltype(value()) {
-    return value();
+  /// QoL dereference access for referenceable fields.
+  ///
+  /// @details `M` keeps lookup and the availability check dependent until use.
+  template <typename M = meta,
+    typename std::enable_if<M::has_reference_access(), int>::type = 0>
+  constexpr auto operator*() const noexcept -> decltype(M::ref(_owner)) {
+    return M::ref(_owner);
   }
 
+  /// QoL member access for referenceable fields.
+  ///
+  /// @details `M` keeps lookup and the availability check dependent until use.
+  template <typename M = meta,
+    typename std::enable_if<M::has_reference_access(), int>::type = 0>
+  constexpr auto operator->() const noexcept -> decltype(&M::ref(_owner)) {
+    return &M::ref(_owner);
+  }
+
+  /// Assign fields that support assignment, including bitfields.
+  ///
+  /// @details `M` keeps generated assignment lookup and availability checks
+  /// dependent until use.
   template <typename V,
     typename OwnerRef = Record &,
-    typename std::enable_if<detail::_is_writable_field<OwnerRef, meta>::value,
+    typename M = meta,
+    typename std::enable_if<M::has_value_access()
+        && detail::_is_writable_field<OwnerRef, M>::value,
       int>::type = 0>
   void set_value(V &&v) {
-    meta::set_value(_owner, std::forward<V>(v));
+    M::set_value(_owner, std::forward<V>(v));
   }
 
   constexpr explicit field_binding_t(Record &owner): _owner(owner) {}
@@ -517,8 +640,11 @@ struct binding_t {
     std::true_type>::type;
   using storage_t = typename std::conditional<owning::value, type, T>::type;
 
-  // Preserve the public storage shape for unevaluated visitor return types.
-  storage_t value;
+  // Entity inference is unavailable before generated metadata exists. Both
+  // names preserve record/enum storage expressions in unevaluated visitor
+  // return types; this declaration-only shape is never constructed.
+  storage_t record;
+  storage_t enum_value;
 
   template <typename U, reflected_entity E>
   constexpr operator binding_t<U, E>() const noexcept;
@@ -574,8 +700,8 @@ struct meta_t<T, reflected_entity::record> {
     return reflected::qualified_type_name();
   }
 
-  static constexpr const char *annotation() noexcept {
-    return reflected::annotation();
+  static constexpr const char *documentation() noexcept {
+    return reflected::documentation();
   }
 
   static constexpr reflected_entity entity() noexcept {
@@ -639,8 +765,8 @@ struct meta_t<T, reflected_entity::enumeration> {
     return reflected::qualified_type_name();
   }
 
-  static constexpr const char *annotation() noexcept {
-    return reflected::annotation();
+  static constexpr const char *documentation() noexcept {
+    return reflected::documentation();
   }
 
   static constexpr reflected_entity entity() noexcept {
@@ -671,7 +797,7 @@ struct binding_t<T, reflected_entity::record> {
 
   // todo: add an explicit interface to `std::move` an owned value out of a
   // binding_t<T> without exposing the storage member.
-  storage_t value;
+  storage_t record;
 
   static constexpr const char *type_name() noexcept {
     return reflected::type_name();
@@ -681,28 +807,28 @@ struct binding_t<T, reflected_entity::record> {
     return reflected::qualified_type_name();
   }
 
-  static constexpr const char *annotation() noexcept {
-    return reflected::annotation();
+  static constexpr const char *documentation() noexcept {
+    return reflected::documentation();
   }
 
   constexpr operator decltype((std::declval<const storage_t &>()))() const {
-    return value;
+    return record;
   }
 
   // C++11 does not allow non-const constexpr member functions.
 #  if OMNI_CPLUSPLUS >= 201402L
   constexpr
 #  endif
-  /// Bindings for public fields visible through the reflected record.
-  auto public_fields() & -> decltype(meta_t<type>::_public_fields(
+    /// Bindings for public fields visible through the reflected record.
+    auto public_fields() & -> decltype(meta_t<type>::_public_fields(
       std::declval<storage_t &>())) {
-    return meta_t<type>::_public_fields(value);
+    return meta_t<type>::_public_fields(record);
   }
 
   constexpr auto
     public_fields() const & -> decltype(meta_t<type>::_public_fields(
       std::declval<const storage_t &>())) {
-    return meta_t<type>::_public_fields(value);
+    return meta_t<type>::_public_fields(record);
   }
 
   auto public_fields() && -> decltype(meta_t<type>::_public_fields(
@@ -720,7 +846,7 @@ struct binding_t<T, reflected_entity::record> {
     typename std::enable_if<!owning::value
         && std::is_convertible<U &, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: value(u) {}
+  constexpr explicit binding_t(U &u) noexcept: record(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
@@ -729,7 +855,7 @@ struct binding_t<T, reflected_entity::record> {
       int>::type = 0>
   constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_move_constructible<type>::value)
-      : value(std::forward<U>(u)) {}
+      : record(std::forward<U>(u)) {}
 };
 
 template <typename T>
@@ -749,7 +875,7 @@ struct binding_t<T, reflected_entity::enumeration> {
 
   // todo: add an explicit interface to `std::move` an owned value out of a
   // binding_t<T> without exposing the storage member.
-  storage_t value;
+  storage_t enum_value;
 
   static constexpr const char *type_name() noexcept {
     return reflected::type_name();
@@ -759,12 +885,12 @@ struct binding_t<T, reflected_entity::enumeration> {
     return reflected::qualified_type_name();
   }
 
-  static constexpr const char *annotation() noexcept {
-    return reflected::annotation();
+  static constexpr const char *documentation() noexcept {
+    return reflected::documentation();
   }
 
   operator decltype((std::declval<const storage_t &>()))() const {
-    return value;
+    return enum_value;
   }
 
   static constexpr auto enumerators() -> decltype(reflected::enumerators()) {
@@ -779,7 +905,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     typename std::enable_if<!owning::value
         && std::is_convertible<U &, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: value(u) {}
+  constexpr explicit binding_t(U &u) noexcept: enum_value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
@@ -788,7 +914,7 @@ struct binding_t<T, reflected_entity::enumeration> {
       int>::type = 0>
   constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_move_constructible<type>::value)
-      : value(std::forward<U>(u)) {}
+      : enum_value(std::forward<U>(u)) {}
 };
 #endif
 
