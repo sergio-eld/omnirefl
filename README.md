@@ -180,6 +180,10 @@ Omnirefl focuses on POD-like records and enums.
   out-of-scope queries as errors on a best-effort basis.
 - Public data members only. Private/protected fields are skipped, including
   fields inherited through public bases. Member functions are not reflected.
+- [Deprecated public fields can emit compiler deprecation diagnostics while
+  their metadata is formed](tests/tool/regressions/deprecated_public_field.cpp),
+  before `is_deprecated()` can filter them. Deferring this access would require
+  replacing the natural `typename Field::type` interface with a template query.
 - Local and unnamed types are not supported. Experimental indexed support exists
   for investigation (`omni_reflected_target(... ENABLE_INDEX_MODE)`), but is
   not part of the release contract: it has proven unstable because function
@@ -384,9 +388,6 @@ Benchmark runs are reported by the
 
 ### Reflection Usage
 
-- [Generated accessors trigger deprecation warnings for deprecated public
-  fields](tests/tool/regressions/deprecated_public_field.cpp), breaking
-  warning-as-error builds.
 - [A public nested type inside a private parent is emitted through an
   inaccessible qualified
   name](tests/tool/regressions/public_nested_in_private_parent.cpp).
@@ -398,8 +399,6 @@ Benchmark runs are reported by the
   (tests/tool/packed_field_test.cpp); this is an implementation-dependent
   layout case. Use an aligned field representation such as `std::array` when
   whole-field access is required.
-- [Pointer-wrapped nested template field types lose their enclosing-record
-  qualifier in `field.type_name()`](tests/tool/regressions/nested_template_field_name.cpp).
 - [Pointer fields whose external pointee is only forward-declared are silently
   ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
   warning while the enclosing record is reflected best-effort.
