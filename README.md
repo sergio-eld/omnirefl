@@ -31,7 +31,7 @@ omni_reflected_target(example)
 ```
 
 Instrumentation can also be triggered explicitly through `<target>.omni`
-(`example.omni` here):
+(`example.omni` for the `example` target):
 
 ```bash
 cmake --build build -t example.omni
