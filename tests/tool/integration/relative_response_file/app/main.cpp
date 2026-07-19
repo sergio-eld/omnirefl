@@ -10,6 +10,6 @@ struct record {
 
 int main() {
   return omni::reflected_call(
-    [](auto binding) -> int { return binding.value.value; },
+    [](auto binding) -> int { return binding.record.value; },
     record{0});
 }

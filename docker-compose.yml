@@ -1,9 +1,10 @@
 # Local package-test entrypoints use the same public shape as CI:
 #
-#   TEST_PLATFORM=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows>
+#   UBUNTU_VERSION=<18.04|20.04|22.04>
 #   TOOLCHAIN=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
 #
-# Linux package tests and benchmarks use TEST_PLATFORM + TOOLCHAIN to select the image.
+# Ubuntu package tests and benchmarks use UBUNTU_VERSION + TOOLCHAIN to select
+# the image. Alpine and Windows services receive only TOOLCHAIN.
 # Alpine has a dedicated service because it unpacks the TGZ package instead of
 # installing the DEB package. Windows tests use separate services where a
 # matrix row needs a different image or shell, but still receive only TOOLCHAIN.
@@ -92,7 +93,7 @@ services:
         mv /tmp/package/*.zip /packages/
 
   test-alpine:
-    image: ghcr.io/sergio-eld/test-alpine
+    image: ghcr.io/sergio-eld/omnirefl-test-alpine:3.23.3-x86_64-${TOOLCHAIN:-gcc}
     build:
       context: .
       dockerfile: docker/test-alpine.Dockerfile
@@ -153,7 +154,7 @@ services:
         exit $$rc
 
   test-ubuntu:
-    image: ghcr.io/sergio-eld/test-${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}
+    image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION:-22.04}-x86_64-${TOOLCHAIN:-gcc}
     build:
       context: .
       dockerfile: docker/test-ubuntu.Dockerfile
@@ -162,10 +163,10 @@ services:
         COMPILER: ${TOOLCHAIN:-gcc}
     volumes:
       - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
-      - ${TEST_RESULTS_DIR:-./artifacts/test-results/${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}}:/results:rw
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/ubuntu-${UBUNTU_VERSION:-22.04}-${TOOLCHAIN:-gcc}}:/results:rw
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
-      TEST_PLATFORM: ${TEST_PLATFORM:-ubuntu-22.04}
+      TEST_PLATFORM: ubuntu-${UBUNTU_VERSION:-22.04}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     working_dir: /tmp/build
     entrypoint:
@@ -216,7 +217,10 @@ services:
         exit $$rc
 
   benchmark:
-    image: ghcr.io/sergio-eld/test-${TEST_PLATFORM:-ubuntu-22.04}-${TOOLCHAIN:-gcc}
+    image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION:-22.04}-x86_64-${TOOLCHAIN:-gcc}
+    environment:
+      TEST_PLATFORM: ubuntu-${UBUNTU_VERSION:-22.04}
+      TOOLCHAIN: ${TOOLCHAIN:-gcc}
     volumes:
       - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/benchmarks}:/results:rw
@@ -294,7 +298,7 @@ services:
           done
 
   test-windows-msvc:
-    image: ghcr.io/sergio-eld/test-windows-${TOOLCHAIN:-msvc}
+    image: ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-${TOOLCHAIN:-msvc}
     # Windows Docker Compose creates a new NAT network per project by default.
     # On the self-hosted runner those per-run networks can lose outbound
     # connectivity, so Windows package tests use Docker's existing `nat`.
@@ -372,7 +376,7 @@ services:
         exit $$rc
 
   test-windows-msys2:
-    image: ghcr.io/sergio-eld/test-windows-msys2
+    image: ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-msys2
     # Windows Docker Compose creates a new NAT network per project by default.
     # On the self-hosted runner those per-run networks can lose outbound
     # connectivity, so Windows package tests use Docker's existing `nat`.

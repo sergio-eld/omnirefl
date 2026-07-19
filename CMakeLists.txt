@@ -351,6 +351,7 @@ if(ENABLE_PACKAGE)
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/clean_build.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/reflected_target.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_omnirefl_from_ccdb.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")

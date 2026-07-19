@@ -1,6 +1,6 @@
 
-#include <gtest/gtest.h>
 #include "structs.h" //< todo: move to a separate file
+#include <gtest/gtest.h>
 
 #include <omnirefl/reflection.hpp>
 
@@ -14,7 +14,7 @@ struct record {
 struct read_value {
   template <typename Binding>
   int operator()(Binding binding) const {
-    return binding.value.value;
+    return binding.record.value;
   }
 };
 #endif
@@ -27,7 +27,7 @@ TEST(cmake_integration, compile_command_filter_matches_exact_target) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   EXPECT_EQ(1,
     omni::reflected_call(
-      [](auto binding) -> int { return binding.value.value; },
+      [](auto binding) -> int { return binding.record.value; },
       ccdb_output_filter_test::record{1}));
 #else
   EXPECT_EQ(1,

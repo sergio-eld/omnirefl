@@ -81,19 +81,22 @@ int main() {
   const auto write = [](omni::binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
+      // Bindings and field bindings are trivial to copy.
       std::apply(
         [](omni::field_binding auto... field) -> void {
-          const auto set = [](omni::field_binding auto field) -> void {
+          const auto write = [](omni::field_binding auto field) -> void {
             constexpr std::string_view name = field.name();
 
+            // value() is read-only; ref() exposes a writable reference.
             if constexpr ("foo"sv == name)
-              field.set_value(8);
+              field.ref() = 8;
 
+            // operator* and operator-> are QoL accessors.
             if constexpr ("bar"sv == name)
-              field.set_value("after");
+              *field = "after";
           };
 
-          (set(field), ...);
+          (write(field), ...);
         },
         b.public_fields());
     };
@@ -130,9 +133,10 @@ Omnirefl focuses on POD-like records and enums.
 - Globally accessible named records and enums.
 - Nested named records/enums of supported globally accessible parents.
 - Unconstrained primary record templates, including use as CRTP bases.
-- Public data fields: names, type names, annotations, value retrieval, mutation
-  of writable fields, and `is_const()`/`is_mutable()`/`is_volatile()` traits.
-- Enumerator names, values, and annotations.
+- Public data fields: names, type names, documentation, value retrieval,
+  mutation of writable fields, reference access when safe, and
+  `is_const()`/`is_mutable()`/`is_volatile()`/`is_deprecated()` traits.
+- Enumerator names, values, and documentation.
 - Dependency discovery through:
   - public field types
   - public bases and transitive public bases
@@ -176,6 +180,15 @@ Omnirefl focuses on POD-like records and enums.
   out-of-scope queries as errors on a best-effort basis.
 - Public data members only. Private/protected fields are skipped, including
   fields inherited through public bases. Member functions are not reflected.
+- GCC 16 diagnoses the intentional incomplete-type SFINAE used for nested
+  reflection with `-Wsfinae-incomplete`. Generated headers suppress this warning
+  only within generated declarations. This workaround should be monitored;
+  current nested record and enum tests do not reproduce the unstable
+  specialization selection targeted by the warning.
+- [Deprecated public fields can emit compiler deprecation diagnostics while
+  their metadata is formed](tests/tool/regressions/deprecated_public_field.cpp),
+  before `is_deprecated()` can filter them. Deferring this access would require
+  replacing the natural `typename Field::type` interface with a template query.
 - Local and unnamed types are not supported. Experimental indexed support exists
   for investigation (`omni_reflected_target(... ENABLE_INDEX_MODE)`), but is
   not part of the release contract: it has proven unstable because function
@@ -214,10 +227,9 @@ as Clang compilation errors. Compiler warnings are not reported by omnirefl.
 
 Install options:
 
-- Latest release:
-  [download the packaged archive for your platform](https://github.com/sergio-eld/omnirefl/releases/latest).
-  Linux packages are published as `.deb` and `.tar.gz`; Windows packages are
-  published as `.zip`.
+- Release archives:
+  [browse published releases](https://github.com/sergio-eld/omnirefl/releases).
+  Linux release packages use `.deb` and `.tar.gz`; Windows packages use `.zip`.
 - Latest CI artifact:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
@@ -304,7 +316,7 @@ docker compose run --rm --entrypoint /bin/ash build-linux
   runnable README example.
 - [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
   is the executable usage guide with C++20, compatibility, dependency,
-  template, annotation, schema, and write examples. It is written for limited
+  template, documentation, schema, and write examples. It is written for limited
   C++20 support and avoids `<concepts>` plus C++20 ranges algorithms.
 
 ## Tested Toolchains
@@ -330,8 +342,9 @@ Current package/install coverage is reported by the
 - (+) `Windows:MSYS2 clang` covered by CI package matrix
 - TODO(High): cross-build the tool for `macOS`.
 - TODO(High): cross-build the tool for `ARM64` targets.
-- TODO(High): investigate switching the tool build to Cosmopolitan after a
-  baseline benchmark is in place.
+- (-) Cosmopolitan 4.0.2 cannot build the tool: its bundled libc++ 19 lacks
+  required C++23 library interfaces. Revisit after its standard library is
+  updated.
 
 ## Is It Slow?
 
@@ -364,7 +377,7 @@ Benchmark runs are reported by the
 - Target: `linux-x86_64`
 - Environment: Ubuntu 22.04 GCC package-test image
 - Baseline target: `benchmark.baseline`
-- Raw history artifact: `benchmark-history-linux-x86_64-gcc`
+- Raw history artifact: `benchmark-history-linux-x86_64-gcc-attempt-<N>`
 - Reported baseline: average of the last 5 stored runs
 - Tracked metrics:
   - reflection/tool wall time for `benchmark.baseline.omni`
@@ -380,13 +393,6 @@ Benchmark runs are reported by the
 
 ### Reflection Usage
 
-- **High:** [Volatile bitfields and other copy-accessed volatile scalar
-  fields](tests/tool/api_structs.hpp#L25) produce generated accessors with
-  volatile-qualified return types, triggering `-Wdeprecated-volatile` in
-  C++20 and breaking warning-as-error builds.
-- [Generated accessors trigger deprecation warnings for deprecated public
-  fields](tests/tool/regressions/deprecated_public_field.cpp), breaking
-  warning-as-error builds.
 - [A public nested type inside a private parent is emitted through an
   inaccessible qualified
   name](tests/tool/regressions/public_nested_in_private_parent.cpp).
@@ -394,8 +400,11 @@ Benchmark runs are reported by the
   field](tests/tool/regressions/private_nested_type_through_public_base.cpp).
 - [Anonymous unions emit an empty-named container field and omit promoted
   members](tests/tool/regressions/anonymous_union_members.cpp).
-- [Pointer-wrapped nested template field types lose their enclosing-record
-  qualifier in `field.type_name()`](tests/tool/regressions/nested_template_field_name.cpp).
+- [Compiler-packed misaligned raw arrays have no safe whole-field
+  accessor](tests/tool/packed_field_test.cpp).
+  This is an implementation-dependent
+  layout case. Use an aligned field representation such as `std::array` when
+  whole-field access is required.
 - [Pointer fields whose external pointee is only forward-declared are silently
   ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
   warning while the enclosing record is reflected best-effort.

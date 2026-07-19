@@ -530,7 +530,10 @@ struct nm_qual_type {
   /// namespace
   std::vector<namespace_component> namespaces;
 
-  // todo: store type_id instead
+  // refactorme: model these as `enclosing_record` values carrying declaration
+  // identity and template-specialization spelling. Name renderers could then
+  // evaluate ordinary and specialized records through one component pipeline
+  // instead of recovering missing structure from source text.
   /// non-empty for nested types `struct foo { struct bar{}; };`
   std::vector<std::string> enclosing_records;
 
@@ -562,11 +565,11 @@ struct field_data {
   enum class value_access {
     reference,
     copy,
-    array_copy,
+    misaligned_array,
   } access;
 
-  std::vector<std::size_t> array_extents;
   bool is_volatile;
+  bool is_deprecated;
 
   enum {
     none = 0,
@@ -1175,16 +1178,28 @@ bool is_compound_dependency_route(const clang::CXXRecordDecl *record) {
           ->getName()));
 }
 
+std::string format_type_name(const nm_qual_type &type) {
+  const std::string type_name = type.name.value_or("(unnamed)");
+  return std::format("{}",
+    std::array{
+      std::span{type.enclosing_records},
+      std::span{&type_name, std::size_t{1}},
+    } //
+      | std::views::join //
+      | std::views::join_with("::"sv) //
+      | util::format_range);
+}
+
 std::string format(const nm_qual_type &type) {
   const std::vector namespace_names = type.namespaces //
     | std::views::transform(&namespace_component::name)
     | std::ranges::to<std::vector>();
 
-  const std::string type_name = type.name.value_or("(unnamed)");
+  const std::string type_name = format_type_name(type);
+
   return std::format("{}",
     std::array{
       std::span{namespace_names},
-      std::span{type.enclosing_records},
       std::span{&type_name, std::size_t{1}},
     } //
       | std::views::join //
@@ -2217,8 +2232,7 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
       ctx.errors.reflected_call_args.push_back(std::move(candidate.error));
   }
 
-  for (const meta::type_id &type_name :
-    ctx.skipped_virtual_base_dependencies) {
+  for (const meta::type_id &type_name : ctx.skipped_virtual_base_dependencies) {
     log(log_level::warning, [&type_name] {
       return std::format(
         "\nreflection dependency '{}' skipped: "
@@ -2392,18 +2406,6 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
 
 namespace render::impl {
 
-std::string format_type_name(const meta::nm_qual_type &t) {
-  const std::string type_name = t.name.value_or("(unnamed)");
-  return std::format("{}",
-    std::array{
-      std::span{t.enclosing_records},
-      std::span{&type_name, std::size_t{1}},
-    } //
-      | std::views::join //
-      | std::views::join_with("::"sv) //
-      | util::format_range);
-}
-
 std::string format_primary_template_type_name(const meta::nm_qual_type &t,
   const std::string &primary_name) {
   return std::format("{}",
@@ -2504,9 +2506,9 @@ std::string namespace_opening(const meta::namespace_component &ns) {
 std::string forward_declaration(const meta::reflectable &t) {
   assert(t.definition.type_name.name);
 
-  const std::string name = format_type_name(t.definition.type_name);
   const auto format_data_sum =
-    [&name, &t]<typename... U>(const std::variant<U...> &data) -> std::string {
+    [name = meta::format_type_name(t.definition.type_name), &t]<typename... U>(
+      const std::variant<U...> &data) -> std::string {
     return std::visit(
       [&name, &t]<typename T>(const T &data) -> std::string {
         if constexpr (std::same_as<meta::enum_data, T>) {
@@ -4335,161 +4337,239 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
   };
 }
 
+namespace meta::impl {
+
+struct named_type_source {
+  const clang::NamedDecl *declaration;
+  clang::NestedNameSpecifierLoc qualifier;
+  clang::SourceLocation name;
+};
+
+std::optional<named_type_source> named_type_source_from(clang::TypeLoc type) {
+  if (const clang::QualifiedTypeLoc qualified =
+        type.getAs<clang::QualifiedTypeLoc>()) {
+    return named_type_source_from(qualified.getUnqualifiedLoc());
+  }
+
+  if (const clang::PointerTypeLoc pointer =
+        type.getAs<clang::PointerTypeLoc>()) {
+    return named_type_source_from(pointer.getPointeeLoc());
+  }
+
+  if (const clang::ReferenceTypeLoc reference =
+        type.getAs<clang::ReferenceTypeLoc>()) {
+    return named_type_source_from(reference.getPointeeLoc());
+  }
+
+  if (const clang::ArrayTypeLoc array = type.getAs<clang::ArrayTypeLoc>())
+    return named_type_source_from(array.getElementLoc());
+
+  if (const clang::TemplateSpecializationTypeLoc specialization =
+        type.getAs<clang::TemplateSpecializationTypeLoc>()) {
+    const clang::TemplateDecl *const template_decl =
+      specialization.getTypePtr()->getTemplateName().getAsTemplateDecl();
+
+    if (!template_decl || !template_decl->getTemplatedDecl())
+      return std::nullopt;
+
+    return named_type_source{
+      .declaration = template_decl->getTemplatedDecl(),
+      .qualifier = specialization.getQualifierLoc(),
+      .name = specialization.getTemplateNameLoc(),
+    };
+  }
+
+  if (const clang::TagTypeLoc tag = type.getAsAdjusted<clang::TagTypeLoc>()) {
+    return named_type_source{
+      .declaration = tag.getDecl(),
+      .qualifier = tag.getQualifierLoc(),
+      .name = tag.getNameLoc(),
+    };
+  }
+
+  if (const clang::TypedefTypeLoc alias =
+        type.getAsAdjusted<clang::TypedefTypeLoc>()) {
+    return named_type_source{
+      .declaration = alias.getDecl(),
+      .qualifier = alias.getQualifierLoc(),
+      .name = alias.getNameLoc(),
+    };
+  }
+
+  if (const clang::UsingTypeLoc alias =
+        type.getAsAdjusted<clang::UsingTypeLoc>()) {
+    return named_type_source{
+      .declaration = alias.getDecl(),
+      .qualifier = alias.getQualifierLoc(),
+      .name = alias.getNameLoc(),
+    };
+  }
+
+  return std::nullopt;
+}
+
+clang::SourceLocation namespace_free_begin(const named_type_source &source) {
+  if (!source.qualifier
+    || clang::NestedNameSpecifier::Kind::Type
+      != source.qualifier.getNestedNameSpecifier().getKind()) {
+    return source.name;
+  }
+
+  return named_type_source_from(source.qualifier.getAsTypeLoc())
+    .transform(namespace_free_begin)
+    .value_or(source.name);
+}
+
+std::string source_text_from(const clang::ASTContext &ast,
+  clang::SourceRange range) {
+  return clang::Lexer::getSourceText( //
+    clang::CharSourceRange::getTokenRange(range),
+    ast.getSourceManager(),
+    ast.getLangOpts())
+    .str();
+}
+
+std::string type_name_from_decl(const clang::NamedDecl *decl) {
+  assert(decl);
+
+  return meta::format_type_name(meta::nm_qual_type::from_decl(decl));
+}
+
+// Namespaces and enclosing records use the same `::` spelling. Clang's
+// qualifier kind distinguishes `ns::outer::value`, which becomes
+// `outer::value`, from the enclosing-record portion that must be preserved.
+std::string field_type_name_from(const clang::ASTContext &ast,
+  clang::TypeLoc type) {
+  if (const clang::QualifiedTypeLoc qualified =
+        type.getAs<clang::QualifiedTypeLoc>()) {
+    const std::string qualifiers =
+      type.getType().getLocalQualifiers().getAsString(ast.getPrintingPolicy());
+    const clang::UnqualTypeLoc unqualified = qualified.getUnqualifiedLoc();
+    const std::string type_name = field_type_name_from(ast, unqualified);
+
+    if (qualifiers.empty())
+      return type_name;
+
+    if (unqualified.getAs<clang::PointerTypeLoc>())
+      return std::format("{} {}", type_name, qualifiers);
+
+    return std::format("{} {}", qualifiers, type_name);
+  }
+
+  if (const clang::PointerTypeLoc pointer =
+        type.getAs<clang::PointerTypeLoc>()) {
+    const std::string pointee =
+      field_type_name_from(ast, pointer.getPointeeLoc());
+
+    return std::format("{}{}", pointee, pointee.ends_with('*') ? "*" : " *");
+  }
+
+  if (const clang::LValueReferenceTypeLoc reference =
+        type.getAs<clang::LValueReferenceTypeLoc>()) {
+    return std::format("{} &",
+      field_type_name_from(ast, reference.getPointeeLoc()));
+  }
+
+  if (const clang::RValueReferenceTypeLoc reference =
+        type.getAs<clang::RValueReferenceTypeLoc>()) {
+    return std::format("{} &&",
+      field_type_name_from(ast, reference.getPointeeLoc()));
+  }
+
+  if (const clang::ArrayTypeLoc array = type.getAs<clang::ArrayTypeLoc>()) {
+    std::string extents;
+    clang::TypeLoc element = array;
+    while (const clang::ArrayTypeLoc dimension =
+             element.getAs<clang::ArrayTypeLoc>()) {
+      extents += source_text_from(ast, dimension.getBracketsRange());
+      element = dimension.getElementLoc();
+    }
+
+    return field_type_name_from(ast, element) + extents;
+  }
+
+  const std::optional source = named_type_source_from(type);
+  if (!source)
+    return source_text_from(ast, type.getSourceRange());
+
+  if (source->qualifier
+    && clang::NestedNameSpecifier::Kind::Type
+      == source->qualifier.getNestedNameSpecifier().getKind()) {
+    return source_text_from(ast,
+      {namespace_free_begin(*source), type.getEndLoc()});
+  }
+
+  const std::string type_name = type_name_from_decl(source->declaration);
+  if (const clang::TemplateSpecializationTypeLoc specialization =
+        type.getAs<clang::TemplateSpecializationTypeLoc>()) {
+    return type_name
+      + source_text_from(ast,
+        {specialization.getLAngleLoc(), specialization.getRAngleLoc()});
+  }
+
+  return type_name;
+}
+
+std::string field_type_name(const clang::ASTContext &ast,
+  const clang::FieldDecl *field) {
+  assert(field);
+
+  const clang::TypeSourceInfo *type_source_info = field->getTypeSourceInfo();
+  if (!type_source_info)
+    return field->getType().getAsString(ast.getPrintingPolicy());
+
+  return field_type_name_from(ast,
+    type_source_info->getTypeLoc().getUnqualifiedLoc());
+}
+
+} // namespace meta::impl
+
 meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   const clang::FieldDecl *d) {
   assert(d);
 
-  const clang::TypeSourceInfo *type_source_info = d->getTypeSourceInfo();
-  const clang::QualType field_type =
-    type_source_info ? type_source_info->getType() : d->getType();
-
-  const auto short_type_name = [](std::string_view qualified) -> std::string {
-    const std::size_t template_args = qualified.find('<');
-    const std::size_t end = std::string_view::npos == template_args
-      ? qualified.size()
-      : template_args;
-
-    const std::size_t qualifier = qualified.rfind("::", end);
-
-    return std::string{qualified.substr(
-      std::string_view::npos == qualifier ? 0 : qualifier + 2)};
-  };
-
-  const auto type_name_from_decl = [](const clang::NamedDecl *decl) {
-    const meta::nm_qual_type type_name = meta::nm_qual_type::from_decl(decl);
-    std::vector<std::string> elems;
-    elems.reserve(type_name.enclosing_records.size() + std::size_t{1});
-    std::ranges::copy(type_name.enclosing_records, std::back_inserter(elems));
-    elems.emplace_back(type_name.name.value_or("(unnamed)"));
-    return std::format("{}",
-      elems | std::views::join_with("::"sv) | util::format_range);
-  };
-
-  const std::string source_type_name = std::invoke([&] {
-    if (type_source_info) {
-      const clang::SourceRange range =
-        type_source_info->getTypeLoc().getSourceRange();
-
-      const llvm::StringRef text = clang::Lexer::getSourceText(
-        clang::CharSourceRange::getTokenRange(range),
-        ast.getSourceManager(),
-        ast.getLangOpts());
-
-      std::string source = text.str();
-
-      while (!source.empty()
-        && std::isspace(static_cast<unsigned char>(source.back())))
-        source.pop_back();
-
-      if (!source.empty())
-        return source;
-    }
-
-    return field_type.getAsString(ast.getPrintingPolicy());
-  });
-
-  clang::PrintingPolicy qualified_policy = ast.getPrintingPolicy();
-  qualified_policy.FullyQualifiedName = true;
-
-  const std::string qualified_type_name =
-    field_type.getUnqualifiedType().getAsString(qualified_policy);
-
-  const std::string type_name = std::invoke([&] {
-    if (type_source_info) {
-      const clang::UnqualTypeLoc source_type =
-        type_source_info->getTypeLoc().getUnqualifiedLoc();
-
-      if (const clang::TemplateSpecializationTypeLoc template_type =
-            source_type.getAs<clang::TemplateSpecializationTypeLoc>()) {
-        const clang::TemplateDecl *const template_decl =
-          template_type.getTypePtr()->getTemplateName().getAsTemplateDecl();
-
-        if (template_decl && template_decl->getTemplatedDecl()) {
-          // ad hoc: use semantic ownership for the outer template name, but
-          // preserve source-spelled arguments. This removes namespace aliases
-          // without losing enclosing records or alias-template names.
-          return std::format("{}{}",
-            type_name_from_decl(template_decl->getTemplatedDecl()),
-            clang::Lexer::getSourceText( //
-              clang::CharSourceRange::getTokenRange( //
-                template_type.getLAngleLoc(),
-                template_type.getRAngleLoc()),
-              ast.getSourceManager(),
-              ast.getLangOpts())
-              .str());
-        }
-
-        return source_type_name;
-      }
-
-      if (source_type.getAs<clang::DecltypeTypeLoc>())
-        return source_type_name;
-    }
-
-    if (const auto *type_decl = field_type->getAsTagDecl()) {
-      return type_name_from_decl(type_decl);
-    }
-
-    if (const auto *typedef_type = field_type->getAs<clang::TypedefType>())
-      return type_name_from_decl(typedef_type->getDecl());
-
-    return short_type_name(source_type_name);
-  });
-
-  // ad hoc: packed fields cannot always bind to references. Infer safe access
-  // from the record layout and copy fields whose address may be misaligned.
-  const value_access access = std::invoke([&ast, d] {
-    if (d->isBitField())
-      return value_access::copy;
-
-    if (d->getType()->isReferenceType())
-      return value_access::reference;
-
-    const clang::CharUnits field_alignment =
-      ast.getTypeAlignInChars(d->getType());
-
-    if (field_alignment.isOne()
-      || (field_alignment
-          <= ast.getTypeAlignInChars(ast.getCanonicalTagType(d->getParent()))
-        && ast.toCharUnitsFromBits(ast.getFieldOffset(d))
-          .isMultipleOf(field_alignment))) {
-      return value_access::reference;
-    }
-
-    if (nullptr != ast.getAsConstantArrayType(d->getType()))
-      return value_access::array_copy;
-
-    // ad hoc: dependent and flexible arrays cannot be materialized as the
-    // nested std::array value used for fixed arrays, so they retain reference
-    // access for now.
-    // todo(high): add copied access for misaligned dependent/flexible arrays.
-    return d->getType()->isArrayType() //
-      ? value_access::reference
-      : value_access::copy;
-  });
-
   return {
     .name = std::string(fn::as<std::string_view>(d->getName())),
-    .type_name = type_name,
-    .qualified_type_name = qualified_type_name,
-    .annotation = annotation_from_decl(ast, d),
-    .access = access,
-    .array_extents = std::invoke([&ast, d, access] {
-      std::vector<std::size_t> extents;
-      if (value_access::array_copy != access)
-        return extents;
+    .type_name = meta::impl::field_type_name(ast, d),
+    .qualified_type_name = std::invoke([&ast, d] -> std::string {
+      clang::PrintingPolicy policy = ast.getPrintingPolicy();
+      policy.FullyQualifiedName = true;
 
-      for (const clang::ConstantArrayType *array =
-             ast.getAsConstantArrayType(d->getType());
-        nullptr != array;
-        array = ast.getAsConstantArrayType(array->getElementType())) {
-        extents.push_back(
-          static_cast<std::size_t>(array->getSize().getZExtValue()));
+      const clang::TypeSourceInfo *source = d->getTypeSourceInfo();
+      const clang::QualType type = source ? source->getType() : d->getType();
+
+      return type.getUnqualifiedType().getAsString(policy);
+    }),
+
+    .annotation = annotation_from_decl(ast, d),
+    // ad hoc: packed fields cannot always bind to references. Infer safe
+    // access from the record layout and copy fields whose address may be
+    // misaligned.
+    .access = std::invoke([&ast, d] -> value_access {
+      if (d->isBitField())
+        return value_access::copy;
+
+      if (d->getType()->isReferenceType())
+        return value_access::reference;
+
+      const clang::CharUnits field_alignment =
+        ast.getTypeAlignInChars(d->getType());
+
+      if (field_alignment.isOne()
+        || (field_alignment
+            <= ast.getTypeAlignInChars(ast.getCanonicalTagType(d->getParent()))
+          && ast.toCharUnitsFromBits(ast.getFieldOffset(d))
+            .isMultipleOf(field_alignment))) {
+        return value_access::reference;
       }
 
-      return extents;
+      return d->getType()->isArrayType() //
+        ? value_access::misaligned_array
+        : value_access::copy;
     }),
+
     .is_volatile = d->getType().isVolatileQualified(),
+    .is_deprecated = d->hasAttr<clang::DeprecatedAttr>(),
     .qualified = d->isMutable()
       ? as_mutable
       : (d->getType().isConstQualified() ? as_const : none),
@@ -5094,13 +5174,13 @@ std::string escaped_string_literal_content(std::string_view s) {
   return out;
 }
 
-std::string annotation_method(std::string_view annotation) {
+std::string documentation_method(std::string_view documentation) {
   return std::format(
-    "\n  static constexpr auto annotation() noexcept"
+    "\n  static constexpr auto documentation() noexcept"
     "\n    -> const char(&)[sizeof(\"{0}\")] {{"
     "\n    return \"{0}\";"
     "\n  }}",
-    escaped_string_literal_content(annotation));
+    escaped_string_literal_content(documentation));
 }
 
 // render `_omni_{root}_as_root` for `root::inner_type` as input
@@ -5291,7 +5371,7 @@ std::string reflectable_head(const meta::nm_qual_type &t,
         reflected_qualified_type_name,
 
         // 6
-        annotation_method(annotation));
+        documentation_method(annotation));
     }
   }
 
@@ -5328,13 +5408,13 @@ std::string reflectable_head(const meta::nm_qual_type &t,
     reflectable_entity(d),
 
     // 3
-    format_type_name(t),
+    meta::format_type_name(t),
 
     // 4
     meta::format(t),
 
     // 5
-    annotation_method(annotation));
+    documentation_method(annotation));
 }
 
 std::string format_accessed_type(std::string root,
@@ -5404,9 +5484,9 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t,
 
     matched_type,
     reflectable_entity(d),
-    format_type_name(t),
+    meta::format_type_name(t),
     meta::format(t),
-    annotation_method(annotation));
+    documentation_method(annotation));
 }
 
 template <meta::reflectable_data Data>
@@ -5438,9 +5518,9 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
 
     index,
     reflectable_entity(d),
-    format_type_name(t),
+    meta::format_type_name(t),
     meta::format(t),
-    annotation_method(annotation));
+    documentation_method(annotation));
 }
 
 std::string reflectable_body(const meta::enum_data &d) {
@@ -5466,52 +5546,45 @@ std::string reflectable_body(const meta::record_data &d) {
     [](const auto &field_index) {
       const auto &[index, f] = field_index;
 
-      const auto [value_type, value_expression] = std::invoke([&f] {
-        if (meta::field_data::value_access::array_copy == f.access) {
-          // ad hoc: raw arrays cannot be returned by value. Copy packed fixed
-          // arrays into recursively nested std::array values instead.
-          const auto format_array_copy = //
-            [&f](this auto self,
-              std::span<const std::size_t> extents,
-              std::string_view indexes) -> std::string {
-            return std::format(
-              "typename omni::detail::_packed_value<"
-              "omni::compat::remove_cvref_t<"
-              "decltype(t.{0}{1})>>::type{{{{{2}}}}}",
-              f.name,
-              indexes,
-              std::views::iota(std::size_t{0}, extents.front()) //
-                | std::views::transform(
-                  [&f, self, extents, indexes](std::size_t index) {
-                    const std::string nested_indexes =
-                      std::format("{}[{}]", indexes, index);
+      const std::string accessors = std::invoke([&f] {
+        // Misaligned packed raw arrays emit metadata without accessors.
+        if (meta::field_data::value_access::misaligned_array == f.access)
+          return std::string{};
 
-                    return 1 == extents.size() //
-                      ? std::format("t.{}{}", f.name, nested_indexes)
-                      : self(extents.subspan(1), nested_indexes);
-                  }) //
-                | std::views::join_with(", "sv) //
-                | util::format_range);
-          };
-
-          return std::pair{
-            std::format(
-              "typename omni::detail::_packed_value<decltype(t.{})>::type",
-              f.name),
-            format_array_copy(f.array_extents, ""sv),
-          };
-        }
-
-        // FIXME(high): copy accessors retain top-level cv-qualification from
-        // volatile bitfields and packed scalar fields. C++20 deprecates
-        // volatile-qualified scalar return types; strip the copy's top-level
-        // cv without changing the volatile field read or metadata.
-        return std::pair{
-          meta::field_data::value_access::copy == f.access
-            ? std::format("decltype(t.{})", f.name)
-            : std::format("decltype((t.{}))", f.name),
+        const bool by_reference =
+          meta::field_data::value_access::reference == f.access;
+        const std::string value_type = //
+          by_reference
+          ? std::format("decltype((t.{}))", f.name)
+          : std::format("omni::compat::remove_cvref_t<decltype(t.{})>", f.name);
+        return std::format(
+          "\n\n    // Emitted for reference and copy access."
+          "\n    // Lvalue reads preserve owner qualification."
+          "\n    template <typename _T>"
+          "\n    static constexpr auto value(const _T &t) noexcept"
+          "\n      -> {1} {{"
+          "\n      return {2};"
+          "\n    }}"
+          "\n\n    // Emitted for reference and copy access."
+          "\n    // Supports assignment through the public writable-field wrapper."
+          "\n    template <typename _T, typename V>"
+          "\n    static void set_value(_T &t, V &&v) {{"
+          "\n      t.{0} = std::forward<V>(v);"
+          "\n    }}"
+          "{3}",
+          f.name,
+          value_type,
           std::format("t.{}", f.name),
-        };
+          by_reference
+            ? std::format(
+                "\n\n    // Emitted only for fields that can bind to a reference."
+                "\n    template <typename _T>"
+                "\n    static constexpr auto ref(_T &t) noexcept"
+                "\n      -> decltype((t.{0})) {{"
+                "\n      return t.{0};"
+                "\n    }}",
+                f.name)
+            : std::string{});
       });
 
       return std::format(
@@ -5527,30 +5600,26 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n    }}"
         "\n"
         "\n    static constexpr auto type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{6}\")] {{"
-        "\n      return \"{6}\";"
+        "\n      -> const char(&)[sizeof(\"{8}\")] {{"
+        "\n      return \"{8}\";"
         "\n    }}"
         "\n"
         "\n    static constexpr auto qualified_type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{7}\")] {{"
-        "\n      return \"{7}\";"
+        "\n      -> const char(&)[sizeof(\"{9}\")] {{"
+        "\n      return \"{9}\";"
         "\n    }}"
-        "{8}"
+        "{10}"
         "\n"
         "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
         "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
         "\n    static constexpr bool is_volatile() noexcept {{ return {4}; }}"
-        "\n"
-        "\n    template <typename _T>"
-        "\n    static constexpr auto value(const _T &t) noexcept"
-        "\n      -> {5} {{"
-        "\n      return {9};"
-        "\n    }}"
-        "\n"
-        "\n    template <typename _T, typename V>"
-        "\n    static void set_value(_T &t, V &&v) {{"
-        "\n      t.{0} = std::forward<V>(v);"
-        "\n    }}"
+        "\n    static constexpr bool has_value_access() noexcept"
+        " {{ return {5}; }}"
+        "\n    static constexpr bool has_reference_access() noexcept"
+        " {{ return {6}; }}"
+        "\n    static constexpr bool is_deprecated() noexcept"
+        " {{ return {7}; }}"
+        "{11}"
         "\n  }};",
         // 0
         f.name,
@@ -5568,19 +5637,25 @@ std::string reflectable_body(const meta::record_data &d) {
         f.is_volatile,
 
         // 5
-        value_type,
+        meta::field_data::value_access::misaligned_array != f.access,
 
         // 6
-        escaped_string_literal_content(f.type_name),
+        meta::field_data::value_access::reference == f.access,
 
         // 7
-        escaped_string_literal_content(f.qualified_type_name),
+        f.is_deprecated,
 
         // 8
-        annotation_method(f.annotation),
+        escaped_string_literal_content(f.type_name),
 
         // 9
-        value_expression);
+        escaped_string_literal_content(f.qualified_type_name),
+
+        // 10
+        documentation_method(f.annotation),
+
+        // 11
+        accessors);
     };
 
   return std::format(
@@ -5701,25 +5776,10 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     ctx.nested,
     ctx.indexed);
 
-  const bool has_packed_array_copies = std::invoke(
-    [](const auto &...rs) {
-      return (std::ranges::any_of(rs, [](const auto &r) {
-        const auto *record = std::get_if<meta::record_data>(&r.type.data);
-        return nullptr != record
-          && std::ranges::any_of(record->public_fields,
-            [](const meta::field_data &field) {
-              return meta::field_data::value_access::array_copy == field.access;
-            });
-      }) || ...);
-    },
-    ctx.fwd_declarables,
-    ctx.nested,
-    ctx.indexed);
-
   const std::vector required_includes = //
     std::to_array<std::string_view>({
       "omnirefl/reflection.hpp",
-      has_enums || has_packed_array_copies ? "array" : "",
+      has_enums ? "array" : "",
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
@@ -5751,6 +5811,14 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\n  typename... T>"
     "\nstruct _omni_template_arg<I, Template<T...>>:"
     "\n    std::tuple_element<I, std::tuple<T...>> {{}};"
+    "\n"
+    "\n#if defined(__GNUC__) && !defined(__clang__) && 16 <= __GNUC__"
+    "\n// GCC 16 diagnoses the intentional incomplete-type SFINAE used to"
+    "\n// discover nested reflected types. Existing nested metadata tests validate"
+    "\n// specialization selection; keep this workaround monitored."
+    "\n#  pragma GCC diagnostic push"
+    "\n#  pragma GCC diagnostic ignored \"-Wsfinae-incomplete\""
+    "\n#endif"
     "\n"
     "\n// -- forward declarable reflected types --------"
     "\n{2}"
@@ -5789,6 +5857,10 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\n    omni::compat::void_t<typename omni::detail::_reflected<typename std::decay<T>::type>::type>"
     "\n> : std::true_type {{}};"
     "\n"
+    "\n#if defined(__GNUC__) && !defined(__clang__) && 16 <= __GNUC__"
+    "\n#  pragma GCC diagnostic pop"
+    "\n#endif"
+    "\n"
     "\n",
 
     // 0:
@@ -5822,20 +5894,8 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 5: ad hoc: packed fixed-array copy accessors reference this helper only
-    // through generated source text, so emit it only when those accessors
-    // exist.
-    has_packed_array_copies
-      ? "template <typename T>"
-        "\nstruct _packed_value {"
-        "\n  using type = typename std::remove_cv<T>::type;"
-        "\n};"
-        "\n"
-        "\ntemplate <typename T, std::size_t N>"
-        "\nstruct _packed_value<T[N]> {"
-        "\n  using type = std::array<typename _packed_value<T>::type, N>;"
-        "\n};"
-      : "",
+    // 5:
+    "",
 
     // 6:
     ctx.fwd_declarables //

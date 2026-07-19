@@ -15,8 +15,8 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <sstream>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -111,8 +111,8 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  *   omni::binding_t<T>::public_fields() -> omni::field_binding_t<...>
  *
  * The first test below shows the stable reflected-scope interface. The rest of
- * this file covers enums, bindings, dependency routes, annotations, bitfields,
- * primary templates, and schema-style traversal.
+ * this file covers enums, bindings, dependency routes, documentation,
+ * bitfields, primary templates, and schema-style traversal.
  */
 
 /// API exposition -------------------------------------------------------------
@@ -159,10 +159,8 @@ struct field_summary {
     return name == rhs.name //
       && type_name == rhs.type_name
       && qualified_type_name == rhs.qualified_type_name
-      && annotation == rhs.annotation
-      && is_const == rhs.is_const
-      && is_mutable == rhs.is_mutable
-      && is_volatile == rhs.is_volatile;
+      && annotation == rhs.annotation && is_const == rhs.is_const
+      && is_mutable == rhs.is_mutable && is_volatile == rhs.is_volatile;
   }
 };
 
@@ -178,8 +176,7 @@ struct reflected_summary {
     return entity == rhs.entity //
       && type_name == rhs.type_name
       && qualified_type_name == rhs.qualified_type_name
-      && annotation == rhs.annotation
-      && fields == rhs.fields
+      && annotation == rhs.annotation && fields == rhs.fields
       && enumerators == rhs.enumerators;
   }
 };
@@ -200,41 +197,40 @@ TEST(exposition, reflected_scope_overview) {
   // Prefer captures for extra arguments that should not be reflected. This
   // exposition is artificial; a summary-only visitor should usually return by
   // value.
-  const auto render =
-    [&ctx]<typename Meta>(Meta m) -> void {
-      ctx.entity =
-        omni::reflected_entity::record == m.entity() ? "record"sv : "enum"sv;
-      ctx.type_name = m.type_name();
-      ctx.qualified_type_name = m.qualified_type_name();
-      ctx.annotation = m.annotation();
+  const auto render = [&ctx]<typename Meta>(Meta m) -> void {
+    ctx.entity =
+      omni::reflected_entity::record == m.entity() ? "record"sv : "enum"sv;
+    ctx.type_name = m.type_name();
+    ctx.qualified_type_name = m.qualified_type_name();
+    ctx.annotation = m.documentation();
 
-      if constexpr (omni::reflected_entity::record == m.entity()) {
-        // `omni::compat::apply` provides the same shape for earlier standards.
-        std::apply(
-          [&ctx]<omni::field_meta... FieldMeta>(FieldMeta... field) -> void {
-            (ctx.fields.push_back({
-               .name = field.name(),
-               // Field declaration spelling with the outer namespace omitted.
-               // Reflectable field types can be queried separately through
-               // `omni::reflected<FieldMeta::type>()`.
-               .type_name = field.type_name(),
-               // Source spelling with namespaces restored when Clang can
-               // identify the declaration.
-               .qualified_type_name = field.qualified_type_name(),
-               .annotation = field.annotation(),
-               .is_const = field.is_const(),
-               .is_mutable = field.is_mutable(),
-               .is_volatile = field.is_volatile(),
-             }),
-              ...);
-          },
-          m.public_fields());
-      } else {
-        static_assert(omni::reflected_entity::enumeration == m.entity());
-        for (const auto &value_name : m.enumerators())
-          ctx.enumerators.push_back(value_name.second);
-      }
-    };
+    if constexpr (omni::reflected_entity::record == m.entity()) {
+      // `omni::compat::apply` provides the same shape for earlier standards.
+      std::apply(
+        [&ctx]<omni::field_meta... FieldMeta>(FieldMeta... field) -> void {
+          (ctx.fields.push_back({
+             .name = field.name(),
+             // Field declaration spelling with the outer namespace omitted.
+             // Reflectable field types can be queried separately through
+             // `omni::reflected<FieldMeta::type>()`.
+             .type_name = field.type_name(),
+             // Source spelling with namespaces restored when Clang can
+             // identify the declaration.
+             .qualified_type_name = field.qualified_type_name(),
+             .annotation = field.documentation(),
+             .is_const = field.is_const(),
+             .is_mutable = field.is_mutable(),
+             .is_volatile = field.is_volatile(),
+           }),
+            ...);
+        },
+        m.public_fields());
+    } else {
+      static_assert(omni::reflected_entity::enumeration == m.entity());
+      for (const auto &value_name : m.enumerators())
+        ctx.enumerators.push_back(value_name.second);
+    }
+  };
 
   const exposition::reflected_summary k_expected_record{
     .entity = "record"sv,
@@ -322,26 +318,26 @@ TEST(exposition, reflected_scope_overview) {
 
 // Field bindings allow mutation of public data members, including bitfields.
 TEST(exposition, write_foobar) {
-  const auto write_foobar = [](omni::binding auto b)
-    -> exposition::foobar_record {
-      omni::compat::apply(
-        [](omni::field_binding auto... field) {
-          const auto write = [](omni::field_binding auto field) {
-            constexpr std::string_view field_name = field.name();
+  const auto write_foobar = //
+    [](omni::binding auto b) -> exposition::foobar_record {
+    omni::compat::apply(
+      [](omni::field_binding auto... field) {
+        const auto write = [](omni::field_binding auto field) {
+          constexpr std::string_view field_name = field.name();
 
-            if constexpr (field_name.find("foo") != std::string_view::npos)
-              field.set_value(8);
+          if constexpr (field_name.find("foo") != std::string_view::npos)
+            field.set_value(8);
 
-            if constexpr (field_name.find("bar") != std::string_view::npos)
-              field.set_value(15);
-          };
+          if constexpr (field_name.find("bar") != std::string_view::npos)
+            field.set_value(15);
+        };
 
-          (write(field), ...);
-        },
-        b.public_fields());
+        (write(field), ...);
+      },
+      b.public_fields());
 
-      return std::move(b.value);
-    };
+    return std::move(b.record);
+  };
 
   const auto record = omni::reflected_call(write_foobar,
     exposition::foobar_record{
@@ -373,11 +369,10 @@ TEST(example, enum_names) {
     omni::reflected_call(
       [](const omni::binding auto status) -> std::string_view {
         const auto enumerators = status.enumerators();
-        const auto it = std::find_if(
-          enumerators.begin(),
+        const auto it = std::find_if(enumerators.begin(),
           enumerators.end(),
           [&status](const auto &value_name) {
-            return value_name.first == status.value;
+            return value_name.first == status.enum_value;
           });
 
         return enumerators.end() == it ? "unknown"sv : it->second;
@@ -423,11 +418,11 @@ TEST(example, binding_storage_forms) {
     static_assert(!decltype(const_binding)::owning::value);
     static_assert(decltype(owning_binding)::owning::value);
 
-    mutable_binding.value.foo_count = 8;
+    mutable_binding.record.foo_count = 8;
 
-    return mutable_binding.value.foo_count //
-      + const_binding.value.bar_count
-      + owning_binding.value.untouched_count;
+    return mutable_binding.record.foo_count //
+      + const_binding.record.bar_count //
+      + owning_binding.record.untouched_count;
   };
 
   EXPECT_EQ(22,
@@ -448,7 +443,7 @@ TEST(example, reflected_value_query) {
   const auto query_value = [](omni::binding auto b) -> std::string_view {
     // `omni::reflected(value)` is a reflected-scope convenience query. It keeps
     // the value qualification instead of forcing the user to spell `decltype`.
-    const omni::binding auto same_value = omni::reflected(b.value);
+    const omni::binding auto same_value = omni::reflected(b.record);
     return same_value.type_name();
   };
 
@@ -458,21 +453,22 @@ TEST(example, reflected_value_query) {
 
 TEST(example, meta_bind_and_field_metadata) {
   const auto inspect = [](omni::meta auto record) -> int {
-    // `meta.bind()` default-constructs an owning binding when the reflected type
-    // is default constructible. `meta.bind(value)` binds an existing object.
+    // `meta.bind()` default-constructs an owning binding when the reflected
+    // type is default constructible. `meta.bind(value)` binds an existing
+    // object.
     auto owned = record.bind();
-    auto non_owning = record.bind(owned.value);
+    auto non_owning = record.bind(owned.record);
 
     return std::apply(
       [&non_owning]<omni::field_meta... Field>(Field... field) {
         // Field metadata can be used without first creating field bindings.
         // Indexes are local to the declaring record and follow declaration
         // order for this simple non-inherited record.
-        ((field.set_value(non_owning.value,
+        ((field.set_value(non_owning.record,
            static_cast<typename Field::type>(field.index() + 1))),
           ...);
 
-        return (field.value(non_owning.value) + ...);
+        return (field.value(non_owning.record) + ...);
       },
       record.public_fields());
   };
@@ -505,8 +501,7 @@ TEST(example, primary_template_read_data) {
 
     bool operator==(const rendered_field &rhs) const {
       return name == rhs.name //
-        && annotation == rhs.annotation
-        && value == rhs.value;
+        && annotation == rhs.annotation && value == rhs.value;
     }
   };
 
@@ -527,7 +522,7 @@ TEST(example, primary_template_read_data) {
           if constexpr ("title"sv == field_name) {
             out.push_back({
               .name = field.name(),
-              .annotation = field.annotation(),
+              .annotation = field.documentation(),
               .value = field.value(),
             });
           }
@@ -535,7 +530,7 @@ TEST(example, primary_template_read_data) {
           if constexpr ("revisions"sv == field_name) {
             out.push_back({
               .name = field.name(),
-              .annotation = field.annotation(),
+              .annotation = field.documentation(),
               .value = std::to_string(field.value()),
             });
           }
@@ -641,10 +636,10 @@ TEST(example, primary_template_from_map) {
     {"count"s, 8},
   };
 
-  const auto from_map =
-    [&table]<omni::meta Result>(Result result_type) -> primary_template::result {
-    const auto init =
-      [&table]<typename T>(omni::type_t<T>, std::string_view name) -> T {
+  const auto from_map = [&table]<omni::meta Result>(
+                          Result result_type) -> primary_template::result {
+    const auto init = [&table]<typename T>(omni::type_t<T>,
+                        std::string_view name) -> T {
       const auto it = table.find(name);
       if (table.end() == it)
         return {};
@@ -672,8 +667,8 @@ TEST(example, primary_template_from_map) {
     };
 
     return std::apply(
-      [&init]<omni::field_meta... Field>(Field... field)
-        -> primary_template::result {
+      [&init]<omni::field_meta... Field>(
+        Field... field) -> primary_template::result {
         return {
           init(omni::type<typename Field::type>, field.name())...,
         };
@@ -826,8 +821,7 @@ TEST(example, annotated_dependencies) {
 
     bool operator==(const rendered_field &rhs) const {
       return name == rhs.name //
-        && type_name == rhs.type_name
-        && annotation == rhs.annotation;
+        && type_name == rhs.type_name && annotation == rhs.annotation;
     }
   };
 
@@ -846,7 +840,7 @@ TEST(example, annotated_dependencies) {
         return {
           .type_name = type.type_name(),
           .qualified_type_name = type.qualified_type_name(),
-          .annotation = type.annotation(),
+          .annotation = type.documentation(),
         };
       };
 
@@ -880,8 +874,8 @@ TEST(example, annotated_dependencies) {
       if constexpr (requires { typename Record::type::second_type; }) {
         out.protocol_types.push_back({
           .protocol = "second_type",
-          .type = render_type(
-            omni::reflected<typename Record::type::second_type>()),
+          .type =
+            render_type(omni::reflected<typename Record::type::second_type>()),
         });
       }
 
@@ -918,20 +912,19 @@ TEST(example, annotated_dependencies) {
 
       omni::compat::apply(
         [&out, render_type](omni::field_meta auto... field) {
-          const auto render =
-            [&out, render_type]<omni::field_meta Field>(Field field) {
+          const auto render = [&out, render_type]<omni::field_meta Field>(
+                                Field field) {
             out.public_fields.push_back({
               .name = field.name(),
               .type_name = field.type_name(),
-              .annotation = field.annotation(),
+              .annotation = field.documentation(),
             });
 
             if constexpr (meta::is<std::tuple, typename Field::type>()) {
               std::invoke(
                 [&out, render_type]<typename... T>(
                   omni::type_t<std::tuple<T...>>) {
-                  (out.from_tuple.push_back(
-                     render_type(omni::reflected<T>())),
+                  (out.from_tuple.push_back(render_type(omni::reflected<T>())),
                     ...);
                 },
                 omni::type<typename Field::type>);
@@ -949,9 +942,8 @@ TEST(example, annotated_dependencies) {
             }
 
             if constexpr (meta::is<std::vector, typename Field::type>()) {
-              out.from_vector.push_back(
-                render_type(
-                  omni::reflected<typename Field::type::value_type>()));
+              out.from_vector.push_back(render_type(
+                omni::reflected<typename Field::type::value_type>()));
             }
           };
 
@@ -972,67 +964,75 @@ TEST(example, annotated_dependencies) {
   const std::vector<rendered_protocol_type> k_expected_protocol_types{
     {
       .protocol = "type"sv,
-      .type = {
-        .type_name = "protocol_type"sv,
-        .qualified_type_name = "dependency::protocol_type"sv,
-        .annotation = "protocol type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_type"sv,
+          .qualified_type_name = "dependency::protocol_type"sv,
+          .annotation = "protocol type alias dependency"sv,
+        },
     },
     {
       .protocol = "value_type"sv,
-      .type = {
-        .type_name = "protocol_value_type"sv,
-        .qualified_type_name = "dependency::protocol_value_type"sv,
-        .annotation = "protocol value_type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_value_type"sv,
+          .qualified_type_name = "dependency::protocol_value_type"sv,
+          .annotation = "protocol value_type alias dependency"sv,
+        },
     },
     {
       .protocol = "first_type"sv,
-      .type = {
-        .type_name = "protocol_first_type"sv,
-        .qualified_type_name = "dependency::protocol_first_type"sv,
-        .annotation = "protocol first_type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_first_type"sv,
+          .qualified_type_name = "dependency::protocol_first_type"sv,
+          .annotation = "protocol first_type alias dependency"sv,
+        },
     },
     {
       .protocol = "second_type"sv,
-      .type = {
-        .type_name = "protocol_second_type"sv,
-        .qualified_type_name = "dependency::protocol_second_type"sv,
-        .annotation = "protocol second_type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_second_type"sv,
+          .qualified_type_name = "dependency::protocol_second_type"sv,
+          .annotation = "protocol second_type alias dependency"sv,
+        },
     },
     {
       .protocol = "key_type"sv,
-      .type = {
-        .type_name = "protocol_key_type"sv,
-        .qualified_type_name = "dependency::protocol_key_type"sv,
-        .annotation = "protocol key_type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_key_type"sv,
+          .qualified_type_name = "dependency::protocol_key_type"sv,
+          .annotation = "protocol key_type alias dependency"sv,
+        },
     },
     {
       .protocol = "error_type"sv,
-      .type = {
-        .type_name = "protocol_error_type"sv,
-        .qualified_type_name = "dependency::protocol_error_type"sv,
-        .annotation = "protocol error_type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_error_type"sv,
+          .qualified_type_name = "dependency::protocol_error_type"sv,
+          .annotation = "protocol error_type alias dependency"sv,
+        },
     },
     {
       .protocol = "value"sv,
-      .type = {
-        .type_name = "protocol_value"sv,
-        .qualified_type_name = "dependency::protocol_value"sv,
-        .annotation = "protocol value alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_value"sv,
+          .qualified_type_name = "dependency::protocol_value"sv,
+          .annotation = "protocol value alias dependency"sv,
+        },
     },
     {
       .protocol = "mapped_type"sv,
-      .type = {
-        .type_name = "protocol_mapped_type"sv,
-        .qualified_type_name = "dependency::protocol_mapped_type"sv,
-        .annotation = "protocol mapped_type alias dependency"sv,
-      },
+      .type =
+        {
+          .type_name = "protocol_mapped_type"sv,
+          .qualified_type_name = "dependency::protocol_mapped_type"sv,
+          .annotation = "protocol mapped_type alias dependency"sv,
+        },
     },
   };
 
@@ -1106,7 +1106,8 @@ TEST(example, annotated_dependencies) {
   EXPECT_EQ(k_expected_from_vector, rendered.from_vector);
 }
 
-/// Compatibility ---------------------------------------------------------------
+/// Compatibility
+/// ---------------------------------------------------------------
 
 TEST(example, cpp14_cpp17_binding_name) {
   using namespace std::string_view_literals;
@@ -1168,6 +1169,8 @@ struct nonassignable {
 struct record {
   int writable;
   const int fixed;
+  // TODO(High): provide a safe whole-field access path for misaligned packed
+  // raw arrays without changing their declared type.
   int raw[2];
   std::array<int, 2> values;
   nonassignable locked;
@@ -1195,8 +1198,8 @@ TEST(example, filter_fields_before_set_value) {
             constexpr std::string_view field_name = field.name();
             constexpr auto replacement = std::array{42, 43};
 
-            // std::array supports whole-value assignment. Raw arrays need
-            // element access through the planned referenceable-field API.
+            // std::array supports whole-value assignment. Misaligned packed
+            // raw arrays currently have no whole-field accessor.
             if constexpr ("values" == field_name) {
               if constexpr (std::is_assignable_v<typename Field::type &,
                               decltype(replacement)>) {
@@ -1437,20 +1440,21 @@ void render_schema(std::ostringstream &out,
   if constexpr (omni::reflected_entity::record == schema.entity()) {
     out << indent << "type: object\n";
     out << indent << "name: " << schema.type_name() << '\n';
-    out << indent << "annotation: " << schema.annotation() << '\n';
+    out << indent << "documentation: " << schema.documentation() << '\n';
     out << indent << "properties:\n";
 
     omni::compat::apply(
       [&out, indent](omni::field_meta auto... field) {
         const auto render_field = //
           [&out, indent]<omni::field_meta Field>(Field field) {
-          out << indent << "  - name: " << field.name() << '\n';
-          out << indent << "    annotation: " << field.annotation() << '\n';
-          out << indent << "    schema:\n";
-          render_schema(out,
-            omni::type<typename Field::type>,
-            std::string{indent} + "      ");
-        };
+            out << indent << "  - name: " << field.name() << '\n';
+            out << indent << "    documentation: " << field.documentation()
+                << '\n';
+            out << indent << "    schema:\n";
+            render_schema(out,
+              omni::type<typename Field::type>,
+              std::string{indent} + "      ");
+          };
 
         (render_field(field), ...);
       },
@@ -1460,7 +1464,7 @@ void render_schema(std::ostringstream &out,
 
     out << indent << "type: string\n";
     out << indent << "name: " << schema.type_name() << '\n';
-    out << indent << "annotation: " << schema.annotation() << '\n';
+    out << indent << "documentation: " << schema.documentation() << '\n';
     out << indent << "enum:\n";
 
     for (const auto &value_name : schema.enumerators()) {
@@ -1515,26 +1519,26 @@ TEST(example, annotated_schema_profile) {
   const std::string k_expected_profile =
     "type: object\n"
     "name: profile\n"
-    "annotation: user profile\n"
+    "documentation: user profile\n"
     "properties:\n"
     "  - name: id\n"
-    "    annotation: database id\n"
+    "    documentation: database id\n"
     "    schema:\n"
     "      type: integer\n"
     "  - name: active\n"
-    "    annotation: account enabled\n"
+    "    documentation: account enabled\n"
     "    schema:\n"
     "      type: boolean\n"
     "  - name: name\n"
-    "    annotation: display name\n"
+    "    documentation: display name\n"
     "    schema:\n"
     "      type: string\n"
     "  - name: account_tier\n"
-    "    annotation: account tier\n"
+    "    documentation: account tier\n"
     "    schema:\n"
     "      type: string\n"
     "      name: profile::tier\n"
-    "      annotation: account tier enum\n"
+    "      documentation: account tier enum\n"
     "      enum:\n"
     "        - basic\n"
     "        - premium\n";
@@ -1547,46 +1551,46 @@ TEST(example, annotated_schema_address_book) {
   const std::string k_expected_address_book =
     "type: object\n"
     "name: address_book\n"
-    "annotation: address collection\n"
+    "documentation: address collection\n"
     "properties:\n"
     "  - name: addresses\n"
-    "    annotation: known addresses\n"
+    "    documentation: known addresses\n"
     "    schema:\n"
     "      type: array\n"
     "      items:\n"
     "        type: object\n"
     "        name: profile::address\n"
-    "        annotation: mailing address\n"
+    "        documentation: mailing address\n"
     "        properties:\n"
     "          - name: city\n"
-    "            annotation: city name\n"
+    "            documentation: city name\n"
     "            schema:\n"
     "              type: string\n"
     "          - name: postal_code\n"
-    "            annotation: postal code\n"
+    "            documentation: postal code\n"
     "            schema:\n"
     "              type: integer\n"
     "  - name: tags\n"
-    "    annotation: public labels\n"
+    "    documentation: public labels\n"
     "    schema:\n"
     "      type: array\n"
     "      items:\n"
     "        type: string\n"
     "  - name: address_by_name\n"
-    "    annotation: named addresses\n"
+    "    documentation: named addresses\n"
     "    schema:\n"
     "      type: object\n"
     "      additionalProperties:\n"
     "        type: object\n"
     "        name: profile::address\n"
-    "        annotation: mailing address\n"
+    "        documentation: mailing address\n"
     "        properties:\n"
     "          - name: city\n"
-    "            annotation: city name\n"
+    "            documentation: city name\n"
     "            schema:\n"
     "              type: string\n"
     "          - name: postal_code\n"
-    "            annotation: postal code\n"
+    "            documentation: postal code\n"
     "            schema:\n"
     "              type: integer\n";
 
@@ -1598,18 +1602,18 @@ TEST(example, annotated_schema_small_record) {
   const std::string k_expected_feature_toggle =
     "type: object\n"
     "name: feature_toggle\n"
-    "annotation: feature toggle\n"
+    "documentation: feature toggle\n"
     "properties:\n"
     "  - name: enabled\n"
-    "    annotation: enabled flag\n"
+    "    documentation: enabled flag\n"
     "    schema:\n"
     "      type: boolean\n"
     "  - name: rollout\n"
-    "    annotation: rollout percentage\n"
+    "    documentation: rollout percentage\n"
     "    schema:\n"
     "      type: number\n"
     "  - name: owners\n"
-    "    annotation: owner aliases\n"
+    "    documentation: owner aliases\n"
     "    schema:\n"
     "      type: array\n"
     "      items:\n"

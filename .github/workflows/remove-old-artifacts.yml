@@ -29,6 +29,19 @@ jobs:
             const masterShortSha = master.data.object.sha.substring(0, 12)
             const cutoffMs = Date.now() - 90 * 1000
 
+            const belongsToActiveRun = async (artifact) => {
+              if (!artifact.workflow_run)
+                return false
+
+              const run = await github.rest.actions.getWorkflowRun({
+                owner,
+                repo,
+                run_id: artifact.workflow_run.id,
+              })
+
+              return 'completed' !== run.data.status
+            }
+
             const artifacts = await github.paginate(
               github.rest.actions.listArtifactsForRepo,
               {owner, repo, per_page: 100})
@@ -59,6 +72,7 @@ jobs:
               const sha = packageSha(artifact)
               const keep =
                 artifact.name.startsWith('benchmark-history') ||
+                artifact.name.startsWith('aggregated-test-results-') ||
                 (
                   isPackage &&
                   masterShortSha === sha
@@ -66,7 +80,9 @@ jobs:
                 retainedPackageShas.has(sha) ||
                 (!isPackage && cutoffMs <= new Date(artifact.created_at).getTime())
 
-              if (keep) {
+              // Recheck immediately before deletion: a rerun may have started
+              // after this cleanup collected its artifact candidates.
+              if (keep || await belongsToActiveRun(artifact)) {
                 core.info(`keeping artifact: ${artifact.name}`)
                 continue
               }

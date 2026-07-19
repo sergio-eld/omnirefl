@@ -1,31 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Defaults
-VERSIONS=(18 20 22)
-COMPILERS=(gcc clang) #< fixme: mingw)
+UBUNTU_VERSIONS=(18.04 20.04 22.04)
+TOOLCHAINS=(gcc clang mingw)
 
-# Args: VERSIONS... -- COMPILERS...
+# Args: UBUNTU_VERSIONS... -- TOOLCHAINS...
 if (($#)); then
-  VERSIONS=()
-  COMPILERS=()
+  UBUNTU_VERSIONS=()
+  TOOLCHAINS=()
   mode=vers
   for a in "$@"; do
     [[ "$a" == "--" ]] && { mode=comp; continue; }
-    [[ $mode == vers ]] && VERSIONS+=("$a") || COMPILERS+=("$a")
+    [[ $mode == vers ]] && UBUNTU_VERSIONS+=("$a") || TOOLCHAINS+=("$a")
   done
 fi
 
-export UBUNTU_VERSION=""
-export COMPILER=""
+docker compose run --rm build-linux
 
-for job in build-linux build-tests-alpine package-linux; do
-  docker compose run --rm "$job" || exit 1
+for toolchain in "${TOOLCHAINS[@]}"; do
+  TOOLCHAIN="$toolchain" docker compose run --rm test-alpine
 done
 
-for v in "${VERSIONS[@]}"; do
-  for c in "${COMPILERS[@]}"; do
-    UBUNTU_VERSION="$v" COMPILER="$c" \
-      docker compose run --rm test-ubuntu || exit 1
+for version in "${UBUNTU_VERSIONS[@]}"; do
+  for toolchain in "${TOOLCHAINS[@]}"; do
+    UBUNTU_VERSION="$version" TOOLCHAIN="$toolchain" \
+      docker compose run --rm test-ubuntu
   done
 done

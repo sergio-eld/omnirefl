@@ -1,6 +1,6 @@
 
-#include <gtest/gtest.h>
 #include "shared_structs.h"
+#include <gtest/gtest.h>
 
 #include <omnirefl/reflection.hpp>
 
@@ -97,7 +97,7 @@ struct print_field_annotations_simple_t {
   struct _visit {
     template <typename... F>
     std::vector<std::string> operator()(const F &...field) {
-      return {std::string(field.annotation())...};
+      return {std::string(field.documentation())...};
     }
   };
 
@@ -110,7 +110,7 @@ struct print_field_annotations_simple_t {
 struct print_annotation_simple_t {
   template <typename T>
   std::string operator()(omni::binding_t<T> binding) const {
-    return binding.annotation();
+    return binding.documentation();
   }
 } const static print_annotation_simple{};
 
@@ -177,9 +177,9 @@ struct field_values_simple_t {
   template <typename Field>
   static typename std::enable_if<
     !std::is_same<std::string, typename Field::type>::value
-      && !std::is_same<int, typename Field::type>::value
-      && !std::is_same<unsigned, typename Field::type>::value
-      && !std::is_same<double, typename Field::type>::value>::type
+    && !std::is_same<int, typename Field::type>::value
+    && !std::is_same<unsigned, typename Field::type>::value
+    && !std::is_same<double, typename Field::type>::value>::type
     _append(std::vector<std::string> &, const Field &) {}
 } const static field_values_simple{};
 
@@ -228,7 +228,7 @@ struct write_fields_from_std_map {
     is_reflected_record<typename Field::type>::value>::type
     _write_field(const std::map<std::string, V> &from, Field field) {
     if (0 != from.count(field.name())
-        && _write_field_from_nested_map(from.at(field.name()), field))
+      && _write_field_from_nested_map(from.at(field.name()), field))
       return;
 
     auto nested_binding = omni::meta_t<typename Field::type>::bind();
@@ -265,8 +265,7 @@ struct write_fields_from_std_map {
     Field field) {
     bool written = false;
     int dummy[] = {0,
-      (written = written
-          || _try_nested_map(compat::get_if<V>(&value), field),
+      (written = written || _try_nested_map(compat::get_if<V>(&value), field),
         0)...};
     (void)dummy;
     return written;
@@ -278,8 +277,7 @@ struct write_fields_from_std_map {
     Field field) {
     bool written = false;
     int dummy[] = {0,
-      (written = written
-          || _try_nested_map(compat::get_if<V>(&value), field),
+      (written = written || _try_nested_map(compat::get_if<V>(&value), field),
         0)...};
     (void)dummy;
     return written;
@@ -354,8 +352,7 @@ T from_std_map(const std::map<std::string, V> &from) {
     },
     T{});
 #else
-  return omni::reflected_call(from_std_map_return_adapter<T, V>{from},
-    T{});
+  return omni::reflected_call(from_std_map_return_adapter<T, V>{from}, T{});
 #endif
 }
 
@@ -363,8 +360,8 @@ T from_std_map(const std::map<std::string, V> &from) {
 
 static const struct {
   template <typename Enum>
-  std::vector<std::string> operator()(omni::binding_t<Enum> binding) const
-    noexcept {
+  std::vector<std::string> operator()(
+    omni::binding_t<Enum> binding) const noexcept {
     const auto enums = binding.enumerators();
     std::vector<std::string> names;
     for (const auto &value_name : enums)
@@ -430,8 +427,12 @@ class in_cpp_mixed_access {
   int in_cpp_public_field_1;
   double in_cpp_public_field_2;
 
+  int _prevent_unused_warning() const {
+    return in_cpp_private_field;
+  }
+
   private:
-  int in_cpp_private_field OMNI_BASELINE_MAYBE_UNUSED;
+  int in_cpp_private_field;
 
   protected:
   double in_cpp_protected_field;
@@ -513,9 +514,13 @@ struct in_cpp_crtp_base_with_header_base: in_header_struct {
 
 template <typename Derived>
 class in_cpp_crtp_mixed_access_base {
-  int in_cpp_hidden_crtp_base_field OMNI_BASELINE_MAYBE_UNUSED;
+  int in_cpp_hidden_crtp_base_field;
 
   public:
+  int _prevent_unused_warning() const {
+    return in_cpp_hidden_crtp_base_field;
+  }
+
   int in_cpp_visible_crtp_base_field;
 };
 
@@ -530,7 +535,8 @@ struct in_cpp_crtp_derived: in_cpp_crtp_base<in_cpp_crtp_derived> {
   double in_cpp_crtp_field_1;
 };
 
-struct in_cpp_second_crtp_derived: in_cpp_crtp_base<in_cpp_second_crtp_derived> {
+struct in_cpp_second_crtp_derived:
+    in_cpp_crtp_base<in_cpp_second_crtp_derived> {
   std::string in_cpp_second_crtp_field_0;
   double in_cpp_second_crtp_field_1;
 };
@@ -619,7 +625,7 @@ struct {
   std::string oceanic = "815";
   int station = 4;
   double bearing = 8.15;
-} const unnamed_global{};
+} const unnamed_global OMNI_BASELINE_MAYBE_UNUSED{};
 
 struct: example::in_header_struct {
   std::string unnamed_global_header_base_field_0;
@@ -1448,7 +1454,8 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 // }
 
 // FIXME: does not generate: the unnamed type used through std::vector is
-// collected as a dependency, but generated-header reflection reports non-reflectable types.
+// collected as a dependency, but generated-header reflection reports
+// non-reflectable types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_vector_field) {
 //   struct {
@@ -1472,7 +1479,8 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 // }
 
 // FIXME: does not generate: the unnamed type used through std::tuple is
-// collected as a dependency, but generated-header reflection reports non-reflectable types.
+// collected as a dependency, but generated-header reflection reports
+// non-reflectable types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_tuple_field) {
 //   struct {
@@ -1496,7 +1504,8 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 // }
 
 // FIXME: does not generate: the unnamed type used through mpark::variant is
-// collected as a dependency, but generated-header reflection reports non-reflectable types.
+// collected as a dependency, but generated-header reflection reports
+// non-reflectable types.
 //
 // TEST(print_names, in_cpp_local_unnamed_struct_with_unnamed_variant_field) {
 //   struct {
@@ -2172,7 +2181,8 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 // through the GTest fixture class before that class is declared in the forced
 // include. Expected behavior is to reflect only the public fields.
 //
-// TEST(write_values, in_cpp_local_unnamed_struct_with_mixed_access_from_std_map) {
+// TEST(write_values,
+// in_cpp_local_unnamed_struct_with_mixed_access_from_std_map) {
 //   class local_unnamed_like {
 //     int hidden = 1;
 //
@@ -2632,7 +2642,8 @@ TEST(write_values, in_cpp_struct_with_nested_mpark_variant_map) {
   using nested_type = example::in_cpp_struct_with_nested_struct::nested;
   using nested_value = mpark::variant<int, double, std::string>;
   using nested_map = std::map<std::string, nested_value>;
-  using value = mpark::variant<int, double, std::string, nested_type, nested_map>;
+  using value =
+    mpark::variant<int, double, std::string, nested_type, nested_map>;
 
   example::in_cpp_struct_with_nested_struct p{};
 
@@ -2666,7 +2677,8 @@ TEST(write_values, in_cpp_struct_with_nested_mpark_map_wrong_nested_type) {
   using nested_type = example::in_cpp_struct_with_nested_struct::nested;
   using nested_value = mpark::variant<int, double, std::string>;
   using nested_map = std::map<std::string, nested_value>;
-  using value = mpark::variant<int, double, std::string, nested_type, nested_map>;
+  using value =
+    mpark::variant<int, double, std::string, nested_type, nested_map>;
 
   example::in_cpp_struct_with_nested_struct p{};
 
@@ -2684,7 +2696,8 @@ TEST(write_values, in_cpp_struct_with_nested_mpark_map_missing_nested_field) {
   using nested_type = example::in_cpp_struct_with_nested_struct::nested;
   using nested_value = mpark::variant<int, double, std::string>;
   using nested_map = std::map<std::string, nested_value>;
-  using value = mpark::variant<int, double, std::string, nested_type, nested_map>;
+  using value =
+    mpark::variant<int, double, std::string, nested_type, nested_map>;
 
   example::in_cpp_struct_with_nested_struct p{};
   p.n.i = 146;
@@ -2704,7 +2717,8 @@ TEST(write_values, in_cpp_struct_with_nested_mpark_map_extra_nested_keys) {
   using nested_type = example::in_cpp_struct_with_nested_struct::nested;
   using nested_value = mpark::variant<int, double, std::string>;
   using nested_map = std::map<std::string, nested_value>;
-  using value = mpark::variant<int, double, std::string, nested_type, nested_map>;
+  using value =
+    mpark::variant<int, double, std::string, nested_type, nested_map>;
 
   example::in_cpp_struct_with_nested_struct p{};
 
@@ -2721,11 +2735,13 @@ TEST(write_values, in_cpp_struct_with_nested_mpark_map_extra_nested_keys) {
   ASSERT_EQ("extra nested", p.name);
 }
 
-TEST(write_values, in_cpp_struct_with_nested_mpark_map_wrong_nested_value_type) {
+TEST(write_values,
+  in_cpp_struct_with_nested_mpark_map_wrong_nested_value_type) {
   using nested_type = example::in_cpp_struct_with_nested_struct::nested;
   using nested_value = mpark::variant<int, double, std::string>;
   using nested_map = std::map<std::string, nested_value>;
-  using value = mpark::variant<int, double, std::string, nested_type, nested_map>;
+  using value =
+    mpark::variant<int, double, std::string, nested_type, nested_map>;
 
   example::in_cpp_struct_with_nested_struct p{};
 
@@ -2790,7 +2806,8 @@ TEST(write_values, in_cpp_struct_with_nested_std_variant_map) {
 // tool, but the real compilation does not find a matching generated _reflected
 // specialization for the local unnamed record.
 //
-// TEST(write_values, in_cpp_local_unnamed_struct_from_std_variant_map_reference)
+// TEST(write_values,
+// in_cpp_local_unnamed_struct_from_std_variant_map_reference)
 // {
 //   struct {
 //     std::string name;
@@ -2809,7 +2826,8 @@ TEST(write_values, in_cpp_struct_with_nested_std_variant_map) {
 //   ASSERT_EQ(11.5, p.score);
 // }
 //
-// TEST(write_values, in_cpp_local_unnamed_struct_from_std_variant_map_wrong_type)
+// TEST(write_values,
+// in_cpp_local_unnamed_struct_from_std_variant_map_wrong_type)
 // {
 //   struct {
 //     std::string name;
@@ -2917,10 +2935,11 @@ TEST(write_values, in_cpp_struct_with_nested_std_map_wrong_nested_value_type) {
 #endif
 
 // TODO: support nested type fields declared inside a local unnamed parent.
-// Generated-header reflection currently generates an invalid nested type reference for this
-// route.
+// Generated-header reflection currently generates an invalid nested type
+// reference for this route.
 //
-// TEST(write_values, in_cpp_local_unnamed_struct_with_nested_struct_from_std_map) {
+// TEST(write_values,
+// in_cpp_local_unnamed_struct_with_nested_struct_from_std_map) {
 //   struct {
 //     struct nested {
 //       int i;

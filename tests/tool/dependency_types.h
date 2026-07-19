@@ -80,7 +80,7 @@ static const struct reflected_name_t {
 static const struct reflected_annotation_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    return v.annotation();
+    return v.documentation();
   }
 } reflected_annotation;
 
@@ -88,7 +88,7 @@ static const struct field_annotations_t {
   struct collect {
     template <typename... Field>
     std::vector<std::string> operator()(const Field &...f) const {
-      return std::vector<std::string>{f.annotation()...};
+      return std::vector<std::string>{f.documentation()...};
     }
   };
 
@@ -101,13 +101,12 @@ static const struct field_annotations_t {
 static const struct constexpr_annotations_t {
   template <typename T>
   bool operator()(const T &v) const {
-    typedef typename std::tuple_element<
-      0,
-      decltype(v.public_fields())>::type first_field;
+    typedef typename std::tuple_element<0, decltype(v.public_fields())>::type
+      first_field;
 
-    static_assert('a' == T::annotation()[0],
+    static_assert('a' == T::documentation()[0],
       "type annotation must be constexpr");
-    static_assert('a' == first_field::annotation()[0],
+    static_assert('a' == first_field::documentation()[0],
       "field annotation must be constexpr");
 
     return true;
@@ -161,8 +160,8 @@ static const struct get_dependency_name_t {
     const auto f = std::get<0>(v.public_fields());
     using field_type = typename decltype(f)::type;
 
-    return std::string(v.type_name()) + "::"
-      + std::string(omni::reflected<field_type>().type_name()) + ":int";
+    return std::string(v.type_name())
+      + "::" + std::string(omni::reflected<field_type>().type_name()) + ":int";
   }
 } get_dependency_name;
 
@@ -179,9 +178,9 @@ static const struct get_dependency_name_layer_2_t {
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
-    return std::string(v.type_name()) + "::"
-      + std::string(omni::reflected<intermediate_type>().type_name()) + "::"
-      + std::string(omni::reflected<dep_type>().type_name()) + ":int";
+    return std::string(v.type_name())
+      + "::" + std::string(omni::reflected<intermediate_type>().type_name())
+      + "::" + std::string(omni::reflected<dep_type>().type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -211,9 +210,9 @@ static const struct get_dependency_name_layer_2_t {
     using level_1 = typename root_type::value_type;
     using dep_type = typename level_1::value_type;
 
-    return std::string(T::type_name()) + "::"
-      + std::string(omni::meta_t<level_1>::type_name()) + "::"
-      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
+    return std::string(T::type_name())
+      + "::" + std::string(omni::meta_t<level_1>::type_name())
+      + "::" + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -229,8 +228,8 @@ static const struct get_dependency_name_t {
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
 
-    return std::string(v.type_name()) + "::"
-      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
+    return std::string(v.type_name())
+      + "::" + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name;
 
@@ -253,7 +252,8 @@ static const struct get_dependency_name_layer_2_t {
       typename first_variant_arg<outer_field_type>::type; // std::tuple<...>
     using dep_type = typename std::tuple_element<0, intermediate_type>::type;
 
-    return std::string(v.type_name()) + "::tuple::" // intermediate_type is a std::tuple<...>
+    return std::string(v.type_name())
+      + "::tuple::" // intermediate_type is a std::tuple<...>
       + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
   }
 } get_dependency_name_layer_2;
@@ -742,9 +742,7 @@ struct shared_from_this_derived:
   std::string name;
   int count;
 
-  shared_from_this_derived(std::string n, int c)
-      : name(n)
-      , count(c) {}
+  shared_from_this_derived(std::string n, int c): name(n), count(c) {}
 };
 
 struct multi_base_derived:

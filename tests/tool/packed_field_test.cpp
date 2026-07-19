@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 #include <omnirefl/reflection.hpp>
 
-#include <array>
 #include <cstdint>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace packed_field_test {
 
@@ -32,45 +32,68 @@ struct reference_record {
 };
 #pragma pack(pop)
 
-struct copied_values {
-  std::uint16_t value;
-  std::array<std::uint16_t, 2> values;
-  std::array<std::array<std::uint16_t, 2>, 2> matrix;
+template <typename Binding>
+struct can_value {
+  template <typename B>
+  static auto test(int)
+    -> decltype(std::declval<const B &>().value(), std::true_type{});
+
+  template <typename>
+  static std::false_type test(...);
+
+  static const bool value = decltype(test<Binding>(0))::value;
+};
+
+template <typename Binding>
+struct can_ref {
+  template <typename B>
+  static auto test(int)
+    -> decltype(std::declval<const B &>().ref(), std::true_type{});
+
+  template <typename>
+  static std::false_type test(...);
+
+  static const bool value = decltype(test<Binding>(0))::value;
 };
 
 struct write_value {
   template <typename T>
-  copied_values operator()(omni::binding_t<T> binding) const {
+  std::uint16_t operator()(omni::binding_t<T> binding) const {
     const auto fields = binding.public_fields();
+    typedef typename std::tuple_element<0, decltype(fields)>::type marker_field;
+    typedef typename std::tuple_element<1, decltype(fields)>::type value_field;
+    typedef typename std::tuple_element<2, decltype(fields)>::type array_field;
+    typedef typename std::tuple_element<3, decltype(fields)>::type matrix_field;
 
-    static_assert(
-      std::is_reference<decltype(std::get<0>(fields).value())>::value,
+    static_assert(marker_field::has_value_access(),
+      "alignment-one fields must expose value access");
+    static_assert(marker_field::has_reference_access(),
       "alignment-one fields may retain reference access");
-
-    auto value = std::get<1>(fields);
-
-    static_assert(!std::is_reference<decltype(value.value())>::value,
+    static_assert(value_field::has_value_access(),
+      "packed scalar fields must expose copy access");
+    static_assert(!value_field::has_reference_access(),
       "packed fields must be read by value");
-    static_assert(std::is_array<typename omni::compat::decay_t<
-                    decltype(std::get<2>(fields))>::type>::value,
+    static_assert(!array_field::has_value_access(),
+      "misaligned raw arrays must not expose value access");
+    static_assert(!array_field::has_reference_access(),
+      "misaligned raw arrays must not expose references");
+    static_assert(!can_value<array_field>::value,
+      "misaligned raw arrays must not change type when read");
+    static_assert(!can_ref<array_field>::value,
+      "misaligned raw arrays must not expose unsafe storage");
+    static_assert(!matrix_field::has_value_access(),
+      "nested misaligned raw arrays must not expose value access");
+    static_assert(!can_value<matrix_field>::value,
+      "nested misaligned raw arrays must not change type when read");
+    static_assert(std::is_array<typename array_field::type>::value,
       "field metadata must retain the declared raw-array type");
-    static_assert(std::is_same<decltype(std::get<2>(fields).value()),
-                    std::array<std::uint16_t, 2>>::value,
-      "packed arrays must be copied into aligned storage");
-    static_assert(std::is_same<decltype(std::get<3>(fields).value()),
-                    std::array<std::array<std::uint16_t, 2>, 2>>::value,
-      "nested packed arrays must be copied recursively");
     static_assert(
-      std::is_same<
-        typename omni::compat::decay_t<decltype(std::get<3>(fields))>::type,
-        std::uint16_t[2][2]>::value,
+      std::is_same<typename matrix_field::type, std::uint16_t[2][2]>::value,
       "nested field metadata must retain the declared raw-array type");
 
-    const auto values = std::get<2>(fields).value();
-    const auto matrix = std::get<3>(fields).value();
-
-    value.set_value(89);
-    return {value.value(), values, matrix};
+    auto value = std::get<1>(fields);
+    value.set_value(std::uint16_t{89});
+    return value.value();
   }
 };
 
@@ -81,9 +104,9 @@ struct reference_address {
   int *operator()(omni::binding_t<T> binding) const {
     const auto field = std::get<0>(binding.public_fields());
 
-    static_assert(std::is_reference<decltype(field.value())>::value,
+    static_assert(field.has_reference_access(),
       "reference fields must preserve the referent");
-    return &field.value();
+    return &field.ref();
   }
 };
 
@@ -94,17 +117,15 @@ reference_address const static address{};
 TEST(fields, packed_field_is_read_by_value) {
   packed_field_test::record input{'x', 53, {1, 2}, {{3, 5}, {8, 13}}};
 
-  const packed_field_test::copied_values copied =
+  const std::uint16_t copied =
     omni::reflected_call(packed_field_test::write, input);
 
-  EXPECT_EQ(89, copied.value);
-  EXPECT_EQ(1, copied.values[0]);
-  EXPECT_EQ(2, copied.values[1]);
-  EXPECT_EQ(3, copied.matrix[0][0]);
-  EXPECT_EQ(5, copied.matrix[0][1]);
-  EXPECT_EQ(8, copied.matrix[1][0]);
-  EXPECT_EQ(13, copied.matrix[1][1]);
+  EXPECT_EQ(89, copied);
   EXPECT_EQ(89, input.value);
+  EXPECT_EQ(1, input.values[0]);
+  EXPECT_EQ(2, input.values[1]);
+  EXPECT_EQ(3, input.matrix[0][0]);
+  EXPECT_EQ(13, input.matrix[1][1]);
 }
 
 TEST(fields, packed_reference_field_preserves_referent) {

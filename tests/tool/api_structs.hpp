@@ -26,8 +26,6 @@ struct volatile_field_record_t {
   int normal;
   mutable volatile int cache;
   volatile int observed;
-  // FIXME(high): the generated copy accessor currently returns this
-  // volatile scalar by value, triggering -Wdeprecated-volatile in C++20.
   volatile unsigned flags : 3;
 };
 
@@ -358,6 +356,8 @@ struct additional_volatile_forms_t {
         mutable_volatile_field;
     typedef typename std::tuple_element<3, decltype(mutable_fields)>::type
       volatile_bitfield;
+    typedef decltype(std::get<3>(mutable_fields)
+        .value()) volatile_bitfield_value;
 
     static_assert(
       std::is_same<const volatile int &, const_volatile_reference>::value,
@@ -373,6 +373,8 @@ struct additional_volatile_forms_t {
       "mutable-volatile fields must remain volatile");
     static_assert(volatile_bitfield::is_volatile(),
       "volatile bitfields must retain volatile metadata");
+    static_assert(std::is_same<unsigned, volatile_bitfield_value>::value,
+      "copied volatile bitfields must drop top-level qualification");
 
     std::get<1>(const_volatile_fields).set_value(17);
     std::get<2>(mutable_fields).set_value(29);
