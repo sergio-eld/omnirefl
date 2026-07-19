@@ -1531,6 +1531,43 @@ std::vector<std::string> callstack_from(clang::ASTContext &ast,
   return frames;
 }
 
+bool definition_follows_reflected_call(clang::ASTContext &ast,
+  const clang::CXXOperatorCallExpr &call,
+  const clang::TagDecl &definition) {
+  const clang::SourceManager &sm = ast.getSourceManager();
+  const clang::SourceLocation definition_location =
+    sm.getExpansionLoc(definition.getLocation());
+
+  if (definition_location.isInvalid())
+    return false;
+
+  const auto is_before_definition = //
+    [&sm, definition_location](clang::SourceLocation use) -> bool {
+      return use.isValid()
+        && sm.isBeforeInTranslationUnit(sm.getExpansionLoc(use),
+          definition_location);
+    };
+
+  if (!is_before_definition(call.getExprLoc()))
+    return false;
+
+  // A lexically later definition is valid when an enclosing template is
+  // instantiated only after that definition becomes visible.
+  clang::DynTypedNode node = clang::DynTypedNode::create(call);
+  for (auto parents = ast.getParents(node); //
+    !parents.empty(); //
+    node = parents[0], parents = ast.getParents(node)) {
+    const auto *decl = node.get<clang::FunctionDecl>();
+
+    if (decl && decl->getPointOfInstantiation().isValid()
+      && !is_before_definition(decl->getPointOfInstantiation())) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 meta::source_file_context append_invalid_reflection_query(
   meta::source_file_context a,
   clang::ASTContext &ast,
@@ -1696,7 +1733,9 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
 
   const auto &tag = clang::cast<clang::TagType>(canonical);
 
-  if (!tag.getDecl()->getDefinition()) {
+  const clang::TagDecl *const definition = tag.getDecl()->getDefinition();
+
+  if (!definition) {
     return std::unexpected(invalid_arg_error(
       /*reason*/ //
       "forward declarations without definitions are not allowed "
@@ -1704,6 +1743,15 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
       /*suggestion*/ //
       "include the definition before the reflected_call "
       "or pass a different reflectable type"));
+  }
+
+  if (definition_follows_reflected_call(ast, call, *definition)) {
+    return std::unexpected(invalid_arg_error(
+      /*reason*/ //
+      "the reflected_call argument is incomplete at this call; "
+      "its definition appears later in the translation unit",
+      /*suggestion*/ //
+      "move the type definition before this reflected_call"));
   }
 
   if (tag.getDecl()->isInStdNamespace()) {
@@ -1724,11 +1772,8 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
   }
 
   const auto *record_type = llvm::dyn_cast<clang::RecordType>(&tag);
-  const clang::RecordDecl *record_definition =
-    record_type ? record_type->getDecl()->getDefinition() : nullptr;
-
-  const clang::CXXRecordDecl *record_decl = record_definition
-    ? llvm::dyn_cast<clang::CXXRecordDecl>(record_definition)
+  const clang::CXXRecordDecl *record_decl = record_type
+    ? llvm::dyn_cast<clang::CXXRecordDecl>(definition)
     : nullptr;
 
   if (!record_decl)

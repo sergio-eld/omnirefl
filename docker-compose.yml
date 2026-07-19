@@ -15,14 +15,49 @@
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 
 x-build-alpine-image: &build-alpine-image
-  # TODO: keep ARM64 and Cosmopolitan builds in separate target-specific
-  # Dockerfile/image families.
+  # TODO: keep Cosmopolitan builds in a separate target-specific image family.
   image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION:-22.1.8}
   build:
     context: .
     dockerfile: docker/build-alpine-x86_64-musl-ucrt.Dockerfile
     args:
       LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
+
+x-build-alpine-aarch64-image: &build-alpine-aarch64-image
+  platform: linux/arm64
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl:llvm-${LLVM_VERSION:-22.1.8}
+  build:
+    context: .
+    dockerfile: docker/build-alpine-aarch64-musl.Dockerfile
+    args:
+      LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
+
+x-build-linux-command: &build-linux-command
+  - /bin/ash
+  - -euxc
+  - |
+    # Package validation runs from installed artifacts in test containers.
+    # This build only needs to produce the tool and package files.
+    cmake /src -GNinja \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DENABLE_PACKAGE=ON \
+      -DENABLE_TESTING=OFF \
+      -DENABLE_BENCH=OFF \
+      -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+      -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
+    cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
+
+    mkdir -p symbols
+    for binary in omnirefl ccdb_query; do
+      objcopy --only-keep-debug "$$binary" "symbols/$$binary.debug"
+      strip --strip-unneeded "$$binary"
+      objcopy --remove-section .gnu_debuglink "$$binary" 2>/dev/null || true
+      objcopy --add-gnu-debuglink="symbols/$$binary.debug" "$$binary"
+    done
+
+    mkdir -p /tmp/package /packages
+    cpack -G "DEB;TGZ" -B /tmp/package
+    mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
 services:
   build-linux:
@@ -32,30 +67,16 @@ services:
       - ./build-alpine/linux:/build:rw
       - ${PACKAGE_DIR:-./artifacts/packages/linux}:/packages:rw
     working_dir: /build
-    command:
-      - /bin/ash
-      - -euxc
-      - |
-        # Package validation runs from installed artifacts in test containers.
-        # This build only needs to produce the tool and package files.
-        cmake /src -GNinja \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DENABLE_PACKAGE=ON \
-          -DENABLE_TESTING=OFF \
-          -DENABLE_BENCH=OFF \
-          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
-        cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
+    command: *build-linux-command
 
-        mkdir -p symbols &&
-        objcopy --only-keep-debug omnirefl symbols/omnirefl.debug &&
-        strip --strip-unneeded omnirefl &&
-        (objcopy --remove-section .gnu_debuglink omnirefl 2>/dev/null || true) &&
-        objcopy --add-gnu-debuglink=symbols/omnirefl.debug omnirefl &&
-
-        mkdir -p /tmp/package /packages &&
-        cpack -G "DEB;TGZ" -B /tmp/package &&
-        mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
+  build-linux-aarch64:
+    <<: *build-alpine-aarch64-image
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine/linux-aarch64:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/linux}:/packages:rw
+    working_dir: /build
+    command: *build-linux-command
 
   build-windows:
     <<: *build-alpine-image
@@ -82,14 +103,19 @@ services:
 
         cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
 
-        mkdir -p symbols &&
-        x86_64-w64-mingw32-objcopy --only-keep-debug omnirefl.exe symbols/omnirefl.exe.debug &&
-        x86_64-w64-mingw32-strip --strip-unneeded omnirefl.exe &&
-        (x86_64-w64-mingw32-objcopy --remove-section .gnu_debuglink omnirefl.exe 2>/dev/null || true) &&
-        x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe &&
+        mkdir -p symbols
+        for binary in omnirefl.exe ccdb_query.exe; do
+          x86_64-w64-mingw32-objcopy \
+            --only-keep-debug "$$binary" "symbols/$$binary.debug"
+          x86_64-w64-mingw32-strip --strip-unneeded "$$binary"
+          x86_64-w64-mingw32-objcopy \
+            --remove-section .gnu_debuglink "$$binary" 2>/dev/null || true
+          x86_64-w64-mingw32-objcopy \
+            --add-gnu-debuglink="symbols/$$binary.debug" "$$binary"
+        done
 
-        mkdir -p /tmp/package /packages &&
-        cpack -G "ZIP" -B /tmp/package &&
+        mkdir -p /tmp/package /packages
+        cpack -G "ZIP" -B /tmp/package
         mv /tmp/package/*.zip /packages/
 
   test-alpine:

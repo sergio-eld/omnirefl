@@ -31,7 +31,7 @@ omni_reflected_target(example)
 ```
 
 Instrumentation can also be triggered explicitly through `<target>.omni`
-(`example.omni` here):
+(`example.omni` for the `example` target):
 
 ```bash
 cmake --build build -t example.omni
@@ -134,32 +134,41 @@ Omnirefl focuses on POD-like records and enums.
 - Nested named records/enums of supported globally accessible parents.
 - Unconstrained primary record templates, including use as CRTP bases.
 - Public data fields: names, type names, documentation, value retrieval,
-  mutation of writable fields, reference access when safe, and
+  mutation of writable fields, reference access when safe,
+  `has_value_access()`/`has_reference_access()` capability queries, and
   `is_const()`/`is_mutable()`/`is_volatile()`/`is_deprecated()` traits.
-- Enumerator names, values, and documentation.
-- Dependency discovery through:
-  - public field types
-  - public bases and transitive public bases
-  - public fields of primary template records
-  - supported public member aliases:
-    - `error_type`
-    - `first_type`
-    - `key_type`
-    - `mapped_type`
-    - `second_type`
-    - `type`
-    - `value`
-    - `value_type`
-  - template-pack routes named `tuple` or `variant`
-- Standard-library record types are not traversed as reflectable records
-  outside those protocol routes.
+- Enum documentation, plus enumerator names and values.
 
-### Limits
+### Dependency Protocols
+
+Additional reflected types are discovered through:
+
+- public field types
+- public bases and transitive public bases
+- public fields of primary template records
+- supported public member aliases:
+  - `error_type`
+  - `first_type`
+  - `key_type`
+  - `mapped_type`
+  - `second_type`
+  - `type`
+  - `value`
+  - `value_type`
+- template-pack routes named `tuple` or `variant`
+
+Standard-library record types are not traversed as reflectable records outside
+those protocol routes.
+
+### Limitations
 
 - `reflected_call` is the instrumentation boundary. The visitor must be either
   a generic lambda or a type with a templated `operator()`. Its return type must
   not depend on instantiating the visitor body during the tool run; for lambdas,
   this means an explicit trailing return type, including `-> void`.
+  Consequently, a lambda cannot currently return a type declared inside its
+  body. Supporting such local result types without supporting recursive
+  `reflected_call` is technically possible and under consideration.
   `constexpr auto result = reflected_call(...)` is not supported: it forces
   evaluation and breaks that instrumentation boundary.
 - `reflected_call` accepts reflected records and enums only. The caller must
@@ -175,7 +184,10 @@ Omnirefl focuses on POD-like records and enums.
   forward-declared.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
-  instantiated independently.
+  instantiated independently. Sema-based recursive instrumentation is
+  technically possible, but is not intended for now: it would severely
+  complicate the implementation and cause a combinatorial expansion of the
+  required test coverage.
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
 - Public data members only. Private/protected fields are skipped, including
@@ -234,12 +246,12 @@ Install options:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
   run on `master` and use the artifacts produced by
-  `Build package / linux-x86_64` or
+  `Build package / linux-x86_64`, `Build package / linux-aarch64`, or
   `Build package / windows-x86_64`. GitHub Actions artifacts do not provide a
   stable direct "latest artifact" download URL; look for
-  `packages-linux-x86_64-musl-<short-sha>` or
+  `packages-linux-<arch>-musl-<short-sha>` or
   `packages-windows-x86_64-ucrt-<short-sha>`.
-- Build locally using the prepared Docker image; see
+- Build locally using the prepared Docker images; see
   [Build and Develop Locally](#build-and-develop-locally).
 
 The examples below assume a standard install under `/usr/local`.
@@ -261,6 +273,22 @@ cmake ../omnirefl-tests -GNinja
 ctest --output-on-failure
 ```
 
+On Windows, run from a Visual Studio Developer PowerShell so `cl.exe` is
+configured:
+
+```powershell
+$prefix = "C:\path\to\omnirefl"
+Copy-Item -Recurse "$prefix\share\omnirefl\tests" .\omnirefl-tests
+
+New-Item -ItemType Directory build | Out-Null
+Set-Location build
+
+cmake ../omnirefl-tests -GNinja `
+  "-Domnirefl_DIR=$prefix/lib/cmake/omnirefl"
+
+ctest --output-on-failure
+```
+
 The copied tree also contains the runnable example and comprehensive guide
 sources. The tests fetch their own test-only dependencies during CMake
 configuration. If CMake cannot find omnirefl in a non-standard install, pass
@@ -269,38 +297,53 @@ for an unpacked `.zip` package.
 
 ## Build and Develop Locally
 
-The repository uses the
-[`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-x86_64-musl-ucrt)
-Alpine Docker image for local and CI builds. The image contains prebuilt
-LLVM/Clang installs for both Linux and Windows targets; building that layer
-from source can take close to an hour, so using the prepared image is the
-simplest way to get reproducible local and CI builds. The image is defined by
-[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile).
+The repository uses prepared Alpine Docker images for local and CI builds:
 
-The same Alpine image is used for the MinGW Windows cross-build. The Linux tool
-build uses static musl linking, so the packaged executable has no runtime libc
-dependency on the target Linux distribution. The Windows package targets UCRT;
-no other runtime dependency is expected.
+- [`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-x86_64-musl-ucrt)
+  for x86_64 Linux and Windows packages
+- [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
+  for AArch64 Linux packages
 
-If configuring the build directly on the host instead of using the image, use a
-C++23 compiler. As of now, the prepared build image uses GCC for the native
-Linux tool build.
+Both images provide a versioned LLVM/Clang toolchain and reproducible local and
+CI build environment. Using them is the simplest approach; rebuilding a
+complete toolchain image can take close to an hour. They are defined by
+[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile)
+and
+[docker/build-alpine-aarch64-musl.Dockerfile](docker/build-alpine-aarch64-musl.Dockerfile).
 
-Build Linux and Windows packages:
+The x86_64 image is also used for the MinGW Windows cross-build. Linux's stable
+kernel-userspace ABI allows static musl packages to have zero target-distribution
+runtime library dependencies. The Windows package depends only on UCRT.
+
+Windows ARM64 cross-compilation with MinGW was attempted but is not working as
+of this writing. macOS cross-compilation was also attempted without success and
+remains planned.
+
+> [!NOTE]
+> A Cosmopolitan cross-build was attempted, but its C++ implementation appears
+> to lack the C++23 support required by omnirefl as of this writing.
+
+If configuring the build directly on the host instead of using an image, use a
+C++23 compiler. As of now, the prepared build images use GCC for native Linux
+tool builds.
+
+Build packages:
 
 ```bash
 docker compose run --rm build-linux
+docker compose run --rm build-linux-aarch64
 docker compose run --rm build-windows
 ```
 
 > [!NOTE]
 > If the configured image is unavailable, for example when building a commit
 > older than `master`, `docker compose run` may trigger a local image build.
-> Since that build can take close to an hour, run it explicitly before
-> packaging:
+> Image builds can take a while, especially the x86_64 source build, so run
+> them explicitly before packaging:
 >
 > ```bash
 > docker compose build build-linux
+> docker compose build build-linux-aarch64
 > ```
 
 The packages are written to `artifacts/packages/linux` and
@@ -336,15 +379,11 @@ Current package/install coverage is reported by the
 - (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
 - (+) `Linux:Ubuntu 18.04/20.04/22.04 MinGW GCC` covered by CI package matrix
   (build-only for Windows test binaries)
+- (+) `Linux:AArch64 musl` covered by CI package build matrix
 - (+) `Windows:MSVC` covered by CI package matrix
 - (+) `Windows:clang-cl` covered by CI package matrix
 - (+) `Windows:MSYS2 MinGW` covered by CI package matrix
 - (+) `Windows:MSYS2 clang` covered by CI package matrix
-- TODO(High): cross-build the tool for `macOS`.
-- TODO(High): cross-build the tool for `ARM64` targets.
-- (-) Cosmopolitan 4.0.2 cannot build the tool: its bundled libc++ 19 lacks
-  required C++23 library interfaces. Revisit after its standard library is
-  updated.
 
 ## Is It Slow?
 
@@ -386,8 +425,66 @@ Benchmark runs are reported by the
 - Regression warnings require an increase above 20% for reflection wall time
   or the tool/build percentage; wall time also requires at least a 500 ms
   increase. Internal stage and build timings are retained as diagnostic detail.
-- TODO: when the repository goes public, render or link the benchmark history
-  directly from the README instead of requiring artifact lookup.
+- TODO: publish benchmark history at a stable URL instead of requiring artifact
+  lookup.
+
+## How It Works
+
+`reflected_call` identifies root records and enums. Omnirefl walks their public
+[dependency protocols](#dependency-protocols), then force-includes a generated
+header before the translation unit.
+
+The generated header does not need to include user declarations. It
+forward-declares namespace-scope roots where C++ permits it; not every type can
+be forward-declared (see [Limitations](#limitations)). Field access remains
+dependent on a template parameter, delaying instantiation until the source
+definition is available. Nested-type lookup uses the same mechanism through
+SFINAE. A simplified generated shape is:
+
+```cpp
+namespace app {
+struct root; // The definition may remain in the .cpp file.
+}
+
+namespace omni {
+namespace detail {
+
+// Field accessors use T, so their instantiation is delayed until app::root is
+// complete.
+template <typename T>
+struct _reflected<struct app::root, T> {
+  // Metadata omitted.
+};
+
+// _wrt means "with respect to": its type is app::root, but remains
+// syntactically dependent on T so nested-name lookup is delayed.
+template <typename T>
+struct _reflected<T,
+  typename std::enable_if<
+    std::is_same<T, typename _wrt<app::root, T>::type::nested>::value,
+    T>::type> {
+  // Metadata omitted.
+};
+
+} // namespace detail
+} // namespace omni
+```
+
+This permits records declared directly in one `.cpp` file to be reflected.
+Without the delayed specializations, users would need separate declaration
+headers and a manually ordered wrapper around generated metadata. That wrapper
+would still need a policy for which reachable types to reflect; Omnirefl derives
+roots from `reflected_call` and dependencies from the protocols above, enabling
+a seamless experience.
+
+> [!NOTE]
+> Experimental indexed mode (`omni_reflected_target(... ENABLE_INDEX_MODE)`) is
+> disabled by default. It can reflect virtually any otherwise-valid record that
+> cannot be forward-declared, including local and unnamed records, by assigning
+> generated indexes instead. The C++ standard does not guarantee the template
+> instantiation timing on which those registrations rely; the mode has proven
+> extremely brittle across compilers and also increases compile time and object
+> size. See [Limitations](#limitations).
 
 ## Known Regressions
 
@@ -406,7 +503,7 @@ Benchmark runs are reported by the
   layout case. Use an aligned field representation such as `std::array` when
   whole-field access is required.
 - [Pointer fields whose external pointee is only forward-declared are silently
-  ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
+  ignored](tests/tool/CMakeLists.txt#L690) instead of being skipped with a
   warning while the enclosing record is reflected best-effort.
 
 ### Candidate Explicit Limitations
@@ -416,8 +513,10 @@ Benchmark runs are reported by the
 
 ## Bug Reports
 
-For tool crashes on Linux, please include the command line, stderr/stdout, the
-input `.cpp`, the generated header if one was produced, and a backtrace.
+Report defects through
+[GitHub Issues](https://github.com/sergio-eld/omnirefl/issues). For tool crashes
+on Linux, please include the command line, stderr/stdout, the input `.cpp`, the
+generated header if one was produced, and a backtrace.
 
 ```bash
 # Enable core dumps for the current shell, then rerun the exact failing command.
@@ -434,3 +533,7 @@ coredumpctl gdb omnirefl --batch \
 
 If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
 systems route core dumps to a crash service instead of the current directory.
+
+## License
+
+Omnirefl is available under the [MIT License](LICENSE).

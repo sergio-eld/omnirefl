@@ -9,6 +9,13 @@ on:
     branches:
       - master
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      upload_symbols:
+        description: Upload detached debug symbols for release assembly
+        type: boolean
+        required: false
+        default: false
 
 env:
   LLVM_VERSION: 22.1.8
@@ -24,14 +31,17 @@ jobs:
   # local package-test entrypoints.
   build-package:
     name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         os: [linux, windows]
-        arch: [x86_64]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows
+            arch: aarch64
 
     steps:
       - name: Checkout Repository
@@ -46,19 +56,34 @@ jobs:
           echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
       - name: Pull build-alpine Image
-        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
+        run: |
+          if [ "aarch64" = "${{ matrix.arch }}" ]; then
+            docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl:llvm-${LLVM_VERSION}
+          else
+            docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
+          fi
 
       - name: Build and package omnirefl tool
         run: |
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
-            docker compose run --rm build-${{ matrix.os }}
+            docker compose run --rm \
+              build-${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}
 
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6
         with:
           name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.os }}
+          if-no-files-found: error
+
+      - name: Upload Debug Symbols
+        if: ${{ inputs.upload_symbols }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: symbols-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
+          path: >-
+            ./build-alpine/${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}/symbols
           if-no-files-found: error
 
   test-linux:
@@ -488,9 +513,10 @@ jobs:
           path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
           if-no-files-found: error
 
-  aggregate-test-results:
+  required-ci:
+    name: Required CI
     runs-on: ubuntu-latest
-    needs: [test-linux, test-windows]
+    needs: [build-package, test-linux, test-windows]
     permissions:
       contents: read
       actions: write
@@ -582,3 +608,24 @@ jobs:
                 artifact_id: artifact.id,
               })
             }
+
+      - name: Require successful package and test jobs
+        if: >-
+          ${{
+            always()
+            && (
+              'success' != needs['build-package'].result
+              || 'success' != needs['test-linux'].result
+              || 'success' != needs['test-windows'].result
+            )
+          }}
+        env:
+          BUILD_PACKAGE_RESULT: ${{ needs['build-package'].result }}
+          LINUX_TEST_RESULT: ${{ needs['test-linux'].result }}
+          WINDOWS_TEST_RESULT: ${{ needs['test-windows'].result }}
+        run: |
+          printf 'build-package: %s\ntest-linux: %s\ntest-windows: %s\n' \
+            "$BUILD_PACKAGE_RESULT" \
+            "$LINUX_TEST_RESULT" \
+            "$WINDOWS_TEST_RESULT"
+          exit 1

@@ -1,4 +1,5 @@
 *
 !*.Dockerfile
 !clang-cmake-options
+!docker/libcxx-installed-config-site.patch
 !llvm-project.patch

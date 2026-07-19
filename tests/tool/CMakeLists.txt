@@ -623,6 +623,12 @@ if("17" IN_LIST _supported_cpp_standards)
         "forward declarations without definitions"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
+        "reflected_call_definition_after_call"
+        negative_run/reflected_call_definition_after_call.cpp
+        1
+        "definition appears later in the translation unit"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
         "reflected_call_template_callstack"
         negative_run/reflected_call_template_callstack.cpp
         1
