@@ -242,6 +242,28 @@ struct inline_namespace_parent {
 };
 
 } // namespace v1
+
+namespace definition_order {
+
+struct field_count {
+  template <typename Binding>
+  std::size_t operator()(Binding binding) const {
+    return std::tuple_size<decltype(binding.public_fields())>::value;
+  }
+};
+
+template <typename T>
+std::size_t count_fields(const T &value) {
+  return omni::reflected_call(field_count{}, value);
+}
+
+// Keep the definition below count_fields: its instantiation point makes the
+// reflected_call valid despite the earlier template body.
+struct record {
+  int value;
+};
+
+} // namespace definition_order
 } // namespace interface_test
 
 namespace field_type_spelling_alias = interface_test::field_type_spelling;
@@ -269,6 +291,12 @@ TEST(odr_test, inside_interface_test_cpp) {
   EXPECT_EQ(k_expected,
     omni::reflected_call(odr_test::get_field_name_values, k_input));
   EXPECT_EQ(k_expected, odr_test::in_header_call(k_input));
+}
+
+TEST(reflected_call, template_instantiated_after_argument_definition) {
+  EXPECT_EQ(std::size_t{1},
+    interface_test::definition_order::count_fields(
+      interface_test::definition_order::record{}));
 }
 
 template <typename T, typename Visit>

@@ -160,6 +160,9 @@ Omnirefl focuses on POD-like records and enums.
   a generic lambda or a type with a templated `operator()`. Its return type must
   not depend on instantiating the visitor body during the tool run; for lambdas,
   this means an explicit trailing return type, including `-> void`.
+  Consequently, a lambda cannot currently return a type declared inside its
+  body. Supporting such local result types without supporting recursive
+  `reflected_call` is technically possible and under consideration.
   `constexpr auto result = reflected_call(...)` is not supported: it forces
   evaluation and breaks that instrumentation boundary.
 - `reflected_call` accepts reflected records and enums only. The caller must
@@ -175,7 +178,10 @@ Omnirefl focuses on POD-like records and enums.
   forward-declared.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
-  instantiated independently.
+  instantiated independently. Sema-based recursive instrumentation is
+  technically possible, but is not intended for now: it would severely
+  complicate the implementation and cause a combinatorial expansion of the
+  required test coverage.
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
 - Public data members only. Private/protected fields are skipped, including
@@ -418,11 +424,6 @@ Benchmark runs are reported by the
 - [Pointer fields whose external pointee is only forward-declared are silently
   ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
   warning while the enclosing record is reflected best-effort.
-- [A `reflected_call` argument defined only after the call is accepted using
-  its later whole-translation-unit
-  definition](tests/tool/regressions/reflected_call_definition_after_call.cpp),
-  then generated metadata fails against the incomplete type at the call site.
-
 ### Candidate Explicit Limitations
 
 - Primary templates with class-type non-type template parameters
