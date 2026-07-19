@@ -424,6 +424,7 @@ Benchmark runs are reported by the
 - [Pointer fields whose external pointee is only forward-declared are silently
   ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
   warning while the enclosing record is reflected best-effort.
+
 ### Candidate Explicit Limitations
 
 - Primary templates with class-type non-type template parameters
