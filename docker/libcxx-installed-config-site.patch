@@ -1,0 +1,22 @@
+# This patch modifies LLVM libc++ source and remains under the upstream LLVM
+# project license.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# See https://llvm.org/LICENSE.txt.
+
+--- usr/include/c++/v1/__config_site
++++ usr/include/c++/v1/__config_site
+@@ -17,6 +17,14 @@
+ #define _LIBCPP_HAS_MONOTONIC_CLOCK 1
+ #define _LIBCPP_HAS_TERMINAL 1
+ #define _LIBCPP_HAS_MUSL_LIBC 1
++#if defined(__has_include)
++#  undef _LIBCPP_HAS_MUSL_LIBC
++#  if __has_include(<bits/alltypes.h>)
++#    define _LIBCPP_HAS_MUSL_LIBC 1
++#  else
++#    define _LIBCPP_HAS_MUSL_LIBC 0
++#  endif
++#endif
+ #define _LIBCPP_HAS_THREAD_API_PTHREAD 0
+ #define _LIBCPP_HAS_THREAD_API_EXTERNAL 0
+ #define _LIBCPP_HAS_THREAD_API_WIN32 0

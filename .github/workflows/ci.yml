@@ -24,14 +24,17 @@ jobs:
   # local package-test entrypoints.
   build-package:
     name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         os: [linux, windows]
-        arch: [x86_64]
+        arch: [x86_64, aarch64]
+        exclude:
+          - os: windows
+            arch: aarch64
 
     steps:
       - name: Checkout Repository
@@ -46,13 +49,19 @@ jobs:
           echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
       - name: Pull build-alpine Image
-        run: docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
+        run: |
+          if [ "aarch64" = "${{ matrix.arch }}" ]; then
+            docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl:llvm-${LLVM_VERSION}
+          else
+            docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
+          fi
 
       - name: Build and package omnirefl tool
         run: |
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
-            docker compose run --rm build-${{ matrix.os }}
+            docker compose run --rm \
+              build-${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}
 
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6

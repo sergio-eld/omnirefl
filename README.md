@@ -408,6 +408,10 @@ Benchmark runs are reported by the
 - [Pointer fields whose external pointee is only forward-declared are silently
   ignored](tests/tool/CMakeLists.txt#L679) instead of being skipped with a
   warning while the enclosing record is reflected best-effort.
+- [A `reflected_call` argument defined only after the call is accepted using
+  its later whole-translation-unit
+  definition](tests/tool/regressions/reflected_call_definition_after_call.cpp),
+  then generated metadata fails against the incomplete type at the call site.
 
 ### Candidate Explicit Limitations
 
