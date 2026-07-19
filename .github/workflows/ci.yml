@@ -118,7 +118,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: test-${{ matrix.platform }}-${{ matrix.toolchain }}
+          name: >-
+            test-${{ matrix.platform }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
@@ -143,7 +144,9 @@ jobs:
 
       - name: Resolve Short SHA
         id: commit
-        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
       - name: Download Package Artifacts
         uses: actions/download-artifact@v8
@@ -169,16 +172,21 @@ jobs:
             const repo = context.repo.repo
             const workflow_id = 'ci.yml'
             const branch = context.payload.repository.default_branch
-            const historyArtifactName =
+            const historyArtifactPrefix =
               'benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}'
 
-            const hasHistory = async (run_id) => {
+            const historyArtifactFrom = async (run_id) => {
               const artifacts = await github.paginate(
                 github.rest.actions.listWorkflowRunArtifacts,
                 {owner, repo, run_id, per_page: 100})
 
-              return artifacts.some((artifact) =>
-                historyArtifactName === artifact.name && !artifact.expired)
+              return artifacts
+                .filter(({expired, name}) =>
+                  !expired && (
+                    historyArtifactPrefix === name ||
+                    name.startsWith(`${historyArtifactPrefix}-attempt-`)))
+                .sort((lhs, rhs) =>
+                  new Date(rhs.created_at) - new Date(lhs.created_at))[0]
             }
 
             const runs = await github.paginate(
@@ -197,8 +205,10 @@ jobs:
                 continue
               }
 
-              if (await hasHistory(run.id)) {
+              const artifact = await historyArtifactFrom(run.id)
+              if (artifact) {
                 core.setOutput('run_id', run.id)
+                core.setOutput('artifact_name', artifact.name)
                 return
               }
             }
@@ -209,7 +219,7 @@ jobs:
         if: ${{ '' != steps.history_run.outputs.run_id }}
         uses: actions/download-artifact@v8
         with:
-          name: benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}
+          name: ${{ steps.history_run.outputs.artifact_name }}
           path: ./artifacts/benchmark-history
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -252,7 +262,8 @@ jobs:
         if: ${{ success() && 'push' == github.event_name && 'master' == github.ref_name }}
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}
+          name: >-
+            benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ./artifacts/benchmark-history
           if-no-files-found: error
 
@@ -260,7 +271,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}
+          name: >-
+            benchmark-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ./artifacts/benchmarks
           if-no-files-found: error
 
@@ -345,7 +357,7 @@ jobs:
 
       - name: Install MSYS2 Toolchain
         if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: ${{ matrix.msystem }}
           release: false
@@ -471,7 +483,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: test-windows-${{ matrix.toolchain }}
+          name: >-
+            test-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
           if-no-files-found: error
 
@@ -484,25 +497,88 @@ jobs:
     if: always()
 
     steps:
+      - name: Find previous aggregate artifact
+        id: previous_aggregate
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+              })
+
+            const artifact = artifacts
+              .filter(({name}) =>
+                name.startsWith('aggregated-test-results-attempt-'))
+              .sort((lhs, rhs) =>
+                new Date(rhs.created_at) - new Date(lhs.created_at))[0]
+
+            core.setOutput('name', artifact?.name ?? '')
+
+      - name: Download previous aggregate artifact
+        id: download_previous
+        if: ${{ '' != steps.previous_aggregate.outputs.name }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.previous_aggregate.outputs.name }}
+          path: ./test-results
+
       - name: Download test artifacts
+        id: download_tests
         uses: actions/download-artifact@v8
         with:
           pattern: test-*
           path: ./test-results
-          merge-multiple: true
 
       - name: Upload aggregated test artifact
         id: upload_agg
-        if: always()
+        if: >-
+          ${{
+            always()
+            && 'success' == steps.download_tests.outcome
+            && (
+              '' == steps.previous_aggregate.outputs.name
+              || 'success' == steps.download_previous.outcome
+            )
+          }}
         uses: actions/upload-artifact@v6
         with:
-          name: all-test-results
+          name: aggregated-test-results-attempt-${{ github.run_attempt }}
           path: ./test-results
           if-no-files-found: error
 
       - name: Clean up intermediate artifacts
-        if: ${{ always() && 'success' == steps.upload_agg.outcome }}
-        uses: geekyeggo/delete-artifact@v6
+        if: >-
+          ${{
+            always()
+            && 'success' == steps.upload_agg.outcome
+            && (
+              'pull_request' != github.event_name
+              || github.event.pull_request.head.repo.full_name == github.repository
+            )
+          }}
+        uses: actions/github-script@v8
         with:
-          name: test-*
-          failOnError: false
+          script: |
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+              })
+
+            for (const artifact of artifacts.filter(({name}) =>
+              name.startsWith('test-'))) {
+              core.info(`deleting intermediate artifact: ${artifact.name}`)
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+              })
+            }

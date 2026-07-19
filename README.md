@@ -222,10 +222,9 @@ as Clang compilation errors. Compiler warnings are not reported by omnirefl.
 
 Install options:
 
-- Latest release:
-  [download the packaged archive for your platform](https://github.com/sergio-eld/omnirefl/releases/latest).
-  Linux packages are published as `.deb` and `.tar.gz`; Windows packages are
-  published as `.zip`.
+- Release archives:
+  [browse published releases](https://github.com/sergio-eld/omnirefl/releases).
+  Linux release packages use `.deb` and `.tar.gz`; Windows packages use `.zip`.
 - Latest CI artifact:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
@@ -338,8 +337,9 @@ Current package/install coverage is reported by the
 - (+) `Windows:MSYS2 clang` covered by CI package matrix
 - TODO(High): cross-build the tool for `macOS`.
 - TODO(High): cross-build the tool for `ARM64` targets.
-- TODO(High): investigate switching the tool build to Cosmopolitan after a
-  baseline benchmark is in place.
+- (-) Cosmopolitan 4.0.2 cannot build the tool: its bundled libc++ 19 lacks
+  required C++23 library interfaces. Revisit after its standard library is
+  updated.
 
 ## Is It Slow?
 
@@ -372,7 +372,7 @@ Benchmark runs are reported by the
 - Target: `linux-x86_64`
 - Environment: Ubuntu 22.04 GCC package-test image
 - Baseline target: `benchmark.baseline`
-- Raw history artifact: `benchmark-history-linux-x86_64-gcc`
+- Raw history artifact: `benchmark-history-linux-x86_64-gcc-attempt-<N>`
 - Reported baseline: average of the last 5 stored runs
 - Tracked metrics:
   - reflection/tool wall time for `benchmark.baseline.omni`
@@ -395,8 +395,9 @@ Benchmark runs are reported by the
   field](tests/tool/regressions/private_nested_type_through_public_base.cpp).
 - [Anonymous unions emit an empty-named container field and omit promoted
   members](tests/tool/regressions/anonymous_union_members.cpp).
-- [Compiler-packed misaligned raw arrays have no safe whole-field accessor]
-  (tests/tool/packed_field_test.cpp); this is an implementation-dependent
+- [Compiler-packed misaligned raw arrays have no safe whole-field
+  accessor](tests/tool/packed_field_test.cpp).
+  This is an implementation-dependent
   layout case. Use an aligned field representation such as `std::array` when
   whole-field access is required.
 - [Pointer fields whose external pointee is only forward-declared are silently
