@@ -1,0 +1,143 @@
+name: Release
+run-name: Release / ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    env:
+      # Fine-grained token with read/write access to repository contents.
+      GH_TOKEN: ${{ secrets.OMNIREFL_RELEASE_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Validate Release Target
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "OMNIREFL_RELEASE_TOKEN is not configured" >&2
+            exit 1
+          fi
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release already exists for $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+  validation:
+    name: Build and validate release
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+    with:
+      upload_symbols: true
+    permissions:
+      actions: write
+      contents: read
+
+  release:
+    name: Create draft prerelease
+    needs: validation
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.OMNIREFL_RELEASE_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Download Packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: packages-*
+          path: ./artifacts/packages
+
+      - name: Download Debug Symbols
+        uses: actions/download-artifact@v8
+        with:
+          pattern: symbols-*
+          path: ./artifacts/symbols
+
+      - name: Prepare Release Assets
+        id: assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          version="${GITHUB_REF_NAME#v}"
+          short_sha="${GITHUB_SHA::12}"
+          release_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$release_dir"
+
+          packages=(
+            "omnirefl-linux-x86_64-musl-${version}-${short_sha}.deb"
+            "omnirefl-linux-x86_64-musl-${version}-${short_sha}.tar.gz"
+            "omnirefl-linux-aarch64-musl-${version}-${short_sha}.deb"
+            "omnirefl-linux-aarch64-musl-${version}-${short_sha}.tar.gz"
+            "omnirefl-windows-x86_64-ucrt-${version}-${short_sha}.zip"
+          )
+
+          for package in "${packages[@]}"; do
+            matches=(./artifacts/packages/*/"$package")
+            if [ 1 -ne "${#matches[@]}" ]; then
+              echo "expected one $package, found ${#matches[@]}" >&2
+              exit 1
+            fi
+
+            cp "${matches[0]}" "$release_dir/"
+          done
+
+          for target in linux-x86_64-musl linux-aarch64-musl; do
+            symbols="./artifacts/symbols/symbols-${target}-${short_sha}"
+            test -s "$symbols/omnirefl.debug"
+            test -s "$symbols/ccdb_query.debug"
+            tar -czf \
+              "$release_dir/omnirefl-${target}-${version}-${short_sha}-symbols.tar.gz" \
+              -C "$symbols" omnirefl.debug ccdb_query.debug
+          done
+
+          symbols="./artifacts/symbols/symbols-windows-x86_64-ucrt-${short_sha}"
+          test -s "$symbols/omnirefl.exe.debug"
+          test -s "$symbols/ccdb_query.exe.debug"
+          (
+            cd "$symbols"
+            cmake -E tar cf \
+              "$release_dir/omnirefl-windows-x86_64-ucrt-${version}-${short_sha}-symbols.zip" \
+              --format=zip -- omnirefl.exe.debug ccdb_query.exe.debug
+          )
+
+          (
+            cd "$release_dir"
+            sha256sum omnirefl-* > SHA256SUMS
+          )
+
+          echo "directory=$release_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Create Draft Prerelease
+        id: create_release
+        env:
+          ASSET_DIR: ${{ steps.assets.outputs.directory }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$ASSET_DIR"/* \
+            --draft \
+            --prerelease \
+            --verify-tag \
+            --generate-notes \
+            --title "Omnirefl ${GITHUB_REF_NAME#v}"
+
+      - name: Remove Partial Draft
+        if: ${{ failure() && 'failure' == steps.create_release.outcome }}
+        run: gh release delete "$GITHUB_REF_NAME" --yes || true

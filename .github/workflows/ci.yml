@@ -9,6 +9,13 @@ on:
     branches:
       - master
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      upload_symbols:
+        description: Upload detached debug symbols for release assembly
+        type: boolean
+        required: false
+        default: false
 
 env:
   LLVM_VERSION: 22.1.8
@@ -68,6 +75,15 @@ jobs:
         with:
           name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.os }}
+          if-no-files-found: error
+
+      - name: Upload Debug Symbols
+        if: ${{ inputs.upload_symbols }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: symbols-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
+          path: >-
+            ./build-alpine/${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}/symbols
           if-no-files-found: error
 
   test-linux:

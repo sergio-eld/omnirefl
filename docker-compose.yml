@@ -47,14 +47,16 @@ x-build-linux-command: &build-linux-command
       -DClang_DIR=$${CLANG_INSTALL_LINUX}/lib/cmake/clang &&
     cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
 
-    mkdir -p symbols &&
-    objcopy --only-keep-debug omnirefl symbols/omnirefl.debug &&
-    strip --strip-unneeded omnirefl &&
-    (objcopy --remove-section .gnu_debuglink omnirefl 2>/dev/null || true) &&
-    objcopy --add-gnu-debuglink=symbols/omnirefl.debug omnirefl &&
+    mkdir -p symbols
+    for binary in omnirefl ccdb_query; do
+      objcopy --only-keep-debug "$$binary" "symbols/$$binary.debug"
+      strip --strip-unneeded "$$binary"
+      objcopy --remove-section .gnu_debuglink "$$binary" 2>/dev/null || true
+      objcopy --add-gnu-debuglink="symbols/$$binary.debug" "$$binary"
+    done
 
-    mkdir -p /tmp/package /packages &&
-    cpack -G "DEB;TGZ" -B /tmp/package &&
+    mkdir -p /tmp/package /packages
+    cpack -G "DEB;TGZ" -B /tmp/package
     mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
 services:
@@ -101,14 +103,19 @@ services:
 
         cmake --build . -t omnirefl.exe ccdb_query.exe -j$$(nproc) &&
 
-        mkdir -p symbols &&
-        x86_64-w64-mingw32-objcopy --only-keep-debug omnirefl.exe symbols/omnirefl.exe.debug &&
-        x86_64-w64-mingw32-strip --strip-unneeded omnirefl.exe &&
-        (x86_64-w64-mingw32-objcopy --remove-section .gnu_debuglink omnirefl.exe 2>/dev/null || true) &&
-        x86_64-w64-mingw32-objcopy --add-gnu-debuglink=symbols/omnirefl.exe.debug omnirefl.exe &&
+        mkdir -p symbols
+        for binary in omnirefl.exe ccdb_query.exe; do
+          x86_64-w64-mingw32-objcopy \
+            --only-keep-debug "$$binary" "symbols/$$binary.debug"
+          x86_64-w64-mingw32-strip --strip-unneeded "$$binary"
+          x86_64-w64-mingw32-objcopy \
+            --remove-section .gnu_debuglink "$$binary" 2>/dev/null || true
+          x86_64-w64-mingw32-objcopy \
+            --add-gnu-debuglink="symbols/$$binary.debug" "$$binary"
+        done
 
-        mkdir -p /tmp/package /packages &&
-        cpack -G "ZIP" -B /tmp/package &&
+        mkdir -p /tmp/package /packages
+        cpack -G "ZIP" -B /tmp/package
         mv /tmp/package/*.zip /packages/
 
   test-alpine:
