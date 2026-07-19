@@ -234,12 +234,12 @@ Install options:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
   run on `master` and use the artifacts produced by
-  `Build package / linux-x86_64` or
+  `Build package / linux-x86_64`, `Build package / linux-aarch64`, or
   `Build package / windows-x86_64`. GitHub Actions artifacts do not provide a
   stable direct "latest artifact" download URL; look for
-  `packages-linux-x86_64-musl-<short-sha>` or
+  `packages-linux-<arch>-musl-<short-sha>` or
   `packages-windows-x86_64-ucrt-<short-sha>`.
-- Build locally using the prepared Docker image; see
+- Build locally using the prepared Docker images; see
   [Build and Develop Locally](#build-and-develop-locally).
 
 The examples below assume a standard install under `/usr/local`.
@@ -269,38 +269,47 @@ for an unpacked `.zip` package.
 
 ## Build and Develop Locally
 
-The repository uses the
-[`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt`](https://github.com/sergio-eld/omnirefl/pkgs/container/omnirefl-build-alpine-x86_64-musl-ucrt)
-Alpine Docker image for local and CI builds. The image contains prebuilt
-LLVM/Clang installs for both Linux and Windows targets; building that layer
-from source can take close to an hour, so using the prepared image is the
-simplest way to get reproducible local and CI builds. The image is defined by
-[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile).
+The repository uses prepared Alpine Docker images for local and CI builds:
 
-The same Alpine image is used for the MinGW Windows cross-build. The Linux tool
-build uses static musl linking, so the packaged executable has no runtime libc
-dependency on the target Linux distribution. The Windows package targets UCRT;
-no other runtime dependency is expected.
+- [`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-x86_64-musl-ucrt)
+  for x86_64 Linux and Windows packages
+- [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
+  for AArch64 Linux packages
 
-If configuring the build directly on the host instead of using the image, use a
-C++23 compiler. As of now, the prepared build image uses GCC for the native
-Linux tool build.
+The x86_64 image builds its LLVM/Clang installations from source and can take
+close to an hour to reproduce. The AArch64 image uses versioned Alpine
+LLVM/Clang packages. Using the prepared images is the simplest way to get
+reproducible local and CI builds. They are defined by
+[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile)
+and
+[docker/build-alpine-aarch64-musl.Dockerfile](docker/build-alpine-aarch64-musl.Dockerfile).
 
-Build Linux and Windows packages:
+The x86_64 image is also used for the MinGW Windows cross-build. Linux packages
+use static musl linking, so the executable has no runtime libc dependency on
+the target distribution. The Windows package targets UCRT; no other runtime
+dependency is expected.
+
+If configuring the build directly on the host instead of using an image, use a
+C++23 compiler. As of now, the prepared build images use GCC for native Linux
+tool builds.
+
+Build packages:
 
 ```bash
 docker compose run --rm build-linux
+docker compose run --rm build-linux-aarch64
 docker compose run --rm build-windows
 ```
 
 > [!NOTE]
 > If the configured image is unavailable, for example when building a commit
 > older than `master`, `docker compose run` may trigger a local image build.
-> Since that build can take close to an hour, run it explicitly before
-> packaging:
+> Image builds can take a while, especially the x86_64 source build, so run
+> them explicitly before packaging:
 >
 > ```bash
 > docker compose build build-linux
+> docker compose build build-linux-aarch64
 > ```
 
 The packages are written to `artifacts/packages/linux` and
@@ -336,12 +345,13 @@ Current package/install coverage is reported by the
 - (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
 - (+) `Linux:Ubuntu 18.04/20.04/22.04 MinGW GCC` covered by CI package matrix
   (build-only for Windows test binaries)
+- (+) `Linux:AArch64 musl` covered by CI package build matrix
 - (+) `Windows:MSVC` covered by CI package matrix
 - (+) `Windows:clang-cl` covered by CI package matrix
 - (+) `Windows:MSYS2 MinGW` covered by CI package matrix
 - (+) `Windows:MSYS2 clang` covered by CI package matrix
 - TODO(High): cross-build the tool for `macOS`.
-- TODO(High): cross-build the tool for `ARM64` targets.
+- TODO(High): cross-build the tool for `Windows ARM64`.
 - (-) Cosmopolitan 4.0.2 cannot build the tool: its bundled libc++ 19 lacks
   required C++23 library interfaces. Revisit after its standard library is
   updated.
@@ -386,8 +396,8 @@ Benchmark runs are reported by the
 - Regression warnings require an increase above 20% for reflection wall time
   or the tool/build percentage; wall time also requires at least a 500 ms
   increase. Internal stage and build timings are retained as diagnostic detail.
-- TODO: when the repository goes public, render or link the benchmark history
-  directly from the README instead of requiring artifact lookup.
+- TODO: publish benchmark history at a stable URL instead of requiring artifact
+  lookup.
 
 ## Known Regressions
 
