@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -595,13 +596,21 @@ struct field_binding_t {
     return M::ref(_owner);
   }
 
-  /// QoL member access for referenceable fields.
+  /// QoL member access returning the field's actual address even when its type
+  /// overloads `operator&`.
+  ///
+  /// `std::addressof` is available since C++11 but is `constexpr` only since
+  /// C++17, so this accessor follows the same constant-evaluation boundary.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
     typename std::enable_if<M::has_reference_access(), int>::type = 0>
-  constexpr auto operator->() const noexcept -> decltype(&M::ref(_owner)) {
-    return &M::ref(_owner);
+#if OMNI_CPLUSPLUS >= 201703L
+  constexpr
+#endif
+    auto operator->() const noexcept
+    -> decltype(std::addressof(M::ref(_owner))) {
+    return std::addressof(M::ref(_owner));
   }
 
   /// Assign fields that support assignment, including bitfields.

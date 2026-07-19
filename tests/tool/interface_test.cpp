@@ -85,6 +85,30 @@ struct record {
   std::unique_ptr<int> owned;
 };
 
+struct overloaded_address {
+  int value;
+  overloaded_address *alternate;
+
+  overloaded_address *operator&() noexcept {
+    return alternate;
+  }
+
+  const overloaded_address *operator&() const noexcept {
+    return alternate;
+  }
+};
+
+struct address_record {
+  overloaded_address field;
+};
+
+struct field_address {
+  template <typename T>
+  const overloaded_address *operator()(omni::binding_t<T> binding) const {
+    return std::get<0>(binding.public_fields()).operator->();
+  }
+};
+
 struct read_write_move {
   template <typename T>
   std::unique_ptr<int> operator()(omni::binding_t<T> binding) const {
@@ -835,6 +859,19 @@ TEST(fields, reference_and_move_access) {
   omni::reflected_call(interface_test::field_access::write_through_meta{input},
     omni::type_t<interface_test::field_access::record>{});
   EXPECT_EQ(17, input.scalar);
+}
+
+TEST(fields, arrow_bypasses_overloaded_address_of) {
+  namespace fa = interface_test::field_access;
+
+  fa::overloaded_address alternate{7, nullptr};
+  fa::address_record input{{42, std::addressof(alternate)}};
+  const fa::address_record const_input{{53, std::addressof(alternate)}};
+
+  EXPECT_EQ(std::addressof(input.field),
+    omni::reflected_call(fa::field_address{}, input));
+  EXPECT_EQ(std::addressof(const_input.field),
+    omni::reflected_call(fa::field_address{}, const_input));
 }
 
 TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
