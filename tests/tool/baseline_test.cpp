@@ -427,8 +427,12 @@ class in_cpp_mixed_access {
   int in_cpp_public_field_1;
   double in_cpp_public_field_2;
 
+  int _prevent_unused_warning() const {
+    return in_cpp_private_field;
+  }
+
   private:
-  int in_cpp_private_field OMNI_BASELINE_MAYBE_UNUSED;
+  int in_cpp_private_field;
 
   protected:
   double in_cpp_protected_field;
@@ -510,9 +514,13 @@ struct in_cpp_crtp_base_with_header_base: in_header_struct {
 
 template <typename Derived>
 class in_cpp_crtp_mixed_access_base {
-  int in_cpp_hidden_crtp_base_field OMNI_BASELINE_MAYBE_UNUSED;
+  int in_cpp_hidden_crtp_base_field;
 
   public:
+  int _prevent_unused_warning() const {
+    return in_cpp_hidden_crtp_base_field;
+  }
+
   int in_cpp_visible_crtp_base_field;
 };
 

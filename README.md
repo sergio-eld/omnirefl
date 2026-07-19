@@ -180,6 +180,11 @@ Omnirefl focuses on POD-like records and enums.
   out-of-scope queries as errors on a best-effort basis.
 - Public data members only. Private/protected fields are skipped, including
   fields inherited through public bases. Member functions are not reflected.
+- GCC 16 diagnoses the intentional incomplete-type SFINAE used for nested
+  reflection with `-Wsfinae-incomplete`. Generated headers suppress this warning
+  only within generated declarations. This workaround should be monitored;
+  current nested record and enum tests do not reproduce the unstable
+  specialization selection targeted by the warning.
 - [Deprecated public fields can emit compiler deprecation diagnostics while
   their metadata is formed](tests/tool/regressions/deprecated_public_field.cpp),
   before `is_deprecated()` can filter them. Deferring this access would require
