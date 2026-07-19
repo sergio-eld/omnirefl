@@ -52,7 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      attestations: write
       contents: read
+      id-token: write
     env:
       GH_TOKEN: ${{ secrets.OMNIREFL_RELEASE_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -124,6 +126,11 @@ jobs:
           )
 
           echo "directory=$release_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Attest Release Assets
+        uses: actions/attest@v4
+        with:
+          subject-checksums: ${{ steps.assets.outputs.directory }}/SHA256SUMS
 
       - name: Create Draft Prerelease
         id: create_release
