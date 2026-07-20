@@ -965,6 +965,10 @@ if(ENABLE_BENCH)
     target_compile_definitions(benchmark.baseline PRIVATE CXX_STANDARD=${_benchmark_cpp_standard})
     target_link_libraries(benchmark.baseline PRIVATE GTest::GTest std_compat)
     omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
+
+    if("20" IN_LIST _supported_cpp_standards)
+        add_subdirectory(bench/record_conversion)
+    endif()
 endif()
 
 set(_has_cxx20_reflected_guide_features OFF)

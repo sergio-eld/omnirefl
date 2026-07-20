@@ -330,7 +330,7 @@ void value_categories_read_test(const std::vector<std::string> &expected,
   EXPECT_EQ(expected, omni::reflected_call(visit, lvalue));
   EXPECT_EQ(expected, omni::reflected_call(visit, const_lvalue));
 
-  // prvalue tested outside with 'owning' reflected visitors
+  // The prvalue case is tested separately.
 }
 
 #if defined(__cpp_concepts)
@@ -807,6 +807,41 @@ TEST(enumerators, enum_type_t) {
   value_categories_test<enum_type_t>("zero,one", en::enum_type_enumerators);
 }
 
+namespace {
+
+struct validate_conversion_qualifiers_t {
+  template <typename Rvalue,
+    typename Mutable,
+    typename Const,
+    typename Volatile,
+    typename ConstVolatile>
+  void operator()(Rvalue,
+    Mutable,
+    Const,
+    Volatile,
+    ConstVolatile) const {
+    using T = typename Rvalue::type;
+
+    ASSERT_EQ(false, Rvalue::owning::value);
+    ASSERT_EQ(true, (std::is_same<Rvalue, omni::binding_t<T &&>>::value));
+    ASSERT_EQ(true, std::is_trivially_copyable<Rvalue>::value);
+    ASSERT_EQ(true, (std::is_convertible<Rvalue, const T &>::value));
+    ASSERT_EQ(true, (std::is_convertible<Rvalue, T &>::value));
+    ASSERT_EQ(true, (std::is_convertible<Mutable, T &>::value));
+    ASSERT_EQ(true, (std::is_convertible<Const, const T &>::value));
+    ASSERT_EQ(false, (std::is_convertible<Const, T &>::value));
+    ASSERT_EQ(true,
+      (std::is_convertible<Volatile, volatile T &>::value));
+    ASSERT_EQ(false, (std::is_convertible<Volatile, T &>::value));
+    ASSERT_EQ(true,
+      (std::is_convertible<ConstVolatile, const volatile T &>::value));
+    ASSERT_EQ(false,
+      (std::is_convertible<ConstVolatile, const T &>::value));
+  }
+};
+
+} // namespace
+
 TEST(bindings, conversion_qualifiers) {
   using interface_test::enum_type_t;
   using interface_test::field_qualification_record_t;
@@ -818,24 +853,27 @@ TEST(bindings, conversion_qualifiers) {
   const volatile auto const_volatile_record =
     field_qualification_record_t{1, 2, 3, 4};
 
-  EXPECT_TRUE(omni::reflected_call(b::conversion_qualifiers,
+  const b::conversion_qualifiers_t<validate_conversion_qualifiers_t>
+    validate{validate_conversion_qualifiers_t{}};
+
+  omni::reflected_call(validate,
     field_qualification_record_t{1, 2, 3, 4},
     mutable_record,
     const_record,
     volatile_record,
-    const_volatile_record));
+    const_volatile_record);
 
   enum_type_t mutable_enum = enum_type_t::zero;
   const enum_type_t const_enum = enum_type_t::zero;
   volatile enum_type_t volatile_enum = enum_type_t::zero;
   const volatile enum_type_t const_volatile_enum = enum_type_t::zero;
 
-  EXPECT_TRUE(omni::reflected_call(b::conversion_qualifiers,
+  omni::reflected_call(validate,
     enum_type_t::zero,
     mutable_enum,
     const_enum,
     volatile_enum,
-    const_volatile_enum));
+    const_volatile_enum);
 }
 
 TEST(record_type_t, field_value_read) {
@@ -847,9 +885,9 @@ TEST(record_type_t, field_value_read) {
 
   value_categories_read_test(k_expected, k_input, fv::record_type_field_values);
 
-  // owning binding
+  // Non-owning rvalue binding.
   EXPECT_EQ(k_expected,
-    omni::reflected_call(fv::record_type_field_values_own,
+    omni::reflected_call(fv::record_type_field_values_rvalue,
       record_type_t{k_input}));
 }
 
@@ -907,10 +945,12 @@ TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
 
   static const std::vector<std::string> k_expected{"815", "oceanic"};
 
-  EXPECT_EQ(k_expected,
-    omni::reflected_call(
-      interface_test::inline_examples::rvalue_binding_can_be_named,
-      record_type_t{}));
+  const auto result = omni::reflected_call(
+    interface_test::inline_examples::rvalue_binding_can_be_named,
+    record_type_t{});
+
+  EXPECT_EQ(k_expected, result.fields);
+  EXPECT_EQ(true, result.owns_value);
 
   // Direct rvalue field access is intentionally invalid:
   // omni::reflected(record_type_t{}).public_fields();
@@ -937,7 +977,8 @@ TEST(record_type_t, field_value_write) {
   }
 
   const record_type_t owned =
-    omni::reflected_call(fw::record_type_field_write_own_call_t{k_expected},
+    omni::reflected_call(
+      fw::record_type_field_write_and_return_call_t{k_expected},
       record_type_t{});
   EXPECT_EQ_FIELDS(k_expected, owned);
 

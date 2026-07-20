@@ -254,11 +254,8 @@ struct reflected_call_t {
   template <typename T>
   static constexpr meta_t<T> _tool_arg(type_t<T>) noexcept;
 
-  template <typename T,
-    typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-      T,
-      compat::decay_t<T>>>
-  static binding_t<Binding> _tool_arg(T &&) noexcept;
+  template <typename T>
+  static binding_t<T &&> _tool_arg(T &&) noexcept;
 #endif
 
   template <typename T>
@@ -266,13 +263,10 @@ struct reflected_call_t {
     return {};
   }
 
-  template <typename T,
-    typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-      T,
-      compat::decay_t<T>>>
-  static constexpr binding_t<Binding> _reflect_arg(T &&t) noexcept(
-    noexcept(binding_t<Binding>{std::forward<T>(t)})) {
-    return binding_t<Binding>{std::forward<T>(t)};
+  template <typename T>
+  static constexpr binding_t<T &&> _reflect_arg(T &&t) noexcept(
+    noexcept(binding_t<T &&>{std::forward<T>(t)})) {
+    return binding_t<T &&>{std::forward<T>(t)};
   }
 
   public:
@@ -644,10 +638,12 @@ template <typename T, reflected_entity Entity>
 struct binding_t {
   using omni_binding_tag = void;
   using type = compat::decay_t<T>;
-  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+  using owning = typename std::conditional<std::is_reference<T>::value,
     std::false_type,
     std::true_type>::type;
-  using storage_t = typename std::conditional<owning::value, type, T>::type;
+  using storage_t = typename std::conditional<owning::value,
+    type,
+    typename std::remove_reference<T>::type &>::type;
 
   // Entity inference is unavailable before generated metadata exists. Both
   // names preserve record/enum storage expressions in unevaluated visitor
@@ -795,13 +791,13 @@ struct binding_t<T, reflected_entity::record> {
   using type = compat::decay_t<T>;
   using reflected = typename meta_t<type>::reflected;
 
-  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+  using owning = typename std::conditional<std::is_reference<T>::value,
     std::false_type,
     std::true_type>::type;
 
   using storage_t = typename std::conditional<owning::value,
     type, //< own a value
-    T //< hold a reference (T is U& / const U&)
+    typename std::remove_reference<T>::type & //< hold a reference
     >::type;
 
   // todo: add an explicit interface to `std::move` an owned value out of a
@@ -850,12 +846,12 @@ struct binding_t<T, reflected_entity::record> {
   friend struct reflected_call_t;
   friend struct meta_t<type>;
 
-  // non-owning: T is an lvalue reference (U& / const U&)
+  // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
     typename std::enable_if<!owning::value
-        && std::is_convertible<U &, T>::value,
+        && std::is_convertible<U &&, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: record(u) {}
+  constexpr explicit binding_t(U &&u) noexcept: record(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
@@ -873,13 +869,13 @@ struct binding_t<T, reflected_entity::enumeration> {
   using reflected = typename meta_t<T>::reflected;
   using type = typename reflected::type;
 
-  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+  using owning = typename std::conditional<std::is_reference<T>::value,
     std::false_type,
     std::true_type>::type;
 
   using storage_t = typename std::conditional<owning::value,
     type, //< own a value
-    T //< hold a reference (T is U& / const U&)
+    typename std::remove_reference<T>::type & //< hold a reference
     >::type;
 
   // todo: add an explicit interface to `std::move` an owned value out of a
@@ -909,12 +905,12 @@ struct binding_t<T, reflected_entity::enumeration> {
   private:
   friend struct reflected_call_t;
 
-  // non-owning: T is an lvalue reference (U& / const U&)
+  // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
     typename std::enable_if<!owning::value
-        && std::is_convertible<U &, T>::value,
+        && std::is_convertible<U &&, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: enum_value(u) {}
+  constexpr explicit binding_t(U &&u) noexcept: enum_value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
