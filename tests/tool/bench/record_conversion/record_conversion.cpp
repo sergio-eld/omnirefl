@@ -62,40 +62,47 @@ inline constexpr auto benchmark_name = //
 
 } // namespace reflected_visitors
 
+// TODO: Consider exposing same-named reflected struct conversion as a QoL
+// utility.
 template <typename From, typename To>
 To reflected_convert(From &&from, omni::type_t<To> target_type) {
+  // GCC 15 does not count the dependent call from the nested generic visitor
+  // when evaluating -Wunused-but-set-variable.
+  [[maybe_unused]] static const auto assign_matching_field = //
+    [](omni::field_binding auto to, omni::field_binding auto... from) -> void {
+    static_assert(
+      ((std::string_view(to.name()) == std::string_view(from.name())) || ...),
+      "source has no same-named field");
+
+    (std::invoke(
+       [](omni::field_binding auto from, omni::field_binding auto to) -> void {
+         if constexpr (std::string_view(to.name())
+           == std::string_view(from.name())) {
+           static_assert(requires { to.ref() = std::move(from).value(); });
+           to.ref() = std::move(from).value();
+         }
+       },
+       from,
+       to),
+      ...);
+  };
+
   const auto visit = //
     [](omni::binding auto source, omni::meta auto target) -> To {
-    [[maybe_unused]] static auto assign_matching_field = //
-      [](omni::field_binding auto from,
-        omni::field_binding auto... to) -> void {
-      constexpr bool found = //
-        ((std::string_view(to.name()) == std::string_view(from.name())) || ...);
-
-      static_assert(found, "destination has no same-named field");
-      (std::invoke(
-         [&from](omni::field_binding auto to) -> void {
-           if constexpr (std::string_view(to.name())
-             == std::string_view(from.name())) {
-             static_assert(requires { to.ref() = std::move(from).value(); });
-             to.ref() = std::move(from).value();
-           }
-         },
-         to),
-        ...);
-    };
-
+    // GCC 15 may miss dead-store elimination for this default initialization
+    // after lowering the field traversal below.
     To result{};
     omni::binding auto destination = target.bind(result);
     std::apply(
-      [&destination](omni::field_binding auto... from) -> void {
-        std::apply(
-          [&from...](omni::field_binding auto... to) -> void {
-            (std::invoke(assign_matching_field, std::move(from), to...), ...);
-          },
-          destination.public_fields());
+      [&source](omni::field_binding auto... to) -> void {
+        (std::apply( //
+           [&to](omni::field_binding auto... from) -> void {
+             assign_matching_field(to, from...);
+           },
+           source.public_fields()),
+          ...);
       },
-      source.public_fields());
+      destination.public_fields());
 
     return result;
   };
@@ -112,8 +119,7 @@ struct move_source {
   static move_source from_index(std::size_t index) {
     return {
       .name = "example",
-      .payload =
-        std::make_unique<int>(static_cast<int>(index % 32768)),
+      .payload = std::make_unique<int>(static_cast<int>(index % 32768)),
     };
   }
 };
@@ -129,13 +135,13 @@ struct move_destination {
       source.name;
     }
   {
-    if constexpr (Implementation == conversion_type::aggregate_return) {
+    if constexpr (conversion_type::aggregate_return == Implementation) {
       return {
         .payload = std::move(source.payload),
         .name = std::move(source.name),
       };
-    } else if constexpr (
-      Implementation == conversion_type::default_then_assign) {
+    } else if constexpr (conversion_type::default_then_assign
+      == Implementation) {
       move_destination result{};
       result.payload = std::move(source.payload);
       result.name = std::move(source.name);
@@ -174,14 +180,14 @@ struct trivial_destination {
       source.score;
     }
   {
-    if constexpr (Implementation == conversion_type::aggregate_return) {
+    if constexpr (conversion_type::aggregate_return == Implementation) {
       return {
         .flags = source.flags,
         .id = source.id,
         .score = source.score,
       };
-    } else if constexpr (
-      Implementation == conversion_type::default_then_assign) {
+    } else if constexpr (conversion_type::default_then_assign
+      == Implementation) {
       trivial_destination result{};
       result.flags = source.flags;
       result.id = source.id;
@@ -204,8 +210,7 @@ struct move_source {
 
   static move_source from_index(std::size_t index) {
     return {
-      .payload =
-        std::make_unique<int>(static_cast<int>(index % 32768)),
+      .payload = std::make_unique<int>(static_cast<int>(index % 32768)),
       .name = "example",
     };
   }
@@ -222,13 +227,13 @@ struct move_destination {
       source.name;
     }
   {
-    if constexpr (Implementation == conversion_type::aggregate_return) {
+    if constexpr (conversion_type::aggregate_return == Implementation) {
       return {
         .payload = std::move(source.payload),
         .name = std::move(source.name),
       };
-    } else if constexpr (
-      Implementation == conversion_type::default_then_assign) {
+    } else if constexpr (conversion_type::default_then_assign
+      == Implementation) {
       move_destination result{};
       result.payload = std::move(source.payload);
       result.name = std::move(source.name);
@@ -267,14 +272,14 @@ struct trivial_destination {
       source.score;
     }
   {
-    if constexpr (Implementation == conversion_type::aggregate_return) {
+    if constexpr (conversion_type::aggregate_return == Implementation) {
       return {
         .flags = source.flags,
         .id = source.id,
         .score = source.score,
       };
-    } else if constexpr (
-      Implementation == conversion_type::default_then_assign) {
+    } else if constexpr (conversion_type::default_then_assign
+      == Implementation) {
       trivial_destination result{};
       result.flags = source.flags;
       result.id = source.id;
@@ -292,12 +297,12 @@ struct trivial_destination {
 template <typename To>
 struct raw {
   template <std::ranges::sized_range Range, typename Convert>
-  RECORD_CONVERSION_NOINLINE std::vector<To> operator()(Range &input,
-    Convert convert) const {
+  RECORD_CONVERSION_NOINLINE std::vector<To> operator()(Range &&input,
+    Convert &&convert) const {
     std::vector<To> output;
     output.reserve(std::ranges::size(input));
-    for (auto &from : input)
-      output.emplace_back(std::invoke(convert, from));
+    for (auto &&from : std::forward<Range>(input))
+      output.emplace_back(convert(std::forward<decltype(from)>(from)));
     return output;
   }
 };
@@ -305,11 +310,13 @@ struct raw {
 template <typename To>
 struct ranges_transform {
   template <std::ranges::sized_range Range, typename Convert>
-  RECORD_CONVERSION_NOINLINE std::vector<To> operator()(Range &input,
-    Convert convert) const {
+  RECORD_CONVERSION_NOINLINE std::vector<To> operator()(Range &&input,
+    Convert &&convert) const {
     std::vector<To> output;
     output.reserve(std::ranges::size(input));
-    std::ranges::transform(input, std::back_inserter(output), convert);
+    std::ranges::transform(std::forward<Range>(input),
+      std::back_inserter(output),
+      std::forward<Convert>(convert));
     return output;
   }
 };
@@ -319,9 +326,10 @@ struct ranges_transform {
 template <typename To>
 struct ranges_to {
   template <std::ranges::input_range Range, typename Convert>
-  RECORD_CONVERSION_NOINLINE std::vector<To> operator()(Range &input,
-    Convert convert) const {
-    return input | std::views::transform(convert)
+  RECORD_CONVERSION_NOINLINE std::vector<To> operator()(Range &&input,
+    Convert &&convert) const {
+    return std::forward<Range>(input)
+      | std::views::transform(std::forward<Convert>(convert))
       | std::ranges::to<std::vector>();
   }
 };
@@ -333,7 +341,7 @@ template <typename From,
   template <typename> typename BatchConvert>
 void benchmark_scenario() {
   benchmark::RegisterBenchmark(
-      /*name=*/omni::reflected_call(reflected_visitors::benchmark_name,
+    /*name=*/omni::reflected_call(reflected_visitors::benchmark_name,
       omni::type<From>,
       Implementation,
       omni::type<BatchConvert<To>>),
@@ -354,14 +362,12 @@ void benchmark_scenario() {
             From::from_index);
           state.ResumeTiming();
 
-          auto output = std::invoke(BatchConvert<To>{},
-            input,
-            [](From &from) -> To {
-              if constexpr (std::is_copy_constructible_v<From>)
-                return To::template from<Implementation>(from);
-              else
-                return To::template from<Implementation>(std::move(from));
-            });
+          auto output = BatchConvert<To>{}(input, [](auto &&from) -> To {
+            if constexpr (std::is_copy_constructible_v<From>)
+              return To::template from<Implementation>(from);
+            else
+              return To::template from<Implementation>(std::move(from));
+          });
           benchmark::DoNotOptimize(output.data());
           benchmark::ClobberMemory();
           state.PauseTiming();
