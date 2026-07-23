@@ -342,6 +342,7 @@ Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
       const ast::rule<Match, Node, Fold> &rule) {
       const auto bound_matcher =
         traverse(rule.traversal_kind, rule.pattern.match.bind(binding_tag));
+
       using matcher_t = decltype(bound_matcher);
 
       struct _callback: MatchFinder::MatchCallback {
@@ -363,6 +364,7 @@ Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
           if (!node) {
             llvm::errs()
               << "DEBUG: Matc::Callback: Node of invalid type matched.\n";
+
             return;
           }
 
@@ -391,6 +393,7 @@ Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
       (finder.addMatcher(callback.matcher, &callback), ...);
     },
     callbacks);
+
   finder.matchAST(ast.getASTContext());
 
   return a;
@@ -2078,6 +2081,7 @@ meta::source_file_context meta::matches::fold_reflected_call(
 
     const meta::type_id id =
       std::visit([](const auto &type) { return type.id; }, reflected->type);
+
     const meta::type_id concrete_id =
       std::visit([](const auto &type) { return type.concrete_id; },
         reflected->type);
@@ -2662,6 +2666,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
       std::error_code ec;
       fs::remove(tmp, ec);
     });
+
     return std::unexpected(
       std::format("rename('{}'): {}", depfile.string(), ec.message()));
   }
@@ -2994,11 +2999,13 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     "-c"sv,
     "/c"sv,
   };
+
   static constexpr std::array k_ignored_output_options{
     "-o"sv,
     "/Fo"sv,
     "/Fo:"sv,
   };
+
   static constexpr std::array k_cl_driver_names{
     "cl"sv,
     "cl.exe"sv,
@@ -3008,49 +3015,76 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::string compiler_name =
     llvm::StringRef{fs::path(raw_flags.front()).filename().string()}.lower();
+
   const bool invoked_as_cl =
     std::ranges::contains(k_cl_driver_names, compiler_name);
+
   const bool cl_style =
     invoked_as_cl || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
 
-  const std::vector flags = raw_flags //
-    | std_c::views::enumerate //
-    | std::views::filter([&raw_flags](const auto &indexed) {
-        const auto &[index, arg] = indexed;
-        const bool ignored_output_value = 0 != index
-          && std::ranges::contains(k_ignored_output_options,
-            std::string_view{raw_flags[index - 1]});
+  // std::views::pairwise is unavailable in Cosmopolitan's libc++; this variant
+  // preserves boundary flags by making their missing neighbors optional.
+  struct flag_context {
+    std::optional<std::string_view> previous;
+    std::string_view current;
+    std::optional<std::string_view> next;
+  };
+
+  const auto flag_contexts = [&raw_flags] {
+    return std::views::iota(raw_flags.cbegin(), raw_flags.cend()) //
+      | std::views::transform(
+        [begin = raw_flags.cbegin(), end = raw_flags.cend()](const auto flag) {
+          const auto next = std::ranges::next(flag);
+          return flag_context{
+            begin == flag
+              ? std::optional<std::string_view>{}
+              : std::optional<std::string_view>{
+                  *std::ranges::prev(flag),
+                },
+            std::string_view{*flag},
+            end == next
+              ? std::optional<std::string_view>{}
+              : std::optional<std::string_view>{*next},
+          };
+        });
+  };
+
+  const auto flags = flag_contexts() //
+    | std::views::filter([](const auto &flag) {
+        const bool ignored_output_value = flag.previous.has_value()
+          && std::ranges::contains(k_ignored_output_options, *flag.previous);
 
         return !ignored_output_value
           && !std::ranges::contains(k_ignored_action_options,
-            std::string_view{arg})
+            flag.current)
           && !std::ranges::contains(k_ignored_output_options,
-            std::string_view{arg});
+            flag.current);
       })
-    | std::views::values //
-    | std::ranges::to<std::vector>();
+    | std::views::transform([](const flag_context &flag) {
+        return flag.current;
+      }) //
+    | std::ranges::to<std::vector<std::string>>();
 
   const std::optional<std::string> response_file_directory =
-    std::invoke([&raw_flags] -> std::optional<std::string> {
-      const auto indexed_flags =
-        raw_flags | std_c::views::enumerate | std::views::reverse;
+    std::invoke([&flag_contexts] -> std::optional<std::string> {
+      const auto flags = flag_contexts() | std::views::reverse;
 
       const auto found =
-        std::ranges::find_if(indexed_flags, [&raw_flags](const auto &indexed) {
-          const auto &[index, arg] = indexed;
-          return std::string_view{arg}.starts_with("-working-directory="sv)
-            || ("-working-directory"sv == arg
-              && std::ssize(raw_flags) > index + 1);
+        std::ranges::find_if(flags, [](const auto &flag) {
+          return flag.current.starts_with("-working-directory="sv)
+            || ("-working-directory"sv == flag.current
+              && flag.next.has_value());
         });
-      if (indexed_flags.end() == found)
+
+      if (flags.end() == found)
         return std::nullopt;
 
-      const auto &[index, arg] = *found;
+      const auto found_flag = *found;
       constexpr std::string_view k_joined = "-working-directory=";
       const std::string_view directory = //
-        std::string_view{arg}.starts_with(k_joined) //
-        ? std::string_view{arg}.substr(k_joined.size())
-        : std::string_view{raw_flags[index + 1]};
+        found_flag.current.starts_with(k_joined) //
+        ? found_flag.current.substr(k_joined.size())
+        : *found_flag.next;
 
       return fs::absolute(directory).lexically_normal().generic_string();
     });
@@ -3107,6 +3141,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::expected normalized_args =
     parse_driver_args(std::span{*expanded_flags}.subspan(1), cl_style);
+
   if (!normalized_args)
     return std::unexpected(processing_error(source, normalized_args.error()));
 
@@ -3114,6 +3149,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     std::invoke([&normalized_args] -> std::optional<std::string> {
       const auto *working_directory =
         normalized_args->getLastArgNoClaim(options::OPT_working_directory);
+
       if (!working_directory)
         return std::nullopt;
 
@@ -3204,6 +3240,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         // names until compiler-driver mapping is split out of omnirefl.
         const std::string compiler =
           fs::path(raw_flags.front()).filename().string();
+
         if (compiler.starts_with("x86_64-w64-mingw32-"))
           return std::string{"x86_64-w64-windows-gnu"};
         if (compiler.starts_with("i686-w64-mingw32-"))
@@ -3235,6 +3272,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       std::error_code ec;
       return fs::weakly_canonical(raw_flags.front(), ec);
     });
+
     const fs::path compiler_root = compiler_path.parent_path().parent_path();
 
     if (fs::is_directory(compiler_root / "include/c++/v1")) {
@@ -3336,6 +3374,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         out.emplace_back("-fsyntax-only");
         out.emplace_back(
           std::format("-resource-dir={}", resource_dir.generic_string()));
+
         return out;
       }
 
@@ -3365,6 +3404,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(
         std::format("-resource-dir={}", resource_dir.generic_string()));
+
       out.emplace_back(source.generic_string());
 
       return out;
@@ -3388,6 +3428,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
         const llvm::ErrorOr<std::string> current_directory =
           driver.getVFS().getCurrentWorkingDirectory();
+
         if (!current_directory) {
           return std::unexpected(processing_error(source,
             std::format("failed to read the current working directory: {}",
@@ -4495,6 +4536,7 @@ std::string field_type_name_from(const clang::ASTContext &ast,
         type.getAs<clang::QualifiedTypeLoc>()) {
     const std::string qualifiers =
       type.getType().getLocalQualifiers().getAsString(ast.getPrintingPolicy());
+
     const clang::UnqualTypeLoc unqualified = qualified.getUnqualifiedLoc();
     const std::string type_name = field_type_name_from(ast, unqualified);
 
@@ -4853,9 +4895,11 @@ collected_dependencies recursively_collect_dependency_types(
     cur_decl = cur_definition;
     const clang::TagType *cur_type =
       meta::map_decl_to_canonical_type(ast, cur_decl);
+
     const bool in_std = cur_decl->isInStdNamespace();
     const bool is_compound_dependency =
       meta::is_compound_dependency_route(cur_decl);
+
     const clang::TagType *dependency_parent =
       in_std || is_compound_dependency ? pending.parent : cur_type;
 
@@ -5071,6 +5115,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
     .annotation = std::invoke([&ast, t] {
       const auto *spec =
         llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(t->getDecl());
+
       return meta::annotation_from_decl(ast,
         spec ? static_cast<const clang::Decl *>(spec->getSpecializedTemplate())
              : static_cast<const clang::Decl *>(t->getDecl()));
@@ -5106,6 +5151,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
 
   const clang::Type &template_arg_type =
     *ast.getCanonicalType(template_arg.getUnqualifiedType()).getTypePtr();
+
   // todo: C-arrays, pointers?
 
   // not a struct|class|union|enum
@@ -5307,6 +5353,7 @@ std::string format_qualified_inner_type_from_root(const std::string &root,
   const std::string leaf = inner_type.name->contains('<')
     ? std::format("template {}", *inner_type.name)
     : *inner_type.name;
+
   const std::array spans{
     std::span<const std::string>{&root, 1},
     std::span<const std::string>{inner_type.enclosing_records}.subspan(1),
@@ -5506,6 +5553,7 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t,
 
   const std::string access_root_for =
     std::format("{}<T>", enclosing_root_as_dependent(t));
+
   const std::string matched_type = public_access_path.steps.empty()
     ? std::format("typename {}",
         format_qualified_inner_type_from_root(access_root_for, t))
@@ -5604,10 +5652,12 @@ std::string reflectable_body(const meta::record_data &d) {
 
         const bool by_reference =
           meta::field_data::value_access::reference == f.access;
+
         const std::string value_type = //
           by_reference
           ? std::format("decltype((t.{}))", f.name)
           : std::format("omni::compat::remove_cvref_t<decltype(t.{})>", f.name);
+
         return std::format(
           "\n\n    // Emitted for reference and copy access."
           "\n    // Lvalue reads preserve owner qualification."

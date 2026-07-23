@@ -87,6 +87,8 @@ jobs:
             ./build-alpine/${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}/symbols
           if-no-files-found: error
 
+  # Keep this outside the package matrix: macOS cross-compilation takes much
+  # longer, and its test job should depend only on this package build.
   build-cosmopolitan-package:
     name: Build package / cosmopolitan-universal
     runs-on: ubuntu-latest
@@ -188,12 +190,18 @@ jobs:
     runs-on: macos-15-intel
     needs: build-cosmopolitan-package
     permissions:
+      actions: read
       contents: read
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
       - name: Resolve Short SHA
         id: commit
-        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
       - name: Download Cosmopolitan Package
         uses: actions/download-artifact@v8
@@ -209,7 +217,8 @@ jobs:
           source="$root/tests"
           build="$root/build"
           results="$GITHUB_WORKSPACE/artifacts/test-results/macos-cosmopolitan"
-          mkdir -p "$root" "$results"
+          benchmarks="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-x86_64-cosmopolitan"
+          mkdir -p "$root" "$results" "$benchmarks"
 
           package="$(find artifacts/packages/cosmopolitan \
             -maxdepth 1 -type f -name 'omnirefl-cosmopolitan-*.tar.gz' \
@@ -233,18 +242,148 @@ jobs:
             echo "OMNIREFL_TEST_SOURCE=$source"
             echo "OMNIREFL_TEST_BUILD=$build"
             echo "OMNIREFL_TEST_RESULTS=$results"
+            echo "OMNIREFL_BENCHMARK_RESULTS=$benchmarks"
           } >> "$GITHUB_ENV"
 
-      - name: Run Package Tests
+      - name: Run benchmark
         run: |
           set -euo pipefail
           cmake -S "$OMNIREFL_TEST_SOURCE" \
             -B "$OMNIREFL_TEST_BUILD" \
             -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_BENCH=ON \
             -Domnirefl_DIR="$OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
             tee "$OMNIREFL_TEST_RESULTS/configure.log"
 
+          reflection_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          cmake --build "$OMNIREFL_TEST_BUILD" \
+            -t benchmark.baseline.omni \
+            > "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" 2>&1
+          reflection_end="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          reflection_ms="$(awk \
+            -v start="$reflection_start" \
+            -v end="$reflection_end" \
+            'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
+
+          build_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          cmake --build "$OMNIREFL_TEST_BUILD" \
+            -t benchmark.baseline \
+            --parallel "$(sysctl -n hw.logicalcpu)" \
+            > "$OMNIREFL_BENCHMARK_RESULTS/build.log" 2>&1
+          build_end="$(python3 -c 'import time; print(time.monotonic_ns())')"
+          build_ms="$(awk \
+            -v start="$build_start" \
+            -v end="$build_end" \
+            'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
+          tool_build="$(awk -v tool="$reflection_ms" -v build="$build_ms" \
+            'BEGIN { printf "%.6f", 0 == build ? 0 : 100 * tool / build }')"
+
+          {
+            printf "[\n"
+            printf "  {\"name\": \"reflection wall\", \"unit\": \"ms\", \"value\": %s},\n" "$reflection_ms"
+            printf "  {\"name\": \"build wall\", \"unit\": \"ms\", \"value\": %s},\n" "$build_ms"
+            printf "  {\"name\": \"tool/build\", \"unit\": \"%%\", \"value\": %s}" "$tool_build"
+            grep -E "^[^:]+: .+ \\([0-9]+ microseconds\\)$" \
+              "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" \
+              | while IFS= read -r line; do
+                name="${line%%:*}"
+                us="$(printf "%s\n" "$line" \
+                  | sed -E "s/.*\\(([0-9]+) microseconds\\)$/\\1/")"
+                ms="$(awk -v us="$us" \
+                  'BEGIN { printf "%.3f", us / 1000 }')"
+                printf ",\n  {\"name\": \"tool %s\", \"unit\": \"ms\", \"value\": %s}" \
+                  "$name" "$ms"
+              done
+            printf "\n]\n"
+          } > "$OMNIREFL_BENCHMARK_RESULTS/benchmark.json"
+
+          printf "\nBenchmark summary (macos-x86_64-cosmopolitan)\n"
+          printf "%-32s %12s %8s\n" "metric" "value" "unit"
+          printf "%-32s %12s %8s\n" "reflection wall" "$reflection_ms" "ms"
+          printf "%-32s %12s %8s\n" "build wall" "$build_ms" "ms"
+          printf "%-32s %12s %8s\n" "tool/build" "$tool_build" "%"
+
+      - name: Find macOS benchmark history artifact
+        id: macos_history_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const workflow_id = 'ci.yml'
+            const branch = context.payload.repository.default_branch
+            const historyArtifactPrefix =
+              'benchmark-history-macos-x86_64-cosmopolitan'
+
+            const historyArtifactFrom = async (run_id) => {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id, per_page: 100})
+
+              return artifacts
+                .filter(({expired, name}) =>
+                  !expired && (
+                    historyArtifactPrefix === name ||
+                    name.startsWith(`${historyArtifactPrefix}-attempt-`)))
+                .sort((lhs, rhs) =>
+                  new Date(rhs.created_at) - new Date(lhs.created_at))[0]
+            }
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id,
+                branch,
+                status: 'success',
+                per_page: 20,
+              })
+
+            for (const run of runs) {
+              if (context.runId === run.id) {
+                continue
+              }
+
+              const artifact = await historyArtifactFrom(run.id)
+              if (artifact) {
+                core.setOutput('run_id', run.id)
+                core.setOutput('artifact_name', artifact.name)
+                return
+              }
+            }
+
+            core.setOutput('run_id', '')
+
+      - name: Download macOS benchmark history
+        if: ${{ '' != steps.macos_history_run.outputs.run_id }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.macos_history_run.outputs.artifact_name }}
+          path: ./artifacts/benchmark-history/macos
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.macos_history_run.outputs.run_id }}
+
+      - name: Prepare macOS benchmark history
+        run: mkdir -p ./artifacts/benchmark-history/macos
+
+      - name: Check macOS benchmark regression
+        run: |
+          python3 -B ci/benchmark_history.py compare \
+            --current ./artifacts/benchmarks/macos-x86_64-cosmopolitan/benchmark.json \
+            --history ./artifacts/benchmark-history/macos/history.json \
+            --os macos-x86_64-cosmopolitan \
+            --arch x86_64 \
+            --libc cosmopolitan \
+            --threshold 1.2 \
+            --min-delta-ms 500 \
+            --count 5
+
+      - name: Run Package Tests
+        run: |
+          set -euo pipefail
           cmake --build "$OMNIREFL_TEST_BUILD" \
             --parallel "$(sysctl -n hw.logicalcpu)" 2>&1 |
             tee "$OMNIREFL_TEST_RESULTS/build.log"
@@ -257,6 +396,38 @@ jobs:
           rc=${PIPESTATUS[0]}
           set -e
           exit "$rc"
+
+      - name: Update macOS benchmark history
+        if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
+        env:
+          COMMIT_TITLE: ${{ steps.commit.outputs.title }}
+        run: |
+          python3 -B ci/benchmark_history.py update \
+            --current ./artifacts/benchmarks/macos-x86_64-cosmopolitan/benchmark.json \
+            --history ./artifacts/benchmark-history/macos/history.json \
+            --commit "${{ github.sha }}" \
+            --commit-title "$COMMIT_TITLE" \
+            --os macos-x86_64-cosmopolitan \
+            --arch x86_64 \
+            --libc cosmopolitan \
+            --max-runs 200
+
+      - name: Upload macOS benchmark history
+        if: ${{ success() && 'push' == github.event_name && 'master' == github.ref_name }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: >-
+            benchmark-history-macos-x86_64-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmark-history/macos
+          if-no-files-found: error
+
+      - name: Upload macOS benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-macos-x86_64-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmarks/macos-x86_64-cosmopolitan
+          if-no-files-found: error
 
       - name: Collect Test Diagnostics
         if: always()
