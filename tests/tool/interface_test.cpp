@@ -12,6 +12,42 @@
 #include <vector>
 
 namespace interface_test {
+namespace aggregate_initialization {
+
+struct source {
+  std::string name;
+  std::unique_ptr<int> payload;
+  int count;
+};
+
+struct destination {
+  std::unique_ptr<int> payload;
+  std::string name;
+  int count;
+  double missing;
+};
+
+struct repeated_source {
+  std::string first;
+  std::string second;
+  int count;
+};
+
+struct repeated_destination {
+  std::string second;
+  std::string first;
+  long count;
+};
+
+struct convert {
+  template <typename From, typename To>
+  To operator()(omni::binding_t<From> from, omni::meta_t<To>) const {
+    return omni::refl::aggregate_into<To>(from.public_fields());
+  }
+};
+
+} // namespace aggregate_initialization
+
 namespace field_visibility {
 
 struct left_base {
@@ -925,6 +961,37 @@ TEST(fields, reference_and_move_access) {
   omni::reflected_call(interface_test::field_access::write_through_meta{input},
     omni::type_t<interface_test::field_access::record>{});
   EXPECT_EQ(17, input.scalar);
+}
+
+TEST(aggregate_into, constructs_aggregate_from_field_tuple) {
+  namespace aggregate = interface_test::aggregate_initialization;
+
+  aggregate::source source{"oceanic", std::unique_ptr<int>{new int{815}}, 47};
+  const aggregate::destination destination = omni::reflected_call(
+    aggregate::convert{},
+    std::move(source),
+    omni::type_t<aggregate::destination>{});
+
+  ASSERT_NE(nullptr, destination.payload);
+  EXPECT_EQ(815, *destination.payload);
+  EXPECT_EQ("oceanic", destination.name);
+  EXPECT_EQ(47, destination.count);
+  EXPECT_EQ(0.0, destination.missing);
+  EXPECT_EQ(nullptr, source.payload);
+}
+
+TEST(aggregate_into, matches_same_typed_fields_by_name) {
+  namespace aggregate = interface_test::aggregate_initialization;
+
+  aggregate::repeated_source source{"first", "second", 47};
+  const aggregate::repeated_destination destination = omni::reflected_call(
+    aggregate::convert{},
+    std::move(source),
+    omni::type_t<aggregate::repeated_destination>{});
+
+  EXPECT_EQ("second", destination.second);
+  EXPECT_EQ("first", destination.first);
+  EXPECT_EQ(47, destination.count);
 }
 
 TEST(fields, arrow_bypasses_overloaded_address_of) {

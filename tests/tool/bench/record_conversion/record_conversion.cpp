@@ -33,6 +33,7 @@ enum class conversion_type {
   aggregate_return,
   default_then_assign,
   reflected,
+  aggregate_into,
 };
 
 namespace reflected_visitors {
@@ -110,6 +111,16 @@ To reflected_convert(From &&from, omni::type_t<To> target_type) {
   return omni::reflected_call(visit, std::forward<From>(from), target_type);
 }
 
+template <typename From, typename To>
+To aggregate_into_convert(From &&from, omni::type_t<To> target_type) {
+  const auto visit = //
+    [](omni::binding auto source, omni::meta auto) -> To {
+    return omni::refl::aggregate_into<To>(source.public_fields());
+  };
+
+  return omni::reflected_call(visit, std::forward<From>(from), target_type);
+}
+
 namespace reordered {
 
 struct move_source {
@@ -146,8 +157,11 @@ struct move_destination {
       result.payload = std::move(source.payload);
       result.name = std::move(source.name);
       return result;
-    } else {
+    } else if constexpr (conversion_type::reflected == Implementation) {
       return reflected_convert(std::forward<From>(source),
+        omni::type<move_destination>);
+    } else {
+      return aggregate_into_convert(std::forward<From>(source),
         omni::type<move_destination>);
     }
   }
@@ -193,8 +207,11 @@ struct trivial_destination {
       result.id = source.id;
       result.score = source.score;
       return result;
-    } else {
+    } else if constexpr (conversion_type::reflected == Implementation) {
       return reflected_convert(std::forward<From>(source),
+        omni::type<trivial_destination>);
+    } else {
+      return aggregate_into_convert(std::forward<From>(source),
         omni::type<trivial_destination>);
     }
   }
@@ -238,8 +255,11 @@ struct move_destination {
       result.payload = std::move(source.payload);
       result.name = std::move(source.name);
       return result;
-    } else {
+    } else if constexpr (conversion_type::reflected == Implementation) {
       return reflected_convert(std::forward<From>(source),
+        omni::type<move_destination>);
+    } else {
+      return aggregate_into_convert(std::forward<From>(source),
         omni::type<move_destination>);
     }
   }
@@ -285,8 +305,11 @@ struct trivial_destination {
       result.id = source.id;
       result.score = source.score;
       return result;
-    } else {
+    } else if constexpr (conversion_type::reflected == Implementation) {
       return reflected_convert(std::forward<From>(source),
+        omni::type<trivial_destination>);
+    } else {
+      return aggregate_into_convert(std::forward<From>(source),
         omni::type<trivial_destination>);
     }
   }
@@ -438,6 +461,14 @@ int main(int argc, char **argv) {
     same_order::move_destination,
     reflected,
     raw>();
+  benchmark_scenario<reordered::move_source,
+    reordered::move_destination,
+    aggregate_into,
+    raw>();
+  benchmark_scenario<same_order::move_source,
+    same_order::move_destination,
+    aggregate_into,
+    raw>();
   benchmark_scenario<reordered::trivial_source,
     reordered::trivial_destination,
     aggregate_return,
@@ -461,6 +492,14 @@ int main(int argc, char **argv) {
   benchmark_scenario<same_order::trivial_source,
     same_order::trivial_destination,
     reflected,
+    raw>();
+  benchmark_scenario<reordered::trivial_source,
+    reordered::trivial_destination,
+    aggregate_into,
+    raw>();
+  benchmark_scenario<same_order::trivial_source,
+    same_order::trivial_destination,
+    aggregate_into,
     raw>();
 
   benchmark_scenario<reordered::move_source,
@@ -487,6 +526,14 @@ int main(int argc, char **argv) {
     same_order::move_destination,
     reflected,
     ranges_transform>();
+  benchmark_scenario<reordered::move_source,
+    reordered::move_destination,
+    aggregate_into,
+    ranges_transform>();
+  benchmark_scenario<same_order::move_source,
+    same_order::move_destination,
+    aggregate_into,
+    ranges_transform>();
   benchmark_scenario<reordered::trivial_source,
     reordered::trivial_destination,
     aggregate_return,
@@ -510,6 +557,14 @@ int main(int argc, char **argv) {
   benchmark_scenario<same_order::trivial_source,
     same_order::trivial_destination,
     reflected,
+    ranges_transform>();
+  benchmark_scenario<reordered::trivial_source,
+    reordered::trivial_destination,
+    aggregate_into,
+    ranges_transform>();
+  benchmark_scenario<same_order::trivial_source,
+    same_order::trivial_destination,
+    aggregate_into,
     ranges_transform>();
 
 #if defined(__cpp_lib_ranges_to_container) \
@@ -538,6 +593,14 @@ int main(int argc, char **argv) {
     same_order::move_destination,
     reflected,
     ranges_to>();
+  benchmark_scenario<reordered::move_source,
+    reordered::move_destination,
+    aggregate_into,
+    ranges_to>();
+  benchmark_scenario<same_order::move_source,
+    same_order::move_destination,
+    aggregate_into,
+    ranges_to>();
   benchmark_scenario<reordered::trivial_source,
     reordered::trivial_destination,
     aggregate_return,
@@ -561,6 +624,14 @@ int main(int argc, char **argv) {
   benchmark_scenario<same_order::trivial_source,
     same_order::trivial_destination,
     reflected,
+    ranges_to>();
+  benchmark_scenario<reordered::trivial_source,
+    reordered::trivial_destination,
+    aggregate_into,
+    ranges_to>();
+  benchmark_scenario<same_order::trivial_source,
+    same_order::trivial_destination,
+    aggregate_into,
     ranges_to>();
 #endif
 

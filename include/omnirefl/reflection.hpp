@@ -207,6 +207,88 @@ concept field_binding =
   requires { typename compat::remove_cvref_t<T>::omni_field_binding_tag; };
 #endif
 
+/// Experimental utilities callable only from within a reflected scope.
+namespace refl {
+namespace detail {
+
+template <typename>
+struct _dependent_false: std::false_type {};
+
+template <typename T, typename = T>
+struct aggregate_into_t {
+  template <typename Fields>
+  static T from(Fields &&) {
+    static_assert(_dependent_false<T>::value,
+      "aggregation into T is not supported");
+  }
+};
+
+template <std::size_t Index,
+  typename TargetField,
+  typename Fields,
+  typename Or,
+  bool End>
+struct _get_t;
+
+template <std::size_t Index, typename TargetField, typename Fields, typename Or>
+struct _get_t<Index, TargetField, Fields, Or, true> {
+  static Or from(Fields &, Or &or_value) {
+    return std::move(or_value);
+  }
+};
+
+template <std::size_t Index, typename TargetField, typename Fields, typename Or>
+struct _get_t<Index, TargetField, Fields, Or, false> {
+  using field = typename std::tuple_element<Index, Fields>::type;
+
+  static Or from(Fields &fields, Or &or_value) {
+    return from(fields,
+      or_value,
+      std::integral_constant<bool,
+        omni::detail::_same_field_name(TargetField::name(), field::name())>{});
+  }
+
+  private:
+  static Or from(Fields &fields, Or &, std::true_type) {
+    using source = decltype(std::declval<field &&>().value());
+    static_assert(std::is_constructible<Or, source>::value,
+      "destination field is not constructible from same-named source field");
+    return Or{std::move(std::get<Index>(fields)).value()};
+  }
+
+  static Or from(Fields &fields, Or &or_value, std::false_type) {
+    return _get_t<Index + 1,
+      TargetField,
+      Fields,
+      Or,
+      Index + 1 == std::tuple_size<Fields>::value>::from(fields,
+      or_value);
+  }
+};
+
+} // namespace detail
+
+// REFACTORME: refine this provisional tuple-only public interface after the
+// aggregate-construction experiment is complete.
+/// Return the same-named field constructed as `Or`, or `or_value`.
+template <typename TargetField, typename... Field, typename Or>
+Or get(std::tuple<Field...> &fields, Or or_value) {
+  using fields_t = std::tuple<Field...>;
+  return detail::_get_t<0,
+    TargetField,
+    fields_t,
+    Or,
+    sizeof...(Field) == 0>::from(fields,
+    or_value);
+}
+
+template <typename T, typename Fields>
+T aggregate_into(Fields &&fields) {
+  return detail::aggregate_into_t<T>::from(std::forward<Fields>(fields));
+}
+
+} // namespace refl
+
 struct reflected_call_t {
   private:
 #if !defined(OMNI_TOOL_RUN) \
