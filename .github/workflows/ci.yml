@@ -18,17 +18,18 @@ on:
         default: false
 
 env:
+  COSMOPOLITAN_VERSION: 4.0.2
   LLVM_VERSION: 22.1.8
 
 jobs:
   # Package tests use the same matrix vocabulary as docker-compose.yml:
   #
-  #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows>
-  #   toolchain=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
+  #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows|macos>
+  #   toolchain=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang|cosmopolitan>
   #
-  # Linux rows dispatch to Compose services. Windows rows install and test the
-  # package directly on GitHub-hosted runners; the Compose services remain the
-  # local package-test entrypoints.
+  # Linux rows dispatch to Compose services. Windows and macOS rows install and
+  # test packages directly on GitHub-hosted runners; the Compose services remain
+  # the local Linux and Windows package-test entrypoints.
   build-package:
     name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
@@ -84,6 +85,40 @@ jobs:
           name: symbols-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
           path: >-
             ./build-alpine/${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}/symbols
+          if-no-files-found: error
+
+  build-cosmopolitan-package:
+    name: Build package / cosmopolitan-universal
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Resolve Short SHA
+        id: commit
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull Cosmopolitan Build Image
+        run: >-
+          docker pull
+          ghcr.io/sergio-eld/omnirefl-build-cosmopolitan:cosmopolitan-${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}
+
+      - name: Build Cosmopolitan Package
+        run: |
+          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
+          PACKAGE_DIR=./artifacts/packages/cosmopolitan \
+            docker compose run --rm build-cosmopolitan
+
+      - name: Upload Cosmopolitan Package
+        uses: actions/upload-artifact@v6
+        with:
+          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan
           if-no-files-found: error
 
   test-linux:
@@ -146,6 +181,107 @@ jobs:
           name: >-
             test-${{ matrix.platform }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }}
+          if-no-files-found: error
+
+  test-macos:
+    name: macOS test / cosmopolitan-x86_64
+    runs-on: macos-15-intel
+    needs: build-cosmopolitan-package
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve Short SHA
+        id: commit
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Cosmopolitan Package
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan
+
+      - name: Install Cosmopolitan Package
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/with space"
+          install="$root/omnirefl"
+          source="$root/tests"
+          build="$root/build"
+          results="$GITHUB_WORKSPACE/artifacts/test-results/macos-cosmopolitan"
+          mkdir -p "$root" "$results"
+
+          package="$(find artifacts/packages/cosmopolitan \
+            -maxdepth 1 -type f -name 'omnirefl-cosmopolitan-*.tar.gz' \
+            -print -quit)"
+          test -n "$package"
+          tar -xzf "$package" -C "$root"
+
+          package_root="$(find "$root" -mindepth 1 -maxdepth 1 \
+            -type d -name 'omnirefl-*' -print -quit)"
+          test -n "$package_root"
+          mv "$package_root" "$install"
+          cp -R "$install/share/omnirefl/tests" "$source"
+
+          "$install/bin/omnirefl" --help 2>&1 |
+            tee "$results/omnirefl-help.log"
+          "$install/bin/ccdb_query" --help 2>&1 |
+            tee "$results/ccdb-query-help.log"
+
+          {
+            echo "OMNIREFL_INSTALL_ROOT=$install"
+            echo "OMNIREFL_TEST_SOURCE=$source"
+            echo "OMNIREFL_TEST_BUILD=$build"
+            echo "OMNIREFL_TEST_RESULTS=$results"
+          } >> "$GITHUB_ENV"
+
+      - name: Run Package Tests
+        run: |
+          set -euo pipefail
+          cmake -S "$OMNIREFL_TEST_SOURCE" \
+            -B "$OMNIREFL_TEST_BUILD" \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Domnirefl_DIR="$OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
+            tee "$OMNIREFL_TEST_RESULTS/configure.log"
+
+          cmake --build "$OMNIREFL_TEST_BUILD" \
+            --parallel "$(sysctl -n hw.logicalcpu)" 2>&1 |
+            tee "$OMNIREFL_TEST_RESULTS/build.log"
+
+          set +e
+          ctest --test-dir "$OMNIREFL_TEST_BUILD" \
+            --output-junit "$OMNIREFL_TEST_RESULTS/macos-cosmopolitan.xml" \
+            -V 2>&1 |
+            tee "$OMNIREFL_TEST_RESULTS/macos-cosmopolitan.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          exit "$rc"
+
+      - name: Collect Test Diagnostics
+        if: always()
+        run: |
+          build="$RUNNER_TEMP/with space/build"
+          results="$GITHUB_WORKSPACE/artifacts/test-results/macos-cosmopolitan"
+          diagnostics="$results/diagnostics"
+          mkdir -p "$diagnostics"
+
+          for file in \
+            "$build/CMakeCache.txt" \
+            "$build/compile_commands.json" \
+            "$build/Testing/Temporary/LastTest.log" \
+            "$build/CMakeFiles/CMakeError.log"; do
+            if [ -f "$file" ]; then
+              cp "$file" "$diagnostics/"
+            fi
+          done
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-macos-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/macos-cosmopolitan
           if-no-files-found: error
 
   benchmark:
@@ -516,7 +652,12 @@ jobs:
   required-ci:
     name: Required CI
     runs-on: ubuntu-latest
-    needs: [build-package, test-linux, test-windows]
+    needs:
+      - build-package
+      - build-cosmopolitan-package
+      - test-linux
+      - test-macos
+      - test-windows
     permissions:
       contents: read
       actions: write
@@ -615,17 +756,23 @@ jobs:
             always()
             && (
               'success' != needs['build-package'].result
+              || 'success' != needs['build-cosmopolitan-package'].result
               || 'success' != needs['test-linux'].result
+              || 'success' != needs['test-macos'].result
               || 'success' != needs['test-windows'].result
             )
           }}
         env:
           BUILD_PACKAGE_RESULT: ${{ needs['build-package'].result }}
+          BUILD_COSMOPOLITAN_PACKAGE_RESULT: ${{ needs['build-cosmopolitan-package'].result }}
           LINUX_TEST_RESULT: ${{ needs['test-linux'].result }}
+          MACOS_TEST_RESULT: ${{ needs['test-macos'].result }}
           WINDOWS_TEST_RESULT: ${{ needs['test-windows'].result }}
         run: |
-          printf 'build-package: %s\ntest-linux: %s\ntest-windows: %s\n' \
+          printf 'build-package: %s\nbuild-cosmopolitan-package: %s\ntest-linux: %s\ntest-macos: %s\ntest-windows: %s\n' \
             "$BUILD_PACKAGE_RESULT" \
+            "$BUILD_COSMOPOLITAN_PACKAGE_RESULT" \
             "$LINUX_TEST_RESULT" \
+            "$MACOS_TEST_RESULT" \
             "$WINDOWS_TEST_RESULT"
           exit 1

@@ -15,6 +15,8 @@
 #include <variant>
 #include <vector>
 
+#include "std_compat.h"
+
 namespace {
 
 using namespace std::string_view_literals;
@@ -183,7 +185,7 @@ int main(int argc, const char *const *argv) {
       std::cout << std::format("{} -working-directory {}\n",
         c.CommandLine //
           | std::views::transform(shell_quote) //
-          | std::views::join_with(" "sv) //
+          | std_c::views::join_with(" "sv) //
           | std::ranges::to<std::string>(),
         shell_quote(c.Directory));
       return 0;

@@ -303,25 +303,29 @@ The repository uses prepared Alpine Docker images for local and CI builds:
   for x86_64 Linux and Windows packages
 - [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
   for AArch64 Linux packages
+- [`docker/build-alpine-cosmopolitan.Dockerfile`](docker/build-alpine-cosmopolitan.Dockerfile)
+  for experimental universal Cosmopolitan packages
 
-Both images provide a versioned LLVM/Clang toolchain and reproducible local and
+The images provide a versioned LLVM/Clang toolchain and reproducible local and
 CI build environment. Using them is the simplest approach; rebuilding a
 complete toolchain image can take close to an hour. They are defined by
-[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile)
+[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile),
+[docker/build-alpine-aarch64-musl.Dockerfile](docker/build-alpine-aarch64-musl.Dockerfile),
 and
-[docker/build-alpine-aarch64-musl.Dockerfile](docker/build-alpine-aarch64-musl.Dockerfile).
+[docker/build-alpine-cosmopolitan.Dockerfile](docker/build-alpine-cosmopolitan.Dockerfile).
 
 The x86_64 image is also used for the MinGW Windows cross-build. Linux's stable
 kernel-userspace ABI allows static musl packages to have zero target-distribution
 runtime library dependencies. The Windows package depends only on UCRT.
 
 Windows ARM64 cross-compilation with MinGW was attempted but is not working as
-of this writing. macOS cross-compilation was also attempted without success and
-remains planned.
+of this writing.
 
 > [!NOTE]
-> A Cosmopolitan cross-build was attempted, but its C++ implementation appears
-> to lack the C++23 support required by omnirefl as of this writing.
+> The Cosmopolitan build produces a universal APE package from Alpine. It uses
+> compatibility paths for the C++23 library facilities missing from cosmocc
+> 4.0.2. The package and reflection pipeline are verified through the Linux APE
+> loader; execution on macOS still needs a macOS CI runner.
 
 If configuring the build directly on the host instead of using an image, use a
 C++23 compiler. As of now, the prepared build images use GCC for native Linux

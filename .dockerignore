@@ -1,5 +1,7 @@
 *
 !*.Dockerfile
 !clang-cmake-options
+!docker/cosmopolitan.cmake
 !docker/libcxx-installed-config-site.patch
+!llvm-project-cosmopolitan.patch
 !llvm-project.patch

@@ -17,6 +17,8 @@ option(ENABLE_BENCH "Enable benchmarks" OFF)
 message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
 set(OMNIREFL_PACKAGE_COMMIT "" CACHE STRING "Commit id suffix for package file names")
+set(OMNIREFL_PACKAGE_TARGET "" CACHE STRING "Override the platform component of package file names")
+set(CLANG_RESOURCE_DIR "" CACHE PATH "Clang resource directory containing builtin headers")
 
 # ad hoc: when using the MinGW GCC cross compiler directly, CMake may leave
 # CMAKE_SYSTEM_PROCESSOR empty unless configured through a toolchain file.
@@ -77,17 +79,20 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 message(STATUS "CLANG_INCLUDE_DIRS: ${CLANG_INCLUDE_DIRS}")
 message(STATUS "LLVM_INCLUDE_DIRS: ${LLVM_INCLUDE_DIRS}")
 
-unset(CLANG_RESOURCE_DIR CACHE)
-foreach(dir IN LISTS CLANG_INCLUDE_DIRS)
-    message(STATUS "Looking for Clang resource dir in: ${dir}/../")
-    file(GLOB CLANG_RESOURCE_DIR_CANDIDATE "${dir}/../lib/clang/*/include")
-    if(CLANG_RESOURCE_DIR_CANDIDATE)
-        list(GET CLANG_RESOURCE_DIR_CANDIDATE 0 CLANG_RESOURCE_DIR)
-        get_filename_component( CLANG_RESOURCE_DIR "${CLANG_RESOURCE_DIR}/../" ABSOLUTE)
-        message(STATUS "CLANG_RESOURCE_DIR: ${CLANG_RESOURCE_DIR}")
-        break()
-    endif()
-endforeach()
+if(CLANG_RESOURCE_DIR)
+    message(STATUS "Using Clang resource dir: ${CLANG_RESOURCE_DIR}")
+else()
+    foreach(dir IN LISTS CLANG_INCLUDE_DIRS)
+        message(STATUS "Looking for Clang resource dir in: ${dir}/../")
+        file(GLOB CLANG_RESOURCE_DIR_CANDIDATE "${dir}/../lib/clang/*/include")
+        if(CLANG_RESOURCE_DIR_CANDIDATE)
+            list(GET CLANG_RESOURCE_DIR_CANDIDATE 0 CLANG_RESOURCE_DIR)
+            get_filename_component(CLANG_RESOURCE_DIR "${CLANG_RESOURCE_DIR}/../" ABSOLUTE)
+            message(STATUS "CLANG_RESOURCE_DIR: ${CLANG_RESOURCE_DIR}")
+            break()
+        endif()
+    endforeach()
+endif()
 
 if(NOT CLANG_RESOURCE_DIR)
     message(FATAL_ERROR "Failed to detect Clang resource dir")
@@ -95,12 +100,18 @@ endif()
 
 
 # -- Tool executable --------
+set(_omnirefl_enable_ipo ON)
+if(COSMOPOLITAN_DETECTED)
+    # The released cosmocc GCC binaries do not include an LTO plugin.
+    set(_omnirefl_enable_ipo OFF)
+endif()
+
 add_executable(tool main.cpp)
 add_executable(omni::tool ALIAS tool)
 
 set_target_properties(tool PROPERTIES
     OUTPUT_NAME ${PROJECT_NAME}
-    INTERPROCEDURAL_OPTIMIZATION ON
+    INTERPROCEDURAL_OPTIMIZATION ${_omnirefl_enable_ipo}
     ENABLE_EXPORTS OFF)
 
 target_include_directories(tool PRIVATE
@@ -119,7 +130,7 @@ add_executable(ccdb_query ccdb_query.cpp)
 add_executable(omni::ccdb_query ALIAS ccdb_query)
 
 set_target_properties(ccdb_query PROPERTIES
-    INTERPROCEDURAL_OPTIMIZATION ON
+    INTERPROCEDURAL_OPTIMIZATION ${_omnirefl_enable_ipo}
     ENABLE_EXPORTS OFF)
 
 target_include_directories(ccdb_query SYSTEM PRIVATE
@@ -158,13 +169,16 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
 elseif(ENABLE_BENCH OR ENABLE_TESTING)
     enable_testing()
 
-    # Tests in the subdir are packaged and expect to work with `find_package(omnirefl)`.
+    # tests/tool is packaged and expects to work with `find_package(omnirefl)`.
     # These lines emulate the 'found' package.
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
 
     add_subdirectory(tests/tool tests)
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
+    if(ENABLE_TESTING)
+        add_subdirectory(tests/std_compat tests/std_compat)
+    endif()
 endif()
 
 if(ENABLE_PACKAGE)
@@ -255,6 +269,26 @@ if(ENABLE_PACKAGE)
                 "musl.txt"
                 "https://raw.githubusercontent.com/ifduyue/musl/v${CMAKE_MATCH_1}/COPYRIGHT")
         endif()
+    endif()
+
+    get_target_property(_tool_static_cosmopolitan tool OMNIREFL_STATIC_COSMOPOLITAN)
+    get_target_property(_ccdb_query_static_cosmopolitan ccdb_query OMNIREFL_STATIC_COSMOPOLITAN)
+    if(_tool_static_cosmopolitan OR _ccdb_query_static_cosmopolitan)
+        get_filename_component(_cosmopolitan_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        get_filename_component(_cosmopolitan_root "${_cosmopolitan_bin_dir}" DIRECTORY)
+
+        foreach(_license gpl2 gpl3 lgpl2 lgpl3)
+            set(_license_path "${_cosmopolitan_root}/LICENSE.${_license}")
+            if(EXISTS "${_license_path}")
+                install(FILES "${_license_path}"
+                    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
+                    RENAME "Cosmopolitan-${_license}.txt")
+            else()
+                message(WARNING
+                    "Package will omit Cosmopolitan ${_license} notice: "
+                    "${_license_path} does not exist")
+            endif()
+        endforeach()
     endif()
 
     if(MINGW)
@@ -383,26 +417,27 @@ if(ENABLE_PACKAGE)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS NO)
 
-    string(TOLOWER "${CMAKE_SYSTEM_NAME}" OMNIREFL_PACKAGE_OS)
-    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" OMNIREFL_PACKAGE_ARCH)
-    if(OMNIREFL_PACKAGE_OS STREQUAL "" OR OMNIREFL_PACKAGE_ARCH STREQUAL "")
-        message(FATAL_ERROR
-            "Package target requires CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR")
-    endif()
+    if(OMNIREFL_PACKAGE_TARGET STREQUAL "")
+        string(TOLOWER "${CMAKE_SYSTEM_NAME}" OMNIREFL_PACKAGE_OS)
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" OMNIREFL_PACKAGE_ARCH)
+        if(OMNIREFL_PACKAGE_OS STREQUAL "" OR OMNIREFL_PACKAGE_ARCH STREQUAL "")
+            message(FATAL_ERROR "Package target requires CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR")
+        endif()
 
-    if(OMNIREFL_PACKAGE_ARCH MATCHES "^(x86_64|amd64)$")
-        set(OMNIREFL_PACKAGE_ARCH "x86_64")
-    elseif(OMNIREFL_PACKAGE_ARCH MATCHES "^(aarch64|arm64)$")
-        set(OMNIREFL_PACKAGE_ARCH "aarch64")
-    elseif(OMNIREFL_PACKAGE_ARCH MATCHES "^i[3-6]86$")
-        set(OMNIREFL_PACKAGE_ARCH "x86")
-    endif()
+        if(OMNIREFL_PACKAGE_ARCH MATCHES "^(x86_64|amd64)$")
+            set(OMNIREFL_PACKAGE_ARCH "x86_64")
+        elseif(OMNIREFL_PACKAGE_ARCH MATCHES "^(aarch64|arm64)$")
+            set(OMNIREFL_PACKAGE_ARCH "aarch64")
+        elseif(OMNIREFL_PACKAGE_ARCH MATCHES "^i[3-6]86$")
+            set(OMNIREFL_PACKAGE_ARCH "x86")
+        endif()
 
-    set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_OS}-${OMNIREFL_PACKAGE_ARCH}")
-    if(OMNIREFL_PACKAGE_OS STREQUAL "linux")
-        set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_TARGET}-musl")
-    elseif(OMNIREFL_PACKAGE_OS STREQUAL "windows")
-        set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_TARGET}-ucrt")
+        set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_OS}-${OMNIREFL_PACKAGE_ARCH}")
+        if(OMNIREFL_PACKAGE_OS STREQUAL "linux")
+            set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_TARGET}-musl")
+        elseif(OMNIREFL_PACKAGE_OS STREQUAL "windows")
+            set(OMNIREFL_PACKAGE_TARGET "${OMNIREFL_PACKAGE_TARGET}-ucrt")
+        endif()
     endif()
 
     set(CPACK_PACKAGE_FILE_NAME

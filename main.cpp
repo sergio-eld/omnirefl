@@ -68,7 +68,6 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-#include <flat_map>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -88,6 +87,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include "std_compat.h"
 
 namespace fs = std::filesystem;
 using namespace std::string_view_literals;
@@ -939,8 +940,9 @@ template <>
 struct std::formatter<log_level, char>: std::formatter<std::string_view, char> {
   template <typename FormatContext>
   auto format(log_level level, FormatContext &ctx) const {
-    static const std::flat_map string_by_enum =
-      log_levels | std::ranges::to<std::flat_map>();
+    static const std::map<log_level, std::string_view> string_by_enum =
+      log_levels
+      | std::ranges::to<std::map<log_level, std::string_view>>();
 
     assert(string_by_enum.contains(level) && "missing log_level mapping");
     return std::formatter<std::string_view, char>::format(
@@ -1040,7 +1042,8 @@ std::string format_error(const source_error &error) {
     error.subject,
     error.reason);
 
-  for (const auto &[index, line] : error.source.lines | std::views::enumerate) {
+  for (const auto &[index, line] :
+    error.source.lines | std_c::views::enumerate) {
     message += std::format("\n    {}", line);
 
     if (error.source.pointer_line != index)
@@ -1186,7 +1189,7 @@ std::string format_type_name(const nm_qual_type &type) {
       std::span{&type_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -1203,7 +1206,7 @@ std::string format(const nm_qual_type &type) {
       std::span{&type_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -2459,7 +2462,7 @@ std::string format_primary_template_type_name(const meta::nm_qual_type &t,
       std::span{&primary_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -2477,7 +2480,7 @@ std::string format_primary_template_qualified_type_name(
       std::span{&primary_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -2494,7 +2497,7 @@ std::string format_template_params(
       std::size_t level) -> std::string {
     std::string out;
 
-    for (const auto &[index, param] : params | std::views::enumerate) {
+    for (const auto &[index, param] : params | std_c::views::enumerate) {
       if (0 != index)
         out += std::format(",\n{}", indentation(level));
 
@@ -2538,7 +2541,7 @@ std::string format_template_args(const meta::template_data &t) {
             },
             param);
         }) //
-      | std::views::join_with(", "sv) //
+      | std_c::views::join_with(", "sv) //
       | util::format_range);
 }
 
@@ -2584,7 +2587,7 @@ std::string forward_declaration(const meta::reflectable &t) {
       std::array{
         t.definition.type_name.namespaces //
           | std::views::transform(namespace_opening) //
-          | std::views::join_with("\n"sv) //
+          | std_c::views::join_with("\n"sv) //
           | std::ranges::to<std::string>(),
 
         std::format("// declared at: {}\n{}",
@@ -2596,11 +2599,11 @@ std::string forward_declaration(const meta::reflectable &t) {
           | std::views::transform([](const meta::namespace_component &ns) {
               return std::format("}} // namespace {}", ns.name);
             }) //
-          | std::views::join_with("\n"sv) //
+          | std_c::views::join_with("\n"sv) //
           | std::ranges::to<std::string>(),
       } //
       | std::views::filter([](std::string_view s) { return !s.empty(); }) //
-      | std::views::join_with("\n"sv));
+      | std_c::views::join_with("\n"sv));
 }
 
 } // namespace render::impl
@@ -2647,7 +2650,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
           includes //
             | std::views::transform(
               [&](const fs::path &p) { return esc(p.string()); }) //
-            | std::views::join_with(" \\\n  "sv) //
+            | std_c::views::join_with(" \\\n  "sv) //
             | util::format_range));
 
   os.close();
@@ -2753,16 +2756,18 @@ std::expected<fs::path, app_error> infer_resource_dir(const char *argv0) {
       scan.skipped.empty()
         ? " "
         : std::format("\nSkipped entries:\n{}\n",
-            scan.skipped | std::views::join_with("\n"sv) | util::format_range)),
+            scan.skipped //
+              | std_c::views::join_with("\n"sv) //
+              | util::format_range)),
   });
 }
 
 std::optional<log_level> parse_log_level(std::string_view name) {
-  static const std::flat_map<std::string_view, log_level> log_level_by_name =
+  static const std::map<std::string_view, log_level> log_level_by_name =
     log_levels //
     | std::views::transform(
       [](const auto &level) { return std::pair{level.second, level.first}; }) //
-    | std::ranges::to<std::flat_map>();
+    | std::ranges::to<std::map<std::string_view, log_level>>();
 
   if (!log_level_by_name.contains(name))
     return std::nullopt;
@@ -2817,7 +2822,7 @@ std::expected<cli::options, app_error> cli::parse(int argc,
 
   const std::string log_level_help = std::format("Log level: {}.",
     log_levels //
-      | std::views::values | std::views::join_with(", "sv)
+      | std::views::values | std_c::views::join_with(", "sv)
       | util::format_range);
 
   CLI::Option *const cli_log_level = //
@@ -3009,7 +3014,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     invoked_as_cl || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
 
   const std::vector flags = raw_flags //
-    | std::views::enumerate //
+    | std_c::views::enumerate //
     | std::views::filter([&raw_flags](const auto &indexed) {
         const auto &[index, arg] = indexed;
         const bool ignored_output_value = 0 != index
@@ -3022,12 +3027,13 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
           && !std::ranges::contains(k_ignored_output_options,
             std::string_view{arg});
       })
-    | std::views::values | std::ranges::to<std::vector>();
+    | std::views::values //
+    | std::ranges::to<std::vector>();
 
   const std::optional<std::string> response_file_directory =
     std::invoke([&raw_flags] -> std::optional<std::string> {
       const auto indexed_flags =
-        raw_flags | std::views::enumerate | std::views::reverse;
+        raw_flags | std_c::views::enumerate | std::views::reverse;
 
       const auto found =
         std::ranges::find_if(indexed_flags, [&raw_flags](const auto &indexed) {
@@ -3096,7 +3102,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   log(log_level::debug, [&raw_flags] {
     return std::format("\ninput flags:\n{}",
-      raw_flags | std::views::join_with("\n"sv) | util::format_range);
+      raw_flags | std_c::views::join_with("\n"sv) | util::format_range);
   });
 
   const std::expected normalized_args =
@@ -3432,7 +3438,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     return std::format("\nusing cc1 args:\n{}",
       compilation_args
         | std::views::transform([](llvm::StringRef arg) { return arg.str(); })
-        | std::views::join_with("\n"sv) | util::format_range);
+        | std_c::views::join_with("\n"sv) | util::format_range);
   });
 
   std::shared_ptr clang_invocation =
@@ -3698,7 +3704,7 @@ std::expected<render::reflection_context, app_error>
     input_errors.emplace_back(std::format("invalid reflection queries:\n{}",
       ctx.errors.reflection_queries //
         | std::views::transform(diag::format_error) //
-        | std::views::join_with("\n"sv) //
+        | std_c::views::join_with("\n"sv) //
         | util::format_range));
   }
 
@@ -3712,7 +3718,7 @@ std::expected<render::reflection_context, app_error>
       "fields, bases, or protocol aliases",
       ctx.errors.reflected_call_args //
         | std::views::transform(diag::format_error) //
-        | std::views::join_with("\n"sv) //
+        | std_c::views::join_with("\n"sv) //
         | util::format_range));
   }
 
@@ -3722,14 +3728,14 @@ std::expected<render::reflection_context, app_error>
         | std::views::transform([](const std::string &error) {
             return std::format("  {}", error);
           }) //
-        | std::views::join_with("\n"sv) //
+        | std_c::views::join_with("\n"sv) //
         | util::format_range));
   }
 
   if (!input_errors.empty()) {
     return std::unexpected(processing_error(source,
       input_errors //
-        | std::views::join_with("\n\n"sv) //
+        | std_c::views::join_with("\n\n"sv) //
         | std::ranges::to<std::string>()));
   }
 
@@ -4049,7 +4055,7 @@ std::string format_record_data(const meta::record_data &d) {
       : std::format(" {{ {} }}",
           d.public_fields //
             | std::views::transform(&meta::field_data::name) //
-            | std::views::join_with(", "sv) //
+            | std_c::views::join_with(", "sv) //
             | util::format_range));
 }
 
@@ -4064,7 +4070,7 @@ std::string format_enum_data(const meta::enum_data &d) {
   return std::format("{} {{ {} }}",
     kind,
     d.enumerators //
-      | std::views::join_with(", "sv) //
+      | std_c::views::join_with(", "sv) //
       | util::format_range);
 }
 
@@ -4120,12 +4126,12 @@ std::string format_matches(const meta::source_file_context &ctx) {
       | std::views::transform(std::bind_front(format_reflectable,
         std::cref(ctx.resolved_as_dependency),
         std::cref(ctx.index_by_type_id))) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     ctx.file_dependencies //
       | std::views::transform([](const fs::path &p) { return p.string(); })
-      | std::views::join_with("\n"sv) //
+      | std_c::views::join_with("\n"sv) //
       | util::format_range);
 }
 
@@ -4192,7 +4198,7 @@ std::string format_timings(
             format_duration(duration),
             duration.count());
         })
-      | std::views::join_with("\n"sv) //
+      | std_c::views::join_with("\n"sv) //
       | util::format_range);
 }
 
@@ -4911,7 +4917,7 @@ collected_dependencies recursively_collect_dependency_types(
       }
 
       for (const auto &[index, type] :
-        template_specialization_types(arg_list) | std::views::enumerate) {
+        template_specialization_types(arg_list) | std_c::views::enumerate) {
         std::optional public_access_path = pending.public_access_path;
 
         if (public_access_path) {
@@ -5244,7 +5250,7 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format("_omni_{}_as_root",
-    elems | std::views::join_with("_"sv) | util::format_range);
+    elems | std_c::views::join_with("_"sv) | util::format_range);
 }
 
 // Makes a qualified type name dependent so it can be used in SFINAE even when
@@ -5266,7 +5272,7 @@ std::string declaration_for_enclosing_root_as_dependent(
     "template <typename Inner>"
     "\nusing {} = typename _wrt<{}, Inner>::type;",
     enclosing_root_as_dependent(inner_type),
-    elems | std::views::join_with("::"sv) | util::format_range);
+    elems | std_c::views::join_with("::"sv) | util::format_range);
 }
 
 std::string forward_declaration_for_enclosing_root(
@@ -5310,7 +5316,7 @@ std::string format_qualified_inner_type_from_root(const std::string &root,
   return std::format("{}",
     spans //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -5582,7 +5588,7 @@ std::string reflectable_body(const meta::enum_data &d) {
       | std::views::transform([](std::string_view e) {
           return std::format("{{type::{0}, \"{0}\"}}", e);
         })
-      | std::views::join_with(",\n        "sv) //
+      | std_c::views::join_with(",\n        "sv) //
       | util::format_range);
 }
 
@@ -5714,9 +5720,9 @@ std::string reflectable_body(const meta::record_data &d) {
     d.public_fields.empty()
       ? std::string("\n  // no reflectable fields detected")
       : std::format("\n{}",
-          d.public_fields | std::views::enumerate //
+          d.public_fields | std_c::views::enumerate //
             | std::views::transform(format_field)
-            | std::views::join_with("\n\n"sv) //
+            | std_c::views::join_with("\n\n"sv) //
             | util::format_range),
 
     d.public_fields //
@@ -5724,7 +5730,7 @@ std::string reflectable_body(const meta::record_data &d) {
       | std::views::transform([](std::string_view f) {
           return std::format("omni::field_meta_t<type, {}_t>", f);
         }) //
-      | std::views::join_with(",\n      "sv) //
+      | std_c::views::join_with(",\n      "sv) //
       | util::format_range);
 }
 
@@ -5775,7 +5781,7 @@ std::string render_public_bases(
       | std::views::transform(&meta::reflectable_reference::id)
       | std::views::transform(fetch) //
       | std::views::transform(format) //
-      | std::views::join_with(",\n    "sv) //
+      | std_c::views::join_with(",\n    "sv) //
       | util::format_range);
 }
 
@@ -5915,28 +5921,28 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     required_includes //
       | std::views::transform(
         [](std::string_view s) { return std::format("#include <{}>", s); })
-      | std::views::join_with("\n"sv) //
+      | std_c::views::join_with("\n"sv) //
       | util::format_range,
 
     // 2:
     ctx.fwd_declarables //
       | std::views::transform(&reflection_context::forward_declarable::type)
       | std::views::transform(render::impl::forward_declaration) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 3:
     ctx.enclosing_roots //
       | std::views::transform(
         render::impl::forward_declaration_for_enclosing_root) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 4:
     ctx.enclosing_roots //
       | std::views::transform(
         render::impl::declaration_for_enclosing_root_as_dependent) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 5:
@@ -5947,7 +5953,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::forward_declarable>,
         std::cref(ctx.type_name_by_id)))
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 7:
@@ -5955,7 +5961,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::nested_type>,
         std::cref(ctx.type_name_by_id)))
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 8:
@@ -5963,7 +5969,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::indexed_type>,
         std::cref(ctx.type_name_by_id)))
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range);
 
   // todo: check if file has errors

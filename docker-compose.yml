@@ -15,7 +15,6 @@
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 
 x-build-alpine-image: &build-alpine-image
-  # TODO: keep Cosmopolitan builds in a separate target-specific image family.
   image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION:-22.1.8}
   build:
     context: .
@@ -60,6 +59,41 @@ x-build-linux-command: &build-linux-command
     mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
 services:
+  build-cosmopolitan:
+    image: ghcr.io/sergio-eld/omnirefl-build-cosmopolitan:cosmopolitan-${COSMOPOLITAN_VERSION:-4.0.2}-llvm-${LLVM_VERSION:-22.1.8}
+    build:
+      context: .
+      dockerfile: docker/build-alpine-cosmopolitan.Dockerfile
+      args:
+        COSMOPOLITAN_VERSION: ${COSMOPOLITAN_VERSION:-4.0.2}
+        LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine/cosmopolitan:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/cosmopolitan}:/packages:rw
+    working_dir: /build
+    command:
+      - /bin/ash
+      - -euxc
+      - |
+        cmake /src -GNinja \
+          -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_PACKAGE=ON \
+          -DENABLE_TESTING=OFF \
+          -DENABLE_BENCH=OFF \
+          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+          -DOMNIREFL_PACKAGE_TARGET=cosmopolitan-universal \
+          -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN}/lib/cmake/clang \
+          -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN}/lib/cmake/llvm \
+          -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
+
+        cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
+
+        mkdir -p /tmp/package /packages &&
+        cpack -G TGZ -B /tmp/package &&
+        mv /tmp/package/*.tar.gz /packages/
+
   build-linux:
     <<: *build-alpine-image
     volumes:
