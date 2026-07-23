@@ -256,6 +256,18 @@ Install options:
 
 The examples below assume a standard install under `/usr/local`.
 
+### macOS (experimental)
+
+The current macOS installation is ad hoc because the cross-build still emits
+APE files; a way to avoid APE has not been found yet. After extracting the
+Cosmopolitan package, convert both tools to native Mach-O:
+
+```bash
+prefix=/path/to/unpacked/omnirefl
+/bin/sh "$prefix/bin/omnirefl" --assimilate
+/bin/sh "$prefix/bin/ccdb_query" --assimilate
+```
+
 ## Packaged Tests and Examples
 
 Assuming a standard install, the packaged test/example sources are available

@@ -232,6 +232,11 @@ jobs:
           mv "$package_root" "$install"
           cp -R "$install/share/omnirefl/tests" "$source"
 
+          # The cross-build emits APEs. Assimilate the extracted test
+          # installation to native Mach-O before CMake launches the tools.
+          /bin/sh "$install/bin/omnirefl" --assimilate
+          /bin/sh "$install/bin/ccdb_query" --assimilate
+
           "$install/bin/omnirefl" --help 2>&1 |
             tee "$results/omnirefl-help.log"
           "$install/bin/ccdb_query" --help 2>&1 |
