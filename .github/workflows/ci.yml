@@ -257,9 +257,12 @@ jobs:
             tee "$OMNIREFL_TEST_RESULTS/configure.log"
 
           reflection_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          cmake --build "$OMNIREFL_TEST_BUILD" \
-            -t benchmark.baseline.omni \
-            > "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" 2>&1
+          if ! cmake --build "$OMNIREFL_TEST_BUILD" \
+              -t benchmark.baseline.omni \
+              > "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" 2>&1; then
+            cat "$OMNIREFL_BENCHMARK_RESULTS/reflection.log"
+            exit 1
+          fi
           reflection_end="$(python3 -c 'import time; print(time.monotonic_ns())')"
           reflection_ms="$(awk \
             -v start="$reflection_start" \
@@ -267,10 +270,13 @@ jobs:
             'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
 
           build_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          cmake --build "$OMNIREFL_TEST_BUILD" \
-            -t benchmark.baseline \
-            --parallel "$(sysctl -n hw.logicalcpu)" \
-            > "$OMNIREFL_BENCHMARK_RESULTS/build.log" 2>&1
+          if ! cmake --build "$OMNIREFL_TEST_BUILD" \
+              -t benchmark.baseline \
+              --parallel "$(sysctl -n hw.logicalcpu)" \
+              > "$OMNIREFL_BENCHMARK_RESULTS/build.log" 2>&1; then
+            cat "$OMNIREFL_BENCHMARK_RESULTS/build.log"
+            exit 1
+          fi
           build_end="$(python3 -c 'import time; print(time.monotonic_ns())')"
           build_ms="$(awk \
             -v start="$build_start" \
@@ -679,6 +685,7 @@ jobs:
           Move-Item $packageRoot.FullName $install
           Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $root
           & (Join-Path $install 'bin/omnirefl.exe') -h
+          & (Join-Path $install 'bin/ccdb_query.exe') -h
 
           @(
             "OMNIREFL_INSTALL_ROOT=$($install.Replace('\', '/'))"

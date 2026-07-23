@@ -15,6 +15,12 @@ set_tests_properties(omnirefl.cli.help PROPERTIES
     PASS_REGULAR_EXPRESSION
         "Usage: omnirefl -o <reflection.hpp> -c <source.cpp>")
 
+add_test(NAME ccdb_query.cli.help
+    COMMAND $<TARGET_FILE:omni::ccdb_query> --help)
+set_tests_properties(ccdb_query.cli.help PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "Usage: ccdb_query <compile_commands.json> <source.cpp> \\[output-contains\\]")
+
 add_test(NAME omnirefl.cli.version
     COMMAND $<TARGET_FILE:omni::tool> --version)
 set_tests_properties(omnirefl.cli.version PROPERTIES

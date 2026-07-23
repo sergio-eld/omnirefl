@@ -46,7 +46,8 @@ execute_process(
     ERROR_VARIABLE _ccdb_err)
 
 if(NOT 0 EQUAL _ccdb_result)
-    message(FATAL_ERROR "${_ccdb_err}")
+    message(FATAL_ERROR
+        "ccdb_query failed with code ${_ccdb_result}\n${_ccdb_err}")
 endif()
 
 string(STRIP "${_compiler_command}" _compiler_command)
