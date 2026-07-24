@@ -41,6 +41,7 @@
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
@@ -48,7 +49,10 @@
 #include <llvm/Support/Allocator.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/FileUtilities.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
 #pragma GCC diagnostic pop
@@ -3219,36 +3223,80 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return driver_mode_cl || invoked_as_cl || has_msvc_style_args;
     });
 
-  const std::string driver_triple =
-    std::invoke([msvc_used, &normalized_args, &raw_flags] {
-      const std::string target_triple = std::invoke([&normalized_args] {
-        if (const auto *opt =
-              normalized_args->getLastArgNoClaim(options::OPT_target))
-          return llvm::Triple::normalize(opt->getValue());
-        return llvm::sys::getProcessTriple();
-      });
+  const auto target_triple =
+    std::invoke([&] -> std::optional<std::string> {
+      if (const auto *target =
+            normalized_args->getLastArgNoClaim(options::OPT_target))
+        return llvm::Triple::normalize(target->getValue());
 
-      llvm::Triple triple(target_triple);
-      if (msvc_used) {
-        triple.setOS(llvm::Triple::Win32);
-        triple.setEnvironment(llvm::Triple::MSVC);
-      }
-
-      if (!msvc_used && !normalized_args->getLastArgNoClaim(options::OPT_target)
-        && !raw_flags.empty()) {
-        // refactorme(cc1_flags): infer the target from GCC-style cross compiler
-        // names until compiler-driver mapping is split out of omnirefl.
-        const std::string compiler =
-          fs::path(raw_flags.front()).filename().string();
-
-        if (compiler.starts_with("x86_64-w64-mingw32-"))
-          return std::string{"x86_64-w64-windows-gnu"};
-        if (compiler.starts_with("i686-w64-mingw32-"))
-          return std::string{"i686-w64-windows-gnu"};
-      }
-
-      return triple.str();
+      if (compiler_name.starts_with("x86_64-w64-mingw32-"))
+        return "x86_64-w64-windows-gnu";
+      if (compiler_name.starts_with("i686-w64-mingw32-"))
+        return "i686-w64-windows-gnu";
+      return std::nullopt;
     });
+
+  const llvm::Triple process_triple{llvm::sys::getProcessTriple()};
+
+  // refactorme(macos_sysroot): replace this inline platform detection.
+  // ad hoc: Apple's compiler launcher omits SDK selection from
+  // compile_commands.json. A successful xcrun query supplies both the SDK and
+  // the APE's runtime operating system.
+  const auto macos_sysroot =
+    (msvc_used || process_triple.isOSWindows()
+      || (target_triple && llvm::Triple{*target_triple}.isOSWindows())) //
+    ? std::nullopt
+    : std::invoke([] -> std::optional<std::string> {
+      const auto xcrun = llvm::sys::findProgramByName("xcrun");
+      if (!xcrun)
+        return std::nullopt;
+
+      llvm::SmallString<64> output;
+      if (llvm::sys::fs::createTemporaryFile("omnirefl-xcrun", "", output))
+        return std::nullopt;
+
+      llvm::FileRemover remove_output(output);
+      if (llvm::sys::ExecuteAndWait(*xcrun,
+            {
+              llvm::StringRef{*xcrun},
+              llvm::StringRef{"--show-sdk-path"},
+            },
+            /*Env=*/std::nullopt,
+            {
+              /*stdin=*/std::optional{llvm::StringRef{""}},
+              /*stdout=*/std::optional{llvm::StringRef{output}},
+              /*stderr=*/std::optional{llvm::StringRef{""}},
+            },
+            /*SecondsToWait=*/10)
+        != 0)
+        return std::nullopt;
+
+      const auto buffer = llvm::MemoryBuffer::getFile(output);
+      if (!buffer)
+        return std::nullopt;
+
+      const llvm::StringRef path = buffer->get()->getBuffer().trim();
+      return path.empty() //
+        ? std::nullopt
+        : std::optional{path.str()};
+    });
+
+  const std::string driver_triple = std::invoke([&] {
+    llvm::Triple triple = target_triple //
+      ? llvm::Triple{*target_triple}
+      : process_triple;
+
+    if (msvc_used) {
+      triple.setOS(llvm::Triple::Win32);
+      triple.setEnvironment(llvm::Triple::MSVC);
+    } else if (!target_triple && macos_sysroot) {
+      triple.setVendor(llvm::Triple::Apple);
+      triple.setOS(llvm::Triple::Darwin);
+      triple.setEnvironment(llvm::Triple::UnknownEnvironment);
+    }
+
+    return triple.str();
+  });
 
   const bool mingw_used = llvm::Triple(driver_triple).isWindowsGNUEnvironment();
 
@@ -3400,6 +3448,13 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       });
 
       std::ranges::copy(driver_args, std::back_inserter(out));
+
+      if (macos_sysroot
+        && !normalized_args->hasArg(options::OPT_isysroot,
+          options::OPT__sysroot_EQ)) {
+        out.emplace_back("-isysroot");
+        out.emplace_back(*macos_sysroot);
+      }
 
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(
