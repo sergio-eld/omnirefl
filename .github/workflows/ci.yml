@@ -186,7 +186,129 @@ jobs:
           if-no-files-found: error
 
   test-macos:
-    name: macOS test / cosmopolitan-x86_64
+    name: macOS test / ${{ matrix.runner }}-cosmopolitan
+    runs-on: ${{ matrix.runner }}
+    needs: build-cosmopolitan-package
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - macos-15-intel
+          - macos-26-intel
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Resolve Short SHA
+        id: commit
+        run: |
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Cosmopolitan Package
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan
+
+      - name: Install Cosmopolitan Package
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/with space"
+          install="$root/omnirefl"
+          source="$root/tests"
+          build="$root/build"
+          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-cosmopolitan"
+          mkdir -p "$root" "$results"
+
+          package="$(find artifacts/packages/cosmopolitan \
+            -maxdepth 1 -type f -name 'omnirefl-cosmopolitan-*.tar.gz' \
+            -print -quit)"
+          test -n "$package"
+          tar -xzf "$package" -C "$root"
+
+          package_root="$(find "$root" -mindepth 1 -maxdepth 1 \
+            -type d -name 'omnirefl-*' -print -quit)"
+          test -n "$package_root"
+          mv "$package_root" "$install"
+          cp -R "$install/share/omnirefl/tests" "$source"
+
+          # The cross-build emits APEs. Assimilate the extracted test
+          # installation to native Mach-O before CMake launches the tools.
+          /bin/sh "$install/bin/omnirefl" --assimilate
+          /bin/sh "$install/bin/ccdb_query" --assimilate
+
+          "$install/bin/omnirefl" --help 2>&1 |
+            tee "$results/omnirefl-help.log"
+          "$install/bin/ccdb_query" --help 2>&1 |
+            tee "$results/ccdb-query-help.log"
+
+          {
+            echo "OMNIREFL_INSTALL_ROOT=$install"
+            echo "OMNIREFL_TEST_SOURCE=$source"
+            echo "OMNIREFL_TEST_BUILD=$build"
+            echo "OMNIREFL_TEST_RESULTS=$results"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure Package Tests
+        run: |
+          set -euo pipefail
+          cmake -S "$OMNIREFL_TEST_SOURCE" \
+            -B "$OMNIREFL_TEST_BUILD" \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_BENCH=OFF \
+            -Domnirefl_DIR="$OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
+            tee "$OMNIREFL_TEST_RESULTS/configure.log"
+
+      - name: Run Package Tests
+        run: |
+          set -euo pipefail
+          cmake --build "$OMNIREFL_TEST_BUILD" \
+            --parallel "$(sysctl -n hw.logicalcpu)" 2>&1 |
+            tee "$OMNIREFL_TEST_RESULTS/build.log"
+
+          set +e
+          ctest --test-dir "$OMNIREFL_TEST_BUILD" \
+            --output-junit "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-cosmopolitan.xml" \
+            -V 2>&1 |
+            tee "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-cosmopolitan.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          exit "$rc"
+
+      - name: Collect Test Diagnostics
+        if: always()
+        run: |
+          build="$RUNNER_TEMP/with space/build"
+          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-cosmopolitan"
+          diagnostics="$results/diagnostics"
+          mkdir -p "$diagnostics"
+
+          for file in \
+            "$build/CMakeCache.txt" \
+            "$build/compile_commands.json" \
+            "$build/Testing/Temporary/LastTest.log" \
+            "$build/CMakeFiles/CMakeError.log"; do
+            if [ -f "$file" ]; then
+              cp "$file" "$diagnostics/"
+            fi
+          done
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: >-
+            test-${{ matrix.runner }}-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/${{ matrix.runner }}-cosmopolitan
+          if-no-files-found: error
+
+  benchmark-macos:
+    name: Benchmark / macos-x86_64-cosmopolitan
     runs-on: macos-15-intel
     needs: build-cosmopolitan-package
     permissions:
@@ -216,9 +338,8 @@ jobs:
           install="$root/omnirefl"
           source="$root/tests"
           build="$root/build"
-          results="$GITHUB_WORKSPACE/artifacts/test-results/macos-cosmopolitan"
-          benchmarks="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-x86_64-cosmopolitan"
-          mkdir -p "$root" "$results" "$benchmarks"
+          results="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-x86_64-cosmopolitan"
+          mkdir -p "$root" "$results"
 
           package="$(find artifacts/packages/cosmopolitan \
             -maxdepth 1 -type f -name 'omnirefl-cosmopolitan-*.tar.gz' \
@@ -232,37 +353,34 @@ jobs:
           mv "$package_root" "$install"
           cp -R "$install/share/omnirefl/tests" "$source"
 
-          # The cross-build emits APEs. Assimilate the extracted test
+          # The cross-build emits APEs. Assimilate the extracted benchmark
           # installation to native Mach-O before CMake launches the tools.
           /bin/sh "$install/bin/omnirefl" --assimilate
           /bin/sh "$install/bin/ccdb_query" --assimilate
 
-          "$install/bin/omnirefl" --help 2>&1 |
-            tee "$results/omnirefl-help.log"
-          "$install/bin/ccdb_query" --help 2>&1 |
-            tee "$results/ccdb-query-help.log"
-
           {
             echo "OMNIREFL_INSTALL_ROOT=$install"
-            echo "OMNIREFL_TEST_SOURCE=$source"
-            echo "OMNIREFL_TEST_BUILD=$build"
-            echo "OMNIREFL_TEST_RESULTS=$results"
-            echo "OMNIREFL_BENCHMARK_RESULTS=$benchmarks"
+            echo "OMNIREFL_BENCHMARK_SOURCE=$source"
+            echo "OMNIREFL_BENCHMARK_BUILD=$build"
+            echo "OMNIREFL_BENCHMARK_RESULTS=$results"
           } >> "$GITHUB_ENV"
 
-      - name: Run benchmark
+      - name: Configure Benchmark
         run: |
           set -euo pipefail
-          cmake -S "$OMNIREFL_TEST_SOURCE" \
-            -B "$OMNIREFL_TEST_BUILD" \
+          cmake -S "$OMNIREFL_BENCHMARK_SOURCE" \
+            -B "$OMNIREFL_BENCHMARK_BUILD" \
             -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_BENCH=ON \
             -Domnirefl_DIR="$OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/configure.log"
+            tee "$OMNIREFL_BENCHMARK_RESULTS/configure.log"
 
+      - name: Run benchmark
+        run: |
+          set -euo pipefail
           reflection_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          if ! cmake --build "$OMNIREFL_TEST_BUILD" \
+          if ! cmake --build "$OMNIREFL_BENCHMARK_BUILD" \
               -t benchmark.baseline.omni \
               > "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" 2>&1; then
             cat "$OMNIREFL_BENCHMARK_RESULTS/reflection.log"
@@ -275,7 +393,7 @@ jobs:
             'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
 
           build_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          if ! cmake --build "$OMNIREFL_TEST_BUILD" \
+          if ! cmake --build "$OMNIREFL_BENCHMARK_BUILD" \
               -t benchmark.baseline \
               --parallel "$(sysctl -n hw.logicalcpu)" \
               > "$OMNIREFL_BENCHMARK_RESULTS/build.log" 2>&1; then
@@ -392,22 +510,6 @@ jobs:
             --min-delta-ms 500 \
             --count 5
 
-      - name: Run Package Tests
-        run: |
-          set -euo pipefail
-          cmake --build "$OMNIREFL_TEST_BUILD" \
-            --parallel "$(sysctl -n hw.logicalcpu)" 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/build.log"
-
-          set +e
-          ctest --test-dir "$OMNIREFL_TEST_BUILD" \
-            --output-junit "$OMNIREFL_TEST_RESULTS/macos-cosmopolitan.xml" \
-            -V 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/macos-cosmopolitan.log"
-          rc=${PIPESTATUS[0]}
-          set -e
-          exit "$rc"
-
       - name: Update macOS benchmark history
         if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
         env:
@@ -438,32 +540,6 @@ jobs:
         with:
           name: benchmark-macos-x86_64-cosmopolitan-attempt-${{ github.run_attempt }}
           path: ./artifacts/benchmarks/macos-x86_64-cosmopolitan
-          if-no-files-found: error
-
-      - name: Collect Test Diagnostics
-        if: always()
-        run: |
-          build="$RUNNER_TEMP/with space/build"
-          results="$GITHUB_WORKSPACE/artifacts/test-results/macos-cosmopolitan"
-          diagnostics="$results/diagnostics"
-          mkdir -p "$diagnostics"
-
-          for file in \
-            "$build/CMakeCache.txt" \
-            "$build/compile_commands.json" \
-            "$build/Testing/Temporary/LastTest.log" \
-            "$build/CMakeFiles/CMakeError.log"; do
-            if [ -f "$file" ]; then
-              cp "$file" "$diagnostics/"
-            fi
-          done
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: test-macos-cosmopolitan-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/macos-cosmopolitan
           if-no-files-found: error
 
   benchmark:

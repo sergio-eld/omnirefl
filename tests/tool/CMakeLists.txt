@@ -293,42 +293,44 @@ add_test(NAME omnirefl.integration.response_file_gnu_tokenization
 set_tests_properties(omnirefl.integration.response_file_gnu_tokenization
     PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
-set(_windows_tokenization_response_file
-    "${CMAKE_CURRENT_BINARY_DIR}/windows-tokenization.rsp")
-file(WRITE "${_windows_tokenization_response_file}"
-    "/DOMNI_RESPONSE_TOKENIZED='single'\n"
-    "/DOMNI_RESPONSE_TOKENIZED_SIZE=9\n")
-add_test(NAME omnirefl.integration.response_file_windows_tokenization
-    COMMAND $<TARGET_FILE:omni::tool>
-        --resource-dir "${omnirefl_RESOURCE_DIR}"
-        --log-level silent
-        -o windows-tokenization.omnirefl.hpp
-        -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
-        -- clang-cl "@${_windows_tokenization_response_file}")
-set_tests_properties(omnirefl.integration.response_file_windows_tokenization
-    PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+if(WIN32)
+    set(_windows_tokenization_response_file
+        "${CMAKE_CURRENT_BINARY_DIR}/windows-tokenization.rsp")
+    file(WRITE "${_windows_tokenization_response_file}"
+        "/DOMNI_RESPONSE_TOKENIZED='single'\n"
+        "/DOMNI_RESPONSE_TOKENIZED_SIZE=9\n")
+    add_test(NAME omnirefl.integration.response_file_windows_tokenization
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o windows-tokenization.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
+            -- clang-cl "@${_windows_tokenization_response_file}")
+    set_tests_properties(omnirefl.integration.response_file_windows_tokenization
+        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
-add_test(NAME omnirefl.integration.response_file_windows_tokenization_uppercase
-    COMMAND $<TARGET_FILE:omni::tool>
-        --resource-dir "${omnirefl_RESOURCE_DIR}"
-        --log-level silent
-        -o windows-tokenization-uppercase.omnirefl.hpp
-        -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
-        -- CLANG-CL.EXE "@${_windows_tokenization_response_file}")
-set_tests_properties(
-    omnirefl.integration.response_file_windows_tokenization_uppercase
-    PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME omnirefl.integration.response_file_windows_tokenization_uppercase
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o windows-tokenization-uppercase.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
+            -- CLANG-CL.EXE "@${_windows_tokenization_response_file}")
+    set_tests_properties(
+        omnirefl.integration.response_file_windows_tokenization_uppercase
+        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
-add_test(NAME omnirefl.integration.response_file_windows_driver_mode
-    COMMAND $<TARGET_FILE:omni::tool>
-        --resource-dir "${omnirefl_RESOURCE_DIR}"
-        --log-level silent
-        -o windows-tokenization-driver-mode.omnirefl.hpp
-        -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
-        -- clang --driver-mode=cl "@${_windows_tokenization_response_file}")
-set_tests_properties(
-    omnirefl.integration.response_file_windows_driver_mode
-    PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME omnirefl.integration.response_file_windows_driver_mode
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o windows-tokenization-driver-mode.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/response_tokenization.cpp"
+            -- clang --driver-mode=cl "@${_windows_tokenization_response_file}")
+    set_tests_properties(
+        omnirefl.integration.response_file_windows_driver_mode
+        PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 
 set(_driver_caller_dir "${CMAKE_CURRENT_BINARY_DIR}/driver-caller")
 set(_driver_compiler_dir "${CMAKE_CURRENT_BINARY_DIR}/driver-compiler")
@@ -395,17 +397,19 @@ if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 
-add_test(NAME omnirefl.cli.overridden_separate_resource_dir_windows
-    COMMAND $<TARGET_FILE:omni::tool>
-        --resource-dir "${omnirefl_RESOURCE_DIR}"
-        --log-level silent
-        -o overridden-resource-dir-windows.omnirefl.hpp
-        -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
-        -- clang-cl -resource-dir ignored-driver-resource-dir-windows)
-set_tests_properties(omnirefl.cli.overridden_separate_resource_dir_windows
-    PROPERTIES
-        FAIL_REGULAR_EXPRESSION "ignored-driver-resource-dir-windows"
-        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+if(WIN32)
+    add_test(NAME omnirefl.cli.overridden_separate_resource_dir_windows
+        COMMAND $<TARGET_FILE:omni::tool>
+            --resource-dir "${omnirefl_RESOURCE_DIR}"
+            --log-level silent
+            -o overridden-resource-dir-windows.omnirefl.hpp
+            -c "${CMAKE_CURRENT_LIST_DIR}/cli_source.cpp"
+            -- clang-cl -resource-dir ignored-driver-resource-dir-windows)
+    set_tests_properties(omnirefl.cli.overridden_separate_resource_dir_windows
+        PROPERTIES
+            FAIL_REGULAR_EXPRESSION "ignored-driver-resource-dir-windows"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 
 # -- Dependencies --------
 include(FetchContent)
@@ -810,6 +814,9 @@ if("17" IN_LIST _supported_cpp_standards)
     endfunction()
 
     if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag(-fopenmp _omnirefl_has_fopenmp)
+
         _omnirefl_driver_option(
             17 imacros OMNI_DRIVER_IMACROS
             -imacros "${CMAKE_CURRENT_LIST_DIR}/driver_imacros_config.h")
@@ -818,7 +825,9 @@ if("17" IN_LIST _supported_cpp_standards)
         if(NOT WIN32)
             _omnirefl_driver_option(17 pthread OMNI_DRIVER_PTHREAD -pthread)
         endif()
-        _omnirefl_driver_option(17 openmp OMNI_DRIVER_OPENMP -fopenmp)
+        if(_omnirefl_has_fopenmp)
+            _omnirefl_driver_option(17 openmp OMNI_DRIVER_OPENMP -fopenmp)
+        endif()
         _omnirefl_driver_option(
             17 no_exceptions OMNI_DRIVER_NO_EXCEPTIONS -fno-exceptions)
         _omnirefl_driver_option(17 no_rtti OMNI_DRIVER_NO_RTTI -fno-rtti)
