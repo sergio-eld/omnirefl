@@ -3233,9 +3233,50 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         return "x86_64-w64-windows-gnu";
       if (compiler_name.starts_with("i686-w64-mingw32-"))
         return "i686-w64-windows-gnu";
-      return std::nullopt;
+
+      // FIXME(cosmopolitan-target): querying the compiler for every
+      // instrumentation run is an expensive ad hoc. Derive or cache its
+      // default target without starting another process.
+      if (msvc_used)
+        return std::nullopt;
+
+      const auto compiler = llvm::sys::findProgramByName(raw_flags.front());
+      if (!compiler)
+        return std::nullopt;
+
+      llvm::SmallString<64> output;
+      if (llvm::sys::fs::createTemporaryFile(
+            "omnirefl-compiler-target", "", output))
+        return std::nullopt;
+
+      llvm::FileRemover remove_output(output);
+      if (llvm::sys::ExecuteAndWait(*compiler,
+            {
+              llvm::StringRef{*compiler},
+              llvm::StringRef{"-dumpmachine"},
+            },
+            /*Env=*/std::nullopt,
+            {
+              /*stdin=*/std::optional{llvm::StringRef{""}},
+              /*stdout=*/std::optional{llvm::StringRef{output}},
+              /*stderr=*/std::optional{llvm::StringRef{""}},
+            },
+            /*SecondsToWait=*/10)
+        != 0)
+        return std::nullopt;
+
+      const auto buffer = llvm::MemoryBuffer::getFile(output);
+      if (!buffer)
+        return std::nullopt;
+
+      const llvm::StringRef triple = buffer->get()->getBuffer().trim();
+      return triple.empty() //
+        ? std::nullopt
+        : std::optional{llvm::Triple::normalize(triple)};
     });
 
+  // For Cosmopolitan this is LLVM's build triple, not necessarily the
+  // architecture of the running APE payload.
   const llvm::Triple process_triple{llvm::sys::getProcessTriple()};
 
   // refactorme(macos_sysroot): replace this inline platform detection.

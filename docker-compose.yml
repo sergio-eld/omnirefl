@@ -83,7 +83,7 @@ services:
           -DENABLE_TESTING=OFF \
           -DENABLE_BENCH=OFF \
           -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          -DOMNIREFL_PACKAGE_TARGET=macos-x86_64-cosmopolitan \
+          -DOMNIREFL_PACKAGE_TARGET=cosmopolitan-universal \
           -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN}/lib/cmake/clang \
           -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN}/lib/cmake/llvm \
           -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
@@ -272,6 +272,123 @@ services:
         fi
 
         exit $$rc
+
+  test-cosmopolitan-alpine:
+    extends:
+      service: test-alpine
+    volumes:
+      - ${TEST_PACKAGE_DIR:-./artifacts/packages/cosmopolitan}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/cosmopolitan-alpine-${TOOLCHAIN:-gcc}}:/results:rw
+    entrypoint:
+      - /bin/ash
+      - -euxc
+      - |
+        set -o pipefail
+        mkdir -p /results /tmp/build /tmp/src /opt/omnirefl
+        package=$$(find /packages -maxdepth 1 \
+          -name 'omnirefl-cosmopolitan-universal-*.tar.gz' \
+          | sort | tail -n 1)
+        test -n "$$package"
+        tar -xzf "$$package" -C /opt/omnirefl --strip-components=1
+        cp -r /opt/omnirefl/share/omnirefl/tests/* /tmp/src/
+        /opt/omnirefl/bin/omnirefl --help
+        /opt/omnirefl/bin/ccdb_query --help
+
+        export CC=gcc
+        export CXX=g++
+        PREFIX=cosmopolitan-alpine-$$(uname -m)
+
+        cmake /tmp/src -GNinja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -Domnirefl_DIR=/opt/omnirefl/lib/cmake/omnirefl
+
+        set +e
+        ctest --output-junit /results/$$PREFIX.xml -V 2>&1 | tee /results/$$PREFIX.log
+        rc=$$?
+        set -e
+
+        mkdir -p /results/diagnostics
+        cp -f CMakeCache.txt compile_commands.json /results/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /results/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /results/diagnostics/ 2>/dev/null || true
+        find . -path './omni_*/*.omnirefl.hpp' -o -path './omni_*/*.omnirefl.hpp.d' \
+          | tar -czf /results/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
+        fi
+
+        exit $$rc
+
+  test-cosmopolitan-alpine-aarch64:
+    extends:
+      service: test-cosmopolitan-alpine
+    platform: linux/arm64
+    image: ghcr.io/sergio-eld/omnirefl-test-alpine:3.23.3-aarch64-gcc
+    build:
+      context: .
+      dockerfile: docker/test-alpine-aarch64.Dockerfile
+
+  test-cosmopolitan-ubuntu:
+    extends:
+      service: test-ubuntu
+    volumes:
+      - ${TEST_PACKAGE_DIR:-./artifacts/packages/cosmopolitan}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/cosmopolitan-ubuntu-${UBUNTU_VERSION:-22.04}}:/results:rw
+    entrypoint:
+      - /bin/bash
+      - -euxo
+      - pipefail
+      - -c
+      - |
+        mkdir -p /results /opt/omnirefl
+        package=$$(find /packages -maxdepth 1 \
+          -name 'omnirefl-cosmopolitan-universal-*.tar.gz' \
+          | sort | tail -n 1)
+        test -n "$$package"
+        tar -xzf "$$package" -C /opt/omnirefl --strip-components=1
+        /opt/omnirefl/bin/omnirefl --help
+        /opt/omnirefl/bin/ccdb_query --help
+
+        export CC=gcc
+        export CXX=g++
+        PREFIX=cosmopolitan-ubuntu-${UBUNTU_VERSION:-22.04}-$$(uname -m)
+
+        cp -r /opt/omnirefl/share/omnirefl/tests /tmp/src
+        cmake /tmp/src -GNinja \
+          -Domnirefl_DIR=/opt/omnirefl/lib/cmake/omnirefl
+
+        set +e
+        ctest --output-junit /results/$$PREFIX.xml -V 2>&1 | tee /results/$$PREFIX.log
+        rc=$$?
+        set -e
+
+        mkdir -p /results/diagnostics
+        cp -f CMakeCache.txt compile_commands.json /results/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /results/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /results/diagnostics/ 2>/dev/null || true
+        find . -path './omni_*/*.omnirefl.hpp' -o -path './omni_*/*.omnirefl.hpp.d' \
+          | tar -czf /results/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
+        fi
+
+        exit $$rc
+
+  test-cosmopolitan-ubuntu-aarch64:
+    extends:
+      service: test-cosmopolitan-ubuntu
+    platform: linux/arm64
+    image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION:-22.04}-aarch64-gcc
+    build:
+      context: .
+      dockerfile: docker/test-ubuntu.Dockerfile
+      args:
+        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
+        COMPILER: gcc
 
   benchmark:
     image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION:-22.04}-x86_64-${TOOLCHAIN:-gcc}
@@ -487,6 +604,131 @@ services:
         set +e
         ctest . --output-junit "/c/test/windows-$$TOOLCHAIN.xml" -V 2>&1 |
           tee "/c/test/windows-$$TOOLCHAIN.log"
+        rc=$${PIPESTATUS[0]}
+        set -e
+
+        cp -f CMakeCache.txt compile_commands.json /c/test/diagnostics/ 2>/dev/null || true
+        cp -f Testing/Temporary/LastTest.log /c/test/diagnostics/ 2>/dev/null || true
+        cp -f CMakeFiles/CMakeError.log /c/test/diagnostics/ 2>/dev/null || true
+        find . -name "*.omnirefl.hpp" -o -name "*.omnirefl.hpp.d" |
+          tar -czf /c/test/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
+
+        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
+          echo "ctest failed with rc=$$rc; keeping container alive"
+          tail -f /dev/null
+        fi
+
+        exit "$$rc"
+
+  test-cosmopolitan-windows-msvc:
+    extends:
+      service: test-windows-msvc
+    volumes:
+      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/cosmopolitan}:C:/install:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/cosmopolitan-windows-${TOOLCHAIN:-msvc}}:C:/test:rw
+    command:
+      - |
+        $$ErrorActionPreference = 'Stop'
+        $$vsEnv = cmd /c '"C:\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul && set'
+        foreach ($$line in $$vsEnv) {
+          if ($$line -match '^(.*?)=(.*)$$') {
+            Set-Item -Path ('Env:' + $$matches[1]) -Value $$matches[2]
+          }
+        }
+
+        New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
+        $$package = Get-ChildItem -Path 'C:/install' -Filter 'omnirefl-cosmopolitan-universal-*.tar.gz' | Sort-Object Name | Select-Object -Last 1
+        if ($$null -eq $$package) { throw 'Cosmopolitan package artifact was not found in C:/install' }
+        tar -xzf $$package.FullName -C 'C:/with space'
+        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
+
+        Set-Location 'C:/with space'
+        $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
+        if ($$null -eq $$installRoot) { throw 'could not find extracted omnirefl package root' }
+        Move-Item $$installRoot.FullName ./omnirefl
+        Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
+        ./omnirefl/bin/omnirefl.exe -h
+        ./omnirefl/bin/ccdb_query.exe -h
+
+        switch ($$env:TOOLCHAIN) {
+          'msvc' {}
+          'clang-cl' {
+            $$env:Path = 'C:/Program Files/LLVM/bin;' + $$env:Path
+            $$env:CC = 'clang-cl'
+            $$env:CXX = 'clang-cl'
+          }
+          default { throw ('Unsupported TOOLCHAIN=' + $$env:TOOLCHAIN) }
+        }
+
+        Set-Location 'C:/with space/build'
+        cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
+        cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+
+        ctest . --output-junit C:/test/cosmopolitan-windows-$$env:TOOLCHAIN.xml -V 2>&1 |
+          Tee-Object C:/test/cosmopolitan-windows-$$env:TOOLCHAIN.log
+        $$rc = $$LASTEXITCODE
+
+        Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
+        Copy-Item -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/
+        Copy-Item -ErrorAction SilentlyContinue CMakeFiles/CMakeError.log C:/test/diagnostics/
+        Get-ChildItem -Recurse -Include *.omnirefl.hpp, *.omnirefl.hpp.d -Path . |
+          Compress-Archive -DestinationPath C:/test/diagnostics/generated-reflection.zip -Force
+
+        if ((0 -ne $$rc) -and $$env:KEEP_ALIVE_ON_FAILURE) {
+          Write-Host ('ctest failed with rc=' + $$rc + '; keeping container alive')
+          while ($$true) { Start-Sleep -Seconds 3600 }
+        }
+
+        exit $$rc
+
+  test-cosmopolitan-windows-msys2:
+    extends:
+      service: test-windows-msys2
+    volumes:
+      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/cosmopolitan}:C:/install:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/cosmopolitan-windows-${TOOLCHAIN:-msys2-mingw}}:C:/test:rw
+    entrypoint:
+      - C:\tools\msys64\usr\bin\bash.exe
+      - -lc
+      - |
+        set -euxo pipefail
+        mkdir -p "/c/with space" /c/test/diagnostics
+        package="$$(find /c/install -maxdepth 1 \
+          -name "omnirefl-cosmopolitan-universal-*.tar.gz" \
+          | sort | tail -n 1)"
+        test -n "$$package"
+        tar -xzf "$$package" -C "/c/with space"
+
+        cd "/c/with space"
+        install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
+        test -n "$$install_root"
+        mv "$$install_root" ./omnirefl
+        cp -r omnirefl/share/omnirefl/tests ./
+        ./omnirefl/bin/omnirefl.exe -h
+        ./omnirefl/bin/ccdb_query.exe -h
+
+        case $${TOOLCHAIN:-msys2-mingw} in
+          msys2-mingw)
+            export PATH=/mingw64/bin:/usr/bin:$$PATH
+            export CC=gcc
+            export CXX=g++
+            ;;
+          msys2-clang)
+            export PATH=/clang64/bin:/usr/bin:$$PATH
+            export CC=clang
+            export CXX=clang++
+            ;;
+          *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
+        esac
+
+        mkdir -p "/c/with space/build"
+        cd "/c/with space/build"
+        cmake "../tests" -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
+        cmake --build . -j"$$(nproc)"
+
+        set +e
+        ctest . --output-junit "/c/test/cosmopolitan-windows-$$TOOLCHAIN.xml" -V 2>&1 |
+          tee "/c/test/cosmopolitan-windows-$$TOOLCHAIN.log"
         rc=$${PIPESTATUS[0]}
         set -e
 

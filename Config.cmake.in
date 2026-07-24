@@ -15,6 +15,13 @@ endif()
 include("${CMAKE_CURRENT_LIST_DIR}/reflected_target.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@Targets.cmake")
 
+if(CMAKE_HOST_WIN32)
+    set_target_properties(omni::tool PROPERTIES
+        IMPORTED_LOCATION_RELEASE "${PACKAGE_PREFIX_DIR}/bin/@PROJECT_NAME@.exe")
+    set_target_properties(omni::ccdb_query PROPERTIES
+        IMPORTED_LOCATION_RELEASE "${PACKAGE_PREFIX_DIR}/bin/ccdb_query.exe")
+endif()
+
 if (NOT TARGET omni::refl)
     message(FATAL_ERROR "@PROJECT_NAME@ error: target not found")
 endif()

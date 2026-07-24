@@ -79,6 +79,8 @@ RUN cmake -S "${LLVM_SOURCE_DIR}/llvm" -B "${LLVM_BUILD_DIR}" -GNinja \
     && test -d "${LLVM_BUILD_DIR}/lib/clang/${llvm_major}" \
     && ln -s "${llvm_major}" "${CLANG_RESOURCE_DIR_COSMOPOLITAN}"
 
+COPY docker/libcxx-installed-config-site.patch /tmp/
+
 RUN cmake -S "${LLVM_SOURCE_DIR}/runtimes" -B /tmp/cxx-headers -GNinja \
       -DCMAKE_TOOLCHAIN_FILE=/opt/cosmopolitan.cmake \
       -DCMAKE_BUILD_TYPE=Release \
@@ -98,8 +100,14 @@ RUN cmake -S "${LLVM_SOURCE_DIR}/runtimes" -B /tmp/cxx-headers -GNinja \
     && resource_include="${CLANG_RESOURCE_DIR_COSMOPOLITAN}/include" \
     && mkdir -p "${resource_include}/c++" \
     && cp -r /tmp/cxx-headers/include/c++/v1 "${resource_include}/c++/" \
+    && patch --no-backup-if-mismatch \
+      -d "${CLANG_RESOURCE_DIR_COSMOPOLITAN}" \
+      -p1 \
+      -i /tmp/libcxx-installed-config-site.patch \
     && test -f "${resource_include}/c++/v1/memory" \
     && test -f "${resource_include}/c++/v1/cxxabi.h" \
-    && rm -rf /tmp/cxx-headers
+    && rm -rf \
+      /tmp/cxx-headers \
+      /tmp/libcxx-installed-config-site.patch
 
 CMD ["bash"]

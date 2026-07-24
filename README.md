@@ -241,30 +241,35 @@ Install options:
 
 - Release archives:
   [browse published releases](https://github.com/sergio-eld/omnirefl/releases).
-  Linux release packages use `.deb` and `.tar.gz`; Windows packages use `.zip`.
+  Native Linux release packages use `.deb` and `.tar.gz`; native Windows
+  packages use `.zip`; the experimental universal package uses `.tar.gz`.
 - Latest CI artifact:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
   run on `master` and use the artifacts produced by
-  `Build package / linux-x86_64`, `Build package / linux-aarch64`, or
-  `Build package / windows-x86_64`, or `Build packages / macOS Cosmopolitan`.
+  `Build package / linux-x86_64`, `Build package / linux-aarch64`,
+  `Build package / windows-x86_64`, or
+  `Build package / Cosmopolitan universal`.
   GitHub Actions artifacts do not provide a stable direct "latest artifact"
   download URL; look for
   `packages-linux-<arch>-musl-<short-sha>` or
   `packages-windows-x86_64-ucrt-<short-sha>`, or
-  `packages-macos-<arch>-cosmopolitan-<short-sha>`.
+  `packages-cosmopolitan-universal-<short-sha>`.
 - Build locally using the prepared Docker images; see
   [Build and Develop Locally](#build-and-develop-locally).
 
 The examples below assume a standard install under `/usr/local`.
 
-### macOS (experimental)
+### Cosmopolitan universal package (experimental)
 
-Use the package matching the host architecture. The x86_64 package contains
-native Mach-O tools. The AArch64 package remains ad hoc: Cosmopolitan 4.0.2
-does not emit native arm64 Mach-O, so its launchers run APE payloads through
-the embedded `ape-m1` loader. The first invocation needs the Xcode command-line
-tools to compile that loader.
+The single archive contains fat x86_64/AArch64 APE tools and one portable
+libc++ header bundle. It is package-tested on Alpine and Ubuntu for both
+architectures, on x86_64 Windows, and on x86_64 and arm64 macOS.
+
+On Linux and macOS, invoke `bin/omnirefl` and `bin/ccdb_query`. On Windows,
+invoke the adjacent `.exe` files. macOS arm64 remains ad hoc because
+Cosmopolitan 4.0.2 uses its embedded `ape-m1` loader; the first invocation
+needs the Xcode command-line tools to compile that loader.
 
 ## Packaged Tests and Examples
 
@@ -314,7 +319,7 @@ The repository uses prepared Alpine Docker images for local and CI builds:
 - [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
   for AArch64 Linux packages
 - [`docker/build-alpine-cosmopolitan.Dockerfile`](docker/build-alpine-cosmopolitan.Dockerfile)
-  for experimental x86_64 and AArch64 macOS packages
+  for the experimental universal Cosmopolitan package
 
 The images provide a versioned LLVM/Clang toolchain and reproducible local and
 CI build environment. Using them is the simplest approach; rebuilding a
@@ -332,10 +337,10 @@ Windows ARM64 cross-compilation with MinGW was attempted but is not working as
 of this writing.
 
 > [!NOTE]
-> The Cosmopolitan build produces separate x86_64 and AArch64 macOS packages
-> from one fat link. It uses compatibility paths for the C++23 library
-> facilities missing from cosmocc 4.0.2. Both packages and reflection pipelines
-> are verified on matching macOS CI runners.
+> The Cosmopolitan build produces one package from a fat x86_64/AArch64 link.
+> It uses compatibility paths for the C++23 library facilities missing from
+> cosmocc 4.0.2. The bundled libc++ configuration selects musl or non-musl
+> behavior from the consuming platform's headers.
 
 If configuring the build directly on the host instead of using an image, use a
 C++23 compiler. As of now, the prepared build images use GCC for native Linux
@@ -361,8 +366,9 @@ docker compose run --rm build-cosmopolitan
 > docker compose build build-linux-aarch64
 > ```
 
-The packages are written to `artifacts/packages/linux` and
-`artifacts/packages/windows`. To work inside the same build image:
+The packages are written to `artifacts/packages/linux`,
+`artifacts/packages/windows`, and `artifacts/packages/cosmopolitan`. To work
+inside the same build image:
 
 ```bash
 docker compose run --rm --entrypoint /bin/ash build-linux
@@ -399,6 +405,10 @@ Current package/install coverage is reported by the
 - (+) `Windows:clang-cl` covered by CI package matrix
 - (+) `Windows:MSYS2 MinGW` covered by CI package matrix
 - (+) `Windows:MSYS2 clang` covered by CI package matrix
+- (+) `Cosmopolitan:Alpine x86_64/AArch64` covered by CI package matrix
+- (+) `Cosmopolitan:Ubuntu x86_64/AArch64` covered by CI package matrix
+- (+) `Cosmopolitan:Windows x86_64` covered by CI package matrix
+- (+) `Cosmopolitan:macOS x86_64/arm64` covered by CI package matrix
 
 ## Is It Slow?
 
