@@ -325,7 +325,7 @@ services:
           'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
 
         tool_build="$$(awk -v tool="$$reflection_ms" -v build="$$build_ms" \
-          'BEGIN { printf "%.6f", 0 == build ? 0 : 100 * tool / build }')"
+          'BEGIN { printf "%.6f", (0 == build ? 0 : 100 * tool / build) }')"
 
         {
           printf "[\n"
