@@ -247,10 +247,12 @@ Install options:
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
   run on `master` and use the artifacts produced by
   `Build package / linux-x86_64`, `Build package / linux-aarch64`, or
-  `Build package / windows-x86_64`. GitHub Actions artifacts do not provide a
-  stable direct "latest artifact" download URL; look for
+  `Build package / windows-x86_64`, or `Build packages / macOS Cosmopolitan`.
+  GitHub Actions artifacts do not provide a stable direct "latest artifact"
+  download URL; look for
   `packages-linux-<arch>-musl-<short-sha>` or
-  `packages-windows-x86_64-ucrt-<short-sha>`.
+  `packages-windows-x86_64-ucrt-<short-sha>`, or
+  `packages-macos-<arch>-cosmopolitan-<short-sha>`.
 - Build locally using the prepared Docker images; see
   [Build and Develop Locally](#build-and-develop-locally).
 
@@ -258,15 +260,11 @@ The examples below assume a standard install under `/usr/local`.
 
 ### macOS (experimental)
 
-The current macOS installation is ad hoc because the cross-build still emits
-APE files; a way to avoid APE has not been found yet. After extracting the
-Cosmopolitan package, convert both tools to native Mach-O:
-
-```bash
-prefix=/path/to/unpacked/omnirefl
-/bin/sh "$prefix/bin/omnirefl" --assimilate
-/bin/sh "$prefix/bin/ccdb_query" --assimilate
-```
+Use the package matching the host architecture. The x86_64 package contains
+native Mach-O tools. The AArch64 package remains ad hoc: Cosmopolitan 4.0.2
+does not emit native arm64 Mach-O, so its launchers run APE payloads through
+the embedded `ape-m1` loader. The first invocation needs the Xcode command-line
+tools to compile that loader.
 
 ## Packaged Tests and Examples
 
@@ -316,7 +314,7 @@ The repository uses prepared Alpine Docker images for local and CI builds:
 - [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
   for AArch64 Linux packages
 - [`docker/build-alpine-cosmopolitan.Dockerfile`](docker/build-alpine-cosmopolitan.Dockerfile)
-  for experimental universal Cosmopolitan packages
+  for experimental x86_64 and AArch64 macOS packages
 
 The images provide a versioned LLVM/Clang toolchain and reproducible local and
 CI build environment. Using them is the simplest approach; rebuilding a
@@ -334,10 +332,10 @@ Windows ARM64 cross-compilation with MinGW was attempted but is not working as
 of this writing.
 
 > [!NOTE]
-> The Cosmopolitan build produces a universal APE package from Alpine. It uses
-> compatibility paths for the C++23 library facilities missing from cosmocc
-> 4.0.2. The package and reflection pipeline are verified through the Linux APE
-> loader; execution on macOS still needs a macOS CI runner.
+> The Cosmopolitan build produces separate x86_64 and AArch64 macOS packages
+> from one fat link. It uses compatibility paths for the C++23 library
+> facilities missing from cosmocc 4.0.2. Both packages and reflection pipelines
+> are verified on matching macOS CI runners.
 
 If configuring the build directly on the host instead of using an image, use a
 C++23 compiler. As of now, the prepared build images use GCC for native Linux
@@ -349,6 +347,7 @@ Build packages:
 docker compose run --rm build-linux
 docker compose run --rm build-linux-aarch64
 docker compose run --rm build-windows
+docker compose run --rm build-cosmopolitan
 ```
 
 > [!NOTE]

@@ -87,10 +87,10 @@ jobs:
             ./build-alpine/${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}/symbols
           if-no-files-found: error
 
-  # Keep this outside the package matrix: macOS cross-compilation takes much
-  # longer, and its test job should depend only on this package build.
+  # Keep this outside the package matrix: the fat Cosmopolitan link is slow,
+  # but one build emits both architecture-specific macOS packages.
   build-cosmopolitan-package:
-    name: Build package / cosmopolitan-universal
+    name: Build packages / macOS Cosmopolitan
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -116,11 +116,18 @@ jobs:
           PACKAGE_DIR=./artifacts/packages/cosmopolitan \
             docker compose run --rm build-cosmopolitan
 
-      - name: Upload Cosmopolitan Package
+      - name: Upload x86_64 Cosmopolitan Package
         uses: actions/upload-artifact@v6
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan
+          name: packages-macos-x86_64-cosmopolitan-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan/omnirefl-macos-x86_64-cosmopolitan-*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload aarch64 Cosmopolitan Package
+        uses: actions/upload-artifact@v6
+        with:
+          name: packages-macos-aarch64-cosmopolitan-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan/omnirefl-macos-aarch64-cosmopolitan-*.tar.gz
           if-no-files-found: error
 
   test-linux:
@@ -186,7 +193,7 @@ jobs:
           if-no-files-found: error
 
   test-macos:
-    name: macOS test / ${{ matrix.runner }}-cosmopolitan
+    name: macOS test / ${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan
     runs-on: ${{ matrix.runner }}
     needs: build-cosmopolitan-package
     permissions:
@@ -195,9 +202,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner:
-          - macos-15-intel
-          - macos-26-intel
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+            host_arch: x86_64
+          - runner: macos-26-intel
+            arch: x86_64
+            host_arch: x86_64
+          - runner: macos-15
+            arch: aarch64
+            host_arch: arm64
+          - runner: macos-26
+            arch: aarch64
+            host_arch: arm64
 
     steps:
       - name: Checkout Repository
@@ -211,8 +228,8 @@ jobs:
       - name: Download Cosmopolitan Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan
+          name: packages-macos-${{ matrix.arch }}-cosmopolitan-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan/${{ matrix.arch }}
 
       - name: Install Cosmopolitan Package
         run: |
@@ -221,11 +238,13 @@ jobs:
           install="$root/omnirefl"
           source="$root/tests"
           build="$root/build"
-          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-cosmopolitan"
+          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan"
           mkdir -p "$root" "$results"
+          test "$(uname -m)" = "${{ matrix.host_arch }}"
 
-          package="$(find artifacts/packages/cosmopolitan \
-            -maxdepth 1 -type f -name 'omnirefl-cosmopolitan-*.tar.gz' \
+          package="$(find "artifacts/packages/cosmopolitan/${{ matrix.arch }}" \
+            -maxdepth 1 -type f \
+            -name 'omnirefl-macos-${{ matrix.arch }}-cosmopolitan-*.tar.gz' \
             -print -quit)"
           test -n "$package"
           tar -xzf "$package" -C "$root"
@@ -235,11 +254,6 @@ jobs:
           test -n "$package_root"
           mv "$package_root" "$install"
           cp -R "$install/share/omnirefl/tests" "$source"
-
-          # The cross-build emits APEs. Assimilate the extracted test
-          # installation to native Mach-O before CMake launches the tools.
-          /bin/sh "$install/bin/omnirefl" --assimilate
-          /bin/sh "$install/bin/ccdb_query" --assimilate
 
           "$install/bin/omnirefl" --help 2>&1 |
             tee "$results/omnirefl-help.log"
@@ -273,9 +287,9 @@ jobs:
 
           set +e
           ctest --test-dir "$OMNIREFL_TEST_BUILD" \
-            --output-junit "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-cosmopolitan.xml" \
+            --output-junit "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan.xml" \
             -V 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-cosmopolitan.log"
+            tee "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan.log"
           rc=${PIPESTATUS[0]}
           set -e
           exit "$rc"
@@ -284,7 +298,7 @@ jobs:
         if: always()
         run: |
           build="$RUNNER_TEMP/with space/build"
-          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-cosmopolitan"
+          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan"
           diagnostics="$results/diagnostics"
           mkdir -p "$diagnostics"
 
@@ -303,17 +317,27 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            test-${{ matrix.runner }}-cosmopolitan-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/${{ matrix.runner }}-cosmopolitan
+            test-${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan
           if-no-files-found: error
 
   benchmark-macos:
-    name: Benchmark / macos-x86_64-cosmopolitan
-    runs-on: macos-15-intel
+    name: Benchmark / macos-${{ matrix.arch }}-cosmopolitan
+    runs-on: ${{ matrix.runner }}
     needs: build-cosmopolitan-package
     permissions:
       actions: read
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+            host_arch: x86_64
+          - runner: macos-15
+            arch: aarch64
+            host_arch: arm64
 
     steps:
       - name: Checkout Repository
@@ -328,8 +352,8 @@ jobs:
       - name: Download Cosmopolitan Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan
+          name: packages-macos-${{ matrix.arch }}-cosmopolitan-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmopolitan/${{ matrix.arch }}
 
       - name: Install Cosmopolitan Package
         run: |
@@ -338,11 +362,13 @@ jobs:
           install="$root/omnirefl"
           source="$root/tests"
           build="$root/build"
-          results="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-x86_64-cosmopolitan"
+          results="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan"
           mkdir -p "$root" "$results"
+          test "$(uname -m)" = "${{ matrix.host_arch }}"
 
-          package="$(find artifacts/packages/cosmopolitan \
-            -maxdepth 1 -type f -name 'omnirefl-cosmopolitan-*.tar.gz' \
+          package="$(find "artifacts/packages/cosmopolitan/${{ matrix.arch }}" \
+            -maxdepth 1 -type f \
+            -name 'omnirefl-macos-${{ matrix.arch }}-cosmopolitan-*.tar.gz' \
             -print -quit)"
           test -n "$package"
           tar -xzf "$package" -C "$root"
@@ -352,11 +378,6 @@ jobs:
           test -n "$package_root"
           mv "$package_root" "$install"
           cp -R "$install/share/omnirefl/tests" "$source"
-
-          # The cross-build emits APEs. Assimilate the extracted benchmark
-          # installation to native Mach-O before CMake launches the tools.
-          /bin/sh "$install/bin/omnirefl" --assimilate
-          /bin/sh "$install/bin/ccdb_query" --assimilate
 
           {
             echo "OMNIREFL_INSTALL_ROOT=$install"
@@ -427,7 +448,7 @@ jobs:
             printf "\n]\n"
           } > "$OMNIREFL_BENCHMARK_RESULTS/benchmark.json"
 
-          printf "\nBenchmark summary (macos-x86_64-cosmopolitan)\n"
+          printf "\nBenchmark summary (macos-${{ matrix.arch }}-cosmopolitan)\n"
           printf "%-32s %12s %8s\n" "metric" "value" "unit"
           printf "%-32s %12s %8s\n" "reflection wall" "$reflection_ms" "ms"
           printf "%-32s %12s %8s\n" "build wall" "$build_ms" "ms"
@@ -443,7 +464,7 @@ jobs:
             const workflow_id = 'ci.yml'
             const branch = context.payload.repository.default_branch
             const historyArtifactPrefix =
-              'benchmark-history-macos-x86_64-cosmopolitan'
+              'benchmark-history-macos-${{ matrix.arch }}-cosmopolitan'
 
             const historyArtifactFrom = async (run_id) => {
               const artifacts = await github.paginate(
@@ -490,21 +511,21 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.macos_history_run.outputs.artifact_name }}
-          path: ./artifacts/benchmark-history/macos
+          path: ./artifacts/benchmark-history/macos-${{ matrix.arch }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.macos_history_run.outputs.run_id }}
 
       - name: Prepare macOS benchmark history
-        run: mkdir -p ./artifacts/benchmark-history/macos
+        run: mkdir -p ./artifacts/benchmark-history/macos-${{ matrix.arch }}
 
       - name: Check macOS benchmark regression
         run: |
           python3 -B ci/benchmark_history.py compare \
-            --current ./artifacts/benchmarks/macos-x86_64-cosmopolitan/benchmark.json \
-            --history ./artifacts/benchmark-history/macos/history.json \
-            --os macos-x86_64-cosmopolitan \
-            --arch x86_64 \
+            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan/benchmark.json \
+            --history ./artifacts/benchmark-history/macos-${{ matrix.arch }}/history.json \
+            --os macos-${{ matrix.arch }}-cosmopolitan \
+            --arch ${{ matrix.arch }} \
             --libc cosmopolitan \
             --threshold 1.2 \
             --min-delta-ms 500 \
@@ -516,12 +537,12 @@ jobs:
           COMMIT_TITLE: ${{ steps.commit.outputs.title }}
         run: |
           python3 -B ci/benchmark_history.py update \
-            --current ./artifacts/benchmarks/macos-x86_64-cosmopolitan/benchmark.json \
-            --history ./artifacts/benchmark-history/macos/history.json \
+            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan/benchmark.json \
+            --history ./artifacts/benchmark-history/macos-${{ matrix.arch }}/history.json \
             --commit "${{ github.sha }}" \
             --commit-title "$COMMIT_TITLE" \
-            --os macos-x86_64-cosmopolitan \
-            --arch x86_64 \
+            --os macos-${{ matrix.arch }}-cosmopolitan \
+            --arch ${{ matrix.arch }} \
             --libc cosmopolitan \
             --max-runs 200
 
@@ -530,16 +551,16 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            benchmark-history-macos-x86_64-cosmopolitan-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmark-history/macos
+            benchmark-history-macos-${{ matrix.arch }}-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmark-history/macos-${{ matrix.arch }}
           if-no-files-found: error
 
       - name: Upload macOS benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-macos-x86_64-cosmopolitan-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmarks/macos-x86_64-cosmopolitan
+          name: benchmark-macos-${{ matrix.arch }}-cosmopolitan-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan
           if-no-files-found: error
 
   benchmark:

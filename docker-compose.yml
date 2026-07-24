@@ -83,16 +83,13 @@ services:
           -DENABLE_TESTING=OFF \
           -DENABLE_BENCH=OFF \
           -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          -DOMNIREFL_PACKAGE_TARGET=cosmopolitan-universal \
+          -DOMNIREFL_PACKAGE_TARGET=macos-x86_64-cosmopolitan \
           -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN}/lib/cmake/clang \
           -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN}/lib/cmake/llvm \
           -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
 
         cmake --build . -t omnirefl ccdb_query -j$$(nproc) &&
-
-        mkdir -p /tmp/package /packages &&
-        cpack -G TGZ -B /tmp/package &&
-        mv /tmp/package/*.tar.gz /packages/
+        bash /src/docker/package-cosmopolitan.sh /build /src /packages
 
   build-linux:
     <<: *build-alpine-image
