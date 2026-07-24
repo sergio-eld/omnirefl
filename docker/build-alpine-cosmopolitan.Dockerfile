@@ -79,4 +79,27 @@ RUN cmake -S "${LLVM_SOURCE_DIR}/llvm" -B "${LLVM_BUILD_DIR}" -GNinja \
     && test -d "${LLVM_BUILD_DIR}/lib/clang/${llvm_major}" \
     && ln -s "${llvm_major}" "${CLANG_RESOURCE_DIR_COSMOPOLITAN}"
 
+RUN cmake -S "${LLVM_SOURCE_DIR}/runtimes" -B /tmp/cxx-headers -GNinja \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/cosmopolitan.cmake \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
+      -DLIBCXX_EXTRA_SITE_DEFINES=_LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE \
+      -DLIBCXX_INCLUDE_TESTS=OFF \
+      -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+      -DLIBCXX_ENABLE_SHARED=OFF \
+      -DLIBCXX_ENABLE_STATIC=OFF \
+      -DLIBCXXABI_INCLUDE_TESTS=OFF \
+      -DLIBCXXABI_ENABLE_SHARED=OFF \
+      -DLIBCXXABI_ENABLE_STATIC=ON \
+      -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+    && cmake --build /tmp/cxx-headers \
+      --target generate-cxx-headers generate-cxxabi-headers \
+      --parallel "$(nproc)" \
+    && resource_include="${CLANG_RESOURCE_DIR_COSMOPOLITAN}/include" \
+    && mkdir -p "${resource_include}/c++" \
+    && cp -r /tmp/cxx-headers/include/c++/v1 "${resource_include}/c++/" \
+    && test -f "${resource_include}/c++/v1/memory" \
+    && test -f "${resource_include}/c++/v1/cxxabi.h" \
+    && rm -rf /tmp/cxx-headers
+
 CMD ["bash"]

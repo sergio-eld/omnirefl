@@ -3531,21 +3531,20 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     o.ResourceDir = resource_dir.generic_string();
 
     if (!msvc_used && !mingw_used) {
+      // Packaged headers are absolute and remain outside a target SDK.
       o.AddPath(
         // todo: this should be configured at compile time
         (resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
           .generic_string(),
         clang::frontend::IncludeDirGroup::CXXSystem,
-        // todo: I have no idea what are these parameters. comment
         /*IsFramework=*/false,
-        /*IgnoreSysRoot=*/false);
+        /*IgnoreSysRoot=*/true);
 
       // todo: this should be configured at compile time
       o.AddPath((resource_dir / "include/c++/v1").generic_string(),
         clang::frontend::IncludeDirGroup::CXXSystem,
-        // todo: I have no idea what are these parameters. comment
         /*IsFramework=*/false,
-        /*IgnoreSysRoot=*/false);
+        /*IgnoreSysRoot=*/true);
 
       // ad hoc: C++ headers must be included before C's
       std::rotate(o.UserEntries.rbegin(),
