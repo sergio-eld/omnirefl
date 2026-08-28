@@ -24,7 +24,7 @@ find_package(omnirefl CONFIG REQUIRED)
 add_executable(example main.cpp)
 set_property(TARGET example PROPERTY CXX_STANDARD 20)
 
-# Reflection is not transitive: only this target's own .cpp files are
+# Reflection is not transitive: only this target's own C++ translation units are
 # instrumented. Call omni_reflected_target for each target that should be
 # reflected.
 omni_reflected_target(example)
@@ -36,24 +36,6 @@ Instrumentation can also be triggered explicitly through `<target>.omni`
 ```bash
 cmake --build build -t example.omni
 ```
-
-The same target shape is used by
-[tests/tool/example/CMakeLists.txt](tests/tool/example/CMakeLists.txt).
-
-`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
-require CMake. An equivalent direct invocation is:
-
-```bash
-# Generate the reflection header, then force-include it when compiling the same
-# translation unit.
-flags="-std=c++20 -I/path/to/omnirefl/include"
-omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
-c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
-```
-
-`-c` selects the instrumented source; compiler output options after `--` are
-ignored. When a compilation database is available, `ccdb_query` can select its
-matching compiler command for use after `--`.
 
 ```cpp
 #include <omnirefl/reflection.hpp>
@@ -107,12 +89,10 @@ int main() {
 }
 ```
 
-The snippet above is available as
-[tests/tool/example/main.cpp](tests/tool/example/main.cpp) and is included in
-the package.
-See [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
-for the full executable guide. It targets limited C++20 support: omnirefl
-concepts are used, but `<concepts>` and C++20 ranges algorithms are avoided.
+The complete example is available in
+[tests/tool/example](tests/tool/example). The
+[comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
+covers the remaining interface and compatibility features.
 
 ## Seamless Experience
 
@@ -120,9 +100,7 @@ concepts are used, but `<concepts>` and C++20 ranges algorithms are avoided.
 2. Use `omni::reflected_call(...)` where reflection is needed.
 
 Everything else remains regular C++. Omnirefl discovers the argument types and
-supported dependencies, force-includes the generated header, and emits
-compiler-style dependency files (`.d`) so Ninja reruns it when the source or
-any included header changes (tested with Ninja only as of this writing). No
+supported dependencies, then generates and force-includes their metadata. No
 macros, compiler-specific UB, or manual regeneration are required.
 
 ## Supported Scope
@@ -130,13 +108,15 @@ macros, compiler-specific UB, or manual regeneration are required.
 Omnirefl focuses on POD-like records and enums.
 
 - C++11 through C++23; C++20 concepts provide the most ergonomic interface.
-- Globally accessible named records and enums.
-- Nested named records/enums of supported globally accessible parents.
+- Named namespace-scope records and enums; namespace-scope unscoped enums
+  require a fixed underlying type.
+- Nested named records/enums of supported parents.
 - Unconstrained primary record templates, including use as CRTP bases.
 - Public data fields: names, type names, documentation, value retrieval,
   mutation of writable fields, reference access when safe,
   `has_value_access()`/`has_reference_access()` capability queries, and
   `is_const()`/`is_mutable()`/`is_volatile()`/`is_deprecated()` traits.
+  Private/protected fields and member functions are not reflected.
 - Enum documentation, plus enumerator names and values.
 
 ### Dependency Protocols
@@ -167,135 +147,93 @@ those protocol routes.
   not depend on instantiating the visitor body during the tool run; for lambdas,
   this means an explicit trailing return type, including `-> void`.
   Consequently, a lambda cannot currently return a type declared inside its
-  body. Supporting such local result types without supporting recursive
-  `reflected_call` is technically possible and under consideration.
-  `constexpr auto result = reflected_call(...)` is not supported: it forces
-  evaluation and breaks that instrumentation boundary.
+  body. `constexpr auto result = reflected_call(...)` is not supported: it
+  forces evaluation and breaks that instrumentation boundary.
 - `reflected_call` accepts reflected records and enums only. The caller must
   sanitize pointers, arrays, and compound inputs before the call; use
   `std::visit` or `mpark::visit` for variants. Compound types remain valid
   dependency routes as listed above. Invalid-input detection is best effort.
+- Local and unnamed types are not supported as reflected roots.
+- Records nested inside template records are not supported.
+- Privately nested types cannot be reflected through a public field, including
+  fields inherited from a public base.
 - Records with direct or inherited virtual bases are not supported. They are
   rejected as `reflected_call` inputs and skipped with a warning when found as
   dependencies.
-- Constrained primary record templates are not supported. The force-included
-  generated header would have to repeat equivalent constraints before their
-  source-level dependencies are declared, and concepts cannot be
-  forward-declared.
+- Constrained primary record templates are not supported.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
-  instantiated independently. Sema-based recursive instrumentation is
-  technically possible, but is not intended for now: it would severely
-  complicate the implementation and cause a combinatorial expansion of the
-  required test coverage.
+  instantiated independently.
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
-- Public data members only. Private/protected fields are skipped, including
-  fields inherited through public bases. Member functions are not reflected.
-- GCC 16 diagnoses the intentional incomplete-type SFINAE used for nested
-  reflection with `-Wsfinae-incomplete`. Generated headers suppress this warning
-  only within generated declarations. This workaround should be monitored;
-  current nested record and enum tests do not reproduce the unstable
-  specialization selection targeted by the warning.
 - [Deprecated public fields can emit compiler deprecation diagnostics while
   their metadata is formed](tests/tool/regressions/deprecated_public_field.cpp),
-  before `is_deprecated()` can filter them. Deferring this access would require
-  replacing the natural `typename Field::type` interface with a template query.
-- Local and unnamed types are not supported. Experimental indexed support exists
-  for investigation (`omni_reflected_target(... ENABLE_INDEX_MODE)`), but is
-  not part of the release contract: it has proven unstable because function
-  template specializations are instantiated lazily, and a dependent return type
-  can postpone instantiating the function body until the specialization is
+  before `is_deprecated()` can filter them.
+- Anonymous unions are not reflected correctly.
+- Compiler-packed misaligned raw arrays have no safe whole-field accessor; use
+  an aligned representation such as `std::array` when whole-field access is
   required.
-- CMake-generated sources are skipped by default. Targets commonly contain
-  helper translation units such as Qt moc output, which must not be
-  instrumented; explicit opt-in for generated sources is not available yet.
-- The CMake wrapper only instruments concrete C++ source entries. Source
-  generator expressions such as this are not supported:
+- External pointees that are only forward-declared are not traversed.
+- `omni_reflected_target` does not support OBJECT or INTERFACE libraries.
+- The CMake wrapper instruments concrete, non-generated C++ translation units.
+  Generated sources are skipped, source generator expressions are rejected,
+  and C translation units are ignored. If no C++ source remains, reflection is
+  skipped with a warning.
 
-  ```cmake
-  target_sources(example PRIVATE
-      "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/debug.cpp>")
-  omni_reflected_target(example)
-  ```
+## Direct CLI Usage
 
-  CMake resolves the selected source while generating the buildsystem, after
-  `omni_reflected_target()` has configured each source's generated header and
-  force-include option. Those source properties cannot be attached to the
-  resolved path retroactively.
-- C translation units are ignored; if no C++ source remains, reflection is
-  skipped with a configuration warning.
+`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
+require CMake:
 
-Linters and language servers such as clangd can report temporary "ghost"
-diagnostics between edits/tool runs, because reflected `.cpp` files depend on
-the generated header that is force-included during normal compilation. Build
-the affected `.cpp` file normally, or refresh its metadata explicitly through
-the `<target>.omni` CMake target.
+```bash
+# Cosmopolitan packages use omnirefl on Unix and omnirefl.exe on Windows.
+flags="-std=c++20 -I/path/to/omnirefl/include"
+omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
+c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
+```
 
-During AST creation, invalid C++ in the reflected translation unit is reported
-as Clang compilation errors. Compiler warnings are not reported by omnirefl.
+`-c` selects the instrumented source; compiler output options after `--` are
+ignored. `ccdb_query` prints the matching command from a compilation database;
+the optional final argument selects among commands by output-path substring:
+
+```bash
+ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
+```
 
 ## Install
 
-Every package exposes the same installed layout:
-
-- `bin/omnirefl` and `bin/ccdb_query`
-- `include/omnirefl`
-- `lib/cmake/omnirefl`
-- `share/omnirefl/tests`
-
-Native Linux releases provide `.deb` and `.tar.gz` packages, native Windows
-releases provide `.zip` packages, and the experimental Cosmopolitan build
-provides one `.tar.gz` package for Linux, macOS, and Windows. Install a `.deb`
-normally, or unpack an archive and use its `omnirefl-*` directory as the
-installation prefix.
-
-On Linux and macOS, invoke `bin/omnirefl` and `bin/ccdb_query`. On Windows,
-invoke the adjacent `.exe` files. The Cosmopolitan archive keeps its APE
-payloads as those `.exe` files and adds the normal extensionless Unix
-launchers; this packaging detail does not change CMake usage.
-
-Package sources:
+Install options:
 
 - Release archives:
   [browse published releases](https://github.com/sergio-eld/omnirefl/releases).
+  Linux packages use `.deb` or `.tar.gz`, Windows packages use `.zip`, and the
+  experimental Cosmopolitan `.tar.gz` package supports Linux, macOS, and
+  Windows.
 - Latest CI artifact:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
-  run on `master` and use the artifacts produced by
-  `Build package / linux-x86_64`, `Build package / linux-aarch64`,
-  `Build package / windows-x86_64`, or
-  `Build package / cosmo-universal`.
-  GitHub Actions artifacts do not provide a stable direct "latest artifact"
-  download URL; look for
-  `packages-linux-<arch>-musl-<short-sha>` or
-  `packages-windows-x86_64-ucrt-<short-sha>`, or
-  `packages-cosmo-universal-<short-sha>`.
+  run on `master` and download the package artifact for the required runtime
+  and architecture.
 - Build locally using the prepared Docker images; see
-  [Build and Develop Locally](#build-and-develop-locally).
+  [Build Packages Locally](#build-packages-locally).
 
-### Cosmopolitan universal package (experimental)
-
-The single archive contains fat x86_64/AArch64 APE tools and one portable
-libc++ header bundle. It is package-tested on Alpine and Ubuntu for both
-architectures, on x86_64 Windows, and on x86_64 and arm64 macOS. macOS arm64
-remains ad hoc because, as of this writing, the bundled Cosmopolitan toolchain
-uses its embedded `ape-m1` loader; the first invocation needs the Xcode
-command-line tools to compile that loader.
+Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
+`omnirefl-*` directory as the installation prefix.
 
 ## Packaged Tests and Examples
 
-Assuming a standard install, the packaged test/example sources are available
-under `share/omnirefl/tests`. Copy them into a writable directory before
-configuring:
+Packaged test/example sources are available under `share/omnirefl/tests`. Copy
+them into a writable directory before configuring:
 
 ```bash
-prefix=/usr/local # Or the unpacked install root.
+# Use /usr for a .deb, or the unpacked omnirefl-* directory for an archive.
+prefix=/usr
 cp -R "$prefix/share/omnirefl/tests" ./omnirefl-tests
 
 mkdir build && cd build
 
-cmake ../omnirefl-tests -GNinja
+cmake ../omnirefl-tests -GNinja \
+  "-Domnirefl_DIR=$prefix/lib/cmake/omnirefl"
 
 ctest --output-on-failure
 ```
@@ -316,125 +254,44 @@ cmake ../omnirefl-tests -GNinja `
 ctest --output-on-failure
 ```
 
-The copied tree also contains the runnable example and comprehensive guide
-sources. The tests fetch their own test-only dependencies during CMake
-configuration. If CMake cannot find omnirefl in a non-standard install, pass
-`-Domnirefl_DIR="$prefix/lib/cmake/omnirefl"`; on Windows this is usually needed
-for an unpacked `.zip` package.
+The tests fetch their own test-only dependencies during CMake configuration.
 
-## Build and Develop Locally
+## Build Packages Locally
 
-The repository uses prepared Alpine Docker images for local and CI builds:
-
-- [`ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-x86_64-musl-ucrt)
-  for x86_64 Linux and Windows packages
-- [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
-  for AArch64 Linux packages
-- [`docker/build-alpine-cosmo.Dockerfile`](docker/build-alpine-cosmo.Dockerfile)
-  for the experimental universal Cosmopolitan package
-
-The images provide a versioned LLVM/Clang toolchain and reproducible local and
-CI build environment. Using them is the simplest approach; rebuilding a
-complete toolchain image can take close to an hour. They are defined by
-[docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile),
-[docker/build-alpine-aarch64-musl.Dockerfile](docker/build-alpine-aarch64-musl.Dockerfile),
-and
-[docker/build-alpine-cosmo.Dockerfile](docker/build-alpine-cosmo.Dockerfile).
-
-The x86_64 image is also used for the MinGW Windows cross-build. Linux's stable
-kernel-userspace ABI allows static musl packages to have zero target-distribution
-runtime library dependencies. The Windows package depends only on UCRT.
-
-Windows ARM64 cross-compilation with MinGW was attempted but is not working as
-of this writing.
-
-> [!NOTE]
-> The Cosmopolitan build produces one package from a fat x86_64/AArch64 link.
-> It uses compatibility paths for the C++23 library facilities missing from
-> the bundled cosmocc release. The bundled libc++ configuration selects musl
-> or non-musl behavior from the consuming platform's headers.
-
-As of this writing, the toolchain and test-image versions in [`.env`](.env)
-are the source of truth for local and CI image selection. Docker Compose loads
-them automatically, and CI resolves the complete image tags through Compose.
-
-If configuring the build directly on the host instead of using an image, use a
-C++23 compiler. As of this writing, the prepared build images use GCC for
-Linux musl tool builds.
-
-Build packages:
+Docker Compose uses prepared, versioned build images. Rebuilding a complete
+toolchain image locally can take close to an hour.
 
 ```bash
+export PACKAGE_DIR=./artifacts/packages/current
 docker compose run --rm build-musl
 docker compose run --rm build-musl-aarch64
 docker compose run --rm build-ucrt
 docker compose run --rm build-cosmo
 ```
 
-> [!NOTE]
-> If the configured image is unavailable, for example when building a commit
-> older than `master`, `docker compose run` may trigger a local image build.
-> Image builds can take a while, especially the x86_64 source build, so run
-> them explicitly before packaging:
->
-> ```bash
-> docker compose build build-musl
-> docker compose build build-musl-aarch64
-> ```
-
-The packages are written to `artifacts/packages/musl`,
-`artifacts/packages/ucrt`, and `artifacts/packages/cosmo`. To work
-inside the same build image:
+The Linux package test expects the matching musl archive and the universal
+Cosmopolitan archive in `PACKAGE_DIR`; the commands above populate that
+directory.
 
 ```bash
-docker compose run --rm --entrypoint /bin/ash build-musl
+docker compose run --rm test-alpine
 ```
 
-Package-test services are selected by host and toolchain, not by package
-runtime. Point `PACKAGE_DIR` at a directory containing the compatible musl and
-Cosmopolitan `.tar.gz` packages; the runner identifies and tests both from
-their filenames:
+## Tested Platforms
 
-```bash
-PACKAGE_DIR=./artifacts/packages/current \
-  docker compose run --rm test-alpine
-```
+The [CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
+tests these package/platform combinations:
 
-## Examples
+- Linux x86_64 musl and Cosmopolitan packages on Alpine and Ubuntu 18.04,
+  20.04, and 22.04 with GCC and Clang.
+- Linux AArch64 musl and Cosmopolitan packages on Alpine and Ubuntu 22.04 with
+  GCC.
+- Windows x86_64 UCRT and Cosmopolitan packages with MSVC, clang-cl, MSYS2 GCC,
+  and MSYS2 Clang.
+- The Cosmopolitan package on Intel and Apple Silicon macOS 15 and 26.
 
-- [tests/tool/example/main.cpp](tests/tool/example/main.cpp) is the small
-  runnable README example.
-- [tests/tool/comprehensive_guide/comprehensive_guide.cpp](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
-  is the executable usage guide with C++20, compatibility, dependency,
-  template, documentation, schema, and write examples. It is written for limited
-  C++20 support and avoids `<concepts>` plus C++20 ranges algorithms.
-
-## Tested Toolchains
-
-Current package/install coverage is reported by the
-[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
-
-- (+) `Linux:Alpine GCC` covered by CI package matrix
-- (+) `Linux:Alpine Clang` covered by CI package matrix
-- (+) `Linux:Alpine MinGW GCC` covered by CI package matrix
-  (build-only for Windows test binaries)
-- (+) `Linux:Ubuntu 18.04 GCC` covered by CI package matrix
-- (+) `Linux:Ubuntu 18.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu 20.04 GCC` covered by CI package matrix
-- (+) `Linux:Ubuntu 20.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu 22.04 GCC` covered by CI package matrix
-- (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
-- (+) `Linux:Ubuntu 18.04/20.04/22.04 MinGW GCC` covered by CI package matrix
-  (build-only for Windows test binaries)
-- (+) `Linux:AArch64 musl` covered by CI package build and test matrices
-- (+) `Windows:MSVC` covered by CI package matrix
-- (+) `Windows:clang-cl` covered by CI package matrix
-- (+) `Windows:MSYS2 MinGW` covered by CI package matrix
-- (+) `Windows:MSYS2 clang` covered by CI package matrix
-- (+) `Cosmopolitan:Alpine x86_64/AArch64` covered by CI package matrix
-- (+) `Cosmopolitan:Ubuntu x86_64/AArch64` covered by CI package matrix
-- (+) `Cosmopolitan:Windows x86_64` covered by CI package matrix
-- (+) `Cosmopolitan:macOS x86_64/arm64` covered by CI package matrix
+The Linux matrix also checks MinGW cross-compilation. Windows AArch64 packaging
+is not currently supported.
 
 ## Is It Slow?
 
@@ -461,28 +318,12 @@ stages and regression tracking.
 
 ## Continuous Benchmark
 
-Benchmark runs are reported by the
-[CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+CI benchmarks native musl and Cosmopolitan on Linux x86_64, plus Cosmopolitan
+on Intel and Apple Silicon macOS. Benchmark inputs use `Release`;
+distributable packages retain `RelWithDebInfo` for detached symbols.
 
-- Targets: native musl and Cosmopolitan `linux-x86_64`
-- Environment: the same Ubuntu 22.04 GCC package-test image
-- Tool build: benchmark inputs use `Release`; distributable packages retain
-  `RelWithDebInfo` for detached symbols
-- Baseline target: `benchmark.baseline`
-- Musl history artifact:
-  `benchmark-history-linux-x86_64-musl-gcc-attempt-<N>`
-- Cosmo history artifact:
-  `benchmark-history-linux-x86_64-cosmo-gcc-attempt-<N>`
-- Reported baseline: average of the last 5 stored runs
-- Tracked metrics:
-  - reflection/tool wall time for `benchmark.baseline.omni`
-  - build wall time for `benchmark.baseline`
-  - reflection/tool wall time as percentage of build wall time
-- Regression warnings require an increase above 20% for reflection wall time
-  or the tool/build percentage; wall time also requires at least a 500 ms
-  increase. Internal stage and build timings are retained as diagnostic detail.
-- TODO: publish benchmark history at a stable URL instead of requiring artifact
-  lookup.
+Reports compare reflection and object-build wall time for `benchmark.baseline`
+against the average of the last five stored runs.
 
 ## How It Works
 
@@ -499,7 +340,7 @@ SFINAE. A simplified generated shape is:
 
 ```cpp
 namespace app {
-struct root; // The definition may remain in the .cpp file.
+struct root; // The definition may remain in the translation unit.
 }
 
 namespace omni {
@@ -526,48 +367,21 @@ struct _reflected<T,
 } // namespace omni
 ```
 
-This permits records declared directly in one `.cpp` file to be reflected.
+This permits records declared directly in one translation unit to be reflected.
 Without the delayed specializations, users would need separate declaration
 headers and a manually ordered wrapper around generated metadata. That wrapper
 would still need a policy for which reachable types to reflect; Omnirefl derives
 roots from `reflected_call` and dependencies from the protocols above, enabling
 a seamless experience.
 
-> [!NOTE]
-> Experimental indexed mode (`omni_reflected_target(... ENABLE_INDEX_MODE)`) is
-> disabled by default. It can reflect virtually any otherwise-valid record that
-> cannot be forward-declared, including local and unnamed records, by assigning
-> generated indexes instead. The C++ standard does not guarantee the template
-> instantiation timing on which those registrations rely; the mode has proven
-> extremely brittle across compilers and also increases compile time and object
-> size. See [Limitations](#limitations).
+## Troubleshooting and Bug Reports
 
-## Known Regressions
+Language servers can report temporary diagnostics because reflected translation
+units depend on a force-included generated header. Build the affected source or
+refresh it through the `<target>.omni` target.
 
-### Reflection Usage
-
-- [A public nested type inside a private parent is emitted through an
-  inaccessible qualified
-  name](tests/tool/regressions/public_nested_in_private_parent.cpp).
-- [Public-base traversal loses a private nested type exposed through a public
-  field](tests/tool/regressions/private_nested_type_through_public_base.cpp).
-- [Anonymous unions emit an empty-named container field and omit promoted
-  members](tests/tool/regressions/anonymous_union_members.cpp).
-- [Compiler-packed misaligned raw arrays have no safe whole-field
-  accessor](tests/tool/packed_field_test.cpp).
-  This is an implementation-dependent
-  layout case. Use an aligned field representation such as `std::array` when
-  whole-field access is required.
-- [Pointer fields whose external pointee is only forward-declared are silently
-  ignored](tests/tool/CMakeLists.txt#L690) instead of being skipped with a
-  warning while the enclosing record is reflected best-effort.
-
-### Candidate Explicit Limitations
-
-- Primary templates with class-type non-type template parameters
-  (`template <Struct value>`) when `Struct` cannot itself be forward-declared.
-
-## Bug Reports
+Invalid C++ in an instrumented translation unit is reported as a Clang error.
+Compiler warnings are not reported by omnirefl.
 
 Report defects through
 [GitHub Issues](https://github.com/sergio-eld/omnirefl/issues). For tool crashes
@@ -576,15 +390,17 @@ generated header if one was produced, and a backtrace.
 
 ```bash
 # Enable core dumps for the current shell, then rerun the exact failing command.
+binary=./omnirefl # Use ./omnirefl.exe for the Cosmopolitan APE payload.
 ulimit -c unlimited
-omnirefl -o out.omnirefl.hpp -c source.cpp -- <compiler command...>
+"$binary" -o out.omnirefl.hpp -c source.cpp -- <compiler command...>
 
 # If your system writes core files into the working directory:
-gdb --batch -ex "thread apply all bt full" ./omnirefl ./core > omnirefl.bt.txt
+gdb --batch -ex "thread apply all bt full" "$binary" ./core > omnirefl.bt.txt
 
 # If your system uses systemd-coredump:
-coredumpctl gdb omnirefl --batch \
-  -ex "thread apply all bt full" > omnirefl.bt.txt
+coredumpctl --output=omnirefl.core dump "$(basename "$binary")"
+gdb --batch -ex "thread apply all bt full" \
+  "$binary" omnirefl.core > omnirefl.bt.txt
 ```
 
 If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
