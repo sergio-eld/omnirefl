@@ -1,4 +1,19 @@
-FROM ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-22.1.8
+ARG ALPINE_VERSION
+FROM alpine:${ALPINE_VERSION}
 
-RUN apk --no-cache add clang21 \
-    && rm -rf /var/cache/apk/*
+ARG COMPILER=gcc
+
+RUN set -eux; \
+    apk --no-cache add \
+        build-base \
+        cmake \
+        git \
+        ninja-build \
+        tar; \
+    case "$COMPILER" in \
+        gcc) ;; \
+        clang) apk --no-cache add clang21 ;; \
+        mingw) apk --no-cache add mingw-w64-gcc ;; \
+        *) echo "Unsupported COMPILER '$COMPILER'" >&2; exit 1 ;; \
+    esac; \
+    rm -rf /var/cache/apk/*

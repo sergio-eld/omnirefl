@@ -1,6 +1,7 @@
 #include <CLI/CLI.hpp>
 
 #include <clang/Tooling/CompilationDatabase.h>
+#include <clang/Tooling/JSONCompilationDatabase.h>
 
 #include <algorithm>
 #include <cctype>
@@ -10,10 +11,13 @@
 #include <iostream>
 #include <memory>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
+
+#include "std_compat.h"
 
 namespace {
 
@@ -42,7 +46,7 @@ std::string shell_quote(std::string_view arg) {
   const auto escaped = arg //
     | std::views::transform([](const char &c) -> std::string_view {
         return '\\' == c //
-          ? "'\\\\'"sv
+          ? "\\\\"sv
           : '\'' == c //
             ? "'\\''"sv
             : std::string_view{&c, 1};
@@ -53,13 +57,25 @@ std::string shell_quote(std::string_view arg) {
   return needs_quote ? std::format("'{}'", escaped) : escaped;
 }
 
+bool is_drive_mount_path(std::string_view path) {
+  return 3 <= path.size() && '/' == path[0]
+    && std::isalpha(static_cast<unsigned char>(path[1])) && '/' == path[2];
+}
+
 std::expected<std::unique_ptr<clang::tooling::CompilationDatabase>, std::string>
   load_compile_db(const fs::path &db_path) {
   std::string err;
-  std::unique_ptr loaded =
-    clang::tooling::CompilationDatabase::loadFromDirectory(
-      db_path.parent_path().generic_string(),
-      err);
+  const std::string path = db_path.generic_string();
+
+  // A Cosmopolitan process exposes C:/... as /C/.... LLVM was configured on
+  // Linux, so automatic command-line detection would otherwise use GNU
+  // escaping and discard backslashes from CMake's Windows command strings.
+  std::unique_ptr<clang::tooling::CompilationDatabase> loaded =
+    clang::tooling::JSONCompilationDatabase::loadFromFile(path,
+      err,
+      is_drive_mount_path(path) //
+        ? clang::tooling::JSONCommandLineSyntax::Windows
+        : clang::tooling::JSONCommandLineSyntax::AutoDetect);
 
   if (!loaded)
     return std::unexpected(std::format("failed to load compilation db {}: {}",
@@ -81,29 +97,71 @@ std::expected<clang::tooling::CompileCommand, std::string> resolve_command(
   if (!db)
     return std::unexpected(std::move(db).error());
 
-  const std::vector commands =
-    (*db)->getCompileCommands(o.source.generic_string());
-
   // CMake may use either path separator in Windows compile databases.
-  const auto normalize_path_separators = [](std::string_view path) {
-    return path //
+  // Cosmopolitan additionally exposes C:/... as /C/....
+  const auto normalize_path = [](std::string_view path) {
+    std::string normalized = path //
       | std::views::transform(
         [](const char c) { return '\\' == c ? '/' : c; }) //
       | std::ranges::to<std::string>();
+
+    if (3 <= normalized.size() && '/' == normalized[0]
+      && std::isalpha(static_cast<unsigned char>(normalized[1]))
+      && '/' == normalized[2]) {
+      normalized[0] = normalized[1];
+      normalized[1] = ':';
+    }
+
+    if (2 <= normalized.size() && ':' == normalized[1])
+      normalized[0] = static_cast<char>(
+        std::tolower(static_cast<unsigned char>(normalized[0])));
+
+    return normalized;
   };
 
-  const std::string output_contains =
-    normalize_path_separators(o.output_contains);
+  std::vector commands =
+    (*db)->getCompileCommands(o.source.generic_string());
+  if (commands.empty()) {
+    const std::string source = normalize_path(o.source.generic_string());
+    commands = (*db)->getAllCompileCommands() //
+      | std::views::filter([&source, normalize_path](const auto &command) {
+          return source == normalize_path(command.Filename);
+        }) //
+      | std::ranges::to<std::vector>();
+  }
+
+  const std::string output_contains = normalize_path(o.output_contains);
 
   std::vector resolved = commands //
-    | std::views::filter([&output_contains, normalize_path_separators](
+    | std::views::filter([&output_contains, normalize_path](
                            const clang::tooling::CompileCommand &c) {
-        return normalize_path_separators(c.Output).contains(output_contains);
+        return normalize_path(c.Output).contains(output_contains);
       })
     | std::ranges::to<std::vector>();
 
-  if (1 == resolved.size())
-    return std::move(resolved.front());
+  if (1 == resolved.size()) {
+    clang::tooling::CompileCommand command = std::move(resolved.front());
+    if (is_drive_mount_path(o.compile_commands.generic_string())) {
+      for (std::string &arg : command.CommandLine) {
+        for (std::size_t index = 0; index + 2 < arg.size(); ++index) {
+          if (!std::isalpha(static_cast<unsigned char>(arg[index]))
+            || ':' != arg[index + 1]
+            || !"/\\"sv.contains(arg[index + 2]))
+            continue;
+
+          const char drive = arg[index];
+          arg[index] = '/';
+          arg[index + 1] = drive;
+          arg[index + 2] = '/';
+          std::ranges::replace(
+            std::span{arg}.subspan(index + 3), '\\', '/');
+          break;
+        }
+      }
+    }
+
+    return command;
+  }
 
   if (resolved.empty()) {
     return std::unexpected(
@@ -183,7 +241,7 @@ int main(int argc, const char *const *argv) {
       std::cout << std::format("{} -working-directory {}\n",
         c.CommandLine //
           | std::views::transform(shell_quote) //
-          | std::views::join_with(" "sv) //
+          | std_c::views::join_with(" "sv) //
           | std::ranges::to<std::string>(),
         shell_quote(c.Directory));
       return 0;

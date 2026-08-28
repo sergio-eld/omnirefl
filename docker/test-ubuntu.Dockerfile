@@ -1,7 +1,7 @@
 # Usage example:
 #   UBUNTU_VERSION=18.04 TOOLCHAIN=gcc docker compose build test-ubuntu
 
-ARG UBUNTU_VERSION=18.04
+ARG UBUNTU_VERSION
 
 FROM ubuntu:${UBUNTU_VERSION} AS build
 

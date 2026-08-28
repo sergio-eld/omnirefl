@@ -5,41 +5,44 @@
 #
 # Ubuntu package tests and benchmarks use UBUNTU_VERSION + TOOLCHAIN to select
 # the image. Alpine and Windows services receive only TOOLCHAIN.
-# Alpine has a dedicated service because it unpacks the TGZ package instead of
-# installing the DEB package. Windows tests use separate services where a
-# matrix row needs a different image or shell, but still receive only TOOLCHAIN.
+# Package format and runtime are inferred from the package filename. Windows
+# services remain separate where a toolchain needs a different image or shell.
 # Windows package tests intentionally install under `C:/with space` to catch
 # path quoting regressions.
-# When invoking `docker.exe compose` from WSL, export WINDOWS_PACKAGE_DIR,
+# When invoking `docker.exe compose` from WSL, export PACKAGE_DIR,
 # TEST_RESULTS_DIR, and TOOLCHAIN through WSLENV. Windows containers cannot bind
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
+#
+# As of this writing, the committed .env file is the single source of truth for
+# build/test image versions. Compose loads it automatically; shell variables
+# may override it when testing another toolchain or distribution release.
 
-x-build-alpine-image: &build-alpine-image
-  # TODO: keep Cosmopolitan builds in a separate target-specific image family.
-  image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION:-22.1.8}
+x-build-musl-ucrt-image: &build-musl-ucrt-image
+  platform: linux/amd64
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
   build:
     context: .
     dockerfile: docker/build-alpine-x86_64-musl-ucrt.Dockerfile
     args:
-      LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
+      LLVM_VERSION: ${LLVM_VERSION}
 
-x-build-alpine-aarch64-image: &build-alpine-aarch64-image
+x-build-musl-aarch64-image: &build-musl-aarch64-image
   platform: linux/arm64
-  image: ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl:llvm-${LLVM_VERSION:-22.1.8}
+  image: ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl:llvm-${LLVM_VERSION}
   build:
     context: .
     dockerfile: docker/build-alpine-aarch64-musl.Dockerfile
     args:
-      LLVM_VERSION: ${LLVM_VERSION:-22.1.8}
+      LLVM_VERSION: ${LLVM_VERSION}
 
-x-build-linux-command: &build-linux-command
+x-build-musl-command: &build-musl-command
   - /bin/ash
   - -euxc
   - |
     # Package validation runs from installed artifacts in test containers.
     # This build only needs to produce the tool and package files.
     cmake /src -GNinja \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_BUILD_TYPE=$${CMAKE_BUILD_TYPE} \
       -DENABLE_PACKAGE=ON \
       -DENABLE_TESTING=OFF \
       -DENABLE_BENCH=OFF \
@@ -59,31 +62,116 @@ x-build-linux-command: &build-linux-command
     cpack -G "DEB;TGZ" -B /tmp/package
     mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
+x-test-linux-command: &test-linux-command |
+  set --
+  case $${TOOLCHAIN} in
+    gcc) export CC=gcc; export CXX=g++ ;;
+    clang) export CC=clang; export CXX=clang++ ;;
+    mingw)
+      export CC=x86_64-w64-mingw32-gcc
+      export CXX=x86_64-w64-mingw32-g++
+      set -- --cmake-arg -DCMAKE_SYSTEM_NAME=Windows
+      ;;
+    *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
+  esac
+
+  exec "$$PACKAGE_TEST_SHELL" /runner/test_packages.sh \
+    --packages /packages \
+    --name "$$TEST_NAME" \
+    --results /results \
+    "$$@"
+
 services:
-  build-linux:
-    <<: *build-alpine-image
+  build-cosmo:
+    # Keep COSMOPOLITAN_* and cosmopolitan.cmake aligned with the upstream
+    # toolchain name; project-owned services, images, paths, and packages use
+    # the shorter `cosmo` runtime name.
+    platform: linux/amd64
+    image: ghcr.io/sergio-eld/omnirefl-build-cosmo:universal-${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}
+    build:
+      context: .
+      dockerfile: docker/build-alpine-cosmo.Dockerfile
+      args:
+        COSMOPOLITAN_VERSION: ${COSMOPOLITAN_VERSION}
+        LLVM_VERSION: ${LLVM_VERSION}
     volumes:
       - ./:/src:ro
-      - ./build-alpine/linux:/build:rw
-      - ${PACKAGE_DIR:-./artifacts/packages/linux}:/packages:rw
+      - ./build-alpine/cosmo/${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/cosmo}:/packages:rw
     working_dir: /build
-    command: *build-linux-command
+    command:
+      - /bin/ash
+      - -euxc
+      - |
+        cmake /src -GNinja \
+          -B /build/x86_64 \
+          -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
+          -DCOSMOPOLITAN_ARCH=x86_64 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_PACKAGE=ON \
+          -DENABLE_TESTING=OFF \
+          -DENABLE_BENCH=OFF \
+          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+          -DOMNIREFL_PACKAGE_TARGET=cosmo-universal \
+          -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN_X86_64}/lib/cmake/clang \
+          -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN_X86_64}/lib/cmake/llvm \
+          -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
 
-  build-linux-aarch64:
-    <<: *build-alpine-aarch64-image
+        cmake /src -GNinja \
+          -B /build/aarch64 \
+          -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
+          -DCOSMOPOLITAN_ARCH=aarch64 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_PACKAGE=OFF \
+          -DENABLE_TESTING=OFF \
+          -DENABLE_BENCH=OFF \
+          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+          -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN_AARCH64}/lib/cmake/clang \
+          -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN_AARCH64}/lib/cmake/llvm \
+          -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
+
+        cmake --build /build/x86_64 -t omnirefl ccdb_query -j$$(nproc) &&
+        cmake --build /build/aarch64 -t omnirefl ccdb_query -j$$(nproc) &&
+        bash /src/docker/package-cosmo.sh \
+          /build/x86_64 /build/aarch64 /packages
+
+  build-musl:
+    <<: *build-musl-ucrt-image
+    environment:
+      CMAKE_BUILD_TYPE: RelWithDebInfo
     volumes:
       - ./:/src:ro
-      - ./build-alpine/linux-aarch64:/build:rw
-      - ${PACKAGE_DIR:-./artifacts/packages/linux}:/packages:rw
+      - ./build-alpine/musl/x86_64/llvm-${LLVM_VERSION}:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:rw
     working_dir: /build
-    command: *build-linux-command
+    command: *build-musl-command
 
-  build-windows:
-    <<: *build-alpine-image
+  build-musl-aarch64:
+    <<: *build-musl-aarch64-image
+    environment:
+      CMAKE_BUILD_TYPE: RelWithDebInfo
     volumes:
       - ./:/src:ro
-      - ./build-alpine/windows:/build:rw
-      - ${PACKAGE_DIR:-./artifacts/packages/windows}:/packages:rw
+      - ./build-alpine/musl/aarch64/llvm-${LLVM_VERSION}:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:rw
+    working_dir: /build
+    command: *build-musl-command
+
+  build-benchmark-musl:
+    extends:
+      service: build-musl
+    environment:
+      CMAKE_BUILD_TYPE: Release
+    volumes:
+      - ./build-alpine/benchmark/musl/x86_64/llvm-${LLVM_VERSION}:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/benchmark-musl}:/packages:rw
+
+  build-ucrt:
+    <<: *build-musl-ucrt-image
+    volumes:
+      - ./:/src:ro
+      - ./build-alpine/ucrt/x86_64/llvm-${LLVM_VERSION}:/build:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:/packages:rw
     working_dir: /build
     command:
       - /bin/ash
@@ -98,6 +186,7 @@ services:
             -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
             -DENABLE_PACKAGE=ON \
             -DENABLE_TESTING=OFF \
+            -DENABLE_BENCH=OFF \
             -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
             -DClang_DIR=$${CLANG_INSTALL_WINDOWS}/lib/cmake/clang &&
 
@@ -119,80 +208,54 @@ services:
         mv /tmp/package/*.zip /packages/
 
   test-alpine:
-    image: ghcr.io/sergio-eld/omnirefl-test-alpine:3.23.3-x86_64-${TOOLCHAIN:-gcc}
+    image: ghcr.io/sergio-eld/omnirefl-test-alpine:${ALPINE_VERSION}-x86_64-${TOOLCHAIN:-gcc}
     build:
       context: .
       dockerfile: docker/test-alpine.Dockerfile
+      args:
+        ALPINE_VERSION: ${ALPINE_VERSION}
+        COMPILER: ${TOOLCHAIN:-gcc}
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
+      PACKAGE_TEST_SHELL: /bin/ash
+      TEST_NAME: ${TEST_NAME:-alpine-x86_64-${TOOLCHAIN:-gcc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
-      - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
-      - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-${TOOLCHAIN:-gcc}}:/results:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
+      - ./ci:/runner:ro
     working_dir: /tmp/build
     entrypoint:
       - /bin/ash
       - -euxc
-      - |
-        set -o pipefail
-        mkdir -p /results /tmp/build /tmp/src /opt/omnirefl
-        pkg=$$(find /packages -maxdepth 1 -name 'omnirefl-linux-*.tar.gz' | sort | tail -n 1)
-        test -n "$$pkg"
-        tar -xzf "$$pkg" -C /opt/omnirefl --strip-components=1
-        cp -r /opt/omnirefl/share/omnirefl/tests/* /tmp/src/
+      - *test-linux-command
 
-        CMAKE_FLAGS=""
-        case $${TOOLCHAIN:-gcc} in
-          gcc) export CC=gcc; export CXX=g++ ;;
-          clang) export CC=clang; export CXX=clang++ ;;
-          mingw)
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
-            CMAKE_FLAGS="-DCMAKE_SYSTEM_NAME=Windows"
-            ;;
-          *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
-        esac
-
-        PREFIX=alpine-$${TOOLCHAIN:-gcc}
-
-        cmake /tmp/src -GNinja \
-          -DCMAKE_BUILD_TYPE=Release \
-          -Domnirefl_DIR=/opt/omnirefl/lib/cmake/omnirefl \
-          $$CMAKE_FLAGS
-
-        set +e
-        ctest --output-junit /results/$$PREFIX.xml -V 2>&1 | tee /results/$$PREFIX.log
-        rc=$$?
-        set -e
-
-        mkdir -p /results/diagnostics
-        cp -f CMakeCache.txt compile_commands.json /results/diagnostics/ 2>/dev/null || true
-        cp -f Testing/Temporary/LastTest.log /results/diagnostics/ 2>/dev/null || true
-        cp -f CMakeFiles/CMakeError.log /results/diagnostics/ 2>/dev/null || true
-        find . -path './omni_*/*.omnirefl.hpp' -o -path './omni_*/*.omnirefl.hpp.d' \
-          | tar -czf /results/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
-
-        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
-          echo "ctest failed with rc=$$rc; keeping container alive"
-          tail -f /dev/null
-        fi
-
-        exit $$rc
+  test-alpine-aarch64:
+    extends:
+      service: test-alpine
+    platform: linux/arm64
+    image: ghcr.io/sergio-eld/omnirefl-test-alpine:${ALPINE_VERSION}-aarch64-${TOOLCHAIN:-gcc}
+    environment:
+      TEST_NAME: ${TEST_NAME:-alpine-aarch64-${TOOLCHAIN:-gcc}}
+    volumes:
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-aarch64-${TOOLCHAIN:-gcc}}:/results:rw
 
   test-ubuntu:
-    image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION:-22.04}-x86_64-${TOOLCHAIN:-gcc}
+    image: &test-ubuntu-x86-image ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}
     build:
       context: .
       dockerfile: docker/test-ubuntu.Dockerfile
       args:
-        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
+        UBUNTU_VERSION: ${UBUNTU_VERSION}
         COMPILER: ${TOOLCHAIN:-gcc}
     volumes:
-      - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
-      - ${TEST_RESULTS_DIR:-./artifacts/test-results/ubuntu-${UBUNTU_VERSION:-22.04}-${TOOLCHAIN:-gcc}}:/results:rw
+      - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/ubuntu-${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
+      - ./ci:/runner:ro
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
-      TEST_PLATFORM: ubuntu-${UBUNTU_VERSION:-22.04}
+      PACKAGE_TEST_SHELL: /bin/bash
+      TEST_NAME: ${TEST_NAME:-ubuntu-${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     working_dir: /tmp/build
     entrypoint:
@@ -200,57 +263,27 @@ services:
       - -euxo
       - pipefail
       - -c
-      - |
-        mkdir -p /results
-        apt install -y /packages/omnirefl-linux-*.deb
+      - *test-linux-command
 
-        CMAKE_FLAGS=""
-        case $${TOOLCHAIN:-gcc} in
-          gcc) export CC=gcc; export CXX=g++ ;;
-          clang) export CC=clang; export CXX=clang++ ;;
-          mingw)
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
-            CMAKE_FLAGS="-DCMAKE_SYSTEM_NAME=Windows"
-            ;;
-          *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
-        esac
-
-        PREFIX=$${TEST_PLATFORM:-ubuntu-22.04}-$${TOOLCHAIN:-gcc}
-
-        cp -r /usr/share/omnirefl/tests/* /tmp/
-        cmake /tmp -GNinja $$CMAKE_FLAGS
-
-        set +e
-        ctest --output-junit /results/$$PREFIX.xml -V 2>&1 | tee /results/$$PREFIX.log
-        rc=$$?
-        set -e
-
-        mkdir -p /results/diagnostics
-        cp -f CMakeCache.txt compile_commands.json /results/diagnostics/ 2>/dev/null || true
-        cp -f Testing/Temporary/LastTest.log /results/diagnostics/ 2>/dev/null || true
-        cp -f CMakeFiles/CMakeError.log /results/diagnostics/ 2>/dev/null || true
-        find . -path './omni_*/*.omnirefl.hpp' -o -path './omni_*/*.omnirefl.hpp.d' \
-          | tar -czf /results/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
-
-        apt remove -y omnirefl
-
-        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
-          echo "ctest failed with rc=$$rc; keeping container alive"
-          tail -f /dev/null
-        fi
-
-        exit $$rc
+  test-ubuntu-aarch64:
+    extends:
+      service: test-ubuntu
+    platform: linux/arm64
+    image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION}-aarch64-${TOOLCHAIN:-gcc}
+    environment:
+      TEST_NAME: ${TEST_NAME:-ubuntu-${UBUNTU_VERSION}-aarch64-${TOOLCHAIN:-gcc}}
+    volumes:
+      - ${TEST_RESULTS_DIR:-./artifacts/test-results/ubuntu-${UBUNTU_VERSION}-aarch64-${TOOLCHAIN:-gcc}}:/results:rw
 
   benchmark:
-    image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:${UBUNTU_VERSION:-22.04}-x86_64-${TOOLCHAIN:-gcc}
+    image: *test-ubuntu-x86-image
     environment:
-      TEST_PLATFORM: ubuntu-${UBUNTU_VERSION:-22.04}
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
     volumes:
-      - ${LINUX_PACKAGE_DIR:-./artifacts/packages/linux}:/packages:ro
+      - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/benchmarks}:/results:rw
       - ${BUILD_DIR:-./artifacts/benchmark-build}:/benchmark:rw
+      - ./ci:/runner:ro
     working_dir: /benchmark
     entrypoint:
       - /bin/bash
@@ -261,72 +294,34 @@ services:
         trap 'chmod -R a+rwX /results /benchmark 2>/dev/null || true' EXIT
         rm -rf /benchmark/run
         mkdir -p /benchmark/run/build /results
-        apt install -y /packages/omnirefl-linux-*.deb
 
-        cmake -S /usr/share/omnirefl/tests \
-          -B /benchmark/run/build \
-          -GNinja \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DENABLE_BENCH=ON \
-          > /results/configure.log 2>&1
+        packages=(/packages/*.tar.gz)
+        test 1 -eq "$${#packages[@]}"
+        test -f "$${packages[0]}"
 
-        reflection_start="$$(date +%s%N)"
-        cmake --build /benchmark/run/build -t benchmark.baseline.omni \
-          > /results/reflection.log 2>&1
-        reflection_end="$$(date +%s%N)"
-        reflection_ms="$$(awk \
-          -v start="$$reflection_start" \
-          -v end="$$reflection_end" \
-          'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
+        case "$$(basename "$${packages[0]}")" in
+          *-musl-*) package_runtime=musl ;;
+          *-cosmo-*) package_runtime=cosmo ;;
+          *) echo "Cannot infer package runtime" >&2; exit 1 ;;
+        esac
 
-        build_start="$$(date +%s%N)"
-        cmake --build /benchmark/run/build \
-          -t benchmark.baseline \
-          --parallel "$$(nproc --ignore=2)" \
-          > /results/build.log 2>&1
-        build_end="$$(date +%s%N)"
-        build_ms="$$(awk \
-          -v start="$$build_start" \
-          -v end="$$build_end" \
-          'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
+        mkdir -p /benchmark/run/archive
+        tar -xzf "$${packages[0]}" -C /benchmark/run/archive
+        package_roots=(/benchmark/run/archive/omnirefl-*)
+        test 1 -eq "$${#package_roots[@]}"
+        test -d "$${package_roots[0]}"
+        install="$${package_roots[0]}"
 
-        tool_build="$$(awk -v tool="$$reflection_ms" -v build="$$build_ms" \
-          'BEGIN { printf "%.6f", 0 == build ? 0 : 100 * tool / build }')"
-
-        {
-          printf "[\n"
-          printf "  {\"name\": \"reflection wall\", \"unit\": \"ms\", \"value\": %s},\n" "$$reflection_ms"
-          printf "  {\"name\": \"build wall\", \"unit\": \"ms\", \"value\": %s},\n" "$$build_ms"
-          printf "  {\"name\": \"tool/build\", \"unit\": \"%%\", \"value\": %s}" "$$tool_build"
-          grep -E "^[^:]+: .+ \\([0-9]+ microseconds\\)$$" /results/reflection.log \
-            | while IFS= read -r line; do
-              name="$${line%%:*}"
-              us="$$(printf "%s\n" "$$line" \
-                | sed -E "s/.*\\(([0-9]+) microseconds\\)$$/\\1/")"
-              ms="$$(awk -v us="$$us" 'BEGIN { printf "%.3f", us / 1000 }')"
-              printf ",\n  {\"name\": \"tool %s\", \"unit\": \"ms\", \"value\": %s}" "$$name" "$$ms"
-            done
-          printf "\n]\n"
-        } > /results/benchmark.json
-
-        printf "\nBenchmark summary (%s-%s)\n" "$${TEST_PLATFORM:-ubuntu-22.04}" "$${TOOLCHAIN:-gcc}"
-        printf "%-32s %12s %8s\n" "metric" "value" "unit"
-        printf "%-32s %12s %8s\n" "reflection wall" "$$reflection_ms" "ms"
-        printf "%-32s %12s %8s\n" "build wall" "$$build_ms" "ms"
-        printf "%-32s %12s %8s\n" "tool/build" "$$tool_build" "%"
-        grep -E "^[^:]+: .+ \\([0-9]+ microseconds\\)$$" /results/reflection.log \
-          | while IFS= read -r line; do
-            name="$${line%%:*}"
-            us="$$(printf "%s\n" "$$line" \
-              | sed -E "s/.*\\(([0-9]+) microseconds\\)$$/\\1/")"
-            ms="$$(awk -v us="$$us" 'BEGIN { printf "%.3f", us / 1000 }')"
-            printf "%-32s %12s %8s\n" "tool $$name" "$$ms" "ms"
-          done
+        exec /runner/benchmark_package.sh \
+          --install "$$install" \
+          --build /benchmark/run/build \
+          --results /results \
+          --name "linux-$$(uname -m)-$$package_runtime-$${TOOLCHAIN:-gcc}"
 
   test-windows-msvc:
     image: ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-${TOOLCHAIN:-msvc}
     # Windows Docker Compose creates a new NAT network per project by default.
-    # On the self-hosted runner those per-run networks can lose outbound
+    # On the local Windows Docker host those per-run networks can lose outbound
     # connectivity, so Windows package tests use Docker's existing `nat`.
     network_mode: nat
     build:
@@ -336,9 +331,10 @@ services:
         TOOLCHAIN: ${TOOLCHAIN:-msvc}
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-msvc}
+      TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msvc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
-      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/windows}:C:/install:ro
+      - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:C:/install:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msvc}}:C:/test:rw
     working_dir: "C:/"
     entrypoint:
@@ -359,9 +355,16 @@ services:
         }
 
         New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
-        $$package = Get-ChildItem -Path 'C:/install' -Filter 'omnirefl-*.zip' | Sort-Object Name | Select-Object -Last 1
-        if ($$null -eq $$package) { throw 'Windows package artifact was not found in C:/install' }
-        Expand-Archive -Path $$package.FullName -DestinationPath 'C:/with space' -Force
+        $$packages = @(Get-ChildItem -Path 'C:/install' -File | Where-Object {
+          $$_.Name.EndsWith('.zip') -or $$_.Name.EndsWith('.tar.gz')
+        })
+        if (1 -ne $$packages.Count) { throw 'expected one package in C:/install' }
+        if ($$packages[0].Name.EndsWith('.zip')) {
+          Expand-Archive -Path $$packages[0].FullName -DestinationPath 'C:/with space' -Force
+        } else {
+          tar -xzf $$packages[0].FullName -C 'C:/with space'
+          if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
+        }
 
         Set-Location 'C:/with space'
         $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
@@ -369,6 +372,7 @@ services:
         Move-Item $$installRoot.FullName ./omnirefl
         Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
         ./omnirefl/bin/omnirefl.exe -h
+        ./omnirefl/bin/ccdb_query.exe -h
 
         switch ($$env:TOOLCHAIN) {
           'msvc' {}
@@ -384,8 +388,8 @@ services:
         cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
         cmake --build . -j $$env:NUMBER_OF_PROCESSORS
 
-        ctest . --output-junit C:/test/windows-$$env:TOOLCHAIN.xml -V 2>&1 |
-          Tee-Object C:/test/windows-$$env:TOOLCHAIN.log
+        ctest . --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
+          Tee-Object C:/test/$$env:TEST_NAME.log
         $$rc = $$LASTEXITCODE
 
         Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
@@ -404,7 +408,7 @@ services:
   test-windows-msys2:
     image: ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-msys2
     # Windows Docker Compose creates a new NAT network per project by default.
-    # On the self-hosted runner those per-run networks can lose outbound
+    # On the local Windows Docker host those per-run networks can lose outbound
     # connectivity, so Windows package tests use Docker's existing `nat`.
     network_mode: nat
     build:
@@ -412,9 +416,10 @@ services:
       dockerfile: docker/test-windows-msys2.Dockerfile
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
+      TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msys2-mingw}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
-      - ${WINDOWS_PACKAGE_DIR:-./artifacts/packages/windows}:C:/install:ro
+      - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:C:/install:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msys2-mingw}}:C:/test:rw
     working_dir: "C:/"
     entrypoint:
@@ -423,16 +428,33 @@ services:
       - |
         set -euxo pipefail
         mkdir -p "/c/with space" /c/test/diagnostics
-        pkg="$$(find /c/install -maxdepth 1 -name "omnirefl-*.zip" | sort | tail -n 1)"
-        test -n "$$pkg"
-        unzip -q "$$pkg" -d "/c/with space"
+        shopt -s nullglob
+        packages=(/c/install/*.zip /c/install/*.tar.gz)
+        test 1 -eq "$${#packages[@]}"
+        test -f "$${packages[0]}"
+        case "$${packages[0]}" in
+          *.zip) unzip -q "$${packages[0]}" -d "/c/with space" ;;
+          *.tar.gz)
+            # refactorme(cosmo_msys2): review native archive/launcher handling.
+            # ad hoc: MSYS2 aliases names with and without the .exe suffix.
+            # Windows tar preserves both launchers stored in the Cosmo package.
+            "/c/Windows/System32/tar.exe" \
+              -xzf "$${packages[0]}" -C "/c/with space"
+            ;;
+        esac
 
         cd "/c/with space"
         install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
         test -n "$$install_root"
         mv "$$install_root" ./omnirefl
         cp -r omnirefl/share/omnirefl/tests ./
-        ./omnirefl/bin/omnirefl.exe -h
+        # refactorme(cosmo_msys2): review native archive/launcher handling.
+        # ad hoc: MSYS2 reports ENOENT when launching Cosmopolitan's PE payload
+        # directly; PowerShell delegates it to the Windows loader.
+        powershell.exe -NoProfile -Command \
+          '& "C:/with space/omnirefl/bin/omnirefl.exe" -h; exit $$LASTEXITCODE'
+        powershell.exe -NoProfile -Command \
+          '& "C:/with space/omnirefl/bin/ccdb_query.exe" -h; exit $$LASTEXITCODE'
 
         case $${TOOLCHAIN:-msys2-mingw} in
           msys2-mingw)
@@ -454,8 +476,8 @@ services:
         cmake --build . -j"$$(nproc)"
 
         set +e
-        ctest . --output-junit "/c/test/windows-$$TOOLCHAIN.xml" -V 2>&1 |
-          tee "/c/test/windows-$$TOOLCHAIN.log"
+        ctest . --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
+          tee "/c/test/$$TEST_NAME.log"
         rc=$${PIPESTATUS[0]}
         set -e
 

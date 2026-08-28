@@ -1,7 +1,6 @@
 # stage 1 build-clang
-FROM alpine:3.23.3 AS builder
-
-ENV DEBIAN_FRONTED=noninteractive
+ARG ALPINE_VERSION=3.23.3
+FROM alpine:${ALPINE_VERSION} AS builder
 
 ENV LLVM_DIR=/tmp/llvm
 ENV CLANG_BUILD_LINUX=/tmp/llvm/build-linux
@@ -14,22 +13,16 @@ ENV CLANG_INSTALL_HEADERS=/llvm/install-headers
 
 ENV CLANG_BUILD_TYPE=Release
 
-RUN apk update && apk upgrade && \
-    apk --no-cache add \
+RUN apk --no-cache add \
         build-base \
         clang21 \
         cmake \
-        g++ \
         git \
-        gtest \
-        gtest-dev \
         mingw-w64-gcc \
-        neovim \
         ninja-build \
         ninja-is-really-ninja \
         python3 \
-        tar \
-        &&:
+        tar
 
 ARG LLVM_VERSION
 RUN mkdir $LLVM_DIR; cd $LLVM_DIR; \
@@ -37,7 +30,6 @@ RUN mkdir $LLVM_DIR; cd $LLVM_DIR; \
     git clone --depth 1 --branch llvmorg-$LLVM_VERSION https://github.com/llvm/llvm-project.git \
     &&:
 
-# should it be passed as an argument?
 ADD ./clang-cmake-options $LLVM_DIR/
 RUN mkdir $CLANG_BUILD_LINUX; \
     cd $CLANG_BUILD_LINUX; \
@@ -66,8 +58,7 @@ RUN mkdir $CLANG_BUILD_WINDOWS; \
 RUN cmake --build $CLANG_BUILD_WINDOWS -j$(nproc)
 RUN cmake --install $CLANG_BUILD_WINDOWS
 
-# should it be passed as an argument?
-ADD ./llvm-project.patch $LLVM_DIR/
+COPY docker/llvm-project.patch $LLVM_DIR/
 RUN cd $LLVM_DIR/llvm-project; \
     # ad hoc: can't build without LIBCXX_HAS_MUSL_LIBC on alpine, and it will be configured.
     #   but the tool will fail on ubuntu, because of missing "bits/alltypes.h"
@@ -92,9 +83,7 @@ RUN mkdir -p "$CLANG_BUILD_HEADERS"; \
     && :
 
 # stage 2 final image
-FROM alpine:3.23.3
-
-ENV DEBIAN_FRONTED=noninteractive
+FROM alpine:${ALPINE_VERSION}
 
 ENV CLANG_INSTALL_LINUX=/usr/local/llvm/install-linux
 ENV CLANG_INSTALL_WINDOWS=/usr/local/llvm/install-windows
@@ -103,20 +92,14 @@ ENV CLANG_INSTALL_WINDOWS=/usr/local/llvm/install-windows
 COPY --from=builder /llvm/install-linux $CLANG_INSTALL_LINUX
 COPY --from=builder /llvm/install-windows $CLANG_INSTALL_WINDOWS
 
-RUN apk update && apk upgrade && \
-    apk --no-cache add \
+RUN apk --no-cache add \
         build-base \
         cmake \
-        g++ \
         git \
-        gtest \
-        gtest-dev \
         mingw-w64-gcc \
-        neovim \
         ninja-build \
         ninja-is-really-ninja \
         python3 \
-        tar \
-        && rm -rf /var/cache/apk/*
+        tar
 
 CMD ["ash"]

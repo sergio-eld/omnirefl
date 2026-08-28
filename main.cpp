@@ -41,6 +41,7 @@
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
@@ -48,7 +49,10 @@
 #include <llvm/Support/Allocator.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/FileUtilities.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
 #pragma GCC diagnostic pop
@@ -68,7 +72,6 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-#include <flat_map>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -88,6 +91,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include "std_compat.h"
 
 namespace fs = std::filesystem;
 using namespace std::string_view_literals;
@@ -341,6 +346,7 @@ Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
       const ast::rule<Match, Node, Fold> &rule) {
       const auto bound_matcher =
         traverse(rule.traversal_kind, rule.pattern.match.bind(binding_tag));
+
       using matcher_t = decltype(bound_matcher);
 
       struct _callback: MatchFinder::MatchCallback {
@@ -362,6 +368,7 @@ Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
           if (!node) {
             llvm::errs()
               << "DEBUG: Matc::Callback: Node of invalid type matched.\n";
+
             return;
           }
 
@@ -390,6 +397,7 @@ Accum fold_matches(clang::ASTUnit &ast, //< for some reason MatchFinder needs
       (finder.addMatcher(callback.matcher, &callback), ...);
     },
     callbacks);
+
   finder.matchAST(ast.getASTContext());
 
   return a;
@@ -939,8 +947,9 @@ template <>
 struct std::formatter<log_level, char>: std::formatter<std::string_view, char> {
   template <typename FormatContext>
   auto format(log_level level, FormatContext &ctx) const {
-    static const std::flat_map string_by_enum =
-      log_levels | std::ranges::to<std::flat_map>();
+    static const std::map<log_level, std::string_view> string_by_enum =
+      log_levels
+      | std::ranges::to<std::map<log_level, std::string_view>>();
 
     assert(string_by_enum.contains(level) && "missing log_level mapping");
     return std::formatter<std::string_view, char>::format(
@@ -1040,7 +1049,8 @@ std::string format_error(const source_error &error) {
     error.subject,
     error.reason);
 
-  for (const auto &[index, line] : error.source.lines | std::views::enumerate) {
+  for (const auto &[index, line] :
+    error.source.lines | std_c::views::enumerate) {
     message += std::format("\n    {}", line);
 
     if (error.source.pointer_line != index)
@@ -1186,7 +1196,7 @@ std::string format_type_name(const nm_qual_type &type) {
       std::span{&type_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -1203,7 +1213,7 @@ std::string format(const nm_qual_type &type) {
       std::span{&type_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -2075,6 +2085,7 @@ meta::source_file_context meta::matches::fold_reflected_call(
 
     const meta::type_id id =
       std::visit([](const auto &type) { return type.id; }, reflected->type);
+
     const meta::type_id concrete_id =
       std::visit([](const auto &type) { return type.concrete_id; },
         reflected->type);
@@ -2459,7 +2470,7 @@ std::string format_primary_template_type_name(const meta::nm_qual_type &t,
       std::span{&primary_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -2477,7 +2488,7 @@ std::string format_primary_template_qualified_type_name(
       std::span{&primary_name, std::size_t{1}},
     } //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -2494,7 +2505,7 @@ std::string format_template_params(
       std::size_t level) -> std::string {
     std::string out;
 
-    for (const auto &[index, param] : params | std::views::enumerate) {
+    for (const auto &[index, param] : params | std_c::views::enumerate) {
       if (0 != index)
         out += std::format(",\n{}", indentation(level));
 
@@ -2538,7 +2549,7 @@ std::string format_template_args(const meta::template_data &t) {
             },
             param);
         }) //
-      | std::views::join_with(", "sv) //
+      | std_c::views::join_with(", "sv) //
       | util::format_range);
 }
 
@@ -2584,7 +2595,7 @@ std::string forward_declaration(const meta::reflectable &t) {
       std::array{
         t.definition.type_name.namespaces //
           | std::views::transform(namespace_opening) //
-          | std::views::join_with("\n"sv) //
+          | std_c::views::join_with("\n"sv) //
           | std::ranges::to<std::string>(),
 
         std::format("// declared at: {}\n{}",
@@ -2596,11 +2607,11 @@ std::string forward_declaration(const meta::reflectable &t) {
           | std::views::transform([](const meta::namespace_component &ns) {
               return std::format("}} // namespace {}", ns.name);
             }) //
-          | std::views::join_with("\n"sv) //
+          | std_c::views::join_with("\n"sv) //
           | std::ranges::to<std::string>(),
       } //
       | std::views::filter([](std::string_view s) { return !s.empty(); }) //
-      | std::views::join_with("\n"sv));
+      | std_c::views::join_with("\n"sv));
 }
 
 } // namespace render::impl
@@ -2647,7 +2658,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
           includes //
             | std::views::transform(
               [&](const fs::path &p) { return esc(p.string()); }) //
-            | std::views::join_with(" \\\n  "sv) //
+            | std_c::views::join_with(" \\\n  "sv) //
             | util::format_range));
 
   os.close();
@@ -2659,6 +2670,7 @@ std::expected<fs::path, std::string> write_dependencies_file(
       std::error_code ec;
       fs::remove(tmp, ec);
     });
+
     return std::unexpected(
       std::format("rename('{}'): {}", depfile.string(), ec.message()));
   }
@@ -2753,16 +2765,18 @@ std::expected<fs::path, app_error> infer_resource_dir(const char *argv0) {
       scan.skipped.empty()
         ? " "
         : std::format("\nSkipped entries:\n{}\n",
-            scan.skipped | std::views::join_with("\n"sv) | util::format_range)),
+            scan.skipped //
+              | std_c::views::join_with("\n"sv) //
+              | util::format_range)),
   });
 }
 
 std::optional<log_level> parse_log_level(std::string_view name) {
-  static const std::flat_map<std::string_view, log_level> log_level_by_name =
+  static const std::map<std::string_view, log_level> log_level_by_name =
     log_levels //
     | std::views::transform(
       [](const auto &level) { return std::pair{level.second, level.first}; }) //
-    | std::ranges::to<std::flat_map>();
+    | std::ranges::to<std::map<std::string_view, log_level>>();
 
   if (!log_level_by_name.contains(name))
     return std::nullopt;
@@ -2817,7 +2831,7 @@ std::expected<cli::options, app_error> cli::parse(int argc,
 
   const std::string log_level_help = std::format("Log level: {}.",
     log_levels //
-      | std::views::values | std::views::join_with(", "sv)
+      | std::views::values | std_c::views::join_with(", "sv)
       | util::format_range);
 
   CLI::Option *const cli_log_level = //
@@ -2983,17 +2997,27 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const fs::path &resource_dir = cli_args.resource_dir;
   const fs::path &source = cli_args.source;
   const std::vector<std::string> &raw_flags = cli_args.flags;
+  const std::string source_path = source.generic_string();
+  const bool windows_drive_mount_used =
+    3 <= source_path.size() && '/' == source_path[0]
+    && std::isalpha(static_cast<unsigned char>(source_path[1]))
+    && '/' == source_path[2];
+  const std::string driver_source = windows_drive_mount_used
+    ? std::format("{}:{}", source_path[1], source_path.substr(2))
+    : source_path;
 
   // Omnirefl supplies its own source and produces no compiler output.
   static constexpr std::array k_ignored_action_options{
     "-c"sv,
     "/c"sv,
   };
+
   static constexpr std::array k_ignored_output_options{
     "-o"sv,
     "/Fo"sv,
     "/Fo:"sv,
   };
+
   static constexpr std::array k_cl_driver_names{
     "cl"sv,
     "cl.exe"sv,
@@ -3003,48 +3027,91 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::string compiler_name =
     llvm::StringRef{fs::path(raw_flags.front()).filename().string()}.lower();
+
   const bool invoked_as_cl =
     std::ranges::contains(k_cl_driver_names, compiler_name);
+
   const bool cl_style =
     invoked_as_cl || std::ranges::contains(raw_flags, "--driver-mode=cl"sv);
 
-  const std::vector flags = raw_flags //
-    | std::views::enumerate //
-    | std::views::filter([&raw_flags](const auto &indexed) {
-        const auto &[index, arg] = indexed;
-        const bool ignored_output_value = 0 != index
-          && std::ranges::contains(k_ignored_output_options,
-            std::string_view{raw_flags[index - 1]});
+  // std::views::pairwise is unavailable in Cosmopolitan's libc++; this variant
+  // preserves boundary flags by making their missing neighbors optional.
+  struct flag_context {
+    std::optional<std::string_view> previous;
+    std::string_view current;
+    std::optional<std::string_view> next;
+  };
+
+  const auto flag_contexts = [&raw_flags] {
+    return std::views::iota(raw_flags.cbegin(), raw_flags.cend()) //
+      | std::views::transform(
+        [begin = raw_flags.cbegin(), end = raw_flags.cend()](const auto flag) {
+          const auto next = std::ranges::next(flag);
+          return flag_context{
+            begin == flag
+              ? std::optional<std::string_view>{}
+              : std::optional<std::string_view>{
+                  *std::ranges::prev(flag),
+                },
+            std::string_view{*flag},
+            end == next
+              ? std::optional<std::string_view>{}
+              : std::optional<std::string_view>{*next},
+          };
+        });
+  };
+
+  const auto flags = flag_contexts() //
+    | std::views::filter([](const auto &flag) {
+        const bool ignored_output_value = flag.previous.has_value()
+          && std::ranges::contains(k_ignored_output_options, *flag.previous);
 
         return !ignored_output_value
           && !std::ranges::contains(k_ignored_action_options,
-            std::string_view{arg})
+            flag.current)
           && !std::ranges::contains(k_ignored_output_options,
-            std::string_view{arg});
+            flag.current);
       })
-    | std::views::values | std::ranges::to<std::vector>();
+    | std::views::transform([windows_drive_mount_used](
+                              const flag_context &flag) -> std::string {
+        if (!windows_drive_mount_used || 4 > flag.current.size()
+          || '@' != flag.current[0]
+          || !std::isalpha(static_cast<unsigned char>(flag.current[1]))
+          || ':' != flag.current[2]
+          || ('/' != flag.current[3] && '\\' != flag.current[3])) {
+          return std::string{flag.current};
+        }
+
+        // The Windows host passes @C:/... response files, while an APE opens
+        // the same drive through its /C/... mount.
+        std::string mounted{"@/"};
+        mounted += flag.current[1];
+        mounted += flag.current.substr(3);
+        std::ranges::replace(mounted, '\\', '/');
+        return mounted;
+      }) //
+    | std::ranges::to<std::vector<std::string>>();
 
   const std::optional<std::string> response_file_directory =
-    std::invoke([&raw_flags] -> std::optional<std::string> {
-      const auto indexed_flags =
-        raw_flags | std::views::enumerate | std::views::reverse;
+    std::invoke([&flag_contexts] -> std::optional<std::string> {
+      const auto flags = flag_contexts() | std::views::reverse;
 
       const auto found =
-        std::ranges::find_if(indexed_flags, [&raw_flags](const auto &indexed) {
-          const auto &[index, arg] = indexed;
-          return std::string_view{arg}.starts_with("-working-directory="sv)
-            || ("-working-directory"sv == arg
-              && std::ssize(raw_flags) > index + 1);
+        std::ranges::find_if(flags, [](const auto &flag) {
+          return flag.current.starts_with("-working-directory="sv)
+            || ("-working-directory"sv == flag.current
+              && flag.next.has_value());
         });
-      if (indexed_flags.end() == found)
+
+      if (flags.end() == found)
         return std::nullopt;
 
-      const auto &[index, arg] = *found;
+      const auto found_flag = *found;
       constexpr std::string_view k_joined = "-working-directory=";
       const std::string_view directory = //
-        std::string_view{arg}.starts_with(k_joined) //
-        ? std::string_view{arg}.substr(k_joined.size())
-        : std::string_view{raw_flags[index + 1]};
+        found_flag.current.starts_with(k_joined) //
+        ? found_flag.current.substr(k_joined.size())
+        : *found_flag.next;
 
       return fs::absolute(directory).lexically_normal().generic_string();
     });
@@ -3052,7 +3119,12 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   // ad hoc: approximate driver response-file expansion by selecting the
   // tokenizer from the invocation style and compile-command directory.
   const std::expected expanded_flags = //
-    std::invoke([&flags, response_file_directory, cl_style]
+    std::invoke([&flags,
+                  response_file_directory,
+                  cl_style,
+                  &driver_source,
+                  &source_path,
+                  windows_drive_mount_used]
       -> std::expected<std::vector<std::string>, std::string> {
       llvm::BumpPtrAllocator allocator;
       llvm::SmallVector<const char *> args;
@@ -3080,7 +3152,51 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       }
 
       return args //
-        | std::views::transform(fn::as<std::string>) //
+        | std::views::transform(
+          [&driver_source, &source_path, windows_drive_mount_used](
+            std::string_view arg) -> std::string {
+            if (!windows_drive_mount_used)
+              return std::string{arg};
+
+            std::string mounted;
+            if (3 <= arg.size() && '/' == arg[0]
+              && std::isalpha(static_cast<unsigned char>(arg[1]))
+              && '/' == arg[2]) {
+              mounted = arg;
+            } else if (3 <= arg.size()
+              && std::isalpha(static_cast<unsigned char>(arg[0]))
+              && ':' == arg[1] && ('/' == arg[2] || '\\' == arg[2])) {
+              // Paths expanded from response files have not passed through
+              // the APE's drive-mount translation.
+              mounted = '/';
+              mounted += arg[0];
+              mounted += arg.substr(2);
+            } else {
+              return std::string{arg};
+            }
+            std::ranges::replace(mounted, '\\', '/');
+
+            std::string input{mounted};
+            for (std::size_t dollar = input.find("$$");
+              std::string::npos != dollar;
+              dollar = input.find("$$", dollar + 1)) {
+              input.erase(dollar, 1);
+            }
+
+            const std::string extension = fs::path{input}.extension().string();
+            const clang::InputKind input_kind =
+              clang::FrontendOptions::getInputKindForExtension(
+                llvm::StringRef{extension}.drop_front(!extension.empty()));
+
+            // clang-cl interprets /D/... as a macro option. Present source
+            // inputs using drive spelling until the driver has classified
+            // them, while leaving frontend option paths mounted for the APE.
+            if (source_path == input
+              || (!input_kind.isUnknown() && !input_kind.isHeader()))
+              return std::format("{}:{}", input[1], input.substr(2));
+
+            return mounted;
+          }) //
         | std::ranges::to<std::vector>();
     });
 
@@ -3096,11 +3212,12 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   log(log_level::debug, [&raw_flags] {
     return std::format("\ninput flags:\n{}",
-      raw_flags | std::views::join_with("\n"sv) | util::format_range);
+      raw_flags | std_c::views::join_with("\n"sv) | util::format_range);
   });
 
   const std::expected normalized_args =
     parse_driver_args(std::span{*expanded_flags}.subspan(1), cl_style);
+
   if (!normalized_args)
     return std::unexpected(processing_error(source, normalized_args.error()));
 
@@ -3108,6 +3225,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     std::invoke([&normalized_args] -> std::optional<std::string> {
       const auto *working_directory =
         normalized_args->getLastArgNoClaim(options::OPT_working_directory);
+
       if (!working_directory)
         return std::nullopt;
 
@@ -3119,11 +3237,24 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const std::vector compiler_sources =
     normalized_args->getAllArgValues(options::OPT_INPUT) //
     | std::views::transform(
-      [&compile_directory, &source](std::string_view input) {
-        const auto resolve = [&compile_directory](std::string_view input) {
+      [&compile_directory, &driver_source, &source, windows_drive_mount_used](
+        std::string_view input) {
+        if (driver_source == input)
+          return source;
+
+        const auto resolve = [&compile_directory, windows_drive_mount_used](
+                               std::string_view input) {
+          std::string mounted{input};
+          if (windows_drive_mount_used && 3 <= mounted.size()
+            && std::isalpha(static_cast<unsigned char>(mounted[0]))
+            && ':' == mounted[1] && ('/' == mounted[2] || '\\' == mounted[2])) {
+            mounted = '/' + mounted.substr(0, 1) + mounted.substr(2);
+            std::ranges::replace(mounted, '\\', '/');
+          }
+
           return fs::absolute(compile_directory //
-              ? fs::path{*compile_directory} / input
-              : fs::path{input})
+              ? fs::path{*compile_directory} / mounted
+              : fs::path{mounted})
             .lexically_normal();
         };
 
@@ -3177,35 +3308,89 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return driver_mode_cl || invoked_as_cl || has_msvc_style_args;
     });
 
-  const std::string driver_triple =
-    std::invoke([msvc_used, &normalized_args, &raw_flags] {
-      const std::string target_triple = std::invoke([&normalized_args] {
-        if (const auto *opt =
-              normalized_args->getLastArgNoClaim(options::OPT_target))
-          return llvm::Triple::normalize(opt->getValue());
-        return llvm::sys::getProcessTriple();
-      });
+  const auto target_triple =
+    std::invoke([&] -> std::optional<std::string> {
+      if (const auto *target =
+            normalized_args->getLastArgNoClaim(options::OPT_target))
+        return llvm::Triple::normalize(target->getValue());
 
-      llvm::Triple triple(target_triple);
-      if (msvc_used) {
-        triple.setOS(llvm::Triple::Win32);
-        triple.setEnvironment(llvm::Triple::MSVC);
-      }
-
-      if (!msvc_used && !normalized_args->getLastArgNoClaim(options::OPT_target)
-        && !raw_flags.empty()) {
-        // refactorme(cc1_flags): infer the target from GCC-style cross compiler
-        // names until compiler-driver mapping is split out of omnirefl.
-        const std::string compiler =
-          fs::path(raw_flags.front()).filename().string();
-        if (compiler.starts_with("x86_64-w64-mingw32-"))
-          return std::string{"x86_64-w64-windows-gnu"};
-        if (compiler.starts_with("i686-w64-mingw32-"))
-          return std::string{"i686-w64-windows-gnu"};
-      }
-
-      return triple.str();
+      if (compiler_name.starts_with("x86_64-w64-mingw32-"))
+        return "x86_64-w64-windows-gnu";
+      if (compiler_name.starts_with("i686-w64-mingw32-"))
+        return "i686-w64-windows-gnu";
+      return std::nullopt;
     });
+
+  const llvm::Triple process_triple{llvm::sys::getProcessTriple()};
+
+  // refactorme(macos_sysroot): replace this inline platform detection.
+  // ad hoc: Apple's compiler launcher omits SDK selection from
+  // compile_commands.json. A successful xcrun query supplies both the SDK and
+  // the APE's runtime operating system.
+  const auto macos_sysroot =
+    (msvc_used || process_triple.isOSWindows()
+      || (target_triple && llvm::Triple{*target_triple}.isOSWindows())) //
+    ? std::nullopt
+    : std::invoke([] -> std::optional<std::string> {
+      const auto xcrun = llvm::sys::findProgramByName("xcrun");
+      if (!xcrun)
+        return std::nullopt;
+
+      llvm::SmallString<64> output;
+      if (llvm::sys::fs::createTemporaryFile("omnirefl-xcrun", "", output))
+        return std::nullopt;
+
+      llvm::FileRemover remove_output(output);
+      if (llvm::sys::ExecuteAndWait(*xcrun,
+            {
+              llvm::StringRef{*xcrun},
+              llvm::StringRef{"--show-sdk-path"},
+            },
+            /*Env=*/std::nullopt,
+            {
+              /*stdin=*/std::optional{llvm::StringRef{""}},
+              /*stdout=*/std::optional{llvm::StringRef{output}},
+              /*stderr=*/std::optional{llvm::StringRef{""}},
+            },
+            /*SecondsToWait=*/10)
+        != 0)
+        return std::nullopt;
+
+      const auto buffer = llvm::MemoryBuffer::getFile(output);
+      if (!buffer)
+        return std::nullopt;
+
+      const llvm::StringRef path = buffer->get()->getBuffer().trim();
+      return path.empty() //
+        ? std::nullopt
+        : std::optional{path.str()};
+    });
+
+  const std::string driver_triple = std::invoke([&] {
+    llvm::Triple triple = target_triple //
+      ? llvm::Triple{*target_triple}
+      : process_triple;
+
+    if (msvc_used) {
+      triple.setOS(llvm::Triple::Win32);
+      triple.setEnvironment(llvm::Triple::MSVC);
+    } else if (!target_triple && windows_drive_mount_used) {
+      // refactorme(cosmo_runtime): review runtime-platform detection.
+      // ad hoc: a Cosmopolitan process triple identifies its build target, not
+      // the operating system currently executing the APE. Drive-mounted source
+      // paths identify a native Windows compiler invocation without spawning
+      // the compiler once per instrumentation run.
+      triple.setVendor(llvm::Triple::PC);
+      triple.setOS(llvm::Triple::Win32);
+      triple.setEnvironment(llvm::Triple::GNU);
+    } else if (!target_triple && macos_sysroot) {
+      triple.setVendor(llvm::Triple::Apple);
+      triple.setOS(llvm::Triple::Darwin);
+      triple.setEnvironment(llvm::Triple::UnknownEnvironment);
+    }
+
+    return triple.str();
+  });
 
   const bool mingw_used = llvm::Triple(driver_triple).isWindowsGNUEnvironment();
 
@@ -3217,7 +3402,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     const std::string compiler_name =
       fs::path(raw_flags.front()).filename().string();
 
-    const std::string gcc_machine = std::invoke([&] {
+    std::string gcc_machine = std::invoke([&] {
       if (compiler_name.starts_with("x86_64-w64-mingw32-"))
         return std::string{"x86_64-w64-mingw32"};
       if (compiler_name.starts_with("i686-w64-mingw32-"))
@@ -3225,11 +3410,30 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return std::string{};
     });
 
-    const fs::path compiler_path = std::invoke([&raw_flags] {
+    const fs::path compiler_path = std::invoke([&] {
+      std::string compiler{raw_flags.front()};
+      if (windows_drive_mount_used && 3 <= compiler.size()
+        && std::isalpha(static_cast<unsigned char>(compiler[0]))
+        && ':' == compiler[1]
+        && ('/' == compiler[2] || '\\' == compiler[2])) {
+        // refactorme(cosmo_windows_path): review runtime path translation.
+        // ad hoc: resolve the compiler through the APE's mounted Windows drive.
+        compiler = '/' + compiler.substr(0, 1) + compiler.substr(2);
+        std::ranges::replace(compiler, '\\', '/');
+      }
+
       std::error_code ec;
-      return fs::weakly_canonical(raw_flags.front(), ec);
+      return fs::weakly_canonical(compiler, ec);
     });
+
     const fs::path compiler_root = compiler_path.parent_path().parent_path();
+
+    if (gcc_machine.empty()) {
+      if ("mingw64" == compiler_root.filename())
+        gcc_machine = "x86_64-w64-mingw32";
+      else if ("mingw32" == compiler_root.filename())
+        gcc_machine = "i686-w64-mingw32";
+    }
 
     if (fs::is_directory(compiler_root / "include/c++/v1")) {
       std::array ordered = {
@@ -3267,7 +3471,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     const std::string compiler_variant =
       compiler_path.filename().string().contains("posix") ? "posix" : "win32";
 
-    const fs::path gcc_root = fs::path("/usr/lib/gcc") / gcc_machine;
+    fs::path gcc_root = compiler_root / "lib/gcc" / gcc_machine;
+    if (!fs::is_directory(gcc_root))
+      gcc_root = fs::path("/usr/lib/gcc") / gcc_machine;
     if (!fs::is_directory(gcc_root))
       return paths;
 
@@ -3291,18 +3497,43 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     const fs::path &gcc_dir =
       candidates.end() == found ? candidates.back() : *found;
 
-    std::array ordered = {
+    // refactorme(mingw_include_paths): review explicit distribution layouts.
+    // ad hoc: Alpine, MSYS2, and Debian store cross-target libstdc++ in
+    // different roots; prefer target-qualified layouts before GCC's local
+    // layout.
+    const std::array cxx_root_candidates = {
+      compiler_root / gcc_machine / "include/c++" / gcc_dir.filename(),
+      compiler_root / "include/c++" / gcc_dir.filename(),
       gcc_dir / "include/c++",
-      gcc_dir / "include/c++" / gcc_machine,
-      gcc_dir / "include/c++/backward",
+    };
+
+    const auto cxx_root = std::ranges::find_if(cxx_root_candidates,
+      [](const fs::path &path) { return fs::is_directory(path); });
+
+    if (cxx_root_candidates.end() == cxx_root)
+      return paths;
+
+    std::array ordered = {
+      *cxx_root,
+      *cxx_root / gcc_machine,
+      *cxx_root / "backward",
       gcc_dir / "include",
       gcc_dir / "include-fixed",
+      compiler_root / gcc_machine / "include",
     };
 
     std::ranges::copy(ordered | std::views::filter([](const fs::path &path) {
       return fs::is_directory(path);
     }),
       std::back_inserter(paths));
+
+    // ad hoc: MSYS2 keeps its CRT here, while the equivalent Linux path is
+    // the host /usr/include and would precede project-provided system includes.
+    if ((compiler_root.filename() == "mingw64"
+          || compiler_root.filename() == "mingw32")
+      && fs::is_directory(compiler_root / "include")) {
+      paths.emplace_back(compiler_root / "include");
+    }
 
     return paths;
   });
@@ -3324,12 +3555,13 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
             | std::views::filter([](std::string_view s) { return !s.empty(); }),
           std::back_inserter(out));
 
-        out.emplace_back(source.generic_string());
+        out.emplace_back(driver_source);
 
         // force AST-only and tool resource-dir (last-wins)
         out.emplace_back("-fsyntax-only");
         out.emplace_back(
           std::format("-resource-dir={}", resource_dir.generic_string()));
+
         return out;
       }
 
@@ -3356,10 +3588,18 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       std::ranges::copy(driver_args, std::back_inserter(out));
 
+      if (macos_sysroot
+        && !normalized_args->hasArg(options::OPT_isysroot,
+          options::OPT__sysroot_EQ)) {
+        out.emplace_back("-isysroot");
+        out.emplace_back(*macos_sysroot);
+      }
+
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(
         std::format("-resource-dir={}", resource_dir.generic_string()));
-      out.emplace_back(source.generic_string());
+
+      out.emplace_back(driver_source);
 
       return out;
     });
@@ -3382,6 +3622,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
         const llvm::ErrorOr<std::string> current_directory =
           driver.getVFS().getCurrentWorkingDirectory();
+
         if (!current_directory) {
           return std::unexpected(processing_error(source,
             std::format("failed to read the current working directory: {}",
@@ -3428,18 +3669,20 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const auto &compilation_args = compilation->getJobs().begin()->getArguments();
 
-  log(log_level::debug, [&compilation_args] {
+  const std::vector<std::string> frontend_args = compilation_args //
+    | std::views::transform(fn::as<std::string>) //
+    | std::ranges::to<std::vector>();
+
+  log(log_level::debug, [&frontend_args] {
     return std::format("\nusing cc1 args:\n{}",
-      compilation_args
-        | std::views::transform([](llvm::StringRef arg) { return arg.str(); })
-        | std::views::join_with("\n"sv) | util::format_range);
+      frontend_args | std_c::views::join_with("\n"sv) | util::format_range);
   });
 
   std::shared_ptr clang_invocation =
     std::make_shared<clang::CompilerInvocation>();
 
   if (!clang::CompilerInvocation::CreateFromArgs(*clang_invocation,
-        compilation_args,
+        to_vector_of_raw_pointers(frontend_args),
         *log.clang_engine)) {
     return std::unexpected(
       processing_error(source, "Failed to create CompilerInvocation."));
@@ -3448,7 +3691,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   if (compile_directory)
     clang_invocation->getFileSystemOpts().WorkingDir = *compile_directory;
 
-  const auto &frontend_inputs = clang_invocation->getFrontendOpts().Inputs;
+  auto &frontend_inputs = clang_invocation->getFrontendOpts().Inputs;
   if (1 != frontend_inputs.size()) {
     return std::unexpected(processing_error(source,
       std::format("expected one frontend input, resolved {}",
@@ -3465,8 +3708,55 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         clang::languageToString(input_language).str())));
   }
 
+  if (windows_drive_mount_used) {
+    // clang-cl must classify D:/... as an input before the APE mount spelling
+    // is restored; /D/... is otherwise parsed as an MSVC macro definition.
+    frontend_inputs.front() = clang::FrontendInputFile{
+      source_path,
+      frontend_inputs.front().getKind(),
+      frontend_inputs.front().isSystem(),
+    };
+  }
+
   {
     clang::HeaderSearchOptions &o = clang_invocation->getHeaderSearchOpts();
+
+    if (msvc_used && windows_drive_mount_used) {
+      // The APE exposes %INCLUDE% as a colon-separated /C/... path list. This
+      // POSIX-configured Clang expects semicolons for MSVC and otherwise emits
+      // the complete list as one search entry. Split that generated entry.
+      decltype(o.UserEntries) mounted_entries;
+      for (const auto &entry : o.UserEntries) {
+        if (3 > entry.Path.size()
+          || '/' != entry.Path[0]
+          || !std::isalpha(static_cast<unsigned char>(entry.Path[1]))
+          || '/' != entry.Path[2]) {
+          mounted_entries.emplace_back(entry);
+          continue;
+        }
+
+        for (std::size_t start = 0; start < entry.Path.size();) {
+          std::size_t next = entry.Path.find(':', start + 3);
+          while (std::string::npos != next
+            && (next + 3 >= entry.Path.size()
+              || '/' != entry.Path[next + 1]
+              || !std::isalpha(
+                static_cast<unsigned char>(entry.Path[next + 2]))
+              || '/' != entry.Path[next + 3])) {
+            next = entry.Path.find(':', next + 1);
+          }
+
+          auto mounted = entry;
+          mounted.Path = entry.Path.substr(start, next - start);
+          mounted_entries.emplace_back(std::move(mounted));
+
+          if (std::string::npos == next)
+            break;
+          start = next + 1;
+        }
+      }
+      o.UserEntries = std::move(mounted_entries);
+    }
 
     // Original intent: bundle libc++ so native Linux instrumentation can work
     // as a mostly standalone tool even when no usable host C++ standard library
@@ -3484,21 +3774,20 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     o.ResourceDir = resource_dir.generic_string();
 
     if (!msvc_used && !mingw_used) {
+      // Packaged headers are absolute and remain outside a target SDK.
       o.AddPath(
         // todo: this should be configured at compile time
         (resource_dir / "include/x86_64-unknown-linux-gnu/c++/v1")
           .generic_string(),
         clang::frontend::IncludeDirGroup::CXXSystem,
-        // todo: I have no idea what are these parameters. comment
         /*IsFramework=*/false,
-        /*IgnoreSysRoot=*/false);
+        /*IgnoreSysRoot=*/true);
 
       // todo: this should be configured at compile time
       o.AddPath((resource_dir / "include/c++/v1").generic_string(),
         clang::frontend::IncludeDirGroup::CXXSystem,
-        // todo: I have no idea what are these parameters. comment
         /*IsFramework=*/false,
-        /*IgnoreSysRoot=*/false);
+        /*IgnoreSysRoot=*/true);
 
       // ad hoc: C++ headers must be included before C's
       std::rotate(o.UserEntries.rbegin(),
@@ -3698,7 +3987,7 @@ std::expected<render::reflection_context, app_error>
     input_errors.emplace_back(std::format("invalid reflection queries:\n{}",
       ctx.errors.reflection_queries //
         | std::views::transform(diag::format_error) //
-        | std::views::join_with("\n"sv) //
+        | std_c::views::join_with("\n"sv) //
         | util::format_range));
   }
 
@@ -3712,7 +4001,7 @@ std::expected<render::reflection_context, app_error>
       "fields, bases, or protocol aliases",
       ctx.errors.reflected_call_args //
         | std::views::transform(diag::format_error) //
-        | std::views::join_with("\n"sv) //
+        | std_c::views::join_with("\n"sv) //
         | util::format_range));
   }
 
@@ -3722,14 +4011,14 @@ std::expected<render::reflection_context, app_error>
         | std::views::transform([](const std::string &error) {
             return std::format("  {}", error);
           }) //
-        | std::views::join_with("\n"sv) //
+        | std_c::views::join_with("\n"sv) //
         | util::format_range));
   }
 
   if (!input_errors.empty()) {
     return std::unexpected(processing_error(source,
       input_errors //
-        | std::views::join_with("\n\n"sv) //
+        | std_c::views::join_with("\n\n"sv) //
         | std::ranges::to<std::string>()));
   }
 
@@ -4049,7 +4338,7 @@ std::string format_record_data(const meta::record_data &d) {
       : std::format(" {{ {} }}",
           d.public_fields //
             | std::views::transform(&meta::field_data::name) //
-            | std::views::join_with(", "sv) //
+            | std_c::views::join_with(", "sv) //
             | util::format_range));
 }
 
@@ -4064,7 +4353,7 @@ std::string format_enum_data(const meta::enum_data &d) {
   return std::format("{} {{ {} }}",
     kind,
     d.enumerators //
-      | std::views::join_with(", "sv) //
+      | std_c::views::join_with(", "sv) //
       | util::format_range);
 }
 
@@ -4120,12 +4409,12 @@ std::string format_matches(const meta::source_file_context &ctx) {
       | std::views::transform(std::bind_front(format_reflectable,
         std::cref(ctx.resolved_as_dependency),
         std::cref(ctx.index_by_type_id))) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     ctx.file_dependencies //
       | std::views::transform([](const fs::path &p) { return p.string(); })
-      | std::views::join_with("\n"sv) //
+      | std_c::views::join_with("\n"sv) //
       | util::format_range);
 }
 
@@ -4192,7 +4481,7 @@ std::string format_timings(
             format_duration(duration),
             duration.count());
         })
-      | std::views::join_with("\n"sv) //
+      | std_c::views::join_with("\n"sv) //
       | util::format_range);
 }
 
@@ -4489,6 +4778,7 @@ std::string field_type_name_from(const clang::ASTContext &ast,
         type.getAs<clang::QualifiedTypeLoc>()) {
     const std::string qualifiers =
       type.getType().getLocalQualifiers().getAsString(ast.getPrintingPolicy());
+
     const clang::UnqualTypeLoc unqualified = qualified.getUnqualifiedLoc();
     const std::string type_name = field_type_name_from(ast, unqualified);
 
@@ -4847,9 +5137,11 @@ collected_dependencies recursively_collect_dependency_types(
     cur_decl = cur_definition;
     const clang::TagType *cur_type =
       meta::map_decl_to_canonical_type(ast, cur_decl);
+
     const bool in_std = cur_decl->isInStdNamespace();
     const bool is_compound_dependency =
       meta::is_compound_dependency_route(cur_decl);
+
     const clang::TagType *dependency_parent =
       in_std || is_compound_dependency ? pending.parent : cur_type;
 
@@ -4911,7 +5203,7 @@ collected_dependencies recursively_collect_dependency_types(
       }
 
       for (const auto &[index, type] :
-        template_specialization_types(arg_list) | std::views::enumerate) {
+        template_specialization_types(arg_list) | std_c::views::enumerate) {
         std::optional public_access_path = pending.public_access_path;
 
         if (public_access_path) {
@@ -5065,6 +5357,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
     .annotation = std::invoke([&ast, t] {
       const auto *spec =
         llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(t->getDecl());
+
       return meta::annotation_from_decl(ast,
         spec ? static_cast<const clang::Decl *>(spec->getSpecializedTemplate())
              : static_cast<const clang::Decl *>(t->getDecl()));
@@ -5100,6 +5393,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
 
   const clang::Type &template_arg_type =
     *ast.getCanonicalType(template_arg.getUnqualifiedType()).getTypePtr();
+
   // todo: C-arrays, pointers?
 
   // not a struct|class|union|enum
@@ -5244,7 +5538,7 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   elems.push_back(inner_type.enclosing_records.front());
 
   return std::format("_omni_{}_as_root",
-    elems | std::views::join_with("_"sv) | util::format_range);
+    elems | std_c::views::join_with("_"sv) | util::format_range);
 }
 
 // Makes a qualified type name dependent so it can be used in SFINAE even when
@@ -5266,7 +5560,7 @@ std::string declaration_for_enclosing_root_as_dependent(
     "template <typename Inner>"
     "\nusing {} = typename _wrt<{}, Inner>::type;",
     enclosing_root_as_dependent(inner_type),
-    elems | std::views::join_with("::"sv) | util::format_range);
+    elems | std_c::views::join_with("::"sv) | util::format_range);
 }
 
 std::string forward_declaration_for_enclosing_root(
@@ -5301,6 +5595,7 @@ std::string format_qualified_inner_type_from_root(const std::string &root,
   const std::string leaf = inner_type.name->contains('<')
     ? std::format("template {}", *inner_type.name)
     : *inner_type.name;
+
   const std::array spans{
     std::span<const std::string>{&root, 1},
     std::span<const std::string>{inner_type.enclosing_records}.subspan(1),
@@ -5310,7 +5605,7 @@ std::string format_qualified_inner_type_from_root(const std::string &root,
   return std::format("{}",
     spans //
       | std::views::join //
-      | std::views::join_with("::"sv) //
+      | std_c::views::join_with("::"sv) //
       | util::format_range);
 }
 
@@ -5500,6 +5795,7 @@ std::string inner_reflectable_head(const meta::nm_qual_type &t,
 
   const std::string access_root_for =
     std::format("{}<T>", enclosing_root_as_dependent(t));
+
   const std::string matched_type = public_access_path.steps.empty()
     ? std::format("typename {}",
         format_qualified_inner_type_from_root(access_root_for, t))
@@ -5582,7 +5878,7 @@ std::string reflectable_body(const meta::enum_data &d) {
       | std::views::transform([](std::string_view e) {
           return std::format("{{type::{0}, \"{0}\"}}", e);
         })
-      | std::views::join_with(",\n        "sv) //
+      | std_c::views::join_with(",\n        "sv) //
       | util::format_range);
 }
 
@@ -5598,10 +5894,12 @@ std::string reflectable_body(const meta::record_data &d) {
 
         const bool by_reference =
           meta::field_data::value_access::reference == f.access;
+
         const std::string value_type = //
           by_reference
           ? std::format("decltype((t.{}))", f.name)
           : std::format("omni::compat::remove_cvref_t<decltype(t.{})>", f.name);
+
         return std::format(
           "\n\n    // Emitted for reference and copy access."
           "\n    // Lvalue reads preserve owner qualification."
@@ -5714,9 +6012,9 @@ std::string reflectable_body(const meta::record_data &d) {
     d.public_fields.empty()
       ? std::string("\n  // no reflectable fields detected")
       : std::format("\n{}",
-          d.public_fields | std::views::enumerate //
+          d.public_fields | std_c::views::enumerate //
             | std::views::transform(format_field)
-            | std::views::join_with("\n\n"sv) //
+            | std_c::views::join_with("\n\n"sv) //
             | util::format_range),
 
     d.public_fields //
@@ -5724,7 +6022,7 @@ std::string reflectable_body(const meta::record_data &d) {
       | std::views::transform([](std::string_view f) {
           return std::format("omni::field_meta_t<type, {}_t>", f);
         }) //
-      | std::views::join_with(",\n      "sv) //
+      | std_c::views::join_with(",\n      "sv) //
       | util::format_range);
 }
 
@@ -5775,7 +6073,7 @@ std::string render_public_bases(
       | std::views::transform(&meta::reflectable_reference::id)
       | std::views::transform(fetch) //
       | std::views::transform(format) //
-      | std::views::join_with(",\n    "sv) //
+      | std_c::views::join_with(",\n    "sv) //
       | util::format_range);
 }
 
@@ -5915,28 +6213,28 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     required_includes //
       | std::views::transform(
         [](std::string_view s) { return std::format("#include <{}>", s); })
-      | std::views::join_with("\n"sv) //
+      | std_c::views::join_with("\n"sv) //
       | util::format_range,
 
     // 2:
     ctx.fwd_declarables //
       | std::views::transform(&reflection_context::forward_declarable::type)
       | std::views::transform(render::impl::forward_declaration) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 3:
     ctx.enclosing_roots //
       | std::views::transform(
         render::impl::forward_declaration_for_enclosing_root) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 4:
     ctx.enclosing_roots //
       | std::views::transform(
         render::impl::declaration_for_enclosing_root_as_dependent) //
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 5:
@@ -5947,7 +6245,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::forward_declarable>,
         std::cref(ctx.type_name_by_id)))
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 7:
@@ -5955,7 +6253,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::nested_type>,
         std::cref(ctx.type_name_by_id)))
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
     // 8:
@@ -5963,7 +6261,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::indexed_type>,
         std::cref(ctx.type_name_by_id)))
-      | std::views::join_with("\n\n"sv) //
+      | std_c::views::join_with("\n\n"sv) //
       | util::format_range);
 
   // todo: check if file has errors
