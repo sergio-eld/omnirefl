@@ -2997,10 +2997,14 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const fs::path &resource_dir = cli_args.resource_dir;
   const fs::path &source = cli_args.source;
   const std::vector<std::string> &raw_flags = cli_args.flags;
+  const std::string source_path = source.generic_string();
   const bool windows_drive_mount_used =
-    3 <= source.native().size() && '/' == source.native()[0]
-    && std::isalpha(static_cast<unsigned char>(source.native()[1]))
-    && '/' == source.native()[2];
+    3 <= source_path.size() && '/' == source_path[0]
+    && std::isalpha(static_cast<unsigned char>(source_path[1]))
+    && '/' == source_path[2];
+  const std::string driver_source = windows_drive_mount_used
+    ? std::format("{}:{}", source_path[1], source_path.substr(2))
+    : source_path;
 
   // Omnirefl supplies its own source and produces no compiler output.
   static constexpr std::array k_ignored_action_options{
@@ -3118,6 +3122,8 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     std::invoke([&flags,
                   response_file_directory,
                   cl_style,
+                  &driver_source,
+                  &source_path,
                   windows_drive_mount_used]
       -> std::expected<std::vector<std::string>, std::string> {
       llvm::BumpPtrAllocator allocator;
@@ -3147,7 +3153,15 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       return args //
         | std::views::transform(
-          [windows_drive_mount_used](std::string_view arg) -> std::string {
+          [&driver_source,
+            &source_path,
+            windows_drive_mount_used](std::string_view arg) -> std::string {
+            // Clang's Windows driver treats /C/... as the /C option. Restore
+            // the drive spelling only for the input selected by omnirefl.
+            if (windows_drive_mount_used
+              && (source_path == arg || driver_source == arg))
+              return driver_source;
+
             if (!windows_drive_mount_used || 3 > arg.size()
               || !std::isalpha(static_cast<unsigned char>(arg[0]))
               || ':' != arg[1] || ('/' != arg[2] && '\\' != arg[2]))
@@ -3201,7 +3215,12 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const std::vector compiler_sources =
     normalized_args->getAllArgValues(options::OPT_INPUT) //
     | std::views::transform(
-      [&compile_directory, &source](std::string_view input) {
+      [&compile_directory,
+        &driver_source,
+        &source](std::string_view input) {
+        if (driver_source == input)
+          return source;
+
         const auto resolve = [&compile_directory](std::string_view input) {
           return fs::absolute(compile_directory //
               ? fs::path{*compile_directory} / input
@@ -3506,7 +3525,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
             | std::views::filter([](std::string_view s) { return !s.empty(); }),
           std::back_inserter(out));
 
-        out.emplace_back(source.generic_string());
+        out.emplace_back(driver_source);
 
         // force AST-only and tool resource-dir (last-wins)
         out.emplace_back("-fsyntax-only");
@@ -3550,7 +3569,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       out.emplace_back(
         std::format("-resource-dir={}", resource_dir.generic_string()));
 
-      out.emplace_back(source.generic_string());
+      out.emplace_back(driver_source);
 
       return out;
     });
@@ -3620,18 +3639,29 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const auto &compilation_args = compilation->getJobs().begin()->getArguments();
 
-  log(log_level::debug, [&compilation_args] {
+  const std::vector<std::string> frontend_args = compilation_args //
+    | std::views::transform(
+      [&driver_source,
+        &source_path,
+        windows_drive_mount_used](llvm::StringRef arg) {
+        // The Windows driver needs C:/... to recognize an input, while the
+        // Cosmopolitan frontend VFS needs /C/... to open the same file.
+        return windows_drive_mount_used && driver_source == arg
+          ? source_path
+          : arg.str();
+      }) //
+    | std::ranges::to<std::vector>();
+
+  log(log_level::debug, [&frontend_args] {
     return std::format("\nusing cc1 args:\n{}",
-      compilation_args
-        | std::views::transform([](llvm::StringRef arg) { return arg.str(); })
-        | std_c::views::join_with("\n"sv) | util::format_range);
+      frontend_args | std_c::views::join_with("\n"sv) | util::format_range);
   });
 
   std::shared_ptr clang_invocation =
     std::make_shared<clang::CompilerInvocation>();
 
   if (!clang::CompilerInvocation::CreateFromArgs(*clang_invocation,
-        compilation_args,
+        to_vector_of_raw_pointers(frontend_args),
         *log.clang_engine)) {
     return std::unexpected(
       processing_error(source, "Failed to create CompilerInvocation."));

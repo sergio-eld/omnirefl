@@ -185,10 +185,19 @@ jobs:
               docker compose run --rm --entrypoint uname "$TEST_SERVICE" -m
           )" = "${{ matrix.arch }}"
 
-      - name: Download Package Artifacts
+      # Download the two inputs sequentially. A single merged wildcard makes
+      # download-artifact extract every platform package concurrently.
+      - name: Download musl Package
         uses: actions/download-artifact@v8
         with:
-          pattern: packages-*
+          pattern: packages-linux-${{ matrix.arch }}-musl-*
+          path: ./artifacts/packages/current
+          merge-multiple: true
+
+      - name: Download Cosmo Package
+        uses: actions/download-artifact@v8
+        with:
+          pattern: packages-cosmo-universal-*
           path: ./artifacts/packages/current
           merge-multiple: true
 
@@ -300,10 +309,17 @@ jobs:
               mingw-w64-clang-x86_64-clang
 
     steps:
-      - name: Download Package Artifacts
+      - name: Download UCRT Package
         uses: actions/download-artifact@v8
         with:
-          pattern: packages-*
+          pattern: packages-windows-x86_64-ucrt-*
+          path: ./artifacts/packages/current
+          merge-multiple: true
+
+      - name: Download Cosmo Package
+        uses: actions/download-artifact@v8
+        with:
+          pattern: packages-cosmo-universal-*
           path: ./artifacts/packages/current
           merge-multiple: true
 
@@ -750,6 +766,15 @@ jobs:
           echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
+      # Docker bind mounts must not create the shared parent as root before
+      # the runner writes benchmark history into it.
+      - name: Prepare benchmark directories
+        run: |
+          mkdir -p ./artifacts/benchmark-history
+          mkdir -p ./artifacts/packages/benchmark-musl
+          mkdir -p ./artifacts/benchmarks
+          mkdir -p ./artifacts/benchmark-build
+
       - name: Pull Benchmark Build Image
         run: docker compose pull build-benchmark-musl
 
@@ -828,9 +853,6 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.history_run.outputs.run_id }}
-
-      - name: Prepare benchmark history
-        run: mkdir -p ./artifacts/benchmark-history
 
       - name: Check benchmark regression
         run: |
