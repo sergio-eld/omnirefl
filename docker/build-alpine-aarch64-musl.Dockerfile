@@ -1,34 +1,34 @@
-FROM alpine:edge
-
-ARG LLVM_VERSION
+# LLVM 22 is not available in Alpine 3.23. Pin the AArch64 edge image so
+# unrelated edge updates do not invalidate every following build layer.
+FROM alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
 
 ENV CLANG_INSTALL_LINUX=/usr/local/llvm/install-linux
 
 RUN set -eux; \
-    test -n "$LLVM_VERSION"; \
-    llvm_major="${LLVM_VERSION%%.*}"; \
     apk --no-cache add \
         build-base \
-        "clang$llvm_major-dev~$LLVM_VERSION" \
-        "clang$llvm_major-static~$LLVM_VERSION" \
         cmake \
-        file \
-        g++ \
         git \
-        gtest \
-        gtest-dev \
-        "libc++-dev~$LLVM_VERSION" \
         libxml2-static \
-        "llvm$llvm_major-dev~$LLVM_VERSION" \
-        "llvm$llvm_major-gtest~$LLVM_VERSION" \
-        "llvm$llvm_major-static~$LLVM_VERSION" \
-        neovim \
         ninja-build \
         ninja-is-really-ninja \
         python3 \
         tar \
         zlib-static \
-        zstd-static; \
+        zstd-static
+
+ARG LLVM_VERSION
+
+RUN set -eux; \
+    test -n "$LLVM_VERSION"; \
+    llvm_major="${LLVM_VERSION%%.*}"; \
+    apk --no-cache add \
+        "clang$llvm_major-dev~$LLVM_VERSION" \
+        "clang$llvm_major-static~$LLVM_VERSION" \
+        "libc++-dev~$LLVM_VERSION" \
+        "llvm$llvm_major-dev~$LLVM_VERSION" \
+        "llvm$llvm_major-gtest~$LLVM_VERSION" \
+        "llvm$llvm_major-static~$LLVM_VERSION"; \
     mkdir -p "$(dirname "$CLANG_INSTALL_LINUX")"; \
     ln -s "/usr/lib/llvm$llvm_major" "$CLANG_INSTALL_LINUX"
 

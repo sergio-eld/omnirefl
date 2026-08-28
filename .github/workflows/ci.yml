@@ -17,22 +17,14 @@ on:
         required: false
         default: false
 
-env:
-  COSMOPOLITAN_VERSION: 4.0.2
-  LLVM_VERSION: 22.1.8
-
 jobs:
-  # Package tests use the same matrix vocabulary as docker-compose.yml:
-  #
-  #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows|macos>
-  #   toolchain=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang|cosmopolitan>
-  #
-  # Linux rows dispatch to Compose services. Native Windows and macOS rows
-  # install directly on GitHub-hosted runners; universal-package Windows rows
-  # use the existing Windows test containers.
-  build-package:
+  build-package-musl:
     name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
+    # As of this writing, GitHub provides no `ubuntu-latest-arm` label. Use the
+    # versioned ARM runner to avoid emulating AArch64 builds on an x86_64 host.
     runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    env:
+      PACKAGE_RUNTIME: ${{ 'linux' == matrix.os && 'musl' || 'ucrt' }}
     permissions:
       contents: read
     strategy:
@@ -40,6 +32,8 @@ jobs:
       matrix:
         os: [linux, windows]
         arch: [x86_64, aarch64]
+        # As of this writing, the MinGW cross-toolchain used here does not
+        # provide a working Windows AArch64 package build.
         exclude:
           - os: windows
             arch: aarch64
@@ -52,45 +46,54 @@ jobs:
 
       - name: Resolve Short SHA
         id: commit
-        run: |
-          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Pull build-alpine Image
+      - name: Pull Build Image
         run: |
+          # Compose owns the toolchain versions and resolves the complete image
+          # tag for the selected build service.
+          service=build-$PACKAGE_RUNTIME
           if [ "aarch64" = "${{ matrix.arch }}" ]; then
-            docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl:llvm-${LLVM_VERSION}
-          else
-            docker pull ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
+            service=$service-aarch64
           fi
+          docker compose pull "$service"
 
       - name: Build and package omnirefl tool
         run: |
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
-          PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
+          PACKAGE_DIR=./artifacts/packages/$PACKAGE_RUNTIME \
             docker compose run --rm \
-              build-${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}
+              build-$PACKAGE_RUNTIME${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}
 
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6
         with:
           name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/${{ matrix.os }}
+          path: ./artifacts/packages/${{ env.PACKAGE_RUNTIME }}
           if-no-files-found: error
+
+      - name: Stage Debug Symbols
+        if: ${{ inputs.upload_symbols }}
+        run: |
+          shopt -s nullglob
+          symbol_dirs=(./build-alpine/$PACKAGE_RUNTIME/${{ matrix.arch }}/*/symbols)
+          test 1 -eq "${#symbol_dirs[@]}"
+          mkdir -p ./artifacts/symbols
+          cp "${symbol_dirs[0]}"/*.debug ./artifacts/symbols/
 
       - name: Upload Debug Symbols
         if: ${{ inputs.upload_symbols }}
         uses: actions/upload-artifact@v6
         with:
           name: symbols-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
-          path: >-
-            ./build-alpine/${{ matrix.os }}${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}/symbols
+          path: ./artifacts/symbols
           if-no-files-found: error
 
-  # Keep this outside the package matrix: the fat Cosmopolitan link is much
-  # slower than the native package links, but emits one cross-platform package.
-  build-cosmopolitan-package:
-    name: Build package / Cosmopolitan universal
+  # Keep this outside the package matrix: the fat Cosmo link is much
+  # slower than the musl/UCRT package links, but emits one cross-platform
+  # package.
+  build-package-cosmo:
+    name: Build package / cosmo-universal
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,170 +108,111 @@ jobs:
         id: commit
         run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Pull Cosmopolitan Build Image
-        run: >-
-          docker pull
-          ghcr.io/sergio-eld/omnirefl-build-cosmopolitan:cosmopolitan-${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}
+      - name: Pull Cosmo Build Image
+        # Compose owns the toolchain versions and resolves the complete image
+        # tag for this build service.
+        run: docker compose pull build-cosmo
 
-      - name: Build Cosmopolitan Package
+      - name: Build Cosmo Package
         run: |
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
-          PACKAGE_DIR=./artifacts/packages/cosmopolitan \
-            docker compose run --rm build-cosmopolitan
+          PACKAGE_DIR=./artifacts/packages/cosmo \
+            docker compose run --rm build-cosmo
 
-      - name: Upload Cosmopolitan Package
+      - name: Upload Cosmo Package
         uses: actions/upload-artifact@v6
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan/omnirefl-cosmopolitan-universal-*.tar.gz
+          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmo/omnirefl-cosmo-universal-*.tar.gz
           if-no-files-found: error
 
-  test-linux:
-    name: Linux test / ${{ matrix.platform }}-${{ matrix.toolchain }}
-    runs-on: ubuntu-latest
-    needs: build-package
+  # Package tests use the same matrix vocabulary as docker-compose.yml:
+  #
+  #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows|macos>
+  #   toolchain=<gcc|clang|mingw|msvc|clang-cl|msys2-mingw|msys2-clang>
+  #
+  # Linux rows dispatch to Compose services. Windows and macOS rows install
+  # directly on GitHub-hosted runners; local Windows validation uses the
+  # separate Compose services because its Windows container environment cannot
+  # be reproduced by GitHub-hosted runners. Platform runners infer package
+  # runtime and archive handling from filenames.
+  test-package-linux:
+    name: Package test / linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }}
+    # As of this writing, GitHub provides no `ubuntu-latest-arm` label. Use the
+    # versioned ARM runner to execute AArch64 packages without emulation.
+    runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    needs:
+      - build-package-musl
+      - build-package-cosmo
     strategy:
       fail-fast: false
       matrix:
         platform: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
         toolchain: [gcc, clang, mingw]
+        arch: [x86_64, aarch64]
+        exclude:
+          - arch: aarch64
+            platform: ubuntu-18.04
+          - arch: aarch64
+            platform: ubuntu-20.04
+          - arch: aarch64
+            toolchain: clang
+          - arch: aarch64
+            toolchain: mingw
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
-
-      - name: Resolve Short SHA
-        id: commit
-        run: |
-          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
-
-      - name: Pull Docker Image
-        run: |
-          if [ "alpine" = "${{ matrix.platform }}" ]; then
-            docker pull \
-              "ghcr.io/sergio-eld/omnirefl-test-alpine:3.23.3-x86_64-${{ matrix.toolchain }}"
-          else
-            ubuntu_version="${{ matrix.platform }}"
-            docker pull \
-              "ghcr.io/sergio-eld/omnirefl-test-ubuntu:${ubuntu_version#ubuntu-}-x86_64-${{ matrix.toolchain }}"
-          fi
-
-      - name: Download Package Artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: packages-linux-x86_64-musl-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/linux
-
-      - name: Run Package Test
-        run: |
-          if [ "alpine" = "${{ matrix.platform }}" ]; then
-            TOOLCHAIN=${{ matrix.toolchain }} \
-            LINUX_PACKAGE_DIR=./artifacts/packages/linux \
-            TEST_RESULTS_DIR=./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }} \
-              docker compose run --rm test-alpine
-          else
-            ubuntu_version="${{ matrix.platform }}"
-            UBUNTU_VERSION="${ubuntu_version#ubuntu-}" \
-            TOOLCHAIN=${{ matrix.toolchain }} \
-            LINUX_PACKAGE_DIR=./artifacts/packages/linux \
-            TEST_RESULTS_DIR=./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }} \
-              docker compose run --rm test-ubuntu
-          fi
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: >-
-            test-${{ matrix.platform }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/${{ matrix.platform }}-${{ matrix.toolchain }}
-          if-no-files-found: error
-
-  test-cosmopolitan-linux:
-    name: Cosmopolitan test / ${{ matrix.platform }}-${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    needs: build-cosmopolitan-package
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: alpine
-            arch: x86_64
-            machine: x86_64
-            runner: ubuntu-latest
-            service: test-cosmopolitan-alpine
-            image: ghcr.io/sergio-eld/omnirefl-test-alpine:3.23.3-x86_64-gcc
-          - platform: alpine
-            arch: aarch64
-            machine: aarch64
-            runner: ubuntu-24.04-arm
-            service: test-cosmopolitan-alpine-aarch64
-          - platform: ubuntu-22.04
-            arch: x86_64
-            machine: x86_64
-            runner: ubuntu-latest
-            service: test-cosmopolitan-ubuntu
-            ubuntu_version: "22.04"
-            image: ghcr.io/sergio-eld/omnirefl-test-ubuntu:22.04-x86_64-gcc
-          - platform: ubuntu-22.04
-            arch: aarch64
-            machine: aarch64
-            runner: ubuntu-24.04-arm
-            service: test-cosmopolitan-ubuntu-aarch64
-            ubuntu_version: "22.04"
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v7
-
-      - name: Resolve Short SHA
-        id: commit
-        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare Docker Image
         run: |
-          if [ -n "${{ matrix.image }}" ]; then
-            docker pull "${{ matrix.image }}"
-          else
-            UBUNTU_VERSION="${{ matrix.ubuntu_version }}" \
-              docker compose build "${{ matrix.service }}"
+          platform=${{ matrix.platform }}
+          service=test-${platform%%-*}
+          if [[ "$platform" == ubuntu-* ]]; then
+            export UBUNTU_VERSION=${platform#ubuntu-}
+            echo "UBUNTU_VERSION=$UBUNTU_VERSION" >> "$GITHUB_ENV"
           fi
+          if [ "aarch64" = "${{ matrix.arch }}" ]; then
+            service=$service-aarch64
+          fi
+          TOOLCHAIN=${{ matrix.toolchain }} docker compose pull "$service"
+          echo "TEST_SERVICE=$service" >> "$GITHUB_ENV"
 
       - name: Verify Test Container Architecture
         run: |
           test "$(
-            UBUNTU_VERSION="${{ matrix.ubuntu_version }}" \
-              docker compose run --rm --entrypoint uname "${{ matrix.service }}" -m
-          )" = "${{ matrix.machine }}"
+            TOOLCHAIN=${{ matrix.toolchain }} \
+              docker compose run --rm --entrypoint uname "$TEST_SERVICE" -m
+          )" = "${{ matrix.arch }}"
 
-      - name: Download Cosmopolitan Package
+      - name: Download Package Artifacts
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan
+          pattern: packages-*
+          path: ./artifacts/packages/current
+          merge-multiple: true
 
       - name: Run Package Test
         run: |
-          TOOLCHAIN=gcc \
-          UBUNTU_VERSION="${{ matrix.ubuntu_version }}" \
-          TEST_PACKAGE_DIR=./artifacts/packages/cosmopolitan \
-          TEST_RESULTS_DIR=./artifacts/test-results/cosmopolitan-${{ matrix.platform }}-${{ matrix.arch }} \
-            docker compose run --rm "${{ matrix.service }}"
+          TOOLCHAIN=${{ matrix.toolchain }} \
+          PACKAGE_DIR=./artifacts/packages/current \
+          TEST_NAME=linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+          TEST_RESULTS_DIR=./artifacts/test-results/linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            docker compose run --rm "$TEST_SERVICE"
 
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            test-cosmopolitan-${{ matrix.platform }}-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/cosmopolitan-${{ matrix.platform }}-${{ matrix.arch }}
+            test-linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
-  test-macos:
-    name: macOS test / ${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan
+  test-package-macos:
+    name: Package test / ${{ matrix.runner }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
-    needs: build-cosmopolitan-package
+    needs: build-package-cosmo
     permissions:
       actions: read
       contents: read
@@ -298,106 +242,314 @@ jobs:
         run: |
           echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Download Cosmopolitan Package
+      - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan
-
-      - name: Install Cosmopolitan Package
-        run: |
-          set -euo pipefail
-          root="$RUNNER_TEMP/with space"
-          install="$root/omnirefl"
-          source="$root/tests"
-          build="$root/build"
-          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan"
-          mkdir -p "$root" "$results"
-          test "$(uname -m)" = "${{ matrix.host_arch }}"
-
-          package="$(find artifacts/packages/cosmopolitan \
-            -maxdepth 1 -type f \
-            -name 'omnirefl-cosmopolitan-universal-*.tar.gz' \
-            -print -quit)"
-          test -n "$package"
-          tar -xzf "$package" -C "$root"
-
-          package_root="$(find "$root" -mindepth 1 -maxdepth 1 \
-            -type d -name 'omnirefl-*' -print -quit)"
-          test -n "$package_root"
-          mv "$package_root" "$install"
-          cp -R "$install/share/omnirefl/tests" "$source"
-
-          "$install/bin/omnirefl" --help 2>&1 |
-            tee "$results/omnirefl-help.log"
-          "$install/bin/ccdb_query" --help 2>&1 |
-            tee "$results/ccdb-query-help.log"
-
-          {
-            echo "OMNIREFL_INSTALL_ROOT=$install"
-            echo "OMNIREFL_TEST_SOURCE=$source"
-            echo "OMNIREFL_TEST_BUILD=$build"
-            echo "OMNIREFL_TEST_RESULTS=$results"
-          } >> "$GITHUB_ENV"
-
-      - name: Configure Package Tests
-        run: |
-          set -euo pipefail
-          cmake -S "$OMNIREFL_TEST_SOURCE" \
-            -B "$OMNIREFL_TEST_BUILD" \
-            -GNinja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_BENCH=OFF \
-            -Domnirefl_DIR="$OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/configure.log"
+          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmo
 
       - name: Run Package Tests
         run: |
           set -euo pipefail
-          cmake --build "$OMNIREFL_TEST_BUILD" \
-            --parallel "$(sysctl -n hw.logicalcpu)" 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/build.log"
-
-          set +e
-          ctest --test-dir "$OMNIREFL_TEST_BUILD" \
-            --output-junit "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan.xml" \
-            -V 2>&1 |
-            tee "$OMNIREFL_TEST_RESULTS/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan.log"
-          rc=${PIPESTATUS[0]}
-          set -e
-          exit "$rc"
-
-      - name: Collect Test Diagnostics
-        if: always()
-        run: |
-          build="$RUNNER_TEMP/with space/build"
-          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan"
-          diagnostics="$results/diagnostics"
-          mkdir -p "$diagnostics"
-
-          for file in \
-            "$build/CMakeCache.txt" \
-            "$build/compile_commands.json" \
-            "$build/Testing/Temporary/LastTest.log" \
-            "$build/CMakeFiles/CMakeError.log"; do
-            if [ -f "$file" ]; then
-              cp "$file" "$diagnostics/"
-            fi
-          done
+          results="$GITHUB_WORKSPACE/artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}"
+          test "$(uname -m)" = "${{ matrix.host_arch }}"
+          packages=(artifacts/packages/cosmo/*.tar.gz)
+          test 1 -eq "${#packages[@]}"
+          ci/test_package.sh \
+            --package "${packages[0]}" \
+            --name "${{ matrix.runner }}-${{ matrix.arch }}" \
+            --results "$results"
 
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            test-${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}-cosmopolitan
+            test-${{ matrix.runner }}-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}
+          if-no-files-found: error
+
+  test-package-windows:
+    name: Package test / windows-${{ matrix.toolchain }}
+    runs-on: windows-2022
+    needs:
+      - build-package-musl
+      - build-package-cosmo
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
+        include:
+          - toolchain: msys2-mingw
+            msystem: MINGW64
+            cc: gcc
+            cxx: g++
+            packages: >-
+              git
+              mingw-w64-x86_64-cmake
+              mingw-w64-x86_64-ninja
+              mingw-w64-x86_64-gcc
+          - toolchain: msys2-clang
+            msystem: CLANG64
+            cc: clang
+            cxx: clang++
+            packages: >-
+              git
+              mingw-w64-clang-x86_64-cmake
+              mingw-w64-clang-x86_64-ninja
+              mingw-w64-clang-x86_64-clang
+
+    steps:
+      - name: Download Package Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: packages-*
+          path: ./artifacts/packages/current
+          merge-multiple: true
+
+      - name: Install Packages
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archives = @(Get-ChildItem -Path 'artifacts/packages/current' -Recurse -File | Where-Object {
+            $_.Name -like 'omnirefl-windows-x86_64-ucrt-*.zip' -or
+              $_.Name -like 'omnirefl-cosmo-universal-*.tar.gz'
+          })
+          $root = Join-Path $env:RUNNER_TEMP 'with space/packages'
+          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.toolchain }}'
+          New-Item -ItemType Directory -Force -Path $root, $results | Out-Null
+          $installed = @{}
+
+          foreach ($archive in $archives) {
+            if ($archive.Name -like '*-ucrt-*') {
+              $runtime = 'ucrt'
+            } elseif ($archive.Name -like '*-cosmo-*') {
+              $runtime = 'cosmo'
+            } else {
+              throw "cannot infer package runtime from $($archive.Name)"
+            }
+            if ($installed.ContainsKey($runtime)) {
+              throw "multiple $runtime packages"
+            }
+
+            $extract = Join-Path $root "extract-$runtime"
+            $package = Join-Path $root $runtime
+            New-Item -ItemType Directory -Force -Path $extract, $package | Out-Null
+            if ($archive.Name.EndsWith('.zip')) {
+              Expand-Archive -Path $archive.FullName -DestinationPath $extract -Force
+            } else {
+              tar -xzf $archive.FullName -C $extract
+              if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+            }
+
+            $packageRoots = @(Get-ChildItem -Path $extract -Directory -Filter 'omnirefl-*')
+            if (1 -ne $packageRoots.Count) {
+              throw "expected one package root in $($archive.Name)"
+            }
+
+            $install = Join-Path $package 'install'
+            Move-Item $packageRoots[0].FullName $install
+            Remove-Item -Recurse $extract
+            Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $package
+            & (Join-Path $install 'bin/omnirefl.exe') -h
+            if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+            & (Join-Path $install 'bin/ccdb_query.exe') -h
+            if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+            $installed[$runtime] = $true
+          }
+
+          if (!$installed.ContainsKey('ucrt')) {
+            throw 'UCRT package was not installed'
+          }
+          if (!$installed.ContainsKey('cosmo')) {
+            throw 'Cosmo package was not installed'
+          }
+
+          @(
+            "OMNIREFL_PACKAGES_ROOT=$($root.Replace('\', '/'))"
+            "OMNIREFL_TEST_RESULTS=$($results.Replace('\', '/'))"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install MSYS2 Toolchain
+        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          release: false
+          update: true
+          install: ${{ matrix.packages }}
+
+      - name: Run MSVC-compatible Package Tests
+        if: ${{ 'msvc' == matrix.toolchain || 'clang-cl' == matrix.toolchain }}
+        # Windows PowerShell promotes ordinary native stderr (for example,
+        # Git's clone progress) to NativeCommandError under the runner's strict
+        # error preference. PowerShell 7 preserves it as process output; the
+        # explicit exit-code checks below still reject real command failures.
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vsInstall = & $vswhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            throw 'Visual Studio with the x64 C++ toolchain was not found'
+          }
+
+          $vsDevCmd = Join-Path $vsInstall 'Common7/Tools/VsDevCmd.bat'
+          $vsEnv = & $env:ComSpec /d /c "`"$vsDevCmd`" -arch=x64 >nul && set"
+          if (0 -ne $LASTEXITCODE) {
+            throw 'failed to initialize the Visual Studio environment'
+          }
+
+          foreach ($line in $vsEnv) {
+            if ($line -match '^(.*?)=(.*)$') {
+              Set-Item -Path ('Env:' + $Matches[1]) -Value $Matches[2]
+            }
+          }
+
+          if ('clang-cl' -eq '${{ matrix.toolchain }}') {
+            $llvmBin = 'C:/Program Files/LLVM/bin'
+            if (!(Test-Path (Join-Path $llvmBin 'clang-cl.exe'))) {
+              throw 'clang-cl was not found in the hosted runner LLVM installation'
+            }
+
+            $env:Path = "$llvmBin;$env:Path"
+            $env:CC = 'clang-cl'
+            $env:CXX = 'clang-cl'
+          }
+
+          $result = 0
+          foreach ($package in Get-ChildItem -Path $env:OMNIREFL_PACKAGES_ROOT -Directory) {
+            $install = Join-Path $package.FullName 'install'
+            $source = Join-Path $package.FullName 'tests'
+            $build = Join-Path $package.FullName 'build'
+            $results = Join-Path $env:OMNIREFL_TEST_RESULTS $package.Name
+            New-Item -ItemType Directory -Force -Path $build, $results | Out-Null
+
+            cmake -S $source -B $build -GNinja `
+              -DCMAKE_BUILD_TYPE=Release `
+              "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
+              Tee-Object (Join-Path $results 'configure.log')
+            $configureResult = $LASTEXITCODE
+            if (0 -ne $configureResult) {
+              $result = $configureResult
+              continue
+            }
+
+            cmake --build $build `
+              --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
+              Tee-Object (Join-Path $results 'build.log')
+            $buildResult = $LASTEXITCODE
+            if (0 -ne $buildResult) {
+              $result = $buildResult
+              continue
+            }
+
+            ctest --test-dir $build `
+              --output-junit (Join-Path $results "windows-${{ matrix.toolchain }}.xml") `
+              -V 2>&1 |
+              Tee-Object (Join-Path $results "windows-${{ matrix.toolchain }}.log")
+            $testResult = $LASTEXITCODE
+            if (0 -ne $testResult) {
+              $result = $testResult
+            }
+          }
+          exit $result
+
+      - name: Run MSYS2 Package Tests
+        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
+        shell: msys2 {0}
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          set -euo pipefail
+          packages_root="$(cygpath -u "$OMNIREFL_PACKAGES_ROOT")"
+          results_dir="$(cygpath -u "$OMNIREFL_TEST_RESULTS")"
+          result=0
+
+          for package in "$packages_root"/*; do
+            name="$(basename "$package")"
+            install="$package/install"
+            source="$package/tests"
+            build="$package/build"
+            results="$results_dir/$name"
+            mkdir -p "$build" "$results"
+
+            set +e
+            cmake -S "$source" -B "$build" -GNinja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -Domnirefl_DIR="$install/lib/cmake/omnirefl" 2>&1 |
+              tee "$results/configure.log"
+            configure_result=${PIPESTATUS[0]}
+            set -e
+            if ((0 != configure_result)); then
+              result=$configure_result
+              continue
+            fi
+
+            set +e
+            cmake --build "$build" --parallel "$(nproc)" 2>&1 |
+              tee "$results/build.log"
+            build_result=${PIPESTATUS[0]}
+            set -e
+            if ((0 != build_result)); then
+              result=$build_result
+              continue
+            fi
+
+            set +e
+            ctest --test-dir "$build" \
+              --output-junit "$results/windows-${{ matrix.toolchain }}.xml" \
+              -V 2>&1 |
+              tee "$results/windows-${{ matrix.toolchain }}.log"
+            test_result=${PIPESTATUS[0]}
+            set -e
+            if ((0 != test_result)); then
+              result=$test_result
+            fi
+          done
+          exit "$result"
+
+      - name: Collect Test Diagnostics
+        if: always()
+        shell: powershell
+        run: |
+          foreach ($package in Get-ChildItem -Path $env:OMNIREFL_PACKAGES_ROOT -Directory) {
+            $build = Join-Path $package.FullName 'build'
+            $results = Join-Path $env:OMNIREFL_TEST_RESULTS $package.Name
+            $diagnostics = Join-Path $results 'diagnostics'
+            New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+
+            Copy-Item -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
+              (Join-Path $build 'CMakeCache.txt')
+              (Join-Path $build 'compile_commands.json')
+              (Join-Path $build 'Testing/Temporary/LastTest.log')
+              (Join-Path $build 'CMakeFiles/CMakeError.log')
+            )
+
+            $generated = @(Get-ChildItem -ErrorAction SilentlyContinue -Recurse -File `
+              -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
+            if (0 -lt $generated.Count) {
+              Compress-Archive -Path $generated.FullName `
+                -DestinationPath (Join-Path $diagnostics 'generated-reflection.zip') `
+                -Force
+            }
+          }
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: >-
+            test-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
           if-no-files-found: error
 
   benchmark-macos:
-    name: Benchmark / macos-${{ matrix.arch }}-cosmopolitan
+    name: Benchmark / macos-${{ matrix.arch }}-cosmo
     runs-on: ${{ matrix.runner }}
-    needs: build-cosmopolitan-package
+    needs: build-package-cosmo
     permissions:
       actions: read
       contents: read
@@ -422,26 +574,25 @@ jobs:
           echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Download Cosmopolitan Package
+      - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmopolitan
+          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmo
 
-      - name: Install Cosmopolitan Package
+      - name: Install Cosmo Package
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/with space"
           install="$root/omnirefl"
-          source="$root/tests"
           build="$root/build"
-          results="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan"
+          results="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo"
           mkdir -p "$root" "$results"
           test "$(uname -m)" = "${{ matrix.host_arch }}"
 
-          package="$(find artifacts/packages/cosmopolitan \
+          package="$(find artifacts/packages/cosmo \
             -maxdepth 1 -type f \
-            -name 'omnirefl-cosmopolitan-universal-*.tar.gz' \
+            -name 'omnirefl-cosmo-universal-*.tar.gz' \
             -print -quit)"
           test -n "$package"
           tar -xzf "$package" -C "$root"
@@ -450,82 +601,20 @@ jobs:
             -type d -name 'omnirefl-*' -print -quit)"
           test -n "$package_root"
           mv "$package_root" "$install"
-          cp -R "$install/share/omnirefl/tests" "$source"
 
           {
             echo "OMNIREFL_INSTALL_ROOT=$install"
-            echo "OMNIREFL_BENCHMARK_SOURCE=$source"
             echo "OMNIREFL_BENCHMARK_BUILD=$build"
             echo "OMNIREFL_BENCHMARK_RESULTS=$results"
           } >> "$GITHUB_ENV"
 
-      - name: Configure Benchmark
-        run: |
-          set -euo pipefail
-          cmake -S "$OMNIREFL_BENCHMARK_SOURCE" \
-            -B "$OMNIREFL_BENCHMARK_BUILD" \
-            -GNinja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_BENCH=ON \
-            -Domnirefl_DIR="$OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
-            tee "$OMNIREFL_BENCHMARK_RESULTS/configure.log"
-
       - name: Run benchmark
         run: |
-          set -euo pipefail
-          reflection_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          if ! cmake --build "$OMNIREFL_BENCHMARK_BUILD" \
-              -t benchmark.baseline.omni \
-              > "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" 2>&1; then
-            cat "$OMNIREFL_BENCHMARK_RESULTS/reflection.log"
-            exit 1
-          fi
-          reflection_end="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          reflection_ms="$(awk \
-            -v start="$reflection_start" \
-            -v end="$reflection_end" \
-            'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
-
-          build_start="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          if ! cmake --build "$OMNIREFL_BENCHMARK_BUILD" \
-              -t benchmark.baseline \
-              --parallel "$(sysctl -n hw.logicalcpu)" \
-              > "$OMNIREFL_BENCHMARK_RESULTS/build.log" 2>&1; then
-            cat "$OMNIREFL_BENCHMARK_RESULTS/build.log"
-            exit 1
-          fi
-          build_end="$(python3 -c 'import time; print(time.monotonic_ns())')"
-          build_ms="$(awk \
-            -v start="$build_start" \
-            -v end="$build_end" \
-            'BEGIN { printf "%.3f", (end - start) / 1000000 }')"
-          tool_build="$(awk -v tool="$reflection_ms" -v build="$build_ms" \
-            'BEGIN { printf "%.6f", (0 == build ? 0 : 100 * tool / build) }')"
-
-          {
-            printf "[\n"
-            printf "  {\"name\": \"reflection wall\", \"unit\": \"ms\", \"value\": %s},\n" "$reflection_ms"
-            printf "  {\"name\": \"build wall\", \"unit\": \"ms\", \"value\": %s},\n" "$build_ms"
-            printf "  {\"name\": \"tool/build\", \"unit\": \"%%\", \"value\": %s}" "$tool_build"
-            grep -E "^[^:]+: .+ \\([0-9]+ microseconds\\)$" \
-              "$OMNIREFL_BENCHMARK_RESULTS/reflection.log" \
-              | while IFS= read -r line; do
-                name="${line%%:*}"
-                us="$(printf "%s\n" "$line" \
-                  | sed -E "s/.*\\(([0-9]+) microseconds\\)$/\\1/")"
-                ms="$(awk -v us="$us" \
-                  'BEGIN { printf "%.3f", us / 1000 }')"
-                printf ",\n  {\"name\": \"tool %s\", \"unit\": \"ms\", \"value\": %s}" \
-                  "$name" "$ms"
-              done
-            printf "\n]\n"
-          } > "$OMNIREFL_BENCHMARK_RESULTS/benchmark.json"
-
-          printf "\nBenchmark summary (macos-${{ matrix.arch }}-cosmopolitan)\n"
-          printf "%-32s %12s %8s\n" "metric" "value" "unit"
-          printf "%-32s %12s %8s\n" "reflection wall" "$reflection_ms" "ms"
-          printf "%-32s %12s %8s\n" "build wall" "$build_ms" "ms"
-          printf "%-32s %12s %8s\n" "tool/build" "$tool_build" "%"
+          ci/benchmark_package.sh \
+            --install "$OMNIREFL_INSTALL_ROOT" \
+            --build "$OMNIREFL_BENCHMARK_BUILD" \
+            --results "$OMNIREFL_BENCHMARK_RESULTS" \
+            --name "macos-${{ matrix.arch }}-cosmo"
 
       - name: Find macOS benchmark history artifact
         id: macos_history_run
@@ -537,7 +626,7 @@ jobs:
             const workflow_id = 'ci.yml'
             const branch = context.payload.repository.default_branch
             const historyArtifactPrefix =
-              'benchmark-history-macos-${{ matrix.arch }}-cosmopolitan'
+              'benchmark-history-macos-${{ matrix.arch }}-cosmo'
 
             const historyArtifactFrom = async (run_id) => {
               const artifacts = await github.paginate(
@@ -595,11 +684,11 @@ jobs:
       - name: Check macOS benchmark regression
         run: |
           python3 -B ci/benchmark_history.py compare \
-            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan/benchmark.json \
+            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo/benchmark.json \
             --history ./artifacts/benchmark-history/macos-${{ matrix.arch }}/history.json \
-            --os macos-${{ matrix.arch }}-cosmopolitan \
+            --os macos-${{ matrix.arch }}-cosmo \
             --arch ${{ matrix.arch }} \
-            --libc cosmopolitan \
+            --libc cosmo \
             --threshold 1.2 \
             --min-delta-ms 500 \
             --count 5
@@ -610,13 +699,13 @@ jobs:
           COMMIT_TITLE: ${{ steps.commit.outputs.title }}
         run: |
           python3 -B ci/benchmark_history.py update \
-            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan/benchmark.json \
+            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo/benchmark.json \
             --history ./artifacts/benchmark-history/macos-${{ matrix.arch }}/history.json \
             --commit "${{ github.sha }}" \
             --commit-title "$COMMIT_TITLE" \
-            --os macos-${{ matrix.arch }}-cosmopolitan \
+            --os macos-${{ matrix.arch }}-cosmo \
             --arch ${{ matrix.arch }} \
-            --libc cosmopolitan \
+            --libc cosmo \
             --max-runs 200
 
       - name: Upload macOS benchmark history
@@ -624,7 +713,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            benchmark-history-macos-${{ matrix.arch }}-cosmopolitan-attempt-${{ github.run_attempt }}
+            benchmark-history-macos-${{ matrix.arch }}-cosmo-attempt-${{ github.run_attempt }}
           path: ./artifacts/benchmark-history/macos-${{ matrix.arch }}
           if-no-files-found: error
 
@@ -632,14 +721,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-macos-${{ matrix.arch }}-cosmopolitan-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmopolitan
+          name: benchmark-macos-${{ matrix.arch }}-cosmo-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo
           if-no-files-found: error
 
-  benchmark:
+  benchmark-musl:
     name: Benchmark / ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ubuntu-latest
-    needs: build-package
+    needs: build-package-musl
     permissions:
       actions: read
       contents: read
@@ -661,17 +750,19 @@ jobs:
           echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Download Package Artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: packages-${{ matrix.os }}-${{ matrix.arch }}-musl-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/${{ matrix.os }}
+      - name: Pull Benchmark Build Image
+        run: docker compose pull build-benchmark-musl
+
+      - name: Build Release Benchmark Input
+        run: |
+          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
+          PACKAGE_DIR=./artifacts/packages/benchmark-musl \
+            docker compose run --rm build-benchmark-musl
 
       - name: Run benchmark
         run: |
-          UBUNTU_VERSION=22.04 \
           TOOLCHAIN=${{ matrix.toolchain }} \
-          LINUX_PACKAGE_DIR=./artifacts/packages/${{ matrix.os }} \
+          PACKAGE_DIR=./artifacts/packages/benchmark-musl \
           TEST_RESULTS_DIR=./artifacts/benchmarks \
           BUILD_DIR=./artifacts/benchmark-build/${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
             docker compose run --rm benchmark
@@ -686,7 +777,7 @@ jobs:
             const workflow_id = 'ci.yml'
             const branch = context.payload.repository.default_branch
             const historyArtifactPrefix =
-              'benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}'
+              'benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}'
 
             const historyArtifactFrom = async (run_id) => {
               const artifacts = await github.paginate(
@@ -746,7 +837,7 @@ jobs:
           python3 -B ci/benchmark_history.py compare \
             --current ./artifacts/benchmarks/benchmark.json \
             --history ./artifacts/benchmark-history/history.json \
-            --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
             --arch ${{ matrix.arch }} \
             --libc ${{ matrix.libc }} \
             --threshold 1.2 \
@@ -763,7 +854,7 @@ jobs:
             --history ./artifacts/benchmark-history/history.json \
             --commit "${{ github.sha }}" \
             --commit-title "$COMMIT_TITLE" \
-            --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+            --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
             --arch ${{ matrix.arch }} \
             --libc ${{ matrix.libc }} \
             --max-runs 200
@@ -776,7 +867,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+            benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ./artifacts/benchmark-history
           if-no-files-found: error
 
@@ -789,305 +880,157 @@ jobs:
           path: ./artifacts/benchmarks
           if-no-files-found: error
 
-  test-windows:
-    name: Windows test / ${{ matrix.toolchain }}
-    runs-on: windows-2022
-    needs: build-package
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
-        include:
-          - toolchain: msys2-mingw
-            msystem: MINGW64
-            cc: gcc
-            cxx: g++
-            packages: >-
-              git
-              mingw-w64-x86_64-cmake
-              mingw-w64-x86_64-ninja
-              mingw-w64-x86_64-gcc
-          - toolchain: msys2-clang
-            msystem: CLANG64
-            cc: clang
-            cxx: clang++
-            packages: >-
-              git
-              mingw-w64-clang-x86_64-cmake
-              mingw-w64-clang-x86_64-ninja
-              mingw-w64-clang-x86_64-clang
-
-    steps:
-      - name: Resolve Short SHA
-        id: commit
-        shell: powershell
-        run: |
-          "short_sha=$($env:GITHUB_SHA.Substring(0, 12))" |
-            Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Download Package Artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: packages-windows-x86_64-ucrt-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/windows
-
-      - name: Install Package
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $package = Get-ChildItem -Path 'artifacts/packages/windows' -Filter 'omnirefl-*.zip' |
-            Sort-Object Name |
-            Select-Object -Last 1
-          if ($null -eq $package) {
-            throw 'Windows package artifact was not found'
-          }
-
-          $root = Join-Path $env:RUNNER_TEMP 'with space'
-          $install = Join-Path $root 'omnirefl'
-          $source = Join-Path $root 'tests'
-          $build = Join-Path $root 'build'
-          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.toolchain }}'
-          New-Item -ItemType Directory -Force -Path $root, $results | Out-Null
-          Expand-Archive -Path $package.FullName -DestinationPath $root -Force
-
-          $packageRoot = Get-ChildItem -Path $root -Directory -Filter 'omnirefl-*' |
-            Sort-Object Name |
-            Select-Object -First 1
-          if ($null -eq $packageRoot) {
-            throw 'could not find extracted omnirefl package root'
-          }
-
-          Move-Item $packageRoot.FullName $install
-          Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $root
-          & (Join-Path $install 'bin/omnirefl.exe') -h
-          & (Join-Path $install 'bin/ccdb_query.exe') -h
-
-          @(
-            "OMNIREFL_INSTALL_ROOT=$($install.Replace('\', '/'))"
-            "OMNIREFL_TEST_SOURCE=$($source.Replace('\', '/'))"
-            "OMNIREFL_TEST_BUILD=$($build.Replace('\', '/'))"
-            "OMNIREFL_TEST_RESULTS=$($results.Replace('\', '/'))"
-          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Install MSYS2 Toolchain
-        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          release: false
-          update: true
-          install: ${{ matrix.packages }}
-
-      - name: Run MSVC-compatible Package Tests
-        if: ${{ 'msvc' == matrix.toolchain || 'clang-cl' == matrix.toolchain }}
-        # Windows PowerShell promotes ordinary native stderr (for example,
-        # Git's clone progress) to NativeCommandError under the runner's strict
-        # error preference. PowerShell 7 preserves it as process output; the
-        # explicit exit-code checks below still reject real command failures.
-        shell: pwsh
-        run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $vsInstall = & $vswhere -latest -products '*' `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
-            throw 'Visual Studio with the x64 C++ toolchain was not found'
-          }
-
-          $vsDevCmd = Join-Path $vsInstall 'Common7/Tools/VsDevCmd.bat'
-          $vsEnv = & $env:ComSpec /d /c "`"$vsDevCmd`" -arch=x64 >nul && set"
-          if (0 -ne $LASTEXITCODE) {
-            throw 'failed to initialize the Visual Studio environment'
-          }
-
-          foreach ($line in $vsEnv) {
-            if ($line -match '^(.*?)=(.*)$') {
-              Set-Item -Path ('Env:' + $Matches[1]) -Value $Matches[2]
-            }
-          }
-
-          if ('clang-cl' -eq '${{ matrix.toolchain }}') {
-            $llvmBin = 'C:/Program Files/LLVM/bin'
-            if (!(Test-Path (Join-Path $llvmBin 'clang-cl.exe'))) {
-              throw 'clang-cl was not found in the hosted runner LLVM installation'
-            }
-
-            $env:Path = "$llvmBin;$env:Path"
-            $env:CC = 'clang-cl'
-            $env:CXX = 'clang-cl'
-          }
-
-          New-Item -ItemType Directory -Force -Path $env:OMNIREFL_TEST_BUILD | Out-Null
-          Set-Location $env:OMNIREFL_TEST_BUILD
-
-          cmake ../tests -GNinja `
-            -DCMAKE_BUILD_TYPE=Release `
-            "-Domnirefl_DIR=$env:OMNIREFL_INSTALL_ROOT/lib/cmake/omnirefl" 2>&1 |
-            Tee-Object "$env:OMNIREFL_TEST_RESULTS/configure.log"
-          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-
-          cmake --build . `
-            --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
-            Tee-Object "$env:OMNIREFL_TEST_RESULTS/build.log"
-          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-
-          ctest . `
-            --output-junit "$env:OMNIREFL_TEST_RESULTS/windows-${{ matrix.toolchain }}.xml" `
-            -V 2>&1 |
-            Tee-Object "$env:OMNIREFL_TEST_RESULTS/windows-${{ matrix.toolchain }}.log"
-          exit $LASTEXITCODE
-
-      - name: Run MSYS2 Package Tests
-        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
-        shell: msys2 {0}
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
-        run: |
-          set -euo pipefail
-          install_root="$(cygpath -u "$OMNIREFL_INSTALL_ROOT")"
-          build_dir="$(cygpath -u "$OMNIREFL_TEST_BUILD")"
-          results_dir="$(cygpath -u "$OMNIREFL_TEST_RESULTS")"
-
-          mkdir -p "$build_dir"
-          cd "$build_dir"
-
-          cmake ../tests -GNinja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -Domnirefl_DIR="$install_root/lib/cmake/omnirefl" 2>&1 |
-            tee "$results_dir/configure.log"
-
-          cmake --build . --parallel "$(nproc)" 2>&1 |
-            tee "$results_dir/build.log"
-
-          set +e
-          ctest . \
-            --output-junit "$results_dir/windows-${{ matrix.toolchain }}.xml" \
-            -V 2>&1 |
-            tee "$results_dir/windows-${{ matrix.toolchain }}.log"
-          rc=${PIPESTATUS[0]}
-          set -e
-          exit "$rc"
-
-      - name: Collect Test Diagnostics
-        if: always()
-        shell: powershell
-        run: |
-          $build = Join-Path $env:RUNNER_TEMP 'with space/build'
-          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.toolchain }}'
-          $diagnostics = Join-Path $results 'diagnostics'
-          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
-
-          Copy-Item -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
-            (Join-Path $build 'CMakeCache.txt')
-            (Join-Path $build 'compile_commands.json')
-            (Join-Path $build 'Testing/Temporary/LastTest.log')
-            (Join-Path $build 'CMakeFiles/CMakeError.log')
-          )
-
-          $generated = @(Get-ChildItem -ErrorAction SilentlyContinue -Recurse -File `
-            -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
-          if (0 -lt $generated.Count) {
-            Compress-Archive -Path $generated.FullName `
-              -DestinationPath (Join-Path $diagnostics 'generated-reflection.zip') `
-              -Force
-          }
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: >-
-            test-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
-          if-no-files-found: error
-
-  test-cosmopolitan-windows:
-    name: Cosmopolitan test / windows-${{ matrix.toolchain }}
-    runs-on: [self-hosted, windows, x64]
-    needs: build-cosmopolitan-package
-    env:
-      WORK_DIR: cosmopolitan-${{ matrix.toolchain }}-${{ github.run_id }}-${{ github.run_attempt }}
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
+  benchmark-cosmo:
+    name: Benchmark / linux-x86_64-cosmo-gcc
+    runs-on: ubuntu-latest
+    needs: build-package-cosmo
+    permissions:
+      actions: read
+      contents: read
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
-        with:
-          path: ${{ env.WORK_DIR }}
 
       - name: Resolve Short SHA
         id: commit
-        shell: powershell
         run: |
-          "short_sha=$($env:GITHUB_SHA.Substring(0, 12))" |
-            Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Pull Docker Image
-        shell: powershell
-        run: |
-          if ('msys2-mingw' -eq '${{ matrix.toolchain }}' -or
-              'msys2-clang' -eq '${{ matrix.toolchain }}') {
-            docker pull ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-msys2
-          } else {
-            docker pull ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-${{ matrix.toolchain }}
-          }
-
-      - name: Download Cosmopolitan Package
+      - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmopolitan-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./${{ env.WORK_DIR }}/artifacts/packages/cosmopolitan
+          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/cosmo
 
-      - name: Run Package Test
-        shell: powershell
-        working-directory: ${{ env.WORK_DIR }}
+      - name: Run benchmark
         run: |
-          $service = if ('msys2-mingw' -eq '${{ matrix.toolchain }}' -or
-              'msys2-clang' -eq '${{ matrix.toolchain }}') {
-            'test-cosmopolitan-windows-msys2'
-          } else {
-            'test-cosmopolitan-windows-msvc'
-          }
+          TOOLCHAIN=gcc \
+          PACKAGE_DIR=./artifacts/packages/cosmo \
+          TEST_RESULTS_DIR=./artifacts/benchmarks \
+          BUILD_DIR=./artifacts/benchmark-build/linux-x86_64-cosmo-gcc \
+            docker compose run --rm benchmark
 
-          $results = New-Item -ItemType Directory -Force `
-            -Path 'artifacts/test-results/cosmopolitan-windows-${{ matrix.toolchain }}'
-          $env:TOOLCHAIN = '${{ matrix.toolchain }}'
-          $env:WINDOWS_PACKAGE_DIR =
-            (Resolve-Path 'artifacts/packages/cosmopolitan').Path
-          $env:TEST_RESULTS_DIR = $results.FullName
-          docker compose --project-name '${{ env.WORK_DIR }}' run --rm $service
+      - name: Find benchmark history artifact
+        id: history_run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const workflow_id = 'ci.yml'
+            const branch = context.payload.repository.default_branch
+            const historyArtifactPrefix =
+              'benchmark-history-linux-x86_64-cosmo-gcc'
 
-      - name: Cleanup Docker Compose Project
-        if: always()
-        shell: powershell
-        working-directory: ${{ env.WORK_DIR }}
-        run: docker compose --project-name '${{ env.WORK_DIR }}' down --remove-orphans
+            const historyArtifactFrom = async (run_id) => {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id, per_page: 100})
 
-      - name: Upload Test Results
+              return artifacts
+                .filter(({expired, name}) =>
+                  !expired && (
+                    historyArtifactPrefix === name ||
+                    name.startsWith(`${historyArtifactPrefix}-attempt-`)))
+                .sort((lhs, rhs) =>
+                  new Date(rhs.created_at) - new Date(lhs.created_at))[0]
+            }
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id,
+                branch,
+                status: 'success',
+                per_page: 20,
+              })
+
+            for (const run of runs) {
+              if (context.runId === run.id) {
+                continue
+              }
+
+              const artifact = await historyArtifactFrom(run.id)
+              if (artifact) {
+                core.setOutput('run_id', run.id)
+                core.setOutput('artifact_name', artifact.name)
+                return
+              }
+            }
+
+            core.setOutput('run_id', '')
+
+      - name: Download benchmark history
+        if: ${{ '' != steps.history_run.outputs.run_id }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.history_run.outputs.artifact_name }}
+          path: ./artifacts/benchmark-history
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.history_run.outputs.run_id }}
+
+      - name: Prepare benchmark history
+        run: mkdir -p ./artifacts/benchmark-history
+
+      - name: Check benchmark regression
+        run: |
+          python3 -B ci/benchmark_history.py compare \
+            --current ./artifacts/benchmarks/benchmark.json \
+            --history ./artifacts/benchmark-history/history.json \
+            --os linux-x86_64-cosmo-gcc \
+            --arch x86_64 \
+            --libc cosmo \
+            --threshold 1.2 \
+            --min-delta-ms 500 \
+            --count 5
+
+      - name: Update benchmark history
+        if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
+        env:
+          COMMIT_TITLE: ${{ steps.commit.outputs.title }}
+        run: |
+          python3 -B ci/benchmark_history.py update \
+            --current ./artifacts/benchmarks/benchmark.json \
+            --history ./artifacts/benchmark-history/history.json \
+            --commit "${{ github.sha }}" \
+            --commit-title "$COMMIT_TITLE" \
+            --os linux-x86_64-cosmo-gcc \
+            --arch x86_64 \
+            --libc cosmo \
+            --max-runs 200
+
+      - name: Upload benchmark history
+        if: ${{ success() && 'push' == github.event_name && 'master' == github.ref_name }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: >-
+            benchmark-history-linux-x86_64-cosmo-gcc-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmark-history
+          if-no-files-found: error
+
+      - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            test-cosmopolitan-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: >-
-            ./${{ env.WORK_DIR }}/artifacts/test-results/cosmopolitan-windows-${{ matrix.toolchain }}
+            benchmark-linux-x86_64-cosmo-gcc-attempt-${{ github.run_attempt }}
+          path: ./artifacts/benchmarks
           if-no-files-found: error
 
   required-ci:
     name: Required CI
     runs-on: ubuntu-latest
     needs:
-      - build-package
-      - build-cosmopolitan-package
-      - test-linux
-      - test-cosmopolitan-linux
-      - test-macos
-      - test-windows
-      - test-cosmopolitan-windows
+      - build-package-musl
+      - build-package-cosmo
+      - test-package-linux
+      - test-package-macos
+      - test-package-windows
     permissions:
       contents: read
       actions: write
@@ -1185,30 +1128,24 @@ jobs:
           ${{
             always()
             && (
-              'success' != needs['build-package'].result
-              || 'success' != needs['build-cosmopolitan-package'].result
-              || 'success' != needs['test-linux'].result
-              || 'success' != needs['test-cosmopolitan-linux'].result
-              || 'success' != needs['test-macos'].result
-              || 'success' != needs['test-windows'].result
-              || 'success' != needs['test-cosmopolitan-windows'].result
+              'success' != needs['build-package-musl'].result
+              || 'success' != needs['build-package-cosmo'].result
+              || 'success' != needs['test-package-linux'].result
+              || 'success' != needs['test-package-macos'].result
+              || 'success' != needs['test-package-windows'].result
             )
           }}
         env:
-          BUILD_PACKAGE_RESULT: ${{ needs['build-package'].result }}
-          BUILD_COSMOPOLITAN_PACKAGE_RESULT: ${{ needs['build-cosmopolitan-package'].result }}
-          LINUX_TEST_RESULT: ${{ needs['test-linux'].result }}
-          COSMOPOLITAN_LINUX_TEST_RESULT: ${{ needs['test-cosmopolitan-linux'].result }}
-          MACOS_TEST_RESULT: ${{ needs['test-macos'].result }}
-          WINDOWS_TEST_RESULT: ${{ needs['test-windows'].result }}
-          COSMOPOLITAN_WINDOWS_TEST_RESULT: ${{ needs['test-cosmopolitan-windows'].result }}
+          BUILD_PACKAGE_MUSL_RESULT: ${{ needs['build-package-musl'].result }}
+          BUILD_PACKAGE_COSMO_RESULT: ${{ needs['build-package-cosmo'].result }}
+          TEST_PACKAGE_LINUX_RESULT: ${{ needs['test-package-linux'].result }}
+          TEST_PACKAGE_MACOS_RESULT: ${{ needs['test-package-macos'].result }}
+          TEST_PACKAGE_WINDOWS_RESULT: ${{ needs['test-package-windows'].result }}
         run: |
-          printf 'build-package: %s\nbuild-cosmopolitan-package: %s\ntest-linux: %s\ntest-cosmopolitan-linux: %s\ntest-macos: %s\ntest-windows: %s\ntest-cosmopolitan-windows: %s\n' \
-            "$BUILD_PACKAGE_RESULT" \
-            "$BUILD_COSMOPOLITAN_PACKAGE_RESULT" \
-            "$LINUX_TEST_RESULT" \
-            "$COSMOPOLITAN_LINUX_TEST_RESULT" \
-            "$MACOS_TEST_RESULT" \
-            "$WINDOWS_TEST_RESULT" \
-            "$COSMOPOLITAN_WINDOWS_TEST_RESULT"
+          printf 'build-package-musl: %s\nbuild-package-cosmo: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
+            "$BUILD_PACKAGE_MUSL_RESULT" \
+            "$BUILD_PACKAGE_COSMO_RESULT" \
+            "$TEST_PACKAGE_LINUX_RESULT" \
+            "$TEST_PACKAGE_MACOS_RESULT" \
+            "$TEST_PACKAGE_WINDOWS_RESULT"
           exit 1

@@ -15,7 +15,8 @@ if (($#)); then
   done
 fi
 
-docker compose run --rm build-linux
+PACKAGE_DIR=./artifacts/packages/current docker compose run --rm build-musl
+PACKAGE_DIR=./artifacts/packages/current docker compose run --rm build-cosmo
 
 for toolchain in "${TOOLCHAINS[@]}"; do
   TOOLCHAIN="$toolchain" docker compose run --rm test-alpine

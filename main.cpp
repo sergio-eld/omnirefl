@@ -2997,6 +2997,10 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const fs::path &resource_dir = cli_args.resource_dir;
   const fs::path &source = cli_args.source;
   const std::vector<std::string> &raw_flags = cli_args.flags;
+  const bool windows_drive_mount_used =
+    3 <= source.native().size() && '/' == source.native()[0]
+    && std::isalpha(static_cast<unsigned char>(source.native()[1]))
+    && '/' == source.native()[2];
 
   // Omnirefl supplies its own source and produces no compiler output.
   static constexpr std::array k_ignored_action_options{
@@ -3064,8 +3068,23 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
           && !std::ranges::contains(k_ignored_output_options,
             flag.current);
       })
-    | std::views::transform([](const flag_context &flag) {
-        return flag.current;
+    | std::views::transform([windows_drive_mount_used](
+                              const flag_context &flag) -> std::string {
+        if (!windows_drive_mount_used || 4 > flag.current.size()
+          || '@' != flag.current[0]
+          || !std::isalpha(static_cast<unsigned char>(flag.current[1]))
+          || ':' != flag.current[2]
+          || ('/' != flag.current[3] && '\\' != flag.current[3])) {
+          return std::string{flag.current};
+        }
+
+        // The Windows host passes @C:/... response files, while an APE opens
+        // the same drive through its /C/... mount.
+        std::string mounted{"@/"};
+        mounted += flag.current[1];
+        mounted += flag.current.substr(3);
+        std::ranges::replace(mounted, '\\', '/');
+        return mounted;
       }) //
     | std::ranges::to<std::vector<std::string>>();
 
@@ -3096,7 +3115,10 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   // ad hoc: approximate driver response-file expansion by selecting the
   // tokenizer from the invocation style and compile-command directory.
   const std::expected expanded_flags = //
-    std::invoke([&flags, response_file_directory, cl_style]
+    std::invoke([&flags,
+                  response_file_directory,
+                  cl_style,
+                  windows_drive_mount_used]
       -> std::expected<std::vector<std::string>, std::string> {
       llvm::BumpPtrAllocator allocator;
       llvm::SmallVector<const char *> args;
@@ -3124,7 +3146,21 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       }
 
       return args //
-        | std::views::transform(fn::as<std::string>) //
+        | std::views::transform(
+          [windows_drive_mount_used](std::string_view arg) -> std::string {
+            if (!windows_drive_mount_used || 3 > arg.size()
+              || !std::isalpha(static_cast<unsigned char>(arg[0]))
+              || ':' != arg[1] || ('/' != arg[2] && '\\' != arg[2]))
+              return std::string{arg};
+
+            // APE translates drive paths passed by the host, but paths read
+            // from response files enter Clang after that translation.
+            std::string mounted{"/"};
+            mounted += arg[0];
+            mounted += arg.substr(2);
+            std::ranges::replace(mounted, '\\', '/');
+            return mounted;
+          }) //
         | std::ranges::to<std::vector>();
     });
 
@@ -3233,50 +3269,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         return "x86_64-w64-windows-gnu";
       if (compiler_name.starts_with("i686-w64-mingw32-"))
         return "i686-w64-windows-gnu";
-
-      // FIXME(cosmopolitan-target): querying the compiler for every
-      // instrumentation run is an expensive ad hoc. Derive or cache its
-      // default target without starting another process.
-      if (msvc_used)
-        return std::nullopt;
-
-      const auto compiler = llvm::sys::findProgramByName(raw_flags.front());
-      if (!compiler)
-        return std::nullopt;
-
-      llvm::SmallString<64> output;
-      if (llvm::sys::fs::createTemporaryFile(
-            "omnirefl-compiler-target", "", output))
-        return std::nullopt;
-
-      llvm::FileRemover remove_output(output);
-      if (llvm::sys::ExecuteAndWait(*compiler,
-            {
-              llvm::StringRef{*compiler},
-              llvm::StringRef{"-dumpmachine"},
-            },
-            /*Env=*/std::nullopt,
-            {
-              /*stdin=*/std::optional{llvm::StringRef{""}},
-              /*stdout=*/std::optional{llvm::StringRef{output}},
-              /*stderr=*/std::optional{llvm::StringRef{""}},
-            },
-            /*SecondsToWait=*/10)
-        != 0)
-        return std::nullopt;
-
-      const auto buffer = llvm::MemoryBuffer::getFile(output);
-      if (!buffer)
-        return std::nullopt;
-
-      const llvm::StringRef triple = buffer->get()->getBuffer().trim();
-      return triple.empty() //
-        ? std::nullopt
-        : std::optional{llvm::Triple::normalize(triple)};
+      return std::nullopt;
     });
 
-  // For Cosmopolitan this is LLVM's build triple, not necessarily the
-  // architecture of the running APE payload.
   const llvm::Triple process_triple{llvm::sys::getProcessTriple()};
 
   // refactorme(macos_sysroot): replace this inline platform detection.
@@ -3330,6 +3325,15 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     if (msvc_used) {
       triple.setOS(llvm::Triple::Win32);
       triple.setEnvironment(llvm::Triple::MSVC);
+    } else if (!target_triple && windows_drive_mount_used) {
+      // refactorme(cosmo_runtime): review runtime-platform detection.
+      // ad hoc: a Cosmopolitan process triple identifies its build target, not
+      // the operating system currently executing the APE. Drive-mounted source
+      // paths identify a native Windows compiler invocation without spawning
+      // the compiler once per instrumentation run.
+      triple.setVendor(llvm::Triple::PC);
+      triple.setOS(llvm::Triple::Win32);
+      triple.setEnvironment(llvm::Triple::GNU);
     } else if (!target_triple && macos_sysroot) {
       triple.setVendor(llvm::Triple::Apple);
       triple.setOS(llvm::Triple::Darwin);
@@ -3349,7 +3353,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     const std::string compiler_name =
       fs::path(raw_flags.front()).filename().string();
 
-    const std::string gcc_machine = std::invoke([&] {
+    std::string gcc_machine = std::invoke([&] {
       if (compiler_name.starts_with("x86_64-w64-mingw32-"))
         return std::string{"x86_64-w64-mingw32"};
       if (compiler_name.starts_with("i686-w64-mingw32-"))
@@ -3357,12 +3361,30 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return std::string{};
     });
 
-    const fs::path compiler_path = std::invoke([&raw_flags] {
+    const fs::path compiler_path = std::invoke([&] {
+      std::string compiler{raw_flags.front()};
+      if (windows_drive_mount_used && 3 <= compiler.size()
+        && std::isalpha(static_cast<unsigned char>(compiler[0]))
+        && ':' == compiler[1]
+        && ('/' == compiler[2] || '\\' == compiler[2])) {
+        // refactorme(cosmo_windows_path): review runtime path translation.
+        // ad hoc: resolve the compiler through the APE's mounted Windows drive.
+        compiler = '/' + compiler.substr(0, 1) + compiler.substr(2);
+        std::ranges::replace(compiler, '\\', '/');
+      }
+
       std::error_code ec;
-      return fs::weakly_canonical(raw_flags.front(), ec);
+      return fs::weakly_canonical(compiler, ec);
     });
 
     const fs::path compiler_root = compiler_path.parent_path().parent_path();
+
+    if (gcc_machine.empty()) {
+      if ("mingw64" == compiler_root.filename())
+        gcc_machine = "x86_64-w64-mingw32";
+      else if ("mingw32" == compiler_root.filename())
+        gcc_machine = "i686-w64-mingw32";
+    }
 
     if (fs::is_directory(compiler_root / "include/c++/v1")) {
       std::array ordered = {
@@ -3400,7 +3422,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     const std::string compiler_variant =
       compiler_path.filename().string().contains("posix") ? "posix" : "win32";
 
-    const fs::path gcc_root = fs::path("/usr/lib/gcc") / gcc_machine;
+    fs::path gcc_root = compiler_root / "lib/gcc" / gcc_machine;
+    if (!fs::is_directory(gcc_root))
+      gcc_root = fs::path("/usr/lib/gcc") / gcc_machine;
     if (!fs::is_directory(gcc_root))
       return paths;
 
@@ -3424,18 +3448,43 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     const fs::path &gcc_dir =
       candidates.end() == found ? candidates.back() : *found;
 
-    std::array ordered = {
+    // refactorme(mingw_include_paths): review explicit distribution layouts.
+    // ad hoc: Alpine, MSYS2, and Debian store cross-target libstdc++ in
+    // different roots; prefer target-qualified layouts before GCC's local
+    // layout.
+    const std::array cxx_root_candidates = {
+      compiler_root / gcc_machine / "include/c++" / gcc_dir.filename(),
+      compiler_root / "include/c++" / gcc_dir.filename(),
       gcc_dir / "include/c++",
-      gcc_dir / "include/c++" / gcc_machine,
-      gcc_dir / "include/c++/backward",
+    };
+
+    const auto cxx_root = std::ranges::find_if(cxx_root_candidates,
+      [](const fs::path &path) { return fs::is_directory(path); });
+
+    if (cxx_root_candidates.end() == cxx_root)
+      return paths;
+
+    std::array ordered = {
+      *cxx_root,
+      *cxx_root / gcc_machine,
+      *cxx_root / "backward",
       gcc_dir / "include",
       gcc_dir / "include-fixed",
+      compiler_root / gcc_machine / "include",
     };
 
     std::ranges::copy(ordered | std::views::filter([](const fs::path &path) {
       return fs::is_directory(path);
     }),
       std::back_inserter(paths));
+
+    // ad hoc: MSYS2 keeps its CRT here, while the equivalent Linux path is
+    // the host /usr/include and would precede project-provided system includes.
+    if ((compiler_root.filename() == "mingw64"
+          || compiler_root.filename() == "mingw32")
+      && fs::is_directory(compiler_root / "include")) {
+      paths.emplace_back(compiler_root / "include");
+    }
 
     return paths;
   });
@@ -3610,6 +3659,43 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   {
     clang::HeaderSearchOptions &o = clang_invocation->getHeaderSearchOpts();
+
+    if (msvc_used && windows_drive_mount_used) {
+      // The APE exposes %INCLUDE% as a colon-separated /C/... path list. This
+      // POSIX-configured Clang expects semicolons for MSVC and otherwise emits
+      // the complete list as one search entry. Split that generated entry.
+      decltype(o.UserEntries) mounted_entries;
+      for (const auto &entry : o.UserEntries) {
+        if (3 > entry.Path.size()
+          || '/' != entry.Path[0]
+          || !std::isalpha(static_cast<unsigned char>(entry.Path[1]))
+          || '/' != entry.Path[2]) {
+          mounted_entries.emplace_back(entry);
+          continue;
+        }
+
+        for (std::size_t start = 0; start < entry.Path.size();) {
+          std::size_t next = entry.Path.find(':', start + 3);
+          while (std::string::npos != next
+            && (next + 3 >= entry.Path.size()
+              || '/' != entry.Path[next + 1]
+              || !std::isalpha(
+                static_cast<unsigned char>(entry.Path[next + 2]))
+              || '/' != entry.Path[next + 3])) {
+            next = entry.Path.find(':', next + 1);
+          }
+
+          auto mounted = entry;
+          mounted.Path = entry.Path.substr(start, next - start);
+          mounted_entries.emplace_back(std::move(mounted));
+
+          if (std::string::npos == next)
+            break;
+          start = next + 1;
+        }
+      }
+      o.UserEntries = std::move(mounted_entries);
+    }
 
     // Original intent: bundle libc++ so native Linux instrumentation can work
     // as a mostly standalone tool even when no usable host C++ standard library

@@ -237,39 +237,51 @@ as Clang compilation errors. Compiler warnings are not reported by omnirefl.
 
 ## Install
 
-Install options:
+Every package exposes the same installed layout:
+
+- `bin/omnirefl` and `bin/ccdb_query`
+- `include/omnirefl`
+- `lib/cmake/omnirefl`
+- `share/omnirefl/tests`
+
+Native Linux releases provide `.deb` and `.tar.gz` packages, native Windows
+releases provide `.zip` packages, and the experimental Cosmopolitan build
+provides one `.tar.gz` package for Linux, macOS, and Windows. Install a `.deb`
+normally, or unpack an archive and use its `omnirefl-*` directory as the
+installation prefix.
+
+On Linux and macOS, invoke `bin/omnirefl` and `bin/ccdb_query`. On Windows,
+invoke the adjacent `.exe` files. The Cosmopolitan archive keeps its APE
+payloads as those `.exe` files and adds the normal extensionless Unix
+launchers; this packaging detail does not change CMake usage.
+
+Package sources:
 
 - Release archives:
   [browse published releases](https://github.com/sergio-eld/omnirefl/releases).
-  Native Linux release packages use `.deb` and `.tar.gz`; native Windows
-  packages use `.zip`; the experimental universal package uses `.tar.gz`.
 - Latest CI artifact:
   open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
   run on `master` and use the artifacts produced by
   `Build package / linux-x86_64`, `Build package / linux-aarch64`,
   `Build package / windows-x86_64`, or
-  `Build package / Cosmopolitan universal`.
+  `Build package / cosmo-universal`.
   GitHub Actions artifacts do not provide a stable direct "latest artifact"
   download URL; look for
   `packages-linux-<arch>-musl-<short-sha>` or
   `packages-windows-x86_64-ucrt-<short-sha>`, or
-  `packages-cosmopolitan-universal-<short-sha>`.
+  `packages-cosmo-universal-<short-sha>`.
 - Build locally using the prepared Docker images; see
   [Build and Develop Locally](#build-and-develop-locally).
-
-The examples below assume a standard install under `/usr/local`.
 
 ### Cosmopolitan universal package (experimental)
 
 The single archive contains fat x86_64/AArch64 APE tools and one portable
 libc++ header bundle. It is package-tested on Alpine and Ubuntu for both
-architectures, on x86_64 Windows, and on x86_64 and arm64 macOS.
-
-On Linux and macOS, invoke `bin/omnirefl` and `bin/ccdb_query`. On Windows,
-invoke the adjacent `.exe` files. macOS arm64 remains ad hoc because
-Cosmopolitan 4.0.2 uses its embedded `ape-m1` loader; the first invocation
-needs the Xcode command-line tools to compile that loader.
+architectures, on x86_64 Windows, and on x86_64 and arm64 macOS. macOS arm64
+remains ad hoc because, as of this writing, the bundled Cosmopolitan toolchain
+uses its embedded `ape-m1` loader; the first invocation needs the Xcode
+command-line tools to compile that loader.
 
 ## Packaged Tests and Examples
 
@@ -318,7 +330,7 @@ The repository uses prepared Alpine Docker images for local and CI builds:
   for x86_64 Linux and Windows packages
 - [`ghcr.io/sergio-eld/omnirefl-build-alpine-aarch64-musl`](https://github.com/users/sergio-eld/packages/container/package/omnirefl-build-alpine-aarch64-musl)
   for AArch64 Linux packages
-- [`docker/build-alpine-cosmopolitan.Dockerfile`](docker/build-alpine-cosmopolitan.Dockerfile)
+- [`docker/build-alpine-cosmo.Dockerfile`](docker/build-alpine-cosmo.Dockerfile)
   for the experimental universal Cosmopolitan package
 
 The images provide a versioned LLVM/Clang toolchain and reproducible local and
@@ -327,7 +339,7 @@ complete toolchain image can take close to an hour. They are defined by
 [docker/build-alpine-x86_64-musl-ucrt.Dockerfile](docker/build-alpine-x86_64-musl-ucrt.Dockerfile),
 [docker/build-alpine-aarch64-musl.Dockerfile](docker/build-alpine-aarch64-musl.Dockerfile),
 and
-[docker/build-alpine-cosmopolitan.Dockerfile](docker/build-alpine-cosmopolitan.Dockerfile).
+[docker/build-alpine-cosmo.Dockerfile](docker/build-alpine-cosmo.Dockerfile).
 
 The x86_64 image is also used for the MinGW Windows cross-build. Linux's stable
 kernel-userspace ABI allows static musl packages to have zero target-distribution
@@ -339,20 +351,24 @@ of this writing.
 > [!NOTE]
 > The Cosmopolitan build produces one package from a fat x86_64/AArch64 link.
 > It uses compatibility paths for the C++23 library facilities missing from
-> cosmocc 4.0.2. The bundled libc++ configuration selects musl or non-musl
-> behavior from the consuming platform's headers.
+> the bundled cosmocc release. The bundled libc++ configuration selects musl
+> or non-musl behavior from the consuming platform's headers.
+
+As of this writing, the toolchain and test-image versions in [`.env`](.env)
+are the source of truth for local and CI image selection. Docker Compose loads
+them automatically, and CI resolves the complete image tags through Compose.
 
 If configuring the build directly on the host instead of using an image, use a
-C++23 compiler. As of now, the prepared build images use GCC for native Linux
-tool builds.
+C++23 compiler. As of this writing, the prepared build images use GCC for
+Linux musl tool builds.
 
 Build packages:
 
 ```bash
-docker compose run --rm build-linux
-docker compose run --rm build-linux-aarch64
-docker compose run --rm build-windows
-docker compose run --rm build-cosmopolitan
+docker compose run --rm build-musl
+docker compose run --rm build-musl-aarch64
+docker compose run --rm build-ucrt
+docker compose run --rm build-cosmo
 ```
 
 > [!NOTE]
@@ -362,16 +378,26 @@ docker compose run --rm build-cosmopolitan
 > them explicitly before packaging:
 >
 > ```bash
-> docker compose build build-linux
-> docker compose build build-linux-aarch64
+> docker compose build build-musl
+> docker compose build build-musl-aarch64
 > ```
 
-The packages are written to `artifacts/packages/linux`,
-`artifacts/packages/windows`, and `artifacts/packages/cosmopolitan`. To work
+The packages are written to `artifacts/packages/musl`,
+`artifacts/packages/ucrt`, and `artifacts/packages/cosmo`. To work
 inside the same build image:
 
 ```bash
-docker compose run --rm --entrypoint /bin/ash build-linux
+docker compose run --rm --entrypoint /bin/ash build-musl
+```
+
+Package-test services are selected by host and toolchain, not by package
+runtime. Point `PACKAGE_DIR` at a directory containing the compatible musl and
+Cosmopolitan `.tar.gz` packages; the runner identifies and tests both from
+their filenames:
+
+```bash
+PACKAGE_DIR=./artifacts/packages/current \
+  docker compose run --rm test-alpine
 ```
 
 ## Examples
@@ -400,7 +426,7 @@ Current package/install coverage is reported by the
 - (+) `Linux:Ubuntu 22.04 Clang` covered by CI package matrix
 - (+) `Linux:Ubuntu 18.04/20.04/22.04 MinGW GCC` covered by CI package matrix
   (build-only for Windows test binaries)
-- (+) `Linux:AArch64 musl` covered by CI package build matrix
+- (+) `Linux:AArch64 musl` covered by CI package build and test matrices
 - (+) `Windows:MSVC` covered by CI package matrix
 - (+) `Windows:clang-cl` covered by CI package matrix
 - (+) `Windows:MSYS2 MinGW` covered by CI package matrix
@@ -438,10 +464,15 @@ stages and regression tracking.
 Benchmark runs are reported by the
 [CI workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
 
-- Target: `linux-x86_64`
-- Environment: Ubuntu 22.04 GCC package-test image
+- Targets: native musl and Cosmopolitan `linux-x86_64`
+- Environment: the same Ubuntu 22.04 GCC package-test image
+- Tool build: benchmark inputs use `Release`; distributable packages retain
+  `RelWithDebInfo` for detached symbols
 - Baseline target: `benchmark.baseline`
-- Raw history artifact: `benchmark-history-linux-x86_64-gcc-attempt-<N>`
+- Musl history artifact:
+  `benchmark-history-linux-x86_64-musl-gcc-attempt-<N>`
+- Cosmo history artifact:
+  `benchmark-history-linux-x86_64-cosmo-gcc-attempt-<N>`
 - Reported baseline: average of the last 5 stored runs
 - Tracked metrics:
   - reflection/tool wall time for `benchmark.baseline.omni`

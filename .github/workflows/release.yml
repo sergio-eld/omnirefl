@@ -89,7 +89,7 @@ jobs:
             "omnirefl-linux-aarch64-musl-${version}-${short_sha}.deb"
             "omnirefl-linux-aarch64-musl-${version}-${short_sha}.tar.gz"
             "omnirefl-windows-x86_64-ucrt-${version}-${short_sha}.zip"
-            "omnirefl-cosmopolitan-universal-${version}-${short_sha}.tar.gz"
+            "omnirefl-cosmo-universal-${version}-${short_sha}.tar.gz"
           )
 
           for package in "${packages[@]}"; do
