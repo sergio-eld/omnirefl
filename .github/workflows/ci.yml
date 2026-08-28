@@ -146,6 +146,9 @@ jobs:
       - build-package-cosmo
     strategy:
       fail-fast: false
+      # As of this writing, GitHub artifact downloads become unreliable when
+      # every Linux row fetches the same large package archives concurrently.
+      max-parallel: 4
       matrix:
         platform: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
         toolchain: [gcc, clang, mingw]
@@ -163,6 +166,10 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+
+      - name: Resolve Short SHA
+        id: commit
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare Docker Image
         run: |
@@ -185,21 +192,19 @@ jobs:
               docker compose run --rm --entrypoint uname "$TEST_SERVICE" -m
           )" = "${{ matrix.arch }}"
 
-      # Download the two inputs sequentially. A single merged wildcard makes
-      # download-artifact extract every platform package concurrently.
+      # Download the two inputs sequentially. Pattern mode uses the action's
+      # multi-artifact path even when the pattern matches only one artifact.
       - name: Download musl Package
         uses: actions/download-artifact@v8
         with:
-          pattern: packages-linux-${{ matrix.arch }}-musl-*
+          name: packages-linux-${{ matrix.arch }}-musl-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/current
-          merge-multiple: true
 
       - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
-          pattern: packages-cosmo-universal-*
+          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/current
-          merge-multiple: true
 
       - name: Run Package Test
         run: |
@@ -309,19 +314,21 @@ jobs:
               mingw-w64-clang-x86_64-clang
 
     steps:
+      - name: Resolve Short SHA
+        id: commit
+        run: '"short_sha=$($env:GITHUB_SHA.Substring(0, 12))" >> $env:GITHUB_OUTPUT'
+
       - name: Download UCRT Package
         uses: actions/download-artifact@v8
         with:
-          pattern: packages-windows-x86_64-ucrt-*
+          name: packages-windows-x86_64-ucrt-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/current
-          merge-multiple: true
 
       - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
-          pattern: packages-cosmo-universal-*
+          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/current
-          merge-multiple: true
 
       - name: Install Packages
         shell: powershell
