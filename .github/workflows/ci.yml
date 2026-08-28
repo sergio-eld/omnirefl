@@ -314,14 +314,16 @@ jobs:
           if-no-files-found: error
 
   test-package-windows:
-    name: Package test / windows-${{ matrix.toolchain }}
+    name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: windows-2022
     needs:
       - build-package-musl
       - build-package-cosmo
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
+        runtime: [ucrt, cosmo]
         toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
         include:
           - toolchain: msys2-mingw
@@ -348,19 +350,13 @@ jobs:
         id: commit
         run: '"short_sha=$($env:GITHUB_SHA.Substring(0, 12))" >> $env:GITHUB_OUTPUT'
 
-      - name: Download UCRT Package
+      - name: Download Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-windows-x86_64-ucrt-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ 'ucrt' == matrix.runtime && 'windows-x86_64-ucrt' || 'cosmo-universal' }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/current
 
-      - name: Download Cosmo Package
-        uses: actions/download-artifact@v8
-        with:
-          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/current
-
-      - name: Install Packages
+      - name: Install Package
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -368,55 +364,47 @@ jobs:
             $_.Name -like 'omnirefl-windows-x86_64-ucrt-*.zip' -or
               $_.Name -like 'omnirefl-cosmo-universal-*.tar.gz'
           })
+          if (1 -ne $archives.Count) {
+            throw 'expected one package archive'
+          }
+
+          $archive = $archives[0]
+          if ($archive.Name -like '*-ucrt-*') {
+            $runtime = 'ucrt'
+          } elseif ($archive.Name -like '*-cosmo-*') {
+            $runtime = 'cosmo'
+          } else {
+            throw "cannot infer package runtime from $($archive.Name)"
+          }
+          if ('${{ matrix.runtime }}' -ne $runtime) {
+            throw "expected ${{ matrix.runtime }} package, found $runtime"
+          }
+
           $root = Join-Path $env:RUNNER_TEMP 'with space/packages'
-          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.toolchain }}'
-          New-Item -ItemType Directory -Force -Path $root, $results | Out-Null
-          $installed = @{}
-
-          foreach ($archive in $archives) {
-            if ($archive.Name -like '*-ucrt-*') {
-              $runtime = 'ucrt'
-            } elseif ($archive.Name -like '*-cosmo-*') {
-              $runtime = 'cosmo'
-            } else {
-              throw "cannot infer package runtime from $($archive.Name)"
-            }
-            if ($installed.ContainsKey($runtime)) {
-              throw "multiple $runtime packages"
-            }
-
-            $extract = Join-Path $root "extract-$runtime"
-            $package = Join-Path $root $runtime
-            New-Item -ItemType Directory -Force -Path $extract, $package | Out-Null
-            if ($archive.Name.EndsWith('.zip')) {
-              Expand-Archive -Path $archive.FullName -DestinationPath $extract -Force
-            } else {
-              tar -xzf $archive.FullName -C $extract
-              if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-            }
-
-            $packageRoots = @(Get-ChildItem -Path $extract -Directory -Filter 'omnirefl-*')
-            if (1 -ne $packageRoots.Count) {
-              throw "expected one package root in $($archive.Name)"
-            }
-
-            $install = Join-Path $package 'install'
-            Move-Item $packageRoots[0].FullName $install
-            Remove-Item -Recurse $extract
-            Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $package
-            & (Join-Path $install 'bin/omnirefl.exe') -h
+          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}'
+          $extract = Join-Path $root 'extract'
+          $package = Join-Path $root $runtime
+          New-Item -ItemType Directory -Force -Path $extract, $package, $results | Out-Null
+          if ($archive.Name.EndsWith('.zip')) {
+            Expand-Archive -Path $archive.FullName -DestinationPath $extract -Force
+          } else {
+            tar -xzf $archive.FullName -C $extract
             if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-            & (Join-Path $install 'bin/ccdb_query.exe') -h
-            if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-            $installed[$runtime] = $true
           }
 
-          if (!$installed.ContainsKey('ucrt')) {
-            throw 'UCRT package was not installed'
+          $packageRoots = @(Get-ChildItem -Path $extract -Directory -Filter 'omnirefl-*')
+          if (1 -ne $packageRoots.Count) {
+            throw "expected one package root in $($archive.Name)"
           }
-          if (!$installed.ContainsKey('cosmo')) {
-            throw 'Cosmo package was not installed'
-          }
+
+          $install = Join-Path $package 'install'
+          Move-Item $packageRoots[0].FullName $install
+          Remove-Item -Recurse $extract
+          Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $package
+          & (Join-Path $install 'bin/omnirefl.exe') -h
+          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+          & (Join-Path $install 'bin/ccdb_query.exe') -h
+          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
           @(
             "OMNIREFL_PACKAGES_ROOT=$($root.Replace('\', '/'))"
@@ -471,43 +459,29 @@ jobs:
             $env:CXX = 'clang-cl'
           }
 
-          $result = 0
-          foreach ($package in Get-ChildItem -Path $env:OMNIREFL_PACKAGES_ROOT -Directory) {
-            $install = Join-Path $package.FullName 'install'
-            $source = Join-Path $package.FullName 'tests'
-            $build = Join-Path $package.FullName 'build'
-            $results = Join-Path $env:OMNIREFL_TEST_RESULTS $package.Name
-            New-Item -ItemType Directory -Force -Path $build, $results | Out-Null
+          $package = Join-Path $env:OMNIREFL_PACKAGES_ROOT '${{ matrix.runtime }}'
+          $install = Join-Path $package 'install'
+          $source = Join-Path $package 'tests'
+          $build = Join-Path $package 'build'
+          $results = Join-Path $env:OMNIREFL_TEST_RESULTS '${{ matrix.runtime }}'
+          New-Item -ItemType Directory -Force -Path $build, $results | Out-Null
 
-            cmake -S $source -B $build -GNinja `
-              -DCMAKE_BUILD_TYPE=Release `
-              "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
-              Tee-Object (Join-Path $results 'configure.log')
-            $configureResult = $LASTEXITCODE
-            if (0 -ne $configureResult) {
-              $result = $configureResult
-              continue
-            }
+          cmake -S $source -B $build -GNinja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
+            Tee-Object (Join-Path $results 'configure.log')
+          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
-            cmake --build $build `
-              --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
-              Tee-Object (Join-Path $results 'build.log')
-            $buildResult = $LASTEXITCODE
-            if (0 -ne $buildResult) {
-              $result = $buildResult
-              continue
-            }
+          cmake --build $build `
+            --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
+            Tee-Object (Join-Path $results 'build.log')
+          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
-            ctest --test-dir $build `
-              --output-junit (Join-Path $results "windows-${{ matrix.toolchain }}.xml") `
-              -V 2>&1 |
-              Tee-Object (Join-Path $results "windows-${{ matrix.toolchain }}.log")
-            $testResult = $LASTEXITCODE
-            if (0 -ne $testResult) {
-              $result = $testResult
-            }
-          }
-          exit $result
+          ctest --test-dir $build `
+            --output-junit (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml") `
+            -V 2>&1 |
+            Tee-Object (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log")
+          exit $LASTEXITCODE
 
       - name: Run MSYS2 Package Tests
         if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
@@ -519,75 +493,47 @@ jobs:
           set -euo pipefail
           packages_root="$(cygpath -u "$OMNIREFL_PACKAGES_ROOT")"
           results_dir="$(cygpath -u "$OMNIREFL_TEST_RESULTS")"
-          result=0
+          package="$packages_root/${{ matrix.runtime }}"
+          install="$package/install"
+          source="$package/tests"
+          build="$package/build"
+          results="$results_dir/${{ matrix.runtime }}"
+          mkdir -p "$build" "$results"
 
-          for package in "$packages_root"/*; do
-            name="$(basename "$package")"
-            install="$package/install"
-            source="$package/tests"
-            build="$package/build"
-            results="$results_dir/$name"
-            mkdir -p "$build" "$results"
-
-            set +e
-            cmake -S "$source" -B "$build" -GNinja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -Domnirefl_DIR="$install/lib/cmake/omnirefl" 2>&1 |
-              tee "$results/configure.log"
-            configure_result=${PIPESTATUS[0]}
-            set -e
-            if ((0 != configure_result)); then
-              result=$configure_result
-              continue
-            fi
-
-            set +e
-            cmake --build "$build" --parallel "$(nproc)" 2>&1 |
-              tee "$results/build.log"
-            build_result=${PIPESTATUS[0]}
-            set -e
-            if ((0 != build_result)); then
-              result=$build_result
-              continue
-            fi
-
-            set +e
-            ctest --test-dir "$build" \
-              --output-junit "$results/windows-${{ matrix.toolchain }}.xml" \
-              -V 2>&1 |
-              tee "$results/windows-${{ matrix.toolchain }}.log"
-            test_result=${PIPESTATUS[0]}
-            set -e
-            if ((0 != test_result)); then
-              result=$test_result
-            fi
-          done
-          exit "$result"
+          cmake -S "$source" -B "$build" -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Domnirefl_DIR="$install/lib/cmake/omnirefl" 2>&1 |
+            tee "$results/configure.log"
+          cmake --build "$build" --parallel "$(nproc)" 2>&1 |
+            tee "$results/build.log"
+          ctest --test-dir "$build" \
+            --output-junit "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml" \
+            -V 2>&1 |
+            tee "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log"
 
       - name: Collect Test Diagnostics
         if: always()
         shell: powershell
         run: |
-          foreach ($package in Get-ChildItem -Path $env:OMNIREFL_PACKAGES_ROOT -Directory) {
-            $build = Join-Path $package.FullName 'build'
-            $results = Join-Path $env:OMNIREFL_TEST_RESULTS $package.Name
-            $diagnostics = Join-Path $results 'diagnostics'
-            New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+          $package = Join-Path $env:OMNIREFL_PACKAGES_ROOT '${{ matrix.runtime }}'
+          $build = Join-Path $package 'build'
+          $results = Join-Path $env:OMNIREFL_TEST_RESULTS '${{ matrix.runtime }}'
+          $diagnostics = Join-Path $results 'diagnostics'
+          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
 
-            Copy-Item -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
-              (Join-Path $build 'CMakeCache.txt')
-              (Join-Path $build 'compile_commands.json')
-              (Join-Path $build 'Testing/Temporary/LastTest.log')
-              (Join-Path $build 'CMakeFiles/CMakeError.log')
-            )
+          Copy-Item -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
+            (Join-Path $build 'CMakeCache.txt')
+            (Join-Path $build 'compile_commands.json')
+            (Join-Path $build 'Testing/Temporary/LastTest.log')
+            (Join-Path $build 'CMakeFiles/CMakeError.log')
+          )
 
-            $generated = @(Get-ChildItem -ErrorAction SilentlyContinue -Recurse -File `
-              -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
-            if (0 -lt $generated.Count) {
-              Compress-Archive -Path $generated.FullName `
-                -DestinationPath (Join-Path $diagnostics 'generated-reflection.zip') `
-                -Force
-            }
+          $generated = @(Get-ChildItem -ErrorAction SilentlyContinue -Recurse -File `
+            -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
+          if (0 -lt $generated.Count) {
+            Compress-Archive -Path $generated.FullName `
+              -DestinationPath (Join-Path $diagnostics 'generated-reflection.zip') `
+              -Force
           }
 
       - name: Upload Test Results
@@ -595,8 +541,8 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            test-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/windows-${{ matrix.toolchain }}
+            test-windows-${{ matrix.runtime }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
   benchmark-macos:

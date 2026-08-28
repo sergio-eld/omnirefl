@@ -3153,26 +3153,48 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       return args //
         | std::views::transform(
-          [&driver_source,
-            &source_path,
-            windows_drive_mount_used](std::string_view arg) -> std::string {
-            // Clang's Windows driver treats /C/... as the /C option. Restore
-            // the drive spelling only for the input selected by omnirefl.
-            if (windows_drive_mount_used
-              && (source_path == arg || driver_source == arg))
-              return driver_source;
-
-            if (!windows_drive_mount_used || 3 > arg.size()
-              || !std::isalpha(static_cast<unsigned char>(arg[0]))
-              || ':' != arg[1] || ('/' != arg[2] && '\\' != arg[2]))
+          [&driver_source, &source_path, windows_drive_mount_used](
+            std::string_view arg) -> std::string {
+            if (!windows_drive_mount_used)
               return std::string{arg};
 
-            // APE translates drive paths passed by the host, but paths read
-            // from response files enter Clang after that translation.
-            std::string mounted{"/"};
-            mounted += arg[0];
-            mounted += arg.substr(2);
+            std::string mounted;
+            if (3 <= arg.size() && '/' == arg[0]
+              && std::isalpha(static_cast<unsigned char>(arg[1]))
+              && '/' == arg[2]) {
+              mounted = arg;
+            } else if (3 <= arg.size()
+              && std::isalpha(static_cast<unsigned char>(arg[0]))
+              && ':' == arg[1] && ('/' == arg[2] || '\\' == arg[2])) {
+              // Paths expanded from response files have not passed through
+              // the APE's drive-mount translation.
+              mounted = '/';
+              mounted += arg[0];
+              mounted += arg.substr(2);
+            } else {
+              return std::string{arg};
+            }
             std::ranges::replace(mounted, '\\', '/');
+
+            std::string input{mounted};
+            for (std::size_t dollar = input.find("$$");
+              std::string::npos != dollar;
+              dollar = input.find("$$", dollar + 1)) {
+              input.erase(dollar, 1);
+            }
+
+            const std::string extension = fs::path{input}.extension().string();
+            const clang::InputKind input_kind =
+              clang::FrontendOptions::getInputKindForExtension(
+                llvm::StringRef{extension}.drop_front(!extension.empty()));
+
+            // clang-cl interprets /D/... as a macro option. Present source
+            // inputs using drive spelling until the driver has classified
+            // them, while leaving frontend option paths mounted for the APE.
+            if (source_path == input
+              || (!input_kind.isUnknown() && !input_kind.isHeader()))
+              return std::format("{}:{}", input[1], input.substr(2));
+
             return mounted;
           }) //
         | std::ranges::to<std::vector>();
@@ -3215,16 +3237,24 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const std::vector compiler_sources =
     normalized_args->getAllArgValues(options::OPT_INPUT) //
     | std::views::transform(
-      [&compile_directory,
-        &driver_source,
-        &source](std::string_view input) {
+      [&compile_directory, &driver_source, &source, windows_drive_mount_used](
+        std::string_view input) {
         if (driver_source == input)
           return source;
 
-        const auto resolve = [&compile_directory](std::string_view input) {
+        const auto resolve = [&compile_directory, windows_drive_mount_used](
+                               std::string_view input) {
+          std::string mounted{input};
+          if (windows_drive_mount_used && 3 <= mounted.size()
+            && std::isalpha(static_cast<unsigned char>(mounted[0]))
+            && ':' == mounted[1] && ('/' == mounted[2] || '\\' == mounted[2])) {
+            mounted = '/' + mounted.substr(0, 1) + mounted.substr(2);
+            std::ranges::replace(mounted, '\\', '/');
+          }
+
           return fs::absolute(compile_directory //
-              ? fs::path{*compile_directory} / input
-              : fs::path{input})
+              ? fs::path{*compile_directory} / mounted
+              : fs::path{mounted})
             .lexically_normal();
         };
 
@@ -3640,16 +3670,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const auto &compilation_args = compilation->getJobs().begin()->getArguments();
 
   const std::vector<std::string> frontend_args = compilation_args //
-    | std::views::transform(
-      [&driver_source,
-        &source_path,
-        windows_drive_mount_used](llvm::StringRef arg) {
-        // The Windows driver needs C:/... to recognize an input, while the
-        // Cosmopolitan frontend VFS needs /C/... to open the same file.
-        return windows_drive_mount_used && driver_source == arg
-          ? source_path
-          : arg.str();
-      }) //
+    | std::views::transform(fn::as<std::string>) //
     | std::ranges::to<std::vector>();
 
   log(log_level::debug, [&frontend_args] {
@@ -3670,7 +3691,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   if (compile_directory)
     clang_invocation->getFileSystemOpts().WorkingDir = *compile_directory;
 
-  const auto &frontend_inputs = clang_invocation->getFrontendOpts().Inputs;
+  auto &frontend_inputs = clang_invocation->getFrontendOpts().Inputs;
   if (1 != frontend_inputs.size()) {
     return std::unexpected(processing_error(source,
       std::format("expected one frontend input, resolved {}",
@@ -3685,6 +3706,16 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       std::format("omnirefl requires a C++ translation unit, but the compiler "
                   "command selects {}",
         clang::languageToString(input_language).str())));
+  }
+
+  if (windows_drive_mount_used) {
+    // clang-cl must classify D:/... as an input before the APE mount spelling
+    // is restored; /D/... is otherwise parsed as an MSVC macro definition.
+    frontend_inputs.front() = clang::FrontendInputFile{
+      source_path,
+      frontend_inputs.front().getKind(),
+      frontend_inputs.front().isSystem(),
+    };
   }
 
   {
