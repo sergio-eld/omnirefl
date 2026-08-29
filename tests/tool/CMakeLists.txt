@@ -91,6 +91,8 @@ if(DEFINED omnirefl_DIR)
     _omnirefl_accepted_cmake_project(relative_response_file
         -D "EXECUTABLES=relative_response_file"
         -D "REQUIRED_REFLECTION_STEMS=main")
+    _omnirefl_accepted_cmake_project(functional_header
+        -D "EXECUTABLES=functional_header")
 
     function(_omnirefl_rejected_cmake_project name expected_diagnostics)
         add_test(NAME "omnirefl.integration.${name}"
@@ -483,18 +485,8 @@ target_link_libraries(std_compat INTERFACE
     mpark_variant
 )
 
-# Enumerate supported C++ standard levels (>=11) and build targets prefixed with cpp_<N>.
-set(_supported_cpp_standards "")
-foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
-    if(_f MATCHES "^cxx_std_([0-9]+)$")
-        set(_n "${CMAKE_MATCH_1}")
-
-        # Exclude legacy 98/03 (they are numerically >= 11), keep 11+ "year-style" standards.
-        if(_n GREATER_EQUAL 11 AND _n LESS 90)
-            list(APPEND _supported_cpp_standards "${_n}")
-        endif()
-    endif()
-endforeach()
+include("${CMAKE_CURRENT_LIST_DIR}/supported_cpp_standards.cmake")
+_omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
@@ -917,28 +909,6 @@ if("20" IN_LIST _supported_cpp_standards)
             -D "EXPECTED_MESSAGE=constrained templates are not supported"
             -D "DIAGNOSTIC_REGEX=:[0-9]+:[0-9]+: reflected_call argument"
             -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
-endif()
-
-list(REMOVE_DUPLICATES _supported_cpp_standards)
-list(SORT _supported_cpp_standards)
-
-# C++26 has standard reflection. Keep omnirefl release/package validation on the
-# pre-reflection language standards it targets.
-list(REMOVE_ITEM _supported_cpp_standards "26")
-
-# MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
-# Normalize 11 -> 14 to avoid generating duplicate cpp_11 / cpp_14 targets.
-if(MSVC)
-  set(_tmp "")
-  foreach(_n IN LISTS _supported_cpp_standards)
-    if(_n STREQUAL "11")
-      set(_n "14")
-    endif()
-    list(APPEND _tmp "${_n}")
-  endforeach()
-  set(_supported_cpp_standards "${_tmp}")
-  list(REMOVE_DUPLICATES _supported_cpp_standards)
-  list(SORT _supported_cpp_standards)
 endif()
 
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")

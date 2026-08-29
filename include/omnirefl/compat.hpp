@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -20,8 +21,12 @@ struct type_identity {
   using type = T;
 };
 
+#if OMNI_CPLUSPLUS >= 201402L
+using std::index_sequence;
+#else
 template <std::size_t...>
 struct index_sequence {};
+#endif
 
 namespace detail {
 
@@ -88,6 +93,31 @@ using void_t = typename detail::make_void<Ts...>::type;
 using std::apply;
 #else
 using detail::apply;
+#endif
+
+// invoke
+// std::invoke did not become constexpr until C++20.
+#if OMNI_CPLUSPLUS >= 202002L
+using std::invoke;
+#else
+template <typename Function, typename... Argument>
+constexpr auto invoke(Function &&function, Argument &&...argument) ->
+  typename std::enable_if<
+    !std::is_member_pointer<typename std::decay<Function>::type>::value,
+    decltype(std::forward<Function>(function)(
+      std::forward<Argument>(argument)...))>::type {
+  return std::forward<Function>(function)(std::forward<Argument>(argument)...);
+}
+
+template <typename Function, typename... Argument>
+auto invoke(Function &&function, Argument &&...argument) ->
+  typename std::enable_if<
+    std::is_member_pointer<typename std::decay<Function>::type>::value,
+    decltype(std::mem_fn(std::forward<Function>(function))(
+      std::forward<Argument>(argument)...))>::type {
+  return std::mem_fn(std::forward<Function>(function))(
+    std::forward<Argument>(argument)...);
+}
 #endif
 
 // conditional_t

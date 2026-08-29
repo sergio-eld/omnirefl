@@ -151,6 +151,9 @@ target_sources(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/reflection.hpp>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/reflection.hpp>
 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/functional.hpp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/functional.hpp>
+
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/unique_id.hpp>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/unique_id.hpp>)
 
@@ -178,6 +181,7 @@ elseif(ENABLE_BENCH OR ENABLE_TESTING)
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
     if(ENABLE_TESTING)
         add_subdirectory(tests/std_compat tests/std_compat)
+        add_subdirectory(tests/functional tests/functional)
     endif()
 endif()
 
