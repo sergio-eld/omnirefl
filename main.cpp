@@ -5313,6 +5313,10 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
     // Designators can name only direct non-static data members. Bases and
     // unnamed members cannot be represented by the generated initializer;
     // unions can initialize at most one member.
+    // FIXME: Positional aggregate initialization can initialize direct base
+    // subobjects before members. Supporting aggregates with bases therefore
+    // needs separate eligibility and rendering for designated and positional
+    // initialization instead of rejecting them for both forms here.
     .is_aggregatable = cxx_decl && cxx_decl->isAggregate()
       && cxx_decl->bases().empty()
       && std::ranges::all_of(aggregate_fields,
@@ -6096,6 +6100,11 @@ std::string reflectable_body(const meta::record_data &d) {
 }
 
 std::string aggregate_into_body(const meta::record_data &d) {
+  // FIXME: Investigate and clarify missing-field semantics. The generator
+  // emits every destination designator without knowing `Fields`, and template
+  // instantiation cannot conditionally omit a designator. `get` therefore
+  // value-initializes a missing field. This is suitable for optional-like
+  // fields, but required fields need validation before aggregation.
   const auto get_field = [](const meta::field_data &field) {
     return std::format(
       "omni::refl::get<typename omni::detail::_meta<T>::{0}_t>(fields,"
@@ -6118,7 +6127,7 @@ std::string aggregate_into_body(const meta::record_data &d) {
   return std::format(
     "\n"
     "\n  template <typename Fields>"
-    "\n  static T from(Fields &&fields) {{"
+    "\n  static T from(Fields &&{3}) {{"
     "\n#if defined(__cpp_designated_initializers) \\"
     "\n  && 201707L <= __cpp_designated_initializers"
     "\n    return T{{{0}{1}}};"
@@ -6127,9 +6136,18 @@ std::string aggregate_into_body(const meta::record_data &d) {
     "\n#endif"
     "\n  }}"
     "\n}};",
+
+    // 0
     d.public_fields.empty() ? "" : "\n      ",
+
+    // 1
     d.public_fields.empty() ? "" : designated_fields + "\n    ",
-    d.public_fields.empty() ? "" : positional_fields + "\n    ");
+
+    // 2
+    d.public_fields.empty() ? "" : positional_fields + "\n    ",
+
+    // 3
+    d.public_fields.empty() ? "" : "fields");
 }
 
 } // namespace render::impl

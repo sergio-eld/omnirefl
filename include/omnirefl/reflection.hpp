@@ -216,6 +216,8 @@ struct _dependent_false: std::false_type {};
 
 template <typename T, typename = T>
 struct aggregate_into_t {
+  // Generated reflection headers provide `from` through an
+  // `aggregate_into_t<T>` specialization for each supported `T`.
   template <typename Fields>
   static T from(Fields &&) {
     static_assert(_dependent_false<T>::value,
@@ -268,9 +270,14 @@ struct _get_t<Index, TargetField, Fields, Or, false> {
 
 } // namespace detail
 
-// REFACTORME: refine this provisional tuple-only public interface after the
-// aggregate-construction experiment is complete.
-/// Return the same-named field constructed as `Or`, or `or_value`.
+// REFACTORME: Decide whether this provisional tuple-only lookup remains the
+// aggregate-construction customization point before stabilizing the interface.
+/// Return the first same-named field constructed as `Or`, or `or_value`.
+///
+/// The current `Fields` protocol is `std::tuple<Field...>`. Each field provides
+/// a static `name()` and exposes its value through `.value()` as an rvalue.
+/// The first name match is consumed and must construct `Or`; no match returns
+/// `or_value`.
 template <typename TargetField, typename... Field, typename Or>
 Or get(std::tuple<Field...> &fields, Or or_value) {
   using fields_t = std::tuple<Field...>;
@@ -282,6 +289,16 @@ Or get(std::tuple<Field...> &fields, Or or_value) {
     or_value);
 }
 
+/// Shallowly construct `T` from the current tuple-based field protocol.
+///
+/// Generated specializations query each destination public field by name.
+/// Source-only fields are ignored and missing destination fields are
+/// value-initialized by the provisional `get` fallback.
+/// Aggregates with base classes are not currently supported.
+///
+/// Nested values are supported only when the destination field is directly
+/// constructible from the same-named source value. Differently shaped nested
+/// aggregates are not recursively converted.
 template <typename T, typename Fields>
 T aggregate_into(Fields &&fields) {
   return detail::aggregate_into_t<T>::from(std::forward<Fields>(fields));

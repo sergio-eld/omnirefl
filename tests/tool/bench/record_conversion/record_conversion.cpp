@@ -30,7 +30,7 @@
 namespace record_conversion_bench {
 
 enum class conversion_type {
-  aggregate_return,
+  aggregate_return, // Hand-written aggregate-initialization baseline.
   default_then_assign,
   reflected,
   aggregate_into,
@@ -113,12 +113,12 @@ To reflected_convert(From &&from, omni::type_t<To> target_type) {
 
 template <typename From, typename To>
 To aggregate_into_convert(From &&from, omni::type_t<To> target_type) {
-  const auto visit = //
+  return omni::reflected_call(
     [](omni::binding auto source, omni::meta auto) -> To {
-    return omni::refl::aggregate_into<To>(source.public_fields());
-  };
-
-  return omni::reflected_call(visit, std::forward<From>(from), target_type);
+      return omni::refl::aggregate_into<To>(source.public_fields());
+    },
+    std::forward<From>(from),
+    target_type);
 }
 
 namespace reordered {
@@ -161,6 +161,7 @@ struct move_destination {
       return reflected_convert(std::forward<From>(source),
         omni::type<move_destination>);
     } else {
+      static_assert(conversion_type::aggregate_into == Implementation);
       return aggregate_into_convert(std::forward<From>(source),
         omni::type<move_destination>);
     }
@@ -211,6 +212,7 @@ struct trivial_destination {
       return reflected_convert(std::forward<From>(source),
         omni::type<trivial_destination>);
     } else {
+      static_assert(conversion_type::aggregate_into == Implementation);
       return aggregate_into_convert(std::forward<From>(source),
         omni::type<trivial_destination>);
     }
@@ -259,6 +261,7 @@ struct move_destination {
       return reflected_convert(std::forward<From>(source),
         omni::type<move_destination>);
     } else {
+      static_assert(conversion_type::aggregate_into == Implementation);
       return aggregate_into_convert(std::forward<From>(source),
         omni::type<move_destination>);
     }
@@ -309,6 +312,7 @@ struct trivial_destination {
       return reflected_convert(std::forward<From>(source),
         omni::type<trivial_destination>);
     } else {
+      static_assert(conversion_type::aggregate_into == Implementation);
       return aggregate_into_convert(std::forward<From>(source),
         omni::type<trivial_destination>);
     }
