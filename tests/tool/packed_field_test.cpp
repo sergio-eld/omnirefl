@@ -93,7 +93,7 @@ struct write_value {
 
     auto value = std::get<1>(fields);
     value.set_value(std::uint16_t{89});
-    return value.value();
+    return std::move(value).value();
   }
 };
 

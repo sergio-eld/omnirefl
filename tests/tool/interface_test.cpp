@@ -138,6 +138,32 @@ struct address_record {
   overloaded_address field;
 };
 
+struct move_counted {
+  int value;
+  int *moves;
+
+  move_counted(int value, int &move_count): value(value), moves(&move_count) {}
+  move_counted(const move_counted &) = delete;
+  move_counted &operator=(const move_counted &) = delete;
+
+  move_counted(move_counted &&) = delete;
+
+  move_counted &operator=(move_counted &&other) noexcept {
+    value = other.value;
+    moves = other.moves;
+    if (moves)
+      ++*moves;
+
+    other.value = 0;
+    other.moves = nullptr;
+    return *this;
+  }
+};
+
+struct move_record {
+  move_counted field;
+};
+
 struct field_address {
   template <typename T>
   const overloaded_address *operator()(omni::binding_t<T> binding) const {
@@ -151,6 +177,7 @@ struct read_write_move {
     auto fields = binding.public_fields();
     typedef typename std::tuple_element<0, decltype(fields)>::type scalar_field;
     typedef typename std::tuple_element<1, decltype(fields)>::type array_field;
+    typedef typename std::tuple_element<3, decltype(fields)>::type owned_field;
 
     static_assert(scalar_field::has_value_access(),
       "ordinary fields must expose value access");
@@ -171,11 +198,45 @@ struct read_write_move {
     static_assert(
       std::is_same<int (&)[2], decltype(std::get<1>(fields).ref())>::value,
       "raw-array references must preserve type and extent");
+    static_assert(std::is_same<const std::unique_ptr<int> &,
+                    decltype(std::declval<owned_field &>().value())>::value,
+      "lvalue value access must remain read-only");
+    static_assert(std::is_same<std::unique_ptr<int> &&,
+                    decltype(std::declval<owned_field &&>().value())>::value,
+      "moving a field binding must select consuming value access");
+    static_assert(
+      std::is_same<std::unique_ptr<int> &&,
+        decltype(std::move(std::declval<owned_field &>().ref()))>::value,
+      "moving a field reference must provide equivalent consuming access");
 
     *std::get<0>(fields) = 11;
     std::get<1>(fields).ref()[1] = 12;
     std::get<2>(fields)->value = 13;
     return std::move(std::get<3>(fields)).value();
+  }
+};
+
+struct const_move_access {
+  template <typename T>
+  const std::unique_ptr<int> &&operator()(omni::binding_t<T> binding) const {
+    const auto fields = binding.public_fields();
+    auto field = std::get<3>(fields);
+
+    static_assert(std::is_same<const std::unique_ptr<int> &&,
+                    decltype(std::move(field).value())>::value,
+      "consuming access must preserve a const owner");
+    return std::move(field).value();
+  }
+};
+
+struct consume_once {
+  move_counted &output;
+
+  template <typename T>
+  void operator()(omni::binding_t<T> binding) const {
+    const auto fields = binding.public_fields();
+    auto field = std::get<0>(fields);
+    output = std::move(field).value();
   }
 };
 
@@ -961,6 +1022,39 @@ TEST(fields, reference_and_move_access) {
   omni::reflected_call(interface_test::field_access::write_through_meta{input},
     omni::type_t<interface_test::field_access::record>{});
   EXPECT_EQ(17, input.scalar);
+}
+
+TEST(fields, consuming_access_preserves_const_owner) {
+  const interface_test::field_access::record input{
+    1,
+    {2, 3},
+    {4},
+    std::unique_ptr<int>{new int{5}},
+  };
+
+  const std::unique_ptr<int> &&value =
+    omni::reflected_call(interface_test::field_access::const_move_access{},
+      input);
+
+  ASSERT_NE(nullptr, value);
+  EXPECT_EQ(5, *value);
+  EXPECT_EQ(value.get(), input.owned.get());
+}
+
+TEST(fields, consuming_access_moves_field_once) {
+  int source_moves = 0;
+  int output_moves = 0;
+  interface_test::field_access::move_record input{{42, source_moves}};
+  interface_test::field_access::move_counted output{0, output_moves};
+
+  omni::reflected_call(
+    interface_test::field_access::consume_once{output}, input);
+
+  EXPECT_EQ(1, source_moves);
+  EXPECT_EQ(0, output_moves);
+  EXPECT_EQ(42, output.value);
+  EXPECT_EQ(0, input.field.value);
+  EXPECT_EQ(nullptr, input.field.moves);
 }
 
 TEST(aggregate_into, constructs_aggregate_from_field_tuple) {

@@ -1174,6 +1174,9 @@ To convert(From &&from, omni::type_t<To> target_type) {
            if constexpr (std::string_view(to.name())
              == std::string_view(from.name())) {
              static_assert(requires { to.ref() = std::move(from).value(); });
+             // Like optional/expected value access, moving the field binding
+             // selects consuming access. `std::move(from.ref())` is the
+             // explicit equivalent for referenceable fields.
              to.ref() = std::move(from).value();
            }
          },

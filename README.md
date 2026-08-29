@@ -38,12 +38,12 @@ cmake --build build -t example.omni
 ```
 
 ```cpp
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflection.hpp>
 
 #include <iostream>
 #include <string>
 #include <string_view>
-#include <tuple>
 
 struct record {
   int foo;
@@ -63,22 +63,19 @@ int main() {
   const auto write = [](omni::binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
-      // Bindings and field bindings are trivial to copy.
-      std::apply(
-        [](omni::field_binding auto... field) -> void {
-          const auto write = [](omni::field_binding auto field) -> void {
-            constexpr std::string_view name = field.name();
+      // `omni::fn::each` is the QoL equivalent of expanding a visitor over a
+      // tuple with `std::apply`.
+      omni::fn::each(
+        [](omni::field_binding auto field) -> void {
+          constexpr std::string_view name = field.name();
 
-            // value() is read-only; ref() exposes a writable reference.
-            if constexpr ("foo"sv == name)
-              field.ref() = 8;
+          // value() is read-only; ref() exposes a writable reference.
+          if constexpr ("foo"sv == name)
+            field.ref() = 8;
 
-            // operator* and operator-> are QoL accessors.
-            if constexpr ("bar"sv == name)
-              *field = "after";
-          };
-
-          (write(field), ...);
+          // operator* and operator-> are QoL accessors.
+          if constexpr ("bar"sv == name)
+            *field = "after";
         },
         b.public_fields());
     };
@@ -88,6 +85,13 @@ int main() {
   std::cout << "after: foo=" << value.foo << " bar=" << value.bar << '\n';
 }
 ```
+
+Field-binding `value()` uses `std::optional`/`std::expected`-style ref-qualified
+access: `field.value()` deliberately reads without moving, while
+`std::move(field).value()` requests consuming access. For referenceable fields,
+`std::move(field.ref())` is the explicit equivalent. Bitfields and unsafe
+packed scalars fall back to copying because they cannot expose a reference.
+Move the binding, not the result of lvalue `value()`.
 
 The complete example is available in
 [tests/tool/example](tests/tool/example). The
@@ -102,6 +106,34 @@ covers the remaining interface and compatibility features.
 Everything else remains regular C++. Omnirefl discovers the argument types and
 supported dependencies, then generates and force-includes their metadata. No
 macros, compiler-specific UB, or manual regeneration are required.
+
+## Tuple Functional Utilities
+
+`<omnirefl/functional.hpp>` provides small compositions over the standard
+tuple-like protocol (`std::tuple_size` and `std::get`):
+
+- `each(visit, tuple)` invokes `visit` for every element and discards its
+  results.
+- `filter(predicate, tuple)` selects elements at compile time from their
+  cv/ref-qualified access types and returns an owning tuple. Use a predicate
+  type, or `omni::fn::pred<lambda>` with a C++20 templated lambda.
+- `map(visit, tuple)` transforms every element into an owning result tuple.
+- `foldl(visit, accumulator, tuple)` reduces from left to right as
+  `visit(accumulator, element)`.
+- `foldr(visit, accumulator, tuple)` reduces from right to left as
+  `visit(element, accumulator)`.
+
+Each operation supports eager calls, deferred calls, and pipe composition:
+
+```cpp
+omni::fn::map(visit, tuple);
+omni::fn::map(visit)(tuple);
+tuple | omni::fn::map(visit) | omni::fn::foldl(combine, initial);
+```
+
+The utilities preserve tuple access value categories and support move-only
+elements, visitors, and accumulators. See the
+[functional tests](tests/functional/test.cpp) for complete examples.
 
 ## Supported Scope
 

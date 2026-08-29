@@ -633,6 +633,11 @@ struct field_binding_t {
 
   /// Read the field without moving from the owner.
   ///
+  /// The binding's value category selects access in the style of
+  /// `std::optional::value()` and `std::expected::value()`. `field.value()` is
+  /// deliberately read-only; `std::move(field).value()` requests consuming
+  /// access. Move the binding, not the result of lvalue `value()`.
+  ///
   /// @details `M` keeps lookup dependent until the accessor is used.
   template <typename M = meta,
     typename std::enable_if<M::has_value_access(), int>::type = 0>
@@ -640,7 +645,11 @@ struct field_binding_t {
     return M::value(_owner);
   }
 
-  /// Move access for referenceable fields.
+  /// Consuming access for referenceable fields.
+  ///
+  /// Moving the trivial field-binding proxy selects this overload; it does not
+  /// transfer proxy ownership. `std::move(field.ref())` is the explicit
+  /// equivalent when reference access is available.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
@@ -650,9 +659,11 @@ struct field_binding_t {
     return std::move(M::ref(_owner));
   }
 
-  /// Copy access for fields without reference access.
+  /// Consuming syntax for fields without reference access.
   ///
-  /// This overload covers bitfields and packed scalars.
+  /// Bitfields and unsafe packed scalars cannot expose an rvalue reference, so
+  /// this overload copies while preserving the uniform
+  /// `std::move(field).value()` expression.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
@@ -663,6 +674,10 @@ struct field_binding_t {
   }
 
   /// Return a field reference preserving owner cv-qualification.
+  ///
+  /// Use `std::move(field.ref())` to move explicitly from a referenceable
+  /// field. Prefer expected-like `std::move(field).value()` in generic code
+  /// because it also supports non-referenceable fields through copy fallback.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
