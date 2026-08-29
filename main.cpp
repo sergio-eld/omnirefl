@@ -6100,15 +6100,10 @@ std::string reflectable_body(const meta::record_data &d) {
 }
 
 std::string aggregate_into_body(const meta::record_data &d) {
-  // FIXME: Investigate and clarify missing-field semantics. The generator
-  // emits every destination designator without knowing `Fields`, and template
-  // instantiation cannot conditionally omit a designator. `get` therefore
-  // value-initializes a missing field. This is suitable for optional-like
-  // fields, but required fields need validation before aggregation.
   const auto get_field = [](const meta::field_data &field) {
     return std::format(
-      "omni::refl::get<typename omni::detail::_meta<T>::{0}_t>(fields,"
-      "\n        /*or*/ decltype(std::declval<T>().{0}){{}})",
+      "omni::refl::get<typename omni::detail::_meta<T>::{0}_t,"
+      "\n        decltype(std::declval<T>().{0})>(fields)",
       field.name);
   };
 
@@ -6124,6 +6119,11 @@ std::string aggregate_into_body(const meta::record_data &d) {
     | std_c::views::join_with(",\n      "sv) //
     | std::ranges::to<std::string>();
 
+  // TODO: Emit unfiltered `has_bases` metadata for every reflected record and
+  // use it from a common `is_aggregatable<T>` trait. Before C++20, that trait
+  // must require a reflected aggregate with no bases because base subobjects
+  // precede fields in positional initialization. `public_bases_t` is
+  // insufficient because dependency metadata filters standard-library bases.
   return std::format(
     "\n"
     "\n  template <typename Fields>"

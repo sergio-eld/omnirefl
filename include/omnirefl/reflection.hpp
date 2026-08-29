@@ -207,7 +207,11 @@ concept field_binding =
   requires { typename compat::remove_cvref_t<T>::omni_field_binding_tag; };
 #endif
 
-/// Experimental utilities callable only from within a reflected scope.
+/// Experimental utilities backed by generated reflection metadata.
+///
+/// These utilities are callable only from within a reflected scope. Their
+/// declarations remain in `reflection.hpp` while `aggregate_into` is the only
+/// generated utility.
 namespace refl {
 namespace detail {
 
@@ -216,55 +220,83 @@ struct _dependent_false: std::false_type {};
 
 template <typename T, typename = T>
 struct aggregate_into_t {
+  static_assert(_dependent_false<T>::value,
+    "omni::refl::aggregate_into: destination type is not a supported "
+    "aggregate");
+
   // Generated reflection headers provide `from` through an
   // `aggregate_into_t<T>` specialization for each supported `T`.
   template <typename Fields>
-  static T from(Fields &&) {
-    static_assert(_dependent_false<T>::value,
-      "aggregation into T is not supported");
-  }
+  static T from(Fields &&);
 };
 
 template <std::size_t Index,
   typename TargetField,
   typename Fields,
-  typename Or,
+  typename Target,
   bool End>
 struct _get_t;
 
-template <std::size_t Index, typename TargetField, typename Fields, typename Or>
-struct _get_t<Index, TargetField, Fields, Or, true> {
-  static Or from(Fields &, Or &or_value) {
-    return std::move(or_value);
+template <typename TargetField, typename Field, typename Target, bool>
+struct _construct_field_t;
+
+template <typename TargetField, typename Field, typename Target>
+struct _construct_field_t<TargetField, Field, Target, true> {
+  static Target from(Field &field) {
+    return static_cast<Target>(std::move(field).value());
   }
 };
 
-template <std::size_t Index, typename TargetField, typename Fields, typename Or>
-struct _get_t<Index, TargetField, Fields, Or, false> {
+template <typename TargetField, typename Field, typename Target>
+struct _construct_field_t<TargetField, Field, Target, false> {
+  static_assert(_dependent_false<TargetField>::value,
+    "omni::refl::aggregate_into: destination field is not constructible "
+    "from the same-named source field");
+
+  static Target from(Field &);
+};
+
+template <std::size_t Index,
+  typename TargetField,
+  typename Fields,
+  typename Target>
+struct _get_t<Index, TargetField, Fields, Target, true> {
+  static_assert(_dependent_false<TargetField>::value,
+    "omni::refl::aggregate_into: destination field is missing from the "
+    "source fields");
+
+  static Target from(Fields &);
+};
+
+template <std::size_t Index,
+  typename TargetField,
+  typename Fields,
+  typename Target>
+struct _get_t<Index, TargetField, Fields, Target, false> {
   using field = typename std::tuple_element<Index, Fields>::type;
 
-  static Or from(Fields &fields, Or &or_value) {
+  static Target from(Fields &fields) {
     return from(fields,
-      or_value,
       std::integral_constant<bool,
         omni::detail::_same_field_name(TargetField::name(), field::name())>{});
   }
 
   private:
-  static Or from(Fields &fields, Or &, std::true_type) {
+  static Target from(Fields &fields, std::true_type) {
     using source = decltype(std::declval<field &&>().value());
-    static_assert(std::is_constructible<Or, source>::value,
-      "destination field is not constructible from same-named source field");
-    return Or{std::move(std::get<Index>(fields)).value()};
+    return _construct_field_t<TargetField,
+      field,
+      Target,
+      std::is_constructible<Target, source>::value>::from(
+      std::get<Index>(fields));
   }
 
-  static Or from(Fields &fields, Or &or_value, std::false_type) {
+  static Target from(Fields &fields, std::false_type) {
     return _get_t<Index + 1,
       TargetField,
       Fields,
-      Or,
-      Index + 1 == std::tuple_size<Fields>::value>::from(fields,
-      or_value);
+      Target,
+      Index + 1 == std::tuple_size<Fields>::value>::from(fields);
   }
 };
 
@@ -272,28 +304,31 @@ struct _get_t<Index, TargetField, Fields, Or, false> {
 
 // REFACTORME: Decide whether this provisional tuple-only lookup remains the
 // aggregate-construction customization point before stabilizing the interface.
-/// Return the first same-named field constructed as `Or`, or `or_value`.
+/// Return the first same-named field constructed as `Target`.
 ///
 /// The current `Fields` protocol is `std::tuple<Field...>`. Each field provides
 /// a static `name()` and exposes its value through `.value()` as an rvalue.
-/// The first name match is consumed and must construct `Or`; no match returns
-/// `or_value`.
-template <typename TargetField, typename... Field, typename Or>
-Or get(std::tuple<Field...> &fields, Or or_value) {
+/// The first name match is consumed and must construct `Target`. A missing or
+/// incompatible field is a compile-time error.
+template <typename TargetField, typename Target, typename... Field>
+Target get(std::tuple<Field...> &fields) {
   using fields_t = std::tuple<Field...>;
   return detail::_get_t<0,
     TargetField,
     fields_t,
-    Or,
-    sizeof...(Field) == 0>::from(fields,
-    or_value);
+    Target,
+    sizeof...(Field) == 0>::from(fields);
 }
 
 /// Shallowly construct `T` from the current tuple-based field protocol.
 ///
+/// `Fields` currently follows the `std::tuple<Field...>` protocol documented
+/// by `get`. The generated header supplies the implementation for each
+/// supported destination type.
+///
 /// Generated specializations query each destination public field by name.
-/// Source-only fields are ignored and missing destination fields are
-/// value-initialized by the provisional `get` fallback.
+/// Every destination public field is required to have a same-named source field
+/// whose consumed value constructs it; source-only fields are ignored.
 /// Aggregates with base classes are not currently supported.
 ///
 /// Nested values are supported only when the destination field is directly

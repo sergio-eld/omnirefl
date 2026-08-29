@@ -982,6 +982,8 @@ if(_has_cxx20_reflected_guide_features)
     add_subdirectory(comprehensive_guide)
 endif()
 
+add_subdirectory(aggregate_into)
+
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
 
@@ -1000,6 +1002,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(_test_tgt "${cpp_prefix}.test")
     set(_test_sources
         test_main.cpp
+        aggregate_into/test.cpp
         dependent_types_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp

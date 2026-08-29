@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -134,6 +135,30 @@ using std::decay_t;
 #else
 template <typename T>
 using decay_t = typename std::decay<T>::type;
+#endif
+
+// make_unique
+#if OMNI_CPLUSPLUS >= 201402L
+using std::make_unique;
+#else
+template <typename T, typename... Argument>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Argument &&...argument) {
+  return std::unique_ptr<T>{new T(std::forward<Argument>(argument)...)};
+}
+
+template <typename T>
+typename std::enable_if<
+  std::is_array<T>::value && 0 == std::extent<T>::value,
+  std::unique_ptr<T>>::type
+make_unique(std::size_t size) {
+  using element = typename std::remove_extent<T>::type;
+  return std::unique_ptr<T>{new element[size]()};
+}
+
+template <typename T, typename... Argument>
+typename std::enable_if<0 != std::extent<T>::value>::type
+make_unique(Argument &&...) = delete;
 #endif
 
 // disjunction
