@@ -644,6 +644,7 @@ struct record_data {
     is_union,
   } type;
 
+  bool has_bases;
   bool is_aggregatable;
   bool has_template_parent;
   std::optional<template_data> template_info;
@@ -5310,21 +5311,21 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
         ? meta::record_data::is_class
         : meta::record_data::is_union,
 
+    // Unlike public_bases, this includes bases that are not reflected.
+    .has_bases = cxx_decl && !cxx_decl->bases().empty(),
+
     // Designators can name only direct non-static data members. Bases and
     // unnamed members cannot be represented by the generated initializer;
-    // unions can initialize at most one member.
-    // FIXME: Positional aggregate initialization can initialize direct base
-    // subobjects before members. Supporting aggregates with bases therefore
-    // needs separate eligibility and rendering for designated and positional
-    // initialization instead of rejecting them for both forms here.
+    // positional initialization places base subobjects before members. The
+    // current field-only renderer therefore rejects both cases. Union active
+    // member selection is not part of the Fields protocol.
     .is_aggregatable = cxx_decl && cxx_decl->isAggregate()
+      && !r_decl.isUnion()
       && cxx_decl->bases().empty()
       && std::ranges::all_of(aggregate_fields,
         [](const clang::FieldDecl *field) {
           return field->getIdentifier() != nullptr;
-        })
-      && (!r_decl.isUnion()
-        || std::ranges::distance(aggregate_fields) <= 1),
+        }),
 
     .has_template_parent =
       cxx_decl && has_template_record_parent(cxx_decl->getDeclContext()),
@@ -6080,6 +6081,9 @@ std::string reflectable_body(const meta::record_data &d) {
     // todo: consider a comment here for ignored fields
     "\n  using own_public_fields_t ="
     "\n    std::tuple<{}>;"
+    "\n"
+    "\n  static constexpr bool has_bases() noexcept {{ return {}; }}"
+    "\n  static constexpr bool is_aggregatable() noexcept {{ return {}; }}"
     "\n}};",
 
     d.public_fields.empty()
@@ -6096,7 +6100,10 @@ std::string reflectable_body(const meta::record_data &d) {
           return std::format("omni::field_meta_t<type, {}_t>", f);
         }) //
       | std_c::views::join_with(",\n      "sv) //
-      | util::format_range);
+      | util::format_range,
+
+    d.has_bases,
+    d.is_aggregatable);
 }
 
 std::string aggregate_into_body(const meta::record_data &d) {
@@ -6119,11 +6126,6 @@ std::string aggregate_into_body(const meta::record_data &d) {
     | std_c::views::join_with(",\n      "sv) //
     | std::ranges::to<std::string>();
 
-  // TODO: Emit unfiltered `has_bases` metadata for every reflected record and
-  // use it from a common `is_aggregatable<T>` trait. Before C++20, that trait
-  // must require a reflected aggregate with no bases because base subobjects
-  // precede fields in positional initialization. `public_bases_t` is
-  // insufficient because dependency metadata filters standard-library bases.
   return std::format(
     "\n"
     "\n  template <typename Fields>"

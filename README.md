@@ -135,6 +135,16 @@ The utilities preserve tuple access value categories and support move-only
 elements, visitors, and accumulators. See the
 [functional tests](tests/functional/test.cpp) for complete examples.
 
+## Reflection Utilities
+
+The experimental `omni::refl` utilities are implemented through code generated
+for each reflected type and are available only within reflected scopes:
+
+- `aggregate_into<T>(fields)` shallowly constructs a reflected aggregate by
+  matching field bindings by name. All destination public fields must be
+  present and constructible; additional source fields are ignored. See the
+  [example](tests/tool/aggregate_into/test.cpp).
+
 ## Supported Scope
 
 Omnirefl focuses on POD-like records and enums.

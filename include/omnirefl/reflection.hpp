@@ -213,6 +213,17 @@ concept field_binding =
 /// declarations remain in `reflection.hpp` while `aggregate_into` is the only
 /// generated utility.
 namespace refl {
+
+/// Whether generated aggregate construction is available for `T`.
+template <typename T, typename = void>
+struct is_aggregatable: std::false_type {};
+
+template <typename T>
+struct is_aggregatable<T,
+  compat::void_t<decltype(omni::detail::_meta<T>::is_aggregatable())>>:
+    std::integral_constant<bool,
+      omni::detail::_meta<T>::is_aggregatable()> {};
+
 namespace detail {
 
 template <typename>
@@ -329,7 +340,7 @@ Target get(std::tuple<Field...> &fields) {
 /// Generated specializations query each destination public field by name.
 /// Every destination public field is required to have a same-named source field
 /// whose consumed value constructs it; source-only fields are ignored.
-/// Aggregates with base classes are not currently supported.
+/// Unions and aggregates with base classes are not currently supported.
 ///
 /// Nested values are supported only when the destination field is directly
 /// constructible from the same-named source value. Differently shaped nested
@@ -779,6 +790,9 @@ struct meta_t {
   using omni_meta_tag = void;
   using type = compat::decay_t<T>;
 
+  static constexpr bool has_bases() noexcept;
+  static constexpr bool is_aggregatable() noexcept;
+
   template <typename U>
   static constexpr binding_t<compat::decay_t<U>> bind(U &&) noexcept;
 };
@@ -860,6 +874,16 @@ struct meta_t<T, reflected_entity::record> {
 
   static constexpr reflected_entity entity() noexcept {
     return reflected::entity();
+  }
+
+  /// Whether the record directly declares any base class.
+  static constexpr bool has_bases() noexcept {
+    return reflected::has_bases();
+  }
+
+  /// Whether generated aggregate construction is available for the record.
+  static constexpr bool is_aggregatable() noexcept {
+    return refl::is_aggregatable<type>::value;
   }
 
   /// Metadata for public fields visible through the reflected record.

@@ -65,6 +65,32 @@ struct request_projection {
   request_context context;
 };
 
+struct aggregate_base {
+  int inherited;
+};
+
+struct based_destination: aggregate_base {
+  int own;
+};
+
+union union_destination {
+  int value;
+};
+
+struct has_bases {
+  template <typename T>
+  constexpr bool operator()(omni::meta_t<T> target) const noexcept {
+    return target.has_bases();
+  }
+};
+
+struct can_aggregate {
+  template <typename T>
+  constexpr bool operator()(omni::meta_t<T> target) const noexcept {
+    return target.is_aggregatable();
+  }
+};
+
 // Generic C -> A * B adaptation; reflected_call supplies both target schemas.
 struct project_request {
   template <typename From, typename Domain, typename Context>
@@ -130,10 +156,6 @@ struct convert_with_missing_values {
 };
 
 } // namespace aggregate_test
-
-// TODO: Distinguish C++11 positional and C++20 designated initialization.
-// TODO: Cover base-class eligibility once generated `has_bases` metadata
-// exists.
 
 TEST(aggregate_into, projects_source_fields_into_destination) {
   namespace aggregate = aggregate_test;
@@ -203,7 +225,12 @@ TEST(aggregate_into, copies_fields_from_const_source) {
   EXPECT_EQ(2L, source.payload.use_count());
 }
 
-TEST(aggregate_into, matches_same_typed_fields_by_name) {
+#if defined(__cpp_designated_initializers) \
+  && 201707L <= __cpp_designated_initializers
+TEST(aggregate_into, designated_initialization_matches_fields_by_name) {
+#else
+TEST(aggregate_into, positional_initialization_matches_fields_by_name) {
+#endif
   namespace aggregate = aggregate_test;
 
   aggregate::name_match_source source{"first", "second", 47};
@@ -214,6 +241,26 @@ TEST(aggregate_into, matches_same_typed_fields_by_name) {
   EXPECT_EQ("second", destination.second);
   EXPECT_EQ("first", destination.first);
   EXPECT_EQ(47, destination.count);
+}
+
+TEST(aggregate_into, reports_base_class_eligibility) {
+  namespace aggregate = aggregate_test;
+
+  EXPECT_FALSE(omni::reflected_call(aggregate::has_bases{},
+    omni::type_t<aggregate::destination>{}));
+  EXPECT_TRUE(omni::reflected_call(aggregate::can_aggregate{},
+    omni::type_t<aggregate::destination>{}));
+  EXPECT_TRUE(omni::reflected_call(aggregate::has_bases{},
+    omni::type_t<aggregate::based_destination>{}));
+  EXPECT_FALSE(omni::reflected_call(aggregate::can_aggregate{},
+    omni::type_t<aggregate::based_destination>{}));
+}
+
+TEST(aggregate_into, reports_union_ineligible_for_aggregation) {
+  namespace aggregate = aggregate_test;
+
+  EXPECT_FALSE(omni::reflected_call(aggregate::can_aggregate{},
+    omni::type_t<aggregate::union_destination>{}));
 }
 
 TEST(aggregate_into, constructs_non_default_destination_field) {
