@@ -13,6 +13,43 @@ if(NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF"
         CACHE BOOL "Export compile commands" FORCE)
 endif()
 
+# ad hoc: CMake 4 permits Apple compilers to select their default SDK
+# implicitly, which leaves compile_commands.json without the SDK required by
+# Omnirefl's embedded driver. Resolve that fallback lazily, once per configure,
+# instead of launching discovery from every tool invocation.
+# TODO: Move this policy into the planned compiler-environment discovery tool.
+function(_omni_resolve_macos_sdk_fallback out)
+    get_property(_sysroot GLOBAL PROPERTY _OMNIREFL_MACOS_SYSROOT)
+    if(NOT _sysroot)
+        if(DEFINED ENV{SDKROOT} AND IS_ABSOLUTE "$ENV{SDKROOT}")
+            set(_sysroot "$ENV{SDKROOT}")
+        else()
+            set(_sdk "macosx")
+            if(DEFINED ENV{SDKROOT} AND NOT "$ENV{SDKROOT}" STREQUAL "")
+                set(_sdk "$ENV{SDKROOT}")
+            endif()
+
+            execute_process(
+                COMMAND xcrun --sdk "${_sdk}" --show-sdk-path
+                RESULT_VARIABLE _sdk_result
+                OUTPUT_VARIABLE _sysroot
+                ERROR_VARIABLE _sdk_error
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+            if(NOT 0 EQUAL _sdk_result OR NOT IS_ABSOLUTE "${_sysroot}")
+                message(FATAL_ERROR
+                    "omnirefl: CMake failed to resolve the macOS SDK '${_sdk}'. "
+                    "Configure with CMAKE_OSX_SYSROOT set explicitly.\n"
+                    "${_sdk_error}")
+            endif()
+        endif()
+
+        set_property(GLOBAL PROPERTY _OMNIREFL_MACOS_SYSROOT "${_sysroot}")
+    endif()
+
+    set(${out} "${_sysroot}" PARENT_SCOPE)
+endfunction()
+
 # -- Reflection tool sanity checks --------
 macro(_omni_checkhealth)
     if(NOT TARGET omni::tool)
@@ -193,6 +230,55 @@ function(omni_reflected_target target)
             "omnirefl: target ${target} is an INTERFACE library, which is not supported. "
             "Use a STATIC library or an EXECUTABLE instead.")
         return()
+    endif()
+
+    if("Darwin" STREQUAL CMAKE_SYSTEM_NAME)
+        set(_macos_compile_options)
+
+        # ad hoc: Cosmopolitan's process triple describes the packaged payload,
+        # not the macOS target currently compiling this CMake target. Make the
+        # target's existing CMake architecture explicit for both the real
+        # compiler and compile_commands.json.
+        # TODO: Move target normalization into the planned discovery tool.
+        if(NOT CMAKE_CXX_COMPILER_TARGET)
+            get_target_property(_macos_architectures
+                ${target} OSX_ARCHITECTURES)
+            if(NOT _macos_architectures
+                    OR _macos_architectures STREQUAL
+                        "_macos_architectures-NOTFOUND")
+                set(_macos_architectures "${CMAKE_OSX_ARCHITECTURES}")
+            endif()
+            if(NOT _macos_architectures)
+                set(_macos_architectures "${CMAKE_SYSTEM_PROCESSOR}")
+            endif()
+            if(NOT _macos_architectures)
+                message(FATAL_ERROR
+                    "omnirefl: unable to resolve the macOS architecture for "
+                    "target ${target}; set OSX_ARCHITECTURES explicitly")
+            endif()
+
+            list(GET _macos_architectures 0 _macos_architecture)
+            list(APPEND _macos_compile_options
+                "$<$<COMPILE_LANGUAGE:CXX>:--target=${_macos_architecture}-apple-darwin>")
+        endif()
+
+        # Freestanding compilation does not imply SDK independence: it may
+        # still include platform headers, and CMake has no target property that
+        # describes the effective per-source include requirements. A future
+        # no-SDK mode must therefore be an explicit integration contract.
+        if(NOT CMAKE_OSX_SYSROOT)
+            _omni_resolve_macos_sdk_fallback(_macos_sysroot)
+            list(APPEND _macos_compile_options
+                "$<$<COMPILE_LANGUAGE:CXX>:-isysroot${_macos_sysroot}>")
+        endif()
+
+        # BEFORE places these synthesized defaults before target and transitive
+        # compile options, leaving later user-supplied options authoritative.
+        # The defaults intentionally affect the real compiler so its formerly
+        # implicit environment is reproduced by Omnirefl through
+        # compile_commands.json.
+        target_compile_options(${target} BEFORE PRIVATE
+            ${_macos_compile_options})
     endif()
 
     set_target_properties(${target} PROPERTIES _OMNIREFL_PROCESSED TRUE)
