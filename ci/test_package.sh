@@ -175,6 +175,7 @@ cmake --build "$build" --parallel "$parallel" 2>&1 |
 
 set +e
 ctest --test-dir "$build" \
+  --timeout 600 \
   --output-junit "$results/$name.xml" \
   -V 2>&1 |
   tee "$results/$name.log"

@@ -388,7 +388,7 @@ services:
         cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
         cmake --build . -j $$env:NUMBER_OF_PROCESSORS
 
-        ctest . --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
+        ctest . --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
           Tee-Object C:/test/$$env:TEST_NAME.log
         $$rc = $$LASTEXITCODE
 
@@ -476,7 +476,7 @@ services:
         cmake --build . -j"$$(nproc)"
 
         set +e
-        ctest . --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
+        ctest . --timeout 600 --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
           tee "/c/test/$$TEST_NAME.log"
         rc=$${PIPESTATUS[0]}
         set -e

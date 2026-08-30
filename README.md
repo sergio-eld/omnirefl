@@ -277,7 +277,7 @@ mkdir build && cd build
 cmake ../omnirefl-tests -GNinja \
   "-Domnirefl_DIR=$prefix/lib/cmake/omnirefl"
 
-ctest --output-on-failure
+ctest --timeout 600 --output-on-failure
 ```
 
 On Windows, run from a Visual Studio Developer PowerShell so `cl.exe` is
@@ -293,7 +293,7 @@ Set-Location build
 cmake ../omnirefl-tests -GNinja `
   "-Domnirefl_DIR=$prefix/lib/cmake/omnirefl"
 
-ctest --output-on-failure
+ctest --timeout 600 --output-on-failure
 ```
 
 The tests fetch their own test-only dependencies during CMake configuration.
