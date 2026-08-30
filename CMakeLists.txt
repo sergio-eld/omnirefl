@@ -363,11 +363,14 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
         RENAME "CLI11.txt")
 
-    # Ship tests and runnable examples as source so they can be used on other
-    # platforms.
+    # Ship tests and examples as source so they can be used on other platforms.
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/tests/tool/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
+
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/examples/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples")
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"
