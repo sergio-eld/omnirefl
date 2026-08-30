@@ -167,33 +167,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js for Pages Check
-        if: >-
-          ${{
-            'pull_request' == github.event_name
-            && 'alpine' == matrix.platform
-            && 'x86_64' == matrix.arch
-            && 'gcc' == matrix.toolchain
-          }}
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-
-      - name: Check Pages Build
-        if: >-
-          ${{
-            'pull_request' == github.event_name
-            && 'alpine' == matrix.platform
-            && 'x86_64' == matrix.arch
-            && 'gcc' == matrix.toolchain
-          }}
-        working-directory: site
-        run: |
-          npm ci
-          npm run build
-
       - name: Resolve Short SHA
         id: commit
         run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
@@ -752,12 +725,38 @@ jobs:
           path: ${{ env.BENCHMARK_RESULTS }}
           if-no-files-found: error
 
+  check-site:
+    name: Check site
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: ${{ 'pull_request' == github.event_name }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Check Site Build
+        working-directory: site
+        run: |
+          npm ci
+          npm run build
+
   required-ci:
     name: Required CI
     runs-on: ubuntu-latest
     needs:
       - build-package-musl
       - build-package-cosmo
+      - check-site
       - test-package-linux
       - test-package-macos
       - test-package-windows
@@ -860,6 +859,10 @@ jobs:
             && (
               'success' != needs['build-package-musl'].result
               || 'success' != needs['build-package-cosmo'].result
+              || (
+                'pull_request' == github.event_name
+                && 'success' != needs['check-site'].result
+              )
               || 'success' != needs['test-package-linux'].result
               || 'success' != needs['test-package-macos'].result
               || 'success' != needs['test-package-windows'].result
@@ -868,13 +871,15 @@ jobs:
         env:
           BUILD_PACKAGE_MUSL_RESULT: ${{ needs['build-package-musl'].result }}
           BUILD_PACKAGE_COSMO_RESULT: ${{ needs['build-package-cosmo'].result }}
+          CHECK_SITE_RESULT: ${{ needs['check-site'].result }}
           TEST_PACKAGE_LINUX_RESULT: ${{ needs['test-package-linux'].result }}
           TEST_PACKAGE_MACOS_RESULT: ${{ needs['test-package-macos'].result }}
           TEST_PACKAGE_WINDOWS_RESULT: ${{ needs['test-package-windows'].result }}
         run: |
-          printf 'build-package-musl: %s\nbuild-package-cosmo: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
+          printf 'build-package-musl: %s\nbuild-package-cosmo: %s\ncheck-site: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
             "$BUILD_PACKAGE_MUSL_RESULT" \
             "$BUILD_PACKAGE_COSMO_RESULT" \
+            "$CHECK_SITE_RESULT" \
             "$TEST_PACKAGE_LINUX_RESULT" \
             "$TEST_PACKAGE_MACOS_RESULT" \
             "$TEST_PACKAGE_WINDOWS_RESULT"
