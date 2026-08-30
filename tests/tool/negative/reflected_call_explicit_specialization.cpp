@@ -1,3 +1,5 @@
+// Expected failure: explicit template specializations are not supported
+// reflection inputs.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_explicit_specialization {

@@ -1,6 +1,5 @@
-// Negative-compilation input exercised in C++17 and C++20. `aggregate_into`
-// must reject a union destination as unsupported.
-#include "convert.hpp"
+// Expected failure: aggregate_into rejects union destinations.
+#include "../convert.hpp"
 
 #include <utility>
 

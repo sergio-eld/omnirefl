@@ -1,3 +1,5 @@
+// Expected failure: the reflected type is incomplete at the call site even
+// though its definition appears later in the translation unit.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_definition_after_call {

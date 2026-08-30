@@ -1,3 +1,5 @@
+// Expected failure: an unscoped enum cannot be forward-declared for generated
+// reflection when index mode is disabled.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_unscoped_enum {

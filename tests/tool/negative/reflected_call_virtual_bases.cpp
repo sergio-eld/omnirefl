@@ -1,3 +1,5 @@
+// Expected failure: direct, indirect, and templated virtual bases are not
+// supported reflection inputs.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_virtual_bases {

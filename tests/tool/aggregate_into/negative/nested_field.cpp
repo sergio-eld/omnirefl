@@ -1,4 +1,6 @@
-#include "convert.hpp"
+// Expected failure: aggregate_into is shallow and does not recursively convert
+// incompatible same-named nested records.
+#include "../convert.hpp"
 
 #include <utility>
 

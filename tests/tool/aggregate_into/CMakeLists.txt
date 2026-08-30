@@ -5,7 +5,7 @@ function(_aggregate_into_compile_failure cpp_standard name expected_message unex
 
     set(_target "cpp_${cpp_standard}.negative.aggregate_into.${name}")
 
-    add_executable(${_target} EXCLUDE_FROM_ALL "${name}.cpp")
+    add_executable(${_target} EXCLUDE_FROM_ALL "negative/${name}.cpp")
     set_target_properties(${_target} PROPERTIES
         CXX_STANDARD ${cpp_standard}
         CXX_STANDARD_REQUIRED YES

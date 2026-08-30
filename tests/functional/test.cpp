@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -154,13 +155,61 @@ struct add_owned {
 struct invoke_record {
   int value;
 
-  invoke_record add(int right) const {
+  constexpr invoke_record add(int right) const {
     return invoke_record{value + right};
   }
 
-  int sum(int right) const {
+  constexpr int sum(int right) const {
     return value + right;
   }
+
+  constexpr int noexcept_sum(int right) const noexcept {
+    return value + right;
+  }
+};
+
+constexpr invoke_record invoked_record{40};
+static_assert(42
+    == omni::compat::invoke(&invoke_record::sum, invoked_record, 2),
+  "member function invocation must support constant evaluation");
+static_assert(40 == omni::compat::invoke(&invoke_record::value, invoked_record),
+  "member data invocation must support constant evaluation");
+#if defined(__cpp_noexcept_function_type) \
+  && 201510L <= __cpp_noexcept_function_type
+static_assert(noexcept(omni::compat::invoke(
+    &invoke_record::noexcept_sum,
+    invoked_record,
+    2)),
+  "member invocation must preserve noexcept");
+static_assert(!noexcept(omni::compat::invoke(
+    &invoke_record::sum,
+    invoked_record,
+    2)),
+  "member invocation must preserve potentially throwing calls");
+#endif
+static_assert(std::is_same<decltype(omni::compat::invoke(
+                             &invoke_record::value,
+                             std::declval<invoke_record &>())),
+                int &>::value,
+  "member data invocation must preserve mutable lvalues");
+static_assert(std::is_same<decltype(omni::compat::invoke(
+                             &invoke_record::value,
+                             std::declval<const invoke_record &>())),
+                const int &>::value,
+  "member data invocation must preserve const lvalues");
+static_assert(std::is_same<decltype(omni::compat::invoke(
+                             &invoke_record::value,
+                             std::declval<invoke_record &&>())),
+                int &&>::value,
+  "member data invocation must preserve mutable rvalues");
+static_assert(std::is_same<decltype(omni::compat::invoke(
+                             &invoke_record::value,
+                             std::declval<const invoke_record &&>())),
+                const int &&>::value,
+  "member data invocation must preserve const rvalues");
+
+struct derived_invoke_record: invoke_record {
+  explicit constexpr derived_invoke_record(int value): invoke_record{value} {}
 };
 
 struct move_only_each {
@@ -404,6 +453,32 @@ TEST(fn_composition, returns_stringified_reflected_field_values) {
   const auto values = omni::reflected_call(transform_record{}, input);
 
   EXPECT_EQ((std::vector<std::string>{"3", "ignored", "2.5"}), values);
+}
+
+TEST(compat_invoke, invokes_members_through_supported_object_forms) {
+  invoke_record object{40};
+  derived_invoke_record derived{40};
+  auto *const pointer = &object;
+  auto owned = omni::compat::make_unique<invoke_record>(invoke_record{40});
+  auto reference = std::ref(object);
+
+  EXPECT_EQ(42, omni::compat::invoke(&invoke_record::sum, object, 2));
+  EXPECT_EQ(42, omni::compat::invoke(&invoke_record::sum, derived, 2));
+  EXPECT_EQ(42, omni::compat::invoke(&invoke_record::sum, pointer, 2));
+  EXPECT_EQ(42, omni::compat::invoke(&invoke_record::sum, owned, 2));
+  EXPECT_EQ(42, omni::compat::invoke(&invoke_record::sum, reference, 2));
+#if !defined(__cpp_lib_constexpr_functional) \
+  || __cpp_lib_constexpr_functional < 201907L
+  // The compatibility overload set must prioritize members of the wrapper
+  // object over unwrapping it.
+  EXPECT_EQ(&object,
+    &omni::compat::invoke(&decltype(reference)::get, reference));
+#endif
+
+  omni::compat::invoke(&invoke_record::value, object) = 108;
+
+  EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, pointer));
+  EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, reference));
 }
 
 TEST(fn_concat, concatenates_eager_lazy_and_piped_tuples) {

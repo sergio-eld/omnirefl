@@ -1,3 +1,5 @@
+// Expected failure: a reflection query cannot determine a generic visitor's
+// return type when that type is deduced from the visitor body.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_query_lambda_deduced_return {

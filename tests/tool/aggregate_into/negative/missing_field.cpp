@@ -1,4 +1,5 @@
-#include "convert.hpp"
+// Expected failure: the source fields omit a required destination field.
+#include "../convert.hpp"
 
 #include <utility>
 

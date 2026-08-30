@@ -586,59 +586,59 @@ if("17" IN_LIST _supported_cpp_standards)
 
     _omnirefl_negative_tool_run(
         "query_out_of_scope"
-        negative_run/query_out_of_scope.cpp
+        negative/query_out_of_scope.cpp
         1)
     _omnirefl_negative_tool_run(
         "query_non_template_visitor"
-        negative_run/query_non_template_visitor.cpp
+        negative/query_non_template_visitor.cpp
         2
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: reflection query"
         "call stack:")
     _omnirefl_negative_tool_run(
         "query_lambda_deduced_return"
-        negative_run/query_lambda_deduced_return.cpp
+        negative/query_lambda_deduced_return.cpp
         2
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: reflection query"
         "call stack:")
     _omnirefl_negative_tool_run(
         "query_multiple"
-        negative_run/query_multiple.cpp
+        negative/query_multiple.cpp
         7)
     _omnirefl_negative_tool_run(
         "reflected_call_args"
-        negative_run/reflected_call_args.cpp
+        negative/reflected_call_args.cpp
         4
         "invalid reflected_call arguments"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_partial_specialization"
-        negative_run/reflected_call_partial_specialization.cpp
+        negative/reflected_call_partial_specialization.cpp
         1
         "partial template specialization"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_forward_declaration"
-        negative_run/reflected_call_forward_declaration.cpp
+        negative/reflected_call_forward_declaration.cpp
         3
         "forward declarations without definitions"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_definition_after_call"
-        negative_run/reflected_call_definition_after_call.cpp
+        negative/reflected_call_definition_after_call.cpp
         1
         "definition appears later in the translation unit"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_template_callstack"
-        negative_run/reflected_call_template_callstack.cpp
+        negative/reflected_call_template_callstack.cpp
         1
         "instantiated from"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_local_unnamed"
-        negative_run/reflected_call_local_unnamed.cpp
+        negative/reflected_call_local_unnamed.cpp
         3
         "local types are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument"
@@ -647,7 +647,7 @@ if("17" IN_LIST _supported_cpp_standards)
         "ENABLE_INDEX_MODE|indexed support|index mode")
     _omnirefl_negative_tool_run(
         "reflected_call_unscoped_enum"
-        negative_run/reflected_call_unscoped_enum.cpp
+        negative/reflected_call_unscoped_enum.cpp
         1
         "enum cannot be forward-declared"
         ":[0-9]+:[0-9]+: reflected_call argument"
@@ -656,32 +656,32 @@ if("17" IN_LIST _supported_cpp_standards)
         "ENABLE_INDEX_MODE|indexed support|index mode")
     _omnirefl_negative_tool_run(
         "reflected_call_explicit_specialization"
-        negative_run/reflected_call_explicit_specialization.cpp
+        negative/reflected_call_explicit_specialization.cpp
         1
         "explicit specializations are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_nested_template_parent"
-        negative_run/reflected_call_nested_template_parent.cpp
+        negative/reflected_call_nested_template_parent.cpp
         1
         "records nested inside template records are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "query_and_reflected_call_arg"
-        negative_run/query_and_reflected_call_arg.cpp
+        negative/query_and_reflected_call_arg.cpp
         2
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: (reflection query|reflected_call argument)"
         "invalid reflected_call arguments")
     _omnirefl_negative_tool_run(
         "reflected_call_non_template_nested_in_template"
-        negative_run/reflected_call_non_template_nested_in_template.cpp
+        negative/reflected_call_non_template_nested_in_template.cpp
         1
         "records nested inside template records are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_virtual_bases"
-        negative_run/reflected_call_virtual_bases.cpp
+        negative/reflected_call_virtual_bases.cpp
         4
         "records with virtual bases are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
@@ -893,7 +893,7 @@ if("20" IN_LIST _supported_cpp_standards)
     set(_constrained_template_target
         "cpp_20.negative.reflected_call_constrained_primary_template")
     add_executable(${_constrained_template_target} EXCLUDE_FROM_ALL
-        negative_run/reflected_call_constrained_primary_template.cpp)
+        negative/reflected_call_constrained_primary_template.cpp)
     set_target_properties(${_constrained_template_target} PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED YES

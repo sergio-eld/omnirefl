@@ -1,4 +1,6 @@
-#include "convert.hpp"
+// Expected failure: the same-named source field cannot construct the
+// destination field.
+#include "../convert.hpp"
 
 #include <string>
 #include <utility>

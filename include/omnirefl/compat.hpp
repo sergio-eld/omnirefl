@@ -97,12 +97,32 @@ using detail::apply;
 #endif
 
 // invoke
-// std::invoke did not become constexpr until C++20.
-#if OMNI_CPLUSPLUS >= 202002L
+#if defined(__cpp_lib_constexpr_functional) \
+  && 201907L <= __cpp_lib_constexpr_functional
 using std::invoke;
 #else
+namespace detail {
+
+template <typename T>
+struct is_reference_wrapper: std::false_type {};
+
+template <typename T>
+struct is_reference_wrapper<std::reference_wrapper<T>>: std::true_type {};
+
+template <typename Class, typename Object>
+struct is_member_owner:
+    std::integral_constant<bool,
+      std::is_same<Class, typename std::decay<Object>::type>::value
+        || std::is_base_of<
+          Class,
+          typename std::decay<Object>::type>::value> {};
+
+} // namespace detail
+
 template <typename Function, typename... Argument>
-constexpr auto invoke(Function &&function, Argument &&...argument) ->
+constexpr auto invoke(Function &&function, Argument &&...argument) noexcept(
+  noexcept(std::forward<Function>(function)(
+    std::forward<Argument>(argument)...))) ->
   typename std::enable_if<
     !std::is_member_pointer<typename std::decay<Function>::type>::value,
     decltype(std::forward<Function>(function)(
@@ -110,14 +130,96 @@ constexpr auto invoke(Function &&function, Argument &&...argument) ->
   return std::forward<Function>(function)(std::forward<Argument>(argument)...);
 }
 
-template <typename Function, typename... Argument>
-auto invoke(Function &&function, Argument &&...argument) ->
+template <typename Member,
+  typename Class,
+  typename Object,
+  typename... Argument>
+constexpr auto invoke(Member Class::*member,
+  Object &&object,
+  Argument &&...argument) noexcept(
+  noexcept((std::forward<Object>(object).*member)(
+    std::forward<Argument>(argument)...))) ->
   typename std::enable_if<
-    std::is_member_pointer<typename std::decay<Function>::type>::value,
-    decltype(std::mem_fn(std::forward<Function>(function))(
+    std::is_function<Member>::value
+      && detail::is_member_owner<Class, Object>::value,
+    decltype((std::forward<Object>(object).*member)(
       std::forward<Argument>(argument)...))>::type {
-  return std::mem_fn(std::forward<Function>(function))(
+  return (std::forward<Object>(object).*member)(
     std::forward<Argument>(argument)...);
+}
+
+template <typename Member,
+  typename Class,
+  typename Object,
+  typename... Argument>
+constexpr auto invoke(Member Class::*member,
+  Object &&object,
+  Argument &&...argument) noexcept(
+  noexcept((std::forward<Object>(object).get().*member)(
+    std::forward<Argument>(argument)...))) ->
+  typename std::enable_if<
+    std::is_function<Member>::value
+      && !detail::is_member_owner<Class, Object>::value
+      && detail::is_reference_wrapper<
+        typename std::decay<Object>::type>::value,
+    decltype((std::forward<Object>(object).get().*member)(
+      std::forward<Argument>(argument)...))>::type {
+  return (std::forward<Object>(object).get().*member)(
+    std::forward<Argument>(argument)...);
+}
+
+template <typename Member,
+  typename Class,
+  typename Object,
+  typename... Argument>
+constexpr auto invoke(Member Class::*member,
+  Object &&object,
+  Argument &&...argument) noexcept(
+  noexcept(((*std::forward<Object>(object)).*member)(
+    std::forward<Argument>(argument)...))) ->
+  typename std::enable_if<
+    std::is_function<Member>::value
+      && !detail::is_member_owner<Class, Object>::value
+      && !detail::is_reference_wrapper<
+        typename std::decay<Object>::type>::value,
+    decltype(((*std::forward<Object>(object)).*member)(
+      std::forward<Argument>(argument)...))>::type {
+  return ((*std::forward<Object>(object)).*member)(
+    std::forward<Argument>(argument)...);
+}
+
+template <typename Member, typename Class, typename Object>
+constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
+  noexcept(std::forward<Object>(object).*member)) ->
+  typename std::enable_if<
+    std::is_object<Member>::value
+      && detail::is_member_owner<Class, Object>::value,
+    decltype(std::forward<Object>(object).*member)>::type {
+  return std::forward<Object>(object).*member;
+}
+
+template <typename Member, typename Class, typename Object>
+constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
+  noexcept(std::forward<Object>(object).get().*member)) ->
+  typename std::enable_if<
+    std::is_object<Member>::value
+      && !detail::is_member_owner<Class, Object>::value
+      && detail::is_reference_wrapper<
+        typename std::decay<Object>::type>::value,
+    decltype(std::forward<Object>(object).get().*member)>::type {
+  return std::forward<Object>(object).get().*member;
+}
+
+template <typename Member, typename Class, typename Object>
+constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
+  noexcept((*std::forward<Object>(object)).*member)) ->
+  typename std::enable_if<
+    std::is_object<Member>::value
+      && !detail::is_member_owner<Class, Object>::value
+      && !detail::is_reference_wrapper<
+        typename std::decay<Object>::type>::value,
+    decltype((*std::forward<Object>(object)).*member)>::type {
+  return (*std::forward<Object>(object)).*member;
 }
 #endif
 

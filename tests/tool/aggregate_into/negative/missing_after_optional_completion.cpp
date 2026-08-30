@@ -1,4 +1,6 @@
-#include "completion.hpp"
+// Expected failure: supplying a missing optional field does not satisfy the
+// remaining missing non-optional field.
+#include "../completion.hpp"
 
 #include <utility>
 

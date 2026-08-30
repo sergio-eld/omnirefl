@@ -1,6 +1,5 @@
-// Negative-compilation input exercised in C++17 and C++20. `aggregate_into`
-// must reject a destination with a base class as unsupported.
-#include "convert.hpp"
+// Expected failure: aggregate_into rejects destinations with base classes.
+#include "../convert.hpp"
 
 #include <utility>
 

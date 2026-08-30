@@ -1,4 +1,5 @@
-#include "convert.hpp"
+// Expected failure: aggregate_into rejects a non-aggregate destination.
+#include "../convert.hpp"
 
 #include <utility>
 
