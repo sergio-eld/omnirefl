@@ -1,13 +1,16 @@
+<!-- pages:introduction:start -->
 # Omnirefl
-
-<p align="center">
-  <img src="omnirefl-banner.png" alt="Omnirefl" width="640">
-  <br>
-  <sub>Obligatory self-reflection meta joke.</sub>
-</p>
 
 A C++ reflection tool built for a seamless experience without macros or UB.
 
+<p align="center">
+  <img src="omnirefl-banner.png" alt="Meme comparing Omnirefl AST parsing and template machinery with languages that have built-in reflection" width="640">
+  <br>
+  <sub>Obligatory self-reflection meta joke.</sub>
+</p>
+<!-- pages:introduction:end -->
+
+<!-- pages:sneak-peek:start -->
 ## Sneak Peek
 
 Minimal CMake setup:
@@ -86,18 +89,13 @@ int main() {
 }
 ```
 
-Field-binding `value()` uses `std::optional`/`std::expected`-style ref-qualified
-access: `field.value()` deliberately reads without moving, while
-`std::move(field).value()` requests consuming access. For referenceable fields,
-`std::move(field.ref())` is the explicit equivalent. Bitfields and unsafe
-packed scalars fall back to copying because they cannot expose a reference.
-Move the binding, not the result of lvalue `value()`.
-
 The complete example is available in
 [tests/tool/example](tests/tool/example). The
 [comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
+<!-- pages:sneak-peek:end -->
 
+<!-- pages:experience:start -->
 ## Seamless Experience
 
 1. Add `omni_reflected_target(...)` for the CMake target.
@@ -106,34 +104,21 @@ covers the remaining interface and compatibility features.
 Everything else remains regular C++. Omnirefl discovers the argument types and
 supported dependencies, then generates and force-includes their metadata. No
 macros, compiler-specific UB, or manual regeneration are required.
+<!-- pages:experience:end -->
 
-## Tuple Functional Utilities
+## Functional Utilities
 
-`<omnirefl/functional.hpp>` provides small compositions over the standard
-tuple-like protocol (`std::tuple_size` and `std::get`):
-
-- `each(visit, tuple)` invokes `visit` for every element and discards its
-  results.
-- `filter(predicate, tuple)` selects elements at compile time from their
-  cv/ref-qualified access types and returns an owning tuple. Use a predicate
-  type, or `omni::fn::pred<lambda>` with a C++20 templated lambda.
-- `map(visit, tuple)` transforms every element into an owning result tuple.
-- `foldl(visit, accumulator, tuple)` reduces from left to right as
-  `visit(accumulator, element)`.
-- `foldr(visit, accumulator, tuple)` reduces from right to left as
-  `visit(element, accumulator)`.
-
-Each operation supports eager calls, deferred calls, and pipe composition:
+`<omnirefl/functional.hpp>` provides compositors such as `each`, `filter`,
+`map`, and `foldl`, including chainable forms:
 
 ```cpp
-omni::fn::map(visit, tuple);
-omni::fn::map(visit)(tuple);
-tuple | omni::fn::map(visit) | omni::fn::foldl(combine, initial);
+const auto result = tuple
+  | omni::fn::filter(predicate)
+  | omni::fn::map(transform)
+  | omni::fn::foldl(combine, initial);
 ```
 
-The utilities preserve tuple access value categories and support move-only
-elements, visitors, and accumulators. See the
-[functional tests](tests/functional/test.cpp) for complete examples.
+See the [functional tests](tests/functional/test.cpp) for detailed examples.
 
 ## Reflection Utilities
 
@@ -145,9 +130,11 @@ for each reflected type and are available only within reflected scopes:
   present and constructible; additional source fields are ignored. See the
   [example](tests/tool/aggregate_into/test.cpp).
 
+<!-- pages:scope:start -->
 ## Supported Scope
 
-Omnirefl focuses on POD-like records and enums.
+Omnirefl focuses on POD-like records and enums (see
+[Limitations](#limitations)).
 
 - C++11 through C++23; C++20 concepts provide the most ergonomic interface.
 - Named namespace-scope records and enums; namespace-scope unscoped enums
@@ -182,7 +169,54 @@ Additional reflected types are discovered through:
 Standard-library record types are not traversed as reflectable records outside
 those protocol routes.
 
-### Limitations
+<!-- pages:scope:end -->
+
+## Direct CLI Usage
+
+`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
+require CMake:
+
+```bash
+# Cosmopolitan packages use omnirefl on Unix and omnirefl.exe on Windows.
+flags="-std=c++20 -I/path/to/omnirefl/include"
+omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
+c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
+```
+
+`-c` selects the instrumented source; compiler output options after `--` are
+ignored. `ccdb_query` prints the matching command from a compilation database;
+the optional final argument selects among commands by output-path substring:
+
+```bash
+ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
+```
+
+<!-- pages:install:start -->
+## Install
+
+Install options:
+
+- **Release archives:**<br>
+  [Latest release](https://github.com/sergio-eld/omnirefl/releases/latest) or
+  [all releases](https://github.com/sergio-eld/omnirefl/releases). Linux
+  packages use `.deb` or `.tar.gz`; Windows packages use `.zip`. The
+  experimental Cosmopolitan `.tar.gz` package supports Linux, macOS, and
+  Windows.
+- **Latest CI artifact:**<br>
+  Open the latest successful
+  [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
+  run on `master` and download the package artifact for the required runtime
+  and architecture.
+- **Build locally:**<br>
+  Use the prepared Docker images; see
+  [Build Packages Locally](#build-packages-locally).
+
+Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
+`omnirefl-*` directory as the installation prefix.
+<!-- pages:install:end -->
+
+<!-- pages:limitations:start -->
+## Limitations
 
 - `reflected_call` is the instrumentation boundary. The visitor must be either
   a generic lambda or a type with a templated `operator()`. Its return type must
@@ -221,46 +255,7 @@ those protocol routes.
   Generated sources are skipped, source generator expressions are rejected,
   and C translation units are ignored. If no C++ source remains, reflection is
   skipped with a warning.
-
-## Direct CLI Usage
-
-`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
-require CMake:
-
-```bash
-# Cosmopolitan packages use omnirefl on Unix and omnirefl.exe on Windows.
-flags="-std=c++20 -I/path/to/omnirefl/include"
-omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
-c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
-```
-
-`-c` selects the instrumented source; compiler output options after `--` are
-ignored. `ccdb_query` prints the matching command from a compilation database;
-the optional final argument selects among commands by output-path substring:
-
-```bash
-ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
-```
-
-## Install
-
-Install options:
-
-- Release archives:
-  [browse published releases](https://github.com/sergio-eld/omnirefl/releases).
-  Linux packages use `.deb` or `.tar.gz`, Windows packages use `.zip`, and the
-  experimental Cosmopolitan `.tar.gz` package supports Linux, macOS, and
-  Windows.
-- Latest CI artifact:
-  open the latest successful
-  [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
-  run on `master` and download the package artifact for the required runtime
-  and architecture.
-- Build locally using the prepared Docker images; see
-  [Build Packages Locally](#build-packages-locally).
-
-Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
-`omnirefl-*` directory as the installation prefix.
+<!-- pages:limitations:end -->
 
 ## Packaged Tests and Examples
 
