@@ -1,3 +1,4 @@
+// Expected failure: reflection state is queried outside a reflected scope.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_query_out_of_scope {

@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl 
     LANGUAGES CXX C 
-    VERSION 0.0.1)
+    VERSION 0.0.2)
 
 # -- Configurable options --------
 option(ENABLE_PACKAGE "Enable omnirefl packaging" OFF)
@@ -151,6 +151,9 @@ target_sources(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/reflection.hpp>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/reflection.hpp>
 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/functional.hpp>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/functional.hpp>
+
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/unique_id.hpp>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/unique_id.hpp>)
 
@@ -178,6 +181,7 @@ elseif(ENABLE_BENCH OR ENABLE_TESTING)
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
     if(ENABLE_TESTING)
         add_subdirectory(tests/std_compat tests/std_compat)
+        add_subdirectory(tests/functional tests/functional)
     endif()
 endif()
 
@@ -359,11 +363,14 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
         RENAME "CLI11.txt")
 
-    # Ship tests and runnable examples as source so they can be used on other
-    # platforms.
+    # Ship tests and examples as source so they can be used on other platforms.
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/tests/tool/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
+
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/examples/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples")
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"

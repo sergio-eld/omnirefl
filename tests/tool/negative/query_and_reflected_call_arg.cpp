@@ -1,3 +1,5 @@
+// Expected failure: one call combines an out-of-scope reflection query with a
+// non-reflectable top-level argument.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_query_and_reflected_call_arg {

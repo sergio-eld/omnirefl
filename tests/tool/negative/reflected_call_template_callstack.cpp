@@ -1,3 +1,5 @@
+// Expected failure: reflection of an incomplete type is diagnosed through the
+// instantiated template call stack.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_template_callstack {

@@ -478,6 +478,7 @@ jobs:
           if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
           ctest --test-dir $build `
+            --timeout 600 `
             --output-junit (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml") `
             -V 2>&1 |
             Tee-Object (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log")
@@ -507,6 +508,7 @@ jobs:
           cmake --build "$build" --parallel "$(nproc)" 2>&1 |
             tee "$results/build.log"
           ctest --test-dir "$build" \
+            --timeout 600 \
             --output-junit "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml" \
             -V 2>&1 |
             tee "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log"

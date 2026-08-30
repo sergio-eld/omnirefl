@@ -411,18 +411,18 @@ TEST(example, binding_storage_forms) {
   const auto inspect = //
     [](omni::binding auto mutable_binding,
       omni::binding auto const_binding,
-      omni::binding auto owning_binding) -> int {
-    // Lvalue arguments become non-owning bindings. Temporary arguments become
-    // owning bindings, so returning/moving the stored value is possible.
-    static_assert(!decltype(mutable_binding)::owning::value);
-    static_assert(!decltype(const_binding)::owning::value);
-    static_assert(decltype(owning_binding)::owning::value);
+      omni::binding auto rvalue_binding) -> int {
+    // `reflected_call` arguments are non-owning bindings. An rvalue binding
+    // preserves the consuming value category without moving the whole value.
+    EXPECT_EQ(false, decltype(mutable_binding)::owning::value);
+    EXPECT_EQ(false, decltype(const_binding)::owning::value);
+    EXPECT_EQ(false, decltype(rvalue_binding)::owning::value);
 
     mutable_binding.record.foo_count = 8;
 
     return mutable_binding.record.foo_count //
       + const_binding.record.bar_count //
-      + owning_binding.record.untouched_count;
+      + rvalue_binding.record.untouched_count;
   };
 
   EXPECT_EQ(22,
@@ -1155,6 +1155,83 @@ TEST(example, cpp11_struct_visitors) {
 }
 
 /// Advanced examples ----------------------------------------------------------
+
+namespace record_conversion {
+
+template <typename From, typename To>
+To convert(From &&from, omni::type_t<To> target_type) {
+  const auto visit = //
+    [](omni::binding auto source, omni::meta auto target) -> To {
+    [[maybe_unused]] static auto assign_matching_field = //
+      [](omni::field_binding auto from,
+        omni::field_binding auto... to) -> void {
+      constexpr bool found = //
+        ((std::string_view(to.name()) == std::string_view(from.name())) || ...);
+
+      static_assert(found, "destination has no same-named field");
+      (std::invoke(
+         [&from](omni::field_binding auto to) -> void {
+           if constexpr (std::string_view(to.name())
+             == std::string_view(from.name())) {
+             static_assert(requires { to.ref() = std::move(from).value(); });
+             // Like optional/expected value access, moving the field binding
+             // selects consuming access. `std::move(from.ref())` is the
+             // explicit equivalent for referenceable fields.
+             to.ref() = std::move(from).value();
+           }
+         },
+         to),
+        ...);
+    };
+
+    To result{};
+    // Bind the existing destination non-owningly so conversion does not move
+    // the complete object into and back out of binding storage.
+    omni::binding auto destination = target.bind(result);
+    std::apply(
+      [&destination](omni::field_binding auto... f) -> void {
+        std::apply(
+          [&f...](omni::field_binding auto... to_field) -> void {
+            (std::invoke(assign_matching_field, std::move(f), to_field...),
+              ...);
+          },
+          destination.public_fields());
+      },
+      source.public_fields());
+
+    return result;
+  };
+
+  return omni::reflected_call(visit, std::forward<From>(from), target_type);
+}
+
+struct source {
+  std::string name;
+  std::unique_ptr<int> payload;
+};
+
+struct destination {
+  // Destination fields are deliberately ordered differently.
+  std::unique_ptr<int> payload;
+  std::string name;
+};
+
+} // namespace record_conversion
+
+TEST(example, convert_moves_same_named_fields) {
+  record_conversion::source input{
+    .name = "example",
+    .payload = std::make_unique<int>(42),
+  };
+
+  auto output = record_conversion::convert(
+    std::move(input), omni::type<record_conversion::destination>);
+
+  EXPECT_EQ("example", output.name);
+  ASSERT_NE(nullptr, output.payload);
+  EXPECT_EQ(42, *output.payload);
+  EXPECT_EQ(nullptr, input.payload);
+}
 
 namespace writable_fields {
 

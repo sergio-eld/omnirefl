@@ -4,6 +4,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <omnirefl/reflection.hpp>
@@ -141,41 +142,16 @@ enum_type_enumerators_t const static enum_type_enumerators{};
 
 namespace bindings {
 
+template <typename Validate>
 struct conversion_qualifiers_t {
-  template <typename T>
-  bool operator()(omni::binding_t<T> owning,
-    omni::binding_t<T &> mutable_binding,
-    omni::binding_t<const T &> const_binding,
-    omni::binding_t<volatile T &> volatile_binding,
-    omni::binding_t<const volatile T &> const_volatile_binding) const {
-    static_assert(std::is_convertible<decltype(owning), const T &>::value,
-      "owning binding must provide const access");
-    static_assert(!std::is_convertible<decltype(owning), T &>::value,
-      "owning binding must not provide mutable access");
-    static_assert(std::is_convertible<decltype(mutable_binding), T &>::value,
-      "mutable binding must preserve mutable access");
-    static_assert(
-      std::is_convertible<decltype(const_binding), const T &>::value,
-      "const binding must preserve const access");
-    static_assert(!std::is_convertible<decltype(const_binding), T &>::value,
-      "const binding must not provide mutable access");
-    static_assert(
-      std::is_convertible<decltype(volatile_binding), volatile T &>::value,
-      "volatile binding must preserve volatile access");
-    static_assert(!std::is_convertible<decltype(volatile_binding), T &>::value,
-      "volatile binding must not discard volatile qualification");
-    static_assert(std::is_convertible<decltype(const_volatile_binding),
-                    const volatile T &>::value,
-      "const volatile binding must preserve both qualifications");
-    static_assert(
-      !std::is_convertible<decltype(const_volatile_binding), const T &>::value,
-      "const volatile binding must not discard volatile qualification");
+  Validate validate;
 
-    return true;
+  template <typename... Binding>
+  auto operator()(Binding &&...binding) const
+    -> decltype(validate(std::forward<Binding>(binding)...)) {
+    return validate(std::forward<Binding>(binding)...);
   }
 };
-
-conversion_qualifiers_t const static conversion_qualifiers{};
 
 } // namespace bindings
 
@@ -258,7 +234,7 @@ struct record_type_field_values_t {
 };
 
 record_type_field_values_t const static record_type_field_values{};
-record_type_field_values_t const static record_type_field_values_own{};
+record_type_field_values_t const static record_type_field_values_rvalue{};
 
 } // namespace field_value_read
 
@@ -464,17 +440,18 @@ struct record_type_field_write_t {
   }
 };
 
-struct record_type_field_write_own_t {
+struct record_type_field_write_and_return_t {
   template <typename T>
-  T operator()(omni::binding_t<T> binding,
+  typename std::decay<T>::type operator()(omni::binding_t<T> binding,
     const record_type_t &expected) const {
     omni::compat::apply(assign_fields{expected}, binding.public_fields());
-    return binding;
+    return std::move(binding.record);
   }
 };
 
 record_type_field_write_t const static record_type_field_write{};
-record_type_field_write_own_t const static record_type_field_write_own{};
+record_type_field_write_and_return_t const static
+  record_type_field_write_and_return{};
 
 struct record_type_field_write_call_t {
   record_type_t expected;
@@ -485,12 +462,12 @@ struct record_type_field_write_call_t {
   }
 };
 
-struct record_type_field_write_own_call_t {
+struct record_type_field_write_and_return_call_t {
   record_type_t expected;
 
   template <typename T>
-  T operator()(omni::binding_t<T> binding) const {
-    return record_type_field_write_own(binding, expected);
+  typename std::decay<T>::type operator()(omni::binding_t<T> binding) const {
+    return record_type_field_write_and_return(binding, expected);
   }
 };
 
@@ -498,11 +475,20 @@ struct record_type_field_write_own_call_t {
 
 namespace inline_examples {
 
+struct rvalue_binding_result_t {
+  std::vector<std::string> fields;
+  bool owns_value;
+};
+
 struct rvalue_binding_can_be_named_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T>) const {
-    auto value = omni::reflected(T{815, "oceanic"});
-    return field_value_read::record_type_field_values(value);
+  rvalue_binding_result_t operator()(omni::binding_t<T>) const {
+    using value_type = typename std::decay<T>::type;
+    auto value = omni::reflected(value_type{815, "oceanic"});
+    return {
+      field_value_read::record_type_field_values(value),
+      decltype(value)::owning::value,
+    };
   }
 };
 

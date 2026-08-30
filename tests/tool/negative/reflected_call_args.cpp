@@ -1,3 +1,5 @@
+// Expected failure: scalar, standard container, pointer, and array arguments
+// are not reflectable top-level reflected_call inputs.
 #include <omnirefl/reflection.hpp>
 
 #include <vector>

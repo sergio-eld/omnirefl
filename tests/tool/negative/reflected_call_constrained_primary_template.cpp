@@ -1,3 +1,5 @@
+// Expected failure: constrained primary templates are not supported reflection
+// inputs.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_constrained_primary_template {

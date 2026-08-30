@@ -207,6 +207,151 @@ concept field_binding =
   requires { typename compat::remove_cvref_t<T>::omni_field_binding_tag; };
 #endif
 
+/// Experimental utilities backed by generated reflection metadata.
+///
+/// These utilities are callable only from within a reflected scope. Their
+/// declarations remain in `reflection.hpp` while `aggregate_into` is the only
+/// generated utility.
+namespace refl {
+
+/// Whether generated aggregate construction is available for `T`.
+template <typename T, typename = void>
+struct is_aggregatable: std::false_type {};
+
+template <typename T>
+struct is_aggregatable<T,
+  compat::void_t<decltype(omni::detail::_meta<T>::is_aggregatable())>>:
+    std::integral_constant<bool,
+      omni::detail::_meta<T>::is_aggregatable()> {};
+
+namespace detail {
+
+template <typename>
+struct _dependent_false: std::false_type {};
+
+template <typename T, typename = T>
+struct aggregate_into_t {
+  static_assert(_dependent_false<T>::value,
+    "omni::refl::aggregate_into: destination type is not a supported "
+    "aggregate");
+
+  // Generated reflection headers provide `from` through an
+  // `aggregate_into_t<T>` specialization for each supported `T`.
+  template <typename Fields>
+  static T from(Fields &&);
+};
+
+template <std::size_t Index,
+  typename TargetField,
+  typename Fields,
+  typename Target,
+  bool End>
+struct _get_t;
+
+template <typename TargetField, typename Field, typename Target, bool>
+struct _construct_field_t;
+
+template <typename TargetField, typename Field, typename Target>
+struct _construct_field_t<TargetField, Field, Target, true> {
+  static Target from(Field &field) {
+    return static_cast<Target>(std::move(field).value());
+  }
+};
+
+template <typename TargetField, typename Field, typename Target>
+struct _construct_field_t<TargetField, Field, Target, false> {
+  static_assert(_dependent_false<TargetField>::value,
+    "omni::refl::aggregate_into: destination field is not constructible "
+    "from the same-named source field");
+
+  static Target from(Field &);
+};
+
+template <std::size_t Index,
+  typename TargetField,
+  typename Fields,
+  typename Target>
+struct _get_t<Index, TargetField, Fields, Target, true> {
+  static_assert(_dependent_false<TargetField>::value,
+    "omni::refl::aggregate_into: destination field is missing from the "
+    "source fields");
+
+  static Target from(Fields &);
+};
+
+template <std::size_t Index,
+  typename TargetField,
+  typename Fields,
+  typename Target>
+struct _get_t<Index, TargetField, Fields, Target, false> {
+  using field = typename std::tuple_element<Index, Fields>::type;
+
+  static Target from(Fields &fields) {
+    return from(fields,
+      std::integral_constant<bool,
+        omni::detail::_same_field_name(TargetField::name(), field::name())>{});
+  }
+
+  private:
+  static Target from(Fields &fields, std::true_type) {
+    using source = decltype(std::declval<field &&>().value());
+    return _construct_field_t<TargetField,
+      field,
+      Target,
+      std::is_constructible<Target, source>::value>::from(
+      std::get<Index>(fields));
+  }
+
+  static Target from(Fields &fields, std::false_type) {
+    return _get_t<Index + 1,
+      TargetField,
+      Fields,
+      Target,
+      Index + 1 == std::tuple_size<Fields>::value>::from(fields);
+  }
+};
+
+} // namespace detail
+
+// REFACTORME: Decide whether this provisional tuple-only lookup remains the
+// aggregate-construction customization point before stabilizing the interface.
+/// Return the first same-named field constructed as `Target`.
+///
+/// The current `Fields` protocol is `std::tuple<Field...>`. Each field provides
+/// a static `name()` and exposes its value through `.value()` as an rvalue.
+/// The first name match is consumed and must construct `Target`. A missing or
+/// incompatible field is a compile-time error.
+template <typename TargetField, typename Target, typename... Field>
+Target get(std::tuple<Field...> &fields) {
+  using fields_t = std::tuple<Field...>;
+  return detail::_get_t<0,
+    TargetField,
+    fields_t,
+    Target,
+    sizeof...(Field) == 0>::from(fields);
+}
+
+/// Shallowly construct `T` from the current tuple-based field protocol.
+///
+/// `Fields` currently follows the `std::tuple<Field...>` protocol documented
+/// by `get`. The generated header supplies the implementation for each
+/// supported destination type.
+///
+/// Generated specializations query each destination public field by name.
+/// Every destination public field is required to have a same-named source field
+/// whose consumed value constructs it; source-only fields are ignored.
+/// Unions and aggregates with base classes are not currently supported.
+///
+/// Nested values are supported only when the destination field is directly
+/// constructible from the same-named source value. Differently shaped nested
+/// aggregates are not recursively converted.
+template <typename T, typename Fields>
+T aggregate_into(Fields &&fields) {
+  return detail::aggregate_into_t<T>::from(std::forward<Fields>(fields));
+}
+
+} // namespace refl
+
 struct reflected_call_t {
   private:
 #if !defined(OMNI_TOOL_RUN) \
@@ -254,11 +399,8 @@ struct reflected_call_t {
   template <typename T>
   static constexpr meta_t<T> _tool_arg(type_t<T>) noexcept;
 
-  template <typename T,
-    typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-      T,
-      compat::decay_t<T>>>
-  static binding_t<Binding> _tool_arg(T &&) noexcept;
+  template <typename T>
+  static binding_t<T &&> _tool_arg(T &&) noexcept;
 #endif
 
   template <typename T>
@@ -266,13 +408,10 @@ struct reflected_call_t {
     return {};
   }
 
-  template <typename T,
-    typename Binding = compat::conditional_t<std::is_lvalue_reference<T>::value,
-      T,
-      compat::decay_t<T>>>
-  static constexpr binding_t<Binding> _reflect_arg(T &&t) noexcept(
-    noexcept(binding_t<Binding>{std::forward<T>(t)})) {
-    return binding_t<Binding>{std::forward<T>(t)};
+  template <typename T>
+  static constexpr binding_t<T &&> _reflect_arg(T &&t) noexcept(
+    noexcept(binding_t<T &&>{std::forward<T>(t)})) {
+    return binding_t<T &&>{std::forward<T>(t)};
   }
 
   public:
@@ -540,6 +679,11 @@ struct field_binding_t {
 
   /// Read the field without moving from the owner.
   ///
+  /// The binding's value category selects access in the style of
+  /// `std::optional::value()` and `std::expected::value()`. `field.value()` is
+  /// deliberately read-only; `std::move(field).value()` requests consuming
+  /// access. Move the binding, not the result of lvalue `value()`.
+  ///
   /// @details `M` keeps lookup dependent until the accessor is used.
   template <typename M = meta,
     typename std::enable_if<M::has_value_access(), int>::type = 0>
@@ -547,7 +691,11 @@ struct field_binding_t {
     return M::value(_owner);
   }
 
-  /// Move access for referenceable fields.
+  /// Consuming access for referenceable fields.
+  ///
+  /// Moving the trivial field-binding proxy selects this overload; it does not
+  /// transfer proxy ownership. `std::move(field.ref())` is the explicit
+  /// equivalent when reference access is available.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
@@ -557,9 +705,11 @@ struct field_binding_t {
     return std::move(M::ref(_owner));
   }
 
-  /// Copy access for fields without reference access.
+  /// Consuming syntax for fields without reference access.
   ///
-  /// This overload covers bitfields and packed scalars.
+  /// Bitfields and unsafe packed scalars cannot expose an rvalue reference, so
+  /// this overload copies while preserving the uniform
+  /// `std::move(field).value()` expression.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
@@ -570,6 +720,10 @@ struct field_binding_t {
   }
 
   /// Return a field reference preserving owner cv-qualification.
+  ///
+  /// Use `std::move(field.ref())` to move explicitly from a referenceable
+  /// field. Prefer expected-like `std::move(field).value()` in generic code
+  /// because it also supports non-referenceable fields through copy fallback.
   ///
   /// @details `M` keeps lookup and the availability check dependent until use.
   template <typename M = meta,
@@ -636,6 +790,9 @@ struct meta_t {
   using omni_meta_tag = void;
   using type = compat::decay_t<T>;
 
+  static constexpr bool has_bases() noexcept;
+  static constexpr bool is_aggregatable() noexcept;
+
   template <typename U>
   static constexpr binding_t<compat::decay_t<U>> bind(U &&) noexcept;
 };
@@ -644,10 +801,12 @@ template <typename T, reflected_entity Entity>
 struct binding_t {
   using omni_binding_tag = void;
   using type = compat::decay_t<T>;
-  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+  using owning = typename std::conditional<std::is_reference<T>::value,
     std::false_type,
     std::true_type>::type;
-  using storage_t = typename std::conditional<owning::value, type, T>::type;
+  using storage_t = typename std::conditional<owning::value,
+    type,
+    typename std::remove_reference<T>::type &>::type;
 
   // Entity inference is unavailable before generated metadata exists. Both
   // names preserve record/enum storage expressions in unevaluated visitor
@@ -715,6 +874,16 @@ struct meta_t<T, reflected_entity::record> {
 
   static constexpr reflected_entity entity() noexcept {
     return reflected::entity();
+  }
+
+  /// Whether the record directly declares any base class.
+  static constexpr bool has_bases() noexcept {
+    return reflected::has_bases();
+  }
+
+  /// Whether generated aggregate construction is available for the record.
+  static constexpr bool is_aggregatable() noexcept {
+    return refl::is_aggregatable<type>::value;
   }
 
   /// Metadata for public fields visible through the reflected record.
@@ -795,13 +964,13 @@ struct binding_t<T, reflected_entity::record> {
   using type = compat::decay_t<T>;
   using reflected = typename meta_t<type>::reflected;
 
-  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+  using owning = typename std::conditional<std::is_reference<T>::value,
     std::false_type,
     std::true_type>::type;
 
   using storage_t = typename std::conditional<owning::value,
     type, //< own a value
-    T //< hold a reference (T is U& / const U&)
+    typename std::remove_reference<T>::type & //< hold a reference
     >::type;
 
   // todo: add an explicit interface to `std::move` an owned value out of a
@@ -850,12 +1019,12 @@ struct binding_t<T, reflected_entity::record> {
   friend struct reflected_call_t;
   friend struct meta_t<type>;
 
-  // non-owning: T is an lvalue reference (U& / const U&)
+  // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
     typename std::enable_if<!owning::value
-        && std::is_convertible<U &, T>::value,
+        && std::is_convertible<U &&, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: record(u) {}
+  constexpr explicit binding_t(U &&u) noexcept: record(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,
@@ -873,13 +1042,13 @@ struct binding_t<T, reflected_entity::enumeration> {
   using reflected = typename meta_t<T>::reflected;
   using type = typename reflected::type;
 
-  using owning = typename std::conditional<std::is_lvalue_reference<T>::value,
+  using owning = typename std::conditional<std::is_reference<T>::value,
     std::false_type,
     std::true_type>::type;
 
   using storage_t = typename std::conditional<owning::value,
     type, //< own a value
-    T //< hold a reference (T is U& / const U&)
+    typename std::remove_reference<T>::type & //< hold a reference
     >::type;
 
   // todo: add an explicit interface to `std::move` an owned value out of a
@@ -909,12 +1078,12 @@ struct binding_t<T, reflected_entity::enumeration> {
   private:
   friend struct reflected_call_t;
 
-  // non-owning: T is an lvalue reference (U& / const U&)
+  // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
     typename std::enable_if<!owning::value
-        && std::is_convertible<U &, T>::value,
+        && std::is_convertible<U &&, T>::value,
       int>::type = 0>
-  constexpr explicit binding_t(U &u) noexcept: enum_value(u) {}
+  constexpr explicit binding_t(U &&u) noexcept: enum_value(u) {}
 
   // owning: T is a value type (U / const U)
   template <typename U,

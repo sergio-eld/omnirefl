@@ -644,6 +644,8 @@ struct record_data {
     is_union,
   } type;
 
+  bool has_bases;
+  bool is_aggregatable;
   bool has_template_parent;
   std::optional<template_data> template_info;
 
@@ -5278,6 +5280,8 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
 
   const clang::RecordDecl &r_decl = *t->getDecl();
   const clang::CXXRecordDecl *cxx_decl = t->getAsCXXRecordDecl();
+  auto aggregate_fields = r_decl.fields() //
+    | std::views::filter(std::not_fn(&clang::FieldDecl::isUnnamedBitField));
 
   return {
     .public_bases = cxx_decl ? public_bases_view(cxx_decl)
@@ -5306,6 +5310,22 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
       : r_decl.isClass() //
         ? meta::record_data::is_class
         : meta::record_data::is_union,
+
+    // Unlike public_bases, this includes bases that are not reflected.
+    .has_bases = cxx_decl && !cxx_decl->bases().empty(),
+
+    // Designators can name only direct non-static data members. Bases and
+    // unnamed members cannot be represented by the generated initializer;
+    // positional initialization places base subobjects before members. The
+    // current field-only renderer therefore rejects both cases. Union active
+    // member selection is not part of the Fields protocol.
+    .is_aggregatable = cxx_decl && cxx_decl->isAggregate()
+      && !r_decl.isUnion()
+      && cxx_decl->bases().empty()
+      && std::ranges::all_of(aggregate_fields,
+        [](const clang::FieldDecl *field) {
+          return field->getIdentifier() != nullptr;
+        }),
 
     .has_template_parent =
       cxx_decl && has_template_record_parent(cxx_decl->getDeclContext()),
@@ -5864,6 +5884,60 @@ std::string indexed_reflectable_head(const meta::nm_qual_type &t,
     documentation_method(annotation));
 }
 
+std::string aggregate_into_head(const meta::nm_qual_type &t,
+  const meta::record_data &d) {
+  assert(t.name && "unnamed structs not supported");
+
+  if (d.template_info) {
+    const std::string template_args = format_template_args(*d.template_info);
+    const std::string generated_type_name = std::format("{}<{}>",
+      format_primary_template_qualified_type_name(t,
+        d.template_info->primary_name),
+      template_args);
+
+    return std::format(
+      "template <\n  {2},\n  typename T\n>"
+      "\nstruct aggregate_into_t<{0} {1}, T> {{"
+      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\n    \"omnirefl: unexpected types mismatch, try regenerating\");",
+      reflectable_tag(d),
+      generated_type_name,
+      format_template_params(d.template_info->params, 1));
+  }
+
+  return std::format(
+    "template <typename T>"
+    "\nstruct aggregate_into_t<{0} {1}, T> {{"
+    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n    \"omnirefl: unexpected types mismatch, try regenerating\");",
+    reflectable_tag(d),
+    meta::format(t));
+}
+
+std::string inner_aggregate_into_head(const meta::nm_qual_type &t,
+  const meta::type_access_path &public_access_path) {
+  const std::string access_root_for =
+    std::format("{}<T>", enclosing_root_as_dependent(t));
+  const std::string matched_type = public_access_path.steps.empty()
+    ? std::format("typename {}",
+        format_qualified_inner_type_from_root(access_root_for, t))
+    : format_accessed_type(access_root_for, public_access_path);
+
+  return std::format(
+    "template <typename T>"
+    "\nstruct aggregate_into_t<T, typename std::enable_if<"
+    "\n  std::is_same<T, {}>::value, T>::type> {{",
+    matched_type);
+}
+
+std::string indexed_aggregate_into_head(std::size_t index) {
+  return std::format(
+    "template <typename T>"
+    "\nstruct aggregate_into_t<T, typename std::enable_if<"
+    "\n  decltype(omni::detail::reflected_index_match<{0}, T>::exists(0))::value, T>::type> {{",
+    index);
+}
+
 std::string reflectable_body(const meta::enum_data &d) {
   return std::format(
     "\n  constexpr static auto enumerators() noexcept"
@@ -6007,6 +6081,9 @@ std::string reflectable_body(const meta::record_data &d) {
     // todo: consider a comment here for ignored fields
     "\n  using own_public_fields_t ="
     "\n    std::tuple<{}>;"
+    "\n"
+    "\n  static constexpr bool has_bases() noexcept {{ return {}; }}"
+    "\n  static constexpr bool is_aggregatable() noexcept {{ return {}; }}"
     "\n}};",
 
     d.public_fields.empty()
@@ -6023,7 +6100,56 @@ std::string reflectable_body(const meta::record_data &d) {
           return std::format("omni::field_meta_t<type, {}_t>", f);
         }) //
       | std_c::views::join_with(",\n      "sv) //
-      | util::format_range);
+      | util::format_range,
+
+    d.has_bases,
+    d.is_aggregatable);
+}
+
+std::string aggregate_into_body(const meta::record_data &d) {
+  const auto get_field = [](const meta::field_data &field) {
+    return std::format(
+      "omni::refl::get<typename omni::detail::_meta<T>::{0}_t,"
+      "\n        decltype(std::declval<T>().{0})>(fields)",
+      field.name);
+  };
+
+  const std::string designated_fields = d.public_fields //
+    | std::views::transform([&get_field](const meta::field_data &field) {
+        return std::format(".{0} = {1}", field.name, get_field(field));
+      }) //
+    | std_c::views::join_with(",\n      "sv) //
+    | std::ranges::to<std::string>();
+
+  const std::string positional_fields = d.public_fields //
+    | std::views::transform(get_field) //
+    | std_c::views::join_with(",\n      "sv) //
+    | std::ranges::to<std::string>();
+
+  return std::format(
+    "\n"
+    "\n  template <typename Fields>"
+    "\n  static T from(Fields &&{3}) {{"
+    "\n#if defined(__cpp_designated_initializers) \\"
+    "\n  && 201707L <= __cpp_designated_initializers"
+    "\n    return T{{{0}{1}}};"
+    "\n#else"
+    "\n    return T{{{0}{2}}};"
+    "\n#endif"
+    "\n  }}"
+    "\n}};",
+
+    // 0
+    d.public_fields.empty() ? "" : "\n      ",
+
+    // 1
+    d.public_fields.empty() ? "" : designated_fields + "\n    ",
+
+    // 2
+    d.public_fields.empty() ? "" : positional_fields + "\n    ",
+
+    // 3
+    d.public_fields.empty() ? "" : "fields");
 }
 
 } // namespace render::impl
@@ -6105,6 +6231,30 @@ std::string render_reflectable(
     "\n{}",
     render_reflectable_head(d),
     render_reflectable_body(type_name_by_id, d.type));
+}
+
+template <typename S>
+std::string render_aggregate_into(const S &r) {
+  using rc = render::reflection_context;
+  const auto *record = std::get_if<meta::record_data>(&r.type.data);
+  if (!record || !record->is_aggregatable)
+    return {};
+
+  const std::string head = std::invoke([&] {
+    if constexpr (std::same_as<rc::forward_declarable, S>) {
+      return render::impl::aggregate_into_head(r.type.definition.type_name,
+        *record);
+    } else if constexpr (std::same_as<rc::nested_type, S>) {
+      return render::impl::inner_aggregate_into_head(
+        r.type.definition.type_name,
+        r.type.public_access_path);
+    } else {
+      static_assert(std::same_as<rc::indexed_type, S>);
+      return render::impl::indexed_aggregate_into_head(r.index);
+    }
+  });
+
+  return head + render::impl::aggregate_into_body(*record);
 }
 
 auto render::generate_reflection(reflection_context ctx, std::ofstream file)
@@ -6191,6 +6341,21 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\n}} // namespace detail"
     "\n}} // namespace omni"
     "\n"
+    "\nnamespace omni {{"
+    "\nnamespace refl {{"
+    "\nnamespace detail {{"
+    "\n"
+    "\n// -- generated aggregate initializers --------"
+    "\n{9}"
+    "\n"
+    "\n{10}"
+    "\n"
+    "\n{11}"
+    "\n"
+    "\n}} // namespace detail"
+    "\n}} // namespace refl"
+    "\n}} // namespace omni"
+    "\n"
     "\ntemplate <typename T, typename>"
     "\nstruct omni::is_reflected : std::false_type {{}};"
     "\n"
@@ -6261,6 +6426,30 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::indexed_type>,
         std::cref(ctx.type_name_by_id)))
+      | std_c::views::join_with("\n\n"sv) //
+      | util::format_range,
+
+    // 9:
+    ctx.fwd_declarables //
+      | std::views::transform(
+        render_aggregate_into<reflection_context::forward_declarable>) //
+      | std::views::filter([](std::string_view s) { return !s.empty(); }) //
+      | std_c::views::join_with("\n\n"sv) //
+      | util::format_range,
+
+    // 10:
+    ctx.nested //
+      | std::views::transform(
+        render_aggregate_into<reflection_context::nested_type>) //
+      | std::views::filter([](std::string_view s) { return !s.empty(); }) //
+      | std_c::views::join_with("\n\n"sv) //
+      | util::format_range,
+
+    // 11:
+    ctx.indexed //
+      | std::views::transform(
+        render_aggregate_into<reflection_context::indexed_type>) //
+      | std::views::filter([](std::string_view s) { return !s.empty(); }) //
       | std_c::views::join_with("\n\n"sv) //
       | util::format_range);
 

@@ -1,3 +1,5 @@
+// Expected failure: a record nested in a template record cannot be emitted as
+// supported reflection metadata.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_nested_template_parent {

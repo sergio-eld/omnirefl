@@ -1,3 +1,5 @@
+// Expected failure: a non-template record nested in a template record remains
+// unsupported as a reflection input.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_non_template_nested_in_template {

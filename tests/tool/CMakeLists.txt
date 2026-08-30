@@ -91,6 +91,8 @@ if(DEFINED omnirefl_DIR)
     _omnirefl_accepted_cmake_project(relative_response_file
         -D "EXECUTABLES=relative_response_file"
         -D "REQUIRED_REFLECTION_STEMS=main")
+    _omnirefl_accepted_cmake_project(functional_header
+        -D "EXECUTABLES=functional_header")
 
     function(_omnirefl_rejected_cmake_project name expected_diagnostics)
         add_test(NAME "omnirefl.integration.${name}"
@@ -483,18 +485,8 @@ target_link_libraries(std_compat INTERFACE
     mpark_variant
 )
 
-# Enumerate supported C++ standard levels (>=11) and build targets prefixed with cpp_<N>.
-set(_supported_cpp_standards "")
-foreach(_f IN LISTS CMAKE_CXX_COMPILE_FEATURES)
-    if(_f MATCHES "^cxx_std_([0-9]+)$")
-        set(_n "${CMAKE_MATCH_1}")
-
-        # Exclude legacy 98/03 (they are numerically >= 11), keep 11+ "year-style" standards.
-        if(_n GREATER_EQUAL 11 AND _n LESS 90)
-            list(APPEND _supported_cpp_standards "${_n}")
-        endif()
-    endif()
-endforeach()
+include("${CMAKE_CURRENT_LIST_DIR}/supported_cpp_standards.cmake")
+_omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
@@ -594,59 +586,59 @@ if("17" IN_LIST _supported_cpp_standards)
 
     _omnirefl_negative_tool_run(
         "query_out_of_scope"
-        negative_run/query_out_of_scope.cpp
+        negative/query_out_of_scope.cpp
         1)
     _omnirefl_negative_tool_run(
         "query_non_template_visitor"
-        negative_run/query_non_template_visitor.cpp
+        negative/query_non_template_visitor.cpp
         2
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: reflection query"
         "call stack:")
     _omnirefl_negative_tool_run(
         "query_lambda_deduced_return"
-        negative_run/query_lambda_deduced_return.cpp
+        negative/query_lambda_deduced_return.cpp
         2
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: reflection query"
         "call stack:")
     _omnirefl_negative_tool_run(
         "query_multiple"
-        negative_run/query_multiple.cpp
+        negative/query_multiple.cpp
         7)
     _omnirefl_negative_tool_run(
         "reflected_call_args"
-        negative_run/reflected_call_args.cpp
+        negative/reflected_call_args.cpp
         4
         "invalid reflected_call arguments"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_partial_specialization"
-        negative_run/reflected_call_partial_specialization.cpp
+        negative/reflected_call_partial_specialization.cpp
         1
         "partial template specialization"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_forward_declaration"
-        negative_run/reflected_call_forward_declaration.cpp
+        negative/reflected_call_forward_declaration.cpp
         3
         "forward declarations without definitions"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_definition_after_call"
-        negative_run/reflected_call_definition_after_call.cpp
+        negative/reflected_call_definition_after_call.cpp
         1
         "definition appears later in the translation unit"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_template_callstack"
-        negative_run/reflected_call_template_callstack.cpp
+        negative/reflected_call_template_callstack.cpp
         1
         "instantiated from"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_local_unnamed"
-        negative_run/reflected_call_local_unnamed.cpp
+        negative/reflected_call_local_unnamed.cpp
         3
         "local types are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument"
@@ -655,7 +647,7 @@ if("17" IN_LIST _supported_cpp_standards)
         "ENABLE_INDEX_MODE|indexed support|index mode")
     _omnirefl_negative_tool_run(
         "reflected_call_unscoped_enum"
-        negative_run/reflected_call_unscoped_enum.cpp
+        negative/reflected_call_unscoped_enum.cpp
         1
         "enum cannot be forward-declared"
         ":[0-9]+:[0-9]+: reflected_call argument"
@@ -664,32 +656,32 @@ if("17" IN_LIST _supported_cpp_standards)
         "ENABLE_INDEX_MODE|indexed support|index mode")
     _omnirefl_negative_tool_run(
         "reflected_call_explicit_specialization"
-        negative_run/reflected_call_explicit_specialization.cpp
+        negative/reflected_call_explicit_specialization.cpp
         1
         "explicit specializations are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_nested_template_parent"
-        negative_run/reflected_call_nested_template_parent.cpp
+        negative/reflected_call_nested_template_parent.cpp
         1
         "records nested inside template records are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "query_and_reflected_call_arg"
-        negative_run/query_and_reflected_call_arg.cpp
+        negative/query_and_reflected_call_arg.cpp
         2
         "invalid reflection queries"
         ":[0-9]+:[0-9]+: (reflection query|reflected_call argument)"
         "invalid reflected_call arguments")
     _omnirefl_negative_tool_run(
         "reflected_call_non_template_nested_in_template"
-        negative_run/reflected_call_non_template_nested_in_template.cpp
+        negative/reflected_call_non_template_nested_in_template.cpp
         1
         "records nested inside template records are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "reflected_call_virtual_bases"
-        negative_run/reflected_call_virtual_bases.cpp
+        negative/reflected_call_virtual_bases.cpp
         4
         "records with virtual bases are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument")
@@ -901,7 +893,7 @@ if("20" IN_LIST _supported_cpp_standards)
     set(_constrained_template_target
         "cpp_20.negative.reflected_call_constrained_primary_template")
     add_executable(${_constrained_template_target} EXCLUDE_FROM_ALL
-        negative_run/reflected_call_constrained_primary_template.cpp)
+        negative/reflected_call_constrained_primary_template.cpp)
     set_target_properties(${_constrained_template_target} PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED YES
@@ -917,28 +909,6 @@ if("20" IN_LIST _supported_cpp_standards)
             -D "EXPECTED_MESSAGE=constrained templates are not supported"
             -D "DIAGNOSTIC_REGEX=:[0-9]+:[0-9]+: reflected_call argument"
             -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
-endif()
-
-list(REMOVE_DUPLICATES _supported_cpp_standards)
-list(SORT _supported_cpp_standards)
-
-# C++26 has standard reflection. Keep omnirefl release/package validation on the
-# pre-reflection language standards it targets.
-list(REMOVE_ITEM _supported_cpp_standards "26")
-
-# MSVC has no distinct /std:c++11; CMake effectively treats it as C++14.
-# Normalize 11 -> 14 to avoid generating duplicate cpp_11 / cpp_14 targets.
-if(MSVC)
-  set(_tmp "")
-  foreach(_n IN LISTS _supported_cpp_standards)
-    if(_n STREQUAL "11")
-      set(_n "14")
-    endif()
-    list(APPEND _tmp "${_n}")
-  endforeach()
-  set(_supported_cpp_standards "${_tmp}")
-  list(REMOVE_DUPLICATES _supported_cpp_standards)
-  list(SORT _supported_cpp_standards)
 endif()
 
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
@@ -965,6 +935,10 @@ if(ENABLE_BENCH)
     target_compile_definitions(benchmark.baseline PRIVATE CXX_STANDARD=${_benchmark_cpp_standard})
     target_link_libraries(benchmark.baseline PRIVATE GTest::GTest std_compat)
     omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
+
+    if("20" IN_LIST _supported_cpp_standards)
+        add_subdirectory(bench/record_conversion)
+    endif()
 endif()
 
 set(_has_cxx20_reflected_guide_features OFF)
@@ -1008,6 +982,8 @@ if(_has_cxx20_reflected_guide_features)
     add_subdirectory(comprehensive_guide)
 endif()
 
+add_subdirectory(aggregate_into)
+
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")
 
@@ -1026,6 +1002,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(_test_tgt "${cpp_prefix}.test")
     set(_test_sources
         test_main.cpp
+        aggregate_into/test.cpp
         dependent_types_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp

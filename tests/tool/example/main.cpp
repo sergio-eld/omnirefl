@@ -1,9 +1,9 @@
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflection.hpp>
 
 #include <iostream>
 #include <string>
 #include <string_view>
-#include <tuple>
 
 struct record {
   int foo;
@@ -23,22 +23,19 @@ int main() {
   const auto write = [](omni::binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
-      // Bindings and field bindings are trivial to copy.
-      std::apply(
-        [](omni::field_binding auto... field) -> void {
-          const auto write = [](omni::field_binding auto field) -> void {
-            constexpr std::string_view name = field.name();
+      // `omni::fn::each` is the QoL equivalent of expanding a visitor over a
+      // tuple with `std::apply`.
+      omni::fn::each(
+        [](omni::field_binding auto field) -> void {
+          constexpr std::string_view name = field.name();
 
-            // value() is read-only; ref() exposes a writable reference.
-            if constexpr ("foo"sv == name)
-              field.ref() = 8;
+          // value() is read-only; ref() exposes a writable reference.
+          if constexpr ("foo"sv == name)
+            field.ref() = 8;
 
-            // operator* and operator-> are QoL accessors.
-            if constexpr ("bar"sv == name)
-              *field = "after";
-          };
-
-          (write(field), ...);
+          // operator* and operator-> are QoL accessors.
+          if constexpr ("bar"sv == name)
+            *field = "after";
         },
         b.public_fields());
     };

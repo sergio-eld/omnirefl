@@ -1,3 +1,5 @@
+// Expected failure: partial template specializations are not supported
+// reflection inputs.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_partial_specialization {

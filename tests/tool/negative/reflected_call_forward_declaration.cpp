@@ -1,3 +1,5 @@
+// Expected failure: forward declarations without definitions cannot be
+// reflected.
 #include <omnirefl/reflection.hpp>
 
 namespace negative_reflected_call_forward_declaration {
