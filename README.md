@@ -104,6 +104,10 @@ covers the remaining interface and compatibility features.
 Everything else remains regular C++. Omnirefl discovers the argument types and
 supported dependencies, then generates and force-includes their metadata. No
 macros, compiler-specific UB, or manual regeneration are required.
+
+Types can be declared and reflected directly in the same `.cpp`. No dedicated
+declaration headers, schemas, annotations, or checked-in metadata files are
+required; generated metadata remains a build artifact.
 <!-- pages:experience:end -->
 
 ## Functional Utilities
@@ -127,27 +131,62 @@ for each reflected type and are available only within reflected scopes:
 
 - `aggregate_into<T>(fields)` shallowly constructs a reflected aggregate by
   matching field bindings by name. All destination public fields must be
-  present and constructible; additional source fields are ignored. See the
+  present and constructible; additional source fields are ignored. Generated
+  support currently requires an aggregate record without bases or anonymous
+  aggregate members, and excludes unions. See the
   [example](tests/tool/aggregate_into/test.cpp).
 
 <!-- pages:scope:start -->
 ## Supported Scope
 
-Omnirefl focuses on POD-like records and enums (see
+Omnirefl reflects the public data surface of named C++ records and enums (see
 [Limitations](#limitations)).
 
-- C++11 through C++23; C++20 concepts provide the most ergonomic interface.
-- Named namespace-scope records and enums; namespace-scope unscoped enums
-  require a fixed underlying type.
-- Nested named records/enums of supported parents.
-- Unconstrained primary record templates, including use as CRTP bases.
-- Public data fields: names, type names, documentation, value retrieval,
-  mutation of writable fields, reference access when safe,
-  `has_value_access()`/`has_reference_access()` capability queries, and
-  `is_const()`/`is_mutable()`/`is_volatile()`/`is_deprecated()` traits.
-  Private/protected fields and member functions are not reflected.
-- Enum documentation, plus enumerator names and values.
+- **Language:** C++11 through C++23; C++20 concepts provide the most ergonomic
+  interface.
+- **Reflectable declarations:**
+  - named namespace-scope records (structs, classes, and unions) and enums
+  - nested named records and enums inside non-template records
+  - unconstrained primary record templates with type, non-type, and
+    template-template parameters, including type packs and CRTP bases
+  - non-aggregate records and records without a default constructor, when
+    supplied as existing objects or queried through `omni::type<T>`
+- **Type metadata:**
+  - type names with and without enclosing namespace qualification, entity kind,
+    and documentation extracted from Doxygen-style leading and trailing
+    comments: `///`, `//!`, `/** */`, `/*! */`, `///<`, and `//!<`
+  - qualified names retain enclosing record and namespace identifiers,
+    including those of inline namespaces
+  - records additionally expose `has_bases()` and generated
+    `is_aggregatable()` capability queries
+- **Public field metadata and access:**
+  - an ordered tuple of public non-static fields, including fields inherited
+    transitively through public bases; hidden and ambiguous inherited fields
+    are omitted
+  - field name, type names preserving declaration spelling such as alias
+    templates and `decltype`, with and without enclosing namespace
+    qualification, an index local to the declaring record, documentation, and
+    const/mutable/volatile/deprecated traits
+  - read access, consuming move access, writable-field assignment, and safe
+    reference, dereference, and member access
+  - value/reference capability queries for generic field handling
+  - bitfield and misaligned packed scalar members remain readable; writable
+    members remain assignable but do not expose references
+  - private/protected fields, fields inherited through non-public bases, and
+    member functions are omitted
+- **Enum metadata:** enumerator names and values in declaration order.
+- **Invocation and bindings:**
+  - `reflected_call` value arguments produce non-owning bindings;
+    `omni::type<T>` requests metadata without constructing `T`
+  - one visitor can receive multiple value and type arguments
+  - value bindings preserve const/volatile and lvalue/rvalue qualification;
+    visitor value and reference returns are preserved
+  - `omni::reflected(...)` and `is_reflected<T>` query generated dependency
+    metadata from inside the visitor
 
+<!-- pages:scope:end -->
+
+<!-- pages:dependency-protocols:start -->
 ### Dependency Protocols
 
 Additional reflected types are discovered through:
@@ -166,10 +205,12 @@ Additional reflected types are discovered through:
   - `value_type`
 - template-pack routes named `tuple` or `variant`
 
+Supported public routes may expose otherwise non-public nested dependencies.
+
 Standard-library record types are not traversed as reflectable records outside
 those protocol routes.
 
-<!-- pages:scope:end -->
+<!-- pages:dependency-protocols:end -->
 
 ## Direct CLI Usage
 
@@ -194,19 +235,18 @@ ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
 <!-- pages:install:start -->
 ## Install
 
-Install options:
-
 - **Release archives:**<br>
   [Latest release](https://github.com/sergio-eld/omnirefl/releases/latest) or
   [all releases](https://github.com/sergio-eld/omnirefl/releases). Linux
   packages use `.deb` or `.tar.gz`; Windows packages use `.zip`. The
   experimental Cosmopolitan `.tar.gz` package supports Linux, macOS, and
   Windows.
-- **Latest CI artifact:**<br>
+- **Latest CI artifact (if available):**<br>
   Open the latest successful
   [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
   run on `master` and download the package artifact for the required runtime
-  and architecture.
+  and architecture. Artifacts are temporary; cancelled or partially rerun
+  workflows and artifact expiration may leave no downloadable package.
 - **Build locally:**<br>
   Use the prepared Docker images; see
   [Build Packages Locally](#build-packages-locally).
@@ -218,6 +258,10 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 <!-- pages:limitations:start -->
 ## Limitations
 
+Several declaration-shape constraints below follow from the generated-header
+model: reflected types must be nameable before their source declarations. See
+[How It Works](#how-it-works).
+
 - `reflected_call` is the instrumentation boundary. The visitor must be either
   a generic lambda or a type with a templated `operator()`. Its return type must
   not depend on instantiating the visitor body during the tool run; for lambdas,
@@ -226,17 +270,24 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
   body. `constexpr auto result = reflected_call(...)` is not supported: it
   forces evaluation and breaks that instrumentation boundary.
 - `reflected_call` accepts reflected records and enums only. The caller must
-  sanitize pointers, arrays, and compound inputs before the call; use
-  `std::visit` or `mpark::visit` for variants. Compound types remain valid
-  dependency routes as listed above. Invalid-input detection is best effort.
+  convert or dispatch other top-level shapes before the call; use `std::visit`
+  or `mpark::visit` for variants. Scalars, pointers, raw arrays,
+  standard-library records, and compound types are not accepted directly.
+  Compound types remain valid dependency routes as listed above. Invalid-input
+  detection is best effort.
+- A reflected root must be complete and defined before its `reflected_call`.
 - Local and unnamed types are not supported as reflected roots.
+- Namespace-scope unscoped enums require a fixed underlying type so the
+  generated header can forward-declare them.
 - Records nested inside template records are not supported.
-- Privately nested types cannot be reflected through a public field, including
-  fields inherited from a public base.
+- Public access paths to non-public nested dependencies are not preserved when
+  the exposing field is inherited from a public base. A public nested type
+  inside a private enclosing record is also not currently nameable.
 - Records with direct or inherited virtual bases are not supported. They are
   rejected as `reflected_call` inputs and skipped with a warning when found as
   dependencies.
-- Constrained primary record templates are not supported.
+- Constrained primary record templates and explicit or partial record-template
+  specializations are not supported.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.
@@ -249,7 +300,10 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 - Compiler-packed misaligned raw arrays have no safe whole-field accessor; use
   an aligned representation such as `std::array` when whole-field access is
   required.
-- External pointees that are only forward-declared are not traversed.
+- Pointer/reference pointees and raw-array element types are not dependency
+  routes, regardless of whether their definitions are visible.
+- Standard-library public bases are ignored. Other unsupported public bases are
+  skipped with a warning, and their inherited fields are omitted.
 - `omni_reflected_target` does not support OBJECT or INTERFACE libraries.
 - The CMake wrapper instruments concrete, non-generated C++ translation units.
   Generated sources are skipped, source generator expressions are rejected,
@@ -330,28 +384,29 @@ tests these package/platform combinations:
 The Linux matrix also checks MinGW cross-compilation. Windows AArch64 packaging
 is not currently supported.
 
+<!-- pages:performance:start -->
 ## Is It Slow?
 
 Omnirefl uses a Clang frontend action: it preprocesses the translation unit and
 builds its AST, but does not perform object-code optimization or code
-generation. Frontend work commonly accounts for around 30% of a complete object
-build, although the ratio depends on the source, included headers, compiler, and
-optimization level.
+generation. The overhead target is roughly the frontend portion of a complete
+object build: about 30% as an order-of-magnitude expectation. The actual ratio
+depends on the source, included headers, compiler, and optimization level.
 
-The [benchmark baseline](tests/tool/baseline_test.cpp) is intentionally large
-enough to represent a meaningful translation unit and contains a reasonable
-amount of ordinary and reflected code. As of this writing, its complete
-omnirefl run takes about 20-25% of the subsequent Release object build in CI.
-These percentages are relative to the object build alone: a five-second
-compilation gains roughly one additional second when instrumentation runs,
-which is generally negligible at whole-build scale.
+The packaged [benchmark baseline](tests/tool/baseline_test.cpp) is intentionally
+large enough to represent a meaningful translation unit and contains a
+reasonable amount of ordinary and reflected code. CI records its reflection and
+subsequent Release object-build times across benchmarked platforms. See the
+[continuous benchmark](#continuous-benchmark) and
+[workflow history](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
+for observed results.
 
 Only instrumented targets pay this cost, and reflected translation units can be
 isolated in dedicated targets. The impact is therefore most noticeable during
 initial generation. Omnirefl emits dependency files for the source and all its
 included headers, so Ninja reruns instrumentation only when one of those inputs
-changes. See the [continuous benchmark](#continuous-benchmark) for measured
-stages and regression tracking.
+changes.
+<!-- pages:performance:end -->
 
 ## Continuous Benchmark
 
@@ -362,18 +417,32 @@ distributable packages retain `RelWithDebInfo` for detached symbols.
 Reports compare reflection and object-build wall time for `benchmark.baseline`
 against the average of the last five stored runs.
 
+<!-- pages:how-it-works:start -->
 ## How It Works
 
 `reflected_call` identifies root records and enums. Omnirefl walks their public
 [dependency protocols](#dependency-protocols), then force-includes a generated
 header before the translation unit.
 
-The generated header does not need to include user declarations. It
-forward-declares namespace-scope roots where C++ permits it; not every type can
-be forward-declared (see [Limitations](#limitations)). Field access remains
-dependent on a template parameter, delaying instantiation until the source
-definition is available. Nested-type lookup uses the same mechanism through
-SFINAE. A simplified generated shape is:
+The generated header is an internal, per-translation-unit build artifact. It is
+not intended to be installed or published as a reusable interface: its metadata
+reflects the exact compiler invocation, including preprocessor definitions,
+language and target flags, and include paths. The same source may therefore
+produce different metadata in another target or project. The header does not
+`#include` user declaration headers or reproduce their definitions.
+
+> Earlier iterations attempted to reconstruct the required user includes, but
+> that becomes a separate build-integration problem: a declaration may live
+> only in a `.cpp`, a third-party header's supported include path may differ
+> from its filesystem path, and project headers may rely on transitive includes
+> or a particular include order.
+
+The current design avoids guessing. It forward-declares namespace-scope roots
+where C++ permits it; not every type can be forward-declared (see
+[Limitations](#limitations)). Field access remains dependent on a template
+parameter, delaying instantiation until the source definition is available.
+Nested-type lookup uses the same mechanism through SFINAE. A simplified
+generated shape is:
 
 ```cpp
 namespace app {
@@ -410,6 +479,13 @@ headers and a manually ordered wrapper around generated metadata. That wrapper
 would still need a policy for which reachable types to reflect; Omnirefl derives
 roots from `reflected_call` and dependencies from the protocols above, enabling
 a seamless experience.
+
+This model also defines the declaration boundary. Generated code can reproduce
+ordinary record and enum forward declarations and defer nested lookup, but it
+cannot safely recreate local or unnamed types, non-forward-declarable enums,
+records nested in template records, constrained primary templates, or explicit
+and partial specializations before their source declarations.
+<!-- pages:how-it-works:end -->
 
 ## Troubleshooting and Bug Reports
 

@@ -91,6 +91,16 @@
         color: var(--foreground);
       }
 
+      blockquote {
+        margin: 0 0 1rem;
+        padding: 0 1rem;
+        border-left: 0.25rem solid var(--border);
+      }
+
+      blockquote > :last-child {
+        margin-bottom: 0;
+      }
+
       ul,
       ol {
         margin-top: 0;
@@ -243,12 +253,14 @@
   <body>
     <main>
       <nav class="site-nav" aria-label="Page sections">
-        <a href="#introduction">Overview</a>
+        <a href="#introduction">Omnirefl</a>
         <a href="#sneak-peek">Sneak Peek</a>
         <a href="#experience">Seamless Experience</a>
         <a href="#scope">Supported Scope</a>
+        <a href="#performance">Is It Slow?</a>
         <a href="#install">Install</a>
         <a href="#limitations">Limitations</a>
+        <a href="#how-it-works">How It Works</a>
         <a class="source" href="https://github.com/sergio-eld/omnirefl">GitHub ↗</a>
       </nav>
       <!-- omnirefl:readme -->

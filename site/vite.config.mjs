@@ -21,8 +21,11 @@ const sections = [
   'sneak-peek',
   'experience',
   'scope',
+  'dependency-protocols',
+  'performance',
   'install',
   'limitations',
+  'how-it-works',
 ]
 
 const extract = (markdown, section) => {
