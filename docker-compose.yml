@@ -278,6 +278,7 @@ services:
   benchmark:
     image: *test-ubuntu-x86-image
     environment:
+      BENCHMARK_NAME: ${BENCHMARK_NAME:-}
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:ro
@@ -316,7 +317,7 @@ services:
           --install "$$install" \
           --build /benchmark/run/build \
           --results /results \
-          --name "linux-$$(uname -m)-$$package_runtime-$${TOOLCHAIN:-gcc}"
+          --name "$${BENCHMARK_NAME:-linux-$$(uname -m)-$$package_runtime-$${TOOLCHAIN:-gcc}}"
 
   test-windows-msvc:
     image: ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-${TOOLCHAIN:-msvc}

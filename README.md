@@ -473,13 +473,6 @@ struct _reflected<T,
 } // namespace omni
 ```
 
-This permits records declared directly in one translation unit to be reflected.
-Without the delayed specializations, users would need separate declaration
-headers and a manually ordered wrapper around generated metadata. That wrapper
-would still need a policy for which reachable types to reflect; Omnirefl derives
-roots from `reflected_call` and dependencies from the protocols above, enabling
-a seamless experience.
-
 This model also defines the declaration boundary. Generated code can reproduce
 ordinary record and enum forward declarations and defer nested lookup, but it
 cannot safely recreate local or unnamed types, non-forward-declarable enums,

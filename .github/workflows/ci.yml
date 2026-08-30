@@ -574,10 +574,14 @@ jobs:
           path: ./artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
-  benchmark-macos:
-    name: Benchmark / macos-${{ matrix.arch }}-cosmo
+  # Benchmarks run independently on every CI event so pull requests can report
+  # regressions. Pages only persists successful master records afterward.
+  benchmark:
+    name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
-    needs: build-package-cosmo
+    needs:
+      - build-package-musl
+      - build-package-cosmo
     permissions:
       actions: read
       contents: read
@@ -585,12 +589,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-intel
-            arch: x86_64
-            host_arch: x86_64
-          - runner: macos-15
-            arch: aarch64
-            host_arch: arm64
+          - system: ubuntu-22.04
+            architecture: x86_64
+            libc: musl
+            toolchain: gcc
+            runner: ubuntu-latest
+          - system: ubuntu-22.04
+            architecture: x86_64
+            libc: cosmo
+            toolchain: gcc
+            runner: ubuntu-latest
+          - system: macos-15
+            architecture: x86_64
+            libc: cosmo
+            toolchain: apple-clang
+            runner: macos-15-intel
+            host_architecture: x86_64
+          - system: macos-15
+            architecture: aarch64
+            libc: cosmo
+            toolchain: apple-clang
+            runner: macos-15
+            host_architecture: arm64
+    env:
+      BENCHMARK_NAME: ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
+      BENCHMARK_BUILD: ./artifacts/benchmark-build/${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
+      BENCHMARK_RESULTS: ./artifacts/benchmarks/${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
+      BENCHMARK_HISTORY: ./artifacts/benchmark-history/history.json
+      BENCHMARK_HISTORY_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/benchmarks/history.json
 
     steps:
       - name: Checkout Repository
@@ -602,21 +628,41 @@ jobs:
           echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
+      # Docker bind mounts must not create shared parents as root before the
+      # runner writes benchmark records into them.
+      - name: Prepare Benchmark Directories
+        run: |
+          mkdir -p "$BENCHMARK_BUILD"
+          mkdir -p "$BENCHMARK_RESULTS"
+          mkdir -p "$(dirname "$BENCHMARK_HISTORY")"
+          mkdir -p ./artifacts/packages/${{ matrix.libc }}
+
+      - name: Pull Benchmark Build Image
+        if: ${{ 'musl' == matrix.libc }}
+        run: docker compose pull build-benchmark-musl
+
+      - name: Build Release Benchmark Input
+        if: ${{ 'musl' == matrix.libc }}
+        run: |
+          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
+          PACKAGE_DIR=./artifacts/packages/musl \
+            docker compose run --rm build-benchmark-musl
+
       - name: Download Cosmo Package
+        if: ${{ 'cosmo' == matrix.libc }}
         uses: actions/download-artifact@v8
         with:
           name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/cosmo
 
-      - name: Install Cosmo Package
+      - name: Install Cosmo Package on macOS
+        if: ${{ startsWith(matrix.system, 'macos-') }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/with space"
           install="$root/omnirefl"
-          build="$root/build"
-          results="$GITHUB_WORKSPACE/artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo"
-          mkdir -p "$root" "$results"
-          test "$(uname -m)" = "${{ matrix.host_arch }}"
+          mkdir -p "$root"
+          test "$(uname -m)" = "${{ matrix.host_architecture }}"
 
           package="$(find artifacts/packages/cosmo \
             -maxdepth 1 -type f \
@@ -629,431 +675,81 @@ jobs:
             -type d -name 'omnirefl-*' -print -quit)"
           test -n "$package_root"
           mv "$package_root" "$install"
+          echo "OMNIREFL_INSTALL_ROOT=$install" >> "$GITHUB_ENV"
 
-          {
-            echo "OMNIREFL_INSTALL_ROOT=$install"
-            echo "OMNIREFL_BENCHMARK_BUILD=$build"
-            echo "OMNIREFL_BENCHMARK_RESULTS=$results"
-          } >> "$GITHUB_ENV"
+      - name: Run Ubuntu Benchmark
+        if: ${{ startsWith(matrix.system, 'ubuntu-') }}
+        run: |
+          system=${{ matrix.system }}
+          UBUNTU_VERSION=${system#ubuntu-} \
+          TOOLCHAIN=${{ matrix.toolchain }} \
+          PACKAGE_DIR=./artifacts/packages/${{ matrix.libc }} \
+          TEST_RESULTS_DIR="$BENCHMARK_RESULTS" \
+          BUILD_DIR="$BENCHMARK_BUILD" \
+            docker compose run --rm benchmark
 
-      - name: Run benchmark
+      - name: Run macOS Benchmark
+        if: ${{ startsWith(matrix.system, 'macos-') }}
         run: |
           ci/benchmark_package.sh \
             --install "$OMNIREFL_INSTALL_ROOT" \
-            --build "$OMNIREFL_BENCHMARK_BUILD" \
-            --results "$OMNIREFL_BENCHMARK_RESULTS" \
-            --name "macos-${{ matrix.arch }}-cosmo"
+            --build "$BENCHMARK_BUILD" \
+            --results "$BENCHMARK_RESULTS" \
+            --name "$BENCHMARK_NAME"
 
-      - name: Find macOS benchmark history artifact
-        id: macos_history_run
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const owner = context.repo.owner
-            const repo = context.repo.repo
-            const workflow_id = 'ci.yml'
-            const branch = context.payload.repository.default_branch
-            const historyArtifactPrefix =
-              'benchmark-history-macos-${{ matrix.arch }}-cosmo'
+      - name: Download Published Benchmark History
+        run: |
+          if ! status="$(curl --location --silent --show-error \
+            --header 'Cache-Control: no-cache' \
+            --output "$BENCHMARK_HISTORY" \
+            --write-out '%{http_code}' \
+            "$BENCHMARK_HISTORY_URL?run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")"; then
+            echo 'published benchmark history is unavailable' >&2
+            exit 1
+          fi
 
-            const historyArtifactFrom = async (run_id) => {
-              const artifacts = await github.paginate(
-                github.rest.actions.listWorkflowRunArtifacts,
-                {owner, repo, run_id, per_page: 100})
+          if [ 404 = "$status" ]; then
+            rm -f "$BENCHMARK_HISTORY"
+            echo '::notice title=Benchmark baseline::published history does not exist'
+          elif [ 200 != "$status" ]; then
+            echo "published benchmark history returned HTTP $status" >&2
+            exit 1
+          fi
 
-              return artifacts
-                .filter(({expired, name}) =>
-                  !expired && (
-                    historyArtifactPrefix === name ||
-                    name.startsWith(`${historyArtifactPrefix}-attempt-`)))
-                .sort((lhs, rhs) =>
-                  new Date(rhs.created_at) - new Date(lhs.created_at))[0]
-            }
-
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRuns,
-              {
-                owner,
-                repo,
-                workflow_id,
-                branch,
-                status: 'success',
-                per_page: 20,
-              })
-
-            for (const run of runs) {
-              if (context.runId === run.id) {
-                continue
-              }
-
-              const artifact = await historyArtifactFrom(run.id)
-              if (artifact) {
-                core.setOutput('run_id', run.id)
-                core.setOutput('artifact_name', artifact.name)
-                return
-              }
-            }
-
-            core.setOutput('run_id', '')
-
-      - name: Download macOS benchmark history
-        if: ${{ '' != steps.macos_history_run.outputs.run_id }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ steps.macos_history_run.outputs.artifact_name }}
-          path: ./artifacts/benchmark-history/macos-${{ matrix.arch }}
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.macos_history_run.outputs.run_id }}
-
-      - name: Prepare macOS benchmark history
-        run: mkdir -p ./artifacts/benchmark-history/macos-${{ matrix.arch }}
-
-      - name: Check macOS benchmark regression
+      - name: Check Benchmark Regression
         run: |
           python3 -B ci/benchmark_history.py compare \
-            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo/benchmark.json \
-            --history ./artifacts/benchmark-history/macos-${{ matrix.arch }}/history.json \
-            --os macos-${{ matrix.arch }}-cosmo \
-            --arch ${{ matrix.arch }} \
-            --libc cosmo \
-            --threshold 1.2 \
-            --min-delta-ms 500 \
-            --count 5
-
-      - name: Update macOS benchmark history
-        if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
-        env:
-          COMMIT_TITLE: ${{ steps.commit.outputs.title }}
-        run: |
-          python3 -B ci/benchmark_history.py update \
-            --current ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo/benchmark.json \
-            --history ./artifacts/benchmark-history/macos-${{ matrix.arch }}/history.json \
-            --commit "${{ github.sha }}" \
-            --commit-title "$COMMIT_TITLE" \
-            --os macos-${{ matrix.arch }}-cosmo \
-            --arch ${{ matrix.arch }} \
-            --libc cosmo \
-            --max-runs 200
-
-      - name: Upload macOS benchmark history
-        if: ${{ success() && 'push' == github.event_name && 'master' == github.ref_name }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: >-
-            benchmark-history-macos-${{ matrix.arch }}-cosmo-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmark-history/macos-${{ matrix.arch }}
-          if-no-files-found: error
-
-      - name: Upload macOS benchmark artifacts
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: benchmark-macos-${{ matrix.arch }}-cosmo-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmarks/macos-${{ matrix.arch }}-cosmo
-          if-no-files-found: error
-
-  benchmark-musl:
-    name: Benchmark / ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}
-    runs-on: ubuntu-latest
-    needs: build-package-musl
-    permissions:
-      actions: read
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [linux]
-        arch: [x86_64]
-        libc: [musl]
-        toolchain: [gcc]
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v7
-
-      - name: Resolve Short SHA
-        id: commit
-        run: |
-          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
-
-      # Docker bind mounts must not create the shared parent as root before
-      # the runner writes benchmark history into it.
-      - name: Prepare benchmark directories
-        run: |
-          mkdir -p ./artifacts/benchmark-history
-          mkdir -p ./artifacts/packages/benchmark-musl
-          mkdir -p ./artifacts/benchmarks
-          mkdir -p ./artifacts/benchmark-build
-
-      - name: Pull Benchmark Build Image
-        run: docker compose pull build-benchmark-musl
-
-      - name: Build Release Benchmark Input
-        run: |
-          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
-          PACKAGE_DIR=./artifacts/packages/benchmark-musl \
-            docker compose run --rm build-benchmark-musl
-
-      - name: Run benchmark
-        run: |
-          TOOLCHAIN=${{ matrix.toolchain }} \
-          PACKAGE_DIR=./artifacts/packages/benchmark-musl \
-          TEST_RESULTS_DIR=./artifacts/benchmarks \
-          BUILD_DIR=./artifacts/benchmark-build/${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
-            docker compose run --rm benchmark
-
-      - name: Find benchmark history artifact
-        id: history_run
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const owner = context.repo.owner
-            const repo = context.repo.repo
-            const workflow_id = 'ci.yml'
-            const branch = context.payload.repository.default_branch
-            const historyArtifactPrefix =
-              'benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}'
-
-            const historyArtifactFrom = async (run_id) => {
-              const artifacts = await github.paginate(
-                github.rest.actions.listWorkflowRunArtifacts,
-                {owner, repo, run_id, per_page: 100})
-
-              return artifacts
-                .filter(({expired, name}) =>
-                  !expired && (
-                    historyArtifactPrefix === name ||
-                    name.startsWith(`${historyArtifactPrefix}-attempt-`)))
-                .sort((lhs, rhs) =>
-                  new Date(rhs.created_at) - new Date(lhs.created_at))[0]
-            }
-
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRuns,
-              {
-                owner,
-                repo,
-                workflow_id,
-                branch,
-                status: 'success',
-                per_page: 20,
-              })
-
-            for (const run of runs) {
-              if (context.runId === run.id) {
-                continue
-              }
-
-              const artifact = await historyArtifactFrom(run.id)
-              if (artifact) {
-                core.setOutput('run_id', run.id)
-                core.setOutput('artifact_name', artifact.name)
-                return
-              }
-            }
-
-            core.setOutput('run_id', '')
-
-      - name: Download benchmark history
-        if: ${{ '' != steps.history_run.outputs.run_id }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ steps.history_run.outputs.artifact_name }}
-          path: ./artifacts/benchmark-history
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.history_run.outputs.run_id }}
-
-      - name: Check benchmark regression
-        run: |
-          python3 -B ci/benchmark_history.py compare \
-            --current ./artifacts/benchmarks/benchmark.json \
-            --history ./artifacts/benchmark-history/history.json \
-            --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
-            --arch ${{ matrix.arch }} \
+            --current "$BENCHMARK_RESULTS/benchmark.json" \
+            --history "$BENCHMARK_HISTORY" \
+            --system ${{ matrix.system }} \
+            --architecture ${{ matrix.architecture }} \
             --libc ${{ matrix.libc }} \
+            --toolchain ${{ matrix.toolchain }} \
             --threshold 1.2 \
             --min-delta-ms 500 \
             --count 5
 
-      - name: Update benchmark history
-        if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
+      - name: Create Benchmark Record
         env:
           COMMIT_TITLE: ${{ steps.commit.outputs.title }}
         run: |
-          python3 -B ci/benchmark_history.py update \
-            --current ./artifacts/benchmarks/benchmark.json \
-            --history ./artifacts/benchmark-history/history.json \
+          python3 -B ci/benchmark_history.py record \
+            --current "$BENCHMARK_RESULTS/benchmark.json" \
+            --output "$BENCHMARK_RESULTS/run.json" \
             --commit "${{ github.sha }}" \
             --commit-title "$COMMIT_TITLE" \
-            --os ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }} \
-            --arch ${{ matrix.arch }} \
+            --system ${{ matrix.system }} \
+            --architecture ${{ matrix.architecture }} \
             --libc ${{ matrix.libc }} \
-            --max-runs 200
+            --toolchain ${{ matrix.toolchain }}
 
-      # TODO: after release or once the repository is public, move benchmark
-      # history away from artifact storage. GitHub artifacts are easy to delete,
-      # so this is only a temporary private-repo storage workaround.
-      - name: Upload benchmark history
-        if: ${{ success() && 'push' == github.event_name && 'master' == github.ref_name }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: >-
-            benchmark-history-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmark-history
-          if-no-files-found: error
-
-      - name: Upload benchmark artifacts
+      - name: Upload Benchmark Artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            benchmark-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.libc }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmarks
-          if-no-files-found: error
-
-  benchmark-cosmo:
-    name: Benchmark / linux-x86_64-cosmo-gcc
-    runs-on: ubuntu-latest
-    needs: build-package-cosmo
-    permissions:
-      actions: read
-      contents: read
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v7
-
-      - name: Resolve Short SHA
-        id: commit
-        run: |
-          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          echo "title=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
-
-      - name: Download Cosmo Package
-        uses: actions/download-artifact@v8
-        with:
-          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmo
-
-      - name: Run benchmark
-        run: |
-          TOOLCHAIN=gcc \
-          PACKAGE_DIR=./artifacts/packages/cosmo \
-          TEST_RESULTS_DIR=./artifacts/benchmarks \
-          BUILD_DIR=./artifacts/benchmark-build/linux-x86_64-cosmo-gcc \
-            docker compose run --rm benchmark
-
-      - name: Find benchmark history artifact
-        id: history_run
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const owner = context.repo.owner
-            const repo = context.repo.repo
-            const workflow_id = 'ci.yml'
-            const branch = context.payload.repository.default_branch
-            const historyArtifactPrefix =
-              'benchmark-history-linux-x86_64-cosmo-gcc'
-
-            const historyArtifactFrom = async (run_id) => {
-              const artifacts = await github.paginate(
-                github.rest.actions.listWorkflowRunArtifacts,
-                {owner, repo, run_id, per_page: 100})
-
-              return artifacts
-                .filter(({expired, name}) =>
-                  !expired && (
-                    historyArtifactPrefix === name ||
-                    name.startsWith(`${historyArtifactPrefix}-attempt-`)))
-                .sort((lhs, rhs) =>
-                  new Date(rhs.created_at) - new Date(lhs.created_at))[0]
-            }
-
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRuns,
-              {
-                owner,
-                repo,
-                workflow_id,
-                branch,
-                status: 'success',
-                per_page: 20,
-              })
-
-            for (const run of runs) {
-              if (context.runId === run.id) {
-                continue
-              }
-
-              const artifact = await historyArtifactFrom(run.id)
-              if (artifact) {
-                core.setOutput('run_id', run.id)
-                core.setOutput('artifact_name', artifact.name)
-                return
-              }
-            }
-
-            core.setOutput('run_id', '')
-
-      - name: Download benchmark history
-        if: ${{ '' != steps.history_run.outputs.run_id }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ steps.history_run.outputs.artifact_name }}
-          path: ./artifacts/benchmark-history
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.history_run.outputs.run_id }}
-
-      - name: Prepare benchmark history
-        run: mkdir -p ./artifacts/benchmark-history
-
-      - name: Check benchmark regression
-        run: |
-          python3 -B ci/benchmark_history.py compare \
-            --current ./artifacts/benchmarks/benchmark.json \
-            --history ./artifacts/benchmark-history/history.json \
-            --os linux-x86_64-cosmo-gcc \
-            --arch x86_64 \
-            --libc cosmo \
-            --threshold 1.2 \
-            --min-delta-ms 500 \
-            --count 5
-
-      - name: Update benchmark history
-        if: ${{ 'push' == github.event_name && 'master' == github.ref_name }}
-        env:
-          COMMIT_TITLE: ${{ steps.commit.outputs.title }}
-        run: |
-          python3 -B ci/benchmark_history.py update \
-            --current ./artifacts/benchmarks/benchmark.json \
-            --history ./artifacts/benchmark-history/history.json \
-            --commit "${{ github.sha }}" \
-            --commit-title "$COMMIT_TITLE" \
-            --os linux-x86_64-cosmo-gcc \
-            --arch x86_64 \
-            --libc cosmo \
-            --max-runs 200
-
-      - name: Upload benchmark history
-        if: ${{ success() && 'push' == github.event_name && 'master' == github.ref_name }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: >-
-            benchmark-history-linux-x86_64-cosmo-gcc-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmark-history
-          if-no-files-found: error
-
-      - name: Upload benchmark artifacts
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: >-
-            benchmark-linux-x86_64-cosmo-gcc-attempt-${{ github.run_attempt }}
-          path: ./artifacts/benchmarks
+            benchmark-${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.BENCHMARK_RESULTS }}
           if-no-files-found: error
 
   required-ci:
@@ -1069,8 +765,6 @@ jobs:
       contents: read
       actions: write
     if: always()
-    outputs:
-      pages_artifact: ${{ steps.pages_artifact.outputs.name }}
 
     steps:
       - name: Find previous aggregate artifact
@@ -1186,93 +880,12 @@ jobs:
             "$TEST_PACKAGE_WINDOWS_RESULT"
           exit 1
 
-      - name: Checkout Repository for Pages
-        if: >-
-          ${{
-            'refs/heads/master' == github.ref
-            && (
-              'push' == github.event_name
-              || 'workflow_dispatch' == github.event_name
-            )
-          }}
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js for Pages
-        if: >-
-          ${{
-            'refs/heads/master' == github.ref
-            && (
-              'push' == github.event_name
-              || 'workflow_dispatch' == github.event_name
-            )
-          }}
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-
-      - name: Install Site Dependencies
-        if: >-
-          ${{
-            'refs/heads/master' == github.ref
-            && (
-              'push' == github.event_name
-              || 'workflow_dispatch' == github.event_name
-            )
-          }}
-        working-directory: site
-        run: npm ci
-
-      - name: Build Site
-        if: >-
-          ${{
-            'refs/heads/master' == github.ref
-            && (
-              'push' == github.event_name
-              || 'workflow_dispatch' == github.event_name
-            )
-          }}
-        working-directory: site
-        run: npm run build
-
-      - name: Resolve GitHub Pages Artifact Name
-        id: pages_artifact
-        if: >-
-          ${{
-            'refs/heads/master' == github.ref
-            && (
-              'push' == github.event_name
-              || 'workflow_dispatch' == github.event_name
-            )
-          }}
-        run: >-
-          echo "name=github-pages-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
-          >> "$GITHUB_OUTPUT"
-
-      - name: Upload GitHub Pages Artifact
-        if: >-
-          ${{
-            'refs/heads/master' == github.ref
-            && (
-              'push' == github.event_name
-              || 'workflow_dispatch' == github.event_name
-            )
-          }}
-        uses: actions/upload-pages-artifact@v5
-        with:
-          name: ${{ steps.pages_artifact.outputs.name }}
-          path: site/dist
-          retention-days: 30
-
   deploy-pages:
     name: Deploy Pages
     runs-on: ubuntu-latest
     needs:
       - required-ci
-      - benchmark-macos
-      - benchmark-musl
-      - benchmark-cosmo
+      - benchmark
     if: >-
       ${{
         'refs/heads/master' == github.ref
@@ -1352,12 +965,121 @@ jobs:
             core.setOutput('deploy', 'true')
 
       - name: Configure GitHub Pages
+        id: pages
         if: ${{ 'true' == steps.pages_order.outputs.deploy }}
         uses: actions/configure-pages@v6
+
+      - name: Checkout Repository
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install Site Dependencies
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        working-directory: site
+        run: npm ci
+
+      - name: Build Site
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        working-directory: site
+        run: npm run build
+
+      - name: Download Benchmark Records
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        # Ad hoc: download-artifact currently fails for some artifacts uploaded
+        # by Ubuntu runners. The REST download remains valid.
+        # https://github.com/actions/upload-artifact/issues/811
+        # REFACTORME: Restore download-artifact after the upstream fix ships.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=false
+          while IFS=$'\t' read -r artifact_id name artifact_digest; do
+            archive=$RUNNER_TEMP/$name.zip
+            destination=./artifacts/benchmarks/$name
+            if [[ "$artifact_digest" != sha256:* ]]; then
+              printf 'artifact has no SHA-256 digest: %s\n' "$name" >&2
+              exit 1
+            fi
+
+            mkdir -p "$destination"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              > "$archive"
+            printf '%s  %s\n' "${artifact_digest#sha256:}" "$archive" |
+              sha256sum --check -
+            unzip -q "$archive" -d "$destination"
+            rm -f "$archive"
+            found=true
+          done < <(
+            gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.name | startswith("benchmark-")) | [.id, .name, .digest] | @tsv'
+          )
+          $found
+
+      # The deployed JSON is the durable history. Only a missing file starts a
+      # new history; other download failures must not replace it with an empty
+      # snapshot.
+      - name: Download Published Benchmark History
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        env:
+          BENCHMARK_HISTORY_URL: ${{ steps.pages.outputs.base_url }}/benchmarks/history.json
+        run: |
+          history=site/dist/benchmarks/history.json
+          mkdir -p "$(dirname "$history")"
+          if ! status="$(curl --location --silent --show-error \
+            --header 'Cache-Control: no-cache' \
+            --output "$history" \
+            --write-out '%{http_code}' \
+            "$BENCHMARK_HISTORY_URL?run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")"; then
+            echo 'failed to download the published benchmark history' >&2
+            exit 1
+          fi
+
+          if [ 404 = "$status" ]; then
+            rm -f "$history"
+          elif [ 200 != "$status" ]; then
+            echo "published benchmark history returned HTTP $status" >&2
+            exit 1
+          fi
+
+      - name: Update Published Benchmark History
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        run: |
+          mapfile -d '' records < <(
+            find ./artifacts/benchmarks -type f -name run.json -print0)
+          test 0 -lt "${#records[@]}"
+          python3 -B ci/benchmark_history.py merge \
+            --history site/dist/benchmarks/history.json \
+            --run "${records[@]}" \
+            --max-runs 200
+
+      - name: Resolve GitHub Pages Artifact Name
+        id: pages_artifact
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        run: >-
+          echo "name=github-pages-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          >> "$GITHUB_OUTPUT"
+
+      - name: Upload GitHub Pages Artifact
+        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          name: ${{ steps.pages_artifact.outputs.name }}
+          path: site/dist
+          retention-days: 30
 
       - name: Deploy GitHub Pages
         id: deployment
         if: ${{ 'true' == steps.pages_order.outputs.deploy }}
         uses: actions/deploy-pages@v5
         with:
-          artifact_name: ${{ needs.required-ci.outputs.pages_artifact }}
+          artifact_name: ${{ steps.pages_artifact.outputs.name }}

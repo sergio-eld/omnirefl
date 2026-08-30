@@ -7,10 +7,13 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+# TODO: Add regression tests for four-axis filtering, rerun deduplication, and
+# per-series retention.
+
 
 def benchmark_key(entry):
     # Preserve the stage history across the reduce_matches -> fold_matches
-    # terminology change without rewriting retained artifact data.
+    # terminology change without rewriting retained history data.
     return (
         {"tool reduce matches": "tool fold matches"}.get(
             entry["name"], entry["name"]),
@@ -18,12 +21,23 @@ def benchmark_key(entry):
     )
 
 
-def run_libc(run):
-    return run.get("libc", "musl")
+def run_identity(run):
+    return (
+        run["system"],
+        run["architecture"],
+        run["libc"],
+        run["toolchain"],
+    )
 
 
-def run_arch(run):
-    return run.get("arch", "x86_64")
+def validate_run(run):
+    # The CI benchmark matrix is the single source of truth for valid systems,
+    # architectures, libc values, and system-specific toolchains. History only
+    # requires every selected axis to be recorded.
+    for axis in ("system", "architecture", "libc", "toolchain"):
+        value = run.get(axis)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"benchmark run has no {axis}")
 
 
 def github_escape(value):
@@ -63,13 +77,13 @@ def compare_history(args):
 
     series_by_key = defaultdict(list)
     for run in runs:
-        if args.os != run.get("os"):
-            continue
-
-        if args.libc != run_libc(run):
-            continue
-
-        if args.arch != run_arch(run):
+        validate_run(run)
+        if (
+            args.system,
+            args.architecture,
+            args.libc,
+            args.toolchain,
+        ) != run_identity(run):
             continue
 
         for entry in run.get("benchmarks", []):
@@ -172,40 +186,67 @@ def compare_history(args):
                         f"+{r['change']:.1f}% |\n")
 
 
-def update_history(args):
-    history_path = Path(args.history)
-    history_path.parent.mkdir(parents=True, exist_ok=True)
-
+def record_run(args):
     current = json.loads(Path(args.current).read_text())
-    history = (
-        json.loads(history_path.read_text())
-        if history_path.exists()
-        else {"runs": []}
-    )
-
-    runs = [
-        run for run in history.get("runs", [])
-        if not (
-            args.commit == run.get("commit")
-            and args.os == run.get("os")
-            and args.arch == run_arch(run)
-            and args.libc == run_libc(run)
-        )
-    ]
     run = {
         "commit": args.commit,
-        "os": args.os,
-        "arch": args.arch,
+        "system": args.system,
+        "architecture": args.architecture,
         "libc": args.libc,
+        "toolchain": args.toolchain,
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "benchmarks": current,
     }
     if args.commit_title:
         run["commit_title"] = args.commit_title
+    validate_run(run)
 
-    runs.append(run)
-    history["runs"] = runs[-args.max_runs:]
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(run, indent=2) + "\n")
+
+
+def merge_history(args):
+    history_path = Path(args.history)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history = (
+        json.loads(history_path.read_text())
+        if history_path.exists()
+        else {"runs": []}
+    )
+    for run in history.get("runs", []):
+        validate_run(run)
+
+    incoming_by_key = {}
+    for path in args.run:
+        run = json.loads(Path(path).read_text())
+        validate_run(run)
+        key = (run["commit"], *run_identity(run))
+        previous = incoming_by_key.get(key)
+        if previous is None or previous["created_at"] < run["created_at"]:
+            incoming_by_key[key] = run
+
+    incoming = list(incoming_by_key.values())
+    incoming.sort(key=lambda run: (*run_identity(run), run["commit"]))
+    replaced = {(run["commit"], *run_identity(run)) for run in incoming}
+    runs = [
+        run for run in history.get("runs", [])
+        if (run["commit"], *run_identity(run)) not in replaced
+    ]
+    runs.extend(incoming)
+
+    retained = []
+    series_counts = defaultdict(int)
+    for run in reversed(runs):
+        identity = run_identity(run)
+        if args.max_runs <= series_counts[identity]:
+            continue
+
+        series_counts[identity] += 1
+        retained.append(run)
+
+    history["runs"] = list(reversed(retained))
 
     history_path.write_text(json.dumps(history, indent=2) + "\n")
 
@@ -217,24 +258,31 @@ def main():
     compare_parser = subcommands.add_parser("compare")
     compare_parser.add_argument("--current", required=True)
     compare_parser.add_argument("--history", required=True)
-    compare_parser.add_argument("--os", required=True)
-    compare_parser.add_argument("--arch", default="x86_64")
-    compare_parser.add_argument("--libc", default="musl")
+    compare_parser.add_argument("--system", required=True)
+    compare_parser.add_argument("--architecture", required=True)
+    compare_parser.add_argument("--libc", required=True)
+    compare_parser.add_argument("--toolchain", required=True)
     compare_parser.add_argument("--threshold", type=float, default=1.2)
     compare_parser.add_argument("--min-delta-ms", type=float, default=500)
     compare_parser.add_argument("--count", type=int, default=5)
     compare_parser.set_defaults(func=compare_history)
 
-    update_parser = subcommands.add_parser("update")
-    update_parser.add_argument("--current", required=True)
-    update_parser.add_argument("--history", required=True)
-    update_parser.add_argument("--commit", required=True)
-    update_parser.add_argument("--commit-title", default="")
-    update_parser.add_argument("--os", required=True)
-    update_parser.add_argument("--arch", default="x86_64")
-    update_parser.add_argument("--libc", default="musl")
-    update_parser.add_argument("--max-runs", type=int, default=200)
-    update_parser.set_defaults(func=update_history)
+    record_parser = subcommands.add_parser("record")
+    record_parser.add_argument("--current", required=True)
+    record_parser.add_argument("--output", required=True)
+    record_parser.add_argument("--commit", required=True)
+    record_parser.add_argument("--commit-title", default="")
+    record_parser.add_argument("--system", required=True)
+    record_parser.add_argument("--architecture", required=True)
+    record_parser.add_argument("--libc", required=True)
+    record_parser.add_argument("--toolchain", required=True)
+    record_parser.set_defaults(func=record_run)
+
+    merge_parser = subcommands.add_parser("merge")
+    merge_parser.add_argument("--history", required=True)
+    merge_parser.add_argument("--run", required=True, nargs="+")
+    merge_parser.add_argument("--max-runs", type=int, default=200)
+    merge_parser.set_defaults(func=merge_history)
 
     args = parser.parse_args()
     args.func(args)
