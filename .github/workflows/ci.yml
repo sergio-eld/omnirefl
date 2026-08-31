@@ -857,7 +857,10 @@ jobs:
       - benchmark
     if: >-
       ${{
-        'refs/heads/master' == github.ref
+        always()
+        && 'success' == needs['required-ci'].result
+        && 'success' == needs['benchmark'].result
+        && 'refs/heads/master' == github.ref
         && (
           'push' == github.event_name
           || 'workflow_dispatch' == github.event_name
