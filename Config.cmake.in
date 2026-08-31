@@ -26,6 +26,28 @@ if (NOT TARGET omni::refl)
     message(FATAL_ERROR "@PROJECT_NAME@ error: target not found")
 endif()
 
+# Register each new component here and install its configuration as
+# `components/<name>.cmake`. The component configuration must find its
+# dependencies and set `@PROJECT_NAME@_<name>_FOUND`; when unavailable, it must
+# also set `@PROJECT_NAME@_<name>_NOT_FOUND_MESSAGE`.
+set(_@PROJECT_NAME@_supported_components)
+
+foreach(_component IN LISTS @PROJECT_NAME@_FIND_COMPONENTS)
+    if(_component IN_LIST _@PROJECT_NAME@_supported_components)
+        include("${CMAKE_CURRENT_LIST_DIR}/components/${_component}.cmake")
+    else()
+        set(@PROJECT_NAME@_${_component}_FOUND FALSE)
+        set(@PROJECT_NAME@_${_component}_NOT_FOUND_MESSAGE
+            "Unsupported @PROJECT_NAME@ component '${_component}'")
+    endif()
+
+    if(@PROJECT_NAME@_FIND_REQUIRED_${_component}
+        AND NOT @PROJECT_NAME@_${_component}_FOUND)
+        string(APPEND @PROJECT_NAME@_NOT_FOUND_MESSAGE
+            "${@PROJECT_NAME@_${_component}_NOT_FOUND_MESSAGE}\n")
+    endif()
+endforeach()
+
 check_required_components(@PROJECT_NAME@)
 
 # todo: run sanity check with the current compiler:
