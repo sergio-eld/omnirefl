@@ -45,13 +45,23 @@ jobs:
             const artifacts = await github.paginate(
               github.rest.actions.listArtifactsForRepo,
               {owner, repo, per_page: 100})
-            const packageSha = (artifact) =>
-              artifact.name.startsWith('packages-')
-                ? artifact.name.substring(artifact.name.lastIndexOf('-') + 1)
+            const isReleaseArtifact = (artifact) =>
+              artifact.name.startsWith('packages-') ||
+              artifact.name.startsWith('symbols-') ||
+              artifact.name.startsWith('release-inputs-')
+            const releaseArtifactSha = (artifact) =>
+              isReleaseArtifact(artifact)
+                ? artifact.name
+                  .substring(artifact.name.lastIndexOf('-') + 1)
+                  .substring(0, 12)
                 : ''
             const packageCommitDate = new Map()
             for (const artifact of artifacts) {
-              const sha = packageSha(artifact)
+              if (!artifact.name.startsWith('packages-')) {
+                continue
+              }
+
+              const sha = releaseArtifactSha(artifact)
               if ('' === sha || masterShortSha === sha) {
                 continue
               }
@@ -62,22 +72,22 @@ jobs:
               }
             }
 
-            const retainedPackageShas = new Set([...packageCommitDate.entries()]
+            const retainedReleaseShas = new Set([...packageCommitDate.entries()]
               .sort((lhs, rhs) => rhs[1] - lhs[1])
               .slice(0, 5)
               .map(([sha]) => sha))
 
             for (const artifact of artifacts) {
-              const isPackage = artifact.name.startsWith('packages-')
-              const sha = packageSha(artifact)
+              const sha = releaseArtifactSha(artifact)
               const keep =
                 artifact.name.startsWith('aggregated-test-results-') ||
                 (
-                  isPackage &&
+                  isReleaseArtifact(artifact) &&
                   masterShortSha === sha
                 ) ||
-                retainedPackageShas.has(sha) ||
-                (!isPackage && cutoffMs <= new Date(artifact.created_at).getTime())
+                retainedReleaseShas.has(sha) ||
+                (!isReleaseArtifact(artifact) &&
+                  cutoffMs <= new Date(artifact.created_at).getTime())
 
               // Recheck immediately before deletion: a rerun may have started
               // after this cleanup collected its artifact candidates.

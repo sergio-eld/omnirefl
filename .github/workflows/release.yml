@@ -13,10 +13,26 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  RELEASE_PACKAGE_TARGETS: >-
+    linux-x86_64-musl
+    linux-aarch64-musl
+    windows-x86_64-ucrt
+    cosmo-universal
+  RELEASE_SYMBOL_TARGETS: >-
+    linux-x86_64-musl
+    linux-aarch64-musl
+    windows-x86_64-ucrt
+
 jobs:
   preflight:
     name: Release preflight
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse_artifacts: ${{ steps.reuse.outputs.reuse_artifacts }}
     env:
       # Fine-grained token with read/write access to repository contents.
       GH_TOKEN: ${{ secrets.OMNIREFL_RELEASE_TOKEN }}
@@ -51,17 +67,232 @@ jobs:
             exit 1
           fi
 
+      - name: Import Reusable CI Artifacts
+        id: reusable_ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          source_run_is_valid() {
+            local metadata run_sha run_event run_branch run_conclusion
+
+            if ! metadata=$(
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" \
+                --jq '[.head_sha, .event, .head_branch, .conclusion] | @tsv'
+            ); then
+              echo "failed to verify CI run $run_id" >&2
+              return 1
+            fi
+
+            read -r run_sha run_event run_branch run_conclusion <<< "$metadata"
+            if [ "$GITHUB_SHA" != "$run_sha" ] \
+              || [ push != "$run_event" ] \
+              || [ master != "$run_branch" ] \
+              || [ success != "$run_conclusion" ]; then
+              echo "CI run $run_id does not match the release commit" >&2
+              return 1
+            fi
+          }
+
+          resolve_artifact() {
+            local kind=$1
+            local name=$2
+            local metadata count expired artifact_id artifact_digest
+
+            if ! metadata=$(gh api \
+              --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
+              -f name="$name" \
+              -F per_page=100 \
+              --jq \
+              '[.total_count, (if .total_count == 1 then .artifacts[0].expired else true end), (if .total_count == 1 then .artifacts[0].id else "" end), (if .total_count == 1 then .artifacts[0].digest else "" end)] | @tsv'); then
+              printf 'failed to inspect artifact: %s\n' "$name" >&2
+              return 1
+            fi
+
+            IFS=$'\t' read -r count expired artifact_id artifact_digest \
+              <<< "$metadata"
+            if [ 1 -ne "$count" ]; then
+              printf 'expected one reusable artifact %s, found %s\n' \
+                "$name" "$count"
+              return 1
+            fi
+            if [ false != "$expired" ]; then
+              printf 'reusable artifact is expired: %s\n' "$name"
+              return 1
+            fi
+            if [[ "$artifact_digest" != sha256:* ]]; then
+              printf 'reusable artifact has no SHA-256 digest: %s\n' "$name"
+              return 1
+            fi
+
+            printf '%s\t%s\t%s\t%s\n' \
+              "$kind" "$name" "$artifact_id" "$artifact_digest" \
+              >> "$artifact_manifest"
+          }
+
+          import_artifact() {
+            local kind=$1
+            local name=$2
+            local artifact_id=$3
+            local artifact_digest=$4
+            local archive destination
+
+            archive=$RUNNER_TEMP/$name.zip
+            destination=./reusable-artifacts/$kind/$name
+            if ! gh api \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              > "$archive"; then
+              printf 'failed to download reusable artifact: %s\n' "$name" >&2
+              return 1
+            fi
+            if ! printf '%s  %s\n' \
+              "${artifact_digest#sha256:}" "$archive" \
+              | sha256sum --check -; then
+              printf 'reusable artifact digest mismatch: %s\n' "$name" >&2
+              return 1
+            fi
+            if ! mkdir -p "$destination"; then
+              printf 'failed to stage reusable artifact: %s\n' "$name" >&2
+              return 1
+            fi
+            if ! unzip -q "$archive" -d "$destination"; then
+              printf 'failed to extract reusable artifact: %s\n' "$name" >&2
+              return 1
+            fi
+            rm -f "$archive"
+          }
+
+          required_files_available() {
+            local file
+            for file in "$@"; do
+              if [ ! -s "$file" ]; then
+                printf 'reusable artifact file is missing: %s\n' "$file"
+                return 1
+              fi
+            done
+          }
+
+          artifact_manifest=$RUNNER_TEMP/release-artifacts.tsv
+          : > "$artifact_manifest"
+          if ! run_id=$(gh api \
+            --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f branch=master \
+            -f event=push \
+            -f status=success \
+            -f head_sha="$GITHUB_SHA" \
+            -F per_page=100 \
+            --jq '.workflow_runs[0].id // empty'); then
+            echo "failed to find reusable CI run; running full validation"
+            run_id=
+          fi
+          if [ -n "$run_id" ] && ! source_run_is_valid; then
+            run_id=
+          fi
+
+          if [ -n "$run_id" ]; then
+            for target in $RELEASE_PACKAGE_TARGETS; do
+              if ! resolve_artifact packages \
+                "packages-$target-${GITHUB_SHA::12}"; then
+                run_id=
+                break
+              fi
+            done
+          fi
+          if [ -n "$run_id" ]; then
+            for target in $RELEASE_SYMBOL_TARGETS; do
+              if ! resolve_artifact symbols \
+                "symbols-$target-${GITHUB_SHA::12}"; then
+                run_id=
+                break
+              fi
+            done
+          fi
+          if [ -n "$run_id" ] && ! source_run_is_valid; then
+            run_id=
+          fi
+
+          if [ -n "$run_id" ]; then
+            while IFS=$'\t' read -r \
+              kind name artifact_id artifact_digest; do
+              if ! import_artifact \
+                "$kind" "$name" "$artifact_id" "$artifact_digest"; then
+                run_id=
+                break
+              fi
+            done < "$artifact_manifest"
+          fi
+
+          version=${GITHUB_REF_NAME#v}
+          if [ -n "$run_id" ]; then
+            if ! required_files_available \
+              "./reusable-artifacts/packages/packages-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl-linux-x86_64-musl-$version-${GITHUB_SHA::12}.deb" \
+              "./reusable-artifacts/packages/packages-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl-linux-x86_64-musl-$version-${GITHUB_SHA::12}.tar.gz" \
+              "./reusable-artifacts/packages/packages-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl-linux-aarch64-musl-$version-${GITHUB_SHA::12}.deb" \
+              "./reusable-artifacts/packages/packages-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl-linux-aarch64-musl-$version-${GITHUB_SHA::12}.tar.gz" \
+              "./reusable-artifacts/packages/packages-windows-x86_64-ucrt-${GITHUB_SHA::12}/omnirefl-windows-x86_64-ucrt-$version-${GITHUB_SHA::12}.zip" \
+              "./reusable-artifacts/packages/packages-cosmo-universal-${GITHUB_SHA::12}/omnirefl-cosmo-universal-$version-${GITHUB_SHA::12}.tar.gz" \
+              "./reusable-artifacts/symbols/symbols-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
+              "./reusable-artifacts/symbols/symbols-linux-x86_64-musl-${GITHUB_SHA::12}/ccdb_query.debug" \
+              "./reusable-artifacts/symbols/symbols-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
+              "./reusable-artifacts/symbols/symbols-linux-aarch64-musl-${GITHUB_SHA::12}/ccdb_query.debug" \
+              "./reusable-artifacts/symbols/symbols-windows-x86_64-ucrt-${GITHUB_SHA::12}/omnirefl.exe.debug" \
+              "./reusable-artifacts/symbols/symbols-windows-x86_64-ucrt-${GITHUB_SHA::12}/ccdb_query.exe.debug"; then
+              run_id=
+            fi
+          fi
+          if [ -n "$run_id" ] && ! source_run_is_valid; then
+            run_id=
+          fi
+
+          if [ -n "$run_id" ]; then
+            echo "imported release artifacts from successful CI run $run_id"
+            echo "candidate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete reusable CI artifacts were not found"
+            echo "candidate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Reusable Release Artifacts
+        id: reusable_artifacts
+        if: ${{ 'true' == steps.reusable_ci.outputs.candidate }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-inputs-${{ github.sha }}
+          path: ./reusable-artifacts
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Select Release Artifact Source
+        id: reuse
+        if: always()
+        env:
+          CANDIDATE: ${{ steps.reusable_ci.outputs.candidate }}
+          UPLOAD_OUTCOME: ${{ steps.reusable_artifacts.outcome }}
+        run: |
+          reuse_artifacts=false
+          if [ true = "$CANDIDATE" ] && [ success = "$UPLOAD_OUTCOME" ]; then
+            reuse_artifacts=true
+          elif [ true = "$CANDIDATE" ]; then
+            echo "failed to pin reusable artifacts; running full validation"
+          fi
+          echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
+
   validation:
     name: Build and validate release
     needs: preflight
+    if: ${{ 'true' != needs.preflight.outputs.reuse_artifacts }}
     uses: ./.github/workflows/ci.yml
     with:
+      skip_pages: true
       upload_symbols: true
-    # Ad hoc: the reusable CI workflow contains `deploy-pages`. GitHub validates
-    # every nested job's permission ceiling before evaluating its condition, so
-    # the tag-triggered caller must permit Pages even though `deploy-pages` only
-    # runs for `master`. REFACTORME: separate Pages deployment from reusable
-    # package validation.
+    # Ad hoc: `skip_pages` prevents deployment, but GitHub validates every
+    # nested job's permission ceiling before evaluating its condition. The
+    # tag-triggered caller must therefore still permit Pages. REFACTORME:
+    # separate Pages deployment from reusable package validation.
     permissions:
       actions: write
       contents: read
@@ -70,7 +301,21 @@ jobs:
 
   release:
     name: Create draft prerelease
-    needs: validation
+    needs:
+      - preflight
+      - validation
+    if: >-
+      ${{
+        always()
+        && 'success' == needs.preflight.result
+        && (
+          'success' == needs.validation.result
+          || (
+            'skipped' == needs.validation.result
+            && 'true' == needs.preflight.outputs.reuse_artifacts
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -89,6 +334,7 @@ jobs:
         # REFACTORME: Restore download-artifact after the upstream fix ships.
         env:
           GH_TOKEN: ${{ github.token }}
+          REUSE_ARTIFACTS: ${{ needs.preflight.outputs.reuse_artifacts }}
         run: |
           set -euo pipefail
 
@@ -122,20 +368,22 @@ jobs:
           }
 
           short_sha=${GITHUB_SHA::12}
-          for target in \
-            linux-x86_64-musl \
-            linux-aarch64-musl \
-            windows-x86_64-ucrt; do
+          if [ true = "$REUSE_ARTIFACTS" ]; then
             download_artifact \
-              "packages-$target-$short_sha" \
-              "./artifacts/packages/packages-$target-$short_sha"
-            download_artifact \
-              "symbols-$target-$short_sha" \
-              "./artifacts/symbols/symbols-$target-$short_sha"
-          done
-          download_artifact \
-            "packages-cosmo-universal-$short_sha" \
-            "./artifacts/packages/packages-cosmo-universal-$short_sha"
+              "release-inputs-$GITHUB_SHA" \
+              ./artifacts
+          else
+            for target in $RELEASE_PACKAGE_TARGETS; do
+              download_artifact \
+                "packages-$target-$short_sha" \
+                "./artifacts/packages/packages-$target-$short_sha"
+            done
+            for target in $RELEASE_SYMBOL_TARGETS; do
+              download_artifact \
+                "symbols-$target-$short_sha" \
+                "./artifacts/symbols/symbols-$target-$short_sha"
+            done
+          fi
 
       - name: Prepare Release Assets
         id: assets
