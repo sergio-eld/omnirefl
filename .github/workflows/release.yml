@@ -57,9 +57,16 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       upload_symbols: true
+    # Ad hoc: the reusable CI workflow contains `deploy-pages`. GitHub validates
+    # every nested job's permission ceiling before evaluating its condition, so
+    # the tag-triggered caller must permit Pages even though `deploy-pages` only
+    # runs for `master`. REFACTORME: separate Pages deployment from reusable
+    # package validation.
     permissions:
       actions: write
       contents: read
+      id-token: write
+      pages: write
 
   release:
     name: Create draft prerelease
