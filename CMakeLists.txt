@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl 
     LANGUAGES CXX C 
-    VERSION 0.0.2)
+    VERSION 0.0.3)
 
 # -- Configurable options --------
 option(ENABLE_PACKAGE "Enable omnirefl packaging" OFF)

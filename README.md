@@ -74,11 +74,11 @@ int main() {
 
           // value() is read-only; ref() exposes a writable reference.
           if constexpr ("foo"sv == name)
-            field.ref() = 8;
+            field.ref() = 815;
 
           // operator* and operator-> are QoL accessors.
           if constexpr ("bar"sv == name)
-            *field = "after";
+            *field = "oceanic";
         },
         b.public_fields());
     };
