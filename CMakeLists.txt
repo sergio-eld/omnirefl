@@ -13,6 +13,9 @@ message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
 option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
 
+option(ENABLE_EXTENSIONS "Enable extensions in the dev build" OFF)
+message(STATUS "ENABLE_EXTENSIONS: ${ENABLE_EXTENSIONS}")
+
 option(ENABLE_BENCH "Enable benchmarks" OFF)
 message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
 
@@ -160,6 +163,17 @@ target_sources(refl INTERFACE
 target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+if(ENABLE_EXTENSIONS)
+    # Public extension implementations. Component install rules place their
+    # headers and CMake package files under include/ and lib/.
+    add_subdirectory(extensions)
+
+    # Tests, examples, sandboxes, and benchmarks for extensions. The same
+    # project is installed under share/ for installed-package validation.
+    set(_in_omnirefl_build ON)
+    add_subdirectory(extensions_dev)
+endif()
 
 # -- Testing / packaging setup --------
 if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
@@ -371,6 +385,10 @@ if(ENABLE_PACKAGE)
     install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/examples/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples")
+
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/extensions_dev/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples/extensions")
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"
