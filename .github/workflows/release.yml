@@ -287,6 +287,9 @@ jobs:
     if: ${{ 'true' != needs.preflight.outputs.reuse_artifacts }}
     uses: ./.github/workflows/ci.yml
     with:
+      # Preflight skips this fallback when complete CI artifacts were reused.
+      # A fallback must build even when the tagged commit is site-only.
+      build_sources: true
       skip_pages: true
       upload_symbols: true
     # Ad hoc: `skip_pages` prevents deployment, but GitHub validates every

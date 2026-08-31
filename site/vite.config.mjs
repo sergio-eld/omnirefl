@@ -49,8 +49,18 @@ const markdown = new Marked(markedHighlight({
   },
 }))
 
-const renderReadme = async () => {
-  const source = await readFile(readme, 'utf8')
+const slogan = source => {
+  const paragraph = markdown
+    .lexer(extract(source, 'introduction'))
+    .find(token => 'paragraph' === token.type)
+
+  if (!paragraph)
+    throw new Error('README introduction is missing its slogan')
+
+  return paragraph.text
+}
+
+const renderReadme = async source => {
   const rendered = (await Promise.all(sections.map(async section =>
     `<section id="${section}">
       ${await markdown.parse(extract(source, section))}
@@ -83,11 +93,16 @@ const readmePlugin = () => ({
     async handler(html) {
       const placeholder = '<!-- omnirefl:readme -->'
       const highlightPlaceholder = '/* omnirefl:highlight */'
+      const sloganPlaceholder = 'OMNIREFL_SLOGAN'
 
       if (!html.includes(placeholder))
         throw new Error(`index.html is missing '${placeholder}'`)
       if (!html.includes(highlightPlaceholder))
         throw new Error(`index.html is missing '${highlightPlaceholder}'`)
+      if (!html.includes(sloganPlaceholder))
+        throw new Error(`index.html is missing '${sloganPlaceholder}'`)
+
+      const source = await readFile(readme, 'utf8')
 
       const highlight = `
         @media (prefers-color-scheme: light) {
@@ -101,7 +116,8 @@ const readmePlugin = () => ({
 
       return html
         .replace(highlightPlaceholder, highlight)
-        .replace(placeholder, await renderReadme())
+        .replaceAll(sloganPlaceholder, slogan(source))
+        .replace(placeholder, await renderReadme(source))
     },
   },
 })

@@ -9,8 +9,19 @@ on:
     branches:
       - master
   workflow_dispatch:
+    inputs:
+      build_sources:
+        description: Build packages, run package tests, and benchmark
+        type: boolean
+        required: false
+        default: false
   workflow_call:
     inputs:
+      build_sources:
+        description: Build packages, run package tests, and benchmark
+        type: boolean
+        required: false
+        default: false
       skip_pages:
         description: Skip Pages deployment for internal validation calls
         type: boolean
@@ -23,11 +34,78 @@ on:
         default: false
 
 jobs:
+  # Site-only changes check and deploy Pages without rebuilding packages. A
+  # manual or reusable call can force the complete path with `build_sources`.
+  changes:
+    name: Select CI work
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      build_sources: ${{ steps.sources.outputs.build_sources }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect source changes
+        id: sources
+        env:
+          FORCE_BUILD: ${{ inputs.build_sources }}
+          BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ true = "${FORCE_BUILD:-false}" ]; then
+            echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+            exit
+          fi
+
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              before=$PR_BASE_SHA
+              after=$PR_HEAD_SHA
+              ;;
+            push)
+              if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+                echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+                exit
+              fi
+              before=$BEFORE_SHA
+              after=$GITHUB_SHA
+              ;;
+            *)
+              if ! before=$(git rev-parse "$GITHUB_SHA^"); then
+                echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+                exit
+              fi
+              after=$GITHUB_SHA
+              ;;
+          esac
+
+          build_sources=false
+          while IFS= read -r file; do
+            # README sections and the banner are inputs to the generated site.
+            case "$file" in
+              README.md | omnirefl-banner.png | site/*) ;;
+              *)
+                build_sources=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only --no-renames "$before" "$after")
+
+          echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
+
   build-package:
     name: Build package / ${{ matrix.target }}
     # As of this writing, GitHub provides no `ubuntu-latest-arm` label. Use the
     # versioned ARM runner to avoid emulating AArch64 builds on an x86_64 host.
     runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    needs: changes
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
       contents: read
     strategy:
@@ -328,8 +406,13 @@ jobs:
     name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: windows-2022
     needs:
+      - changes
       - build-package
-    if: ${{ !cancelled() }}
+    if: >-
+      ${{
+        !cancelled()
+        && 'true' == needs.changes.outputs.build_sources
+      }}
     strategy:
       fail-fast: false
       matrix:
@@ -737,7 +820,6 @@ jobs:
   check-site:
     name: Check site
     runs-on: ubuntu-latest
-    needs: benchmark
     if: ${{ 'pull_request' == github.event_name }}
     permissions:
       contents: read
@@ -763,6 +845,7 @@ jobs:
     name: Required CI
     runs-on: ubuntu-latest
     needs:
+      - changes
       - build-package
       - check-site
       - test-package-linux
@@ -776,6 +859,7 @@ jobs:
     steps:
       - name: Find previous aggregate artifact
         id: previous_aggregate
+        if: ${{ 'true' == needs.changes.outputs.build_sources }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -798,7 +882,11 @@ jobs:
 
       - name: Download previous aggregate artifact
         id: download_previous
-        if: ${{ '' != steps.previous_aggregate.outputs.name }}
+        if: >-
+          ${{
+            'true' == needs.changes.outputs.build_sources
+            && '' != steps.previous_aggregate.outputs.name
+          }}
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.previous_aggregate.outputs.name }}
@@ -806,6 +894,7 @@ jobs:
 
       - name: Download test artifacts
         id: download_tests
+        if: ${{ 'true' == needs.changes.outputs.build_sources }}
         uses: actions/download-artifact@v8
         with:
           pattern: test-*
@@ -816,6 +905,7 @@ jobs:
         if: >-
           ${{
             always()
+            && 'true' == needs.changes.outputs.build_sources
             && 'success' == steps.download_tests.outcome
             && (
               '' == steps.previous_aggregate.outputs.name
@@ -832,6 +922,7 @@ jobs:
         if: >-
           ${{
             always()
+            && 'true' == needs.changes.outputs.build_sources
             && 'success' == steps.upload_agg.outcome
             && (
               'pull_request' != github.event_name
@@ -865,24 +956,32 @@ jobs:
           ${{
             always()
             && (
-              'success' != needs['build-package'].result
+              'success' != needs.changes.result
               || (
                 'pull_request' == github.event_name
                 && 'success' != needs['check-site'].result
               )
-              || 'success' != needs['test-package-linux'].result
-              || 'success' != needs['test-package-macos'].result
-              || 'success' != needs['test-package-windows'].result
+              || (
+                'true' == needs.changes.outputs.build_sources
+                && (
+                  'success' != needs['build-package'].result
+                  || 'success' != needs['test-package-linux'].result
+                  || 'success' != needs['test-package-macos'].result
+                  || 'success' != needs['test-package-windows'].result
+                )
+              )
             )
           }}
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           BUILD_PACKAGE_RESULT: ${{ needs['build-package'].result }}
           CHECK_SITE_RESULT: ${{ needs['check-site'].result }}
           TEST_PACKAGE_LINUX_RESULT: ${{ needs['test-package-linux'].result }}
           TEST_PACKAGE_MACOS_RESULT: ${{ needs['test-package-macos'].result }}
           TEST_PACKAGE_WINDOWS_RESULT: ${{ needs['test-package-windows'].result }}
         run: |
-          printf 'build-package: %s\ncheck-site: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
+          printf 'changes: %s\nbuild-package: %s\ncheck-site: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
+            "$CHANGES_RESULT" \
             "$BUILD_PACKAGE_RESULT" \
             "$CHECK_SITE_RESULT" \
             "$TEST_PACKAGE_LINUX_RESULT" \
@@ -894,13 +993,17 @@ jobs:
     name: Deploy Pages
     runs-on: ubuntu-latest
     needs:
+      - changes
       - required-ci
       - benchmark
     if: >-
       ${{
         always()
         && 'success' == needs['required-ci'].result
-        && 'success' == needs['benchmark'].result
+        && (
+          'false' == needs.changes.outputs.build_sources
+          || 'success' == needs['benchmark'].result
+        )
         && !inputs.skip_pages
         && 'refs/heads/master' == github.ref
         && (
@@ -1006,7 +1109,11 @@ jobs:
         run: npm run build
 
       - name: Download Benchmark Records
-        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        if: >-
+          ${{
+            'true' == steps.pages_order.outputs.deploy
+            && 'true' == needs.changes.outputs.build_sources
+          }}
         # Ad hoc: download-artifact currently fails for some artifacts uploaded
         # by Ubuntu runners. The REST download remains valid.
         # https://github.com/actions/upload-artifact/issues/811
@@ -1066,7 +1173,11 @@ jobs:
           fi
 
       - name: Update Published Benchmark History
-        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
+        if: >-
+          ${{
+            'true' == steps.pages_order.outputs.deploy
+            && 'true' == needs.changes.outputs.build_sources
+          }}
         run: |
           mapfile -d '' records < <(
             find ./artifacts/benchmarks -type f -name run.json -print0)
