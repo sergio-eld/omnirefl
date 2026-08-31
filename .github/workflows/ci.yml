@@ -11,6 +11,11 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
+      skip_pages:
+        description: Skip Pages deployment for internal validation calls
+        type: boolean
+        required: false
+        default: false
       upload_symbols:
         description: Upload detached debug symbols for release assembly
         type: boolean
@@ -79,23 +84,59 @@ jobs:
           name: packages-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/${{ matrix.runtime }}
           if-no-files-found: error
+          # A later symbol-staging failure may leave this artifact in the same
+          # run. Permit the failed package job to be retried.
+          overwrite: true
 
       - name: Stage Debug Symbols
-        if: ${{ inputs.upload_symbols && matrix.symbols }}
+        # Successful protected-master artifacts can be reused by a subsequent
+        # release for the same commit. `upload_symbols` retains the full-build
+        # fallback used when no reusable CI run exists.
+        if: >-
+          ${{
+            matrix.symbols
+            && (
+              inputs.upload_symbols
+              || (
+                'push' == github.event_name
+                && 'refs/heads/master' == github.ref
+              )
+            )
+          }}
         run: |
           shopt -s nullglob
           symbol_dirs=(./build-alpine/${{ matrix.runtime }}/${{ matrix.arch }}/*/symbols)
           test 1 -eq "${#symbol_dirs[@]}"
-          mkdir -p ./artifacts/symbols
-          cp "${symbol_dirs[0]}"/*.debug ./artifacts/symbols/
+          symbol_names=(omnirefl.debug ccdb_query.debug)
+          if [ ucrt = "${{ matrix.runtime }}" ]; then
+            symbol_names=(omnirefl.exe.debug ccdb_query.exe.debug)
+          fi
+          # Package containers may leave the mounted artifact directory owned
+          # by root. Stage host-side release data in the runner-owned temp dir.
+          mkdir -p "$RUNNER_TEMP/symbols"
+          for symbol in "${symbol_names[@]}"; do
+            test -s "${symbol_dirs[0]}/$symbol"
+            cp "${symbol_dirs[0]}/$symbol" "$RUNNER_TEMP/symbols/"
+          done
 
       - name: Upload Debug Symbols
-        if: ${{ inputs.upload_symbols && matrix.symbols }}
+        if: >-
+          ${{
+            matrix.symbols
+            && (
+              inputs.upload_symbols
+              || (
+                'push' == github.event_name
+                && 'refs/heads/master' == github.ref
+              )
+            )
+          }}
         uses: actions/upload-artifact@v6
         with:
           name: symbols-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/symbols
+          path: ${{ runner.temp }}/symbols
           if-no-files-found: error
+          overwrite: true
 
   # Package tests use the same matrix vocabulary as docker-compose.yml:
   #
@@ -860,6 +901,7 @@ jobs:
         always()
         && 'success' == needs['required-ci'].result
         && 'success' == needs['benchmark'].result
+        && !inputs.skip_pages
         && 'refs/heads/master' == github.ref
         && (
           'push' == github.event_name
