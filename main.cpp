@@ -41,7 +41,6 @@
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
-#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
@@ -49,10 +48,7 @@
 #include <llvm/Support/Allocator.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
-#include <llvm/Support/FileUtilities.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
 #pragma GCC diagnostic pop
@@ -2991,7 +2987,12 @@ std::vector<std::string> filter_tool_irrelevant_args(
     | std::ranges::to<std::vector>();
 }
 
-// refactorme: this is an ugly shite
+// FIXME(high): Remove SDK and system-header discovery from Omnirefl. The tool
+// runs within an already configured build, where header paths are stable inputs;
+// changing them invalidates that configuration. C++ does not require system
+// headers, so any required paths are the user/build system's responsibility.
+// Omnirefl must not launch discovery processes; move optional SDK discovery to
+// the planned standalone tool.
 auto pipeline::to_compiler_invocation(const diagnostics &log,
   const cli::options &cli_args) noexcept
   -> std::expected<compiler_invocation, app_error> {
@@ -3316,6 +3317,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
             normalized_args->getLastArgNoClaim(options::OPT_target))
         return llvm::Triple::normalize(target->getValue());
 
+      // FIXME(high): Remove compiler-name target discovery from this function.
+      // The configured build should provide an explicit target; the planned
+      // standalone discovery tool may supply one when no build system does.
       if (compiler_name.starts_with("x86_64-w64-mingw32-"))
         return "x86_64-w64-windows-gnu";
       if (compiler_name.starts_with("i686-w64-mingw32-"))
@@ -3323,50 +3327,10 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return std::nullopt;
     });
 
+  // FIXME(high): The process triple describes the binary that built Omnirefl,
+  // not necessarily the platform executing a Cosmopolitan APE. Treat it only
+  // as a fallback when the configured build did not provide a target.
   const llvm::Triple process_triple{llvm::sys::getProcessTriple()};
-
-  // refactorme(macos_sysroot): replace this inline platform detection.
-  // ad hoc: Apple's compiler launcher omits SDK selection from
-  // compile_commands.json. A successful xcrun query supplies both the SDK and
-  // the APE's runtime operating system.
-  const auto macos_sysroot =
-    (msvc_used || process_triple.isOSWindows()
-      || (target_triple && llvm::Triple{*target_triple}.isOSWindows())) //
-    ? std::nullopt
-    : std::invoke([] -> std::optional<std::string> {
-      const auto xcrun = llvm::sys::findProgramByName("xcrun");
-      if (!xcrun)
-        return std::nullopt;
-
-      llvm::SmallString<64> output;
-      if (llvm::sys::fs::createTemporaryFile("omnirefl-xcrun", "", output))
-        return std::nullopt;
-
-      llvm::FileRemover remove_output(output);
-      if (llvm::sys::ExecuteAndWait(*xcrun,
-            {
-              llvm::StringRef{*xcrun},
-              llvm::StringRef{"--show-sdk-path"},
-            },
-            /*Env=*/std::nullopt,
-            {
-              /*stdin=*/std::optional{llvm::StringRef{""}},
-              /*stdout=*/std::optional{llvm::StringRef{output}},
-              /*stderr=*/std::optional{llvm::StringRef{""}},
-            },
-            /*SecondsToWait=*/10)
-        != 0)
-        return std::nullopt;
-
-      const auto buffer = llvm::MemoryBuffer::getFile(output);
-      if (!buffer)
-        return std::nullopt;
-
-      const llvm::StringRef path = buffer->get()->getBuffer().trim();
-      return path.empty() //
-        ? std::nullopt
-        : std::optional{path.str()};
-    });
 
   const std::string driver_triple = std::invoke([&] {
     llvm::Triple triple = target_triple //
@@ -3385,17 +3349,30 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       triple.setVendor(llvm::Triple::PC);
       triple.setOS(llvm::Triple::Win32);
       triple.setEnvironment(llvm::Triple::GNU);
-    } else if (!target_triple && macos_sysroot) {
-      triple.setVendor(llvm::Triple::Apple);
-      triple.setOS(llvm::Triple::Darwin);
-      triple.setEnvironment(llvm::Triple::UnknownEnvironment);
     }
 
     return triple.str();
   });
 
+  // Clang is hosted by default. An explicit freestanding invocation does not
+  // imply access to platform SDK headers and remains valid without a sysroot.
+  if (llvm::Triple{driver_triple}.isMacOSX()
+    && !normalized_args->hasFlag(options::OPT_ffreestanding,
+      options::OPT_fhosted,
+      /*Default=*/false)
+    && !normalized_args->hasArg(options::OPT_isysroot,
+      options::OPT__sysroot_EQ)) {
+    log(log_level::warning,
+      "warning: hosted macOS compiler invocation has no SDK path; system "
+      "headers may be unavailable; pass '-isysroot <path>' in the compiler "
+      "arguments after '--'\n");
+  }
+
   const bool mingw_used = llvm::Triple(driver_triple).isWindowsGNUEnvironment();
 
+  // FIXME(high): Remove MinGW compiler-layout discovery from this function.
+  // It probes compiler-relative and system directories on every invocation;
+  // the configured build or planned standalone tool should provide the paths.
   const std::vector<fs::path> mingw_include_paths = std::invoke([&] {
     std::vector<fs::path> paths;
     if (!mingw_used || raw_flags.empty())
@@ -3590,13 +3567,6 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       std::ranges::copy(driver_args, std::back_inserter(out));
 
-      if (macos_sysroot
-        && !normalized_args->hasArg(options::OPT_isysroot,
-          options::OPT__sysroot_EQ)) {
-        out.emplace_back("-isysroot");
-        out.emplace_back(*macos_sysroot);
-      }
-
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(
         std::format("-resource-dir={}", resource_dir.generic_string()));
@@ -3648,6 +3618,9 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   driver.setCheckInputsExist(false);
 
+  // FIXME(high): Clang's Driver performs target-toolchain discovery while
+  // lowering these configured driver arguments. Keep that behavior explicit
+  // until the compiler-invocation boundary is split into a dedicated tool.
   const std::unique_ptr<clang::driver::Compilation> compilation(
     driver.BuildCompilation(
       llvm::ArrayRef(to_vector_of_raw_pointers(cc1_driver_args))));

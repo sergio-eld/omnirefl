@@ -71,7 +71,6 @@ jobs:
               const isPackage = artifact.name.startsWith('packages-')
               const sha = packageSha(artifact)
               const keep =
-                artifact.name.startsWith('benchmark-history') ||
                 artifact.name.startsWith('aggregated-test-results-') ||
                 (
                   isPackage &&
