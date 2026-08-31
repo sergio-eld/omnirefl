@@ -18,25 +18,39 @@ on:
         default: false
 
 jobs:
-  build-package-musl:
-    name: Build package / ${{ matrix.os }}-${{ matrix.arch }}
+  build-package:
+    name: Build package / ${{ matrix.target }}
     # As of this writing, GitHub provides no `ubuntu-latest-arm` label. Use the
     # versioned ARM runner to avoid emulating AArch64 builds on an x86_64 host.
     runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    env:
-      PACKAGE_RUNTIME: ${{ 'linux' == matrix.os && 'musl' || 'ucrt' }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [linux, windows]
-        arch: [x86_64, aarch64]
-        # As of this writing, the MinGW cross-toolchain used here does not
-        # provide a working Windows AArch64 package build.
-        exclude:
-          - os: windows
+        include:
+          - target: linux-x86_64-musl
+            runtime: musl
+            arch: x86_64
+            service: build-musl
+            symbols: true
+          - target: linux-aarch64-musl
+            runtime: musl
             arch: aarch64
+            service: build-musl-aarch64
+            symbols: true
+          # As of this writing, the MinGW cross-toolchain does not provide a
+          # working Windows AArch64 package build.
+          - target: windows-x86_64-ucrt
+            runtime: ucrt
+            arch: x86_64
+            service: build-ucrt
+            symbols: true
+          - target: cosmo-universal
+            runtime: cosmo
+            arch: universal
+            service: build-cosmo
+            symbols: false
 
     steps:
       - name: Checkout Repository
@@ -49,81 +63,38 @@ jobs:
         run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Pull Build Image
-        run: |
-          # Compose owns the toolchain versions and resolves the complete image
-          # tag for the selected build service.
-          service=build-$PACKAGE_RUNTIME
-          if [ "aarch64" = "${{ matrix.arch }}" ]; then
-            service=$service-aarch64
-          fi
-          docker compose pull "$service"
+        # Compose owns the toolchain versions and resolves the complete image
+        # tag for the selected build service.
+        run: docker compose pull ${{ matrix.service }}
 
-      - name: Build and package omnirefl tool
+      - name: Build and Package Omnirefl
         run: |
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
-          PACKAGE_DIR=./artifacts/packages/$PACKAGE_RUNTIME \
-            docker compose run --rm \
-              build-$PACKAGE_RUNTIME${{ 'aarch64' == matrix.arch && '-aarch64' || '' }}
+          PACKAGE_DIR=./artifacts/packages/${{ matrix.runtime }} \
+            docker compose run --rm ${{ matrix.service }}
 
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: packages-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/${{ env.PACKAGE_RUNTIME }}
+          name: packages-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/${{ matrix.runtime }}
           if-no-files-found: error
 
       - name: Stage Debug Symbols
-        if: ${{ inputs.upload_symbols }}
+        if: ${{ inputs.upload_symbols && matrix.symbols }}
         run: |
           shopt -s nullglob
-          symbol_dirs=(./build-alpine/$PACKAGE_RUNTIME/${{ matrix.arch }}/*/symbols)
+          symbol_dirs=(./build-alpine/${{ matrix.runtime }}/${{ matrix.arch }}/*/symbols)
           test 1 -eq "${#symbol_dirs[@]}"
           mkdir -p ./artifacts/symbols
           cp "${symbol_dirs[0]}"/*.debug ./artifacts/symbols/
 
       - name: Upload Debug Symbols
-        if: ${{ inputs.upload_symbols }}
+        if: ${{ inputs.upload_symbols && matrix.symbols }}
         uses: actions/upload-artifact@v6
         with:
-          name: symbols-${{ matrix.os }}-${{ matrix.arch }}${{ 'linux' == matrix.os && '-musl' || '-ucrt' }}-${{ steps.commit.outputs.short_sha }}
+          name: symbols-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/symbols
-          if-no-files-found: error
-
-  # Keep this outside the package matrix: the fat Cosmo link is much
-  # slower than the musl/UCRT package links, but emits one cross-platform
-  # package.
-  build-package-cosmo:
-    name: Build package / cosmo-universal
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Resolve Short SHA
-        id: commit
-        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - name: Pull Cosmo Build Image
-        # Compose owns the toolchain versions and resolves the complete image
-        # tag for this build service.
-        run: docker compose pull build-cosmo
-
-      - name: Build Cosmo Package
-        run: |
-          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
-          PACKAGE_DIR=./artifacts/packages/cosmo \
-            docker compose run --rm build-cosmo
-
-      - name: Upload Cosmo Package
-        uses: actions/upload-artifact@v6
-        with:
-          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmo/omnirefl-cosmo-universal-*.tar.gz
           if-no-files-found: error
 
   # Package tests use the same matrix vocabulary as docker-compose.yml:
@@ -142,8 +113,7 @@ jobs:
     # versioned ARM runner to execute AArch64 packages without emulation.
     runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs:
-      - build-package-musl
-      - build-package-cosmo
+      - build-package
     permissions:
       actions: read
       contents: read
@@ -256,7 +226,7 @@ jobs:
   test-package-macos:
     name: Package test / ${{ matrix.runner }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
-    needs: build-package-cosmo
+    needs: build-package
     permissions:
       actions: read
       contents: read
@@ -317,8 +287,7 @@ jobs:
     name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: windows-2022
     needs:
-      - build-package-musl
-      - build-package-cosmo
+      - build-package
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -553,8 +522,7 @@ jobs:
     name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
     needs:
-      - build-package-musl
-      - build-package-cosmo
+      - build-package
     permissions:
       actions: read
       contents: read
@@ -572,17 +540,17 @@ jobs:
             libc: cosmo
             toolchain: gcc
             runner: ubuntu-latest
-          - system: macos-15
+          - system: macos-26
             architecture: x86_64
             libc: cosmo
             toolchain: apple-clang
-            runner: macos-15-intel
+            runner: macos-26-intel
             host_architecture: x86_64
-          - system: macos-15
+          - system: macos-26
             architecture: aarch64
             libc: cosmo
             toolchain: apple-clang
-            runner: macos-15
+            runner: macos-26
             host_architecture: arm64
     env:
       BENCHMARK_NAME: ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
@@ -754,8 +722,7 @@ jobs:
     name: Required CI
     runs-on: ubuntu-latest
     needs:
-      - build-package-musl
-      - build-package-cosmo
+      - build-package
       - check-site
       - test-package-linux
       - test-package-macos
@@ -857,8 +824,7 @@ jobs:
           ${{
             always()
             && (
-              'success' != needs['build-package-musl'].result
-              || 'success' != needs['build-package-cosmo'].result
+              'success' != needs['build-package'].result
               || (
                 'pull_request' == github.event_name
                 && 'success' != needs['check-site'].result
@@ -869,16 +835,14 @@ jobs:
             )
           }}
         env:
-          BUILD_PACKAGE_MUSL_RESULT: ${{ needs['build-package-musl'].result }}
-          BUILD_PACKAGE_COSMO_RESULT: ${{ needs['build-package-cosmo'].result }}
+          BUILD_PACKAGE_RESULT: ${{ needs['build-package'].result }}
           CHECK_SITE_RESULT: ${{ needs['check-site'].result }}
           TEST_PACKAGE_LINUX_RESULT: ${{ needs['test-package-linux'].result }}
           TEST_PACKAGE_MACOS_RESULT: ${{ needs['test-package-macos'].result }}
           TEST_PACKAGE_WINDOWS_RESULT: ${{ needs['test-package-windows'].result }}
         run: |
-          printf 'build-package-musl: %s\nbuild-package-cosmo: %s\ncheck-site: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
-            "$BUILD_PACKAGE_MUSL_RESULT" \
-            "$BUILD_PACKAGE_COSMO_RESULT" \
+          printf 'build-package: %s\ncheck-site: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
+            "$BUILD_PACKAGE_RESULT" \
             "$CHECK_SITE_RESULT" \
             "$TEST_PACKAGE_LINUX_RESULT" \
             "$TEST_PACKAGE_MACOS_RESULT" \
