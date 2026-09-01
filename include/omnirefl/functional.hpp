@@ -1076,6 +1076,26 @@ constexpr as_closure<Conversion> as(Conversion conversion) {
   return as_closure<Conversion>{std::move(conversion)};
 }
 
+/// Store construction of an explicitly selected type for later application.
+template <typename To>
+constexpr as_closure<type_t<To>> as() {
+  return as(type_t<To>{});
+}
+
+/// Store CTAD or its value-type fallback for later application.
+template <template <typename...> class Template>
+constexpr auto as() -> as_closure<decltype(ctad<Template>())> {
+  return as(ctad<Template>());
+}
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+/// Store type-and-size class-template deduction for later application.
+template <template <typename, std::size_t> class Template>
+constexpr auto as() -> as_closure<decltype(ctad<Template>())> {
+  return as(ctad<Template>());
+}
+#endif
+
 /// Store `visit` for later call or pipe application to a tuple-like object.
 template <typename Visit>
 constexpr each_closure<Visit> each(Visit visit) {

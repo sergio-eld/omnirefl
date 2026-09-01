@@ -120,7 +120,8 @@ set_target_properties(tool PROPERTIES
 target_include_directories(tool PRIVATE
     ${CLANG_INCLUDE_DIRS}
     ${LLVM_INCLUDE_DIRS}
-    ${PROJECT_SOURCE_DIR})
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include)
 
 target_compile_definitions(tool PRIVATE
     OMNIREFL_VERSION="${PROJECT_VERSION}"

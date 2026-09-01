@@ -88,25 +88,14 @@
 #include <variant>
 #include <vector>
 
+#include <omnirefl/functional.hpp>
+
 #include "std_compat.h"
 
 namespace fs = std::filesystem;
 using namespace std::string_view_literals;
 
 namespace fn {
-
-template <typename T>
-struct as_t {
-  template <typename U>
-    requires std::constructible_from<T, U>
-  constexpr T operator()(U &&value) const
-    noexcept(noexcept(T(std::forward<U>(value)))) {
-    return T(std::forward<U>(value));
-  }
-};
-
-template <typename T>
-constexpr as_t<T> as{};
 
 template <typename F>
 constexpr auto with(F &&f) {
@@ -1180,7 +1169,7 @@ bool is_compound_dependency_route(const clang::CXXRecordDecl *record) {
            },
            record->getKind())
     && std::ranges::contains(k_compound_dependency_route_names,
-      fn::as<std::string_view>(
+      omni::fn::as<std::string_view>()(
         clang::cast<clang::ClassTemplateSpecializationDecl>(record)
           ->getSpecializedTemplate()
           ->getName()));
@@ -2983,7 +2972,7 @@ std::vector<std::string> filter_tool_irrelevant_args(
   }
 
   return rendered //
-    | std::views::transform(fn::as<std::string>) //
+    | std::views::transform(omni::fn::as<std::string>()) //
     | std::ranges::to<std::vector>();
 }
 
@@ -3645,7 +3634,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const auto &compilation_args = compilation->getJobs().begin()->getArguments();
 
   const std::vector<std::string> frontend_args = compilation_args //
-    | std::views::transform(fn::as<std::string>) //
+    | std::views::transform(omni::fn::as<std::string>()) //
     | std::ranges::to<std::vector>();
 
   log(log_level::debug, [&frontend_args] {
@@ -3875,7 +3864,8 @@ std::expected<pipeline::parsed_ast, app_error>
     .ast = std::move(ast),
 
     .includes_deps = deps_collector.getDependencies()
-      | std::views::transform(fn::as<fs::path>) | std::ranges::to<std::set>(),
+      | std::views::transform(omni::fn::as<fs::path>())
+      | std::ranges::to<std::set>(),
   };
 }
 
@@ -4839,7 +4829,7 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   assert(d);
 
   return {
-    .name = std::string(fn::as<std::string_view>(d->getName())),
+    .name = std::string(omni::fn::as<std::string_view>()(d->getName())),
     .type_name = meta::impl::field_type_name(ast, d),
     .qualified_type_name = std::invoke([&ast, d] -> std::string {
       clang::PrintingPolicy policy = ast.getPrintingPolicy();
@@ -4928,7 +4918,7 @@ util::viewable_range_of<const clang::TypedefNameDecl *> auto
       return clang::AccessSpecifier::AS_public == d->getAccess()
         && std::ranges::any_of(meta::k_supported_member_aliases,
           std::bind_front(std::equal_to<std::string_view>{},
-            fn::as<std::string_view>(d->getName())));
+            omni::fn::as<std::string_view>()(d->getName())));
     };
 
   return rd.decls() //
@@ -5317,7 +5307,7 @@ auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
   util::viewable_range_of<std::string> auto names = //
     ed.enumerators() //
     | std::views::transform(&clang::EnumDecl::getName)
-    | std::views::transform(fn::as<std::string_view>);
+    | std::views::transform(omni::fn::as<std::string_view>());
 
   // ad hoc: `underlying_type` is emitted into a private, target-specific
   // generated header which, as of this writing, is not intended for
@@ -5524,7 +5514,7 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   std::vector elems = //
     inner_type.namespaces //
     | std::views::transform(&meta::namespace_component::name)
-    | std::views::transform(fn::as<std::string_view>)
+    | std::views::transform(omni::fn::as<std::string_view>())
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
 
@@ -5543,7 +5533,7 @@ std::string declaration_for_enclosing_root_as_dependent(
   std::vector elems = //
     inner_type.namespaces //
     | std::views::transform(&meta::namespace_component::name)
-    | std::views::transform(fn::as<std::string_view>)
+    | std::views::transform(omni::fn::as<std::string_view>())
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
 

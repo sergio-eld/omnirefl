@@ -581,6 +581,13 @@ TEST(fn_as, constructs_the_selected_type) {
   EXPECT_EQ(815, (815 | construct).value);
 }
 
+TEST(fn_as, stores_selected_type_construction) {
+  const auto construct = omni::fn::as<converted_value>();
+
+  EXPECT_EQ(42, construct(42).value);
+  EXPECT_EQ(815, (815 | omni::fn::as<converted_value>()).value);
+}
+
 TEST(traits_is, compares_types_and_type_templates) {
   EXPECT_TRUE((omni::traits::is<int, int>()));
   EXPECT_FALSE((omni::traits::is<int, long>()));
@@ -606,6 +613,13 @@ TEST(fn_as, constructs_a_class_template_from_the_value) {
   EXPECT_EQ((std::vector<int>{815}), 815 | convert);
 }
 
+TEST(fn_as, stores_class_template_construction) {
+  const auto construct = omni::fn::as<std::vector>();
+
+  EXPECT_EQ((std::vector<int>{42}), construct(42));
+  EXPECT_EQ((std::vector<int>{815}), 815 | omni::fn::as<std::vector>());
+}
+
 TEST(fn_ctad, constrains_the_returned_type_template_conversion) {
   EXPECT_FALSE(
     (omni::traits::is_type_template_constructible_from<disabled_type_template,
@@ -619,6 +633,10 @@ TEST(fn_ctad, constrains_the_returned_type_template_conversion) {
 TEST(fn_as, overloads_ctad_for_a_sized_class_template) {
   EXPECT_EQ((std::array<int, 1>{42}),
     42 | omni::fn::as(omni::fn::ctad<std::array>()));
+}
+
+TEST(fn_as, stores_sized_class_template_construction) {
+  EXPECT_EQ((std::array<int, 1>{42}), 42 | omni::fn::as<std::array>());
 }
 
 TEST(fn_ctad, constrains_the_returned_type_size_template_conversion) {
@@ -1739,6 +1757,9 @@ static_assert(815 == (815 | omni::fn::as(observe{})),
   "the as pipe must be usable in C++11 constexpr");
 static_assert(42 == omni::fn::as(omni::type_t<converted_value>{}, 42).value,
   "as must construct an explicitly selected type in C++11 constexpr");
+constexpr auto lazy_selected_as = omni::fn::as<converted_value>();
+static_assert(108 == lazy_selected_as(108).value,
+  "the selected-type as closure must be usable in C++11 constexpr");
 
 // The tool's bundled, standard-conforming C++11 libc++ does not provide
 // constexpr tuple construction/access. These assertions contain no reflection
