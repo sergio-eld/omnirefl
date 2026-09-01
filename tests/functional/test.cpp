@@ -86,6 +86,52 @@ struct observe {
   }
 };
 
+struct converted_value {
+  int value;
+};
+
+template <typename>
+struct another_type_tag {};
+
+struct not_constructible {
+  not_constructible(int) = delete;
+};
+
+template <typename T>
+struct disabled_type_template {
+  disabled_type_template(T) = delete;
+};
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+template <typename T, std::size_t Size>
+struct disabled_type_size_template {
+  disabled_type_size_template(std::array<T, Size>) = delete;
+};
+
+template <typename T, std::size_t Size>
+disabled_type_size_template(std::array<T, Size>)
+  -> disabled_type_size_template<T, Size>;
+#endif
+
+template <template <typename> class Tag,
+  typename To,
+  typename Value,
+  typename = void>
+struct accepts_type_as: std::false_type {};
+
+template <template <typename> class Tag, typename To, typename Value>
+struct accepts_type_as<Tag,
+  To,
+  Value,
+  omni::compat::void_t<decltype(omni::fn::as(Tag<To>{},
+    std::declval<Value>()))>>: std::true_type {};
+
+struct stringify {
+  std::string operator()(int value) const {
+    return std::to_string(value);
+  }
+};
+
 struct mapped_values {
   int first;
   long second;
@@ -481,6 +527,165 @@ TEST(compat_invoke, invokes_members_through_supported_object_forms) {
 
   EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, pointer));
   EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, reference));
+}
+
+TEST(fn_as, converts_eager_lazy_and_piped_values) {
+  const auto convert = omni::fn::as(stringify{});
+
+  EXPECT_EQ("42", omni::fn::as(stringify{}, 42));
+  EXPECT_EQ("108", convert(108));
+  EXPECT_EQ("815", 815 | convert);
+}
+
+TEST(fn_as, preserves_the_converted_value_category) {
+  int mutable_value{};
+  const int const_value{};
+
+  EXPECT_EQ(reference_category::mutable_lvalue,
+    omni::fn::as(map_reference_category{}, mutable_value));
+  EXPECT_EQ(reference_category::const_lvalue,
+    omni::fn::as(map_reference_category{}, const_value));
+  EXPECT_EQ(reference_category::mutable_rvalue,
+    omni::fn::as(map_reference_category{}, std::move(mutable_value)));
+  EXPECT_EQ(reference_category::const_rvalue,
+    omni::fn::as(map_reference_category{}, std::move(const_value)));
+}
+
+TEST(fn_as, lazy_call_preserves_the_converted_value_category) {
+  int mutable_value{};
+  const int const_value{};
+  const auto convert = omni::fn::as(map_reference_category{});
+
+  EXPECT_EQ(reference_category::mutable_lvalue, convert(mutable_value));
+  EXPECT_EQ(reference_category::const_lvalue, convert(const_value));
+  EXPECT_EQ(reference_category::mutable_rvalue,
+    convert(std::move(mutable_value)));
+  EXPECT_EQ(reference_category::const_rvalue, convert(std::move(const_value)));
+}
+
+TEST(fn_as, pipe_preserves_the_converted_value_category) {
+  int mutable_value{};
+  const int const_value{};
+  const auto convert = omni::fn::as(map_reference_category{});
+
+  EXPECT_EQ(reference_category::mutable_lvalue, mutable_value | convert);
+  EXPECT_EQ(reference_category::const_lvalue, const_value | convert);
+  EXPECT_EQ(reference_category::mutable_rvalue,
+    std::move(mutable_value) | convert);
+  EXPECT_EQ(reference_category::const_rvalue, std::move(const_value) | convert);
+}
+
+TEST(fn_as, constructs_the_selected_type) {
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+  constexpr auto conversion = omni::type<converted_value>;
+#else
+  constexpr auto conversion = omni::type_t<converted_value>{};
+#endif
+  const auto construct = omni::fn::as(conversion);
+
+  EXPECT_TRUE((
+    std::is_same<converted_value, omni::type_t<converted_value>::type>::value));
+  EXPECT_EQ(42, omni::fn::as(conversion, 42).value);
+  EXPECT_EQ(108, construct(108).value);
+  EXPECT_EQ(815, (815 | construct).value);
+}
+
+TEST(traits_is, compares_types_and_type_templates) {
+  EXPECT_TRUE((omni::traits::is<int, int>()));
+  EXPECT_FALSE((omni::traits::is<int, long>()));
+  EXPECT_TRUE((omni::traits::is<omni::type_t, omni::type_t>()));
+  EXPECT_FALSE((omni::traits::is<omni::type_t, another_type_tag>()));
+  EXPECT_FALSE(
+    (std::is_same<omni::type_t<int>, omni::compat::type_identity<int>>::value));
+}
+
+TEST(fn_as, participates_only_for_constructible_values) {
+  EXPECT_TRUE((accepts_type_as<omni::type_t, converted_value, int>::value));
+  EXPECT_FALSE((accepts_type_as<omni::type_t, not_constructible, int>::value));
+  EXPECT_FALSE(
+    (accepts_type_as<another_type_tag, converted_value, int>::value));
+}
+
+TEST(fn_as, constructs_a_class_template_from_the_value) {
+  const auto convert = omni::fn::as(omni::fn::ctad<std::vector>());
+
+  EXPECT_EQ((std::vector<int>{42}),
+    omni::fn::as(omni::fn::ctad<std::vector>(), 42));
+  EXPECT_EQ((std::vector<int>{108}), convert(108));
+  EXPECT_EQ((std::vector<int>{815}), 815 | convert);
+}
+
+TEST(fn_ctad, constrains_the_returned_type_template_conversion) {
+  EXPECT_FALSE(
+    (omni::traits::is_type_template_constructible_from<disabled_type_template,
+      int &&>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<
+    decltype(omni::fn::ctad<disabled_type_template>()),
+    int>::value));
+}
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+TEST(fn_as, overloads_ctad_for_a_sized_class_template) {
+  EXPECT_EQ((std::array<int, 1>{42}),
+    42 | omni::fn::as(omni::fn::ctad<std::array>()));
+}
+
+TEST(fn_ctad, constrains_the_returned_type_size_template_conversion) {
+  EXPECT_FALSE((omni::traits::is_type_size_template_constructible_from<
+    disabled_type_size_template,
+    std::array<int, 2> &&>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<
+    decltype(omni::fn::ctad<disabled_type_size_template>()),
+    std::array<int, 2>>::value));
+}
+#endif
+
+TEST(fn_as, follows_the_available_class_template_deduction) {
+  const std::vector<int> input{42};
+  const auto result = input | omni::fn::as(omni::fn::ctad<std::vector>());
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+  EXPECT_TRUE((std::is_same<std::vector<int>,
+    omni::compat::remove_cvref_t<decltype(result)>>::value));
+  EXPECT_EQ(input, result);
+#else
+  EXPECT_TRUE((std::is_same<std::vector<std::vector<int>>,
+    omni::compat::remove_cvref_t<decltype(result)>>::value));
+  EXPECT_EQ((std::vector<std::vector<int>>{input}), result);
+#endif
+}
+
+TEST(fn_as, forwards_a_move_only_value_into_the_selected_type) {
+  auto source = omni::compat::make_unique<int>(42);
+
+  const auto result =
+    omni::fn::as(omni::type_t<std::unique_ptr<int>>{}, std::move(source));
+
+  EXPECT_EQ(nullptr, source);
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(42, *result);
+  }
+}
+
+TEST(fn_as, forwards_a_move_only_value) {
+  auto source = omni::compat::make_unique<int>(42);
+
+  const auto result = omni::fn::as(move_only{}, std::move(source));
+
+  EXPECT_EQ(nullptr, source);
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(42, *result);
+  }
+}
+
+TEST(fn_as, owns_a_move_only_lazy_conversion) {
+  auto convert = omni::fn::as(add_owned_value{
+    omni::compat::make_unique<int>(773),
+  });
+
+  EXPECT_EQ(815, 42 | std::move(convert));
 }
 
 TEST(fn_concat, concatenates_eager_lazy_and_piped_tuples) {
@@ -1545,6 +1750,8 @@ TEST(fn_contract, accepts_only_tuple_like_inputs) {
 }
 
 TEST(fn_contract, exposes_lazy_closure_types) {
+  EXPECT_TRUE((std::is_same<omni::fn::as_closure<observe>,
+    decltype(omni::fn::as(observe{}))>::value));
   EXPECT_TRUE((std::is_same<omni::fn::each_closure<ignore>,
     decltype(omni::fn::each(ignore{}))>::value));
   EXPECT_TRUE((std::is_same<omni::fn::map_closure<transform>,
@@ -1567,6 +1774,17 @@ TEST(fn_contract, exposes_lazy_closure_types) {
     (std::is_same<omni::fn::diff_by_closure<element_type, std::tuple<int>>,
       decltype(omni::fn::diff_by(element_type{}, std::tuple<int>{}))>::value));
 }
+
+static_assert(42 == omni::fn::as(observe{}, 42),
+  "as must be usable in C++11 constexpr");
+
+constexpr auto lazy_as = omni::fn::as(observe{});
+static_assert(108 == lazy_as(108),
+  "the lazy as call must be usable in C++11 constexpr");
+static_assert(815 == (815 | omni::fn::as(observe{})),
+  "the as pipe must be usable in C++11 constexpr");
+static_assert(42 == omni::fn::as(omni::type_t<converted_value>{}, 42).value,
+  "as must construct an explicitly selected type in C++11 constexpr");
 
 // The tool's bundled, standard-conforming C++11 libc++ does not provide
 // constexpr tuple construction/access. These assertions contain no reflection

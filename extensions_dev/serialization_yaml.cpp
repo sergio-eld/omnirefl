@@ -71,13 +71,12 @@ struct object {
 template <typename... T>
 object(std::vector<mem_var<T...>>) -> object<T...>;
 
-bool is_boolean(const ryml::ConstNodeRef &n) {
+bool is_boolean(const ryml::ConstNodeRef &n, c4::csubstr value) {
   if (n.is_val_quoted())
     return false;
-  const auto v = n.val();
-  return "true" == v || "false" == v //
-    || "True" == v || "False" == v //
-    || "TRUE" == v || "FALSE" == v;
+  return "true" == value || "false" == value //
+    || "True" == value || "False" == value //
+    || "TRUE" == value || "FALSE" == value;
 }
 
 template <typename Value, typename Predicate, typename Error>
@@ -129,7 +128,7 @@ std::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from,
   using result = std::expected<void, std::string>;
 
   if constexpr (std::is_fundamental_v<_to>) {
-    const auto _deserialize = //
+    const auto parse_if = //
       [&from](auto predicate, std::string_view error, _to *to) -> result {
       return ensure(from.val(),
         std::move(predicate),
@@ -140,17 +139,17 @@ std::expected<void, std::string> deserialize(const ryml::ConstNodeRef &from,
     };
 
     if constexpr (std::is_same_v<_to, bool>) {
-      return _deserialize([&from](auto) { return is_boolean(from); },
+      return parse_if(std::bind_front(is_boolean, std::cref(from)),
         " is not a boolean",
         &to);
     } else if constexpr (std::is_integral_v<_to> && std::is_unsigned_v<_to>) {
-      return _deserialize(&c4::csubstr::is_unsigned_integer,
+      return parse_if(&c4::csubstr::is_unsigned_integer,
         " is not an unsigned integer",
         &to);
     } else if constexpr (std::is_integral_v<_to>) {
-      return _deserialize(&c4::csubstr::is_integer, " is not an integer", &to);
+      return parse_if(&c4::csubstr::is_integer, " is not an integer", &to);
     } else if constexpr (std::is_floating_point_v<_to>) {
-      return _deserialize(&c4::csubstr::is_real, " is not a real number", &to);
+      return parse_if(&c4::csubstr::is_real, " is not a real number", &to);
     }
     // todo: null, nan, etc?
     // todo: is_string, and use an allocator

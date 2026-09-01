@@ -992,9 +992,17 @@ using record_meta_t = meta_t<_M, reflected_entity::record>;
 template <typename _M>
 using enum_meta_t = meta_t<_M, reflected_entity::enumeration>;
 
+#if defined(OMNI_TYPE_T_DEFINED)
+template <typename T>
+struct type_t;
+#else
 /// Instrumentation type tag; usable without generated metadata.
 template <typename T>
-struct type_t {};
+struct type_t {
+  using type = T;
+};
+#  define OMNI_TYPE_T_DEFINED
+#endif
 
 // Variable templates require C++14.
 #if defined(__cpp_variable_templates)
