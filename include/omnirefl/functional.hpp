@@ -35,6 +35,41 @@ struct type_t {
 namespace fn {
 namespace detail {
 
+template <typename WhenTrue, typename WhenFalse>
+constexpr auto select(std::true_type, WhenTrue &when_true, WhenFalse &)
+  -> decltype(compat::invoke(std::move(when_true))) {
+  return compat::invoke(std::move(when_true));
+}
+
+template <typename WhenTrue, typename WhenFalse>
+constexpr auto select(std::false_type, WhenTrue &, WhenFalse &when_false)
+  -> decltype(compat::invoke(std::move(when_false))) {
+  return compat::invoke(std::move(when_false));
+}
+
+template <typename WhenTrue, typename WhenFalse>
+constexpr auto select(bool condition,
+  WhenTrue &when_true,
+  WhenFalse &when_false) //
+  -> decltype(condition //
+      ? compat::invoke(std::move(when_true))
+      : compat::invoke(std::move(when_false))) {
+  return condition //
+    ? compat::invoke(std::move(when_true))
+    : compat::invoke(std::move(when_false));
+}
+
+template <typename Predicate>
+using compile_time_result =
+  std::integral_constant<bool, static_cast<bool>(compat::invoke(Predicate{}))>;
+
+template <typename Predicate, typename = void>
+struct is_compile_time_predicate: std::false_type {};
+
+template <typename Predicate>
+struct is_compile_time_predicate<Predicate,
+  compat::void_t<compile_time_result<Predicate>>>: std::true_type {};
+
 // Keep language-version selection away from the public declarations so LSP
 // hover preserves their documentation.
 #if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201304L
@@ -113,6 +148,96 @@ constexpr auto type_template_ctad() {
 #endif
 
 } // namespace detail
+
+/// Elevates a stateless predicate into a type-level boolean.
+template <typename Predicate>
+struct compile_time_predicate {
+  template <typename Selected = Predicate>
+  constexpr detail::compile_time_result<Selected> operator()() const {
+    return {};
+  }
+};
+
+/// Stores a copyable value for repeatable deferred retrieval.
+template <typename Value>
+struct identity_t {
+  static_assert(std::is_copy_constructible<Value>::value,
+    "identity requires a copy-constructible value");
+
+  Value value;
+
+  constexpr Value operator()() const {
+    return value;
+  }
+};
+
+/// Stores a value for a single consuming invocation.
+template <typename Value>
+struct consume_t {
+  Value value;
+
+  Value operator()() && {
+    return std::move(value);
+  }
+};
+
+/// Stores a value in its type for repeatable compile-time retrieval.
+template <typename Value, Value Constant>
+struct constant_identity {
+  constexpr Value operator()() const {
+    return Constant;
+  }
+};
+
+/// Store a copyable value for repeatable deferred retrieval.
+template <typename Value>
+constexpr identity_t<Value> identity(Value value) {
+  return {std::move(value)};
+}
+
+/// Store a value for a single consuming invocation.
+template <typename Value>
+consume_t<Value> consume(Value value) {
+  return {std::move(value)};
+}
+
+#if defined(__cpp_nontype_template_parameter_auto) \
+  && 201606L <= __cpp_nontype_template_parameter_auto
+/// Return a type-encoded identity closure for compile-time dispatch.
+template <auto Value>
+constexpr constant_identity<decltype(Value), Value> identity() {
+  return {};
+}
+#else
+/// Return a type-encoded identity closure for compile-time dispatch.
+///
+/// Before C++17, `identity<Value>()` is limited to `int` constants because the
+/// value type cannot be deduced as a non-type template parameter.
+template <int Value>
+constexpr constant_identity<int, Value> identity() {
+  return {};
+}
+#endif
+
+/// Elevate a stateless predicate into a type-level boolean.
+template <typename Predicate>
+constexpr compile_time_predicate<Predicate> ct_pred(Predicate) {
+  static_assert(std::is_empty<Predicate>::value,
+    "compile-time predicate must be stateless");
+  static_assert(detail::is_compile_time_predicate<Predicate>::value,
+    "compile-time predicate must produce a bool-convertible constant");
+  return {};
+}
+
+/// Invoke one of two deferred operations selected by `predicate`.
+template <typename Predicate, typename WhenTrue, typename WhenFalse>
+constexpr auto branch(Predicate predicate,
+  WhenTrue when_true,
+  WhenFalse when_false) //
+  -> decltype(detail::select(
+    compat::invoke(predicate), when_true, when_false)) {
+  return detail::select(compat::invoke(predicate), when_true, when_false);
+}
 
 /// Return a conversion using CTAD or its value-type fallback.
 ///

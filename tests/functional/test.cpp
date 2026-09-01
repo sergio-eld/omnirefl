@@ -198,6 +198,63 @@ struct add_owned {
   }
 };
 
+struct unavailable {
+  int operator()() const = delete;
+};
+
+struct mutable_result {
+  int value;
+
+  int operator()() && {
+    return ++value;
+  }
+};
+
+struct runtime_only_predicate {
+  bool operator()() const {
+    return true;
+  }
+};
+
+static_assert(815
+    == omni::fn::branch(omni::fn::identity(true),
+      omni::fn::identity(815),
+      omni::fn::identity(108)),
+  "branch must remain usable in a C++11 constant expression");
+
+static_assert(815
+    == omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<42>()),
+      omni::fn::identity(815),
+      unavailable{}),
+  "compile-time branch must not instantiate the unselected callable");
+
+static_assert(108
+    == omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<0>()),
+      unavailable{},
+      omni::fn::identity(108)),
+  "compile-time branch must select the false callable");
+
+// Captureless lambdas become implicitly constexpr in C++17. This can make the
+// complete runtime-shaped branch a constant expression, but both callable
+// expressions must still be valid.
+#if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
+static_assert(815
+    == omni::fn::branch([] { return true; },
+      [] { return 815; },
+      [] { return 108; }),
+  "a constexpr lambda must support constant evaluation of branch");
+#endif
+
+// Captureless closure types become default-constructible in C++20.
+#if 202002L <= OMNI_CPLUSPLUS
+static_assert(815
+    == omni::fn::branch(
+      omni::fn::ct_pred([] { return true; }),
+      [] { return 815; },
+      unavailable{}),
+  "C++20 lambdas must support explicit compile-time elevation");
+#endif
+
 struct invoke_record {
   int value;
 
@@ -519,6 +576,101 @@ TEST(compat_invoke, invokes_members_through_supported_object_forms) {
   EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, pointer));
   EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, reference));
 }
+
+TEST(fn_branch, consumes_selected_move_only_value) {
+  auto selected = omni::fn::consume(omni::compat::make_unique<int>(815));
+
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(selected) &>::value));
+  EXPECT_TRUE((omni::compat::is_invocable<decltype(selected) &&>::value));
+
+  auto result = omni::fn::branch(omni::fn::identity(true),
+    std::move(selected),
+    omni::fn::consume(omni::compat::make_unique<int>(108)));
+
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(815, *result);
+  }
+}
+
+TEST(fn_branch, preserves_selected_reference) {
+  int selected = 815;
+  int unselected = 108;
+
+  int &result = omni::fn::branch(
+    omni::fn::identity(true),
+    [&selected]() -> int & { return selected; },
+    [&unselected]() -> int & { return unselected; });
+
+  EXPECT_EQ(&selected, &result);
+}
+
+TEST(fn_branch, compile_time_selection_allows_unrelated_result_types) {
+  const auto result =
+    omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<42>()),
+      omni::fn::identity(std::string{"oceanic"}),
+      omni::fn::identity(108));
+
+  EXPECT_EQ("oceanic", result);
+}
+
+TEST(fn_branch, invokes_selected_mutable_callable_as_rvalue) {
+  EXPECT_EQ(815,
+    omni::fn::branch(omni::fn::identity(true),
+      mutable_result{814},
+      omni::fn::identity(108)));
+}
+
+TEST(fn_branch, selects_runtime_callable) {
+  const std::string value{"oceanic"};
+
+  EXPECT_EQ(815,
+    omni::fn::branch(
+      omni::fn::identity(value == "oceanic"),
+      [] { return 815; },
+      [] { return 108; }));
+}
+
+TEST(fn_branch, selects_runtime_false_callable) {
+  const std::string value{"invalid"};
+
+  EXPECT_EQ("value is invalid",
+    omni::fn::branch(
+      omni::fn::identity(value == "valid"),
+      [] { return std::string{"oceanic"}; },
+      [] { return std::string{"value is invalid"}; }));
+}
+
+TEST(fn_identity, returns_an_owned_copy_on_each_invocation) {
+  auto value = omni::fn::identity(std::string{"oceanic"});
+
+  auto first = value();
+  first = "changed";
+
+  EXPECT_EQ("oceanic", value());
+}
+
+TEST(fn_ct_pred, detects_runtime_only_predicate) {
+  EXPECT_FALSE((omni::fn::detail::is_compile_time_predicate<
+    runtime_only_predicate>::value));
+}
+
+TEST(fn_branch, selects_type_encoded_predicate) {
+  EXPECT_EQ(815,
+    omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<42>()),
+      omni::fn::identity(815),
+      unavailable{}));
+}
+
+#if 202002L <= OMNI_CPLUSPLUS
+TEST(fn_branch, elevates_lambda_for_compile_time_selection_since_cpp20) {
+  EXPECT_EQ(815,
+    omni::fn::branch(
+      omni::fn::ct_pred([] { return true; }),
+      [] { return 815; },
+      unavailable{}));
+}
+#endif
 
 TEST(fn_as, converts_eager_lazy_and_piped_values) {
   const auto convert = omni::fn::as(stringify{});
