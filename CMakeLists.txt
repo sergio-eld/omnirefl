@@ -171,6 +171,8 @@ if(ENABLE_EXTENSIONS)
 
     # Tests, examples, sandboxes, and benchmarks for extensions. The same
     # project is installed under share/ for installed-package validation.
+    set(omnirefl_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
+    include(cmake/reflected_target.cmake)
     set(_in_omnirefl_build ON)
     add_subdirectory(extensions_dev)
 endif()
