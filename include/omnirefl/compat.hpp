@@ -1,5 +1,9 @@
 #pragma once
 
+// Standard-library compatibility for the C++11 public baseline. Facilities
+// use their standard implementation when available and a local drop-in
+// otherwise.
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -221,6 +225,33 @@ constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
     decltype((*std::forward<Object>(object)).*member)>::type {
   return (*std::forward<Object>(object)).*member;
 }
+#endif
+
+// is_invocable
+#if defined(__cpp_lib_is_invocable) && 201703L <= __cpp_lib_is_invocable
+using std::is_invocable;
+#else
+namespace detail {
+
+template <typename, typename Function, typename... Argument>
+struct is_invocable: std::false_type {};
+
+template <typename Function, typename... Argument>
+struct is_invocable< //
+  void_t<decltype(compat::invoke(std::declval<Function>(),
+    std::declval<Argument>()...))>,
+  Function,
+  Argument...>: std::true_type {};
+
+} // namespace detail
+
+template <typename Function, typename... Argument>
+struct is_invocable: detail::is_invocable<void, Function, Argument...> {};
+#endif
+
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <typename Function, typename... Argument>
+concept invocable = is_invocable<Function, Argument...>::value;
 #endif
 
 // conditional_t

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <ranges>
@@ -16,8 +17,12 @@ using namespace std::string_view_literals;
 TEST(std_compat, enumerate_preserves_references) {
   std::vector values{2, 4, 6};
 
-  for (const auto &[index, value] : values | std_c::views::enumerate)
-    values[index] = value + static_cast<int>(index);
+  std::ranges::transform(values | std_c::views::enumerate,
+    values.begin(),
+    [](const auto &indexed) {
+      const auto &[index, value] = indexed;
+      return value + static_cast<int>(index);
+    });
 
   ASSERT_EQ(2, values[0]);
   ASSERT_EQ(5, values[1]);
@@ -30,7 +35,10 @@ TEST(std_compat, enumerate_composes_with_tuple_views) {
   auto selected = values //
     | std_c::views::enumerate //
     | std::views::filter(
-      [](const auto &indexed) { return 0 != std::get<0>(indexed); }) //
+      [](const auto &indexed) {
+        const auto &[index, value] = indexed;
+        return 0 != index;
+      }) //
     | std::views::values;
   auto value = selected.begin();
 

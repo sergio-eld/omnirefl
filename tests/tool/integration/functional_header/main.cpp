@@ -24,12 +24,17 @@ struct add {
   }
 };
 
+struct output {
+  int value;
+};
+
 int main() {
   const std::tuple<int, std::string, int> values{20, "ignored", 22};
   const auto result = values
     | omni::fn::filter(integral{})
     | omni::fn::map(double_value{})
     | omni::fn::foldl(add{}, 0);
+  const auto converted = omni::fn::as(omni::type_t<output>{}, result);
 
-  return 84 == result ? 0 : 1;
+  return 84 == converted.value ? 0 : 1;
 }

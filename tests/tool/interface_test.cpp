@@ -969,7 +969,7 @@ TEST(fields, reference_and_move_access) {
     1,
     {2, 3},
     {4},
-    std::unique_ptr<int>{new int{5}},
+    omni::compat::make_unique<int>(5),
   };
 
   std::unique_ptr<int> moved =
@@ -993,7 +993,7 @@ TEST(fields, consuming_access_preserves_const_owner) {
     1,
     {2, 3},
     {4},
-    std::unique_ptr<int>{new int{5}},
+    omni::compat::make_unique<int>(5),
   };
 
   const std::unique_ptr<int> &&value =

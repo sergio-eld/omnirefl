@@ -1421,8 +1421,8 @@ std::optional<clang::QualType> type_t_arg_type(clang::QualType type) {
       return fn::maybe(llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
         record->getDecl()));
     })
-    .and_then([](const clang::ClassTemplateSpecializationDecl *spec)
-                -> std::optional<clang::QualType> {
+    .and_then([](const clang::ClassTemplateSpecializationDecl *spec) //
+      -> std::optional<clang::QualType> {
       if ("omni::type_t"
         != spec->getSpecializedTemplate()->getQualifiedNameAsString()) {
         return std::nullopt;
@@ -3127,7 +3127,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
                   cl_style,
                   &driver_source,
                   &source_path,
-                  windows_drive_mount_used]
+                  windows_drive_mount_used] //
       -> std::expected<std::vector<std::string>, std::string> {
       llvm::BumpPtrAllocator allocator;
       llvm::SmallVector<const char *> args;
@@ -3587,7 +3587,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::expected<std::optional<std::string>, app_error>
     driver_directory_to_restore =
-      std::invoke([&driver, &compile_directory, &source]
+      std::invoke([&driver, &compile_directory, &source] //
         -> std::expected<std::optional<std::string>, app_error> {
         if (!compile_directory)
           return std::nullopt;

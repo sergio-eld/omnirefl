@@ -133,8 +133,18 @@ template <typename T, typename S>
 struct is_reflected: std::false_type {};
 #endif
 
+#if defined(OMNI_TYPE_T_DEFINED)
 template <typename T>
-struct type_t {};
+struct type_t;
+#else
+// `type_t` is an instrumentation primitive recognized by the reflection tool.
+// todo: consider moving its shared definition to a standalone header.
+template <typename T>
+struct type_t {
+  using type = T;
+};
+#  define OMNI_TYPE_T_DEFINED
+#endif
 
 #if OMNI_CPLUSPLUS >= 201402L
 template <typename T>

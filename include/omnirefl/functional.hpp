@@ -1,15 +1,16 @@
 #pragma once
 
 #include <omnirefl/compat.hpp>
+#include <omnirefl/traits.hpp>
 
+#include <cstddef>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
 // Clang 22 accepts captureless lambdas as non-type template arguments but
 // still reports __cpp_nontype_template_args == 201411L.
-#if defined(__cpp_generic_lambdas) \
-  && 201707L <= __cpp_generic_lambdas \
+#if defined(__cpp_generic_lambdas) && 201707L <= __cpp_generic_lambdas \
   && 202002L <= OMNI_CPLUSPLUS
 #  define OMNI_FN_HAS_PREDICATE_LAMBDA 1
 #else
@@ -17,7 +18,153 @@
 #endif
 
 namespace omni {
+
+#if defined(OMNI_TYPE_T_DEFINED)
+template <typename T>
+struct type_t;
+#else
+// `type_t` is an instrumentation primitive recognized by the reflection tool.
+// todo: consider moving its shared definition to a standalone header.
+template <typename T>
+struct type_t {
+  using type = T;
+};
+#  define OMNI_TYPE_T_DEFINED
+#endif
+
 namespace fn {
+namespace detail {
+
+// Keep language-version selection away from the public declarations so LSP
+// hover preserves their documentation.
+#if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201304L
+// C++11 emulation of the generic lambda returned by `ctad`.
+template <template <typename...> class Template>
+struct cpp11_type_template_ctad {
+  template <typename Value,
+    typename std::enable_if<
+      traits::is_type_template_constructible_from<Template, Value &&>::value,
+      int>::type = 0>
+  constexpr traits::type_template_construct_result_t<Template, Value &&>
+    operator()(Value &&value) const {
+    return Template<compat::decay_t<Value>>{std::forward<Value>(value)};
+  }
+};
+
+template <template <typename...> class Template>
+constexpr cpp11_type_template_ctad<Template> type_template_ctad() {
+  return {};
+}
+#elif defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+template <template <typename...> class Template>
+constexpr auto type_template_ctad() {
+#  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+  return //
+    []<typename Value>(Value &&value)
+    requires traits::type_template_constructible_from<Template, Value &&>
+  { return Template{std::forward<Value>(value)}; };
+#  else
+  return //
+    [](auto &&value) //
+    -> typename std::enable_if<
+      traits::is_type_template_constructible_from<Template,
+        decltype(value)>::value,
+      traits::type_template_construct_result_t<Template,
+        decltype(value)>>::type {
+      return Template{std::forward<decltype(value)>(value)};
+    };
+#  endif
+}
+
+template <template <typename, std::size_t> class Template>
+constexpr auto type_size_template_ctad() {
+#  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+  return //
+    []<typename Value>(Value &&value)
+    requires traits::type_size_template_constructible_from<Template, Value &&>
+  { return Template{std::forward<Value>(value)}; };
+#  else
+  return //
+    [](auto &&value) //
+    -> typename std::enable_if<
+      traits::is_type_size_template_constructible_from<Template,
+        decltype(value)>::value,
+      traits::type_size_template_construct_result_t<Template,
+        decltype(value)>>::type {
+      return Template{std::forward<decltype(value)>(value)};
+    };
+#  endif
+}
+#else
+template <template <typename...> class Template>
+constexpr auto type_template_ctad() {
+  return //
+    [](auto &&value) //
+    -> typename std::enable_if<
+      traits::is_type_template_constructible_from<Template,
+        decltype(value)>::value,
+      traits::type_template_construct_result_t<Template,
+        decltype(value)>>::type {
+      return Template<compat::decay_t<decltype(value)>>{
+        std::forward<decltype(value)>(value)};
+    };
+}
+
+#endif
+
+} // namespace detail
+
+/// Return a conversion using CTAD or its value-type fallback.
+///
+/// This overload accepts class templates containing only type template
+/// parameters.
+template <template <typename...> class Template>
+constexpr decltype(detail::type_template_ctad<Template>()) ctad() {
+  return detail::type_template_ctad<Template>();
+}
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+/// Return a CTAD conversion for a class template whose parameters are one type
+/// followed by one `std::size_t`.
+template <template <typename, std::size_t> class Template>
+constexpr decltype(detail::type_size_template_ctad<Template>()) ctad() {
+  return detail::type_size_template_ctad<Template>();
+}
+#endif
+
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+/// Construct the type selected by an Omnirefl type tag.
+template <template <typename> class Tag, typename To, typename Value>
+  requires(
+    traits::is<type_t, Tag>() && traits::brace_constructible_from<To, Value &&>)
+#else
+/// Construct the type selected by an Omnirefl type tag.
+template <template <typename> class Tag,
+  typename To,
+  typename Value,
+  typename std::enable_if<traits::is<type_t, Tag>()
+      && traits::is_brace_constructible<To, Value &&>::value,
+    int>::type = 0>
+#endif
+constexpr To as(Tag<To>, Value &&value) {
+  return To{std::forward<Value>(value)};
+}
+
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+/// Convert a forwarded value with a local copy or move of `conversion`.
+template <typename Conversion, typename Value>
+  requires compat::invocable<Conversion &, Value &&>
+#else
+/// Convert a forwarded value with a local copy or move of `conversion`.
+template <typename Conversion,
+  typename Value,
+  typename std::enable_if<compat::is_invocable<Conversion &, Value &&>::value,
+    int>::type = 0>
+#endif
+constexpr auto as(Conversion conversion, Value &&value)
+  -> decltype(compat::invoke(conversion, std::forward<Value>(value))) {
+  return compat::invoke(conversion, std::forward<Value>(value));
+}
 
 template <typename Predicate>
 struct not_closure;
@@ -35,8 +182,7 @@ template <typename Predicate>
 struct is_type_callable: std::is_empty<Predicate> {};
 
 template <typename Predicate>
-struct is_type_callable<not_closure<Predicate>>:
-    is_type_callable<Predicate> {};
+struct is_type_callable<not_closure<Predicate>>: is_type_callable<Predicate> {};
 
 template <typename Predicate,
   typename Tuple,
@@ -56,15 +202,12 @@ struct filtered_indices<Predicate,
     filtered_indices<Predicate,
       Tuple,
       compat::index_sequence<Remaining...>,
-      compat::conditional_t<
-        Predicate{}.template operator()<decltype(
-          std::get<Index>(std::declval<Tuple>()))>(),
+      compat::conditional_t<Predicate{}.template
+        operator()<decltype(std::get<Index>(std::declval<Tuple>()))>(),
         compat::index_sequence<Selected..., Index>,
         compat::index_sequence<Selected...>>> {};
 
-template <typename Predicate,
-  typename Tuple,
-  std::size_t... Selected>
+template <typename Predicate, typename Tuple, std::size_t... Selected>
 struct filtered_indices<Predicate,
   Tuple,
   compat::index_sequence<>,
@@ -79,8 +222,8 @@ struct filtered_indices<Predicate,
 
 template <typename Tuple, std::size_t... Index>
 constexpr auto select_tuple(Tuple &&tuple, compat::index_sequence<Index...>)
-  -> std::tuple<compat::decay_t<decltype(
-    std::get<Index>(std::forward<Tuple>(tuple)))>...> {
+  -> std::tuple<
+    compat::decay_t<decltype(std::get<Index>(std::forward<Tuple>(tuple)))>...> {
   return {std::get<Index>(std::forward<Tuple>(tuple))...};
 }
 
@@ -89,13 +232,13 @@ constexpr auto filter_values(Tuple &&tuple)
   -> decltype(select_tuple(std::forward<Tuple>(tuple),
     typename filtered_indices<Predicate,
       Tuple &&,
-      compat::make_index_sequence<std::tuple_size<
-        compat::remove_cvref_t<Tuple>>::value>>::type{})) {
+      compat::make_index_sequence<
+        std::tuple_size<compat::remove_cvref_t<Tuple>>::value>>::type{})) {
   return select_tuple(std::forward<Tuple>(tuple),
     typename filtered_indices<Predicate,
       Tuple &&,
-      compat::make_index_sequence<std::tuple_size<
-        compat::remove_cvref_t<Tuple>>::value>>::type{});
+      compat::make_index_sequence<
+        std::tuple_size<compat::remove_cvref_t<Tuple>>::value>>::type{});
 }
 
 template <std::size_t Index, std::size_t Size>
@@ -103,7 +246,7 @@ struct any_of_values {
   template <typename Predicate, typename Tuple>
   static constexpr bool call(Predicate &predicate, Tuple &&tuple) {
     return compat::invoke(predicate,
-      std::get<Index>(std::forward<Tuple>(tuple)))
+             std::get<Index>(std::forward<Tuple>(tuple)))
       || any_of_values<Index + 1, Size>::call(predicate,
         std::forward<Tuple>(tuple));
   }
@@ -117,10 +260,7 @@ struct any_of_values<Size, Size> {
   }
 };
 
-template <typename Key,
-  typename Left,
-  typename Right,
-  typename Remaining>
+template <typename Key, typename Left, typename Right, typename Remaining>
 struct matches_any;
 
 template <typename Key,
@@ -134,8 +274,8 @@ struct matches_any<Key,
   compat::index_sequence<Index, Remaining...>>:
     std::integral_constant<bool,
       Key{}.template operator()<Left>()
-          == Key{}.template operator()<decltype(
-            std::get<Index>(std::declval<Right>()))>()
+          == Key{}.template
+          operator()<decltype(std::get<Index>(std::declval<Right>()))>()
         || matches_any<Key,
           Left,
           Right,
@@ -167,19 +307,16 @@ struct diff_indices<Key,
       Left,
       Right,
       compat::index_sequence<Remaining...>,
-      compat::conditional_t<
+      compat::conditional_t< //
         matches_any<Key,
           decltype(std::get<Index>(std::declval<Left>())),
           Right,
-          compat::make_index_sequence<std::tuple_size<
-            compat::remove_cvref_t<Right>>::value>>::value,
+          compat::make_index_sequence<
+            std::tuple_size<compat::remove_cvref_t<Right>>::value>>::value,
         compat::index_sequence<Selected...>,
         compat::index_sequence<Selected..., Index>>> {};
 
-template <typename Key,
-  typename Left,
-  typename Right,
-  std::size_t... Selected>
+template <typename Key, typename Left, typename Right, std::size_t... Selected>
 struct diff_indices<Key,
   Left,
   Right,
@@ -199,14 +336,14 @@ constexpr auto diff_by_values(Left &&left, Right &&)
     typename diff_indices<Key,
       Left &&,
       Right &&,
-      compat::make_index_sequence<std::tuple_size<
-        compat::remove_cvref_t<Left>>::value>>::type{})) {
+      compat::make_index_sequence<
+        std::tuple_size<compat::remove_cvref_t<Left>>::value>>::type{})) {
   return select_tuple(std::forward<Left>(left),
     typename diff_indices<Key,
       Left &&,
       Right &&,
-      compat::make_index_sequence<std::tuple_size<
-        compat::remove_cvref_t<Left>>::value>>::type{});
+      compat::make_index_sequence<
+        std::tuple_size<compat::remove_cvref_t<Left>>::value>>::type{});
 }
 
 constexpr bool same_field_name(const char *left, const char *right) noexcept {
@@ -372,8 +509,7 @@ template <typename Left,
 constexpr auto concat(Left &&left, Right &&right)
   -> decltype(std::tuple_cat(std::forward<Left>(left),
     std::forward<Right>(right))) {
-  return std::tuple_cat(std::forward<Left>(left),
-    std::forward<Right>(right));
+  return std::tuple_cat(std::forward<Left>(left), std::forward<Right>(right));
 }
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
@@ -408,9 +544,7 @@ constexpr bool none_of(Predicate predicate, Tuple &&tuple) {
 
 /// Invoke `predicate` and negate its result.
 template <typename Predicate, typename First, typename... Argument>
-constexpr auto not_(Predicate predicate,
-  First &&first,
-  Argument &&...argument)
+constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
   -> decltype(!compat::invoke(predicate,
     std::forward<First>(first),
     std::forward<Argument>(argument)...)) {
@@ -429,9 +563,7 @@ struct field_name {
 };
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-template <typename Key,
-  detail::tuple_like Left,
-  detail::tuple_like Right>
+template <typename Key, detail::tuple_like Left, detail::tuple_like Right>
 #else
 template <typename Key,
   typename Left,
@@ -469,8 +601,7 @@ template <typename Predicate,
 /// accessing the forwarded tuple. Selected values retain their order and are
 /// forwarded into an owning tuple.
 constexpr auto filter(Predicate, Tuple &&tuple)
-  -> decltype(detail::filter_values<Predicate>(
-    std::forward<Tuple>(tuple))) {
+  -> decltype(detail::filter_values<Predicate>(std::forward<Tuple>(tuple))) {
   return detail::filter_values<Predicate>(std::forward<Tuple>(tuple));
 }
 
@@ -540,9 +671,8 @@ template <typename Visit,
 /// and C++14 instead use expression-only recursion because their
 /// constant-expression rules reject that mutation; each result directly
 /// initializes the next accumulator.
-constexpr Accumulator foldl(Visit visit,
-  Accumulator accumulator,
-  Tuple &&tuple) {
+constexpr Accumulator
+  foldl(Visit visit, Accumulator accumulator, Tuple &&tuple) {
 #if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr \
   && defined(__cpp_generic_lambdas)
   return compat::apply(
@@ -582,13 +712,40 @@ template <typename Visit,
 /// tuple returns it without invoking `visit`. Elements are visited
 /// right-to-left; each visitor result directly initializes the accumulator
 /// used with the preceding element.
-constexpr Accumulator foldr(Visit visit,
-  Accumulator accumulator,
-  Tuple &&tuple) {
+constexpr Accumulator
+  foldr(Visit visit, Accumulator accumulator, Tuple &&tuple) {
   return compat::apply(
     detail::foldr_visit<Visit, Accumulator>{visit, accumulator},
     std::forward<Tuple>(tuple));
 }
+
+/// Stores a conversion for deferred application.
+template <typename Conversion>
+struct as_closure {
+  Conversion conversion;
+
+  template <typename Value>
+  constexpr auto operator()(Value &&value) const & -> decltype(as(conversion,
+    std::forward<Value>(value))) {
+    return as(conversion, std::forward<Value>(value));
+  }
+
+  // C++14 removed implicit const from constexpr member functions.
+  template <typename Value>
+#if 201402L <= OMNI_CPLUSPLUS
+  constexpr
+#endif
+    auto operator()(Value &&value) && -> decltype(as(std::move(conversion),
+      std::forward<Value>(value))) {
+    return as(std::move(conversion), std::forward<Value>(value));
+  }
+
+  template <typename Value>
+  friend constexpr auto operator|(Value &&value, as_closure closure)
+    -> decltype(as(std::declval<Conversion &&>(), std::forward<Value>(value))) {
+    return as(std::move(closure.conversion), std::forward<Value>(value));
+  }
+};
 
 /// Stores a tuple for deferred concatenation.
 template <typename Right>
@@ -596,8 +753,8 @@ struct concat_closure {
   Right right;
 
   template <typename Left>
-  constexpr auto operator()(Left &&left) const &
-    -> decltype(concat(std::forward<Left>(left), right)) {
+  constexpr auto operator()(
+    Left &&left) const & -> decltype(concat(std::forward<Left>(left), right)) {
     return concat(std::forward<Left>(left), right);
   }
 
@@ -606,15 +763,14 @@ struct concat_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Left &&left) &&
-      -> decltype(concat(std::forward<Left>(left), std::move(right))) {
+    auto operator()(Left &&left) && -> decltype(concat(std::forward<Left>(left),
+      std::move(right))) {
     return concat(std::forward<Left>(left), std::move(right));
   }
 
   template <typename Left>
   friend constexpr auto operator|(Left &&left, concat_closure closure)
-    -> decltype(concat(std::forward<Left>(left),
-      std::declval<Right &&>())) {
+    -> decltype(concat(std::forward<Left>(left), std::declval<Right &&>())) {
     return concat(std::forward<Left>(left), std::move(closure.right));
   }
 };
@@ -625,8 +781,8 @@ struct any_of_closure {
   Predicate predicate;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(any_of(predicate, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(Tuple &&tuple) const & -> decltype(any_of(predicate,
+    std::forward<Tuple>(tuple))) {
     return any_of(predicate, std::forward<Tuple>(tuple));
   }
 
@@ -635,8 +791,8 @@ struct any_of_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Tuple &&tuple) &&
-      -> decltype(any_of(std::move(predicate), std::forward<Tuple>(tuple))) {
+    auto operator()(Tuple &&tuple) && -> decltype(any_of(std::move(predicate),
+      std::forward<Tuple>(tuple))) {
     return any_of(std::move(predicate), std::forward<Tuple>(tuple));
   }
 
@@ -654,8 +810,9 @@ struct none_of_closure {
   Predicate predicate;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(none_of(predicate, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(
+    Tuple &&tuple) const & -> decltype(none_of(predicate,
+    std::forward<Tuple>(tuple))) {
     return none_of(predicate, std::forward<Tuple>(tuple));
   }
 
@@ -664,8 +821,8 @@ struct none_of_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Tuple &&tuple) &&
-      -> decltype(none_of(std::move(predicate), std::forward<Tuple>(tuple))) {
+    auto operator()(Tuple &&tuple) && -> decltype(none_of(std::move(predicate),
+      std::forward<Tuple>(tuple))) {
     return none_of(std::move(predicate), std::forward<Tuple>(tuple));
   }
 
@@ -688,8 +845,8 @@ struct not_closure {
   }
 
   template <typename First, typename... Argument>
-  constexpr auto operator()(First &&first, Argument &&...argument) const &
-    -> decltype(not_(std::declval<const Predicate &>(),
+  constexpr auto operator()(First &&first, Argument &&...argument)
+    const & -> decltype(not_(std::declval<const Predicate &>(),
       std::forward<First>(first),
       std::forward<Argument>(argument)...)) {
     return not_(predicate,
@@ -702,10 +859,10 @@ struct not_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(First &&first, Argument &&...argument) &&
-      -> decltype(not_(std::declval<Predicate &&>(),
-        std::forward<First>(first),
-        std::forward<Argument>(argument)...)) {
+    auto operator()(First &&first,
+      Argument &&...argument) && -> decltype(not_(std::declval<Predicate &&>(),
+      std::forward<First>(first),
+      std::forward<Argument>(argument)...)) {
     return not_(std::move(predicate),
       std::forward<First>(first),
       std::forward<Argument>(argument)...);
@@ -715,8 +872,7 @@ struct not_closure {
   friend constexpr auto operator|(Value &&value, not_closure closure)
     -> decltype(not_(std::declval<Predicate &&>(),
       std::forward<Value>(value))) {
-    return not_(std::move(closure.predicate),
-      std::forward<Value>(value));
+    return not_(std::move(closure.predicate), std::forward<Value>(value));
   }
 };
 
@@ -727,8 +883,9 @@ struct diff_by_closure {
   Right right;
 
   template <typename Left>
-  constexpr auto operator()(Left &&left) const &
-    -> decltype(diff_by(key, std::forward<Left>(left), right)) {
+  constexpr auto operator()(Left &&left) const & -> decltype(diff_by(key,
+    std::forward<Left>(left),
+    right)) {
     return diff_by(key, std::forward<Left>(left), right);
   }
 
@@ -737,13 +894,10 @@ struct diff_by_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Left &&left) &&
-      -> decltype(diff_by(std::move(key),
-        std::forward<Left>(left),
-        std::move(right))) {
-    return diff_by(std::move(key),
+    auto operator()(Left &&left) && -> decltype(diff_by(std::move(key),
       std::forward<Left>(left),
-      std::move(right));
+      std::move(right))) {
+    return diff_by(std::move(key), std::forward<Left>(left), std::move(right));
   }
 
   template <typename Left>
@@ -763,8 +917,8 @@ struct each_closure {
   Visit visit;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(each(visit, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(Tuple &&tuple) const & -> decltype(each(visit,
+    std::forward<Tuple>(tuple))) {
     return each(visit, std::forward<Tuple>(tuple));
   }
 
@@ -773,15 +927,14 @@ struct each_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Tuple &&tuple) &&
-      -> decltype(each(std::move(visit), std::forward<Tuple>(tuple))) {
+    auto operator()(Tuple &&tuple) && -> decltype(each(std::move(visit),
+      std::forward<Tuple>(tuple))) {
     return each(std::move(visit), std::forward<Tuple>(tuple));
   }
 
   template <typename Tuple>
   friend constexpr auto operator|(Tuple &&tuple, each_closure closure)
-    -> decltype(each(std::declval<Visit &&>(),
-      std::forward<Tuple>(tuple))) {
+    -> decltype(each(std::declval<Visit &&>(), std::forward<Tuple>(tuple))) {
     return each(std::move(closure.visit), std::forward<Tuple>(tuple));
   }
 };
@@ -792,8 +945,8 @@ struct filter_closure {
   Predicate predicate;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(filter(predicate, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(Tuple &&tuple) const & -> decltype(filter(predicate,
+    std::forward<Tuple>(tuple))) {
     return filter(predicate, std::forward<Tuple>(tuple));
   }
 
@@ -802,9 +955,8 @@ struct filter_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Tuple &&tuple) &&
-      -> decltype(filter(std::move(predicate),
-        std::forward<Tuple>(tuple))) {
+    auto operator()(Tuple &&tuple) && -> decltype(filter(std::move(predicate),
+      std::forward<Tuple>(tuple))) {
     return filter(std::move(predicate), std::forward<Tuple>(tuple));
   }
 
@@ -822,8 +974,8 @@ struct map_closure {
   Visit visit;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(map(visit, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(
+    Tuple &&tuple) const & -> decltype(map(visit, std::forward<Tuple>(tuple))) {
     return map(visit, std::forward<Tuple>(tuple));
   }
 
@@ -832,15 +984,14 @@ struct map_closure {
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr
 #endif
-    auto operator()(Tuple &&tuple) &&
-      -> decltype(map(std::move(visit), std::forward<Tuple>(tuple))) {
+    auto operator()(Tuple &&tuple) && -> decltype(map(std::move(visit),
+      std::forward<Tuple>(tuple))) {
     return map(std::move(visit), std::forward<Tuple>(tuple));
   }
 
   template <typename Tuple>
   friend constexpr auto operator|(Tuple &&tuple, map_closure closure)
-    -> decltype(map(std::declval<Visit &&>(),
-      std::forward<Tuple>(tuple))) {
+    -> decltype(map(std::declval<Visit &&>(), std::forward<Tuple>(tuple))) {
     return map(std::move(closure.visit), std::forward<Tuple>(tuple));
   }
 };
@@ -852,8 +1003,9 @@ struct foldl_closure {
   Accumulator accumulator;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(foldl(visit, accumulator, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(Tuple &&tuple) const & -> decltype(foldl(visit,
+    accumulator,
+    std::forward<Tuple>(tuple))) {
     return foldl(visit, accumulator, std::forward<Tuple>(tuple));
   }
 
@@ -888,8 +1040,9 @@ struct foldr_closure {
   Accumulator accumulator;
 
   template <typename Tuple>
-  constexpr auto operator()(Tuple &&tuple) const &
-    -> decltype(foldr(visit, accumulator, std::forward<Tuple>(tuple))) {
+  constexpr auto operator()(Tuple &&tuple) const & -> decltype(foldr(visit,
+    accumulator,
+    std::forward<Tuple>(tuple))) {
     return foldr(visit, accumulator, std::forward<Tuple>(tuple));
   }
 
@@ -916,6 +1069,12 @@ struct foldr_closure {
       std::forward<Tuple>(tuple));
   }
 };
+
+/// Store `conversion` for later call or pipe application.
+template <typename Conversion>
+constexpr as_closure<Conversion> as(Conversion conversion) {
+  return as_closure<Conversion>{std::move(conversion)};
+}
 
 /// Store `visit` for later call or pipe application to a tuple-like object.
 template <typename Visit>
@@ -983,8 +1142,7 @@ constexpr not_closure<Predicate> not_(Predicate predicate) {
 
 /// Store `key` and `right` for later tuple difference application.
 template <typename Key, typename Right>
-constexpr diff_by_closure<Key, compat::decay_t<Right>> diff_by(
-  Key key,
+constexpr diff_by_closure<Key, compat::decay_t<Right>> diff_by(Key key,
   Right &&right) {
   return diff_by_closure<Key, compat::decay_t<Right>>{
     std::move(key),
