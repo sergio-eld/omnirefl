@@ -216,6 +216,15 @@ struct runtime_only_predicate {
   }
 };
 
+template <typename Value>
+struct guided_value {
+  Value value;
+};
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+guided_value(int) -> guided_value<long>;
+#endif
+
 struct sum_three {
   constexpr int operator()(int first, int second, int third) const {
     return first + second + third;
@@ -309,6 +318,10 @@ struct invoke_record {
     return value + right;
   }
 
+  int throwing_sum(int right) const {
+    return value + right;
+  }
+
   constexpr int noexcept_sum(int right) const noexcept {
     return value + right;
   }
@@ -327,7 +340,8 @@ static_assert(
     omni::compat::invoke(&invoke_record::noexcept_sum, invoked_record, 2)),
   "member invocation must preserve noexcept");
 static_assert(
-  !noexcept(omni::compat::invoke(&invoke_record::sum, invoked_record, 2)),
+  !noexcept(
+    omni::compat::invoke(&invoke_record::throwing_sum, invoked_record, 2)),
   "member invocation must preserve potentially throwing calls");
 #endif
 static_assert(std::is_same<decltype(omni::compat::invoke(&invoke_record::value,
@@ -1027,18 +1041,17 @@ TEST(fn_ctad, constrains_the_returned_type_size_template_conversion) {
 #endif
 
 TEST(fn_as, follows_the_available_class_template_deduction) {
-  const std::vector<int> input{42};
-  const auto result = input | omni::fn::as(omni::fn::ctad<std::vector>());
+  const int input = 42;
+  const auto result = input | omni::fn::as(omni::fn::ctad<guided_value>());
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-  EXPECT_TRUE((std::is_same<std::vector<int>,
+  EXPECT_TRUE((std::is_same<guided_value<long>,
     omni::compat::remove_cvref_t<decltype(result)>>::value));
-  EXPECT_EQ(input, result);
 #else
-  EXPECT_TRUE((std::is_same<std::vector<std::vector<int>>,
+  EXPECT_TRUE((std::is_same<guided_value<int>,
     omni::compat::remove_cvref_t<decltype(result)>>::value));
-  EXPECT_EQ((std::vector<std::vector<int>>{input}), result);
 #endif
+  EXPECT_EQ(42, result.value);
 }
 
 TEST(fn_as, forwards_a_move_only_value_into_the_selected_type) {

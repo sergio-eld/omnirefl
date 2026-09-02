@@ -58,10 +58,32 @@ struct _make_integer_sequence<T, N, N, integers...> {
 template <class T, T N>
 using make_integer_sequence = typename _make_integer_sequence<T, 0, N>::type;
 
+template <std::size_t I, typename Tuple>
+using tuple_element_rvalue_t = typename std::add_rvalue_reference<
+  typename std::tuple_element<
+    I,
+    typename std::remove_reference<Tuple>::type>::type>::type;
+
+template <std::size_t I, typename Tuple>
+constexpr auto tuple_get(Tuple &tuple) -> decltype(std::get<I>(tuple)) {
+  return std::get<I>(tuple);
+}
+
+// ad hoc: older libstdc++ releases lack the corrected const-rvalue `std::get`
+// overload. Restore the tuple element's forwarded category explicitly.
+template <std::size_t I, typename Tuple>
+constexpr auto tuple_get(Tuple &&tuple) //
+  -> typename std::enable_if<
+    !std::is_lvalue_reference<Tuple>::value,
+    tuple_element_rvalue_t<I, Tuple>>::type {
+  return static_cast<tuple_element_rvalue_t<I, Tuple>>(std::get<I>(tuple));
+}
+
 template <typename Visit, typename Tuple, std::size_t... I>
 constexpr auto _apply(Visit &&v, Tuple &&t, index_sequence<I...>)
-  -> decltype(std::forward<Visit>(v)(std::get<I>(std::forward<Tuple>(t))...)) {
-  return std::forward<Visit>(v)(std::get<I>(std::forward<Tuple>(t))...);
+  -> decltype(std::forward<Visit>(v)(
+    tuple_get<I>(std::forward<Tuple>(t))...)) {
+  return std::forward<Visit>(v)(tuple_get<I>(std::forward<Tuple>(t))...);
 }
 
 template <typename Visit, typename Tuple>
@@ -102,7 +124,10 @@ using void_t = typename detail::make_void<Ts...>::type;
 #endif
 
 // apply
-#if OMNI_CPLUSPLUS >= 201703L
+// ad hoc: libstdc++ before release 9 does not preserve const-rvalue tuple
+// access through std::apply. Use the corrected local tuple access there.
+#if OMNI_CPLUSPLUS >= 201703L \
+  && (!defined(_GLIBCXX_RELEASE) || 9 <= _GLIBCXX_RELEASE)
 using std::apply;
 #else
 using detail::apply;
@@ -265,10 +290,13 @@ using conditional_t = typename std::conditional<B, T, F>::type;
 #endif
 
 // bind_front
-// ad hoc: GCC 16.1 aborts compilation with an internal compiler error while
-// std::bind_front forms a binder for compile-time branch closures. Use the
-// compatibility implementation instead.
+// libstdc++ 9 advertises bind_front before std::invoke supports constant
+// evaluation. GCC 16.1 also aborts compilation with an internal compiler error
+// while forming a binder for compile-time branch closures. Use the
+// compatibility implementation in both cases.
 #if defined(__cpp_lib_bind_front) && 201907L <= __cpp_lib_bind_front \
+  && defined(__cpp_lib_constexpr_functional) \
+  && 201907L <= __cpp_lib_constexpr_functional \
   && !(defined(__GNUC__) && !defined(__clang__) && 16 == __GNUC__ \
     && 1 == __GNUC_MINOR__)
 using std::bind_front;
@@ -376,17 +404,23 @@ struct bind_front_t {
   constexpr
 #  endif
     auto operator()(Argument &&...argument) & //
-    noexcept(
-      noexcept(call(*this, indices{}, std::forward<Argument>(argument)...)))
-      -> decltype(call(*this, indices{}, std::forward<Argument>(argument)...)) {
+    noexcept(noexcept(call(std::declval<bind_front_t &>(),
+      indices{},
+      std::forward<Argument>(argument)...)))
+      -> decltype(call(std::declval<bind_front_t &>(),
+        indices{},
+        std::forward<Argument>(argument)...)) {
     return call(*this, indices{}, std::forward<Argument>(argument)...);
   }
 
   template <typename... Argument>
   constexpr auto operator()(Argument &&...argument) const & //
-    noexcept(
-      noexcept(call(*this, indices{}, std::forward<Argument>(argument)...)))
-      -> decltype(call(*this, indices{}, std::forward<Argument>(argument)...)) {
+    noexcept(noexcept(call(std::declval<const bind_front_t &>(),
+      indices{},
+      std::forward<Argument>(argument)...)))
+      -> decltype(call(std::declval<const bind_front_t &>(),
+        indices{},
+        std::forward<Argument>(argument)...)) {
     return call(*this, indices{}, std::forward<Argument>(argument)...);
   }
 
@@ -395,9 +429,10 @@ struct bind_front_t {
   constexpr
 #  endif
     auto operator()(Argument &&...argument) && //
-    noexcept(noexcept(
-      call(std::move(*this), indices{}, std::forward<Argument>(argument)...)))
-      -> decltype(call(std::move(*this),
+    noexcept(noexcept(call(std::declval<bind_front_t &&>(),
+      indices{},
+      std::forward<Argument>(argument)...)))
+      -> decltype(call(std::declval<bind_front_t &&>(),
         indices{},
         std::forward<Argument>(argument)...)) {
     return call(std::move(*this),
@@ -407,9 +442,10 @@ struct bind_front_t {
 
   template <typename... Argument>
   constexpr auto operator()(Argument &&...argument) const && //
-    noexcept(noexcept(
-      call(std::move(*this), indices{}, std::forward<Argument>(argument)...)))
-      -> decltype(call(std::move(*this),
+    noexcept(noexcept(call(std::declval<const bind_front_t &&>(),
+      indices{},
+      std::forward<Argument>(argument)...)))
+      -> decltype(call(std::declval<const bind_front_t &&>(),
         indices{},
         std::forward<Argument>(argument)...)) {
     return call(std::move(*this),

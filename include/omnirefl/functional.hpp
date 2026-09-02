@@ -10,8 +10,11 @@
 
 // Clang 22 accepts captureless lambdas as non-type template arguments but
 // still reports __cpp_nontype_template_args == 201411L.
-#if defined(__cpp_generic_lambdas) && 201707L <= __cpp_generic_lambdas \
-  && 202002L <= OMNI_CPLUSPLUS
+#if (defined(__cpp_nontype_template_args) \
+    && 201911L <= __cpp_nontype_template_args) \
+  || (defined(__clang__) && 22 <= __clang_major__ \
+    && defined(__cpp_generic_lambdas) && 201707L <= __cpp_generic_lambdas \
+    && 202002L <= OMNI_CPLUSPLUS)
 #  define OMNI_FN_HAS_PREDICATE_LAMBDA 1
 #else
 #  define OMNI_FN_HAS_PREDICATE_LAMBDA 0
@@ -263,8 +266,16 @@ constexpr auto partial(Function &&function, Bound &&...bound)
     std::forward<Bound>(bound)...);
 }
 
-/// Select one of two deferred operations with a deferred predicate.
+/// C++11-compatible conditional invocation compositor.
 struct branch_t {
+  /// Immediately invoke a predicate and only its selected operation.
+  ///
+  /// A runtime predicate converts both operation results to the conditional
+  /// expression's common result type. A `ct_pred` predicate selects one
+  /// operation at compile time, so no common result type is required, the
+  /// discarded operation need not be invocable, and the selected result type
+  /// is preserved. This provides C++11-compatible `if constexpr`-style
+  /// branching between callables.
   template <typename Predicate, typename WhenTrue, typename WhenFalse>
   constexpr auto operator()(Predicate predicate,
     WhenTrue when_true,
@@ -277,10 +288,10 @@ struct branch_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-/// Select one of two deferred operations with a deferred predicate.
+/// Immediately invoke a predicate and only its selected operation.
 inline constexpr branch_t branch{};
 #else
-/// Select one of two deferred operations with a deferred predicate.
+/// Immediately invoke a predicate and only its selected operation.
 constexpr branch_t branch{};
 #endif
 
@@ -451,7 +462,8 @@ struct filtered_indices<Predicate,
       Tuple,
       compat::index_sequence<Remaining...>,
       compat::conditional_t<Predicate{}.template
-        operator()<decltype(std::get<Index>(std::declval<Tuple>()))>(),
+        operator()<decltype(compat::detail::tuple_get<Index>(
+          std::declval<Tuple>()))>(),
         compat::index_sequence<Selected..., Index>,
         compat::index_sequence<Selected...>>> {};
 
@@ -470,9 +482,9 @@ struct filtered_indices<Predicate,
 
 template <typename Tuple, std::size_t... Index>
 constexpr auto select_tuple(Tuple &&tuple, compat::index_sequence<Index...>)
-  -> std::tuple<
-    compat::decay_t<decltype(std::get<Index>(std::forward<Tuple>(tuple)))>...> {
-  return {std::get<Index>(std::forward<Tuple>(tuple))...};
+  -> std::tuple<compat::decay_t<decltype(compat::detail::tuple_get<Index>(
+    std::forward<Tuple>(tuple)))>...> {
+  return {compat::detail::tuple_get<Index>(std::forward<Tuple>(tuple))...};
 }
 
 template <typename Predicate, typename Tuple>
@@ -494,7 +506,7 @@ struct any_of_values {
   template <typename Predicate, typename Tuple>
   static constexpr bool call(Predicate &predicate, Tuple &&tuple) {
     return compat::invoke(predicate,
-             std::get<Index>(std::forward<Tuple>(tuple)))
+             compat::detail::tuple_get<Index>(std::forward<Tuple>(tuple)))
       || any_of_values<Index + 1, Size>::call(predicate,
         std::forward<Tuple>(tuple));
   }
@@ -523,7 +535,8 @@ struct matches_any<Key,
     std::integral_constant<bool,
       Key{}.template operator()<Left>()
           == Key{}.template
-          operator()<decltype(std::get<Index>(std::declval<Right>()))>()
+          operator()<decltype(compat::detail::tuple_get<Index>(
+            std::declval<Right>()))>()
         || matches_any<Key,
           Left,
           Right,
@@ -557,7 +570,7 @@ struct diff_indices<Key,
       compat::index_sequence<Remaining...>,
       compat::conditional_t< //
         matches_any<Key,
-          decltype(std::get<Index>(std::declval<Left>())),
+          decltype(compat::detail::tuple_get<Index>(std::declval<Left>())),
           Right,
           compat::make_index_sequence<
             std::tuple_size<compat::remove_cvref_t<Right>>::value>>::value,
@@ -755,8 +768,12 @@ template <typename Left,
 #endif
 /// Concatenate two standard tuple-like objects into an owning tuple.
 constexpr auto concat(Left &&left, Right &&right)
+#if !defined(__cpp_return_type_deduction) \
+  || __cpp_return_type_deduction < 201304L
   -> decltype(std::tuple_cat(std::forward<Left>(left),
-    std::forward<Right>(right))) {
+    std::forward<Right>(right)))
+#endif
+{
   return std::tuple_cat(std::forward<Left>(left), std::forward<Right>(right));
 }
 
