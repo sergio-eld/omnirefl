@@ -26,6 +26,14 @@ struct type_identity {
   using type = T;
 };
 
+// decay_t
+#if OMNI_CPLUSPLUS >= 201402L
+using std::decay_t;
+#else
+template <typename T>
+using decay_t = typename std::decay<T>::type;
+#endif
+
 #if OMNI_CPLUSPLUS >= 201402L
 using std::index_sequence;
 #else
@@ -61,11 +69,11 @@ constexpr auto apply(Visit &&v, Tuple &&t)
   -> decltype(_apply(std::forward<Visit>(v),
     std::forward<Tuple>(t),
     make_integer_sequence<std::size_t,
-      std::tuple_size<typename std::decay<Tuple>::type>::value>{})) {
+      std::tuple_size<decay_t<Tuple>>::value>{})) {
   return _apply(std::forward<Visit>(v),
     std::forward<Tuple>(t),
     make_integer_sequence<std::size_t,
-      std::tuple_size<typename std::decay<Tuple>::type>::value>{});
+      std::tuple_size<decay_t<Tuple>>::value>{});
 }
 
 template <typename... Ts>
@@ -116,10 +124,8 @@ struct is_reference_wrapper<std::reference_wrapper<T>>: std::true_type {};
 template <typename Class, typename Object>
 struct is_member_owner:
     std::integral_constant<bool,
-      std::is_same<Class, typename std::decay<Object>::type>::value
-        || std::is_base_of<
-          Class,
-          typename std::decay<Object>::type>::value> {};
+      std::is_same<Class, decay_t<Object>>::value
+        || std::is_base_of<Class, decay_t<Object>>::value> {};
 
 } // namespace detail
 
@@ -128,7 +134,7 @@ constexpr auto invoke(Function &&function, Argument &&...argument) noexcept(
   noexcept(std::forward<Function>(function)(
     std::forward<Argument>(argument)...))) ->
   typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Function>::type>::value,
+    !std::is_member_pointer<decay_t<Function>>::value,
     decltype(std::forward<Function>(function)(
       std::forward<Argument>(argument)...))>::type {
   return std::forward<Function>(function)(std::forward<Argument>(argument)...);
@@ -164,8 +170,7 @@ constexpr auto invoke(Member Class::*member,
   typename std::enable_if<
     std::is_function<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype((std::forward<Object>(object).get().*member)(
       std::forward<Argument>(argument)...))>::type {
   return (std::forward<Object>(object).get().*member)(
@@ -184,8 +189,7 @@ constexpr auto invoke(Member Class::*member,
   typename std::enable_if<
     std::is_function<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && !detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && !detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype(((*std::forward<Object>(object)).*member)(
       std::forward<Argument>(argument)...))>::type {
   return ((*std::forward<Object>(object)).*member)(
@@ -208,8 +212,7 @@ constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
   typename std::enable_if<
     std::is_object<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype(std::forward<Object>(object).get().*member)>::type {
   return std::forward<Object>(object).get().*member;
 }
@@ -220,8 +223,7 @@ constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
   typename std::enable_if<
     std::is_object<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && !detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && !detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype((*std::forward<Object>(object)).*member)>::type {
   return (*std::forward<Object>(object)).*member;
 }
@@ -262,12 +264,175 @@ template <bool B, class T, class F>
 using conditional_t = typename std::conditional<B, T, F>::type;
 #endif
 
-// decay_t
-#if OMNI_CPLUSPLUS >= 201402L
-using std::decay_t;
+// bind_front
+// ad hoc: GCC 16.1 aborts compilation with an internal compiler error while
+// std::bind_front forms a binder for compile-time branch closures. Use the
+// compatibility implementation instead.
+#if defined(__cpp_lib_bind_front) && 201907L <= __cpp_lib_bind_front \
+  && !(defined(__GNUC__) && !defined(__clang__) && 16 == __GNUC__ \
+    && 1 == __GNUC_MINOR__)
+using std::bind_front;
 #else
-template <typename T>
-using decay_t = typename std::decay<T>::type;
+namespace detail {
+
+// libc++ does not provide constexpr std::tuple construction in C++11. This
+// private indexed storage keeps the compatibility implementation constexpr.
+template <std::size_t Index, typename... Value>
+struct bound_type_at;
+
+template <typename First, typename... Rest>
+struct bound_type_at<0, First, Rest...> {
+  using type = First;
+};
+
+template <std::size_t Index, typename First, typename... Rest>
+struct bound_type_at<Index, First, Rest...>:
+    bound_type_at<Index - 1, Rest...> {};
+
+template <std::size_t Index, typename Value>
+struct bound_value {
+  Value value;
+
+  template <typename Source>
+  constexpr bound_value(Source &&source): value{std::forward<Source>(source)} {}
+};
+
+template <typename Index, typename... Value>
+struct bound_values;
+
+template <std::size_t... Index, typename... Value>
+struct bound_values<index_sequence<Index...>, Value...>:
+    bound_value<Index, Value>... {
+  template <typename... Source>
+  constexpr bound_values(Source &&...source)
+      : bound_value<Index, Value>{std::forward<Source>(source)}... {}
+};
+
+template <std::size_t Index, typename Indices, typename... Value>
+constexpr typename bound_type_at<Index, Value...>::type &bound_get(
+  bound_values<Indices, Value...> &values) noexcept {
+  using element =
+    bound_value<Index, typename bound_type_at<Index, Value...>::type>;
+  return static_cast<element &>(values).value;
+}
+
+template <std::size_t Index, typename Indices, typename... Value>
+constexpr const typename bound_type_at<Index, Value...>::type &bound_get(
+  const bound_values<Indices, Value...> &values) noexcept {
+  using element =
+    bound_value<Index, typename bound_type_at<Index, Value...>::type>;
+  return static_cast<const element &>(values).value;
+}
+
+template <std::size_t Index, typename Indices, typename... Value>
+constexpr typename bound_type_at<Index, Value...>::type &&bound_get(
+  bound_values<Indices, Value...> &&values) noexcept {
+  using element =
+    bound_value<Index, typename bound_type_at<Index, Value...>::type>;
+  return std::move(static_cast<element &>(values).value);
+}
+
+template <std::size_t Index, typename Indices, typename... Value>
+constexpr const typename bound_type_at<Index, Value...>::type &&bound_get(
+  const bound_values<Indices, Value...> &&values) noexcept {
+  using element =
+    bound_value<Index, typename bound_type_at<Index, Value...>::type>;
+  return std::move(static_cast<const element &>(values).value);
+}
+
+template <typename Function, typename... Bound>
+struct bind_front_t {
+  using indices = make_index_sequence<sizeof...(Bound)>;
+
+  Function function;
+  bound_values<indices, Bound...> bound;
+
+  template <typename Source,
+    typename std::enable_if<
+      !std::is_same<bind_front_t, decay_t<Source>>::value,
+      int>::type = 0,
+    typename... Value>
+  constexpr bind_front_t(Source &&source, Value &&...value)
+      : function{std::forward<Source>(source)}
+      , bound{std::forward<Value>(value)...} {}
+
+  template <typename Self, std::size_t... Index, typename... Argument>
+  static constexpr auto call(Self &&self,
+    index_sequence<Index...>,
+    Argument &&...argument) //
+    noexcept(noexcept(compat::invoke(std::forward<Self>(self).function,
+      bound_get<Index>(std::forward<Self>(self).bound)...,
+      std::forward<Argument>(argument)...)))
+      -> decltype(compat::invoke(std::forward<Self>(self).function,
+        bound_get<Index>(std::forward<Self>(self).bound)...,
+        std::forward<Argument>(argument)...)) {
+    return compat::invoke(std::forward<Self>(self).function,
+      bound_get<Index>(std::forward<Self>(self).bound)...,
+      std::forward<Argument>(argument)...);
+  }
+
+  template <typename... Argument>
+#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
+  constexpr
+#  endif
+    auto operator()(Argument &&...argument) & //
+    noexcept(
+      noexcept(call(*this, indices{}, std::forward<Argument>(argument)...)))
+      -> decltype(call(*this, indices{}, std::forward<Argument>(argument)...)) {
+    return call(*this, indices{}, std::forward<Argument>(argument)...);
+  }
+
+  template <typename... Argument>
+  constexpr auto operator()(Argument &&...argument) const & //
+    noexcept(
+      noexcept(call(*this, indices{}, std::forward<Argument>(argument)...)))
+      -> decltype(call(*this, indices{}, std::forward<Argument>(argument)...)) {
+    return call(*this, indices{}, std::forward<Argument>(argument)...);
+  }
+
+  template <typename... Argument>
+#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
+  constexpr
+#  endif
+    auto operator()(Argument &&...argument) && //
+    noexcept(noexcept(
+      call(std::move(*this), indices{}, std::forward<Argument>(argument)...)))
+      -> decltype(call(std::move(*this),
+        indices{},
+        std::forward<Argument>(argument)...)) {
+    return call(std::move(*this),
+      indices{},
+      std::forward<Argument>(argument)...);
+  }
+
+  template <typename... Argument>
+  constexpr auto operator()(Argument &&...argument) const && //
+    noexcept(noexcept(
+      call(std::move(*this), indices{}, std::forward<Argument>(argument)...)))
+      -> decltype(call(std::move(*this),
+        indices{},
+        std::forward<Argument>(argument)...)) {
+    return call(std::move(*this),
+      indices{},
+      std::forward<Argument>(argument)...);
+  }
+};
+
+} // namespace detail
+
+template <typename Function, typename... Bound>
+constexpr auto bind_front(Function &&function, Bound &&...bound) //
+  -> typename std::enable_if<
+    std::is_constructible<decay_t<Function>, Function &&>::value
+      && std::is_move_constructible<decay_t<Function>>::value
+      && std::is_constructible<std::tuple<decay_t<Bound>...>,
+        Bound &&...>::value
+      && std::is_move_constructible<std::tuple<decay_t<Bound>...>>::value,
+    detail::bind_front_t<decay_t<Function>, decay_t<Bound>...>>::type {
+  return detail::bind_front_t<decay_t<Function>, decay_t<Bound>...>{
+    std::forward<Function>(function),
+    std::forward<Bound>(bound)...};
+}
 #endif
 
 // make_unique

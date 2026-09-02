@@ -389,6 +389,10 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
 
     install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/tests/functional/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests/functional")
+
+    install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/examples/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples")
 

@@ -387,7 +387,9 @@ services:
 
         Set-Location 'C:/with space/build'
         cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
+        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
         cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
 
         ctest . --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
           Tee-Object C:/test/$$env:TEST_NAME.log

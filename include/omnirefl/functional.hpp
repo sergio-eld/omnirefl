@@ -70,26 +70,51 @@ template <typename Predicate>
 struct is_compile_time_predicate<Predicate,
   compat::void_t<compile_time_result<Predicate>>>: std::true_type {};
 
-// Keep language-version selection away from the public declarations so LSP
-// hover preserves their documentation.
-#if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201304L
-// C++11 emulation of the generic lambda returned by `ctad`.
+#if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201304L \
+  || (defined(_MSC_VER) && !defined(__clang__))
+// Callable-object emulation of the generic lambda returned by `ctad`.
+// MSVC also needs it because substitution of the constrained generic lambda
+// incorrectly rejects valid template construction.
 template <template <typename...> class Template>
-struct cpp11_type_template_ctad {
+struct type_template_ctad_fn {
   template <typename Value,
     typename std::enable_if<
       traits::is_type_template_constructible_from<Template, Value &&>::value,
       int>::type = 0>
   constexpr traits::type_template_construct_result_t<Template, Value &&>
     operator()(Value &&value) const {
+#  if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+    return Template{std::forward<Value>(value)};
+#  else
     return Template<compat::decay_t<Value>>{std::forward<Value>(value)};
+#  endif
   }
 };
 
 template <template <typename...> class Template>
-constexpr cpp11_type_template_ctad<Template> type_template_ctad() {
+constexpr type_template_ctad_fn<Template> type_template_ctad() {
   return {};
 }
+
+#  if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+template <template <typename, std::size_t> class Template>
+struct type_size_template_ctad_fn {
+  template <typename Value,
+    typename std::enable_if<
+      traits::is_type_size_template_constructible_from<Template,
+        Value &&>::value,
+      int>::type = 0>
+  constexpr traits::type_size_template_construct_result_t<Template, Value &&>
+    operator()(Value &&value) const {
+    return Template{std::forward<Value>(value)};
+  }
+};
+
+template <template <typename, std::size_t> class Template>
+constexpr type_size_template_ctad_fn<Template> type_size_template_ctad() {
+  return {};
+}
+#  endif
 #elif defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
 template <template <typename...> class Template>
 constexpr auto type_template_ctad() {
@@ -229,15 +254,113 @@ constexpr compile_time_predicate<Predicate> ct_pred(Predicate) {
   return {};
 }
 
-/// Invoke one of two deferred operations selected by `predicate`.
-template <typename Predicate, typename WhenTrue, typename WhenFalse>
-constexpr auto branch(Predicate predicate,
-  WhenTrue when_true,
-  WhenFalse when_false) //
-  -> decltype(detail::select(
-    compat::invoke(predicate), when_true, when_false)) {
-  return detail::select(compat::invoke(predicate), when_true, when_false);
+/// Bind leading arguments to a callable.
+template <typename Function, typename... Bound>
+constexpr auto partial(Function &&function, Bound &&...bound)
+  -> decltype(compat::bind_front(std::forward<Function>(function),
+    std::forward<Bound>(bound)...)) {
+  return compat::bind_front(std::forward<Function>(function),
+    std::forward<Bound>(bound)...);
 }
+
+/// Select one of two deferred operations with a deferred predicate.
+struct branch_t {
+  template <typename Predicate, typename WhenTrue, typename WhenFalse>
+  constexpr auto operator()(Predicate predicate,
+    WhenTrue when_true,
+    WhenFalse when_false) const //
+    -> decltype(detail::select(compat::invoke(predicate),
+      when_true,
+      when_false)) {
+    return detail::select(compat::invoke(predicate), when_true, when_false);
+  }
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+/// Select one of two deferred operations with a deferred predicate.
+inline constexpr branch_t branch{};
+#else
+/// Select one of two deferred operations with a deferred predicate.
+constexpr branch_t branch{};
+#endif
+
+namespace detail {
+
+// The deferred tail references arguments kept alive by the active `cond`
+// full-expression. This keeps C++11 constant evaluation possible while
+// preserving the original value categories. The tail is invoked immediately
+// by a partially applied branch and must not escape that expression.
+template <typename... Clause>
+struct cond_tail;
+
+template <typename Otherwise>
+struct cond_tail<Otherwise> {
+  Otherwise otherwise;
+
+  constexpr cond_tail(Otherwise otherwise_)
+      : otherwise{std::forward<Otherwise>(otherwise_)} {}
+
+  constexpr cond_tail(const cond_tail &other)
+      : otherwise{std::forward<Otherwise>(other.otherwise)} {}
+
+  template <typename Selected = Otherwise>
+  constexpr auto operator()() const && //
+    -> decltype(compat::invoke(std::declval<Selected>())) {
+    return compat::invoke(std::forward<Otherwise>(otherwise));
+  }
+};
+
+template <typename Current, typename Next, typename... Rest>
+struct cond_tail<Current, Next, Rest...> {
+  Current current;
+  cond_tail<Next, Rest...> next;
+
+  constexpr cond_tail(Current current_, Next next_, Rest... rest)
+      : current{std::forward<Current>(current_)}
+      , next{std::forward<Next>(next_), std::forward<Rest>(rest)...} {}
+
+  constexpr cond_tail(const cond_tail &other)
+      : current{std::forward<Current>(other.current)}
+      , next{other.next} {}
+
+  template <typename Selected = Current>
+  constexpr auto operator()() const && //
+    -> decltype(compat::invoke(std::declval<Selected>(),
+      std::declval<cond_tail<Next, Rest...>>())) {
+    return compat::invoke(std::forward<Current>(current), std::move(next));
+  }
+};
+
+} // namespace detail
+
+/// Evaluate partially applied branches in order, ending with a fallback.
+struct cond_t {
+  template <typename Otherwise>
+  constexpr auto operator()(Otherwise &&otherwise) const
+    -> decltype(compat::invoke(std::forward<Otherwise>(otherwise))) {
+    return compat::invoke(std::forward<Otherwise>(otherwise));
+  }
+
+  template <typename Current, typename Next, typename... Rest>
+  constexpr auto operator()(Current &&current,
+    Next &&next,
+    Rest &&...rest) const //
+    -> decltype(compat::invoke(std::forward<Current>(current),
+      detail::cond_tail<Next &&, Rest &&...>{std::forward<Next>(next),
+        std::forward<Rest>(rest)...})) {
+    return compat::invoke(std::forward<Current>(current),
+      detail::cond_tail<Next &&, Rest &&...>{std::forward<Next>(next),
+        std::forward<Rest>(rest)...});
+  }
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+/// Evaluate partially applied branches in order, ending with a fallback.
+inline constexpr cond_t cond{};
+#else
+/// Evaluate partially applied branches in order, ending with a fallback.
+constexpr cond_t cond{};
+#endif
 
 /// Return a conversion using CTAD or its value-type fallback.
 ///
