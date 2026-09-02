@@ -488,6 +488,12 @@ target_link_libraries(std_compat INTERFACE
 include("${CMAKE_CURRENT_LIST_DIR}/supported_cpp_standards.cmake")
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
+# The installed package places the functional suite beside this project so the
+# same tests exercise its public headers across the package-test matrix.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/functional/CMakeLists.txt")
+    add_subdirectory(functional)
+endif()
+
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
         set(_target "cpp_17.negative.${name}")
