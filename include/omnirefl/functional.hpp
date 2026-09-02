@@ -257,15 +257,6 @@ constexpr compile_time_predicate<Predicate> ct_pred(Predicate) {
   return {};
 }
 
-/// Bind leading arguments to a callable.
-template <typename Function, typename... Bound>
-constexpr auto partial(Function &&function, Bound &&...bound)
-  -> decltype(compat::bind_front(std::forward<Function>(function),
-    std::forward<Bound>(bound)...)) {
-  return compat::bind_front(std::forward<Function>(function),
-    std::forward<Bound>(bound)...);
-}
-
 /// C++11-compatible conditional invocation compositor.
 struct branch_t {
   /// Immediately invoke a predicate and only its selected operation.
@@ -294,6 +285,108 @@ inline constexpr branch_t branch{};
 /// Immediately invoke a predicate and only its selected operation.
 constexpr branch_t branch{};
 #endif
+
+/// Bind leading arguments to a callable.
+template <typename Function,
+  typename... Bound,
+  typename std::enable_if<
+    !std::is_same<compat::decay_t<Function>, branch_t>::value
+      || 2 != sizeof...(Bound),
+    int>::type = 0>
+constexpr auto partial(Function &&function, Bound &&...bound)
+  -> decltype(compat::bind_front(std::forward<Function>(function),
+    std::forward<Bound>(bound)...)) {
+  return compat::bind_front(std::forward<Function>(function),
+    std::forward<Bound>(bound)...);
+}
+
+namespace detail {
+
+// `cond` clauses commonly use `partial(branch, ...)`. A dedicated closure
+// avoids instantiating the substantially more general `bind_front` invocation
+// machinery while preserving its value-category behavior.
+template <typename Predicate, typename WhenTrue>
+struct partial_branch {
+  Predicate predicate;
+  WhenTrue when_true;
+
+  template <typename PredicateValue, typename TrueValue>
+  constexpr partial_branch(PredicateValue &&predicate_, TrueValue &&when_true_)
+      : predicate{std::forward<PredicateValue>(predicate_)}
+      , when_true{std::forward<TrueValue>(when_true_)} {}
+
+  template <typename WhenFalse>
+#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
+  constexpr
+#endif
+    auto operator()(WhenFalse &&when_false) & //
+    noexcept(noexcept(branch(predicate,
+      when_true,
+      std::forward<WhenFalse>(when_false))))
+    -> decltype(branch(predicate,
+      when_true,
+      std::forward<WhenFalse>(when_false))) {
+    return branch(predicate, when_true, std::forward<WhenFalse>(when_false));
+  }
+
+  template <typename WhenFalse>
+  constexpr auto operator()(WhenFalse &&when_false) const & //
+    noexcept(noexcept(branch(predicate,
+      when_true,
+      std::forward<WhenFalse>(when_false))))
+    -> decltype(branch(predicate,
+      when_true,
+      std::forward<WhenFalse>(when_false))) {
+    return branch(predicate, when_true, std::forward<WhenFalse>(when_false));
+  }
+
+  template <typename WhenFalse>
+#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
+  constexpr
+#endif
+    auto operator()(WhenFalse &&when_false) && //
+    noexcept(noexcept(branch(std::move(predicate),
+      std::move(when_true),
+      std::forward<WhenFalse>(when_false))))
+    -> decltype(branch(std::move(predicate),
+      std::move(when_true),
+      std::forward<WhenFalse>(when_false))) {
+    return branch(std::move(predicate),
+      std::move(when_true),
+      std::forward<WhenFalse>(when_false));
+  }
+
+  template <typename WhenFalse>
+  constexpr auto operator()(WhenFalse &&when_false) const && //
+    noexcept(noexcept(branch(std::move(predicate),
+      std::move(when_true),
+      std::forward<WhenFalse>(when_false))))
+    -> decltype(branch(std::move(predicate),
+      std::move(when_true),
+      std::forward<WhenFalse>(when_false))) {
+    return branch(std::move(predicate),
+      std::move(when_true),
+      std::forward<WhenFalse>(when_false));
+  }
+};
+
+} // namespace detail
+
+/// Bind a predicate and selected operation to `branch`.
+template <typename Predicate, typename WhenTrue>
+constexpr auto partial(branch_t,
+  Predicate &&predicate,
+  WhenTrue &&when_true) //
+  -> typename std::enable_if<
+    std::is_constructible<compat::decay_t<Predicate>, Predicate &&>::value
+      && std::is_move_constructible<compat::decay_t<Predicate>>::value
+      && std::is_constructible<compat::decay_t<WhenTrue>, WhenTrue &&>::value
+      && std::is_move_constructible<compat::decay_t<WhenTrue>>::value,
+    detail::partial_branch<compat::decay_t<Predicate>,
+      compat::decay_t<WhenTrue>>>::type {
+  return {std::forward<Predicate>(predicate),
+    std::forward<WhenTrue>(when_true)};
+}
 
 namespace detail {
 
