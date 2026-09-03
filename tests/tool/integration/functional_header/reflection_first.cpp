@@ -1,4 +1,4 @@
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/functional.hpp>
 
 #include <type_traits>

@@ -32,22 +32,14 @@ FetchContent_Declare(tl_expected
     GIT_SHALLOW TRUE
     GIT_PROGRESS TRUE)
 
-set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
-FetchContent_Declare(mpark_variant
-    GIT_REPOSITORY https://github.com/mpark/variant.git
-    GIT_TAG v1.4.0
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES ""
-    GIT_SUBMODULES_RECURSE FALSE)
-
 set(RYML_INSTALL OFF CACHE BOOL "" FORCE)
 # Keep rapidyaml's public compile feature from upgrading every versioned
 # consumer to the parent Omnirefl project's C++23 default.
 set(RYML_CXX_STANDARD 11 CACHE STRING "" FORCE)
 FetchContent_Declare(rapidyaml
     GIT_REPOSITORY https://github.com/biojppm/rapidyaml.git
-    # Preserve the dependency revision used by the recovered implementation.
-    GIT_TAG 837255cfc4c62e1abf8b19c6f6068cd9246f125f
+    # v0.14.0 supports both clang-cl and GCC 16.
+    GIT_TAG 11fa21d3fd3ca4a65df2c0e8b59fa0cc3b5c1642
     GIT_PROGRESS TRUE)
 
 if(ENABLE_BENCH)
@@ -68,7 +60,6 @@ set(CMAKE_CXX_STANDARD 11)
 FetchContent_MakeAvailable(
     googletest
     tl_expected
-    mpark_variant
     rapidyaml)
 if(ENABLE_BENCH)
     FetchContent_MakeAvailable(google_benchmark)
@@ -91,15 +82,14 @@ endif()
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 foreach(_standard IN LISTS _supported_cpp_standards)
-    set(_test_target "cpp_${_standard}.sb.serialization")
-    add_executable(${_test_target} serialization_test.cpp)
+    set(_test_target "cpp_${_standard}.sb.serialization_tree_mapping")
+    add_executable(${_test_target} serialization_tree_mapping_test.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO)
     target_link_libraries(${_test_target} PRIVATE
         gtest_main
-        mpark_variant
         omni::refl
         ryml::ryml
         tl::expected)
@@ -108,18 +98,14 @@ foreach(_standard IN LISTS _supported_cpp_standards)
 
     if(ENABLE_BENCH)
         set(_benchmark_target "cpp_${_standard}.benchmark.serialization")
-        set(_benchmark_sources serialization_composed_bench.cpp)
-        if(17 LESS_EQUAL _standard AND _standard LESS_EQUAL 23)
-            list(PREPEND _benchmark_sources serialization_if_constexpr_bench.cpp)
-        endif()
-        add_executable(${_benchmark_target} ${_benchmark_sources})
+        add_executable(${_benchmark_target}
+            serialization_tree_mapping_bench.cpp)
         set_target_properties(${_benchmark_target} PROPERTIES
             CXX_STANDARD ${_standard}
             CXX_STANDARD_REQUIRED YES
             CXX_EXTENSIONS NO)
         target_link_libraries(${_benchmark_target} PRIVATE
             benchmark::benchmark_main
-            mpark_variant
             omni::refl
             ryml::ryml
             tl::expected)

@@ -365,6 +365,13 @@ function(omni_reflected_target target)
             set(_timings 1)
         endif()
 
+        # TODO: Extend CMake timing mode to report the complete build wall and
+        # each Omnirefl phase as a percentage of it after the build finishes.
+        # This is needed to evaluate the roughly 30% overhead target on real
+        # builds; CI currently measures only an isolated translation unit.
+        # Account for overlapping parallel tool runs rather than summing their
+        # wall times as though they ran sequentially.
+
         # The compiler command is only available at build time from
         # compile_commands.json, so this cannot be expressed as a static
         # add_custom_command argument list. The -P bridge runs ccdb_query,
