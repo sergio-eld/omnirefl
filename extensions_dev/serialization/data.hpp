@@ -25,6 +25,11 @@ struct scalar_values {
   std::vector<payload> records;
 };
 
+struct bitfield_values {
+  unsigned code : 10;
+  bool enabled : 1;
+};
+
 struct coordinates {
   double latitude;
   double longitude;
@@ -74,6 +79,8 @@ constexpr char scalar_json[] = R"({
     {"name": "sunset", "code": 108}
   ]
 })";
+
+constexpr char bitfield_json[] = R"({"code":815,"enabled":true})";
 
 // Repeated strings, nested records, and heterogeneous sequences make this a
 // representative allocation-heavy server payload rather than a scalar-only

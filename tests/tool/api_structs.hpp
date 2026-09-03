@@ -142,6 +142,20 @@ enum_type_enumerators_t const static enum_type_enumerators{};
 
 namespace bindings {
 
+struct entity_type_t {
+  template <typename T>
+  std::string operator()(omni::record_binding_t<T>) const {
+    return "record";
+  }
+
+  template <typename T>
+  std::string operator()(omni::enum_binding_t<T>) const {
+    return "enumeration";
+  }
+};
+
+entity_type_t const static entity_type{};
+
 template <typename Validate>
 struct conversion_qualifiers_t {
   Validate validate;

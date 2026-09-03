@@ -2,14 +2,19 @@
 
 #include "data.hpp"
 
+#include <omnirefl/reflection.hpp>
+
 #include <benchmark/benchmark.h>
 #include <ryml.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace serialization_benchmark {
 
+// Results remain mutable because Google Benchmark deprecates its const-reference
+// `DoNotOptimize` overload.
 template <typename T, typename Deserialize, std::size_t Size>
 void deserialize_preparsed(benchmark::State &state,
   Deserialize deserialize,
@@ -17,7 +22,8 @@ void deserialize_preparsed(benchmark::State &state,
   const ryml::Tree tree = ryml::parse_in_arena(c4::to_csubstr(input));
 
   for (auto _ : state) {
-    auto result = deserialize.template to<T>(tree.rootref());
+    auto result = omni::compat::invoke(
+      deserialize, tree.rootref(), omni::type_t<T>{});
     if (!result) {
       state.SkipWithError(result.error().c_str());
       break;
@@ -30,13 +36,12 @@ void deserialize_preparsed(benchmark::State &state,
     state.iterations() * static_cast<std::int64_t>(Size - 1));
 }
 
-template <typename T, typename Deserialize, std::size_t Size>
-void parse_and_deserialize(benchmark::State &state,
+template <typename Deserialize, std::size_t Size>
+void deserialize_owned(benchmark::State &state,
   Deserialize deserialize,
   const char (&input)[Size]) {
   for (auto _ : state) {
-    const ryml::Tree tree = ryml::parse_in_arena(c4::to_csubstr(input));
-    auto result = deserialize.template to<T>(tree.rootref());
+    auto result = omni::compat::invoke(deserialize, std::string{input});
     if (!result) {
       state.SkipWithError(result.error().c_str());
       break;

@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <omnirefl/reflection.hpp>
+#include <omnirefl/traits.hpp>
 
 #include <mpark/variant.hpp>
 
@@ -28,17 +29,6 @@
 namespace {
 
 namespace meta {
-
-template <template <typename...> typename, typename>
-struct is_template: std::false_type {};
-
-template <template <typename...> typename Template, typename... T>
-struct is_template<Template, Template<T...>>: std::true_type {};
-
-template <template <typename...> typename Template, typename T>
-constexpr bool is() noexcept {
-  return is_template<Template, T>::value;
-}
 
 template <typename T>
 concept range_like = requires(T value) {
@@ -651,13 +641,13 @@ TEST(example, primary_template_from_map) {
         []<typename From>(const From &from) -> T {
           if constexpr (std::is_same_v<From, T>) {
             return from;
-          } else if constexpr (meta::is<std::basic_string, From>()
-            && meta::is<std::basic_string, T>()) {
+          } else if constexpr (omni::traits::is<std::basic_string, From>()
+            && omni::traits::is<std::basic_string, T>()) {
             // Convert between different `std::basic_string` specializations,
             // for example when the target record uses a custom allocator.
             return {from.begin(), from.end()};
-          } else if constexpr (meta::is<std::vector, From>()
-            && meta::is<std::vector, T>()) {
+          } else if constexpr (omni::traits::is<std::vector, From>()
+            && omni::traits::is<std::vector, T>()) {
             return {from.begin(), from.end()};
           } else {
             return {};
@@ -920,7 +910,8 @@ TEST(example, annotated_dependencies) {
               .annotation = field.documentation(),
             });
 
-            if constexpr (meta::is<std::tuple, typename Field::type>()) {
+            if constexpr (
+              omni::traits::is<std::tuple, typename Field::type>()) {
               std::invoke(
                 [&out, render_type]<typename... T>(
                   omni::type_t<std::tuple<T...>>) {
@@ -930,7 +921,8 @@ TEST(example, annotated_dependencies) {
                 omni::type<typename Field::type>);
             }
 
-            if constexpr (meta::is<std::variant, typename Field::type>()) {
+            if constexpr (
+              omni::traits::is<std::variant, typename Field::type>()) {
               std::invoke(
                 [&out, render_type]<typename... T>(
                   omni::type_t<std::variant<T...>>) {
@@ -941,7 +933,8 @@ TEST(example, annotated_dependencies) {
                 omni::type<typename Field::type>);
             }
 
-            if constexpr (meta::is<std::vector, typename Field::type>()) {
+            if constexpr (
+              omni::traits::is<std::vector, typename Field::type>()) {
               out.from_vector.push_back(render_type(
                 omni::reflected<typename Field::type::value_type>()));
             }
@@ -1556,7 +1549,7 @@ void render_schema(std::ostringstream &out,
   std::string_view indent) {
   if constexpr (omni::is_reflected<T>::value) {
     render_schema(out, omni::reflected<T>(), indent);
-  } else if constexpr (meta::is<std::basic_string, T>()) {
+  } else if constexpr (omni::traits::is<std::basic_string, T>()) {
     out << indent << "type: string\n";
   } else if constexpr (std::is_same_v<bool, T>) {
     out << indent << "type: boolean\n";

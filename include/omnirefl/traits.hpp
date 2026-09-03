@@ -19,6 +19,13 @@ struct is_same_template: std::false_type {};
 template <template <typename...> class Template>
 struct is_same_template<Template, Template>: std::true_type {};
 
+template <template <typename...> class, typename>
+struct is_template_specialization: std::false_type {};
+
+template <template <typename...> class Template, typename... Argument>
+struct is_template_specialization<Template, Template<Argument...>>:
+    std::true_type {};
+
 // Detects the result selected by the type-parameter-only `fn::ctad` overload.
 // Valid specializations expose the result as `type`.
 template <template <typename...> class Template,
@@ -118,6 +125,13 @@ template <template <typename...> class Left,
   template <typename...> class Right>
 constexpr bool is() {
   return detail::is_same_template<Left, Right>::value;
+}
+
+/// Report whether `Type` specializes a type-parameter-only class template.
+template <template <typename...> class Template, typename Type>
+constexpr bool is() {
+  return detail::is_template_specialization<Template,
+    compat::remove_cvref_t<Type>>::value;
 }
 
 } // namespace traits

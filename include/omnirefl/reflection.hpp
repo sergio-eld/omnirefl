@@ -151,15 +151,17 @@ template <typename T>
 constexpr type_t<T> type{};
 #endif
 
-// todo(high): introduce record/enum type aliases for meta_t and binding_t so
-// visitors do not spell reflected_entity. First make OMNI_TOOL_RUN infer enum
-// versus record from T; its current record default would break enum-specific
-// alias overloads before generated metadata exists.
 #if defined(OMNI_TOOL_RUN)
 template <typename T, reflected_entity = reflected_entity::record>
 struct meta_t;
 
-template <typename T, reflected_entity = reflected_entity::record>
+// Generated entity metadata is unavailable during the tool run. Language-level
+// enum detection keeps record_binding_t/enum_binding_t visitor overloads
+// deducible there.
+template <typename T,
+  reflected_entity = std::is_enum<compat::decay_t<T>>::value
+    ? reflected_entity::enumeration
+    : reflected_entity::record>
 struct binding_t;
 #else
 template <typename T, reflected_entity = detail::_meta<T>::entity()>
@@ -169,6 +171,15 @@ template <typename T,
   reflected_entity = detail::_meta<compat::decay_t<T>>::entity()>
 struct binding_t;
 #endif
+
+/// Binding for a reflected record without exposing the entity discriminator.
+template <typename T>
+using record_binding_t = binding_t<T, reflected_entity::record>;
+
+/// Binding for a reflected enumeration without exposing the entity
+/// discriminator.
+template <typename T>
+using enum_binding_t = binding_t<T, reflected_entity::enumeration>;
 
 template <typename Owner, typename FieldMeta>
 struct field_meta_t;
@@ -231,8 +242,7 @@ struct is_aggregatable: std::false_type {};
 template <typename T>
 struct is_aggregatable<T,
   compat::void_t<decltype(omni::detail::_meta<T>::is_aggregatable())>>:
-    std::integral_constant<bool,
-      omni::detail::_meta<T>::is_aggregatable()> {};
+    std::integral_constant<bool, omni::detail::_meta<T>::is_aggregatable()> {};
 
 namespace detail {
 
@@ -308,8 +318,8 @@ struct _get_t<Index, TargetField, Fields, Target, false> {
     return _construct_field_t<TargetField,
       field,
       Target,
-      std::is_constructible<Target, source>::value>::from(
-      std::get<Index>(fields));
+      std::is_constructible<Target,
+        source>::value>::from(std::get<Index>(fields));
   }
 
   static Target from(Fields &fields, std::false_type) {

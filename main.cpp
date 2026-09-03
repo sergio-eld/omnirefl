@@ -397,12 +397,6 @@ struct source_location {
   std::uint32_t line;
   std::uint32_t column;
 
-  friend bool operator<(const source_location &lhs,
-    const source_location &rhs) {
-    return std::tie(lhs.source_file, lhs.line, lhs.column)
-      < std::tie(rhs.source_file, rhs.line, rhs.column);
-  }
-
   friend bool operator==(const source_location &,
     const source_location &) = default;
 };
@@ -3114,7 +3108,6 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     std::invoke([&flags,
                   response_file_directory,
                   cl_style,
-                  &driver_source,
                   &source_path,
                   windows_drive_mount_used] //
       -> std::expected<std::vector<std::string>, std::string> {
@@ -3145,7 +3138,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       return args //
         | std::views::transform(
-          [&driver_source, &source_path, windows_drive_mount_used](
+          [&source_path, windows_drive_mount_used](
             std::string_view arg) -> std::string {
             if (!windows_drive_mount_used)
               return std::string{arg};
@@ -3358,6 +3351,10 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   }
 
   const bool mingw_used = llvm::Triple(driver_triple).isWindowsGNUEnvironment();
+  const bool mingw_gcc_used = mingw_used
+    && ("g++" == compiler_name || "g++.exe" == compiler_name
+      || compiler_name.ends_with("-g++")
+      || compiler_name.ends_with("-g++.exe"));
 
   // FIXME(high): Remove MinGW compiler-layout discovery from this function.
   // It probes compiler-relative and system directories on every invocation;
@@ -3555,6 +3552,16 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       });
 
       std::ranges::copy(driver_args, std::back_inserter(out));
+
+      if (mingw_gcc_used) {
+        // FIXME(high): Update bundled Clang to support the active GCC
+        // intrinsic headers, or provide a dedicated instrumentation-only
+        // compiler-argument override/filter mechanism.
+        // ad hoc: Clang cannot parse the active GCC intrinsic headers used by
+        // fast_float. Disable its optional SSE path only for instrumentation;
+        // the real GCC compilation retains SIMD.
+        out.emplace_back("-U__SSE2__");
+      }
 
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(

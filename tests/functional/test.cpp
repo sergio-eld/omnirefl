@@ -988,6 +988,8 @@ TEST(traits_is, compares_types_and_type_templates) {
   EXPECT_FALSE((omni::traits::is<int, long>()));
   EXPECT_TRUE((omni::traits::is<omni::type_t, omni::type_t>()));
   EXPECT_FALSE((omni::traits::is<omni::type_t, another_type_tag>()));
+  EXPECT_TRUE((omni::traits::is<std::vector, std::vector<int>>()));
+  EXPECT_FALSE((omni::traits::is<std::vector, std::tuple<int>>()));
   EXPECT_FALSE(
     (std::is_same<omni::type_t<int>, omni::compat::type_identity<int>>::value));
 }
