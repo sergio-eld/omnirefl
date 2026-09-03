@@ -252,14 +252,14 @@ constexpr auto constexpr_add_to_800 =
 static_assert(815 == constexpr_add_to_800(15),
   "bind_front must remain usable in a C++11 constant expression");
 
-constexpr auto select_815 = omni::fn::partial(omni::fn::branch,
-  omni::fn::ct_pred(omni::fn::identity<42>()),
-  omni::fn::identity(815));
+constexpr auto select_815 = omni::fn::when(
+  omni::fn::ct_pred(omni::fn::ct_const<42>()),
+  omni::fn::ct_const<815>());
 static_assert(815 == select_815(unavailable{}),
   "partial must preserve compile-time branch selection");
 
-constexpr auto skip_unavailable = omni::fn::partial(omni::fn::branch,
-  omni::fn::ct_pred(omni::fn::identity<0>()),
+constexpr auto skip_unavailable = omni::fn::when(
+  omni::fn::ct_pred(omni::fn::ct_const<0>()),
   unavailable{});
 static_assert(815
     == omni::fn::cond(skip_unavailable, select_815, unavailable{}),
@@ -269,21 +269,21 @@ static_assert(815 == omni::fn::cond(select_815, unavailable{}),
   "cond must not instantiate clauses after a compile-time match");
 
 static_assert(815
-    == omni::fn::branch(omni::fn::identity(true),
-      omni::fn::identity(815),
-      omni::fn::identity(108)),
+    == omni::fn::branch(omni::fn::ct_const<true>(),
+      omni::fn::ct_const<815>(),
+      omni::fn::ct_const<108>()),
   "branch must remain usable in a C++11 constant expression");
 
 static_assert(815
-    == omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<42>()),
-      omni::fn::identity(815),
+    == omni::fn::branch(omni::fn::ct_pred(omni::fn::ct_const<42>()),
+      omni::fn::ct_const<815>(),
       unavailable{}),
   "compile-time branch must not instantiate the unselected callable");
 
 static_assert(108
-    == omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<0>()),
+    == omni::fn::branch(omni::fn::ct_pred(omni::fn::ct_const<0>()),
       unavailable{},
-      omni::fn::identity(108)),
+      omni::fn::ct_const<108>()),
   "compile-time branch must select the false callable");
 
 // Captureless lambdas become implicitly constexpr in C++17. This can make the
@@ -727,14 +727,20 @@ TEST(fn_partial, aliases_compat_bind_front) {
 
 TEST(fn_partial, partially_applies_branch) {
   const auto when_true =
-    omni::fn::partial(omni::fn::branch, omni::fn::identity(true));
+    omni::fn::partial(omni::fn::branch, [] { return true; });
   const auto otherwise = omni::fn::partial(omni::fn::branch,
-    omni::fn::identity(false),
-    omni::fn::identity(108));
+    [] { return false; },
+    [] { return 108; });
 
-  EXPECT_EQ(815,
-    when_true(omni::fn::identity(815), omni::fn::identity(108)));
-  EXPECT_EQ(815, otherwise(omni::fn::identity(815)));
+  EXPECT_EQ(815, when_true([] { return 815; }, [] { return 108; }));
+  EXPECT_EQ(815, otherwise([] { return 815; }));
+}
+
+TEST(fn_when, accepts_integral_constant_derived_predicate) {
+  const auto clause =
+    omni::fn::when(std::is_same<int, int>{}, [] { return 815; });
+
+  EXPECT_EQ(815, clause(unavailable{}));
 }
 
 TEST(fn_cond, selects_the_first_matching_branch) {
@@ -742,19 +748,19 @@ TEST(fn_cond, selects_the_first_matching_branch) {
   std::size_t actions{};
 
   const auto result = omni::fn::cond( //
-    omni::fn::partial(omni::fn::branch,
+    omni::fn::when(
       counted_predicate{false, predicates},
       [&actions] {
         ++actions;
         return 108;
       }),
-    omni::fn::partial(omni::fn::branch,
+    omni::fn::when(
       counted_predicate{true, predicates},
       [&actions] {
         ++actions;
         return 815;
       }),
-    omni::fn::partial(omni::fn::branch,
+    omni::fn::when(
       counted_predicate{true, predicates},
       [&actions] {
         ++actions;
@@ -774,26 +780,26 @@ TEST(fn_cond, invokes_the_fallback_when_no_branch_matches) {
   std::size_t predicates{};
 
   const auto result = omni::fn::cond( //
-    omni::fn::partial(omni::fn::branch,
+    omni::fn::when(
       counted_predicate{false, predicates},
-      omni::fn::identity(815)),
-    omni::fn::partial(omni::fn::branch,
+      [] { return 815; }),
+    omni::fn::when(
       counted_predicate{false, predicates},
-      omni::fn::identity(42)),
-    omni::fn::identity(108));
+      [] { return 42; }),
+    [] { return 108; });
 
   EXPECT_EQ(108, result);
   EXPECT_EQ(2, predicates);
-  EXPECT_EQ(815, omni::fn::cond(omni::fn::identity(815)));
+  EXPECT_EQ(815, omni::fn::cond([] { return 815; }));
 }
 
 TEST(fn_cond, returns_the_selected_move_only_value) {
   auto result = omni::fn::cond( //
-    omni::fn::partial(omni::fn::branch,
-      omni::fn::identity(false),
+    omni::fn::when(
+      [] { return false; },
       omni::fn::consume(omni::compat::make_unique<int>(108))),
-    omni::fn::partial(omni::fn::branch,
-      omni::fn::identity(true),
+    omni::fn::when(
+      [] { return true; },
       omni::fn::consume(omni::compat::make_unique<int>(815))),
     omni::fn::consume(omni::compat::make_unique<int>(42)));
 
@@ -805,12 +811,12 @@ TEST(fn_cond, returns_the_selected_move_only_value) {
 
 TEST(fn_cond, compile_time_selection_allows_unrelated_result_types) {
   const auto result = omni::fn::cond( //
-    omni::fn::partial(omni::fn::branch,
-      omni::fn::ct_pred(omni::fn::identity<0>()),
+    omni::fn::when(
+      omni::fn::ct_pred(omni::fn::ct_const<0>()),
       unavailable{}),
-    omni::fn::partial(omni::fn::branch,
-      omni::fn::ct_pred(omni::fn::identity<42>()),
-      omni::fn::identity(std::string{"oceanic"})),
+    omni::fn::when(
+      omni::fn::ct_pred(omni::fn::ct_const<42>()),
+      [] { return std::string{"oceanic"}; }),
     unavailable{});
 
   EXPECT_EQ("oceanic", result);
@@ -822,7 +828,7 @@ TEST(fn_branch, consumes_selected_move_only_value) {
   EXPECT_FALSE((omni::compat::is_invocable<decltype(selected) &>::value));
   EXPECT_TRUE((omni::compat::is_invocable<decltype(selected) &&>::value));
 
-  auto result = omni::fn::branch(omni::fn::identity(true),
+  auto result = omni::fn::branch([] { return true; },
     std::move(selected),
     omni::fn::consume(omni::compat::make_unique<int>(108)));
 
@@ -837,7 +843,7 @@ TEST(fn_branch, preserves_selected_reference) {
   int unselected = 108;
 
   int &result = omni::fn::branch(
-    omni::fn::identity(true),
+    [] { return true; },
     [&selected]() -> int & { return selected; },
     [&unselected]() -> int & { return unselected; });
 
@@ -846,18 +852,18 @@ TEST(fn_branch, preserves_selected_reference) {
 
 TEST(fn_branch, compile_time_selection_allows_unrelated_result_types) {
   const auto result =
-    omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<42>()),
-      omni::fn::identity(std::string{"oceanic"}),
-      omni::fn::identity(108));
+    omni::fn::branch(omni::fn::ct_pred(omni::fn::ct_const<42>()),
+      [] { return std::string{"oceanic"}; },
+      [] { return 108; });
 
   EXPECT_EQ("oceanic", result);
 }
 
 TEST(fn_branch, invokes_selected_mutable_callable_as_rvalue) {
   EXPECT_EQ(815,
-    omni::fn::branch(omni::fn::identity(true),
+    omni::fn::branch([] { return true; },
       mutable_result{814},
-      omni::fn::identity(108)));
+      [] { return 108; }));
 }
 
 TEST(fn_branch, selects_runtime_callable) {
@@ -865,7 +871,7 @@ TEST(fn_branch, selects_runtime_callable) {
 
   EXPECT_EQ(815,
     omni::fn::branch(
-      omni::fn::identity(value == "oceanic"),
+      [value] { return value == "oceanic"; },
       [] { return 815; },
       [] { return 108; }));
 }
@@ -875,18 +881,9 @@ TEST(fn_branch, selects_runtime_false_callable) {
 
   EXPECT_EQ("value is invalid",
     omni::fn::branch(
-      omni::fn::identity(value == "valid"),
+      [value] { return value == "valid"; },
       [] { return std::string{"oceanic"}; },
       [] { return std::string{"value is invalid"}; }));
-}
-
-TEST(fn_identity, returns_an_owned_copy_on_each_invocation) {
-  auto value = omni::fn::identity(std::string{"oceanic"});
-
-  auto first = value();
-  first = "changed";
-
-  EXPECT_EQ("oceanic", value());
 }
 
 TEST(fn_ct_pred, detects_runtime_only_predicate) {
@@ -896,9 +893,16 @@ TEST(fn_ct_pred, detects_runtime_only_predicate) {
 
 TEST(fn_branch, selects_type_encoded_predicate) {
   EXPECT_EQ(815,
-    omni::fn::branch(omni::fn::ct_pred(omni::fn::identity<42>()),
-      omni::fn::identity(815),
+    omni::fn::branch( //
+      std::is_same<int, int>{},
+      [] { return 815; },
       unavailable{}));
+
+  EXPECT_EQ(108,
+    omni::fn::branch( //
+      std::is_same<int, double>{},
+      unavailable{},
+      [] { return 108; }));
 }
 
 #if 202002L <= OMNI_CPLUSPLUS

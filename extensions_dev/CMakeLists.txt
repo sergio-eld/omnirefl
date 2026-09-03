@@ -106,11 +106,13 @@ foreach(_standard IN LISTS _supported_cpp_standards)
     omni_reflected_target(${_test_target})
     add_test(NAME ${_test_target} COMMAND ${_test_target})
 
-    if(ENABLE_BENCH AND 17 LESS_EQUAL _standard AND _standard LESS_EQUAL 23)
+    if(ENABLE_BENCH)
         set(_benchmark_target "cpp_${_standard}.benchmark.serialization")
-        add_executable(${_benchmark_target}
-            serialization_if_constexpr_bench.cpp
-            serialization_composed_bench.cpp)
+        set(_benchmark_sources serialization_composed_bench.cpp)
+        if(17 LESS_EQUAL _standard AND _standard LESS_EQUAL 23)
+            list(PREPEND _benchmark_sources serialization_if_constexpr_bench.cpp)
+        endif()
+        add_executable(${_benchmark_target} ${_benchmark_sources})
         set_target_properties(${_benchmark_target} PROPERTIES
             CXX_STANDARD ${_standard}
             CXX_STANDARD_REQUIRED YES

@@ -15,7 +15,8 @@ namespace serialization_test {
 
 struct composed {
   template <typename T>
-  static serialization::result<T> to(const ryml::ConstNodeRef &from) {
+  static serialization::compat::expected<T, std::string> to(
+    const ryml::ConstNodeRef &from) {
     return serialization::composed::deserialize.template to<T>(from);
   }
 };
@@ -23,7 +24,8 @@ struct composed {
 #if defined(__cpp_if_constexpr) && 201606L <= __cpp_if_constexpr
 struct if_constexpr {
   template <typename T>
-  static serialization::result<T> to(const ryml::ConstNodeRef &from) {
+  static serialization::compat::expected<T, std::string> to(
+    const ryml::ConstNodeRef &from) {
     return serialization::if_constexpr::deserialize.template to<T>(from);
   }
 };
@@ -121,7 +123,7 @@ TYPED_TEST(deserialization, rejects_an_invalid_nested_integer) {
         c4::to_csubstr(serialization_data::invalid_nested_integer_json)));
 
   ASSERT_FALSE(result);
-  EXPECT_EQ("invalid is not an integer", result.error());
+  EXPECT_EQ("\"invalid\" is not an integer", result.error());
 }
 
 TYPED_TEST(deserialization, rejects_an_unknown_field) {
