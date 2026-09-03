@@ -62,6 +62,28 @@ constexpr auto select(bool condition,
     : compat::invoke(std::move(when_false));
 }
 
+struct integral_constant_base_probe {
+  template <typename Value, Value Constant>
+  static std::true_type test(const std::integral_constant<Value, Constant> *);
+
+  static std::false_type test(...);
+};
+
+template <typename Derived>
+struct is_base_of_integral_constant:
+    decltype(integral_constant_base_probe::test(
+      std::declval<compat::decay_t<Derived> *>())){};
+
+// C++11 cannot deduce a function return type containing a lambda closure.
+#if OMNI_CPLUSPLUS < 201402L
+template <typename Constant>
+struct cpp11_constant_predicate {
+  constexpr Constant operator()() const {
+    return {};
+  }
+};
+#endif
+
 template <typename Predicate>
 using compile_time_result =
   std::integral_constant<bool, static_cast<bool>(compat::invoke(Predicate{}))>;
@@ -186,19 +208,6 @@ struct compile_time_predicate {
   }
 };
 
-/// Stores a copyable value for repeatable deferred retrieval.
-template <typename Value>
-struct identity_t {
-  static_assert(std::is_copy_constructible<Value>::value,
-    "identity requires a copy-constructible value");
-
-  Value value;
-
-  constexpr Value operator()() const {
-    return value;
-  }
-};
-
 /// Stores a value for a single consuming invocation.
 template <typename Value>
 struct consume_t {
@@ -209,19 +218,13 @@ struct consume_t {
   }
 };
 
-/// Stores a value in its type for repeatable compile-time retrieval.
+/// Stores a constant in its type for compile-time retrieval.
 template <typename Value, Value Constant>
-struct constant_identity {
-  constexpr Value operator()() const {
-    return Constant;
+struct ct_const_t {
+  constexpr std::integral_constant<Value, Constant> operator()() const {
+    return {};
   }
 };
-
-/// Store a copyable value for repeatable deferred retrieval.
-template <typename Value>
-constexpr identity_t<Value> identity(Value value) {
-  return {std::move(value)};
-}
 
 /// Store a value for a single consuming invocation.
 template <typename Value>
@@ -231,18 +234,18 @@ consume_t<Value> consume(Value value) {
 
 #if defined(__cpp_nontype_template_parameter_auto) \
   && 201606L <= __cpp_nontype_template_parameter_auto
-/// Return a type-encoded identity closure for compile-time dispatch.
+/// Return a callable constant for compile-time dispatch.
 template <auto Value>
-constexpr constant_identity<decltype(Value), Value> identity() {
+constexpr ct_const_t<decltype(Value), Value> ct_const() {
   return {};
 }
 #else
-/// Return a type-encoded identity closure for compile-time dispatch.
+/// Return a callable constant for compile-time dispatch.
 ///
-/// Before C++17, `identity<Value>()` is limited to `int` constants because the
+/// Before C++17, `ct_const<Value>()` is limited to `int` constants because the
 /// value type cannot be deduced as a non-type template parameter.
 template <int Value>
-constexpr constant_identity<int, Value> identity() {
+constexpr ct_const_t<int, Value> ct_const() {
   return {};
 }
 #endif
@@ -262,12 +265,17 @@ struct branch_t {
   /// Immediately invoke a predicate and only its selected operation.
   ///
   /// A runtime predicate converts both operation results to the conditional
-  /// expression's common result type. A `ct_pred` predicate selects one
-  /// operation at compile time, so no common result type is required, the
-  /// discarded operation need not be invocable, and the selected result type
-  /// is preserved. This provides C++11-compatible `if constexpr`-style
-  /// branching between callables.
-  template <typename Predicate, typename WhenTrue, typename WhenFalse>
+  /// expression's common result type. A `true_type`/`false_type`-derived
+  /// predicate or `ct_pred` selects one operation at compile time, so no common
+  /// result type is required, the discarded operation need not be invocable,
+  /// and the selected result type is preserved. This provides C++11-compatible
+  /// `if constexpr`-style branching between callables.
+  template <typename Predicate,
+    typename WhenTrue,
+    typename WhenFalse,
+    typename std::enable_if<
+      !detail::is_base_of_integral_constant<Predicate>::value,
+      int>::type = 0>
   constexpr auto operator()(Predicate predicate,
     WhenTrue when_true,
     WhenFalse when_false) const //
@@ -276,6 +284,39 @@ struct branch_t {
       when_false)) {
     return detail::select(compat::invoke(predicate), when_true, when_false);
   }
+
+#if 201402L <= OMNI_CPLUSPLUS
+  template <typename Predicate,
+    typename WhenTrue,
+    typename WhenFalse,
+    typename std::enable_if<
+      detail::is_base_of_integral_constant<Predicate>::value,
+      int>::type = 0>
+  constexpr auto operator()(Predicate,
+    WhenTrue when_true,
+    WhenFalse when_false) const {
+    return (*this)([]() { return Predicate{}; },
+      std::move(when_true),
+      std::move(when_false));
+  }
+#else
+  template <typename Predicate,
+    typename WhenTrue,
+    typename WhenFalse,
+    typename std::enable_if<
+      detail::is_base_of_integral_constant<Predicate>::value,
+      int>::type = 0>
+  constexpr auto operator()(Predicate,
+    WhenTrue when_true,
+    WhenFalse when_false) const //
+    -> decltype((*this)(detail::cpp11_constant_predicate<Predicate>{},
+      std::move(when_true),
+      std::move(when_false))) {
+    return (*this)(detail::cpp11_constant_predicate<Predicate>{},
+      std::move(when_true),
+      std::move(when_false));
+  }
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -302,9 +343,7 @@ constexpr auto partial(Function &&function, Bound &&...bound)
 
 namespace detail {
 
-// `cond` clauses commonly use `partial(branch, ...)`. A dedicated closure
-// avoids instantiating the substantially more general `bind_front` invocation
-// machinery while preserving its value-category behavior.
+// when(predicate, left) := partial(branch, predicate, left)
 template <typename Predicate, typename WhenTrue>
 struct partial_branch {
   Predicate predicate;
@@ -387,6 +426,49 @@ constexpr auto partial(branch_t,
   return {std::forward<Predicate>(predicate),
     std::forward<WhenTrue>(when_true)};
 }
+
+/// Create a `cond` clause by binding a predicate and its selected operation.
+template <typename Predicate,
+  typename WhenTrue,
+  typename std::enable_if<
+    !detail::is_base_of_integral_constant<Predicate>::value,
+    int>::type = 0>
+constexpr auto when(Predicate &&predicate, WhenTrue &&when_true) //
+  -> decltype(partial(branch,
+    std::forward<Predicate>(predicate),
+    std::forward<WhenTrue>(when_true))) {
+  return partial(branch,
+    std::forward<Predicate>(predicate),
+    std::forward<WhenTrue>(when_true));
+}
+
+// C++14 can deduce a return type containing the lifted lambda closure.
+#if 201402L <= OMNI_CPLUSPLUS
+template <typename Predicate,
+  typename WhenTrue,
+  typename std::enable_if<
+    detail::is_base_of_integral_constant<Predicate>::value,
+    int>::type = 0>
+auto when(Predicate, WhenTrue &&when_true) {
+  return partial(branch,
+    []() { return compat::decay_t<Predicate>{}; },
+    std::forward<WhenTrue>(when_true));
+}
+#else
+template <typename Predicate,
+  typename WhenTrue,
+  typename std::enable_if<
+    detail::is_base_of_integral_constant<Predicate>::value,
+    int>::type = 0>
+constexpr auto when(Predicate, WhenTrue &&when_true) //
+  -> decltype(partial(branch,
+    detail::cpp11_constant_predicate<compat::decay_t<Predicate>>{},
+    std::forward<WhenTrue>(when_true))) {
+  return partial(branch,
+    detail::cpp11_constant_predicate<compat::decay_t<Predicate>>{},
+    std::forward<WhenTrue>(when_true));
+}
+#endif
 
 namespace detail {
 
