@@ -91,8 +91,8 @@ struct sized_integer_field_types_t {
 } // namespace nested
 
 struct type_name_t {
-  template <typename T>
-  std::string operator()(omni::meta_t<T> meta) const {
+  template <typename _M>
+  std::string operator()(omni::meta_t<_M> meta) const {
     return meta.type_name();
   }
 
@@ -105,8 +105,8 @@ struct type_name_t {
 type_name_t const static type_name{};
 
 struct qualified_type_name_t {
-  template <typename T>
-  std::string operator()(omni::meta_t<T> meta) const {
+  template <typename _M>
+  std::string operator()(omni::meta_t<_M> meta) const {
     return meta.qualified_type_name();
   }
 
@@ -122,7 +122,7 @@ namespace enumerators {
 
 struct enum_type_enumerators_t {
   template <typename T>
-  std::string operator()(omni::binding_t<T> binding) const {
+  std::string operator()(omni::enum_binding_t<T> binding) const {
     auto es = binding.enumerators();
     std::string result;
     bool first = true;
@@ -181,7 +181,7 @@ struct qualified_field_type_names_visitor {
 
 struct record_type_fields_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(fields_visitor{}, binding.public_fields());
   }
 };
@@ -190,7 +190,7 @@ record_type_fields_t const static record_type_fields{};
 
 struct record_type_field_type_names_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(field_type_names_visitor{},
       binding.public_fields());
   }
@@ -198,7 +198,7 @@ struct record_type_field_type_names_t {
 
 struct record_type_field_qualified_type_names_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(qualified_field_type_names_visitor{},
       binding.public_fields());
   }
@@ -227,9 +227,8 @@ struct field_values_visitor {
 
 struct record_type_field_values_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
-    return omni::compat::apply(field_values_visitor{},
-      binding.public_fields());
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
+    return omni::compat::apply(field_values_visitor{}, binding.public_fields());
   }
 };
 
@@ -273,7 +272,7 @@ inline std::string bool_name(bool value) {
 template <typename Field>
 std::string flags_for() {
   return std::string{Field::name()} //
-    + ":const=" + bool_name(Field::is_const()) //
+  + ":const=" + bool_name(Field::is_const()) //
     + ":mutable=" + bool_name(Field::is_mutable()) //
     + ":volatile=" + bool_name(Field::is_volatile());
 }
@@ -281,7 +280,7 @@ std::string flags_for() {
 template <typename Field>
 std::string meta_write_for() {
   return std::string{Field::name()} //
-    + ":mutable_owner="
+  + ":mutable_owner="
     + bool_name(can_set_meta<Field, field_qualification_record_t &, int>::value)
     + ":const_owner="
     + bool_name(
@@ -291,7 +290,7 @@ std::string meta_write_for() {
 template <typename Binding>
 std::string binding_write_for() {
   return std::string{Binding::name()} //
-    + ":set_value=" + bool_name(can_set_binding<Binding, int>::value);
+  + ":set_value=" + bool_name(can_set_binding<Binding, int>::value);
 }
 
 struct field_flags_visitor {
@@ -317,16 +316,16 @@ struct binding_write_visitor {
 
 struct additional_volatile_forms_t {
   template <typename T>
-  int operator()(omni::binding_t<const volatile T &> const_volatile_binding,
-    omni::binding_t<T &> mutable_binding) const {
+  int operator()(
+    omni::record_binding_t<const volatile T &> const_volatile_binding,
+    omni::record_binding_t<T &> mutable_binding) const {
     auto const_volatile_fields = const_volatile_binding.public_fields();
     auto mutable_fields = mutable_binding.public_fields();
     typedef decltype(std::get<0>(const_volatile_fields)
         .value()) const_volatile_reference;
     typedef decltype(std::get<1>(const_volatile_fields)
         .value()) mutable_volatile_reference;
-    typedef decltype(std::get<2>(mutable_fields)
-        .value()) volatile_reference;
+    typedef decltype(std::get<2>(mutable_fields).value()) volatile_reference;
     typedef
       typename std::tuple_element<1, decltype(const_volatile_fields)>::type
         mutable_volatile_field;
@@ -364,29 +363,29 @@ struct additional_volatile_forms_t {
 additional_volatile_forms_t const static additional_volatile_forms{};
 
 struct field_flags_from_meta_t {
-  template <typename T>
-  std::vector<std::string> operator()(omni::meta_t<T> meta) const {
+  template <typename _M>
+  std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
     return omni::compat::apply(field_flags_visitor{}, meta.public_fields());
   }
 };
 
 struct field_flags_from_binding_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(field_flags_visitor{}, binding.public_fields());
   }
 };
 
 struct meta_write_availability_t {
-  template <typename T>
-  std::vector<std::string> operator()(omni::meta_t<T> meta) const {
+  template <typename _M>
+  std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
     return omni::compat::apply(meta_write_visitor{}, meta.public_fields());
   }
 };
 
 struct binding_write_availability_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(binding_write_visitor{},
       binding.public_fields());
   }
@@ -415,7 +414,7 @@ struct assign_fields {
   template <typename FieldBinding>
   typename std::enable_if<
     std::is_same<int,
-      typename std::decay<typename FieldBinding::type>::type>::value,
+      omni::compat::decay_t<typename FieldBinding::type>>::value,
     void>::type
     assign_one(FieldBinding b) const {
     b.set_value(expected.first);
@@ -425,7 +424,7 @@ struct assign_fields {
   template <typename FieldBinding>
   typename std::enable_if<
     std::is_same<std::string,
-      typename std::decay<typename FieldBinding::type>::type>::value,
+      omni::compat::decay_t<typename FieldBinding::type>>::value,
     void>::type
     assign_one(FieldBinding b) const {
     b.set_value(expected.second);
@@ -434,7 +433,7 @@ struct assign_fields {
 
 struct record_type_field_write_t {
   template <typename T>
-  void operator()(omni::binding_t<T &> binding,
+  void operator()(omni::record_binding_t<T &> binding,
     const record_type_t &expected) const {
     omni::compat::apply(assign_fields{expected}, binding.public_fields());
   }
@@ -442,7 +441,7 @@ struct record_type_field_write_t {
 
 struct record_type_field_write_and_return_t {
   template <typename T>
-  typename std::decay<T>::type operator()(omni::binding_t<T> binding,
+  omni::compat::decay_t<T> operator()(omni::record_binding_t<T> binding,
     const record_type_t &expected) const {
     omni::compat::apply(assign_fields{expected}, binding.public_fields());
     return std::move(binding.record);
@@ -450,14 +449,13 @@ struct record_type_field_write_and_return_t {
 };
 
 record_type_field_write_t const static record_type_field_write{};
-record_type_field_write_and_return_t const static
-  record_type_field_write_and_return{};
+record_type_field_write_and_return_t const static record_type_field_write_and_return{};
 
 struct record_type_field_write_call_t {
   record_type_t expected;
 
   template <typename T>
-  void operator()(omni::binding_t<T &> binding) const {
+  void operator()(omni::record_binding_t<T &> binding) const {
     record_type_field_write(binding, expected);
   }
 };
@@ -466,7 +464,7 @@ struct record_type_field_write_and_return_call_t {
   record_type_t expected;
 
   template <typename T>
-  typename std::decay<T>::type operator()(omni::binding_t<T> binding) const {
+  omni::compat::decay_t<T> operator()(omni::record_binding_t<T> binding) const {
     return record_type_field_write_and_return(binding, expected);
   }
 };
@@ -482,8 +480,8 @@ struct rvalue_binding_result_t {
 
 struct rvalue_binding_can_be_named_t {
   template <typename T>
-  rvalue_binding_result_t operator()(omni::binding_t<T>) const {
-    using value_type = typename std::decay<T>::type;
+  rvalue_binding_result_t operator()(omni::record_binding_t<T>) const {
+    using value_type = omni::compat::decay_t<T>;
     auto value = omni::reflected(value_type{815, "oceanic"});
     return {
       field_value_read::record_type_field_values(value),

@@ -20,7 +20,7 @@ int main() {
 
   std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
 
-  const auto write = [](omni::binding auto b)
+  const auto write = [](omni::record_binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
       // `omni::fn::each` is the QoL equivalent of expanding a visitor over a

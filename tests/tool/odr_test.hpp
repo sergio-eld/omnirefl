@@ -12,7 +12,7 @@ namespace odr_test {
 
 struct get_field_name_values_t {
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> value) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> value) const {
     // todo: use range for loop
     return omni::compat::apply(_collect_fields_info{}, value.public_fields());
   }
@@ -60,6 +60,6 @@ std::vector<std::string> in_header_call(const T &value) noexcept {
 }
 
 // defined in test_static_odr.cpp
-std::vector<std::string> get_field_name_values_from(const input&);
+std::vector<std::string> get_field_name_values_from(const input &);
 
 } // namespace odr_test

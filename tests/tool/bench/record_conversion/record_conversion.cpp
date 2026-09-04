@@ -39,9 +39,9 @@ enum class conversion_type {
 namespace reflected_visitors {
 
 inline constexpr auto benchmark_name = //
-  [](omni::meta auto source,
-    const omni::binding auto conversion,
-    omni::meta auto batch_convert) -> std::string {
+  [](omni::record_meta auto source,
+    const omni::enum_binding auto conversion,
+    omni::record_meta auto batch_convert) -> std::string {
   const std::string_view type = source.type_name();
   const std::string_view qualified_type = source.qualified_type_name();
   const auto type_separator = qualified_type.rfind("::");
@@ -89,11 +89,11 @@ To reflected_convert(From &&from, omni::type_t<To> target_type) {
   };
 
   const auto visit = //
-    [](omni::binding auto source, omni::meta auto target) -> To {
+    [](omni::record_binding auto source, omni::record_meta auto target) -> To {
     // GCC 15 may miss dead-store elimination for this default initialization
     // after lowering the field traversal below.
     To result{};
-    omni::binding auto destination = target.bind(result);
+    omni::record_binding auto destination = target.bind(result);
     std::apply(
       [&source](omni::field_binding auto... to) -> void {
         (std::apply( //
@@ -114,7 +114,7 @@ To reflected_convert(From &&from, omni::type_t<To> target_type) {
 template <typename From, typename To>
 To aggregate_into_convert(From &&from, omni::type_t<To> target_type) {
   return omni::reflected_call(
-    [](omni::binding auto source, omni::meta auto) -> To {
+    [](omni::record_binding auto source, omni::record_meta auto) -> To {
       return omni::refl::aggregate_into<To>(source.public_fields());
     },
     std::forward<From>(from),

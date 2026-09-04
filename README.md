@@ -63,7 +63,7 @@ int main() {
 
   std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
 
-  const auto write = [](omni::binding auto b)
+  const auto write = [](omni::record_binding auto b)
     // Generic lambdas used as reflected visitors must spell the return type.
     -> void {
       // `omni::fn::each` is the QoL equivalent of expanding a visitor over a
@@ -178,6 +178,10 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
 - **Invocation and bindings:**
   - `reflected_call` value arguments produce non-owning bindings;
     `omni::type<T>` requests metadata without constructing `T`
+  - record and enum metadata expose their domain type through `reflected_type`;
+    the generated metadata template argument is intentionally opaque
+  - field bindings expose the cv-qualified owner object type separately from
+    opaque field metadata
   - one visitor can receive multiple value and type arguments
   - value bindings preserve const/volatile and lvalue/rvalue qualification;
     visitor value and reference returns are preserved
@@ -456,6 +460,9 @@ namespace detail {
 // complete.
 template <typename T>
 struct _reflected<struct app::root, T> {
+  // Internal discovery hook for the reflected C++ type.
+  using type = T;
+
   // Metadata omitted.
 };
 
@@ -466,6 +473,9 @@ struct _reflected<T,
   typename std::enable_if<
     std::is_same<T, typename _wrt<app::root, T>::type::nested>::value,
     T>::type> {
+  // Internal discovery hook for the reflected C++ type.
+  using type = T;
+
   // Metadata omitted.
 };
 

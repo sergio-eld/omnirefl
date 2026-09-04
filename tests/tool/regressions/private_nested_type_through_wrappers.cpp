@@ -54,11 +54,14 @@ TEST(regression, private_nested_type_through_wrappers) {
         using variant_child_t = std::variant_alternative_t<0, variant_t>;
 
         using vector_fields_t =
-          decltype(omni::reflected<vector_child_t>().public_fields());
+          decltype(omni::reflected(omni::type_t<vector_child_t>{})
+              .public_fields());
         using tuple_fields_t =
-          decltype(omni::reflected<tuple_child_t>().public_fields());
+          decltype(omni::reflected(omni::type_t<tuple_child_t>{})
+              .public_fields());
         using variant_fields_t =
-          decltype(omni::reflected<variant_child_t>().public_fields());
+          decltype(omni::reflected(omni::type_t<variant_child_t>{})
+              .public_fields());
 
         return {
           std::tuple_element_t<0, vector_fields_t>::name(),

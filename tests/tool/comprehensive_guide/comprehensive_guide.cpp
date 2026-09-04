@@ -29,17 +29,6 @@ namespace {
 
 namespace meta {
 
-template <template <typename...> typename, typename>
-struct is_template: std::false_type {};
-
-template <template <typename...> typename Template, typename... T>
-struct is_template<Template, Template<T...>>: std::true_type {};
-
-template <template <typename...> typename Template, typename T>
-constexpr bool is() noexcept {
-  return is_template<Template, T>::value;
-}
-
 template <typename T>
 concept range_like = requires(T value) {
   typename T::value_type;
@@ -79,15 +68,15 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  *
  * Reflected argument examples:
  *   foo f = ...;
- *   reflected_call(visit, omni::type<foo>);  // omni::meta_t<foo>
- *   reflected_call(visit, foo{});            // omni::binding_t<foo>
- *   reflected_call(visit, f);                // omni::binding_t<foo &>
- *   reflected_call(visit, std::as_const(f)); // omni::binding_t<const foo &>
- *   reflected_call(visit, std::move(f));     // omni::binding_t<foo>
+ *   reflected_call(visit, omni::type<foo>);  // record_meta_t<_M>
+ *   reflected_call(visit, foo{});            // record_binding_t<foo &&>
+ *   reflected_call(visit, f);                // record_binding_t<foo &>
+ *   reflected_call(visit, std::as_const(f)); // record_binding_t<const foo &>
+ *   reflected_call(visit, std::move(f));     // record_binding_t<foo &&>
  *
  *   const bar b = ...;
- *   reflected_call(visit, f, b); // omni::binding_t<foo &>,
- *                               // omni::binding_t<const bar &>
+ *   reflected_call(visit, f, b);             // record_binding_t<foo &>,
+ *                                            // record_binding_t<const bar &>
  *
  * NOTE: `constexpr auto result = reflected_call(...)` is not supported as of
  * this writing because it triggers visitor body instantiation. The `visit`
@@ -106,9 +95,16 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  * `-> void`. A deduced return type can instantiate the lambda body during tool
  * run, before generated metadata exists.
  *
+ * Public metadata wraps an opaque generated `_M`; use
+ * `meta_t<_M>::reflected_type`, not `_M` directly.
+ *
  * Field tuple mapping:
- *   omni::meta_t<T>::public_fields()    -> omni::field_meta_t<...>
- *   omni::binding_t<T>::public_fields() -> omni::field_binding_t<...>
+ *   omni::record_meta_t<_M>::public_fields() -> omni::field_meta_t<FieldMeta>
+ *   omni::record_binding_t<T>::public_fields()
+ *     -> omni::field_binding_t<Owner, FieldMeta>
+ *
+ * `Owner` carries the cv qualification of the bound record object. Field
+ * bindings are always non-owning because a field cannot outlive its record.
  *
  * The first test below shows the stable reflected-scope interface. The rest of
  * this file covers enums, bindings, dependency routes, documentation,
@@ -212,7 +208,7 @@ TEST(exposition, reflected_scope_overview) {
              .name = field.name(),
              // Field declaration spelling with the outer namespace omitted.
              // Reflectable field types can be queried separately through
-             // `omni::reflected<FieldMeta::type>()`.
+             // `omni::reflected(omni::type<FieldMeta::type>)`.
              .type_name = field.type_name(),
              // Source spelling with namespaces restored when Clang can
              // identify the declaration.
@@ -319,7 +315,7 @@ TEST(exposition, reflected_scope_overview) {
 // Field bindings allow mutation of public data members, including bitfields.
 TEST(exposition, write_foobar) {
   const auto write_foobar = //
-    [](omni::binding auto b) -> exposition::foobar_record {
+    [](omni::record_binding auto b) -> exposition::foobar_record {
     omni::compat::apply(
       [](omni::field_binding auto... field) {
         const auto write = [](omni::field_binding auto field) {
@@ -367,7 +363,7 @@ TEST(example, enum_names) {
 
   EXPECT_EQ("draft"sv,
     omni::reflected_call(
-      [](const omni::binding auto status) -> std::string_view {
+      [](const omni::enum_binding auto status) -> std::string_view {
         const auto enumerators = status.enumerators();
         const auto it = std::find_if(enumerators.begin(),
           enumerators.end(),
@@ -387,7 +383,7 @@ TEST(example, enum_names) {
 
   EXPECT_EQ(k_expected_pairs,
     omni::reflected_call(
-      [](omni::meta auto status)
+      [](omni::enum_meta auto status)
         -> std::vector<std::pair<example::status, std::string_view>> {
         const auto enumerators = status.enumerators();
         return {enumerators.begin(), enumerators.end()};
@@ -409,9 +405,9 @@ TEST(example, binding_storage_forms) {
   };
 
   const auto inspect = //
-    [](omni::binding auto mutable_binding,
-      omni::binding auto const_binding,
-      omni::binding auto rvalue_binding) -> int {
+    [](omni::record_binding auto mutable_binding,
+      omni::record_binding auto const_binding,
+      omni::record_binding auto rvalue_binding) -> int {
     // `reflected_call` arguments are non-owning bindings. An rvalue binding
     // preserves the consuming value category without moving the whole value.
     EXPECT_EQ(false, decltype(mutable_binding)::owning::value);
@@ -440,10 +436,10 @@ TEST(example, binding_storage_forms) {
 TEST(example, reflected_value_query) {
   using namespace std::string_view_literals;
 
-  const auto query_value = [](omni::binding auto b) -> std::string_view {
+  const auto query_value = [](omni::record_binding auto b) -> std::string_view {
     // `omni::reflected(value)` is a reflected-scope convenience query. It keeps
     // the value qualification instead of forcing the user to spell `decltype`.
-    const omni::binding auto same_value = omni::reflected(b.record);
+    const omni::record_binding auto same_value = omni::reflected(b.record);
     return same_value.type_name();
   };
 
@@ -452,7 +448,7 @@ TEST(example, reflected_value_query) {
 }
 
 TEST(example, meta_bind_and_field_metadata) {
-  const auto inspect = [](omni::meta auto record) -> int {
+  const auto inspect = [](omni::record_meta auto record) -> int {
     // `meta.bind()` default-constructs an owning binding when the reflected
     // type is default constructible. `meta.bind(value)` binds an existing
     // object.
@@ -511,7 +507,7 @@ TEST(example, primary_template_read_data) {
   };
 
   const auto read_fields =
-    [](omni::binding auto b) -> std::vector<rendered_field> {
+    [](omni::record_binding auto b) -> std::vector<rendered_field> {
     std::vector<rendered_field> out;
 
     omni::compat::apply(
@@ -651,13 +647,13 @@ TEST(example, primary_template_from_map) {
         []<typename From>(const From &from) -> T {
           if constexpr (std::is_same_v<From, T>) {
             return from;
-          } else if constexpr (meta::is<std::basic_string, From>()
-            && meta::is<std::basic_string, T>()) {
+          } else if constexpr (omni::traits::is<std::basic_string, From>()
+            && omni::traits::is<std::basic_string, T>()) {
             // Convert between different `std::basic_string` specializations,
             // for example when the target record uses a custom allocator.
             return {from.begin(), from.end()};
-          } else if constexpr (meta::is<std::vector, From>()
-            && meta::is<std::vector, T>()) {
+          } else if constexpr (omni::traits::is<std::vector, From>()
+            && omni::traits::is<std::vector, T>()) {
             return {from.begin(), from.end()};
           } else {
             return {};
@@ -835,7 +831,7 @@ TEST(example, annotated_dependencies) {
   };
 
   const auto rendered = omni::reflected_call(
-    []<omni::meta Record>(Record record) -> rendered_context {
+    []<omni::record_meta RecordMeta>(RecordMeta record) -> rendered_context {
       const auto render_type = [](omni::meta auto type) -> rendered_type {
         return {
           .type_name = type.type_name(),
@@ -844,108 +840,118 @@ TEST(example, annotated_dependencies) {
         };
       };
 
+      // Supported nested type aliases are resolved as dependencies of the
+      // reflected record and are therefore available in this reflected scope.
+      using reflected_record = typename RecordMeta::reflected_type;
+
       rendered_context out{
         .type = render_type(record),
       };
 
-      if constexpr (requires { typename Record::type::type; }) {
+      if constexpr (requires { typename reflected_record::type; }) {
         out.protocol_types.push_back({
           .protocol = "type",
-          .type = render_type(omni::reflected<typename Record::type::type>()),
+          .type = render_type(
+            omni::reflected(omni::type<typename reflected_record::type>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::value_type; }) {
+      if constexpr (requires { typename reflected_record::value_type; }) {
         out.protocol_types.push_back({
           .protocol = "value_type",
-          .type =
-            render_type(omni::reflected<typename Record::type::value_type>()),
+          .type = render_type(
+            omni::reflected(omni::type<typename reflected_record::value_type>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::first_type; }) {
+      if constexpr (requires { typename reflected_record::first_type; }) {
         out.protocol_types.push_back({
           .protocol = "first_type",
-          .type =
-            render_type(omni::reflected<typename Record::type::first_type>()),
+          .type = render_type(
+            omni::reflected(omni::type<typename reflected_record::first_type>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::second_type; }) {
+      if constexpr (requires { typename reflected_record::second_type; }) {
         out.protocol_types.push_back({
           .protocol = "second_type",
-          .type =
-            render_type(omni::reflected<typename Record::type::second_type>()),
+          .type = render_type(omni::reflected(
+            omni::type<typename reflected_record::second_type>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::key_type; }) {
+      if constexpr (requires { typename reflected_record::key_type; }) {
         out.protocol_types.push_back({
           .protocol = "key_type",
-          .type =
-            render_type(omni::reflected<typename Record::type::key_type>()),
+          .type = render_type(
+            omni::reflected(omni::type<typename reflected_record::key_type>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::error_type; }) {
+      if constexpr (requires { typename reflected_record::error_type; }) {
         out.protocol_types.push_back({
           .protocol = "error_type",
-          .type =
-            render_type(omni::reflected<typename Record::type::error_type>()),
+          .type = render_type(
+            omni::reflected(omni::type<typename reflected_record::error_type>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::value; }) {
+      if constexpr (requires { typename reflected_record::value; }) {
         out.protocol_types.push_back({
           .protocol = "value",
-          .type = render_type(omni::reflected<typename Record::type::value>()),
+          .type = render_type(
+            omni::reflected(omni::type<typename reflected_record::value>)),
         });
       }
 
-      if constexpr (requires { typename Record::type::mapped_type; }) {
+      if constexpr (requires { typename reflected_record::mapped_type; }) {
         out.protocol_types.push_back({
           .protocol = "mapped_type",
-          .type =
-            render_type(omni::reflected<typename Record::type::mapped_type>()),
+          .type = render_type(omni::reflected(
+            omni::type<typename reflected_record::mapped_type>)),
         });
       }
 
       omni::compat::apply(
         [&out, render_type](omni::field_meta auto... field) {
-          const auto render = [&out, render_type]<omni::field_meta Field>(
-                                Field field) {
-            out.public_fields.push_back({
-              .name = field.name(),
-              .type_name = field.type_name(),
-              .annotation = field.documentation(),
-            });
+          const auto render = //
+            [&out, render_type]<omni::field_meta Field>(Field field) {
+              out.public_fields.push_back({
+                .name = field.name(),
+                .type_name = field.type_name(),
+                .annotation = field.documentation(),
+              });
 
-            if constexpr (meta::is<std::tuple, typename Field::type>()) {
-              std::invoke(
-                [&out, render_type]<typename... T>(
-                  omni::type_t<std::tuple<T...>>) {
-                  (out.from_tuple.push_back(render_type(omni::reflected<T>())),
-                    ...);
-                },
-                omni::type<typename Field::type>);
-            }
+              if constexpr (omni::traits::is<std::tuple,
+                              typename Field::type>()) {
+                std::invoke(
+                  [&out, render_type]<typename... T>(
+                    omni::type_t<std::tuple<T...>>) {
+                    (out.from_tuple.push_back(
+                       render_type(omni::reflected(omni::type<T>))),
+                      ...);
+                  },
+                  omni::type<typename Field::type>);
+              }
 
-            if constexpr (meta::is<std::variant, typename Field::type>()) {
-              std::invoke(
-                [&out, render_type]<typename... T>(
-                  omni::type_t<std::variant<T...>>) {
-                  (out.from_variant.push_back(
-                     render_type(omni::reflected<T>())),
-                    ...);
-                },
-                omni::type<typename Field::type>);
-            }
+              if constexpr (omni::traits::is<std::variant,
+                              typename Field::type>()) {
+                std::invoke(
+                  [&out, render_type]<typename... T>(
+                    omni::type_t<std::variant<T...>>) {
+                    (out.from_variant.push_back(
+                       render_type(omni::reflected(omni::type<T>))),
+                      ...);
+                  },
+                  omni::type<typename Field::type>);
+              }
 
-            if constexpr (meta::is<std::vector, typename Field::type>()) {
-              out.from_vector.push_back(render_type(
-                omni::reflected<typename Field::type::value_type>()));
-            }
-          };
+              if constexpr (omni::traits::is<std::vector,
+                              typename Field::type>()) {
+                out.from_vector.push_back(render_type(omni::reflected(
+                  omni::type<typename Field::type::value_type>)));
+              }
+            };
 
           (render(field), ...);
         },
@@ -1136,8 +1142,8 @@ struct type_name {
     return binding.type_name();
   }
 
-  template <typename Meta>
-  const char *operator()(omni::meta_t<Meta> type) const {
+  template <typename _M>
+  const char *operator()(omni::meta_t<_M> type) const {
     return type.type_name();
   }
 };
@@ -1161,7 +1167,7 @@ namespace record_conversion {
 template <typename From, typename To>
 To convert(From &&from, omni::type_t<To> target_type) {
   const auto visit = //
-    [](omni::binding auto source, omni::meta auto target) -> To {
+    [](omni::record_binding auto source, omni::record_meta auto target) -> To {
     [[maybe_unused]] static auto assign_matching_field = //
       [](omni::field_binding auto from,
         omni::field_binding auto... to) -> void {
@@ -1187,7 +1193,7 @@ To convert(From &&from, omni::type_t<To> target_type) {
     To result{};
     // Bind the existing destination non-owningly so conversion does not move
     // the complete object into and back out of binding storage.
-    omni::binding auto destination = target.bind(result);
+    omni::record_binding auto destination = target.bind(result);
     std::apply(
       [&destination](omni::field_binding auto... f) -> void {
         std::apply(
@@ -1224,8 +1230,8 @@ TEST(example, convert_moves_same_named_fields) {
     .payload = std::make_unique<int>(42),
   };
 
-  auto output = record_conversion::convert(
-    std::move(input), omni::type<record_conversion::destination>);
+  auto output = record_conversion::convert(std::move(input),
+    omni::type<record_conversion::destination>);
 
   EXPECT_EQ("example", output.name);
   ASSERT_NE(nullptr, output.payload);
@@ -1267,7 +1273,7 @@ TEST(example, filter_fields_before_set_value) {
   };
 
   omni::reflected_call(
-    [](omni::binding auto binding) -> void {
+    [](omni::record_binding auto binding) -> void {
       std::apply(
         [](omni::field_binding auto... field) -> void {
           const auto set_if_assignable = //
@@ -1358,7 +1364,7 @@ TEST(example, public_fields_follow_member_visibility) {
   // for the current implementation.
   EXPECT_EQ(expected,
     omni::reflected_call(
-      [](omni::binding auto binding)
+      [](omni::record_binding auto binding)
         -> std::vector<std::pair<std::string_view, int>> {
         return std::apply(
           [](omni::field_binding auto... field)
@@ -1386,7 +1392,7 @@ TEST(example, public_fields_omit_ambiguous_base_members) {
   // neither is visible through `ambiguous_bases` or exposed by public_fields().
   EXPECT_EQ(expected,
     omni::reflected_call(
-      [](omni::binding auto binding)
+      [](omni::record_binding auto binding)
         -> std::vector<std::pair<std::string_view, int>> {
         return std::apply(
           [](omni::field_binding auto... field)
@@ -1555,8 +1561,8 @@ void render_schema(std::ostringstream &out,
   omni::type_t<T>,
   std::string_view indent) {
   if constexpr (omni::is_reflected<T>::value) {
-    render_schema(out, omni::reflected<T>(), indent);
-  } else if constexpr (meta::is<std::basic_string, T>()) {
+    render_schema(out, omni::reflected(omni::type<T>), indent);
+  } else if constexpr (omni::traits::is<std::basic_string, T>()) {
     out << indent << "type: string\n";
   } else if constexpr (std::is_same_v<bool, T>) {
     out << indent << "type: boolean\n";

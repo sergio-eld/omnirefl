@@ -50,8 +50,8 @@ struct do_emplace_back {
 struct transform_record {
   template <typename T>
   // The tool pass needs the explicit result before generated metadata makes
-  // `binding_t<T>::public_fields()` available for return-type deduction.
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  // `record_binding_t<T>::public_fields()` available for return deduction.
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return binding.public_fields() //
       | omni::fn::filter(without_internal_name{})
       | omni::fn::map(stringify_field{})
@@ -176,34 +176,27 @@ static_assert(40 == omni::compat::invoke(&invoke_record::value, invoked_record),
   "member data invocation must support constant evaluation");
 #if defined(__cpp_noexcept_function_type) \
   && 201510L <= __cpp_noexcept_function_type
-static_assert(noexcept(omni::compat::invoke(
-    &invoke_record::noexcept_sum,
-    invoked_record,
-    2)),
+static_assert(
+  noexcept(
+    omni::compat::invoke(&invoke_record::noexcept_sum, invoked_record, 2)),
   "member invocation must preserve noexcept");
-static_assert(!noexcept(omni::compat::invoke(
-    &invoke_record::sum,
-    invoked_record,
-    2)),
+static_assert(
+  !noexcept(omni::compat::invoke(&invoke_record::sum, invoked_record, 2)),
   "member invocation must preserve potentially throwing calls");
 #endif
-static_assert(std::is_same<decltype(omni::compat::invoke(
-                             &invoke_record::value,
+static_assert(std::is_same<decltype(omni::compat::invoke(&invoke_record::value,
                              std::declval<invoke_record &>())),
                 int &>::value,
   "member data invocation must preserve mutable lvalues");
-static_assert(std::is_same<decltype(omni::compat::invoke(
-                             &invoke_record::value,
+static_assert(std::is_same<decltype(omni::compat::invoke(&invoke_record::value,
                              std::declval<const invoke_record &>())),
                 const int &>::value,
   "member data invocation must preserve const lvalues");
-static_assert(std::is_same<decltype(omni::compat::invoke(
-                             &invoke_record::value,
+static_assert(std::is_same<decltype(omni::compat::invoke(&invoke_record::value,
                              std::declval<invoke_record &&>())),
                 int &&>::value,
   "member data invocation must preserve mutable rvalues");
-static_assert(std::is_same<decltype(omni::compat::invoke(
-                             &invoke_record::value,
+static_assert(std::is_same<decltype(omni::compat::invoke(&invoke_record::value,
                              std::declval<const invoke_record &&>())),
                 const int &&>::value,
   "member data invocation must preserve const rvalues");
@@ -514,9 +507,11 @@ TEST(fn_concat, moves_elements_from_rvalue_tuples) {
   std::unique_ptr<int> second;
   std::tie(first, second) = std::move(result);
   const auto left_empty = omni::compat::apply(
-    [](const std::unique_ptr<int> &value) { return !value; }, left);
+    [](const std::unique_ptr<int> &value) { return !value; },
+    left);
   const auto right_empty = omni::compat::apply(
-    [](const std::unique_ptr<int> &value) { return !value; }, right);
+    [](const std::unique_ptr<int> &value) { return !value; },
+    right);
 
   ASSERT_NE(nullptr, first);
   EXPECT_EQ(20, *first);
@@ -527,8 +522,8 @@ TEST(fn_concat, moves_elements_from_rvalue_tuples) {
 }
 
 TEST(fn_concat, moves_an_owned_tuple_from_a_lazy_closure) {
-  auto append = omni::fn::concat(std::make_tuple(
-    omni::compat::make_unique<int>(22)));
+  auto append =
+    omni::fn::concat(std::make_tuple(omni::compat::make_unique<int>(22)));
 
   auto result = std::make_tuple(20) | std::move(append);
   int first{};
@@ -554,8 +549,8 @@ TEST(fn_any_of, evaluates_eager_lazy_and_piped_predicates) {
 }
 
 TEST(fn_any_of, moves_an_owned_predicate_from_a_lazy_closure) {
-  auto contains = omni::fn::any_of(
-    move_only_equals{omni::compat::make_unique<int>(22)});
+  auto contains =
+    omni::fn::any_of(move_only_equals{omni::compat::make_unique<int>(22)});
 
   EXPECT_TRUE(std::move(contains)(std::make_tuple(20, 22)));
 }
@@ -571,8 +566,8 @@ TEST(fn_none_of, evaluates_eager_lazy_and_piped_predicates) {
 }
 
 TEST(fn_none_of, moves_an_owned_predicate_from_a_lazy_closure) {
-  auto excludes = omni::fn::none_of(
-    move_only_equals{omni::compat::make_unique<int>(42)});
+  auto excludes =
+    omni::fn::none_of(move_only_equals{omni::compat::make_unique<int>(42)});
 
   EXPECT_TRUE(std::make_tuple(20, 22) | std::move(excludes));
 }
@@ -591,8 +586,8 @@ TEST(fn_not, negates_eager_lazy_and_type_predicates) {
 }
 
 TEST(fn_not, moves_an_owned_predicate_from_a_lazy_closure) {
-  auto differs = omni::fn::not_(
-    move_only_equals{omni::compat::make_unique<int>(22)});
+  auto differs =
+    omni::fn::not_(move_only_equals{omni::compat::make_unique<int>(22)});
 
   EXPECT_TRUE(std::move(differs)(20));
 }
@@ -655,9 +650,8 @@ TEST(fn_diff_by, projects_forwarded_tuple_access_categories) {
   std::tuple<const int, int> rvalue{20, 22};
   std::tuple<int> rvalue_exclusion{0};
 
-  const auto from_lvalue = omni::fn::diff_by(element_reference_category{},
-    lvalue,
-    lvalue_exclusion);
+  const auto from_lvalue =
+    omni::fn::diff_by(element_reference_category{}, lvalue, lvalue_exclusion);
   const auto from_rvalue = omni::fn::diff_by(element_reference_category{},
     std::move(rvalue),
     std::move(rvalue_exclusion));
@@ -897,8 +891,7 @@ TEST(fn_each, invokes_and_pipes_a_noncopyable_visitor) {
 TEST(fn_each, owns_mutable_state_in_a_lazy_visitor) {
   std::tuple<int, int, int> tuple{1, 2, 3};
   auto add =
-    omni::fn::each(
-      add_next_owned_value{omni::compat::make_unique<int>(10)});
+    omni::fn::each(add_next_owned_value{omni::compat::make_unique<int>(10)});
 
   std::move(add)(tuple);
 
@@ -1062,8 +1055,7 @@ TEST(fn_map, invokes_a_named_move_only_closure) {
 
 TEST(fn_map, owns_read_only_state_in_a_lazy_visitor) {
   const std::tuple<int, int, int> tuple{1, 2, 3};
-  auto add = omni::fn::map(
-    add_owned_value{omni::compat::make_unique<int>(10)});
+  auto add = omni::fn::map(add_owned_value{omni::compat::make_unique<int>(10)});
 
   const auto mapped = std::move(add)(tuple);
 
@@ -1224,8 +1216,7 @@ TEST(fn_foldl, folds_move_only_values_from_a_lazy_closure) {
     omni::compat::make_unique<int>(10),
     omni::compat::make_unique<int>(12),
   };
-  auto fold =
-    omni::fn::foldl(add_owned{}, omni::compat::make_unique<int>(20));
+  auto fold = omni::fn::foldl(add_owned{}, omni::compat::make_unique<int>(20));
 
   auto result = std::move(fold)(std::move(tuple));
 
@@ -1381,8 +1372,7 @@ TEST(fn_foldr, folds_move_only_values_from_a_lazy_closure) {
     omni::compat::make_unique<int>(10),
     omni::compat::make_unique<int>(12),
   };
-  auto fold =
-    omni::fn::foldr(add_owned{}, omni::compat::make_unique<int>(20));
+  auto fold = omni::fn::foldr(add_owned{}, omni::compat::make_unique<int>(20));
 
   auto result = std::move(fold)(std::move(tuple));
 
@@ -1527,9 +1517,9 @@ TEST(fn_contract, exposes_lazy_closure_types) {
     decltype(omni::fn::none_of(is_even{}))>::value));
   EXPECT_TRUE((std::is_same<omni::fn::not_closure<is_even>,
     decltype(omni::fn::not_(is_even{}))>::value));
-  EXPECT_TRUE((std::is_same<
-    omni::fn::diff_by_closure<element_type, std::tuple<int>>,
-    decltype(omni::fn::diff_by(element_type{}, std::tuple<int>{}))>::value));
+  EXPECT_TRUE(
+    (std::is_same<omni::fn::diff_by_closure<element_type, std::tuple<int>>,
+      decltype(omni::fn::diff_by(element_type{}, std::tuple<int>{}))>::value));
 }
 
 // The tool's bundled, standard-conforming C++11 libc++ does not provide

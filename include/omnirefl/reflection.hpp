@@ -3,6 +3,11 @@
 
 // Public reflection interface and generated metadata contract.
 
+// TODO: Extend `reflected_entity` and its metadata wrappers to support
+// scalar/fundamental field types, not only records and enums.
+// TODO: Consider a `reflected_field<&T::field>` query that exposes field
+// metadata, such as its source name, directly from a member pointer.
+
 #pragma once
 
 #include <memory>
@@ -11,6 +16,7 @@
 #include <utility>
 
 #include <omnirefl/compat.hpp>
+#include <omnirefl/traits.hpp>
 
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
 #  include <omnirefl/unique_id.hpp>
@@ -19,14 +25,29 @@
 namespace omni {
 
 namespace detail {
+
+// Generated metadata has internal linkage so it remains local to each
+// instrumented translation unit.
 namespace {
 
-// `= T` is kept for frontend compatibility with generated metadata.
+/// Generated-header specialization point.
+/// The defaulted second parameter keeps generated specializations dependent,
+/// delaying their bodies until `T` is complete.
 template <typename T, typename = T>
 struct _reflected;
 
+} // namespace
+
+// Clang tooling fails to resolve `detail::_meta` from public declarations when
+// the alias itself is in the unnamed namespace. Keep only the generated
+// specialization local to the translation unit.
 template <typename T>
-using _meta = detail::_reflected<compat::decay_t<T>>;
+using _meta = //< Internal convenience accessor for generated metadata.
+  _reflected<
+    // Specializations are generated for unqualified types.
+    compat::decay_t<T>>;
+
+namespace {
 
 constexpr bool _same_field_name(const char *lhs, const char *rhs) noexcept {
   return *lhs == *rhs && ('\0' == *lhs || _same_field_name(lhs + 1, rhs + 1));
@@ -40,9 +61,9 @@ struct _contains_field_name<Field, std::tuple<>>: std::false_type {};
 
 template <typename Field, typename Head, typename... Tail>
 struct _contains_field_name<Field, std::tuple<Head, Tail...>>:
-    std::conditional<_same_field_name(Field::name(), Head::name()),
+    compat::conditional_t<_same_field_name(Field::name(), Head::name()),
       std::true_type,
-      _contains_field_name<Field, std::tuple<Tail...>>>::type {};
+      _contains_field_name<Field, std::tuple<Tail...>>> {};
 
 // Generated field accessors use unqualified member access, so substitution
 // reflects C++ lookup from the final record, including base ambiguity.
@@ -73,11 +94,11 @@ struct _all_visible_public_fields<Record,
     _all_visible_public_fields<Record,
       std::tuple<OwnField...>,
       std::tuple<Tail...>,
-      typename std::conditional<
+      compat::conditional_t<
         _is_public_field_visible_from<Record, BaseField>::value
           && !_contains_field_name<BaseField, std::tuple<OwnField...>>::value,
         std::tuple<Collected..., BaseField>,
-        std::tuple<Collected...>>::type> {};
+        std::tuple<Collected...>>> {};
 
 template <typename Record, typename... OwnField, typename... Collected>
 struct _all_visible_public_fields<Record,
@@ -114,17 +135,10 @@ enum class reflected_entity {
   enumeration, // enum | enum class
 };
 
-// todo: consider extending reflected entity metadata for fundamental/scalar
-// field types.
-
-// todo: what about field pointer? `reflected_field<T::name>` is a valid
-// use-case, to get a string "name" for example
-
-/// todo: use the tool's pass to detect the invalid usage
-/// do not add specializations
-/// (!!!) do not instantiate this outside of a reflected scope
-///
-/// note: T is decayed by generated specialization
+/// Reflected-scope query for branching on generated metadata availability.
+/// Users must not specialize this trait: types become reflected only through
+/// instrumentation and its dependency protocol. Generated detection removes
+/// cv/ref qualification before probing the corresponding metadata.
 template <typename T, typename = void>
 struct is_reflected;
 
@@ -133,38 +147,57 @@ template <typename T, typename S>
 struct is_reflected: std::false_type {};
 #endif
 
-template <typename T>
-struct type_t {};
-
-#if OMNI_CPLUSPLUS >= 201402L
-template <typename T>
-constexpr type_t<T> type{};
-#endif
-
-// todo(high): introduce record/enum type aliases for meta_t and binding_t so
-// visitors do not spell reflected_entity. First make OMNI_TOOL_RUN infer enum
-// versus record from T; its current record default would break enum-specific
-// alias overloads before generated metadata exists.
-#if defined(OMNI_TOOL_RUN)
-template <typename T, reflected_entity = reflected_entity::record>
+#if !defined(OMNI_TOOL_RUN)
+/// Metadata wrapper; valid only within a reflected scope.
+template <typename _M, reflected_entity = _M::entity()>
 struct meta_t;
 
-template <typename T, reflected_entity = reflected_entity::record>
-struct binding_t;
-#else
-template <typename T, reflected_entity = detail::_meta<T>::entity()>
-struct meta_t;
-
+/// Value binding; valid only within a reflected scope.
 template <typename T,
   reflected_entity = detail::_meta<compat::decay_t<T>>::entity()>
 struct binding_t;
+#else
+// Ad hoc: generated entity metadata is unavailable during the tool run, but
+// reflected_call must still select record- and enum-specific visitor overloads.
+// Infer the entity from the source type until the generated header exists.
+/// Metadata wrapper; valid only within a reflected scope.
+template <typename _M,
+  reflected_entity = std::is_enum<compat::decay_t<_M>>::value
+    ? reflected_entity::enumeration
+    : reflected_entity::record>
+struct meta_t;
+
+/// Value binding; valid only within a reflected scope.
+template <typename T,
+  reflected_entity = std::is_enum<compat::decay_t<T>>::value
+    ? reflected_entity::enumeration
+    : reflected_entity::record>
+struct binding_t;
 #endif
 
-template <typename Owner, typename FieldMeta>
+/// Field metadata; valid only within a reflected scope.
+template <typename _M>
 struct field_meta_t;
 
-template <typename Record, typename FieldMeta>
+/// Field binding; valid only within a reflected scope.
+template <typename Owner, typename _M>
 struct field_binding_t;
+
+/// Reflected-scope-only record metadata; `_M` is opaque.
+template <typename _M>
+using record_meta_t = meta_t<_M, reflected_entity::record>;
+
+/// Reflected-scope-only enum metadata; `_M` is opaque.
+template <typename _M>
+using enum_meta_t = meta_t<_M, reflected_entity::enumeration>;
+
+/// Reflected-scope-only record binding.
+template <typename T>
+using record_binding_t = binding_t<T, reflected_entity::record>;
+
+/// Reflected-scope-only enum binding.
+template <typename T>
+using enum_binding_t = binding_t<T, reflected_entity::enumeration>;
 
 namespace detail {
 
@@ -181,30 +214,33 @@ struct _is_writable_field:
 // write eligibility with value assignability before calling set_value.
 
 #if defined(__cpp_concepts)
-// refactorme: consider replacing tag-only concepts with structural
-// public-interface concepts. They would advertise the callable surface
-// (`type_name`, `public_fields`, `enumerators`, field `value`/`set_value`,
-// etc.) instead of only proving that a wrapper type was produced by omnirefl.
-// Possible limitation: structural checks may instantiate too much generated
-// reflection/query surface before the generated header exists.
-// Concepts intentionally check marker tags instead of exact specialization
-// shapes. As of this writing, the entity parameter pollutes meta/binding
-// interface types; the tags keep C++20 visitor syntax stable if internals
-// change, and accept cv/ref-qualified arguments.
 template <typename T>
-concept meta = requires { typename compat::remove_cvref_t<T>::omni_meta_tag; };
+concept meta = traits::is<meta_t, T>();
 
 template <typename T>
-concept binding =
-  requires { typename compat::remove_cvref_t<T>::omni_binding_tag; };
+concept binding = traits::is<binding_t, T>();
 
 template <typename T>
-concept field_meta =
-  requires { typename compat::remove_cvref_t<T>::omni_field_meta_tag; };
+concept field_meta = traits::is<field_meta_t, T>();
 
 template <typename T>
-concept field_binding =
-  requires { typename compat::remove_cvref_t<T>::omni_field_binding_tag; };
+concept field_binding = traits::is<field_binding_t, T>();
+
+template <typename T>
+concept record_meta =
+  meta<T> && compat::remove_cvref_t<T>::entity() == reflected_entity::record;
+
+template <typename T>
+concept enum_meta = meta<T>
+  && compat::remove_cvref_t<T>::entity() == reflected_entity::enumeration;
+
+template <typename T>
+concept record_binding =
+  binding<T> && compat::remove_cvref_t<T>::entity() == reflected_entity::record;
+
+template <typename T>
+concept enum_binding = binding<T>
+  && compat::remove_cvref_t<T>::entity() == reflected_entity::enumeration;
 #endif
 
 /// Experimental utilities backed by generated reflection metadata.
@@ -214,15 +250,14 @@ concept field_binding =
 /// generated utility.
 namespace refl {
 
-/// Whether generated aggregate construction is available for `T`.
+/// Reflected-scope-only query for generated aggregate construction.
 template <typename T, typename = void>
 struct is_aggregatable: std::false_type {};
 
 template <typename T>
 struct is_aggregatable<T,
   compat::void_t<decltype(omni::detail::_meta<T>::is_aggregatable())>>:
-    std::integral_constant<bool,
-      omni::detail::_meta<T>::is_aggregatable()> {};
+    std::integral_constant<bool, omni::detail::_meta<T>::is_aggregatable()> {};
 
 namespace detail {
 
@@ -298,8 +333,8 @@ struct _get_t<Index, TargetField, Fields, Target, false> {
     return _construct_field_t<TargetField,
       field,
       Target,
-      std::is_constructible<Target, source>::value>::from(
-      std::get<Index>(fields));
+      std::is_constructible<Target,
+        source>::value>::from(std::get<Index>(fields));
   }
 
   static Target from(Fields &fields, std::false_type) {
@@ -351,6 +386,15 @@ T aggregate_into(Fields &&fields) {
 }
 
 } // namespace refl
+
+/// Instrumentation type tag; usable without generated metadata.
+template <typename T>
+struct type_t {};
+
+#if OMNI_CPLUSPLUS >= 201402L
+template <typename T>
+constexpr type_t<T> type{};
+#endif
 
 struct reflected_call_t {
   private:
@@ -404,7 +448,8 @@ struct reflected_call_t {
 #endif
 
   template <typename T>
-  static constexpr meta_t<T> _reflect_arg(type_t<T>) noexcept {
+  static constexpr meta_t<detail::_meta<compat::decay_t<T>>> _reflect_arg(
+    type_t<T>) noexcept {
     return {};
   }
 
@@ -447,7 +492,6 @@ struct reflected_arg_type<type_t<T>> {
 } // namespace
 } // namespace detail
 
-/// class to invoke a callable implementation object
 #if defined(OMNI_TOOL_RUN)
 // Tool-run operator definition must stay available in this translation unit:
 // reflected_call can receive local/unnamed visitor types, and Clang rejects a
@@ -478,8 +522,8 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #endif
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
   int registered[] = {0,
-    ((void)detail::_reflected_indexed_type<typename detail::reflected_arg_type<
-        typename std::decay<Args>::type>::type>{},
+    ((void)detail::_reflected_indexed_type<
+       typename detail::reflected_arg_type<compat::decay_t<Args>>::type>{},
       0)...};
   (void)registered;
 #else
@@ -509,70 +553,67 @@ auto reflected_call_t::operator()(Impl &&impl, Args &&...args) const
 #  endif
 #endif
 
-// Field metadata is wrapped as functions instead of exposing member pointers.
-// This keeps normal fields and bitfields on the same interface: bitfields can
-// be read/written through generated accessors, but cannot be addressed by
-// pointer-to-member.
-template <typename Owner, typename FieldMeta>
+/// Field metadata valid only within a reflected scope.
+///
+/// `_M` is opaque. Generated accessors give normal fields and bitfields the
+/// same interface because pointer-to-member cannot represent bitfields.
+template <typename _M>
 struct field_meta_t {
-  using omni_field_meta_tag = void;
-  using owner_type = compat::decay_t<Owner>;
-  using reflected = FieldMeta;
-  using type = typename reflected::type;
+  using type = typename _M::type;
 
   static constexpr const char *name() noexcept {
-    return reflected::name();
+    return _M::name();
   }
 
   /// Source-spelled field type without namespace prefixes, e.g. `outer::item`.
   static constexpr const char *type_name() noexcept {
-    return reflected::type_name();
+    return _M::type_name();
   }
 
   /// Namespace-qualified source spelling, e.g. `app::outer::item`.
   static constexpr const char *qualified_type_name() noexcept {
-    return reflected::qualified_type_name();
+    return _M::qualified_type_name();
   }
 
   /// Documentation text; empty when absent or generated with
   /// `--no-annotations`.
   static constexpr const char *documentation() noexcept {
-    return reflected::documentation();
+    return _M::documentation();
   }
 
   // Index is local to the field's declaring record.
   // Flattened inherited public field tuples may contain repeated indexes.
   static constexpr std::size_t index() noexcept {
-    return reflected::index();
+    return _M::index();
   }
 
   static constexpr bool is_const() noexcept {
-    return reflected::is_const();
+    return _M::is_const();
   }
 
   static constexpr bool is_mutable() noexcept {
-    return reflected::is_mutable();
+    return _M::is_mutable();
   }
 
   static constexpr bool is_volatile() noexcept {
-    return reflected::is_volatile();
+    return _M::is_volatile();
   }
 
   /// True when a type-preserving read equivalent to
   /// `const auto &value = object.field` is safe.
   static constexpr bool has_value_access() noexcept {
-    return reflected::has_value_access();
+    return _M::has_value_access();
   }
 
   /// True when `auto &value = object.field` can bind directly and safely.
   /// Bit-fields cannot bind directly; misaligned packed fields are unsafe.
   static constexpr bool has_reference_access() noexcept {
-    return reflected::has_reference_access();
+    return _M::has_reference_access();
   }
 
   /// True when the field declaration has a deprecated attribute.
   static constexpr bool is_deprecated() noexcept {
-    return reflected::is_deprecated();
+    return _M::is_deprecated();
   }
 
   /// Read the field through an lvalue owner.
@@ -580,7 +621,7 @@ struct field_meta_t {
   /// @details `R` keeps lookup dependent, so an unavailable generated accessor
   /// fails only when used rather than while forming `public_fields()`.
   template <typename T,
-    typename R = reflected,
+    typename R = _M,
     typename std::enable_if<R::has_value_access(), int>::type = 0>
   static constexpr auto value(T &t) noexcept -> decltype(R::value(t)) {
     return R::value(t);
@@ -591,7 +632,7 @@ struct field_meta_t {
   /// @details `R` keeps lookup dependent, so an unavailable generated accessor
   /// fails only when used rather than while forming `public_fields()`.
   template <typename T,
-    typename R = reflected,
+    typename R = _M,
     typename std::enable_if<R::has_reference_access(), int>::type = 0>
   static constexpr auto ref(T &t) noexcept -> decltype(R::ref(t)) {
     return R::ref(t);
@@ -604,7 +645,7 @@ struct field_meta_t {
   template <typename T,
     typename V,
     typename OwnerRef = T &&,
-    typename R = reflected,
+    typename R = _M,
     typename std::enable_if<R::has_value_access()
         && detail::_is_writable_field<OwnerRef, R>::value,
       int>::type = 0>
@@ -613,16 +654,17 @@ struct field_meta_t {
   }
 };
 
-// Field binding pairs field metadata with an object instance. It uses the same
-// generated accessors as field_meta_t, so bitfields remain readable/writable
-// even though pointer-to-member cannot represent them.
-template <typename Record, typename FieldMeta>
+/// Field binding valid only within a reflected scope.
+///
+/// `Owner` is the cv-qualified bound object type, including the final record
+/// through which inherited fields are accessed. `_M` is opaque.
+template <typename Owner, typename _M>
 struct field_binding_t {
-  using omni_field_binding_tag = void;
-  using type = typename FieldMeta::type;
-  using meta = FieldMeta;
+  using owner = Owner;
+  using meta = field_meta_t<_M>;
+  using type = typename meta::type;
 
-  Record &_owner;
+  owner &_owner;
 
   static constexpr const char *name() noexcept {
     return meta::name();
@@ -772,7 +814,7 @@ struct field_binding_t {
   /// @details `M` keeps generated assignment lookup and availability checks
   /// dependent until use.
   template <typename V,
-    typename OwnerRef = Record &,
+    typename OwnerRef = owner &,
     typename M = meta,
     typename std::enable_if<M::has_value_access()
         && detail::_is_writable_field<OwnerRef, M>::value,
@@ -781,72 +823,59 @@ struct field_binding_t {
     M::set_value(_owner, std::forward<V>(v));
   }
 
-  constexpr explicit field_binding_t(Record &owner): _owner(owner) {}
+  constexpr explicit field_binding_t(owner &value): _owner(value) {}
 };
 
-#if defined(OMNI_TOOL_RUN)
-template <typename T, reflected_entity Entity>
-struct meta_t {
-  using omni_meta_tag = void;
-  using type = compat::decay_t<T>;
-
-  static constexpr bool has_bases() noexcept;
-  static constexpr bool is_aggregatable() noexcept;
-
-  template <typename U>
-  static constexpr binding_t<compat::decay_t<U>> bind(U &&) noexcept;
-};
-
-template <typename T, reflected_entity Entity>
-struct binding_t {
-  using omni_binding_tag = void;
-  using type = compat::decay_t<T>;
-  using owning = typename std::conditional<std::is_reference<T>::value,
-    std::false_type,
-    std::true_type>::type;
-  using storage_t = typename std::conditional<owning::value,
-    type,
-    typename std::remove_reference<T>::type &>::type;
-
-  // Entity inference is unavailable before generated metadata exists. Both
-  // names preserve record/enum storage expressions in unevaluated visitor
-  // return types; this declaration-only shape is never constructed.
-  storage_t record;
-  storage_t enum_value;
-
-  template <typename U, reflected_entity E>
-  constexpr operator binding_t<U, E>() const noexcept;
-};
-
+/// Record metadata valid only within a reflected scope.
+template <typename _M>
+struct meta_t<_M, reflected_entity::record> {
+  // Generated metadata does not exist during instrumentation, where `_M` is
+  // temporarily the domain type itself.
+  // TODO: Guard generated-metadata-dependent members while the tool parses the
+  // translation unit, then remove the instrumentation branches below.
+#if !defined(OMNI_TOOL_RUN)
+  /// Domain type recovered from generated metadata.
+  using reflected_type = typename _M::type;
 #else
-template <typename T>
-struct meta_t<T, reflected_entity::record> {
-  using omni_meta_tag = void;
-  using reflected = detail::_meta<T>;
-  using type = typename reflected::type;
+  /// Domain type used as a metadata stand-in during instrumentation.
+  using reflected_type = compat::decay_t<_M>;
+#endif
 
-  /// Public fields visible through `type`; hidden inherited fields are omitted.
+  static constexpr reflected_entity entity() noexcept {
+    return reflected_entity::record;
+  }
+
+#if !defined(OMNI_TOOL_RUN)
+  static_assert(!std::is_enum<reflected_type>::value, "Type is not a record");
+  static_assert(is_reflected<reflected_type>::value,
+    "Type was not reflected (Calling outside a reflected scope?)");
+  static_assert(reflected_entity::record == _M::entity(),
+    "Inconsistent reflection");
+
+  /// Public fields visible through the reflected type; hidden inherited fields
+  /// are omitted.
   using public_fields_t =
-    detail::_all_visible_public_fields_t<reflected>; //< yields std::tuple<...>
+    detail::_all_visible_public_fields_t<_M>; //< yields std::tuple<...>
 
   private:
   friend struct reflected_call_t;
 
   template <typename U>
-  friend constexpr meta_t<compat::decay_t<U>> reflected() noexcept;
+  friend constexpr meta_t<detail::_meta<compat::decay_t<U>>> reflected(
+    type_t<U>) noexcept;
 
   template <typename, reflected_entity>
   friend struct binding_t;
 
   constexpr meta_t() noexcept = default;
 
-  // C++11 ad hoc. `auto` lambda arguments only since C++14
+  // C++11 generic-lambda emulation; `auto` parameters require C++14.
   template <typename _T>
   struct _bind_fields_metadata {
     _T &t;
 
     template <typename... FieldMeta>
-    constexpr auto operator()(FieldMeta...) const noexcept
+    constexpr auto operator()(field_meta_t<FieldMeta>...) const noexcept
       -> std::tuple<field_binding_t<_T, FieldMeta>...> {
       return std::make_tuple(field_binding_t<_T, FieldMeta>{t}...);
     }
@@ -858,34 +887,32 @@ struct meta_t<T, reflected_entity::record> {
       public_fields_t{})) {
     return compat::apply(_bind_fields_metadata<_T>{t}, public_fields_t{});
   }
+#endif
 
   public:
   static constexpr const char *type_name() noexcept {
-    return reflected::type_name();
+    return _M::type_name();
   }
 
   static constexpr const char *qualified_type_name() noexcept {
-    return reflected::qualified_type_name();
+    return _M::qualified_type_name();
   }
 
   static constexpr const char *documentation() noexcept {
-    return reflected::documentation();
-  }
-
-  static constexpr reflected_entity entity() noexcept {
-    return reflected::entity();
+    return _M::documentation();
   }
 
   /// Whether the record directly declares any base class.
   static constexpr bool has_bases() noexcept {
-    return reflected::has_bases();
+    return _M::has_bases();
   }
 
   /// Whether generated aggregate construction is available for the record.
   static constexpr bool is_aggregatable() noexcept {
-    return refl::is_aggregatable<type>::value;
+    return refl::is_aggregatable<reflected_type>::value;
   }
 
+#if !defined(OMNI_TOOL_RUN)
   /// Metadata for public fields visible through the reflected record.
   static constexpr public_fields_t public_fields() noexcept {
     return {};
@@ -902,91 +929,111 @@ struct meta_t<T, reflected_entity::record> {
     return binding_t<Binding>{std::forward<U>(t)};
   }
 
-  template <typename U = type,
+  // `U` keeps this constraint dependent until `bind()` participates in SFINAE.
+  template <typename U = reflected_type,
     typename std::enable_if<std::is_default_constructible<U>::value,
       int>::type = 0>
-  static constexpr binding_t<type> bind() noexcept(
-    std::is_nothrow_default_constructible<type>::value) {
-    return binding_t<type>{type{}};
+  static constexpr binding_t<reflected_type> bind() noexcept(
+    std::is_nothrow_default_constructible<reflected_type>::value) {
+    return binding_t<reflected_type>{reflected_type {}};
   }
 
   // todo: mutable_public_fields(T &t) and mutable_public_fields(const T &t)
+#else
+  template <typename U>
+  static constexpr binding_t<compat::decay_t<U>> bind(U &&) noexcept;
+#endif
 };
 
-template <typename T>
-struct meta_t<T, reflected_entity::enumeration> {
-  using omni_meta_tag = void;
-  using reflected = detail::_meta<T>;
-  using type = typename reflected::type;
+/// Enum metadata valid only within a reflected scope.
+template <typename _M>
+struct meta_t<_M, reflected_entity::enumeration> {
+  // Generated metadata does not exist during instrumentation, where `_M` is
+  // temporarily the domain type itself.
+#if !defined(OMNI_TOOL_RUN)
+  /// Domain type recovered from generated metadata.
+  using reflected_type = typename _M::type;
+#else
+  /// Domain type used as a metadata stand-in during instrumentation.
+  using reflected_type = compat::decay_t<_M>;
+#endif
 
-  static_assert(std::is_enum<type>::value, "Type is not a enum");
-  static_assert(is_reflected<type>::value,
+  static constexpr reflected_entity entity() noexcept {
+    return reflected_entity::enumeration;
+  }
+
+#if !defined(OMNI_TOOL_RUN)
+  static_assert(std::is_enum<reflected_type>::value, "Type is not an enum");
+  static_assert(is_reflected<reflected_type>::value,
     "Type was not reflected (Calling outside a reflected scope?)");
 
-  static_assert(reflected_entity::enumeration == reflected::entity(),
-    "Inconcistent reflection");
+  static_assert(reflected_entity::enumeration == _M::entity(),
+    "Inconsistent reflection");
 
   private:
   friend struct reflected_call_t;
 
   template <typename U>
-  friend constexpr meta_t<compat::decay_t<U>> reflected() noexcept;
+  friend constexpr meta_t<detail::_meta<compat::decay_t<U>>> reflected(
+    type_t<U>) noexcept;
 
   constexpr meta_t() noexcept = default;
+#endif
 
   public:
   static constexpr const char *type_name() noexcept {
-    return reflected::type_name();
+    return _M::type_name();
   }
 
   static constexpr const char *qualified_type_name() noexcept {
-    return reflected::qualified_type_name();
+    return _M::qualified_type_name();
   }
 
   static constexpr const char *documentation() noexcept {
-    return reflected::documentation();
+    return _M::documentation();
   }
 
-  static constexpr reflected_entity entity() noexcept {
-    return reflected::entity();
+#if !defined(OMNI_TOOL_RUN)
+  /// Enumerators in declaration order as `{value, name}` pairs.
+  static constexpr auto enumerators() noexcept -> decltype(_M::enumerators()) {
+    return _M::enumerators();
   }
-
-  // yields std::array of pair<type, const char*>
-  static constexpr auto enumerators() noexcept
-    -> decltype(reflected::enumerators()) {
-    return reflected::enumerators();
-  }
+#endif
 };
 
+#if !defined(OMNI_TOOL_RUN)
+/// Record binding valid only within a reflected scope.
 template <typename T>
 struct binding_t<T, reflected_entity::record> {
-  using omni_binding_tag = void;
   using type = compat::decay_t<T>;
-  using reflected = typename meta_t<type>::reflected;
+  using meta = record_meta_t<detail::_meta<type>>;
 
-  using owning = typename std::conditional<std::is_reference<T>::value,
+  using owning = compat::conditional_t<std::is_reference<T>::value,
     std::false_type,
-    std::true_type>::type;
+    std::true_type>;
 
-  using storage_t = typename std::conditional<owning::value,
+  using storage_t = compat::conditional_t<owning::value,
     type, //< own a value
-    typename std::remove_reference<T>::type & //< hold a reference
-    >::type;
+    typename std::remove_reference<T>::type &>; //< hold a reference
 
   // todo: add an explicit interface to `std::move` an owned value out of a
   // binding_t<T> without exposing the storage member.
   storage_t record;
 
+  static constexpr reflected_entity entity() noexcept {
+    return reflected_entity::record;
+  }
+
   static constexpr const char *type_name() noexcept {
-    return reflected::type_name();
+    return meta::type_name();
   }
 
   static constexpr const char *qualified_type_name() noexcept {
-    return reflected::qualified_type_name();
+    return meta::qualified_type_name();
   }
 
   static constexpr const char *documentation() noexcept {
-    return reflected::documentation();
+    return meta::documentation();
   }
 
   constexpr operator decltype((std::declval<const storage_t &>()))() const {
@@ -998,26 +1045,25 @@ struct binding_t<T, reflected_entity::record> {
   constexpr
 #  endif
     /// Bindings for public fields visible through the reflected record.
-    auto public_fields() & -> decltype(meta_t<type>::_public_fields(
+    auto public_fields() & -> decltype(meta::_public_fields(
       std::declval<storage_t &>())) {
-    return meta_t<type>::_public_fields(record);
+    return meta::_public_fields(record);
   }
 
-  constexpr auto
-    public_fields() const & -> decltype(meta_t<type>::_public_fields(
-      std::declval<const storage_t &>())) {
-    return meta_t<type>::_public_fields(record);
+  constexpr auto public_fields() const & -> decltype(meta::_public_fields(
+    std::declval<const storage_t &>())) {
+    return meta::_public_fields(record);
   }
 
-  auto public_fields() && -> decltype(meta_t<type>::_public_fields(
+  auto public_fields() && -> decltype(meta::_public_fields(
     std::declval<storage_t &>())) = delete;
 
-  auto public_fields() const && -> decltype(meta_t<type>::_public_fields(
+  auto public_fields() const && -> decltype(meta::_public_fields(
     std::declval<const storage_t &>())) = delete;
 
   private:
   friend struct reflected_call_t;
-  friend struct meta_t<type>;
+  friend struct meta_t<detail::_meta<type>, reflected_entity::record>;
 
   // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
@@ -1036,43 +1082,46 @@ struct binding_t<T, reflected_entity::record> {
       : record(std::forward<U>(u)) {}
 };
 
+/// Enum binding valid only within a reflected scope.
 template <typename T>
 struct binding_t<T, reflected_entity::enumeration> {
-  using omni_binding_tag = void;
-  using reflected = typename meta_t<T>::reflected;
-  using type = typename reflected::type;
+  using type = compat::decay_t<T>;
+  using meta = enum_meta_t<detail::_meta<type>>;
 
-  using owning = typename std::conditional<std::is_reference<T>::value,
+  using owning = compat::conditional_t<std::is_reference<T>::value,
     std::false_type,
-    std::true_type>::type;
+    std::true_type>;
 
-  using storage_t = typename std::conditional<owning::value,
+  using storage_t = compat::conditional_t<owning::value,
     type, //< own a value
-    typename std::remove_reference<T>::type & //< hold a reference
-    >::type;
+    typename std::remove_reference<T>::type &>; //< hold a reference
 
   // todo: add an explicit interface to `std::move` an owned value out of a
   // binding_t<T> without exposing the storage member.
   storage_t enum_value;
 
+  static constexpr reflected_entity entity() noexcept {
+    return reflected_entity::enumeration;
+  }
+
   static constexpr const char *type_name() noexcept {
-    return reflected::type_name();
+    return meta::type_name();
   }
 
   static constexpr const char *qualified_type_name() noexcept {
-    return reflected::qualified_type_name();
+    return meta::qualified_type_name();
   }
 
   static constexpr const char *documentation() noexcept {
-    return reflected::documentation();
+    return meta::documentation();
   }
 
   operator decltype((std::declval<const storage_t &>()))() const {
     return enum_value;
   }
 
-  static constexpr auto enumerators() -> decltype(reflected::enumerators()) {
-    return reflected::enumerators();
+  static constexpr auto enumerators() -> decltype(meta::enumerators()) {
+    return meta::enumerators();
   }
 
   private:
@@ -1094,19 +1143,72 @@ struct binding_t<T, reflected_entity::enumeration> {
     std::is_nothrow_move_constructible<type>::value)
       : enum_value(std::forward<U>(u)) {}
 };
+#else
+// Ad hoc: overload resolution instantiates reflected visitor signatures before
+// generated `_reflected` specializations exist. This stand-in duplicates only
+// the binding surface that may participate in a signature; the real definitions
+// above cannot be formed until the generated header is included.
+/// Value binding valid only within a reflected scope.
+template <typename T, reflected_entity Entity>
+struct binding_t {
+  using type = compat::decay_t<T>;
+  using owning = compat::conditional_t<std::is_reference<T>::value,
+    std::false_type,
+    std::true_type>;
+  using storage_t = compat::conditional_t<owning::value,
+    type,
+    typename std::remove_reference<T>::type &>;
+
+  // Entity inference is unavailable before generated metadata exists. Both
+  // names preserve record/enum storage expressions in unevaluated visitor
+  // return types; this declaration-only shape is never constructed.
+  storage_t record;
+  storage_t enum_value;
+
+  static constexpr reflected_entity entity() noexcept {
+    return Entity;
+  }
+
+  // Model conversion through the bound value while Clang probes concrete
+  // visitor parameter types; the instrumentation stand-in is never evaluated.
+  template <typename U, reflected_entity E>
+  constexpr operator binding_t<U, E>() const noexcept;
+};
 #endif
 
+/// Access generated metadata for a reflected type tag.
+/// Query `is_reflected<T>` first when metadata availability is conditional.
+/// TODO(high): Consider an explicit unavailable-metadata diagnostic only if it
+/// can avoid cascading errors from the incomplete generated specialization.
 template <typename T>
-constexpr meta_t<compat::decay_t<T>> reflected() noexcept {
+#if defined(OMNI_TOOL_RUN)
+constexpr meta_t<T> reflected(type_t<T>) noexcept {
+#else
+constexpr meta_t<detail::_meta<compat::decay_t<T>>> reflected(
+  type_t<T>) noexcept {
+#endif
   return {};
 }
 
-template <typename T>
+/// Bind a value to its generated metadata.
+/// Query `is_reflected<T>` first when metadata availability is conditional.
+template <typename T,
+  typename std::enable_if<!traits::is<type_t, compat::decay_t<T>>(),
+    int>::type = 0>
+#if defined(OMNI_TOOL_RUN)
 constexpr auto reflected(T &&t) noexcept(
   noexcept(meta_t<compat::decay_t<T>>::bind(std::forward<T>(t))))
   -> decltype(meta_t<compat::decay_t<T>>::bind(std::forward<T>(t))) {
   return meta_t<compat::decay_t<T>>::bind(std::forward<T>(t));
 }
+#else
+constexpr auto reflected(T &&t) noexcept(
+  noexcept(meta_t<detail::_meta<compat::decay_t<T>>>::bind(std::forward<T>(t))))
+  -> decltype(meta_t<detail::_meta<compat::decay_t<T>>>::bind(
+    std::forward<T>(t))) {
+  return meta_t<detail::_meta<compat::decay_t<T>>>::bind(std::forward<T>(t));
+}
+#endif
 
 constexpr reflected_call_t reflected_call{};
 

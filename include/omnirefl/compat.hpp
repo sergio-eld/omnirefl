@@ -23,6 +23,13 @@ struct type_identity {
 };
 
 #if OMNI_CPLUSPLUS >= 201402L
+using std::decay_t;
+#else
+template <typename T>
+using decay_t = typename std::decay<T>::type;
+#endif
+
+#if OMNI_CPLUSPLUS >= 201402L
 using std::index_sequence;
 #else
 template <std::size_t...>
@@ -57,11 +64,11 @@ constexpr auto apply(Visit &&v, Tuple &&t)
   -> decltype(_apply(std::forward<Visit>(v),
     std::forward<Tuple>(t),
     make_integer_sequence<std::size_t,
-      std::tuple_size<typename std::decay<Tuple>::type>::value>{})) {
+      std::tuple_size<decay_t<Tuple>>::value>{})) {
   return _apply(std::forward<Visit>(v),
     std::forward<Tuple>(t),
     make_integer_sequence<std::size_t,
-      std::tuple_size<typename std::decay<Tuple>::type>::value>{});
+      std::tuple_size<decay_t<Tuple>>::value>{});
 }
 
 template <typename... Ts>
@@ -112,19 +119,16 @@ struct is_reference_wrapper<std::reference_wrapper<T>>: std::true_type {};
 template <typename Class, typename Object>
 struct is_member_owner:
     std::integral_constant<bool,
-      std::is_same<Class, typename std::decay<Object>::type>::value
-        || std::is_base_of<
-          Class,
-          typename std::decay<Object>::type>::value> {};
+      std::is_same<Class, decay_t<Object>>::value
+        || std::is_base_of<Class, decay_t<Object>>::value> {};
 
 } // namespace detail
 
 template <typename Function, typename... Argument>
 constexpr auto invoke(Function &&function, Argument &&...argument) noexcept(
-  noexcept(std::forward<Function>(function)(
-    std::forward<Argument>(argument)...))) ->
-  typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Function>::type>::value,
+  noexcept(
+    std::forward<Function>(function)(std::forward<Argument>(argument)...))) //
+  -> typename std::enable_if<!std::is_member_pointer<decay_t<Function>>::value,
     decltype(std::forward<Function>(function)(
       std::forward<Argument>(argument)...))>::type {
   return std::forward<Function>(function)(std::forward<Argument>(argument)...);
@@ -136,11 +140,10 @@ template <typename Member,
   typename... Argument>
 constexpr auto invoke(Member Class::*member,
   Object &&object,
-  Argument &&...argument) noexcept(
+  Argument &&...argument) noexcept( //
   noexcept((std::forward<Object>(object).*member)(
-    std::forward<Argument>(argument)...))) ->
-  typename std::enable_if<
-    std::is_function<Member>::value
+    std::forward<Argument>(argument)...))) //
+  -> typename std::enable_if<std::is_function<Member>::value
       && detail::is_member_owner<Class, Object>::value,
     decltype((std::forward<Object>(object).*member)(
       std::forward<Argument>(argument)...))>::type {
@@ -154,14 +157,12 @@ template <typename Member,
   typename... Argument>
 constexpr auto invoke(Member Class::*member,
   Object &&object,
-  Argument &&...argument) noexcept(
+  Argument &&...argument) noexcept( //
   noexcept((std::forward<Object>(object).get().*member)(
-    std::forward<Argument>(argument)...))) ->
-  typename std::enable_if<
-    std::is_function<Member>::value
+    std::forward<Argument>(argument)...))) //
+  -> typename std::enable_if<std::is_function<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype((std::forward<Object>(object).get().*member)(
       std::forward<Argument>(argument)...))>::type {
   return (std::forward<Object>(object).get().*member)(
@@ -174,14 +175,12 @@ template <typename Member,
   typename... Argument>
 constexpr auto invoke(Member Class::*member,
   Object &&object,
-  Argument &&...argument) noexcept(
+  Argument &&...argument) noexcept( //
   noexcept(((*std::forward<Object>(object)).*member)(
-    std::forward<Argument>(argument)...))) ->
-  typename std::enable_if<
-    std::is_function<Member>::value
+    std::forward<Argument>(argument)...))) //
+  -> typename std::enable_if<std::is_function<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && !detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && !detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype(((*std::forward<Object>(object)).*member)(
       std::forward<Argument>(argument)...))>::type {
   return ((*std::forward<Object>(object)).*member)(
@@ -191,8 +190,7 @@ constexpr auto invoke(Member Class::*member,
 template <typename Member, typename Class, typename Object>
 constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
   noexcept(std::forward<Object>(object).*member)) ->
-  typename std::enable_if<
-    std::is_object<Member>::value
+  typename std::enable_if<std::is_object<Member>::value
       && detail::is_member_owner<Class, Object>::value,
     decltype(std::forward<Object>(object).*member)>::type {
   return std::forward<Object>(object).*member;
@@ -201,23 +199,19 @@ constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
 template <typename Member, typename Class, typename Object>
 constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
   noexcept(std::forward<Object>(object).get().*member)) ->
-  typename std::enable_if<
-    std::is_object<Member>::value
+  typename std::enable_if<std::is_object<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype(std::forward<Object>(object).get().*member)>::type {
   return std::forward<Object>(object).get().*member;
 }
 
 template <typename Member, typename Class, typename Object>
 constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
-  noexcept((*std::forward<Object>(object)).*member)) ->
-  typename std::enable_if<
-    std::is_object<Member>::value
+  noexcept((*std::forward<Object>(object)).*member)) //
+  -> typename std::enable_if<std::is_object<Member>::value
       && !detail::is_member_owner<Class, Object>::value
-      && !detail::is_reference_wrapper<
-        typename std::decay<Object>::type>::value,
+      && !detail::is_reference_wrapper<decay_t<Object>>::value,
     decltype((*std::forward<Object>(object)).*member)>::type {
   return (*std::forward<Object>(object)).*member;
 }
@@ -231,36 +225,27 @@ template <bool B, class T, class F>
 using conditional_t = typename std::conditional<B, T, F>::type;
 #endif
 
-// decay_t
-#if OMNI_CPLUSPLUS >= 201402L
-using std::decay_t;
-#else
-template <typename T>
-using decay_t = typename std::decay<T>::type;
-#endif
-
 // make_unique
 #if OMNI_CPLUSPLUS >= 201402L
 using std::make_unique;
 #else
 template <typename T, typename... Argument>
 typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Argument &&...argument) {
+  make_unique(Argument &&...argument) {
   return std::unique_ptr<T>{new T(std::forward<Argument>(argument)...)};
 }
 
 template <typename T>
-typename std::enable_if<
-  std::is_array<T>::value && 0 == std::extent<T>::value,
+typename std::enable_if<std::is_array<T>::value && 0 == std::extent<T>::value,
   std::unique_ptr<T>>::type
-make_unique(std::size_t size) {
+  make_unique(std::size_t size) {
   using element = typename std::remove_extent<T>::type;
   return std::unique_ptr<T>{new element[size]()};
 }
 
 template <typename T, typename... Argument>
-typename std::enable_if<0 != std::extent<T>::value>::type
-make_unique(Argument &&...) = delete;
+typename std::enable_if<0 != std::extent<T>::value>::type make_unique(
+  Argument &&...) = delete;
 #endif
 
 // disjunction
@@ -275,7 +260,7 @@ struct disjunction<B1>: B1 {};
 
 template <class B1, class... Bn>
 struct disjunction<B1, Bn...>:
-    std::conditional<bool(B1::value), B1, disjunction<Bn...>>::type {};
+    conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
 #endif
 
 // remove_cvref / remove_cvref_t

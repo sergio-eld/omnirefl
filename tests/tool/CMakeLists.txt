@@ -607,6 +607,12 @@ if("17" IN_LIST _supported_cpp_standards)
         negative/query_multiple.cpp
         7)
     _omnirefl_negative_tool_run(
+        "query_aliases_out_of_scope"
+        negative/query_aliases_out_of_scope.cpp
+        4
+        "invalid reflection queries"
+        ":[0-9]+:[0-9]+: reflection query 'omni::(meta_t|binding_t)'")
+    _omnirefl_negative_tool_run(
         "reflected_call_args"
         negative/reflected_call_args.cpp
         4
@@ -983,6 +989,7 @@ if(_has_cxx20_reflected_guide_features)
 endif()
 
 add_subdirectory(aggregate_into)
+add_subdirectory(reflected)
 
 foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(cpp_prefix "cpp_${cpp_standard}")

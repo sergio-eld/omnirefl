@@ -58,7 +58,7 @@ struct can_ref {
 
 struct write_value {
   template <typename T>
-  std::uint16_t operator()(omni::binding_t<T> binding) const {
+  std::uint16_t operator()(omni::record_binding_t<T> binding) const {
     const auto fields = binding.public_fields();
     typedef typename std::tuple_element<0, decltype(fields)>::type marker_field;
     typedef typename std::tuple_element<1, decltype(fields)>::type value_field;
@@ -101,7 +101,7 @@ write_value const static write{};
 
 struct reference_address {
   template <typename T>
-  int *operator()(omni::binding_t<T> binding) const {
+  int *operator()(omni::record_binding_t<T> binding) const {
     const auto field = std::get<0>(binding.public_fields());
 
     static_assert(field.has_reference_access(),

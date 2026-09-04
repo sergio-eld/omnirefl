@@ -53,7 +53,7 @@ struct collect_name_values {
 struct name_values {
   template <typename T>
   std::vector<std::pair<std::string, int>> operator()(
-    omni::binding_t<T> binding) const {
+    omni::record_binding_t<T> binding) const {
     return omni::compat::apply(collect_name_values{}, binding.public_fields());
   }
 };
@@ -64,13 +64,74 @@ namespace reference_return {
 
 struct first_field {
   template <typename T>
-  auto operator()(omni::binding_t<T> binding) const
+  auto operator()(omni::record_binding_t<T> binding) const
     -> decltype((binding.record.first)) {
     return binding.record.first;
   }
 };
 
 } // namespace reference_return
+
+// C++11 callable emulation for exact wrapper-template deduction tests.
+namespace metadata_contract {
+
+struct construct_record {
+  template <typename _M>
+  typename omni::record_meta_t<_M>::reflected_type operator()(
+    omni::record_meta_t<_M>) const {
+    return {815, "oceanic"};
+  }
+};
+
+struct second_enumerator {
+  template <typename _M>
+  typename omni::enum_meta_t<_M>::reflected_type operator()(
+    omni::enum_meta_t<_M> enumeration) const {
+    return enumeration.enumerators()[1].first;
+  }
+};
+
+struct field_name {
+  template <typename _M>
+  std::string operator()(omni::field_meta_t<_M> field) const {
+    return field.name();
+  }
+};
+
+struct first_field_name {
+  template <typename _M>
+  std::string operator()(omni::record_meta_t<_M> record) const {
+    return field_name{}(std::get<0>(record.public_fields()));
+  }
+};
+
+struct owner_is_const {
+  template <typename Owner, typename _M>
+  constexpr bool operator()(omni::field_binding_t<Owner, _M>) const noexcept {
+    return std::is_const<Owner>::value;
+  }
+};
+
+struct first_field_owner_is_const {
+  template <typename T>
+  bool operator()(omni::record_binding_t<T> record) const {
+    return owner_is_const{}(std::get<0>(record.public_fields()));
+  }
+};
+
+struct binding_type_name {
+  template <typename T>
+  std::string operator()(omni::record_binding_t<T> record) const {
+    return record.type_name();
+  }
+
+  template <typename T>
+  std::string operator()(omni::enum_binding_t<T> enumeration) const {
+    return enumeration.type_name();
+  }
+};
+
+} // namespace metadata_contract
 
 namespace field_access {
 
@@ -130,14 +191,15 @@ struct move_record {
 
 struct field_address {
   template <typename T>
-  const overloaded_address *operator()(omni::binding_t<T> binding) const {
+  const overloaded_address *operator()(
+    omni::record_binding_t<T> binding) const {
     return std::get<0>(binding.public_fields()).operator->();
   }
 };
 
 struct read_write_move {
   template <typename T>
-  std::unique_ptr<int> operator()(omni::binding_t<T> binding) const {
+  std::unique_ptr<int> operator()(omni::record_binding_t<T> binding) const {
     auto fields = binding.public_fields();
     typedef typename std::tuple_element<0, decltype(fields)>::type scalar_field;
     typedef typename std::tuple_element<1, decltype(fields)>::type array_field;
@@ -182,7 +244,8 @@ struct read_write_move {
 
 struct const_move_access {
   template <typename T>
-  const std::unique_ptr<int> &&operator()(omni::binding_t<T> binding) const {
+  const std::unique_ptr<int> &&operator()(
+    omni::record_binding_t<T> binding) const {
     const auto fields = binding.public_fields();
     auto field = std::get<3>(fields);
 
@@ -197,7 +260,7 @@ struct consume_once {
   move_counted &output;
 
   template <typename T>
-  void operator()(omni::binding_t<T> binding) const {
+  void operator()(omni::record_binding_t<T> binding) const {
     const auto fields = binding.public_fields();
     auto field = std::get<0>(fields);
     output = std::move(field).value();
@@ -207,8 +270,8 @@ struct consume_once {
 struct write_through_meta {
   record &input;
 
-  template <typename T>
-  void operator()(omni::meta_t<T> meta) const {
+  template <typename _M>
+  void operator()(omni::record_meta_t<_M> meta) const {
     std::get<0>(meta.public_fields()).ref(input) = 17;
   }
 };
@@ -288,6 +351,7 @@ struct visitor {
 };
 
 } // namespace binding_concept_sfinae
+
 #endif
 
 inline namespace v1 {
@@ -360,6 +424,60 @@ TEST(reflected_call, template_instantiated_after_argument_definition) {
       interface_test::definition_order::record{}));
 }
 
+TEST(metadata, record_wrapper_exposes_reflected_type) {
+  using interface_test::record_type_t;
+
+  const auto value =
+    omni::reflected_call(interface_test::metadata_contract::construct_record{},
+      omni::type_t<record_type_t>{});
+
+  EXPECT_EQ(815, value.first);
+  EXPECT_EQ("oceanic", value.second);
+}
+
+TEST(metadata, enum_wrapper_exposes_reflected_type) {
+  using interface_test::enum_type_t;
+
+  EXPECT_EQ(enum_type_t::one,
+    omni::reflected_call(interface_test::metadata_contract::second_enumerator{},
+      omni::type_t<enum_type_t>{}));
+}
+
+TEST(metadata, field_wrapper_accepts_opaque_generated_metadata) {
+  using interface_test::record_type_t;
+
+  EXPECT_EQ("first",
+    omni::reflected_call(interface_test::metadata_contract::first_field_name{},
+      omni::type_t<record_type_t>{}));
+}
+
+TEST(field_bindings, owner_qualification_is_deduced_from_object) {
+  using interface_test::record_type_t;
+  namespace metadata = interface_test::metadata_contract;
+
+  record_type_t mutable_value{815, "oceanic"};
+  const record_type_t const_value{815, "oceanic"};
+
+  EXPECT_FALSE(omni::reflected_call(metadata::first_field_owner_is_const{},
+    mutable_value));
+  EXPECT_TRUE(
+    omni::reflected_call(metadata::first_field_owner_is_const{}, const_value));
+}
+
+TEST(bindings, entity_aliases_select_the_corresponding_overload) {
+  using interface_test::enum_type_t;
+  using interface_test::record_type_t;
+  namespace metadata = interface_test::metadata_contract;
+
+  record_type_t record{815, "oceanic"};
+  enum_type_t enumeration = enum_type_t::one;
+
+  EXPECT_EQ("record_type_t",
+    omni::reflected_call(metadata::binding_type_name{}, record));
+  EXPECT_EQ("enum_type_t",
+    omni::reflected_call(metadata::binding_type_name{}, enumeration));
+}
+
 template <typename T, typename Visit>
 void value_categories_test(const std::string &expected, const Visit &visit) {
   T lvalue{};
@@ -399,8 +517,10 @@ TEST(cpp20_template_lambdas, meta_type_token) {
   using interface_test::record_type_t;
 
   EXPECT_EQ("record_type_t",
-    omni::reflected_call(
-      [](omni::meta auto type) -> std::string { return type.type_name(); },
+    omni::reflected_call( //
+      [](omni::record_meta auto record) -> std::string {
+        return record.type_name();
+      },
       omni::type<record_type_t>));
 }
 
@@ -413,7 +533,7 @@ TEST(cpp20_template_lambdas, record_binding) {
 
   EXPECT_EQ(k_expected,
     omni::reflected_call(
-      [](omni::binding auto value) -> std::vector<std::string> {
+      [](omni::record_binding auto value) -> std::vector<std::string> {
         const auto fields = value.public_fields();
         return omni::compat::apply(
           [](const omni::field_binding auto &...field) {
@@ -432,6 +552,7 @@ TEST(cpp20_template_lambdas, binding_concept_is_valid_in_sfinae_return) {
   s::record input{17};
   EXPECT_EQ(17, omni::reflected_call(s::visitor{}, input));
 }
+
 #endif
 
 TEST(type_names, namespaced_record_type_t) {
@@ -876,11 +997,7 @@ struct validate_conversion_qualifiers_t {
     typename Const,
     typename Volatile,
     typename ConstVolatile>
-  void operator()(Rvalue,
-    Mutable,
-    Const,
-    Volatile,
-    ConstVolatile) const {
+  void operator()(Rvalue, Mutable, Const, Volatile, ConstVolatile) const {
     using T = typename Rvalue::type;
 
     ASSERT_EQ(false, Rvalue::owning::value);
@@ -891,13 +1008,11 @@ struct validate_conversion_qualifiers_t {
     ASSERT_EQ(true, (std::is_convertible<Mutable, T &>::value));
     ASSERT_EQ(true, (std::is_convertible<Const, const T &>::value));
     ASSERT_EQ(false, (std::is_convertible<Const, T &>::value));
-    ASSERT_EQ(true,
-      (std::is_convertible<Volatile, volatile T &>::value));
+    ASSERT_EQ(true, (std::is_convertible<Volatile, volatile T &>::value));
     ASSERT_EQ(false, (std::is_convertible<Volatile, T &>::value));
     ASSERT_EQ(true,
       (std::is_convertible<ConstVolatile, const volatile T &>::value));
-    ASSERT_EQ(false,
-      (std::is_convertible<ConstVolatile, const T &>::value));
+    ASSERT_EQ(false, (std::is_convertible<ConstVolatile, const T &>::value));
   }
 };
 
@@ -914,8 +1029,8 @@ TEST(bindings, conversion_qualifiers) {
   const volatile auto const_volatile_record =
     field_qualification_record_t{1, 2, 3, 4};
 
-  const b::conversion_qualifiers_t<validate_conversion_qualifiers_t>
-    validate{validate_conversion_qualifiers_t{}};
+  const b::conversion_qualifiers_t<validate_conversion_qualifiers_t> validate{
+    validate_conversion_qualifiers_t{}};
 
   omni::reflected_call(validate,
     field_qualification_record_t{1, 2, 3, 4},
@@ -1011,8 +1126,8 @@ TEST(fields, consuming_access_moves_field_once) {
   interface_test::field_access::move_record input{{42, source_moves}};
   interface_test::field_access::move_counted output{0, output_moves};
 
-  omni::reflected_call(
-    interface_test::field_access::consume_once{output}, input);
+  omni::reflected_call(interface_test::field_access::consume_once{output},
+    input);
 
   EXPECT_EQ(1, source_moves);
   EXPECT_EQ(0, output_moves);
@@ -1070,10 +1185,9 @@ TEST(record_type_t, field_value_write) {
     EXPECT_EQ_FIELDS(k_expected, value);
   }
 
-  const record_type_t owned =
-    omni::reflected_call(
-      fw::record_type_field_write_and_return_call_t{k_expected},
-      record_type_t{});
+  const record_type_t owned = omni::reflected_call(
+    fw::record_type_field_write_and_return_call_t{k_expected},
+    record_type_t{});
   EXPECT_EQ_FIELDS(k_expected, owned);
 
 #undef EXPECT_EQ_FIELDS

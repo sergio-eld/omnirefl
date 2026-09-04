@@ -7,8 +7,8 @@
 #include <map>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <tuple>
+#include <type_traits>
 #if defined CXX_STANDARD && 17 <= CXX_STANDARD
 #  include <variant>
 #endif
@@ -172,7 +172,7 @@ struct maybe_field_names_t {
   }
 
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return field_names(binding);
   }
 } const static maybe_field_names{};
@@ -220,10 +220,8 @@ struct query_mixed_non_reflected_then_field_names_t {
     static_assert(
       !omni::is_reflected<std::vector<non_reflected_probe_record>>::value,
       "negative vector probe must not register reflection metadata");
-    static_assert(
-      !omni::is_reflected<
-        std::tuple<non_reflected_probe_record,
-          non_reflected_probe_enum>>::value,
+    static_assert(!omni::is_reflected<std::tuple<non_reflected_probe_record,
+                    non_reflected_probe_enum>>::value,
       "negative tuple probe must not register reflection metadata");
     return field_names(value);
   }
@@ -291,11 +289,11 @@ struct field_values_t {
   template <typename Field>
   static typename std::enable_if<
     !std::is_same<std::string, typename Field::type>::value
-      && !std::is_same<int, typename Field::type>::value
-      && !std::is_same<unsigned, typename Field::type>::value
-      && !std::is_same<double, typename Field::type>::value
-      && !std::is_same<bool, typename Field::type>::value
-      && !std::is_same<char, typename Field::type>::value>::type
+    && !std::is_same<int, typename Field::type>::value
+    && !std::is_same<unsigned, typename Field::type>::value
+    && !std::is_same<double, typename Field::type>::value
+    && !std::is_same<bool, typename Field::type>::value
+    && !std::is_same<char, typename Field::type>::value>::type
     _append(std::vector<std::string> &, const Field &) {}
 } const static field_values{};
 
@@ -320,8 +318,8 @@ struct write_fields_from_std_map {
       return;
     }
 
-    const auto *value = reflection_compat::get_if<
-      typename Field::type>(&from.at(field.name()));
+    const auto *value =
+      reflection_compat::get_if<typename Field::type>(&from.at(field.name()));
     if (value) {
       field.set_value(*value);
       return;
@@ -332,8 +330,7 @@ struct write_fields_from_std_map {
   }
 
   template <typename Field, typename Nested>
-  static typename std::enable_if<
-    is_string_map<Nested>::value
+  static typename std::enable_if<is_string_map<Nested>::value
       && std::is_class<typename Field::type>::value
       && !std::is_same<std::string, typename Field::type>::value,
     bool>::type
@@ -346,8 +343,7 @@ struct write_fields_from_std_map {
   }
 
   template <typename Field, typename T>
-  static typename std::enable_if<
-    !is_string_map<T>::value
+  static typename std::enable_if<!is_string_map<T>::value
       || !std::is_class<typename Field::type>::value
       || std::is_same<std::string, typename Field::type>::value,
     bool>::type
@@ -356,18 +352,16 @@ struct write_fields_from_std_map {
   }
 
   template <typename V, typename Field>
-  static typename std::enable_if<
-    std::is_class<typename Field::type>::value
-      && !std::is_same<std::string, typename Field::type>::value>::type
+  static typename std::enable_if<std::is_class<typename Field::type>::value
+    && !std::is_same<std::string, typename Field::type>::value>::type
     _write_field_from_flat_map(const std::map<std::string, V> &from,
       Field field) {
     field.set_value(from_std_map<typename Field::type>(from));
   }
 
   template <typename V, typename Field>
-  static typename std::enable_if<
-    !std::is_class<typename Field::type>::value
-      || std::is_same<std::string, typename Field::type>::value>::type
+  static typename std::enable_if<!std::is_class<typename Field::type>::value
+    || std::is_same<std::string, typename Field::type>::value>::type
     _write_field_from_flat_map(const std::map<std::string, V> &, Field) {}
 
   template <typename Field, typename... V>
@@ -376,8 +370,7 @@ struct write_fields_from_std_map {
     bool written = false;
     int dummy[] = {0,
       (written = written
-          || _try_nested_map(reflection_compat::get_if<V>(&value),
-            field),
+          || _try_nested_map(reflection_compat::get_if<V>(&value), field),
         0)...};
     (void)dummy;
     return written;
@@ -390,8 +383,7 @@ struct write_fields_from_std_map {
     bool written = false;
     int dummy[] = {0,
       (written = written
-          || _try_nested_map(reflection_compat::get_if<V>(&value),
-            field),
+          || _try_nested_map(reflection_compat::get_if<V>(&value), field),
         0)...};
     (void)dummy;
     return written;
@@ -442,8 +434,7 @@ void from_std_map(const std::map<std::string, V> &from, T &to) {
 
 template <typename T, typename V>
 T from_std_map(const std::map<std::string, V> &from) {
-  return omni::reflected_call(from_std_map_return_adapter<T, V>{from},
-    T{});
+  return omni::reflected_call(from_std_map_return_adapter<T, V>{from}, T{});
 }
 
 struct write_foo_bar_t {

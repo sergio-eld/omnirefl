@@ -70,7 +70,8 @@ struct is_reflected_record: std::false_type {};
 template <typename T>
 struct is_reflected_record<T, true>:
     std::integral_constant<bool,
-      omni::reflected_entity::record == omni::meta_t<T>::entity()> {};
+      omni::reflected_entity::record
+        == omni::reflected(omni::type_t<T>{}).entity()> {};
 
 template <typename T>
 struct is_string_map: std::false_type {};
@@ -88,7 +89,7 @@ struct print_field_names_simple_t {
   };
 
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(_visit{}, binding.public_fields());
   }
 } const static print_field_names_simple{};
@@ -102,7 +103,7 @@ struct print_field_annotations_simple_t {
   };
 
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(_visit{}, binding.public_fields());
   }
 } const static print_field_annotations_simple{};
@@ -124,7 +125,7 @@ struct maybe_print_field_names_t {
   }
 
   template <typename T>
-  std::vector<std::string> operator()(omni::binding_t<T> binding) const {
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return print_field_names_simple(binding);
   }
 } const static maybe_print_field_names{};
@@ -231,7 +232,8 @@ struct write_fields_from_std_map {
       && _write_field_from_nested_map(from.at(field.name()), field))
       return;
 
-    auto nested_binding = omni::meta_t<typename Field::type>::bind();
+    auto nested_binding =
+      omni::reflected(omni::type_t<typename Field::type>{}).bind();
     omni::compat::apply(_bind_map<std::map<std::string, V>>{from},
       nested_binding.public_fields());
 
@@ -245,7 +247,8 @@ struct write_fields_from_std_map {
     if (!nested)
       return false;
 
-    auto nested_binding = omni::meta_t<typename Field::type>::bind();
+    auto nested_binding =
+      omni::reflected(omni::type_t<typename Field::type>{}).bind();
     omni::compat::apply(_bind_map<Nested>{*nested},
       nested_binding.public_fields());
 
@@ -361,7 +364,7 @@ T from_std_map(const std::map<std::string, V> &from) {
 static const struct {
   template <typename Enum>
   std::vector<std::string> operator()(
-    omni::binding_t<Enum> binding) const noexcept {
+    omni::enum_binding_t<Enum> binding) const noexcept {
     const auto enums = binding.enumerators();
     std::vector<std::string> names;
     for (const auto &value_name : enums)

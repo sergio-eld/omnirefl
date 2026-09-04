@@ -174,7 +174,8 @@ TEST(index_regression, prior_print_names_does_not_pollute_direct_write) {
   }
 }
 
-TEST(index_regression, prior_inplace_template_lambda_does_not_pollute_direct_write) {
+TEST(index_regression,
+  prior_inplace_template_lambda_does_not_pollute_direct_write) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   {
     struct {
@@ -187,7 +188,7 @@ TEST(index_regression, prior_inplace_template_lambda_does_not_pollute_direct_wri
                 "name",
                 "count",
                 "score",
-      }),
+              }),
       omni::reflected_call(
         [](const auto &v) -> std::vector<std::string> {
           const auto fields = v.public_fields();
@@ -213,11 +214,11 @@ TEST(index_regression, prior_inplace_template_lambda_does_not_pollute_direct_wri
 #endif
 }
 
-// FIXME(high): generated-header reflection generates an indexed specialization for this local
-// unnamed function-template from_std_map route, then the later direct
-// write_foo_bar route can match that earlier metadata during real compilation.
-// The equivalent inline map writer passes; continue triage with smaller
-// function-template wrapper probes below.
+// FIXME(high): generated-header reflection generates an indexed specialization
+// for the from_std_map function-template route instantiated with a local
+// unnamed record. The later direct write_foo_bar route can then match that
+// earlier metadata during real compilation. The equivalent inline map writer
+// passes; continue triage with smaller function-template wrapper probes below.
 //
 // TEST(index_regression, prior_from_std_map_does_not_pollute_direct_write) {
 //   {
@@ -288,9 +289,9 @@ TEST(index_regression, prior_extra_arg_lambda_does_not_pollute_direct_write) {
 #endif
 }
 
-// FIXME(high): generated-header reflection indexed reflection is mismatched when
-// reflected_call itself is inside a function template instantiated with a local
-// unnamed type. The tool observes the first local record in
+// FIXME(high): generated-header reflection indexed reflection is mismatched
+// when reflected_call itself is inside a function template instantiated with a
+// local unnamed type. The tool observes the first local record in
 // touch_fields_through_template<T>, but real compilation later matches that
 // metadata for the second local record in this test. This does not require
 // std::map, extra reflected_call arguments, compat::apply, get_if, or
@@ -298,7 +299,7 @@ TEST(index_regression, prior_extra_arg_lambda_does_not_pollute_direct_write) {
 TEST(index_regression,
   prior_template_wrapped_lambda_does_not_pollute_direct_write) {
 #if 0 //< 1 to enable failing tests
-#if defined CXX_STANDARD && 11 < CXX_STANDARD
+#  if defined CXX_STANDARD && 11 < CXX_STANDARD
   {
     struct {
       std::string name;
@@ -322,7 +323,7 @@ TEST(index_regression,
     ASSERT_EQ(15, p.bar_count);
     ASSERT_EQ(3, p.untouched_count);
   }
-#endif
+#  endif
 #endif
 }
 
@@ -360,7 +361,8 @@ TEST(index_regression,
 // #endif
 // }
 
-TEST(index_regression, prior_apply_fields_lambda_does_not_pollute_direct_write) {
+TEST(index_regression,
+  prior_apply_fields_lambda_does_not_pollute_direct_write) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   {
     struct {
@@ -406,7 +408,7 @@ TEST(index_regression, prior_map_lookup_does_not_pollute_direct_write) {
   // pack-expansion lambda shape with a reference capture. This is a regression
   // probe shape issue; prior_helper_writer_does_not_pollute_direct_write keeps
   // the same map-based reflected write route enabled.
-#if defined CXX_STANDARD && 11 < CXX_STANDARD
+#  if defined CXX_STANDARD && 11 < CXX_STANDARD
   {
     struct {
       std::string name;
@@ -428,7 +430,7 @@ TEST(index_regression, prior_map_lookup_does_not_pollute_direct_write) {
                 if (0 == from.count(f.name()))
                   return;
                 (void)index_regression::get_if<
-                  typename std::decay<decltype(f)>::type::type>(
+                  omni::compat::decay_t<decltype(f)>::type>(
                   &from.at(f.name()));
               }(field),
                 0)...};
@@ -453,7 +455,7 @@ TEST(index_regression, prior_map_lookup_does_not_pollute_direct_write) {
     ASSERT_EQ(15, p.bar_count);
     ASSERT_EQ(3, p.untouched_count);
   }
-#endif
+#  endif
 #endif
 }
 
@@ -462,7 +464,7 @@ TEST(index_regression, prior_inline_set_value_does_not_pollute_direct_write) {
   // FIXME(high): packaged Ubuntu 18 GCC rejects this C++14/17 inline
   // pack-expansion lambda shape with a reference capture. The helper-writer
   // equivalent below remains enabled and covers the same reflected field write.
-#if defined CXX_STANDARD && 11 < CXX_STANDARD
+#  if defined CXX_STANDARD && 11 < CXX_STANDARD
   {
     struct {
       std::string name;
@@ -513,7 +515,7 @@ TEST(index_regression, prior_inline_set_value_does_not_pollute_direct_write) {
     ASSERT_EQ(15, p.bar_count);
     ASSERT_EQ(3, p.untouched_count);
   }
-#endif
+#  endif
 #endif
 }
 

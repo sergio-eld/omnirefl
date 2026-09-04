@@ -78,25 +78,28 @@ union union_destination {
 };
 
 struct has_bases {
-  template <typename T>
-  constexpr bool operator()(omni::meta_t<T> target) const noexcept {
+  template <typename _M>
+  constexpr bool operator()(omni::record_meta_t<_M> target) const noexcept {
     return target.has_bases();
   }
 };
 
 struct can_aggregate {
-  template <typename T>
-  constexpr bool operator()(omni::meta_t<T> target) const noexcept {
+  template <typename _M>
+  constexpr bool operator()(omni::record_meta_t<_M> target) const noexcept {
     return target.is_aggregatable();
   }
 };
 
 // Generic C -> A * B adaptation; reflected_call supplies both target schemas.
 struct project_request {
-  template <typename From, typename Domain, typename Context>
-  request_projection operator()(omni::binding_t<From> from,
-    omni::meta_t<Domain>,
-    omni::meta_t<Context>) const {
+  template <typename From, typename _DomainM, typename _ContextM>
+  request_projection operator()(omni::record_binding_t<From> from,
+    omni::record_meta_t<_DomainM>,
+    omni::record_meta_t<_ContextM>) const {
+    using Domain = typename omni::record_meta_t<_DomainM>::reflected_type;
+    using Context = typename omni::record_meta_t<_ContextM>::reflected_type;
+
     // Each cheap binding tuple consumes only its target's same-named fields.
     return {
       omni::refl::aggregate_into<Domain>(from.public_fields()),
@@ -145,13 +148,16 @@ struct completed_destination {
 };
 
 struct convert_with_missing_values {
-  template <typename From, typename To>
-  constexpr To operator()(omni::binding_t<From> from,
-    omni::meta_t<To> target) const {
-    return omni::refl::aggregate_into<To>(omni::fn::concat(from.public_fields(),
-      target.public_fields() //
-        | omni::fn::diff_by(omni::fn::field_name{}, from.public_fields())
-        | omni::fn::map(supply_missing{})));
+  template <typename From, typename _M>
+  constexpr typename omni::record_meta_t<_M>::reflected_type operator()(
+    omni::record_binding_t<From> from,
+    omni::record_meta_t<_M> target) const {
+    return omni::refl::aggregate_into<
+      typename omni::record_meta_t<_M>::reflected_type>(
+      omni::fn::concat(from.public_fields(),
+        target.public_fields() //
+          | omni::fn::diff_by(omni::fn::field_name{}, from.public_fields())
+          | omni::fn::map(supply_missing{})));
   }
 };
 

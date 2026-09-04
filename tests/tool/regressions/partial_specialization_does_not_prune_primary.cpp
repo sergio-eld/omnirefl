@@ -33,7 +33,8 @@ TEST(regression, partial_specialization_does_not_prune_primary) {
         using record_fields_t = decltype(binding.public_fields());
         using primary_t =
           typename std::tuple_element_t<0, record_fields_t>::type;
-        using fields_t = decltype(omni::reflected<primary_t>().public_fields());
+        using fields_t =
+          decltype(omni::reflected(omni::type_t<primary_t>{}).public_fields());
 
         static_assert(1 == std::tuple_size_v<fields_t>);
         return std::tuple_element_t<0, fields_t>::name();
