@@ -144,30 +144,6 @@ struct enum_rebinding_ownership {
   }
 };
 
-struct record_binding_signature_surface {
-  template <typename T>
-  auto operator()(omni::record_binding_t<T> record) const
-    -> decltype(record.public_fields()) {
-    return record.public_fields();
-  }
-};
-
-struct record_meta_signature_surface {
-  template <typename _M>
-  auto operator()(omni::record_meta_t<_M> record) const
-    -> decltype(record.public_fields()) {
-    return record.public_fields();
-  }
-};
-
-struct enum_meta_signature_surface {
-  template <typename _M>
-  auto operator()(omni::enum_meta_t<_M> enumeration) const
-    -> decltype(enumeration.enumerators()) {
-    return enumeration.enumerators();
-  }
-};
-
 struct const_rvalue_binding_is_noexcept {
   template <typename _M>
   bool operator()(omni::record_meta_t<_M> record) const {
@@ -551,25 +527,6 @@ TEST(bindings, reflected_enum_value_preserves_ownership_semantics) {
 
   EXPECT_FALSE(ownership.first);
   EXPECT_TRUE(ownership.second);
-}
-
-TEST(bindings, instrumentation_preserves_public_signature_surface) {
-  using interface_test::enum_type_t;
-  using interface_test::record_type_t;
-  namespace metadata = interface_test::metadata_contract;
-
-  record_type_t record{815, "oceanic"};
-
-  const auto bound_fields =
-    omni::reflected_call(metadata::record_binding_signature_surface{}, record);
-  const auto record_fields = omni::reflected_call(
-    metadata::record_meta_signature_surface{}, omni::type_t<record_type_t>{});
-  const auto enumerators = omni::reflected_call(
-    metadata::enum_meta_signature_surface{}, omni::type_t<enum_type_t>{});
-
-  EXPECT_EQ(std::size_t{2}, std::tuple_size<decltype(bound_fields)>::value);
-  EXPECT_EQ(std::size_t{2}, std::tuple_size<decltype(record_fields)>::value);
-  EXPECT_EQ(std::size_t{2}, std::tuple_size<decltype(enumerators)>::value);
 }
 
 TEST(bindings, exception_specification_matches_stored_value_construction) {

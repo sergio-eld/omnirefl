@@ -316,6 +316,15 @@ struct select_unique_ptr {
   }
 };
 
+struct select_below {
+  std::size_t limit;
+
+  template <typename Element>
+  constexpr bool operator()() const {
+    return sizeof(omni::compat::remove_cvref_t<Element>) < limit;
+  }
+};
+
 struct is_even {
   constexpr bool operator()(int value) const {
     return 0 == value % 2;
@@ -483,12 +492,8 @@ TEST(fn_concat, concatenates_eager_lazy_and_piped_tuples) {
   const auto called = append(left);
   const auto piped = left | append;
 
-  EXPECT_EQ((std::tuple<int, std::string, double, long>{
-              42,
-              "value",
-              2.5,
-              815,
-            }),
+  EXPECT_EQ( //
+    (std::tuple<int, std::string, double, long>{42, "value", 2.5, 815}),
     eager);
   EXPECT_EQ(eager, called);
   EXPECT_EQ(eager, piped);
@@ -660,6 +665,44 @@ TEST(fn_diff_by, projects_forwarded_tuple_access_categories) {
   EXPECT_EQ(std::make_tuple(20), from_rvalue);
 }
 
+TEST(fn_filter, accepts_a_standard_unary_type_trait) {
+  namespace fn = omni::fn;
+
+  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
+
+  const auto called = fn::filter<std::is_integral>(tuple);
+  const auto piped = tuple | fn::filter<std::is_integral>();
+
+  EXPECT_EQ((std::tuple<int, long>{20, 22}), called);
+  EXPECT_EQ((std::tuple<int, long>{20, 22}), piped);
+}
+
+#if OMNI_FN_HAS_NTTP_UNARY
+TEST(fn_filter, lifts_a_structural_predicate_value) {
+  namespace fn = omni::fn;
+
+  const std::tuple<char, int, std::array<char, 16>> tuple{'a', 815, {}};
+  constexpr auto below_eight = fn::filter(fn::nttp_unary<select_below{8}>());
+
+  const auto filtered = tuple | below_eight;
+
+  EXPECT_EQ(std::make_tuple('a', 815), filtered);
+}
+
+TEST(fn_filter, lifts_a_templated_lambda_predicate) {
+  namespace fn = omni::fn;
+
+  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
+
+  const auto filtered =
+    tuple | fn::filter(fn::nttp_unary<[]<typename Element>() {
+      return std::is_integral_v<std::remove_cvref_t<Element>>;
+    }>());
+
+  EXPECT_EQ((std::tuple<int, long>{20, 22}), filtered);
+}
+#endif
+
 TEST(fn_filter, defers_call_and_pipe_application) {
   const std::tuple<int, std::string, double> tuple{1, "ignored", 2.5};
   const auto integral = omni::fn::filter(select_integral{});
@@ -750,19 +793,6 @@ TEST(fn_filter, invokes_a_named_move_only_closure) {
 
   EXPECT_EQ(std::make_tuple(42), filtered);
 }
-
-#if OMNI_FN_HAS_PREDICATE_LAMBDA
-TEST(fn_filter, adapts_a_templated_lambda_predicate) {
-  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
-
-  const auto filtered =
-    tuple | omni::fn::filter(omni::fn::pred<[]<typename Element>() {
-      return std::is_integral_v<std::remove_cvref_t<Element>>;
-    }>);
-
-  EXPECT_EQ((std::tuple<int, long>{20, 22}), filtered);
-}
-#endif
 
 TEST(fn_each, visits_tuple_elements_in_order) {
   const std::tuple<int, int, int> tuple{1, 2, 3};

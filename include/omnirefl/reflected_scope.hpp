@@ -611,28 +611,46 @@ struct field_binding_t {
   constexpr explicit field_binding_t(record &value): _record(value) {}
 };
 
-// Instrumentation uses reduced wrapper definitions from the detail header
-// until generated metadata exists.
-#if !defined(OMNI_TOOL_RUN)
 /// Reflected-scope-only metadata wrapper; `_M` is opaque.
-template <typename _M, reflected_entity = _M::entity()>
+template <typename _M,
+#if defined(OMNI_TOOL_RUN)
+  // Generated entity metadata is unavailable during instrumentation.
+  reflected_entity = std::is_enum<compat::decay_t<_M>>::value
+    ? reflected_entity::enumeration
+    : reflected_entity::record>
+#else
+  reflected_entity = _M::entity()>
+#endif
 struct meta_t;
 
 /// Reflected-scope-only value binding; `T` preserves cv/ref qualification.
-template <typename T, reflected_entity = detail::_meta<T>::entity()>
+template <typename T,
+#if defined(OMNI_TOOL_RUN)
+  // Generated entity metadata is unavailable during instrumentation.
+  reflected_entity = std::is_enum<compat::decay_t<T>>::value
+    ? reflected_entity::enumeration
+    : reflected_entity::record>
+#else
+  reflected_entity = detail::_meta<T>::entity()>
+#endif
 struct binding_t;
 
 /// Reflected-scope-only record metadata; `_M` is opaque.
 template <typename _M>
 struct meta_t<_M, reflected_entity::record> {
   /// Domain type recovered from generated metadata.
+#if defined(OMNI_TOOL_RUN)
+  using reflected_type = compat::decay_t<_M>;
+#else
   using reflected_type = typename _M::type;
+#endif
 
   /// Identify this wrapper as record metadata.
   static constexpr reflected_entity entity() noexcept {
     return reflected_entity::record;
   }
 
+#if !defined(OMNI_TOOL_RUN)
   static_assert(!std::is_enum<reflected_type>::value, "Type is not a record");
   static_assert(is_reflected<reflected_type>::value,
     "Type was not reflected through reflected_call or its dependency "
@@ -733,6 +751,7 @@ struct meta_t<_M, reflected_entity::record> {
   static constexpr public_fields_t public_fields() noexcept {
     return {};
   }
+#endif
 
   /**
    * Bind a record object to this metadata.
@@ -790,8 +809,10 @@ struct meta_t<_M, reflected_entity::record> {
   // Only reflected entry points may construct metadata wrappers.
   friend struct reflected_call_t;
 
+#if !defined(OMNI_TOOL_RUN)
   template <typename U>
   friend constexpr meta_t<detail::_meta<U>> reflected(type_t<U>) noexcept;
+#endif
 
   // Record bindings use `_public_fields` to bind generated field metadata.
   template <typename, reflected_entity>
@@ -812,13 +833,18 @@ struct meta_t<_M, reflected_entity::record> {
 template <typename _M>
 struct meta_t<_M, reflected_entity::enumeration> {
   /// Domain type recovered from generated metadata.
+#if defined(OMNI_TOOL_RUN)
+  using reflected_type = compat::decay_t<_M>;
+#else
   using reflected_type = typename _M::type;
+#endif
 
   /// Identify this wrapper as enum metadata.
   static constexpr reflected_entity entity() noexcept {
     return reflected_entity::enumeration;
   }
 
+#if !defined(OMNI_TOOL_RUN)
   static_assert(std::is_enum<reflected_type>::value, "Type is not an enum");
   static_assert(is_reflected<reflected_type>::value,
     "Type was not reflected through reflected_call or its dependency "
@@ -908,6 +934,7 @@ struct meta_t<_M, reflected_entity::enumeration> {
   static constexpr auto enumerators() noexcept -> decltype(_M::enumerators()) {
     return _M::enumerators();
   }
+#endif
 
   /**
    * Bind an enum value to this metadata.
@@ -941,12 +968,13 @@ struct meta_t<_M, reflected_entity::enumeration> {
   // Only reflected entry points may construct metadata wrappers.
   friend struct reflected_call_t;
 
+#if !defined(OMNI_TOOL_RUN)
   template <typename U>
   friend constexpr meta_t<detail::_meta<U>> reflected(type_t<U>) noexcept;
+#endif
 
   constexpr meta_t() noexcept = default;
 };
-#endif
 
 /// Reflected-scope-only record metadata; `_M` is opaque.
 template <typename _M>
@@ -985,7 +1013,6 @@ using meta_for =
   meta_t<detail::_meta<T>>;
 #endif
 
-#if !defined(OMNI_TOOL_RUN)
 /// Reflected-scope-only record binding.
 ///
 /// TODO(high): Decide whether bindings should inherit their metadata wrappers.
@@ -1013,6 +1040,7 @@ struct binding_t<T, reflected_entity::record> {
     return reflected_entity::record;
   }
 
+#if !defined(OMNI_TOOL_RUN)
   /**
    * Reflected record name without namespace qualification.
    *
@@ -1074,6 +1102,7 @@ struct binding_t<T, reflected_entity::record> {
   static constexpr const char *documentation() noexcept {
     return meta::documentation();
   }
+#endif
 
   /// Return an lvalue reference to the bound record.
   constexpr const storage_t &value() const & noexcept {
@@ -1116,6 +1145,7 @@ struct binding_t<T, reflected_entity::record> {
     return value();
   }
 
+#if !defined(OMNI_TOOL_RUN)
 #  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
   constexpr
 #  endif
@@ -1181,12 +1211,13 @@ struct binding_t<T, reflected_entity::record> {
   auto public_fields() const && -> decltype(meta::_public_fields(
     std::declval<const storage_t &>(),
     typename meta::public_fields_t{})) = delete;
+#endif
 
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
   friend struct reflected_call_t;
-  friend struct meta_t<detail::_meta<type>, reflected_entity::record>;
+  friend meta;
 
   // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
@@ -1232,6 +1263,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     return reflected_entity::enumeration;
   }
 
+#if !defined(OMNI_TOOL_RUN)
   /**
    * Reflected enum name without namespace qualification.
    *
@@ -1290,6 +1322,7 @@ struct binding_t<T, reflected_entity::enumeration> {
   static constexpr const char *documentation() noexcept {
     return meta::documentation();
   }
+#endif
 
   /// Return an lvalue reference to the bound enum value.
   constexpr const storage_t &value() const & noexcept {
@@ -1332,6 +1365,7 @@ struct binding_t<T, reflected_entity::enumeration> {
     return value();
   }
 
+#if !defined(OMNI_TOOL_RUN)
   /**
    * Return enumerators in declaration order as `{value, name}` pairs.
    *
@@ -1356,12 +1390,13 @@ struct binding_t<T, reflected_entity::enumeration> {
     -> decltype(meta::enumerators()) {
     return meta::enumerators();
   }
+#endif
 
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
   friend struct reflected_call_t;
-  friend struct meta_t<detail::_meta<type>, reflected_entity::enumeration>;
+  friend meta;
 
   // non-owning: T is a reference (U& / const U& / U&&)
   template <typename U,
@@ -1379,7 +1414,6 @@ struct binding_t<T, reflected_entity::enumeration> {
     std::is_nothrow_constructible<type, U &&>::value)
       : _enum_value(std::forward<U>(u)) {}
 };
-#endif
 
 /// Reflected-scope-only record binding.
 template <typename T>
@@ -1427,7 +1461,19 @@ concept enum_binding = binding<T>
   && compat::remove_cvref_t<T>::entity() == reflected_entity::enumeration;
 #endif
 
-#if !defined(OMNI_TOOL_RUN)
+#if defined(OMNI_TOOL_RUN)
+// Dependent reflected queries must be declared while the visitor body is
+// parsed. Their definitions require generated metadata and remain unavailable.
+template <typename T>
+constexpr meta_for<T> reflected(type_t<T>) noexcept;
+
+template <typename T,
+  typename std::enable_if<!traits::is<type_t, compat::decay_t<T>>(),
+    int>::type = 0>
+constexpr auto reflected(T &&) noexcept
+  -> binding_t<compat::conditional_t<
+    std::is_lvalue_reference<T &&>::value, T &&, compat::decay_t<T>>>;
+#else
 /**
  * Access generated metadata for a reflected type tag.
  *
@@ -1461,11 +1507,10 @@ constexpr auto reflected(T &&t) noexcept(
 #endif
 
 #if defined(OMNI_TOOL_RUN)
-// Tool-run operator definition must stay available in this translation unit:
-// reflected_call can receive local/unnamed callable types, and Clang rejects a
-// used-but-undefined function template specialization whose type has no
-// linkage. The body is still unevaluated for tool purposes, hence the return
-// warning suppression below.
+// Ad hoc: this definition must remain visible when a callable has no linkage,
+// but instrumentation never evaluates it and therefore intentionally returns
+// nothing. The callable's declared result is still required by surrounding
+// source expressions.
 #  if defined(__clang__)
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wreturn-type"
@@ -1503,11 +1548,11 @@ struct reflected_call_t {
   template <typename Impl, typename... Args>
   auto operator()(Impl &&impl, Args &&...args) const
 #if defined(OMNI_TOOL_RUN)
-    // Instrumentation checks the callable signature before metadata is emitted.
+    // Resolve only the callable declaration; its body is the reflected scope.
     -> decltype(std::declval<Impl &&>()(
-      detail::_tool_arg(std::declval<Args &&>())...)) {
+      _reflect_arg(std::declval<Args &&>())...)) {
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
-    // IDE parsing uses a result placeholder until the generated header exists.
+    // IDE parsing cannot name the result before generation.
     -> detail::_ungenerated_result {
 #else
     // Normal compilation invokes the callable with generated wrappers.
@@ -1527,19 +1572,16 @@ struct reflected_call_t {
 
     (void)impl;
 
-    // Tool-run calls are parsed and matched, but never evaluated. The missing
-    // return is intentional there: constructing an arbitrary callable result
-    // would instantiate exactly the user code reflected_call is meant to defer.
-#if !defined(OMNI_TOOL_RUN) \
-  && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+    // Instrumentation parses and matches calls but does not evaluate them.
+#if defined(OMNI_TOOL_RUN)
+#elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
     return {};
-#elif !defined(OMNI_TOOL_RUN)
+#else
     return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
   }
 };
 
-// Balance the compiler-specific warning suppression used during instrumentation.
 #if defined(OMNI_TOOL_RUN)
 #  if defined(__clang__)
 #    pragma clang diagnostic pop

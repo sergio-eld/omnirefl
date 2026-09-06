@@ -57,7 +57,7 @@ inline constexpr auto benchmark_name = //
   name += qualified_type.substr(namespace_separator + 2,
     type_separator - namespace_separator - 2);
   name += '/';
-  name += enumerator_names.at(conversion.enum_value);
+  name += enumerator_names.at(conversion.value());
   return name;
 };
 
