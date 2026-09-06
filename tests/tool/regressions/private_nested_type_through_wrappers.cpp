@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <array>
 #include <string_view>

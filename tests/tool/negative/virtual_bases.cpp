@@ -1,8 +1,8 @@
 // Expected failure: direct, indirect, and templated virtual bases are not
 // supported reflection inputs.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_virtual_bases {
+namespace negative_virtual_bases {
 
 struct root {
   int value;
@@ -31,4 +31,4 @@ void run() {
     template_value);
 }
 
-} // namespace negative_reflected_call_virtual_bases
+} // namespace negative_virtual_bases

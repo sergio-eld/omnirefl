@@ -1132,7 +1132,9 @@ std::string annotation_from_decl(const clang::ASTContext &ast,
   if (!comment)
     return "";
 
-  return comment->getBriefText(ast);
+  const auto documentation =
+    comment->getFormattedText(ast.getSourceManager(), ast.getDiagnostics());
+  return llvm::StringRef{documentation}.rtrim().str();
 }
 
 type_id canonical_type_id(const clang::ASTContext &ast,
@@ -3934,6 +3936,7 @@ std::expected<meta::source_file_context, app_error>
           loc(qualType(hasDeclaration(
             typeAliasTemplateDecl(anyOf(hasName("::omni::record_meta_t"),
               hasName("::omni::enum_meta_t"),
+              hasName("::omni::meta_for"),
               hasName("::omni::record_binding_t"),
               hasName("::omni::enum_binding_t")))))),
           unless(in_deferred_visitor_signature),
@@ -5995,7 +5998,7 @@ std::string reflectable_body(const meta::record_data &d) {
 
         return std::format(
           "\n\n    // Emitted for reference and copy access."
-          "\n    // Lvalue reads preserve owner qualification."
+          "\n    // Lvalue access preserves bound-record qualification."
           "\n    template <typename _T>"
           "\n    static constexpr auto value(const _T &t) noexcept"
           "\n      -> {1} {{"
@@ -6128,8 +6131,7 @@ std::string reflectable_body(const meta::record_data &d) {
 std::string aggregate_into_body(const meta::record_data &d) {
   const auto get_field = [](const meta::field_data &field) {
     return std::format(
-      "omni::refl::get<typename omni::detail::_meta<T>::{0}_t,"
-      "\n        decltype(std::declval<T>().{0})>(fields)",
+      "omni::refl::get<typename omni::detail::_meta<T>::{0}_t>(fields)",
       field.name);
   };
 
@@ -6290,7 +6292,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
 
   const std::vector required_includes = //
     std::to_array<std::string_view>({
-      "omnirefl/reflection.hpp",
+      "omnirefl/reflected_scope.hpp",
       has_enums ? "array" : "",
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })

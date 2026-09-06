@@ -42,7 +42,7 @@ cmake --build build -t example.omni
 
 ```cpp
 #include <omnirefl/functional.hpp>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <iostream>
 #include <string>
@@ -167,8 +167,8 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
     templates and `decltype`, with and without enclosing namespace
     qualification, an index local to the declaring record, documentation, and
     const/mutable/volatile/deprecated traits
-  - read access, consuming move access, writable-field assignment, and safe
-    reference, dereference, and member access
+  - read access, moving through `std::move(field).value()`, writable-field
+    assignment, and safe reference, dereference, and member access
   - value/reference capability queries for generic field handling
   - bitfield and misaligned packed scalar members remain readable; writable
     members remain assignable but do not expose references
@@ -180,7 +180,7 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
     `omni::type<T>` requests metadata without constructing `T`
   - record and enum metadata expose their domain type through `reflected_type`;
     the generated metadata template argument is intentionally opaque
-  - field bindings expose the cv-qualified owner object type separately from
+  - field bindings expose the cv-qualified bound record type separately from
     opaque field metadata
   - one visitor can receive multiple value and type arguments
   - value bindings preserve const/volatile and lvalue/rvalue qualification;

@@ -1,8 +1,8 @@
 // Expected failure: local and unnamed records require unsupported generated
 // declarations when index mode is disabled.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_local_unnamed {
+namespace negative_local_and_unnamed_types {
 
 struct {
   int value;
@@ -19,4 +19,4 @@ void run() {
   (void)omni::reflected_call([](auto...) -> void {}, first, second, unnamed);
 }
 
-} // namespace negative_reflected_call_local_unnamed
+} // namespace negative_local_and_unnamed_types

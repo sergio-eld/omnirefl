@@ -1,6 +1,6 @@
 // FIXME: Consider making visitor-local types reflectable. This disabled case
 // currently demonstrates the unavailable-metadata failure instead.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace reflected_negative {
 

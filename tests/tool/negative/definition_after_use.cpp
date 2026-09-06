@@ -1,8 +1,8 @@
 // Expected failure: the reflected type is incomplete at the call site even
 // though its definition appears later in the translation unit.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_definition_after_call {
+namespace negative_definition_after_use {
 
 struct record;
 
@@ -15,4 +15,4 @@ struct record {
   int value;
 };
 
-} // namespace negative_reflected_call_definition_after_call
+} // namespace negative_definition_after_use

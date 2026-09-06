@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include "odr_test.hpp"
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 TEST(odr_test, inside_test_main_cpp) {
   static const odr_test::input k_input{815,

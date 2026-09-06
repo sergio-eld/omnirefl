@@ -1,8 +1,8 @@
 // Expected failure: one call combines an out-of-scope reflection query with a
 // non-reflectable top-level argument.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_query_and_reflected_call_arg {
+namespace negative_query_and_unsupported_argument {
 
 struct record {
   int value;
@@ -17,4 +17,4 @@ void run() {
   (void)omni::reflected_call([](auto) -> void {}, value);
 }
 
-} // namespace negative_query_and_reflected_call_arg
+} // namespace negative_query_and_unsupported_argument

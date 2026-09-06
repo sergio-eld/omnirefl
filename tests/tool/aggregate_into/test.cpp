@@ -100,7 +100,7 @@ struct project_request {
     using Domain = typename omni::record_meta_t<_DomainM>::reflected_type;
     using Context = typename omni::record_meta_t<_ContextM>::reflected_type;
 
-    // Each cheap binding tuple consumes only its target's same-named fields.
+    // Each cheap binding tuple moves only its target's same-named fields.
     return {
       omni::refl::aggregate_into<Domain>(from.public_fields()),
       omni::refl::aggregate_into<Context>(from.public_fields()),

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <string_view>
 
@@ -12,7 +12,7 @@ static_assert("left\\right" == std::string_view{OMNI_OPTION_TEXT});
 namespace ccdb_backslash_definition {
 
 struct record {
-  int value;
+  int number;
 };
 
 } // namespace ccdb_backslash_definition
@@ -22,6 +22,6 @@ TEST(ccdb_query, preserves_literal_backslashes) {
 
   EXPECT_EQ(1,
     omni::reflected_call(
-      [](auto binding) -> int { return binding.record.value; },
+      [](auto binding) -> int { return binding.ref().number; },
       record{1}));
 }

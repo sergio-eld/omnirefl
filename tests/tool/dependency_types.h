@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <cstdint>
 #include <map>
@@ -635,6 +635,17 @@ struct annotation_comment_forms {
   int bang_block;
   int trailing_slash; ///< annotation: trailing slash field
   int trailing_bang; //!< annotation: trailing bang field
+};
+
+/// Account data shared across requests and persisted records.
+///
+/// Assigned storage is an implementation detail.
+struct documentation_example {
+  /// Stable identifier used to reference this account
+  /// across requests and persisted records.
+  ///
+  /// Assigned by the storage layer when the account is created.
+  int id;
 };
 
 template <typename T, int N>

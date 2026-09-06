@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace diagnostic_reflected_dependency_unnamed_nested {
 

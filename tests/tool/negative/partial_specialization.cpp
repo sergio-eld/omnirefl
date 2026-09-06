@@ -1,8 +1,8 @@
 // Expected failure: partial template specializations are not supported
 // reflection inputs.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_partial_specialization {
+namespace negative_partial_specialization {
 
 template <typename T>
 struct record {
@@ -23,4 +23,4 @@ void run() {
     r);
 }
 
-} // namespace negative_reflected_call_partial_specialization
+} // namespace negative_partial_specialization

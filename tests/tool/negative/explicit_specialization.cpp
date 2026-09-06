@@ -1,8 +1,8 @@
 // Expected failure: explicit template specializations are not supported
 // reflection inputs.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_explicit_specialization {
+namespace negative_explicit_specialization {
 
 template <typename T>
 struct record {
@@ -20,4 +20,4 @@ void run() {
   (void)omni::reflected_call([](auto) -> void {}, value);
 }
 
-} // namespace negative_reflected_call_explicit_specialization
+} // namespace negative_explicit_specialization

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace regression_skipped_dependency_prunes_orphans {
 

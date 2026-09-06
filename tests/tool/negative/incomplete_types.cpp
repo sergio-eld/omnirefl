@@ -1,8 +1,8 @@
 // Expected failure: forward declarations without definitions cannot be
 // reflected.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_forward_declaration {
+namespace negative_incomplete_types {
 
 struct declared;
 
@@ -20,4 +20,4 @@ void run() {
     omni::type<incomplete_template<int>>);
 }
 
-} // namespace negative_reflected_call_forward_declaration
+} // namespace negative_incomplete_types

@@ -421,6 +421,8 @@ constexpr auto not_(Predicate predicate,
 
 /// QoL key projection for comparing reflected fields by name.
 // TODO: Constrain Field to reflected field metadata or field bindings.
+// TODO: Add reflected-field predicates for filtering fields by record/field
+// writability and value assignability before calling `set_value()`.
 struct field_name {
   template <typename Field>
   constexpr detail::field_name_key<Field> operator()() const {

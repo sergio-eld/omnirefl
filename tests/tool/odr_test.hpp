@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflection.hpp> //< for in-header call
+#include <omnirefl/reflected_scope.hpp> //< for in-header call
 
 #include <sstream>
 #include <string>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace aggregate_test {
 

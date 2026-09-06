@@ -1,6 +1,6 @@
 // Expected failure: a concrete visitor signature queries generated binding and
 // metadata types before reflected_call establishes a reflected scope.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace negative_query_non_template_visitor {
 struct record {

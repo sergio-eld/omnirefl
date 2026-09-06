@@ -1,5 +1,5 @@
 #include <omnirefl/functional.hpp>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <iostream>
 #include <string>

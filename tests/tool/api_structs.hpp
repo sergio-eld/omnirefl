@@ -7,13 +7,24 @@
 #include <utility>
 #include <vector>
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace interface_test {
 
 struct record_type_t {
   int first;
   std::string second;
+};
+
+struct throwing_copy_record_t {
+  throwing_copy_record_t() noexcept = default;
+  throwing_copy_record_t(const throwing_copy_record_t &) noexcept(false) {}
+  throwing_copy_record_t(throwing_copy_record_t &&) noexcept = default;
+};
+
+struct throwing_move_record_t {
+  throwing_move_record_t() noexcept = default;
+  throwing_move_record_t(throwing_move_record_t &&) noexcept(false) {}
 };
 
 struct field_qualification_record_t {
@@ -165,17 +176,31 @@ struct fields_visitor {
   }
 };
 
-struct field_type_names_visitor {
+struct spelled_field_type_names_visitor {
   template <typename... Field>
   std::vector<std::string> operator()(const Field &...) const {
-    return std::vector<std::string>{Field::type_name()...};
+    return std::vector<std::string>{Field::spelled_type_name()...};
   }
 };
 
-struct qualified_field_type_names_visitor {
+struct spelled_qualified_field_type_names_visitor {
   template <typename... Field>
   std::vector<std::string> operator()(const Field &...) const {
-    return std::vector<std::string>{Field::qualified_type_name()...};
+    return std::vector<std::string>{Field::spelled_qualified_type_name()...};
+  }
+};
+
+struct first_field_actual_type_name_t {
+  template <typename _M>
+  std::string operator()(omni::record_meta_t<_M> record) const {
+    using fields = decltype(record.public_fields());
+    using field = typename std::tuple_element<0, fields>::type;
+    using actual_type = typename field::type;
+    using actual_meta = omni::meta_for<actual_type>;
+
+    const actual_meta metadata =
+      omni::reflected(omni::type_t<actual_type>{});
+    return metadata.type_name();
   }
 };
 
@@ -188,21 +213,23 @@ struct record_type_fields_t {
 
 record_type_fields_t const static record_type_fields{};
 
-struct record_type_field_type_names_t {
-  template <typename T>
-  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(field_type_names_visitor{},
-      binding.public_fields());
-  }
-} const static record_type_field_type_names{};
+first_field_actual_type_name_t const static first_field_actual_type_name{};
 
-struct record_type_field_qualified_type_names_t {
+struct record_type_spelled_field_type_names_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(qualified_field_type_names_visitor{},
+    return omni::compat::apply(spelled_field_type_names_visitor{},
       binding.public_fields());
   }
-} const static record_type_field_qualified_type_names{};
+} const static record_type_spelled_field_type_names{};
+
+struct record_type_spelled_qualified_field_type_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
+    return omni::compat::apply(spelled_qualified_field_type_names_visitor{},
+      binding.public_fields());
+  }
+} const static record_type_spelled_qualified_field_type_names{};
 
 } // namespace fields
 
@@ -280,9 +307,9 @@ std::string flags_for() {
 template <typename Field>
 std::string meta_write_for() {
   return std::string{Field::name()} //
-  + ":mutable_owner="
+  + ":mutable_record="
     + bool_name(can_set_meta<Field, field_qualification_record_t &, int>::value)
-    + ":const_owner="
+    + ":const_record="
     + bool_name(
       can_set_meta<Field, const field_qualification_record_t &, int>::value);
 }
@@ -336,7 +363,7 @@ struct additional_volatile_forms_t {
 
     static_assert(
       std::is_same<const volatile int &, const_volatile_reference>::value,
-      "ordinary fields must preserve const-volatile owner qualification");
+      "ordinary fields must preserve const-volatile record qualification");
     static_assert(
       std::is_same<volatile int &, mutable_volatile_reference>::value,
       "mutable fields must drop const and preserve volatile qualification");
@@ -444,7 +471,7 @@ struct record_type_field_write_and_return_t {
   omni::compat::decay_t<T> operator()(omni::record_binding_t<T> binding,
     const record_type_t &expected) const {
     omni::compat::apply(assign_fields{expected}, binding.public_fields());
-    return std::move(binding.record);
+    return std::move(binding).value();
   }
 };
 

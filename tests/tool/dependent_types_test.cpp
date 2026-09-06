@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include "structs.h"
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <string>
 #include <tuple>
@@ -450,6 +450,22 @@ TEST(annotations, documentation_comment_forms) {
             }),
     omni::reflected_call(dt::inspect::field_annotations,
       dt::annotation_comment_forms{}));
+}
+
+TEST(annotations, documentation_preserves_full_sanitized_text) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("Account data shared across requests and persisted records.\n\n"
+            "Assigned storage is an implementation detail.",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::documentation_example{}));
+  EXPECT_EQ((std::vector<std::string>{
+              "Stable identifier used to reference this account\n"
+              "across requests and persisted records.\n\n"
+              "Assigned by the storage layer when the account is created.",
+            }),
+    omni::reflected_call(dt::inspect::field_annotations,
+      dt::documentation_example{}));
 }
 
 TEST(annotations, unannotated_type_and_field_are_empty) {

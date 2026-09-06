@@ -2,7 +2,7 @@
 #include "shared_structs.h"
 #include <gtest/gtest.h>
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <mpark/variant.hpp>
 

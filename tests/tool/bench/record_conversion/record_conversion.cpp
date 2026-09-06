@@ -1,4 +1,4 @@
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <benchmark/benchmark.h>
 

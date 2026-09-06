@@ -1,6 +1,6 @@
 // Expected failure: reflection metadata and bindings are queried repeatedly
 // outside a reflected scope.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <cstddef>
 
