@@ -19,7 +19,8 @@ struct vessel { //< Discovered as the mapped type of `fleet<T>::vessels`.
     double longitude = 0;
   };
 
-  position location;
+  using coordinates = position;
+  coordinates location;
   // Reflected field properties are queryable.
   mutable std::string name = "before"; //< `.is_mutable()` is true.
 };
@@ -27,6 +28,7 @@ struct vessel { //< Discovered as the mapped type of `fleet<T>::vessels`.
 // Primary templates are supported; `.type_name()` returns `"fleet"`.
 template <typename T>
 struct fleet { //< Root specialization supplied to `reflected_call`.
+  // `std::map` is not reflected; its `mapped_type` dependency is discovered.
   std::map<std::string, T> vessels;
 };
 
@@ -35,7 +37,7 @@ struct telemetry {
   const unsigned sensor = 108; //< `.is_const()` is true.
   // Only public fields are reflected.
   private:
-  unsigned john_cena = 49; //< can't see
+  [[maybe_unused]] unsigned john_cena = 49; //< can't see
 };
 
 } // namespace ocean
@@ -46,15 +48,25 @@ std::string describe(RecordMeta record) {
   namespace fn = omni::fn; //< Functional QoL for tuple-like values.
 
   return record.public_fields()
-    | fn::map([](omni::field_meta auto field) {
-        return std::format(" [{}:{}]", field.name(), field.spelled_type_name());
+    | fn::map([]<omni::field_meta FieldMeta>(FieldMeta field) {
+        // `.spelled_type_name()` is available only for fields.
+        const auto description =
+          std::format("{}:{}", field.name(), field.spelled_type_name());
+
+        // Fundamental and standard-library types are not reflected.
+        if constexpr (omni::is_reflected<typename FieldMeta::type>::value)
+          return std::format(" [{} -> {}]",
+            description,
+            omni::meta_for<typename FieldMeta::type>::type_name());
+
+        return std::format(" [{}]", description);
       })
     | fn::foldl(std::plus{}, std::string{record.qualified_type_name()});
 }
 
 // `main()` traverses discovered type dependencies depth-first, calling `describe`:
 // ocean::fleet<ocean::vessel> -> "ocean::fleet [vessels:map<std::string, T>]"
-// ocean::vessel -> "ocean::vessel [location:vessel::position] [name:string]"
+// ocean::vessel -> "ocean::vessel [location:vessel::coordinates -> vessel::position] [name:string]"
 // ocean::vessel::position -> "ocean::vessel::position [latitude:double] [longitude:double]"
 
 // Predicate; instantiate only within the translation unit's reflected scope.
