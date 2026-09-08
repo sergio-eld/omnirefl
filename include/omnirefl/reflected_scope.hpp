@@ -285,6 +285,14 @@ struct field_meta_t {
  *
  * TODO(high): Decide whether this should inherit `field_meta_t<_M>`.
  *   This requires consistent pre-C++20 overload and C++20 concept semantics.
+ *   The same static predicate should accept metadata and bindings:
+ *   ```cpp
+ *   template <omni::field_meta Field>
+ *   using mutable_field = std::bool_constant<Field::is_mutable()>;
+ *
+ *   metadata.public_fields() | omni::fn::filter<mutable_field>();
+ *   binding.public_fields() | omni::fn::filter<mutable_field>();
+ *   ```
  */
 template <typename Record, typename _M>
 struct field_binding_t {

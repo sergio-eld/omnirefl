@@ -9,7 +9,7 @@ if(NOT TARGET omni::tool)
 endif()
 
 add_executable(example main.cpp)
-set_property(TARGET example PROPERTY CXX_STANDARD 20)
+set_property(TARGET example PROPERTY CXX_STANDARD 23)
 
 # Reflection is not transitive: only this target's own .cpp files are
 # instrumented. Call omni_reflected_target for each target that should be

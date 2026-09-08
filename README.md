@@ -13,6 +13,105 @@ A C++ reflection tool built for a seamless experience without macros or UB.
 <!-- pages:sneak-peek:start -->
 ## Sneak Peek
 
+This example intentionally uses C++23 syntax and library facilities to reduce
+verbosity. The demonstrated reflection features remain available through
+Omnirefl's C++11-compatible interfaces.
+Include directives are omitted to keep the block compact; see the
+[complete source](tests/tool/example/main.cpp).
+
+```cpp
+// One .cpp; no declaration headers, metadata files, or reflection macros.
+
+namespace ocean {
+/// `.documentation()` returns this text.
+struct vessel { //< Discovered as the mapped type of `fleet<T>::vessels`.
+  struct position { //< Nested structs are supported; discovered through `location`.
+    double latitude = 0;
+    double longitude = 0;
+  };
+
+  position location;
+  // Reflected field properties are queryable.
+  mutable std::string name = "before"; //< `.is_mutable()` is true.
+};
+
+// Primary templates are supported; `.type_name()` returns `"fleet"`.
+template <typename T>
+struct fleet { //< Root specialization supplied to `reflected_call`.
+  std::map<std::string, T> vessels;
+};
+
+struct telemetry {
+  mutable unsigned depth : 10 = 42; //< Bit-fields remain writable.
+  const unsigned sensor = 108; //< `.is_const()` is true.
+  // Only public fields are reflected.
+  private:
+  unsigned john_cena = 49; //< can't see
+};
+
+} // namespace ocean
+
+// Instantiated only within the translation unit's reflected scope.
+template <omni::record_meta RecordMeta>
+std::string describe(RecordMeta record) {
+  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
+
+  return record.public_fields()
+    | fn::map([](omni::field_meta auto field) {
+        return std::format(" [{}:{}]", field.name(), field.spelled_type_name());
+      })
+    | fn::foldl(std::plus{}, std::string{record.qualified_type_name()});
+}
+
+// `main()` traverses discovered type dependencies depth-first, calling `describe`:
+// ocean::fleet<ocean::vessel> -> "ocean::fleet [vessels:map<std::string, T>]"
+// ocean::vessel -> "ocean::vessel [location:vessel::position] [name:string]"
+// ocean::vessel::position -> "ocean::vessel::position [latitude:double] [longitude:double]"
+
+// Predicate; instantiate only within the translation unit's reflected scope.
+template <omni::field_binding Field>
+using mutable_field = std::bool_constant<Field::is_mutable()>;
+
+void print_field_updates(ocean::telemetry telemetry,
+  const ocean::vessel vessel) {
+  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
+  using namespace std::string_view_literals;
+
+  std::println("before: depth={} sensor={} name={}",
+    static_cast<unsigned>(telemetry.depth), telemetry.sensor, vessel.name);
+
+  const auto write_fields = [](auto &value) {
+    omni::reflected_call(
+      [](omni::record_binding auto record) //< Non-owning binding to `value`.
+        // Explicit result defers scope instantiation until reflection exists.
+        -> void {
+        // Reflected scope: metadata is available here and in called templates.
+        record.public_fields()
+          | fn::filter<mutable_field>()
+          | fn::each([](omni::field_binding auto field) {
+              constexpr std::string_view name = field.name();
+
+              if constexpr ("depth"sv == name)
+                field.set_value(815u); //< Writable bit-field.
+              else if constexpr ("name"sv == name)
+                field.set_value("oceanic"); //< Mutable field of a const object.
+            });
+      },
+      value);
+  };
+
+  write_fields(telemetry);
+  write_fields(vessel);
+
+  std::println("after:  depth={} sensor={} name={}",
+    static_cast<unsigned>(telemetry.depth), telemetry.sensor, vessel.name);
+}
+
+// For `print_field_updates({}, {})`:
+// before: depth=42 sensor=108 name=before
+// after:  depth=815 sensor=108 name=oceanic
+```
+
 Minimal CMake setup:
 
 ```cmake
@@ -25,7 +124,7 @@ project(example LANGUAGES CXX)
 find_package(omnirefl CONFIG REQUIRED)
 
 add_executable(example main.cpp)
-set_property(TARGET example PROPERTY CXX_STANDARD 20)
+set_property(TARGET example PROPERTY CXX_STANDARD 23)
 
 # Reflection is not transitive: only this target's own C++ translation units are
 # instrumented. Call omni_reflected_target for each target that should be
@@ -40,58 +139,7 @@ Instrumentation can also be triggered explicitly through `<target>.omni`
 cmake --build build -t example.omni
 ```
 
-```cpp
-#include <omnirefl/functional.hpp>
-#include <omnirefl/reflected_scope.hpp>
-
-#include <iostream>
-#include <string>
-#include <string_view>
-
-struct record {
-  int foo;
-  std::string bar;
-};
-
-int main() {
-  using namespace std::string_view_literals;
-
-  record value{
-    .foo = 1,
-    .bar = "before",
-  };
-
-  std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
-
-  const auto write = [](omni::record_binding auto b)
-    // Generic lambdas used as reflected visitors must spell the return type.
-    -> void {
-      // `omni::fn::each` is the QoL equivalent of expanding a visitor over a
-      // tuple with `std::apply`.
-      omni::fn::each(
-        [](omni::field_binding auto field) -> void {
-          constexpr std::string_view name = field.name();
-
-          // value() is read-only; ref() exposes a writable reference.
-          if constexpr ("foo"sv == name)
-            field.ref() = 8;
-
-          // operator* and operator-> are QoL accessors.
-          if constexpr ("bar"sv == name)
-            *field = "after";
-        },
-        b.public_fields());
-    };
-
-  omni::reflected_call(write, value);
-
-  std::cout << "after: foo=" << value.foo << " bar=" << value.bar << '\n';
-}
-```
-
-The complete example is available in
-[tests/tool/example](tests/tool/example). The
-[comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
+The [comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 
@@ -109,6 +157,15 @@ Types can be declared and reflected directly in the same `.cpp`. No dedicated
 declaration headers, schemas, annotations, or checked-in metadata files are
 required; generated metadata remains a build artifact.
 <!-- pages:experience:end -->
+
+<!-- pages:status:start -->
+## Status
+
+Omnirefl is under active testing and interface polishing while its first
+extensions are being developed. Until at least 0.1.0, interfaces and package
+layout may change without compatibility guarantees. Release notes aim to call
+out every breaking interface change.
+<!-- pages:status:end -->
 
 ## Functional Utilities
 
