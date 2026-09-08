@@ -717,6 +717,7 @@ std::expected<reflected_type_info, std::string> resolve_reflected_type(
   const diagnostics &log,
   clang::QualType type,
   clang::Sema &sema,
+  clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types);
 
@@ -2096,6 +2097,7 @@ meta::source_file_context meta::matches::fold_reflected_call(
     std::expected reflected = meta::resolve_reflected_type(log,
       arg->type,
       sema,
+      arg->reflected_call_expr->getExprLoc(),
       ast,
       a.resolved_concrete_types);
 
@@ -5007,9 +5009,45 @@ struct collected_dependencies {
   std::set<meta::type_id> skipped_virtual_base_dependencies;
 };
 
+bool template_argument_requires_undefined_type(
+  const clang::TemplateArgument &arg) {
+  if (clang::TemplateArgument::Type == arg.getKind()) {
+    const clang::QualType type = arg.getAsType();
+    const auto *record = type->getAsCXXRecordDecl();
+    if (!record)
+      return type->isIncompleteType();
+
+    if (record->getDefinition())
+      return false;
+
+    const auto *specialization =
+      llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record);
+    return !specialization
+      || std::ranges::any_of(specialization->getTemplateArgs().asArray(),
+        template_argument_requires_undefined_type);
+  }
+
+  return clang::TemplateArgument::Pack == arg.getKind()
+    && std::ranges::any_of(arg.getPackAsArray(),
+      template_argument_requires_undefined_type);
+}
+
+void log_skipped_dependency(const diagnostics &log,
+  const clang::ASTContext &ast,
+  const clang::CXXRecordDecl &record,
+  std::string_view reason) {
+  log(log_level::warning, [&ast, &record, reason] {
+    return std::format("\nreflection dependency '{}' skipped: {}.",
+      meta::canonical_type_id(ast,
+        meta::map_decl_to_canonical_type(ast, &record)),
+      reason);
+  });
+}
+
 collected_dependencies recursively_collect_dependency_types(
   const diagnostics &log,
   clang::Sema &sema,
+  clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<meta::type_id> &resolved_concrete_types,
   clang::CXXRecordDecl &root) {
@@ -5052,13 +5090,6 @@ collected_dependencies recursively_collect_dependency_types(
     return meta::canonical_type_id(ast, type);
   };
 
-  const auto connect = //
-    [&concrete_id, &dependencies_by_type](const clang::TagType *parent,
-      const clang::TagType *dependency) {
-      dependencies_by_type[concrete_id(parent)].emplace(
-        concrete_id(dependency));
-    };
-
   // refactorme: consider extracting reusable type-support classification. Most
   // checks that reject reflected_call arguments also apply while resolving
   // dependencies, where unsupported types are skipped instead of diagnosed as
@@ -5066,7 +5097,7 @@ collected_dependencies recursively_collect_dependency_types(
   const auto enqueue = //
     [&ast,
       &collected,
-      &connect,
+      &dependencies_by_type,
       &public_access_path_by_type,
       &resolved_concrete_types,
       &skipped_virtual_base_dependencies,
@@ -5094,6 +5125,17 @@ collected_dependencies recursively_collect_dependency_types(
         return;
       }
 
+      if (record && !record->getDefinition()) {
+        to_visit.push({
+          .parent = parent,
+          .record = record,
+          .public_access_path = std::move(public_access_path),
+          .is_root = false,
+        });
+
+        return;
+      }
+
       const meta::type_id id = meta::canonical_type_id(ast, dependency);
 
       if (record && meta::has_virtual_bases(*record)) {
@@ -5102,7 +5144,7 @@ collected_dependencies recursively_collect_dependency_types(
         return;
       }
 
-      connect(parent, dependency);
+      dependencies_by_type[meta::canonical_type_id(ast, parent)].emplace(id);
 
       if (public_access_path && !public_access_path->steps.empty()) {
         public_access_path_by_type.try_emplace(id, *public_access_path);
@@ -5134,22 +5176,72 @@ collected_dependencies recursively_collect_dependency_types(
     if (!cur_definition) {
       auto *specialization =
         llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(cur_decl);
+
+      if (specialization
+        && specialization->getSpecializedTemplateOrPartial()
+          .dyn_cast<clang::ClassTemplatePartialSpecializationDecl *>()) {
+        log_skipped_dependency(log,
+          ast,
+          *cur_decl,
+          "partial template specializations are not supported");
+
+        continue;
+      }
+
+      if (specialization
+        && clang::TSK_ExplicitSpecialization
+          == specialization->getSpecializationKind()) {
+        log_skipped_dependency(log,
+          ast,
+          *cur_decl,
+          "explicit template specializations are not supported");
+
+        continue;
+      }
+
       const clang::CXXRecordDecl *primary_definition = specialization
         ? specialization->getSpecializedTemplate()
             ->getTemplatedDecl()
             ->getDefinition()
         : nullptr;
 
+      // Do not ask Clang to instantiate a specialization around an incomplete
+      // argument. Some standard-library templates fail inside Sema before it
+      // can return an invalid declaration.
+      if (specialization
+        && std::ranges::any_of(specialization->getTemplateArgs().asArray(),
+          template_argument_requires_undefined_type)) {
+        log_skipped_dependency(log,
+          ast,
+          *cur_decl,
+          "template specialization has an incomplete type argument");
+
+        continue;
+      }
+
       // A dependent wrapper may not have been instantiated by the program,
       // but its supported aliases still form part of the dependency protocol.
       if (primary_definition
         && !member_aliases_view(*primary_definition).empty()) {
-        sema.InstantiateClassTemplateSpecialization(root.getLocation(),
+        const bool failed = sema.InstantiateClassTemplateSpecialization(
+          point_of_instantiation,
           specialization,
           clang::TSK_ImplicitInstantiation,
           /*Complain=*/false,
           specialization->hasStrictPackMatch());
         cur_definition = cur_decl->getDefinition();
+
+        if (failed
+          || specialization->isInvalidDecl()
+          || !cur_definition
+          || cur_definition->isInvalidDecl()) {
+          log_skipped_dependency(log,
+            ast,
+            *cur_decl,
+            "template specialization could not be instantiated");
+
+          continue;
+        }
       }
     }
 
@@ -5165,6 +5257,14 @@ collected_dependencies recursively_collect_dependency_types(
     }
 
     cur_decl = cur_definition;
+
+    if (meta::has_virtual_bases(*cur_decl)) {
+      skipped_virtual_base_dependencies.emplace(meta::canonical_type_id(ast,
+        meta::map_decl_to_canonical_type(ast, cur_decl)));
+
+      continue;
+    }
+
     const clang::TagType *cur_type =
       meta::map_decl_to_canonical_type(ast, cur_decl);
 
@@ -5176,7 +5276,14 @@ collected_dependencies recursively_collect_dependency_types(
       in_std || is_compound_dependency ? pending.parent : cur_type;
 
     if (!pending.is_root && !in_std && !is_compound_dependency) {
-      connect(pending.parent, cur_type);
+      dependencies_by_type[concrete_id(pending.parent)].emplace(
+        concrete_id(cur_type));
+
+      if (pending.public_access_path
+        && !pending.public_access_path->steps.empty()) {
+        public_access_path_by_type.try_emplace(concrete_id(cur_type),
+          *pending.public_access_path);
+      }
 
       if (resolved_concrete_types.contains(concrete_id(cur_type)))
         continue;
@@ -5421,6 +5528,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
 auto meta::resolve_reflected_type(const diagnostics &log,
   clang::QualType template_arg,
   clang::Sema &sema,
+  clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types)
   -> std::expected<reflected_type_info, std::string> {
@@ -5524,6 +5632,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
   collected_dependencies dependencies =
     recursively_collect_dependency_types(log,
       sema,
+      point_of_instantiation,
       ast,
       resolved_concrete_types,
       *record_type->getAsCXXRecordDecl());
@@ -5676,10 +5785,9 @@ std::string reflectable_tag(const Data &d) {
     return std::format("{}", d.type);
   } else {
     static_assert(std::same_as<meta::enum_data, Data>);
+    // Scoped and unscoped enum type references both use `enum E`;
+    // `enum class E` is valid only when declaring the enum.
     return "enum";
-    // d.is_scoped ? "enum class" : "enum";
-    // ^^^ gives "warning: elaborated-type-specifier for a scoped enum must not
-    // use the ‘class’ keyword"
   }
 }
 

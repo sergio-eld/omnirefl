@@ -788,6 +788,35 @@ if("17" IN_LIST _supported_cpp_standards)
         2
         "template_virtual_dependency<int>' skipped")
     _omnirefl_diagnostic_tool_run(
+        "incomplete_alias_dependency"
+        diagnostic_run/incomplete_alias_dependency.cpp
+        "skipped: template specialization has an incomplete type argument"
+        ""
+        warning)
+    _omnirefl_diagnostic_tool_run(
+        "lazy_specialization_dependency"
+        diagnostic_run/lazy_specialization_dependency.cpp
+        "explicit template specializations are not supported"
+        "partial template specializations are not supported"
+        warning)
+    _omnirefl_diagnostic_tool_run(
+        "lazy_virtual_base_dependency"
+        diagnostic_run/lazy_virtual_base_dependency.cpp
+        "records with virtual bases are not supported"
+        ""
+        warning)
+    # TODO: Enable this detection case if dependency traversal gains a general
+    # bound that does not reject useful finite alias chains.
+    _omnirefl_diagnostic_tool_run(
+        "unbounded_alias_dependency"
+        diagnostic_run/unbounded_alias_dependency.cpp
+        "dependency alias expansion limit reached")
+    _omnirefl_disable_diagnostic_build(
+        "unbounded_alias_dependency")
+    set_tests_properties(
+        cpp_17.diagnostic.unbounded_alias_dependency.run_omni
+        PROPERTIES DISABLED TRUE)
+    _omnirefl_diagnostic_tool_run(
         "anonymous_union_members"
         regressions/anonymous_union_members.cpp
         "unsupported reflection dependency")
@@ -1026,6 +1055,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
     set(_test_sources
         test_main.cpp
         aggregate_into/test.cpp
+        dependency_alias_depth_test.cpp
         dependent_types_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp

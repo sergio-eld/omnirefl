@@ -285,11 +285,11 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
     the generated metadata template argument is intentionally opaque
   - field bindings expose the cv-qualified bound record type separately from
     opaque field metadata
-  - one visitor can receive multiple value and type arguments
+  - one callable can receive multiple value and type arguments
   - value bindings preserve const/volatile and lvalue/rvalue qualification;
-    visitor value and reference returns are preserved
+    callable value and reference returns are preserved
   - `omni::reflected(...)` and `is_reflected<T>` query generated dependency
-    metadata from inside the visitor
+    metadata from inside the callable
 
 <!-- pages:scope:end -->
 
@@ -369,9 +369,9 @@ Several declaration-shape constraints below follow from the generated-header
 model: reflected types must be nameable before their source declarations. See
 [How It Works](#how-it-works).
 
-- `reflected_call` is the instrumentation boundary. The visitor must be either
+- `reflected_call` is the instrumentation boundary. The callable must be either
   a generic lambda or a type with a templated `operator()`. Its return type must
-  not depend on instantiating the visitor body during the tool run; for lambdas,
+  not depend on instantiating the callable body during the tool run; for lambdas,
   this means an explicit trailing return type, including `-> void`.
   Consequently, a lambda cannot currently return a type declared inside its
   body. `constexpr auto result = reflected_call(...)` is not supported: it
@@ -383,6 +383,9 @@ model: reflected types must be nameable before their source declarations. See
   Compound types remain valid dependency routes as listed above. Invalid-input
   detection is best effort.
 - A reflected root must be complete and defined before its `reflected_call`.
+- Incomplete dependency types are skipped with a warning. A class-template
+  dependency is also skipped when instantiating it would require an incomplete
+  type argument.
 - Local and unnamed types are not supported as reflected roots.
 - Namespace-scope unscoped enums require a fixed underlying type so the
   generated header can forward-declare them.
@@ -394,7 +397,8 @@ model: reflected types must be nameable before their source declarations. See
   rejected as `reflected_call` inputs and skipped with a warning when found as
   dependencies.
 - Constrained primary record templates and explicit or partial record-template
-  specializations are not supported.
+  specializations are not supported. `reflected_call` rejects them as roots;
+  explicit or partial specialization dependencies are skipped with a warning.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.
@@ -589,8 +593,8 @@ struct _reflected<T,
 This model also defines the declaration boundary. Generated code can reproduce
 ordinary record and enum forward declarations and defer nested lookup, but it
 cannot safely recreate local or unnamed types, non-forward-declarable enums,
-records nested in template records, constrained primary templates, or explicit
-and partial specializations before their source declarations.
+or records nested in template records. Constrained primary templates and
+explicit or partial specializations are also unsupported.
 <!-- pages:how-it-works:end -->
 
 ## Troubleshooting and Bug Reports
