@@ -494,8 +494,7 @@ template <typename Predicate,
 /// `operator()<Element>()`. `Element` preserves the cv/ref category produced by
 /// accessing the forwarded tuple. Selected values retain their order and are
 /// forwarded into an owning tuple. Use `filter<Trait>()` for a standard unary
-/// type trait, or `nttp_unary<Predicate>()` to encode a C++20 structural
-/// predicate value in this callable protocol.
+/// type trait, or `filter<Predicate>()` for a C++20 structural predicate value.
 constexpr auto filter(Predicate, Tuple &&tuple)
   -> decltype(detail::filter_values<Predicate>(
     std::forward<Tuple>(tuple))) {
@@ -524,6 +523,20 @@ constexpr auto filter(Tuple &&tuple)
 template <auto Predicate>
 constexpr detail::nttp_unary_predicate<Predicate> nttp_unary() {
   return {};
+}
+
+#  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <auto Predicate, detail::tuple_like Tuple>
+#  else
+template <auto Predicate,
+  typename Tuple,
+  typename std::enable_if<
+    detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
+    int>::type = 0>
+#  endif
+/// Select tuple elements accepted by a C++20 structural predicate value.
+constexpr auto filter(Tuple &&tuple) {
+  return filter(nttp_unary<Predicate>(), std::forward<Tuple>(tuple));
 }
 #endif
 
@@ -973,6 +986,14 @@ template <template <typename> class Predicate>
 constexpr filter_closure<detail::unary_trait_predicate<Predicate>> filter() {
   return {detail::unary_trait_predicate<Predicate>{}};
 }
+
+#if OMNI_FN_HAS_NTTP_UNARY
+/// Store a C++20 structural predicate value for later call or pipe application.
+template <auto Predicate>
+constexpr auto filter() {
+  return filter(nttp_unary<Predicate>());
+}
+#endif
 
 /// Store `visit` for later call or pipe application to a tuple-like object.
 template <typename Visit>

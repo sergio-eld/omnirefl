@@ -701,6 +701,22 @@ TEST(fn_filter, lifts_a_templated_lambda_predicate) {
 
   EXPECT_EQ((std::tuple<int, long>{20, 22}), filtered);
 }
+
+TEST(fn_filter, accepts_a_structural_predicate_directly) {
+  namespace fn = omni::fn;
+
+  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
+
+  const auto called = fn::filter<[]<typename Element>() {
+    return std::is_integral_v<std::remove_cvref_t<Element>>;
+  }>(tuple);
+  const auto piped = tuple | fn::filter<[]<typename Element>() {
+    return std::is_integral_v<std::remove_cvref_t<Element>>;
+  }>();
+
+  EXPECT_EQ((std::tuple<int, long>{20, 22}), called);
+  EXPECT_EQ((std::tuple<int, long>{20, 22}), piped);
+}
 #endif
 
 TEST(fn_filter, defers_call_and_pipe_application) {

@@ -11,70 +11,104 @@
 
 // One .cpp; no declaration headers, metadata files, or reflection macros.
 
-namespace ocean {
+namespace oceanic {
 /// `.documentation()` returns this text.
-struct vessel { //< Discovered as the mapped type of `fleet<T>::vessels`.
-  struct position { //< Nested structs are supported; discovered through `location`.
+struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
+  // Nested structs are supported recursively inside non-template records.
+  struct position { //< Discovered via the `location` field.
     double latitude = 0;
     double longitude = 0;
   };
 
   using coordinates = position;
+
+  // Aliases are preserved for field types. For the `location` field,
+  // `.spelled_type_name()` returns the `vessel::coordinates` type name;
+  // `.type_name()` on its reflected type returns `vessel::position` without
+  // the namespace.
   coordinates location;
+
   // Reflected field properties are queryable.
   mutable std::string name = "before"; //< `.is_mutable()` is true.
 };
 
-// Primary templates are supported; `.type_name()` returns `"fleet"`.
+// Primary templates are supported; `.type_name()` returns `"fleet"` without
+// template arguments.
 template <typename T>
-struct fleet { //< Root specialization supplied to `reflected_call`.
-  // `std::map` is not reflected; its `mapped_type` dependency is discovered.
+struct fleet { //< Discovered as an `omni::type_t` argument to `reflected_call`.
+  // Records nested inside template records are not supported.
+  // struct not_supported {};
+
+  // `std` types are not reflected, but dependency protocols apply.
+  // Here `mapped_type` discovers `T`.
   std::map<std::string, T> vessels;
 };
 
-struct telemetry {
-  mutable unsigned depth : 10 = 42; //< Bit-fields remain writable.
+struct telemetry { //< Discovered as a value argument to `reflected_call`.
+  mutable unsigned depth : 10 = 42; //< `.set_value()` writes bit-fields.
   const unsigned sensor = 108; //< `.is_const()` is true.
+
   // Only public fields are reflected.
   private:
   [[maybe_unused]] unsigned john_cena = 49; //< can't see
 };
 
-} // namespace ocean
+} // namespace oceanic
 
-// Instantiated only within the translation unit's reflected scope.
+// Templates may be declared outside the reflected scope and use reflection
+// when called from it, but must not be instantiated outside that scope.
 template <omni::record_meta RecordMeta>
-std::string describe(RecordMeta record) {
+std::string describe_fields(RecordMeta record) {
   namespace fn = omni::fn; //< Functional QoL for tuple-like values.
 
-  return record.public_fields()
+  const auto description = record.public_fields()
     | fn::map([]<omni::field_meta FieldMeta>(FieldMeta field) {
-        // `.spelled_type_name()` is available only for fields.
-        const auto description =
-          std::format("{}:{}", field.name(), field.spelled_type_name());
+        const auto field_description = std::format("  {}: {}", field.name(),
+          // Use `.spelled_qualified_type_name()` to preserve namespaces.
+          field.spelled_type_name());
 
-        // Fundamental and standard-library types are not reflected.
+        // Fundamental and standard-library types are not reflected, so the
+        // metadata query for the actual type name is not available for them.
         if constexpr (omni::is_reflected<typename FieldMeta::type>::value)
-          return std::format(" [{} -> {}]",
-            description,
+          return std::format("{} (resolves to {});\n",
+            field_description,
             omni::meta_for<typename FieldMeta::type>::type_name());
 
-        return std::format(" [{}]", description);
+        return std::format("{};\n", field_description);
       })
-    | fn::foldl(std::plus{}, std::string{record.qualified_type_name()});
+    | fn::foldl(std::plus{},
+      std::format("{} {{\n", record.qualified_type_name()));
+
+  return description + "}";
 }
 
-// `main()` traverses discovered type dependencies depth-first, calling `describe`:
-// ocean::fleet<ocean::vessel> -> "ocean::fleet [vessels:map<std::string, T>]"
-// ocean::vessel -> "ocean::vessel [location:vessel::coordinates -> vessel::position] [name:string]"
-// ocean::vessel::position -> "ocean::vessel::position [latitude:double] [longitude:double]"
+/*
+ * `main()` traverses discovered type dependencies depth-first and prints:
+ * oceanic::fleet {
+ *   vessels: map<std::string, T>;
+ * }
+ * oceanic::vessel {
+ *   location: vessel::coordinates (resolves to vessel::position);
+ *   name: string;
+ * }
+ * oceanic::vessel::position {
+ *   latitude: double;
+ *   longitude: double;
+ * }
+ */
 
-// Predicate; instantiate only within the translation unit's reflected scope.
+// `omni::fn::filter<Trait>()` uses `Trait<T>::value`, like
+// `std::is_integral<T>`.
+// The equivalent C++20 NTTP form for this trait is:
+//   omni::fn::filter<[]<omni::field_binding Field>() {
+//     return Field::is_mutable();
+//   }>()
+// Instantiate either form only within the reflected scope.
 template <omni::field_binding Field>
 using mutable_field = std::bool_constant<Field::is_mutable()>;
 
-void print_field_updates(ocean::telemetry telemetry,
-  const ocean::vessel vessel) {
+void print_field_updates(oceanic::telemetry telemetry,
+  const oceanic::vessel vessel) {
   namespace fn = omni::fn; //< Functional QoL for tuple-like values.
   using namespace std::string_view_literals;
 
@@ -125,7 +159,7 @@ int main() {
         []<typename T>(const auto &self, omni::type_t<T>) -> void {
           if constexpr (omni::is_reflected<T>::value) {
             const auto metadata = omni::reflected(omni::type<T>);
-            std::println("{}", describe(metadata));
+            std::println("{}", describe_fields(metadata));
             metadata.public_fields()
               | fn::each([&self]<omni::field_meta Field>(Field) {
                   self(self, omni::type<typename Field::type>);
@@ -137,6 +171,6 @@ int main() {
 
       dfs(dfs, omni::type<typename Root::reflected_type>);
     },
-    omni::type<ocean::fleet<ocean::vessel>>);
+    omni::type<oceanic::fleet<oceanic::vessel>>);
   print_field_updates({}, {});
 }
