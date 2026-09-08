@@ -716,6 +716,7 @@ struct indexed_arg_candidate {
 std::expected<reflected_type_info, std::string> resolve_reflected_type(
   const diagnostics &log,
   clang::QualType type,
+  clang::Sema &sema,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types);
 
@@ -2094,6 +2095,7 @@ meta::source_file_context meta::matches::fold_reflected_call(
 
     std::expected reflected = meta::resolve_reflected_type(log,
       arg->type,
+      sema,
       ast,
       a.resolved_concrete_types);
 
@@ -5007,9 +5009,10 @@ struct collected_dependencies {
 
 collected_dependencies recursively_collect_dependency_types(
   const diagnostics &log,
+  clang::Sema &sema,
   const clang::ASTContext &ast,
   const std::set<meta::type_id> &resolved_concrete_types,
-  const clang::CXXRecordDecl &root) {
+  clang::CXXRecordDecl &root) {
   // todo: monadic return.
   const auto template_specialization_types = //
     [](const util::viewable_range_of<clang::TemplateArgument> auto &args)
@@ -5021,7 +5024,7 @@ collected_dependencies recursively_collect_dependency_types(
 
   struct pending_record {
     const clang::TagType *parent;
-    const clang::CXXRecordDecl *record;
+    clang::CXXRecordDecl *record;
     std::optional<meta::type_access_path> public_access_path;
     bool is_root;
   };
@@ -5075,7 +5078,7 @@ collected_dependencies recursively_collect_dependency_types(
       if (!dependency)
         return;
 
-      const auto *record = dependency->getAsCXXRecordDecl();
+      auto *record = dependency->getAsCXXRecordDecl();
 
       if (dependency->getDecl()->isInStdNamespace()
         || (record && meta::is_compound_dependency_route(record))) {
@@ -5122,10 +5125,33 @@ collected_dependencies recursively_collect_dependency_types(
 
   while (!to_visit.empty()) {
     const pending_record pending = to_visit.top();
-    const clang::CXXRecordDecl *cur_decl = pending.record;
-    const clang::CXXRecordDecl *cur_definition = cur_decl->getDefinition();
+    clang::CXXRecordDecl *cur_decl = pending.record;
 
     to_visit.pop();
+
+    clang::CXXRecordDecl *cur_definition = cur_decl->getDefinition();
+
+    if (!cur_definition) {
+      auto *specialization =
+        llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(cur_decl);
+      const clang::CXXRecordDecl *primary_definition = specialization
+        ? specialization->getSpecializedTemplate()
+            ->getTemplatedDecl()
+            ->getDefinition()
+        : nullptr;
+
+      // A dependent wrapper may not have been instantiated by the program,
+      // but its supported aliases still form part of the dependency protocol.
+      if (primary_definition
+        && !member_aliases_view(*primary_definition).empty()) {
+        sema.InstantiateClassTemplateSpecialization(root.getLocation(),
+          specialization,
+          clang::TSK_ImplicitInstantiation,
+          /*Complain=*/false,
+          specialization->hasStrictPackMatch());
+        cur_definition = cur_decl->getDefinition();
+      }
+    }
 
     if (!cur_definition) {
       log(log_level::info, [cur_decl] {
@@ -5394,6 +5420,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
 
 auto meta::resolve_reflected_type(const diagnostics &log,
   clang::QualType template_arg,
+  clang::Sema &sema,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types)
   -> std::expected<reflected_type_info, std::string> {
@@ -5496,6 +5523,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
 
   collected_dependencies dependencies =
     recursively_collect_dependency_types(log,
+      sema,
       ast,
       resolved_concrete_types,
       *record_type->getAsCXXRecordDecl());
