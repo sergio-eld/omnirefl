@@ -665,6 +665,19 @@ TEST(sequence_dependency, pair_second_type) {
       dt::pair_dep_two_values{}));
 }
 
+TEST(sequence_dependency, dependent_pair_alias_types) {
+  namespace dt = dependency_types;
+  using record = dt::dependent_pair_dep<dt::resolved::as_dependent_pair_first,
+    dt::resolved::as_dependent_pair_second>;
+
+  EXPECT_EQ((std::vector<std::string>{
+              "as_dependent_pair_first",
+              "as_dependent_pair_second",
+            }),
+    omni::reflected_call(dt::as_sequence_arg::get_dependent_pair_value_names,
+      record{}));
+}
+
 TEST(sequence_dependency, compat_variant_value_type) {
   namespace dt = dependency_types;
 

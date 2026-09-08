@@ -351,6 +351,25 @@ static const struct get_pair_second_value_name_t {
   }
 } get_pair_second_value_name;
 
+static const struct get_dependent_pair_value_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &) const {
+    typedef typename T::type::value_type pair_type;
+    typedef typename pair_type::first_type first_type;
+    typedef typename pair_type::second_type second_type;
+
+    static_assert(omni::is_reflected<first_type>::value,
+      "Dependent pair first type is not reflected");
+    static_assert(omni::is_reflected<second_type>::value,
+      "Dependent pair second type is not reflected");
+
+    return {
+      omni::reflected(omni::type_t<first_type>{}).type_name(),
+      omni::reflected(omni::type_t<second_type>{}).type_name(),
+    };
+  }
+} get_dependent_pair_value_names;
+
 static const struct get_variant_value_name_t {
   template <typename Variant>
   struct first_variant_arg;
@@ -464,6 +483,14 @@ struct as_sequence_pair_first {
 };
 
 struct as_sequence_pair_second {
+  int value;
+};
+
+struct as_dependent_pair_first {
+  int value;
+};
+
+struct as_dependent_pair_second {
   int value;
 };
 
@@ -732,6 +759,11 @@ struct tuple_dep_two_values {
 struct pair_dep_two_values {
   std::pair<resolved::as_sequence_pair_first, resolved::as_sequence_pair_second>
     pair_field;
+};
+
+template <typename First, typename Second>
+struct dependent_pair_dep {
+  using value_type = std::pair<First, Second>;
 };
 
 struct variant_dep_level_1 {
