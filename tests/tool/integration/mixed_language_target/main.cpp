@@ -1,15 +1,15 @@
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 extern "C" int helper(void);
 
 struct record {
-  int value;
+  int number;
 };
 
 struct read_value {
   template <typename Binding>
   int operator()(Binding binding) const {
-    return binding.record.value;
+    return binding.ref().number;
   }
 };
 

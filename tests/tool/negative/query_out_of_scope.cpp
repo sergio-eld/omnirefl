@@ -1,5 +1,5 @@
 // Expected failure: reflection state is queried outside a reflected scope.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 namespace negative_query_out_of_scope {
 struct record {

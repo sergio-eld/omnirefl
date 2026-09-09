@@ -13,6 +13,151 @@ A C++ reflection tool built for a seamless experience without macros or UB.
 <!-- pages:sneak-peek:start -->
 ## Sneak Peek
 
+This example intentionally uses C++23 syntax and library facilities to reduce
+verbosity. The demonstrated reflection features remain available through
+Omnirefl's C++11-compatible interfaces.
+Include directives and `main()` are omitted to keep the block compact; see the
+[complete source](tests/tool/example/main.cpp).
+
+```cpp
+// One .cpp; no declaration headers, metadata files, or reflection macros.
+
+namespace oceanic {
+/// `.documentation()` returns this text.
+struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
+  // Nested structs are supported recursively inside non-template records.
+  struct position { //< Discovered via the `location` field.
+    double latitude = 0;
+    double longitude = 0;
+  };
+
+  using coordinates = position;
+
+  // Aliases are preserved for field types. For the `location` field,
+  // `.spelled_type_name()` returns the `vessel::coordinates` type name;
+  // `.type_name()` on its reflected type returns `vessel::position` without
+  // the namespace.
+  coordinates location;
+
+  // Reflected field properties are queryable.
+  mutable std::string name = "before"; //< `.is_mutable()` is true.
+};
+
+// Primary templates are supported; `.type_name()` returns `"fleet"` without
+// template arguments.
+template <typename T>
+struct fleet { //< Discovered as an `omni::type_t` argument to `reflected_call`.
+  // Records nested inside template records are not supported.
+  // struct not_supported {};
+
+  // `std` types are not reflected, but dependency protocols apply.
+  // Here `mapped_type` discovers `T`.
+  std::map<std::string, T> vessels;
+};
+
+struct telemetry { //< Discovered as a value argument to `reflected_call`.
+  mutable unsigned depth : 10 = 42; //< `.set_value()` writes bit-fields.
+  const unsigned sensor = 108; //< `.is_const()` is true.
+
+  // Only public fields are reflected.
+  private:
+  [[maybe_unused]] unsigned john_cena = 49; //< can't see
+};
+
+} // namespace oceanic
+
+// Templates may be declared outside the reflected scope and use reflection
+// when called from it, but must not be instantiated outside that scope.
+template <omni::record_meta RecordMeta>
+std::string describe_fields(RecordMeta record) {
+  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
+
+  const auto description = record.public_fields()
+    | fn::map([]<omni::field_meta FieldMeta>(FieldMeta field) {
+        const auto field_description = std::format("  {}: {}", field.name(),
+          // Use `.spelled_qualified_type_name()` to preserve namespaces.
+          field.spelled_type_name());
+
+        // Fundamental and standard-library types are not reflected, so the
+        // metadata query for the actual type name is not available for them.
+        if constexpr (omni::is_reflected<typename FieldMeta::type>::value)
+          return std::format("{} (resolves to {});\n",
+            field_description,
+            omni::meta_for<typename FieldMeta::type>::type_name());
+
+        return std::format("{};\n", field_description);
+      })
+    | fn::foldl(std::plus{},
+      std::format("{} {{\n", record.qualified_type_name()));
+
+  return description + "}";
+}
+
+/*
+ * `main()` traverses discovered type dependencies depth-first and prints:
+ * oceanic::fleet {
+ *   vessels: map<std::string, T>;
+ * }
+ * oceanic::vessel {
+ *   location: vessel::coordinates (resolves to vessel::position);
+ *   name: string;
+ * }
+ * oceanic::vessel::position {
+ *   latitude: double;
+ *   longitude: double;
+ * }
+ */
+
+// `omni::fn::filter<Trait>()` uses `Trait<T>::value`, like
+// `std::is_integral<T>`.
+// The equivalent C++20 NTTP form for this trait is:
+//   omni::fn::filter<[]<omni::field_binding Field>() {
+//     return Field::is_mutable();
+//   }>()
+// Instantiate either form only within the reflected scope.
+template <omni::field_binding Field>
+using mutable_field = std::bool_constant<Field::is_mutable()>;
+
+void print_field_updates(oceanic::telemetry telemetry,
+  const oceanic::vessel vessel) {
+  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
+  using namespace std::string_view_literals;
+
+  std::println("before: depth={} sensor={} name={}",
+    static_cast<unsigned>(telemetry.depth), telemetry.sensor, vessel.name);
+
+  const auto write_fields = [](auto &value) {
+    omni::reflected_call(
+      [](omni::record_binding auto record) //< Non-owning binding to `value`.
+        // Explicit result defers scope instantiation until reflection exists.
+        -> void {
+        // Reflected scope: metadata is available here and in called templates.
+        record.public_fields()
+          | fn::filter<mutable_field>()
+          | fn::each([](omni::field_binding auto field) {
+              constexpr std::string_view name = field.name();
+
+              if constexpr ("depth"sv == name)
+                field.set_value(815u); //< Writable bit-field.
+              else if constexpr ("name"sv == name)
+                field.set_value("oceanic"); //< Mutable field of a const object.
+            });
+      },
+      value);
+  };
+
+  write_fields(telemetry);
+  write_fields(vessel);
+
+  std::println("after:  depth={} sensor={} name={}",
+    static_cast<unsigned>(telemetry.depth), telemetry.sensor, vessel.name);
+}
+
+// For `print_field_updates({}, {})`:
+// before: depth=42 sensor=108 name=before
+// after:  depth=815 sensor=108 name=oceanic
+```
+
 Minimal CMake setup:
 
 ```cmake
@@ -25,7 +170,7 @@ project(example LANGUAGES CXX)
 find_package(omnirefl CONFIG REQUIRED)
 
 add_executable(example main.cpp)
-set_property(TARGET example PROPERTY CXX_STANDARD 20)
+set_property(TARGET example PROPERTY CXX_STANDARD 23)
 
 # Reflection is not transitive: only this target's own C++ translation units are
 # instrumented. Call omni_reflected_target for each target that should be
@@ -40,58 +185,7 @@ Instrumentation can also be triggered explicitly through `<target>.omni`
 cmake --build build -t example.omni
 ```
 
-```cpp
-#include <omnirefl/functional.hpp>
-#include <omnirefl/reflection.hpp>
-
-#include <iostream>
-#include <string>
-#include <string_view>
-
-struct record {
-  int foo;
-  std::string bar;
-};
-
-int main() {
-  using namespace std::string_view_literals;
-
-  record value{
-    .foo = 1,
-    .bar = "before",
-  };
-
-  std::cout << "before: foo=" << value.foo << " bar=" << value.bar << '\n';
-
-  const auto write = [](omni::binding auto b)
-    // Generic lambdas used as reflected visitors must spell the return type.
-    -> void {
-      // `omni::fn::each` is the QoL equivalent of expanding a visitor over a
-      // tuple with `std::apply`.
-      omni::fn::each(
-        [](omni::field_binding auto field) -> void {
-          constexpr std::string_view name = field.name();
-
-          // value() is read-only; ref() exposes a writable reference.
-          if constexpr ("foo"sv == name)
-            field.ref() = 8;
-
-          // operator* and operator-> are QoL accessors.
-          if constexpr ("bar"sv == name)
-            *field = "after";
-        },
-        b.public_fields());
-    };
-
-  omni::reflected_call(write, value);
-
-  std::cout << "after: foo=" << value.foo << " bar=" << value.bar << '\n';
-}
-```
-
-The complete example is available in
-[tests/tool/example](tests/tool/example). The
-[comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
+The [comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 
@@ -109,6 +203,15 @@ Types can be declared and reflected directly in the same `.cpp`. No dedicated
 declaration headers, schemas, annotations, or checked-in metadata files are
 required; generated metadata remains a build artifact.
 <!-- pages:experience:end -->
+
+<!-- pages:status:start -->
+## Status
+
+Omnirefl is under active testing and interface polishing while its first
+extensions are being developed. Until at least 0.1.0, interfaces and package
+layout may change without compatibility guarantees. Release notes aim to call
+out every breaking interface change.
+<!-- pages:status:end -->
 
 ## Functional Utilities
 
@@ -167,8 +270,8 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
     templates and `decltype`, with and without enclosing namespace
     qualification, an index local to the declaring record, documentation, and
     const/mutable/volatile/deprecated traits
-  - read access, consuming move access, writable-field assignment, and safe
-    reference, dereference, and member access
+  - read access, moving through `std::move(field).value()`, writable-field
+    assignment, and safe reference, dereference, and member access
   - value/reference capability queries for generic field handling
   - bitfield and misaligned packed scalar members remain readable; writable
     members remain assignable but do not expose references
@@ -178,11 +281,15 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
 - **Invocation and bindings:**
   - `reflected_call` value arguments produce non-owning bindings;
     `omni::type<T>` requests metadata without constructing `T`
-  - one visitor can receive multiple value and type arguments
+  - record and enum metadata expose their domain type through `reflected_type`;
+    the generated metadata template argument is intentionally opaque
+  - field bindings expose the cv-qualified bound record type separately from
+    opaque field metadata
+  - one callable can receive multiple value and type arguments
   - value bindings preserve const/volatile and lvalue/rvalue qualification;
-    visitor value and reference returns are preserved
+    callable value and reference returns are preserved
   - `omni::reflected(...)` and `is_reflected<T>` query generated dependency
-    metadata from inside the visitor
+    metadata from inside the callable
 
 <!-- pages:scope:end -->
 
@@ -262,9 +369,9 @@ Several declaration-shape constraints below follow from the generated-header
 model: reflected types must be nameable before their source declarations. See
 [How It Works](#how-it-works).
 
-- `reflected_call` is the instrumentation boundary. The visitor must be either
+- `reflected_call` is the instrumentation boundary. The callable must be either
   a generic lambda or a type with a templated `operator()`. Its return type must
-  not depend on instantiating the visitor body during the tool run; for lambdas,
+  not depend on instantiating the callable body during the tool run; for lambdas,
   this means an explicit trailing return type, including `-> void`.
   Consequently, a lambda cannot currently return a type declared inside its
   body. `constexpr auto result = reflected_call(...)` is not supported: it
@@ -276,6 +383,9 @@ model: reflected types must be nameable before their source declarations. See
   Compound types remain valid dependency routes as listed above. Invalid-input
   detection is best effort.
 - A reflected root must be complete and defined before its `reflected_call`.
+- Incomplete dependency types are skipped with a warning. A class-template
+  dependency is also skipped when instantiating it would require an incomplete
+  type argument.
 - Local and unnamed types are not supported as reflected roots.
 - Namespace-scope unscoped enums require a fixed underlying type so the
   generated header can forward-declare them.
@@ -287,7 +397,8 @@ model: reflected types must be nameable before their source declarations. See
   rejected as `reflected_call` inputs and skipped with a warning when found as
   dependencies.
 - Constrained primary record templates and explicit or partial record-template
-  specializations are not supported.
+  specializations are not supported. `reflected_call` rejects them as roots;
+  explicit or partial specialization dependencies are skipped with a warning.
 - Direct recursive `reflected_call` is not supported inside a reflected scope.
   A nested reflection call can only work if that reflected path was already
   instantiated independently.
@@ -456,6 +567,9 @@ namespace detail {
 // complete.
 template <typename T>
 struct _reflected<struct app::root, T> {
+  // Internal discovery hook for the reflected C++ type.
+  using type = T;
+
   // Metadata omitted.
 };
 
@@ -466,6 +580,9 @@ struct _reflected<T,
   typename std::enable_if<
     std::is_same<T, typename _wrt<app::root, T>::type::nested>::value,
     T>::type> {
+  // Internal discovery hook for the reflected C++ type.
+  using type = T;
+
   // Metadata omitted.
 };
 
@@ -476,8 +593,8 @@ struct _reflected<T,
 This model also defines the declaration boundary. Generated code can reproduce
 ordinary record and enum forward declarations and defer nested lookup, but it
 cannot safely recreate local or unnamed types, non-forward-declarable enums,
-records nested in template records, constrained primary templates, or explicit
-and partial specializations before their source declarations.
+or records nested in template records. Constrained primary templates and
+explicit or partial specializations are also unsupported.
 <!-- pages:how-it-works:end -->
 
 ## Troubleshooting and Bug Reports

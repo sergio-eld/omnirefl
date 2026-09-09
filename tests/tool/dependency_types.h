@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <cstdint>
 #include <map>
@@ -120,7 +120,7 @@ static const struct first_field_type_name_t {
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type field_type;
 
-    return omni::meta_t<field_type>::type_name();
+    return omni::reflected(omni::type_t<field_type>{}).type_name();
   }
 } first_field_type_name;
 
@@ -131,7 +131,7 @@ static const struct second_field_type_name_t {
     const auto f = std::get<1>(fields);
     typedef typename decltype(f)::type field_type;
 
-    return omni::meta_t<field_type>::type_name();
+    return omni::reflected(omni::type_t<field_type>{}).type_name();
   }
 } second_field_type_name;
 
@@ -160,8 +160,9 @@ static const struct get_dependency_name_t {
     const auto f = std::get<0>(v.public_fields());
     using field_type = typename decltype(f)::type;
 
-    return std::string(v.type_name())
-      + "::" + std::string(omni::reflected<field_type>().type_name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::reflected(omni::type_t<field_type>{}).type_name())
+      + ":int";
   }
 } get_dependency_name;
 
@@ -178,9 +179,12 @@ static const struct get_dependency_name_layer_2_t {
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
-    return std::string(v.type_name())
-      + "::" + std::string(omni::reflected<intermediate_type>().type_name())
-      + "::" + std::string(omni::reflected<dep_type>().type_name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(
+        omni::reflected(omni::type_t<intermediate_type>{}).type_name())
+      + "::"
+      + std::string(omni::reflected(omni::type_t<dep_type>{}).type_name())
+      + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -198,7 +202,9 @@ static const struct get_dependency_name_t {
       "Member alias is not reflected");
 
     return std::string(Parent::type_name()) + "::"
-      + std::string(omni::meta_t<typename parent_type::value_type>::type_name())
+      + std::string(
+        omni::reflected(omni::type_t<typename parent_type::value_type>{})
+          .type_name())
       + ":int";
   }
 } get_dependency_name;
@@ -210,9 +216,10 @@ static const struct get_dependency_name_layer_2_t {
     using level_1 = typename root_type::value_type;
     using dep_type = typename level_1::value_type;
 
-    return std::string(T::type_name())
-      + "::" + std::string(omni::meta_t<level_1>::type_name())
-      + "::" + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
+    return std::string(T::type_name()) + "::"
+      + std::string(omni::reflected(omni::type_t<level_1>{}).type_name()) + "::"
+      + std::string(omni::reflected(omni::type_t<dep_type>{}).type_name())
+      + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -228,8 +235,9 @@ static const struct get_dependency_name_t {
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
 
-    return std::string(v.type_name())
-      + "::" + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
+    return std::string(v.type_name()) + "::"
+      + std::string(omni::reflected(omni::type_t<dep_type>{}).type_name())
+      + ":int";
   }
 } get_dependency_name;
 
@@ -254,7 +262,8 @@ static const struct get_dependency_name_layer_2_t {
 
     return std::string(v.type_name())
       + "::tuple::" // intermediate_type is a std::tuple<...>
-      + std::string(omni::meta_t<dep_type>::type_name()) + ":int";
+      + std::string(omni::reflected(omni::type_t<dep_type>{}).type_name())
+      + ":int";
   }
 } get_dependency_name_layer_2;
 
@@ -274,7 +283,7 @@ static const struct get_vector_value_name_t {
       "Vector value type is not reflected");
 
     return std::string(v.type_name())
-      + "::vector::" + omni::meta_t<value_type>::type_name();
+      + "::vector::" + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_vector_value_name;
 
@@ -290,7 +299,7 @@ static const struct get_tuple_value_name_t {
       "Tuple value type is not reflected");
 
     return std::string(v.type_name())
-      + "::tuple::" + omni::meta_t<value_type>::type_name();
+      + "::tuple::" + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_tuple_value_name;
 
@@ -306,7 +315,7 @@ static const struct get_tuple_second_value_name_t {
       "Tuple second value type is not reflected");
 
     return std::string(v.type_name())
-      + "::tuple::" + omni::meta_t<value_type>::type_name();
+      + "::tuple::" + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_tuple_second_value_name;
 
@@ -322,7 +331,7 @@ static const struct get_pair_first_value_name_t {
       "Pair first type is not reflected");
 
     return std::string(v.type_name())
-      + "::pair::" + omni::meta_t<value_type>::type_name();
+      + "::pair::" + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_pair_first_value_name;
 
@@ -338,9 +347,28 @@ static const struct get_pair_second_value_name_t {
       "Pair second type is not reflected");
 
     return std::string(v.type_name())
-      + "::pair::" + omni::meta_t<value_type>::type_name();
+      + "::pair::" + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_pair_second_value_name;
+
+static const struct get_dependent_pair_value_names_t {
+  template <typename T>
+  std::vector<std::string> operator()(const T &) const {
+    typedef typename T::type::value_type pair_type;
+    typedef typename pair_type::first_type first_type;
+    typedef typename pair_type::second_type second_type;
+
+    static_assert(omni::is_reflected<first_type>::value,
+      "Dependent pair first type is not reflected");
+    static_assert(omni::is_reflected<second_type>::value,
+      "Dependent pair second type is not reflected");
+
+    return {
+      omni::reflected(omni::type_t<first_type>{}).type_name(),
+      omni::reflected(omni::type_t<second_type>{}).type_name(),
+    };
+  }
+} get_dependent_pair_value_names;
 
 static const struct get_variant_value_name_t {
   template <typename Variant>
@@ -362,7 +390,7 @@ static const struct get_variant_value_name_t {
       "Variant value type is not reflected");
 
     return std::string(v.type_name())
-      + "::variant::" + omni::meta_t<value_type>::type_name();
+      + "::variant::" + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_variant_value_name;
 
@@ -378,8 +406,8 @@ static const struct get_nested_vector_tuple_value_name_t {
     static_assert(omni::is_reflected<value_type>::value,
       "Nested vector tuple value type is not reflected");
 
-    return std::string(v.type_name())
-      + "::vector::tuple::" + omni::meta_t<value_type>::type_name();
+    return std::string(v.type_name()) + "::vector::tuple::"
+      + omni::reflected(omni::type_t<value_type>{}).type_name();
   }
 } get_nested_vector_tuple_value_name;
 
@@ -455,6 +483,14 @@ struct as_sequence_pair_first {
 };
 
 struct as_sequence_pair_second {
+  int value;
+};
+
+struct as_dependent_pair_first {
+  int value;
+};
+
+struct as_dependent_pair_second {
   int value;
 };
 
@@ -628,6 +664,17 @@ struct annotation_comment_forms {
   int trailing_bang; //!< annotation: trailing bang field
 };
 
+/// Account data shared across requests and persisted records.
+///
+/// Assigned storage is an implementation detail.
+struct documentation_example {
+  /// Stable identifier used to reference this account
+  /// across requests and persisted records.
+  ///
+  /// Assigned by the storage layer when the account is created.
+  int id;
+};
+
 template <typename T, int N>
 struct value_param_template_record {
   T value;
@@ -712,6 +759,11 @@ struct tuple_dep_two_values {
 struct pair_dep_two_values {
   std::pair<resolved::as_sequence_pair_first, resolved::as_sequence_pair_second>
     pair_field;
+};
+
+template <typename First, typename Second>
+struct dependent_pair_dep {
+  using value_type = std::pair<First, Second>;
 };
 
 struct variant_dep_level_1 {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <type_traits>
 #include <utility>

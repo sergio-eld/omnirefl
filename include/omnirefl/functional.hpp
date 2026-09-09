@@ -6,14 +6,16 @@
 #include <type_traits>
 #include <utility>
 
-// Clang 22 accepts captureless lambdas as non-type template arguments but
+// Clang 22 accepts structural class values as non-type template arguments but
 // still reports __cpp_nontype_template_args == 201411L.
-#if defined(__cpp_generic_lambdas) \
-  && 201707L <= __cpp_generic_lambdas \
-  && 202002L <= OMNI_CPLUSPLUS
-#  define OMNI_FN_HAS_PREDICATE_LAMBDA 1
+#if (defined(__cpp_nontype_template_args) \
+    && 201911L <= __cpp_nontype_template_args) \
+  || (defined(__clang__) && 22 <= __clang_major__ \
+    && defined(__cpp_generic_lambdas) && 201707L <= __cpp_generic_lambdas \
+    && 202002L <= OMNI_CPLUSPLUS)
+#  define OMNI_FN_HAS_NTTP_UNARY 1
 #else
-#  define OMNI_FN_HAS_PREDICATE_LAMBDA 0
+#  define OMNI_FN_HAS_NTTP_UNARY 0
 #endif
 
 namespace omni {
@@ -37,6 +39,28 @@ struct is_type_callable: std::is_empty<Predicate> {};
 template <typename Predicate>
 struct is_type_callable<not_closure<Predicate>>:
     is_type_callable<Predicate> {};
+
+// Class templates must be materialized as a type for the common filter index
+// selection and lazy-closure machinery.
+template <template <typename> class Predicate>
+struct unary_trait_predicate {
+  template <typename Element>
+  constexpr bool operator()() const {
+    return Predicate<compat::remove_cvref_t<Element>>::value;
+  }
+};
+
+#if OMNI_FN_HAS_NTTP_UNARY
+// A structural predicate value must be encoded in the adapter type because
+// tuple indices are selected from types during compilation.
+template <auto Predicate>
+struct nttp_unary_predicate {
+  template <typename Element>
+  constexpr bool operator()() const {
+    return Predicate.template operator()<Element>();
+  }
+};
+#endif
 
 template <typename Predicate,
   typename Tuple,
@@ -421,6 +445,8 @@ constexpr auto not_(Predicate predicate,
 
 /// QoL key projection for comparing reflected fields by name.
 // TODO: Constrain Field to reflected field metadata or field bindings.
+// TODO: Add reflected-field predicates for filtering fields by record/field
+// writability and value assignability before calling `set_value()`.
 struct field_name {
   template <typename Field>
   constexpr detail::field_name_key<Field> operator()() const {
@@ -467,25 +493,51 @@ template <typename Predicate,
 /// `Predicate` must be an empty, default-constructible type with a constexpr
 /// `operator()<Element>()`. `Element` preserves the cv/ref category produced by
 /// accessing the forwarded tuple. Selected values retain their order and are
-/// forwarded into an owning tuple.
+/// forwarded into an owning tuple. Use `filter<Trait>()` for a standard unary
+/// type trait, or `filter<Predicate>()` for a C++20 structural predicate value.
 constexpr auto filter(Predicate, Tuple &&tuple)
   -> decltype(detail::filter_values<Predicate>(
     std::forward<Tuple>(tuple))) {
   return detail::filter_values<Predicate>(std::forward<Tuple>(tuple));
 }
 
-#if OMNI_FN_HAS_PREDICATE_LAMBDA
-/// Adapt a C++20 templated lambda to the type-predicate protocol.
-template <auto Predicate>
-struct predicate_t {
-  template <typename Element>
-  constexpr bool operator()() const {
-    return Predicate.template operator()<Element>();
-  }
-};
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <template <typename> class Predicate, detail::tuple_like Tuple>
+#else
+template <template <typename> class Predicate,
+  typename Tuple,
+  typename std::enable_if<
+    detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
+    int>::type = 0>
+#endif
+/// Select tuple elements accepted by a unary type trait.
+constexpr auto filter(Tuple &&tuple)
+  -> decltype(filter(detail::unary_trait_predicate<Predicate>{},
+    std::forward<Tuple>(tuple))) {
+  return filter(detail::unary_trait_predicate<Predicate>{},
+    std::forward<Tuple>(tuple));
+}
 
+#if OMNI_FN_HAS_NTTP_UNARY
+/// Encode a C++20 structural callable value for type-based selection.
 template <auto Predicate>
-inline constexpr predicate_t<Predicate> pred{};
+constexpr detail::nttp_unary_predicate<Predicate> nttp_unary() {
+  return {};
+}
+
+#  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <auto Predicate, detail::tuple_like Tuple>
+#  else
+template <auto Predicate,
+  typename Tuple,
+  typename std::enable_if<
+    detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
+    int>::type = 0>
+#  endif
+/// Select tuple elements accepted by a C++20 structural predicate value.
+constexpr auto filter(Tuple &&tuple) {
+  return filter(nttp_unary<Predicate>(), std::forward<Tuple>(tuple));
+}
 #endif
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
@@ -928,6 +980,20 @@ template <typename Predicate>
 constexpr filter_closure<Predicate> filter(Predicate predicate) {
   return filter_closure<Predicate>{std::move(predicate)};
 }
+
+/// Store a unary type trait for later call or pipe application.
+template <template <typename> class Predicate>
+constexpr filter_closure<detail::unary_trait_predicate<Predicate>> filter() {
+  return {detail::unary_trait_predicate<Predicate>{}};
+}
+
+#if OMNI_FN_HAS_NTTP_UNARY
+/// Store a C++20 structural predicate value for later call or pipe application.
+template <auto Predicate>
+constexpr auto filter() {
+  return filter(nttp_unary<Predicate>());
+}
+#endif
 
 /// Store `visit` for later call or pipe application to a tuple-like object.
 template <typename Visit>

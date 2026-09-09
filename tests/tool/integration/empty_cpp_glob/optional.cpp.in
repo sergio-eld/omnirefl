@@ -1,4 +1,4 @@
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 struct record {
   int value;
@@ -7,7 +7,7 @@ struct record {
 struct read_value {
   template <typename Binding>
   int operator()(Binding binding) const {
-    return binding.record.value;
+    return binding.ref().value;
   }
 };
 

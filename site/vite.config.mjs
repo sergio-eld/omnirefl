@@ -20,6 +20,7 @@ const sections = [
   'introduction',
   'sneak-peek',
   'experience',
+  'status',
   'scope',
   'dependency-protocols',
   'performance',

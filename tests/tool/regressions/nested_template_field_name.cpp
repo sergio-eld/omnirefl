@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <string>
 #include <tuple>
@@ -90,10 +90,10 @@ struct enclosing_and_leaf_template_record {
   types::templated_outer<int, long>::inner::nested<float> *value;
 };
 
-struct field_type_name {
+struct spelled_type_name {
   template <typename Meta>
   std::string operator()(Meta meta) const {
-    return std::get<0>(meta.public_fields()).type_name();
+    return std::get<0>(meta.public_fields()).spelled_type_name();
   }
 };
 
@@ -103,33 +103,34 @@ TEST(regression, pointer_wrapped_nested_template_keeps_enclosing_record_name) {
   using namespace regression_nested_template_field_name;
 
   EXPECT_EQ("outer::nested<int> *",
-    omni::reflected_call(field_type_name{}, omni::type_t<pointer_record>{}));
+    omni::reflected_call(spelled_type_name{}, omni::type_t<pointer_record>{}));
   EXPECT_EQ("outer::nested<int> **",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<double_pointer_record>{}));
   EXPECT_EQ("outer::inner::actual<int, long> *",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<namespace_qualified_record>{}));
   EXPECT_EQ("outer::inner::plain *",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<namespace_qualified_plain_record>{}));
   EXPECT_EQ("const outer::inner::plain *",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<const_pointer_record>{}));
   EXPECT_EQ("outer::inner::plain * const *",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<const_inner_pointer_record>{}));
   EXPECT_EQ("outer::inner::plain &",
-    omni::reflected_call(field_type_name{}, omni::type_t<reference_record>{}));
+    omni::reflected_call(spelled_type_name{},
+      omni::type_t<reference_record>{}));
   EXPECT_EQ("outer::inner::plain[2]",
-    omni::reflected_call(field_type_name{}, omni::type_t<array_record>{}));
+    omni::reflected_call(spelled_type_name{}, omni::type_t<array_record>{}));
   EXPECT_EQ("outer::inner::plain[2][3]",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<multidimensional_array_record>{}));
   EXPECT_EQ("templated_outer<int, long>::inner::actual *",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<enclosing_template_record>{}));
   EXPECT_EQ("templated_outer<int, long>::inner::nested<float> *",
-    omni::reflected_call(field_type_name{},
+    omni::reflected_call(spelled_type_name{},
       omni::type_t<enclosing_and_leaf_template_record>{}));
 }

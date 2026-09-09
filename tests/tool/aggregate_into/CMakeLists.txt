@@ -21,7 +21,7 @@ function(_aggregate_into_compile_failure cpp_standard name expected_message unex
             -D "TARGET=${_target}"
             -D "EXPECTED_MESSAGE=${expected_message}"
             -D "UNEXPECTED_MESSAGE=${unexpected_message}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/expect_compile_failure.cmake")
+            -P "${CMAKE_CURRENT_LIST_DIR}/../expect_compile_failure.cmake")
 endfunction()
 
 set(_missing_message

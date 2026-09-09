@@ -1,8 +1,8 @@
 // Expected failure: reflection of an incomplete type is diagnosed through the
 // instantiated template call stack.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_template_callstack {
+namespace negative_incomplete_template_callstack {
 
 struct record {
   int value;
@@ -27,4 +27,4 @@ void run() {
   instantiate_reflection(value);
 }
 
-} // namespace negative_reflected_call_template_callstack
+} // namespace negative_incomplete_template_callstack

@@ -1,8 +1,8 @@
 // Expected failure: constrained primary templates are not supported reflection
 // inputs.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
-namespace negative_reflected_call_constrained_primary_template {
+namespace negative_constrained_primary_template {
 
 template <typename T>
 concept complete = 0 < sizeof(T);
@@ -24,4 +24,4 @@ void run() {
     trailing_requires<int>{});
 }
 
-} // namespace negative_reflected_call_constrained_primary_template
+} // namespace negative_constrained_primary_template

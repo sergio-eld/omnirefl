@@ -1,10 +1,10 @@
 // Expected failure: scalar, standard container, pointer, and array arguments
 // are not reflectable top-level reflected_call inputs.
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <vector>
 
-namespace negative_reflected_call_args {
+namespace negative_unsupported_arguments {
 
 struct record {
   int value;
@@ -26,4 +26,4 @@ void run() {
     raw_array);
 }
 
-} // namespace negative_reflected_call_args
+} // namespace negative_unsupported_arguments

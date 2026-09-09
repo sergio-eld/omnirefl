@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include "structs.h"
 
-#include <omnirefl/reflection.hpp>
+#include <omnirefl/reflected_scope.hpp>
 
 #include <string>
 #include <tuple>
@@ -452,6 +452,22 @@ TEST(annotations, documentation_comment_forms) {
       dt::annotation_comment_forms{}));
 }
 
+TEST(annotations, documentation_preserves_full_sanitized_text) {
+  namespace dt = dependency_types;
+
+  EXPECT_EQ("Account data shared across requests and persisted records.\n\n"
+            "Assigned storage is an implementation detail.",
+    omni::reflected_call(dt::inspect::reflected_annotation,
+      dt::documentation_example{}));
+  EXPECT_EQ((std::vector<std::string>{
+              "Stable identifier used to reference this account\n"
+              "across requests and persisted records.\n\n"
+              "Assigned by the storage layer when the account is created.",
+            }),
+    omni::reflected_call(dt::inspect::field_annotations,
+      dt::documentation_example{}));
+}
+
 TEST(annotations, unannotated_type_and_field_are_empty) {
   namespace dt = dependency_types;
 
@@ -647,6 +663,19 @@ TEST(sequence_dependency, pair_second_type) {
   EXPECT_EQ("pair_dep_two_values::pair::as_sequence_pair_second",
     omni::reflected_call(dt::as_sequence_arg::get_pair_second_value_name,
       dt::pair_dep_two_values{}));
+}
+
+TEST(sequence_dependency, dependent_pair_alias_types) {
+  namespace dt = dependency_types;
+  using record = dt::dependent_pair_dep<dt::resolved::as_dependent_pair_first,
+    dt::resolved::as_dependent_pair_second>;
+
+  EXPECT_EQ((std::vector<std::string>{
+              "as_dependent_pair_first",
+              "as_dependent_pair_second",
+            }),
+    omni::reflected_call(dt::as_sequence_arg::get_dependent_pair_value_names,
+      record{}));
 }
 
 TEST(sequence_dependency, compat_variant_value_type) {
