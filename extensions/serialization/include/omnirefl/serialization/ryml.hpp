@@ -133,6 +133,9 @@ struct diagnostics {
 
     // Allows returning a value despite field errors, keeping their defaults.
     bool partial;
+
+    // Ignores fields that are absent from the model.
+    bool extra;
   } policy;
 
   // Retain the tree or refer to the caller's subtree, depending on Owning.
@@ -190,7 +193,7 @@ bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
 }
 
 /**
- * Controls error collection and whether to return a value despite field errors.
+ * Controls error collection, partial values, and acceptance of extra fields.
  */
 struct strategy {
   // TODO(high): Detect at compile time whether a model permits unbounded
@@ -205,8 +208,12 @@ struct strategy {
   // warnings. Failed, missing, and unvisited fields keep initialized defaults.
   bool partial;
 
+  // Ignore fields absent from the model at every nesting level.
+  // Duplicates of model fields remain issues.
+  bool extra;
+
   /**
-   * Return a strategy with the new tolerance and unchanged partial setting.
+   * Return a strategy with the new tolerance and other settings unchanged.
    *
    * Compatibility builder for code predating C++20 designated initializers.
    */
@@ -214,11 +221,12 @@ struct strategy {
     return {
       /*tolerance=*/t,
       /*partial=*/partial,
+      /*extra=*/extra,
     };
   }
 
   /**
-   * Return a strategy with the new partial setting and unchanged tolerance.
+   * Return a strategy with the new partial setting and others unchanged.
    *
    * Compatibility builder for code predating C++20 designated initializers.
    */
@@ -226,12 +234,26 @@ struct strategy {
     return {
       /*tolerance=*/tolerance,
       /*partial=*/p,
+      /*extra=*/extra,
+    };
+  }
+
+  /**
+   * Return a strategy with the new extra setting and others unchanged.
+   *
+   * Compatibility builder for code predating C++20 designated initializers.
+   */
+  constexpr strategy allow_extra(bool e) const {
+    return {
+      /*tolerance=*/tolerance,
+      /*partial=*/partial,
+      /*extra=*/e,
     };
   }
 };
 
 /**
- * Start configuration with the given tolerance and partial=false.
+ * Start configuration with the given tolerance, partial=false, and extra=false.
  *
  * Compatibility builder for code predating C++20 designated initializers.
  */
@@ -239,6 +261,7 @@ constexpr strategy use_tolerance(int t) {
   return {
     /*tolerance=*/t,
     /*partial=*/false,
+    /*extra=*/false,
   };
 }
 
@@ -765,13 +788,17 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
       break;
 
     const auto name = child.key();
+    const bool known = omni::fn::any_of(
+      cpp11_lambda_field_named{
+        /*name=*/name,
+      },
+      fields);
+
+    if (!known && result.diagnostics.policy.extra)
+      continue;
+
     const bool duplicate = from.find_child(name).id() != child.id();
-    if (!duplicate
-      && omni::fn::any_of(
-        cpp11_lambda_field_named{
-          /*name=*/name,
-        },
-        fields))
+    if (known && !duplicate)
       continue;
 
     state.path.push_back({
@@ -822,16 +849,19 @@ struct cpp11_lambda_fold_record {
   template <typename Meta>
   with_diagnostics<To, diagnostics</*owning=*/ false>> operator()(
     omni::record_meta_t<Meta>) const {
+    // Construct in optional storage: moving To{} triggers GCC 15's
+    // uninitialized-union warning for models with an empty tl::optional record.
+    // TL's emplace() calls its throwing value() accessor; use the factory.
     auto result = fold_record(from,
       with_diagnostics<To, diagnostics</*owning=*/ false>>{
-        /*value=*/To{},
-        /*diagnostics=*/
-        {
+        /*value=*/compat::make_optional<To>(),
+        /*diagnostics=*/{
           /*policy=*/{
             /*tolerance=*/0 >= strategy.tolerance
               ? 0
               : static_cast<std::size_t>(strategy.tolerance),
             /*partial=*/strategy.partial,
+            /*extra=*/strategy.extra,
           },
           /*tree=*/from,
           /*issues=*/{},
@@ -941,6 +971,7 @@ struct map_tree_t {
         /*policy=*/{
           /*tolerance=*/result.diagnostics.policy.tolerance,
           /*partial=*/result.diagnostics.policy.partial,
+          /*extra=*/result.diagnostics.policy.extra,
         },
         /*tree=*/std::move(tree),
         /*issues=*/std::move(result.diagnostics.issues),
@@ -966,7 +997,9 @@ struct map_tree_t {
   }
 };
 
-/// Map with zero tolerance and partial values disabled.
+/**
+ * Map with zero tolerance, partial values disabled, and extra fields rejected.
+ */
 constexpr map_tree_t map_tree{
   /*strategy=*/use_tolerance(0).allow_partial(false),
 };
@@ -998,6 +1031,7 @@ struct deserialize_t {
               ? 0
               : static_cast<std::size_t>(strategy.tolerance),
             /*partial=*/strategy.partial,
+            /*extra=*/strategy.extra,
           },
           /*tree=*/::ryml::Tree{
             /*node_capacity=*/0,
@@ -1016,7 +1050,9 @@ struct deserialize_t {
   }
 };
 
-/// Parse and map with zero tolerance and partial values disabled.
+/**
+ * Parse and map with zero tolerance, no partial values, and no extra fields.
+ */
 constexpr deserialize_t deserialize{
   /*strategy=*/use_tolerance(0).allow_partial(false),
 };

@@ -53,6 +53,30 @@ TEST(serialization_formats, emits_yaml_without_configuration) {
   }
 }
 
+TEST(deserialization, accepts_extra_fields_without_partial_values) {
+  constexpr omni::ryml::deserialize_t deserialize{
+    /*strategy=*/omni::ryml::use_tolerance(0).allow_extra(true),
+  };
+  static_assert(deserialize.strategy.extra,
+    "extra fields must be configurable in C++11 constant expressions");
+
+  const auto result = deserialize(omni::type_t<serialization_data::payload>{},
+    R"({"name":"Ada","code":815,"extra":{"anything":[1,null,{}]}})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.policy.extra);
+  EXPECT_FALSE(result.diagnostics.policy.partial);
+  EXPECT_EQ(0U, result.diagnostics.policy.tolerance);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_FALSE(result.diagnostics.stopped());
+  EXPECT_FALSE(omni::ryml::is_partial(result));
+  EXPECT_EQ("", omni::ryml::render_diangostics(result.diagnostics));
+  if (result.value) {
+    EXPECT_EQ("Ada", result.value->name);
+    EXPECT_EQ(815, result.value->code);
+  }
+}
+
 struct person {
   // Person's display name.
   std::string name;
@@ -309,6 +333,12 @@ static_assert(0 == omni::ryml::deserialize.strategy.tolerance,
   "the default deserializer must stop at the first error");
 static_assert(!omni::ryml::deserialize.strategy.partial,
   "the default deserializer must reject values with field errors");
+static_assert(!omni::ryml::deserialize.strategy.extra,
+  "the default deserializer must reject extra fields");
+static_assert(!omni::ryml::map_tree.strategy.extra,
+  "the default mapper must reject extra fields");
+static_assert(!omni::ryml::strategy{}.extra,
+  "value-initialized strategies must reject extra fields");
 
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
@@ -317,6 +347,7 @@ constexpr omni::ryml::deserialize_t configured_deserialize{
     omni::ryml::strategy{
       .tolerance = 0,
       .partial = false,
+      .extra = false,
     },
 };
 static_assert(std::is_aggregate<omni::ryml::deserialize_t>::value,
@@ -517,6 +548,7 @@ TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
       omni::ryml::strategy{
         .tolerance = tolerance,
         .partial = false,
+        .extra = false,
       },
   };
   const auto result =
@@ -553,6 +585,260 @@ INSTANTIATE_TEST_SUITE_P(configuration,
       R"({"name":"oceanic","code":815,"code":108})",
       omni::compat::unexpected<std::string>{"/code: duplicate field"}}),
   [](const testing::TestParamInfo<mapping_case> &p) { return p.param.name; });
+
+// Unknown input fields, crossed with runtime extra and partial settings.
+struct extra_fields_case {
+  // Label used in the individual test name.
+  std::string name;
+  // Document containing a nested record and fields outside the model.
+  std::string source;
+  // First diagnostic when extra fields are rejected with zero tolerance.
+  std::string message;
+};
+
+class extra_fields_policy:
+    public testing::TestWithParam<std::tuple<extra_fields_case, bool, bool>> {};
+
+TEST_P(extra_fields_policy, applies_extra_independently_of_partial) {
+  omni::compat::apply(
+    [](const extra_fields_case &c, bool extra, bool partial) {
+      const auto result = omni::ryml::deserialize_t{
+        /*strategy=*/omni::ryml::use_tolerance(0)
+          .allow_extra(extra)
+          .allow_partial(partial),
+      }(omni::type_t<serialization_data::nested_record>{}, c.source);
+
+      EXPECT_EQ(extra || partial, bool(result.value));
+      EXPECT_EQ(extra, result.diagnostics.policy.extra);
+      EXPECT_EQ(partial, result.diagnostics.policy.partial);
+      EXPECT_EQ(0U, result.diagnostics.policy.tolerance);
+      EXPECT_EQ(!extra, result.diagnostics.stopped());
+      EXPECT_EQ(extra ? 0U : 1U, result.diagnostics.issues.size());
+      EXPECT_EQ(extra ? std::string{} : c.message,
+        omni::ryml::render_diangostics(result.diagnostics));
+      if (!result.diagnostics.issues.empty()) {
+        EXPECT_EQ(omni::ryml::issue::code::unknown_field,
+          result.diagnostics.issues.front().reason);
+        EXPECT_FALSE(result.diagnostics.issues.front().warning);
+      }
+      if (extra && result.value) {
+        EXPECT_DOUBLE_EQ(2.5, result.value->ratio);
+        EXPECT_EQ("Ada", result.value->data.name);
+        EXPECT_EQ(815, result.value->data.code);
+        EXPECT_FALSE(omni::ryml::is_partial(result));
+      }
+    },
+    GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(settings,
+  extra_fields_policy,
+  testing::Combine(
+    testing::Values( //
+      extra_fields_case{"root",
+        R"({"extra":{},"ratio":2.5,"data":{"name":"Ada","code":815}})",
+        "/extra: unknown field"},
+      extra_fields_case{"nested",
+        R"({"ratio":2.5,"data":{"name":"Ada","extra":[],"code":815}})",
+        "/data/extra: unknown field"},
+      extra_fields_case{"multiple",
+        R"({"extra":1,"other":null,"ratio":2.5,
+          "data":{"name":"Ada","code":815,"more":[{},false]}})",
+        "/extra: unknown field"},
+      extra_fields_case{"duplicate_extra",
+        R"({"extra":1,"extra":2,"ratio":2.5,
+          "data":{"name":"Ada","code":815}})",
+        "/extra: unknown field"},
+      extra_fields_case{"yaml",
+        "ratio: 2.5\ndata:\n  name: Ada\n  code: 815\n  extra: [1, null]\n",
+        "/data/extra: unknown field"}),
+    testing::Bool(),
+    testing::Bool()),
+  [](const testing::TestParamInfo< //
+    std::tuple<extra_fields_case, bool, bool>> &p) {
+    return omni::compat::apply(
+      [](const extra_fields_case &c, bool extra, bool partial) {
+        return c.name + (extra ? "_allowed" : "_rejected")
+          + (partial ? "_partial" : "_strict");
+      },
+      p.param);
+  });
+
+class allowed_extra_fields: public testing::TestWithParam<mapping_case> {};
+
+TEST_P(allowed_extra_fields, validates_model_fields) {
+  const auto result = omni::ryml::deserialize_t{
+    /*strategy=*/omni::ryml::use_tolerance(0).allow_extra(true),
+  }(omni::type_t<serialization_data::payload>{}, GetParam().source)
+                        .map_diagnostics(omni::ryml::render_diangostics);
+
+  EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
+  if (GetParam().expected_code && result.value) {
+    EXPECT_EQ(*GetParam().expected_code, result.value->code);
+    EXPECT_EQ("", result.diagnostics);
+  } else if (!GetParam().expected_code) {
+    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(documents,
+  allowed_extra_fields,
+  testing::Values( //
+    mapping_case{"valid", R"({"extra":{},"name":"Ada","code":815})", 815},
+    mapping_case{"duplicate_model_field",
+      R"({"extra":{},"name":"Ada","code":815,"code":108})",
+      omni::compat::unexpected<std::string>{"/code: duplicate field"}},
+    mapping_case{"missing_model_field",
+      R"({"extra":{},"name":"Ada"})",
+      omni::compat::unexpected<std::string>{"/code: missing field"}},
+    mapping_case{"invalid_model_scalar",
+      R"({"extra":{},"name":"Ada","code":"bad"})",
+      omni::compat::unexpected<std::string>{
+        "/code: \"bad\" is not an integer"}},
+    mapping_case{"wrong_root",
+      "[]",
+      omni::compat::unexpected<std::string>{
+        "<root>: expected object, found array"}}),
+  [](const testing::TestParamInfo<mapping_case> &p) { return p.param.name; });
+
+struct nested_extra_config {
+  // Required record whose extra fields should be ignored.
+  serialization_data::payload object;
+  // Record elements whose extra fields should be ignored.
+  std::vector<serialization_data::payload> records;
+  // Unknown fields must not prevent accepting this optional record.
+  omni::compat::optional<serialization_data::payload> optional;
+};
+
+class nested_extra_fields: public testing::TestWithParam<bool> {};
+
+TEST_P(nested_extra_fields, ignores_extra_fields_in_records_and_containers) {
+  const auto result = omni::ryml::deserialize_t{
+    /*strategy=*/omni::ryml::use_tolerance(0)
+      .allow_partial(GetParam())
+      .allow_extra(true),
+  }(omni::type_t<nested_extra_config>{},
+    R"({"extra":null,
+      "object":{"name":"Ada","code":815,"extra":{}},
+      "records":[{"name":"Grace","code":108,"extra":[]},
+                 {"name":"Linus","code":42,"extra":false}],
+      "optional":{"name":"Bjarne","code":23,"extra":{"more":1}}})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_FALSE(result.diagnostics.stopped());
+  EXPECT_TRUE(result.diagnostics.policy.extra);
+  EXPECT_EQ(GetParam(), result.diagnostics.policy.partial);
+  EXPECT_FALSE(omni::ryml::is_partial(result));
+  if (!result.value)
+    return;
+
+  EXPECT_EQ("Ada", result.value->object.name);
+  EXPECT_EQ(815, result.value->object.code);
+  EXPECT_EQ(2U, result.value->records.size());
+  if (2U == result.value->records.size()) {
+    EXPECT_EQ("Grace", result.value->records[0].name);
+    EXPECT_EQ(108, result.value->records[0].code);
+    EXPECT_EQ("Linus", result.value->records[1].name);
+    EXPECT_EQ(42, result.value->records[1].code);
+  }
+  EXPECT_TRUE(result.value->optional);
+  if (result.value->optional) {
+    EXPECT_EQ("Bjarne", result.value->optional->name);
+    EXPECT_EQ(23, result.value->optional->code);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(policies,
+  nested_extra_fields,
+  testing::Bool(),
+  [](const testing::TestParamInfo<bool> &p) {
+    return p.param ? "partial" : "strict";
+  });
+
+TEST(tree_mapping, borrowed_mapping_accepts_extra_fields) {
+  const auto tree =
+    ::ryml::parse_in_arena(R"({"extra":[1,{}],"name":"Ada","code":815})");
+  const auto result = omni::ryml::map_tree_t{
+    /*strategy=*/omni::ryml::use_tolerance(0).allow_extra(true),
+  }(omni::type_t<serialization_data::payload>{}, tree.crootref());
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.policy.extra);
+  EXPECT_FALSE(result.diagnostics.policy.partial);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_FALSE(result.diagnostics.stopped());
+  EXPECT_EQ(&tree, result.diagnostics.tree.tree());
+  if (result.value) {
+    EXPECT_EQ("Ada", result.value->name);
+    EXPECT_EQ(815, result.value->code);
+  }
+}
+
+TEST(deserialization, extra_fields_do_not_hide_syntax_errors) {
+  const auto result = omni::ryml::deserialize_t{
+    /*strategy=*/omni::ryml::use_tolerance(0).allow_extra(true),
+  }(omni::type_t<serialization_data::payload>{},
+    R"({"name":"Ada","code":815,"extra":[)");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_TRUE(result.diagnostics.policy.extra);
+  EXPECT_FALSE(result.diagnostics.policy.partial);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (1U == result.diagnostics.issues.size()) {
+    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+      result.diagnostics.issues.front().reason);
+    EXPECT_FALSE(result.diagnostics.issues.front().warning);
+  }
+  EXPECT_FALSE(omni::ryml::render_diangostics(result.diagnostics).empty());
+}
+
+TEST(deserialization_strategy, builders_preserve_extra_and_other_settings) {
+  constexpr auto original =
+    omni::ryml::use_tolerance(2).allow_partial(true).allow_extra(true);
+  constexpr auto rebound = original.use_tolerance(3).allow_partial(false);
+  constexpr auto disabled = rebound.allow_extra(false);
+  static_assert(rebound.extra,
+    "tolerance and partial builders must preserve extra");
+  static_assert(3 == disabled.tolerance,
+    "allow_extra must preserve tolerance in constant expressions");
+  static_assert(!disabled.partial,
+    "allow_extra must preserve partial in constant expressions");
+  static_assert(!disabled.extra,
+    "allow_extra must be reversible in constant expressions");
+
+  EXPECT_EQ(2, original.tolerance);
+  EXPECT_TRUE(original.partial);
+  EXPECT_TRUE(original.extra);
+  EXPECT_EQ(3, disabled.tolerance);
+  EXPECT_FALSE(disabled.partial);
+  EXPECT_FALSE(disabled.extra);
+}
+
+#if defined(__cpp_designated_initializers) \
+  && 201707L <= __cpp_designated_initializers
+TEST(deserialization_strategy, designated_configuration_accepts_extra_fields) {
+  constexpr omni::ryml::deserialize_t deserialize{
+    .strategy =
+      omni::ryml::strategy{
+        .tolerance = 0,
+        .partial = false,
+        .extra = true,
+      },
+  };
+  const auto result = deserialize(omni::type_t<serialization_data::payload>{},
+    R"({"name":"Ada","code":815,"extra":null})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.policy.extra);
+  EXPECT_FALSE(result.diagnostics.policy.partial);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ("Ada", result.value->name);
+    EXPECT_EQ(815, result.value->code);
+  }
+}
+#endif
 
 constexpr auto updated_strategy =
   omni::ryml::use_tolerance(2).allow_partial(true).use_tolerance(3);
@@ -1236,6 +1522,7 @@ TEST(deserialization_diagnostics,
       omni::ryml::strategy{
         .tolerance = 2,
         .partial = true,
+        .extra = false,
       },
   };
   const auto result = configured(omni::type_t<serialization_data::payload>{},
@@ -1560,6 +1847,18 @@ TEST(tree_mapping, deserializes_a_record_with_no_fields) {
   EXPECT_TRUE(result.diagnostics.tree.crootref().is_map());
 }
 
+TEST(tree_mapping, empty_model_accepts_extra_fields) {
+  const auto result = omni::ryml::map_tree_t{
+    /*strategy=*/omni::ryml::use_tolerance(0).allow_extra(true),
+  }(omni::type_t<empty_record>{},
+    ::ryml::parse_in_arena(R"({"extra":1,"extra":2,"nested":{"more":[]}})"));
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.policy.extra);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_FALSE(result.diagnostics.stopped());
+}
+
 TEST(deserialization, forwards_parser_options_before_mapping) {
   const auto result =
     omni::ryml::deserialize(omni::type_t<serialization_data::payload>{},
@@ -1582,6 +1881,7 @@ TEST(tree_mapping, supports_designated_configuration) {
       omni::ryml::strategy{
         .tolerance = 2,
         .partial = true,
+        .extra = false,
       },
   };
   const auto result = configured(omni::type_t<serialization_data::payload>{},

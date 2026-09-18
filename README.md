@@ -485,6 +485,13 @@ Missing optional fields keep their initialized defaults; explicit null clears
 them. Invalid optional values and wrong-kind containers keep their defaults.
 Sequences preserve source indices, with failed entries holding default values.
 
+Extra fields are rejected by default. Set `extra=true`, or use
+`use_tolerance(0).allow_extra(true)`, to ignore fields absent from the model at
+every nesting level. Ignored fields produce no diagnostics and do not spend
+tolerance. This works with `partial=false`; model fields still require valid
+values, and duplicates of model fields remain issues. Diagnostics preserve the
+setting in `policy.extra`.
+
 Tree arguments select owning diagnostics; node views borrow the caller's tree.
 Keep borrowed trees and any external string storage alive and unchanged while
 using diagnostics. Move owning diagnostics; copying does not rebind their views.
