@@ -476,6 +476,15 @@ constexpr omni::ryml::deserialize_t tolerant_deserialize{
 };
 ```
 
+During deserialization, `partial=true` treats optional and `std::vector` field
+issues as warnings, including issues within their contents. Warnings do not
+spend `tolerance`; scalar and required-record errors outside those fields still
+do. Diagnostics mark warnings explicitly, and the default renderer labels them
+with `warning:`.
+Missing optional fields keep their initialized defaults; explicit null clears
+them. Invalid optional values and wrong-kind containers keep their defaults.
+Sequences preserve source indices, with failed entries holding default values.
+
 Tree arguments select owning diagnostics; node views borrow the caller's tree.
 Keep borrowed trees and any external string storage alive and unchanged while
 using diagnostics. Move owning diagnostics; copying does not rebind their views.

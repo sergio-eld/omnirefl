@@ -1,5 +1,36 @@
 #pragma once
 
+/**
+ * TODO(high): Configure partial deserialization beyond a single bool.
+ *
+ * As of now, optional fields and containers default to warnings when
+ * strategy.partial is true. Supported types are compat::optional (std or tl)
+ * and std::vector, including issues within their nested values. Warnings are
+ * retained and rendered, but do not spend tolerance or stop traversal.
+ * With partial=false, invalid supplied values remain errors.
+ *
+ * Missing optional fields keep their initialized defaults without an issue;
+ * explicit null clears them. Invalid optional values and wrong-kind containers
+ * keep their initialized defaults. Sequences retain source indices, with
+ * failed entries holding default values. Scalar and required-record issues
+ * outside these fields remain errors; partial still permits their defaults
+ * to be returned. Syntax errors always prevent returning a value.
+ *
+ * Consider runtime strategy settings for recovery and severity by field or
+ * category: reject, omit, retain an initialized fallback, or default a value.
+ * Decide whether failed sequence/mapping entries are skipped or retain their
+ * positions, and whether optional values become empty or retain a fallback.
+ * Consider finer recovery within optional records and containers rather than
+ * rejecting an optional value whenever its contents report an issue.
+ *
+ * Default constructibility alone does not establish a valid fallback; consider
+ * metadata for intended defaults and required fields. Keep severity, traversal
+ * tolerance, value retention, and any warning collection limit independent.
+ * Allow strict request handling and lenient config loading through runtime
+ * configuration. Preserve C++11 support and lazy message rendering; defer
+ * user-defined recovery and severity customization until these rules are clear.
+ */
+
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/extensions/compat.hpp>
@@ -19,8 +50,8 @@
 #include <vector>
 
 OMNI_REQUIRE_GENERATED_REFLECTION(
-  "Serialization requires the generated reflection header "
-  "to be included first. With CMake, call omni_reflected_target(<target>).");
+  "Include the generated reflection header before this serialization header. "
+  "With CMake, call omni_reflected_target(<target>).");
 
 namespace omni {
 namespace ryml {
@@ -55,10 +86,13 @@ struct issue {
     compat::optional<std::size_t> index; ///< Sequence position; absent for a field.
   };
 
-  // Group the byte-sized kinds; keep rendering data before source positions.
+  // Group byte-sized kinds and the warning flag before rendering data.
   code reason;
   kind expected;
   kind actual;
+
+  // True for recoverable optional/container issues under strategy.partial.
+  bool warning = false;
 
   // Borrow the decoded scalar from the retained tree; render only on request.
   c4::csubstr value;
@@ -94,7 +128,7 @@ struct diagnostics {
   // Preserves the call's settings.
   struct {
     // Number of errors traversal may pass before stopping on the next one.
-    // Zero stops at the first error; negative call values are stored as zero.
+    // Warnings do not count; negative call values are stored as zero.
     std::size_t tolerance;
 
     // Allows returning a value despite field errors, keeping their defaults.
@@ -112,7 +146,10 @@ struct diagnostics {
 
   // True when mapping's error budget requires stopping.
   bool stopped() const {
-    return issues.size() > policy.tolerance;
+    return policy.tolerance < static_cast<std::size_t>( //
+      std::count_if(issues.begin(),
+        issues.end(),
+        [](const issue &e) { return !e.warning; }));
   }
 };
 
@@ -146,28 +183,30 @@ struct with_diagnostics {
   }
 };
 
-// True when mapping returned a value despite field errors.
+// True when deserialization returned a value with field issues.
 template <typename T, bool Owning>
 bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
   return r.value && !r.diagnostics.issues.empty();
 }
 
-/// Controls error collection and whether to return a value despite field
-/// errors.
+/**
+ * Controls error collection and whether to return a value despite field errors.
+ */
 struct strategy {
   // TODO(high): Detect at compile time whether a model permits unbounded
   // nesting (e.g. a vector of itself); consider a traversal-depth limit in
   // strategy to prevent stack exhaustion from deeply nested or malicious input.
 
-  /// Number of errors traversal may pass before stopping on the next one.
-  /// Zero stops at the first error; negative values behave as zero.
+  // Number of errors traversal may pass before stopping on the next one.
+  // Warnings do not count. Zero stops at the first error; negatives mean zero.
   int tolerance;
 
-  /// Permit returning a value despite field errors, along with diagnostics.
-  /// Failed, missing, and unvisited fields retain their initialized defaults.
+  // Permit returning a value despite errors; optional/container issues become
+  // warnings. Failed, missing, and unvisited fields keep initialized defaults.
   bool partial;
 
-  /** Return a strategy with the new tolerance and unchanged partial setting.
+  /**
+   * Return a strategy with the new tolerance and unchanged partial setting.
    *
    * Compatibility builder for code predating C++20 designated initializers.
    */
@@ -178,7 +217,8 @@ struct strategy {
     };
   }
 
-  /** Return a strategy with the new partial setting and unchanged tolerance.
+  /**
+   * Return a strategy with the new partial setting and unchanged tolerance.
    *
    * Compatibility builder for code predating C++20 designated initializers.
    */
@@ -190,7 +230,8 @@ struct strategy {
   }
 };
 
-/** Start configuration with the given tolerance and partial=false.
+/**
+ * Start configuration with the given tolerance and partial=false.
  *
  * Compatibility builder for code predating C++20 designated initializers.
  */
@@ -280,6 +321,8 @@ struct render_diangostics_t {
 
       message += path.empty() ? std::string{"<root>"} : path;
       message += ": ";
+      if (entry.warning)
+        message += "warning: ";
 
       switch (entry.reason) {
       case issue::code::missing_field:
@@ -325,18 +368,22 @@ namespace detail {
 struct mapping_state {
   omni::ryml::diagnostics</*owning=*/ false> *diagnostics;
   std::vector<issue::path_segment> path;
+  // Issues inside an optional/container field inherit its warning policy.
+  bool warning;
 };
 
 inline issue make_issue(issue::code reason,
   issue::kind expected,
   ::ryml::ConstNodeRef node,
-  const std::vector<issue::path_segment> &path) {
+  const std::vector<issue::path_segment> &path,
+  bool warning = false) {
   // C++11 cannot aggregate-initialize issue because it has member defaults.
   issue result{};
   result.reason = reason;
   result.path = path;
   result.expected = expected;
   result.actual = node_kind(node);
+  result.warning = warning;
 
   if (!node.invalid()) {
     result.node_id = node.id();
@@ -370,6 +417,15 @@ struct select<case_<Condition, Operation>, Case...> {
 
 template <typename To>
 struct map_fundamental {
+  // C++11 dispatch keeps integer-only overflow checks out of bool/real reads.
+  static bool convert(c4::csubstr from, To *to, std::true_type) {
+    return c4::from_chars(from, c4::fmt::overflow_checked(*to));
+  }
+
+  static bool convert(c4::csubstr from, To *to, std::false_type) {
+    return c4::from_chars(from, to);
+  }
+
   void operator()(::ryml::ConstNodeRef from,
     To *to,
     mapping_state *state) const {
@@ -385,7 +441,11 @@ struct map_fundamental {
 
     if (!from.has_val() || from.is_container()) {
       state->diagnostics->issues.push_back(
-        make_issue(issue::code::unexpected_kind, expected, from, state->path));
+        make_issue(issue::code::unexpected_kind,
+          expected,
+          from,
+          state->path,
+          state->warning));
 
       return;
     }
@@ -403,15 +463,26 @@ struct map_fundamental {
 
     if (!valid) {
       state->diagnostics->issues.push_back(
-        make_issue(issue::code::invalid_scalar, expected, from, state->path));
+        make_issue(issue::code::invalid_scalar,
+          expected,
+          from,
+          state->path,
+          state->warning));
 
       return;
     }
 
     To converted{};
-    if (!c4::from_chars(value, &converted)) {
+    if (!convert(value,
+          &converted,
+          std::integral_constant<bool,
+            std::is_integral<To>::value && !std::is_same<To, bool>::value>{})) {
       state->diagnostics->issues.push_back(
-        make_issue(issue::code::out_of_range, expected, from, state->path));
+        make_issue(issue::code::out_of_range,
+          expected,
+          from,
+          state->path,
+          state->warning));
 
       return;
     }
@@ -428,7 +499,11 @@ struct map_string {
 
     if (!from.has_val() || from.is_container()) {
       state->diagnostics->issues.push_back(make_issue(
-        issue::code::unexpected_kind, issue::kind::string, from, state->path));
+        issue::code::unexpected_kind,
+        issue::kind::string,
+        from,
+        state->path,
+        state->warning));
 
       return;
     }
@@ -451,7 +526,29 @@ template <typename To>
 with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
   ::ryml::ConstNodeRef from,
   with_diagnostics<To, diagnostics</*owning=*/ false>> result,
-  std::vector<issue::path_segment> path);
+  std::vector<issue::path_segment> path,
+  bool warning);
+
+struct map_optional {
+  template <typename To>
+  void operator()(::ryml::ConstNodeRef from,
+    To *to,
+    detail::mapping_state *state) const {
+    assert(to && state);
+
+    if (from.has_val() && from.val_is_null()) {
+      to->reset();
+      return;
+    }
+
+    // Keep an initialized fallback if any part of the supplied value fails.
+    typename To::value_type value = *to ? **to : typename To::value_type{};
+    const auto issues_before = state->diagnostics->issues.size();
+    map_value(from, &value, state);
+    if (issues_before == state->diagnostics->issues.size())
+      *to = std::move(value);
+  }
+};
 
 struct map_sequence {
   template <typename To>
@@ -465,7 +562,8 @@ struct map_sequence {
         issue::code::unexpected_kind,
         issue::kind::sequence,
         from,
-        state->path));
+        state->path,
+        state->warning));
 
       return;
     }
@@ -505,7 +603,8 @@ struct map_record {
         /*value=*/std::move(*to),
         /*diagnostics=*/std::move(*state->diagnostics),
       },
-      state->path);
+      state->path,
+      state->warning);
 
     *to = std::move(*result.value);
     *state->diagnostics = std::move(result.diagnostics);
@@ -525,9 +624,12 @@ template <typename To>
 void map_value(::ryml::ConstNodeRef from,
   To *to,
   detail::mapping_state *state) {
+  assert(to && state && state->diagnostics);
+
   using operation = typename detail::select<
     detail::case_<std::is_fundamental<To>::value, detail::map_fundamental<To>>,
     detail::case_<std::is_same<To, std::string>::value, detail::map_string>,
+    detail::case_<omni::traits::is<compat::optional, To>(), map_optional>,
     detail::case_<omni::traits::is<std::vector, To>(), map_sequence>,
     detail::case_<omni::is_reflected<To>::value, map_record>,
     unsupported>::type;
@@ -544,13 +646,30 @@ struct cpp11_lambda_field_named {
   }
 };
 
+// C++11 predicate for classifying duplicates by their destination field type.
+struct cpp11_lambda_recoverable_field_named {
+  c4::csubstr name;
+
+  template <typename Field>
+  bool operator()(Field field) const {
+    return name == c4::to_csubstr(field.name())
+      && (omni::traits::is<compat::optional, typename Field::type>()
+        || omni::traits::is<std::vector, typename Field::type>());
+  }
+};
+
 struct cpp11_lambda_require_field {
   ::ryml::ConstNodeRef from;
   detail::mapping_state *state;
 
   template <typename Field>
   void operator()(Field field) const {
+    assert(state && state->diagnostics);
+
     if (state->diagnostics->stopped())
+      return;
+
+    if (omni::traits::is<compat::optional, typename Field::type>())
       return;
 
     const auto name = c4::to_csubstr(field.name());
@@ -565,7 +684,10 @@ struct cpp11_lambda_require_field {
       issue::code::missing_field,
       issue::kind::unknown,
       ::ryml::ConstNodeRef{},
-      state->path));
+      state->path,
+      state->warning
+        || (state->diagnostics->policy.partial
+          && omni::traits::is<std::vector, typename Field::type>())));
     state->path.pop_back();
   }
 };
@@ -574,6 +696,7 @@ struct cpp11_lambda_require_field {
 struct deserialize_field {
   ::ryml::ConstNodeRef from;
   const std::vector<issue::path_segment> &path;
+  bool warning;
 
   template <typename To, typename Field>
   with_diagnostics<To, diagnostics</*owning=*/ false>> operator()(
@@ -590,6 +713,10 @@ struct deserialize_field {
     detail::mapping_state state{
       /*diagnostics=*/&result.diagnostics,
       /*path=*/path,
+      /*warning=*/warning
+        || (result.diagnostics.policy.partial
+          && (omni::traits::is<compat::optional, typename Field::type>()
+            || omni::traits::is<std::vector, typename Field::type>())),
     };
 
     state.path.push_back({
@@ -609,10 +736,12 @@ template <typename To>
 with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
   ::ryml::ConstNodeRef from,
   with_diagnostics<To, diagnostics</*owning=*/ false>> result,
-  std::vector<issue::path_segment> path) {
+  std::vector<issue::path_segment> path,
+  bool warning) {
   detail::mapping_state state{
     /*diagnostics=*/&result.diagnostics,
     /*path=*/std::move(path),
+    /*warning=*/warning,
   };
 
   if (from.invalid() || !from.is_map()) {
@@ -620,7 +749,8 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
       issue::code::unexpected_kind,
       issue::kind::mapping,
       from,
-      state.path));
+      state.path,
+      state.warning));
 
     return result;
   }
@@ -654,7 +784,14 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
         : issue::code::unknown_field,
       issue::kind::unknown,
       child,
-      state.path));
+      state.path,
+      state.warning
+        || (result.diagnostics.policy.partial && duplicate
+          && omni::fn::any_of(
+            cpp11_lambda_recoverable_field_named{
+              /*name=*/name,
+            },
+            fields))));
     state.path.pop_back();
   }
 
@@ -670,6 +807,7 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
     deserialize_field{
       /*from=*/from,
       /*path=*/state.path,
+      /*warning=*/state.warning,
     },
     std::move(result),
     fields);
@@ -700,7 +838,8 @@ struct cpp11_lambda_fold_record {
           /*parse_message=*/{},
         },
       },
-      {});
+      {},
+      /*warning=*/false);
 
     // Keep defaults throughout the fold; apply retention once at the root.
     if (!result.diagnostics.issues.empty() && !strategy.partial)
