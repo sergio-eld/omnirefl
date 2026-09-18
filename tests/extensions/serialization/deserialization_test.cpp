@@ -1,5 +1,6 @@
-#include "serialization/data.hpp"
-#include "serialization/deserialize.hpp"
+#include "data.hpp"
+
+#include <omnirefl/serialization/ryml.hpp>
 
 #include <gtest/gtest.h>
 
@@ -211,7 +212,7 @@ TEST(deserialization, rejects_missing_destination_fields_by_default) {
 struct mapping_case {
   std::string name;
   std::string source;
-  tl::expected<int, std::string> expected_code;
+  omni::compat::expected<int, std::string> expected_code;
 };
 
 class configured_deserialization:
@@ -283,16 +284,16 @@ INSTANTIATE_TEST_SUITE_P(configuration,
     mapping_case{"reordered", R"({"code":108,"name":"sunset"})", 108},
     mapping_case{"invalid_integer",
       R"({"name":"oceanic","code":"invalid"})",
-      tl::make_unexpected(std::string{"/code: \"invalid\" is not an integer"})},
+      omni::compat::unexpected<std::string>{"/code: \"invalid\" is not an integer"}},
     mapping_case{"missing_field",
       R"({"name":"oceanic"})",
-      tl::make_unexpected(std::string{"/code: missing field"})},
+      omni::compat::unexpected<std::string>{"/code: missing field"}},
     mapping_case{"unknown_field",
       R"({"name":"oceanic","code":815,"extra":1})",
-      tl::make_unexpected(std::string{"/extra: unknown field"})},
+      omni::compat::unexpected<std::string>{"/extra: unknown field"}},
     mapping_case{"duplicate_field",
       R"({"name":"oceanic","code":815,"code":108})",
-      tl::make_unexpected(std::string{"/code: duplicate field"})}),
+      omni::compat::unexpected<std::string>{"/code: duplicate field"}}),
   [](const testing::TestParamInfo<mapping_case> &p) { return p.param.name; });
 
 constexpr auto updated_strategy =
@@ -515,7 +516,7 @@ TEST(deserialization_diagnostics,
   EXPECT_EQ(2U, d.path.size());
   EXPECT_EQ("data", omni::ryml::detail::to_string(d.path.at(0).field));
   EXPECT_EQ("code", omni::ryml::detail::to_string(d.path.at(1).field));
-  EXPECT_EQ(tl::nullopt, d.path.at(1).index);
+  EXPECT_EQ(omni::compat::nullopt, d.path.at(1).index);
   EXPECT_EQ(std::string::npos, d.offset);
   EXPECT_EQ(std::string::npos, d.line);
   EXPECT_EQ(std::string::npos, d.column);
@@ -539,7 +540,7 @@ TEST(deserialization_diagnostics, shares_one_budget_across_nested_sequences) {
     "/records/0/code: \"bad\" is not an integer",
     omni::ryml::render_diangostics(result.diagnostics));
   const auto &index = result.diagnostics.issues.at(0).path.at(1);
-  EXPECT_EQ((tl::optional<std::size_t>{1U}), index.index);
+  EXPECT_EQ((omni::compat::optional<std::size_t>{1U}), index.index);
   if (result.value) {
     EXPECT_EQ((std::vector<int>{1, 0, 3}), result.value->values);
     EXPECT_EQ(2U, result.value->records.size());

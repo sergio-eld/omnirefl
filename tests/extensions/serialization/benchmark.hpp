@@ -1,7 +1,8 @@
 #pragma once
 
 #include "data.hpp"
-#include "deserialize.hpp"
+
+#include <omnirefl/serialization/ryml.hpp>
 
 #include <omnirefl/reflected_scope.hpp>
 
@@ -55,6 +56,28 @@ void deserialize_owned(benchmark::State &state,
 
   state.SetBytesProcessed(
     state.iterations() * static_cast<std::int64_t>(Size - 1));
+}
+
+template <typename T, typename Serialize, std::size_t Size>
+void serialize_owned(benchmark::State &state,
+  Serialize serialize,
+  const char (&input)[Size]) {
+  const auto source = omni::ryml::deserialize(
+    omni::type_t<T>{}, std::string{input});
+  if (!source.value) {
+    state.SkipWithError(
+      omni::ryml::render_diangostics(source.diagnostics).c_str());
+    return;
+  }
+
+  std::int64_t bytes = 0;
+  for (auto _ : state) {
+    auto result = omni::compat::invoke(serialize, *source.value);
+    bytes += static_cast<std::int64_t>(result.size());
+    benchmark::DoNotOptimize(result);
+  }
+
+  state.SetBytesProcessed(bytes);
 }
 
 } // namespace serialization_benchmark

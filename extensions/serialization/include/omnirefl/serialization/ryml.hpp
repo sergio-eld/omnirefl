@@ -2,19 +2,25 @@
 
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/extensions/compat.hpp>
 
 #include <ryml.hpp>
-#include <tl/expected.hpp>
-#include <tl/optional.hpp>
+#include <ryml_std.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <csetjmp>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+OMNI_REQUIRE_GENERATED_REFLECTION(
+  "Serialization requires the generated reflection header "
+  "to be included first. With CMake, call omni_reflected_target(<target>).");
 
 namespace omni {
 namespace ryml {
@@ -46,7 +52,7 @@ struct issue {
 
   struct path_segment {
     c4::csubstr field; ///< Name borrowed from metadata or the retained tree.
-    tl::optional<std::size_t> index; ///< Sequence position; absent for a field.
+    compat::optional<std::size_t> index; ///< Sequence position; absent for a field.
   };
 
   // Group the byte-sized kinds; keep rendering data before source positions.
@@ -85,9 +91,13 @@ struct issue {
  */
 template <bool Owning>
 struct diagnostics {
-  // Preserves the call's settings, with negative tolerance treated as zero.
+  // Preserves the call's settings.
   struct {
+    // Number of errors traversal may pass before stopping on the next one.
+    // Zero stops at the first error; negative call values are stored as zero.
     std::size_t tolerance;
+
+    // Allows returning a value despite field errors, keeping their defaults.
     bool partial;
   } policy;
 
@@ -115,7 +125,7 @@ template <typename T,
 struct with_diagnostics {
   // The deserialized value, if available. strategy.partial controls
   // whether it can be returned despite field errors.
-  tl::optional<T> value;
+  compat::optional<T> value;
 
   Diagnostics diagnostics;
 
@@ -145,6 +155,10 @@ bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
 /// Controls error collection and whether to return a value despite field
 /// errors.
 struct strategy {
+  // TODO(high): Detect at compile time whether a model permits unbounded
+  // nesting (e.g. a vector of itself); consider a traversal-depth limit in
+  // strategy to prevent stack exhaustion from deeply nested or malicious input.
+
   /// Number of errors traversal may pass before stopping on the next one.
   /// Zero stops at the first error; negative values behave as zero.
   int tolerance;
@@ -545,7 +559,7 @@ struct cpp11_lambda_require_field {
 
     state->path.push_back({
       /*field=*/name,
-      /*index=*/tl::nullopt,
+      /*index=*/compat::nullopt,
     });
     state->diagnostics->issues.push_back(detail::make_issue(
       issue::code::missing_field,
@@ -580,7 +594,7 @@ struct deserialize_field {
 
     state.path.push_back({
       /*field=*/name,
-      /*index=*/tl::nullopt,
+      /*index=*/compat::nullopt,
     });
     // Preserve initialized defaults while supporting bit-field value access.
     typename Field::type value = field.value(*result.value);
@@ -632,7 +646,7 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
 
     state.path.push_back({
       /*field=*/name,
-      /*index=*/tl::nullopt,
+      /*index=*/compat::nullopt,
     });
     result.diagnostics.issues.push_back(detail::make_issue(
       duplicate
@@ -690,7 +704,7 @@ struct cpp11_lambda_fold_record {
 
     // Keep defaults throughout the fold; apply retention once at the root.
     if (!result.diagnostics.issues.empty() && !strategy.partial)
-      result.value = tl::nullopt;
+      result.value = compat::nullopt;
 
     return result;
   }
@@ -703,7 +717,7 @@ struct cpp11_lambda_fold_record {
  * ParserOptions are passed directly to ryml. Location tracking, if enabled,
  * ends with this call; the returned tree does not retain the parser.
  */
-inline tl::expected<::ryml::Tree, std::string> parse(std::string source,
+inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {}) {
   constexpr int parse_failed = 1;
 
@@ -749,11 +763,11 @@ inline tl::expected<::ryml::Tree, std::string> parse(std::string source,
   // TODO: Replace this boundary if ryml provides a result-returning parse API.
   return compat::invoke( //
     [&error, &tree, &parser, &source]()
-      -> tl::expected<::ryml::Tree, std::string> {
+      -> compat::expected<::ryml::Tree, std::string> {
       if (parse_failed == setjmp(error.jump))
-        return tl::make_unexpected("line "
+        return compat::unexpected<std::string>{"line "
           + std::to_string(error.location.line + 1) + ", column "
-          + std::to_string(error.location.col + 1) + ": " + error.message);
+          + std::to_string(error.location.col + 1) + ": " + error.message};
 
       ::ryml::parse_in_arena(&parser,
         c4::csubstr{source.data(), source.size()},
@@ -832,47 +846,217 @@ struct deserialize_t {
     omni::type_t<To> to,
     std::string source,
     ::ryml::ParserOptions options = {}) const {
-    auto parsed = parse(std::move(source), options);
-
-    return fn::branch(
-      [&parsed]() { return parsed.has_value(); },
-      [this, to, &parsed]() {
-        // The reflector cannot trace C++20 bind_front's internal sites;
-        // keep the mapper call direct inside the composition.
-        return map_tree_t{
-          /*strategy=*/strategy,
-        }(to, std::move(*parsed));
-      },
-      [this, &parsed]() -> with_diagnostics<To> {
-        return {
-          /*value=*/tl::nullopt,
-          /*diagnostics=*/{
-            /*policy=*/{
-              /*tolerance=*/0 >= strategy.tolerance
-                ? 0
-                : static_cast<std::size_t>(strategy.tolerance),
-              /*partial=*/strategy.partial,
-            },
-            /*tree=*/::ryml::Tree{
-              /*node_capacity=*/0,
-              /*arena_capacity=*/0,
-            },
-            /*issues=*/{
-              detail::make_issue(issue::code::parse_error,
-                issue::kind::unknown,
-                ::ryml::ConstNodeRef{},
-                {}),
-            },
-            /*parse_message=*/std::move(parsed.error()),
+    if (auto parsed = parse(std::move(source), options)) {
+      return map_tree_t{
+        /*strategy=*/strategy,
+      }(to, std::move(*parsed));
+    } else {
+      return {
+        /*value=*/compat::nullopt,
+        /*diagnostics=*/{
+          /*policy=*/{
+            /*tolerance=*/0 >= strategy.tolerance
+              ? 0
+              : static_cast<std::size_t>(strategy.tolerance),
+            /*partial=*/strategy.partial,
           },
-        };
-      });
+          /*tree=*/::ryml::Tree{
+            /*node_capacity=*/0,
+            /*arena_capacity=*/0,
+          },
+          /*issues=*/{
+            detail::make_issue(issue::code::parse_error,
+              issue::kind::unknown,
+              ::ryml::ConstNodeRef{},
+              {}),
+          },
+          /*parse_message=*/std::move(parsed.error()),
+        },
+      };
+    }
   }
 };
 
 /// Parse and map with zero tolerance and partial values disabled.
 constexpr deserialize_t deserialize{
   /*strategy=*/use_tolerance(0).allow_partial(false),
+};
+
+namespace detail {
+
+struct write_scalar {
+  template <typename From>
+  void operator()(const From &from, ::ryml::NodeRef *to) const {
+    assert(to);
+    to->set_val_serialized(from);
+  }
+};
+
+struct write_boolean {
+  void operator()(bool from, ::ryml::NodeRef *to) const {
+    assert(to);
+    // c4's plain bool conversion emits 0/1, rather than document booleans.
+    to->set_val_serialized(c4::fmt::boolalpha(from));
+  }
+};
+
+struct write_number {
+  template <typename From>
+  void operator()(const From &from, ::ryml::NodeRef *to) const {
+    assert(to);
+    // Preserve enough significant digits to recover the original value.
+    to->set_val_serialized(c4::fmt::real(from,
+      std::numeric_limits<From>::max_digits10,
+      c4::FTOA_FLEX));
+  }
+};
+
+struct write_string {
+  void operator()(const std::string &from, ::ryml::NodeRef *to) const {
+    assert(to);
+    to->set_val_serialized(from);
+    // Strings such as "true", "12", and "null" must remain strings.
+    *to |= ::ryml::VAL_DQUO;
+  }
+};
+
+} // namespace detail
+
+namespace reflected_scope {
+
+template <typename From>
+void write_value(const From &from, ::ryml::NodeRef *to);
+
+struct write_sequence {
+  template <typename From>
+  void operator()(const From &from, ::ryml::NodeRef *to) const {
+    assert(to);
+    *to |= ::ryml::SEQ;
+
+    for (const auto &value : from) {
+      auto child = to->append_child();
+      write_value(value, &child);
+    }
+  }
+};
+
+// C++11 visitor writes bound fields without copying their values.
+struct write_field {
+  ::ryml::NodeRef *to;
+
+  template <typename Field>
+  void operator()(Field field) const {
+    assert(to);
+    auto child = to->append_child();
+    child.set_key_serialized(field.name());
+    write_value(field.value(), &child);
+  }
+};
+
+struct write_record {
+  template <typename From>
+  void operator()(const From &from, ::ryml::NodeRef *to) const {
+    assert(to);
+    *to |= ::ryml::MAP;
+    const auto binding = omni::meta_for<From>::bind(from);
+    fn::each(write_field{
+      /*to=*/to,
+    }, binding.public_fields());
+  }
+};
+
+struct unsupported_serialization {
+  template <typename From>
+  void operator()(const From &, ::ryml::NodeRef *) const {
+    // TODO: Define the document representation of reflected enumerations.
+    static_assert(detail::dependent_false<From>::value,
+      "unsupported serialization source type");
+  }
+};
+
+template <typename From>
+void write_value(const From &from, ::ryml::NodeRef *to) {
+  using operation = typename detail::select<
+    detail::case_<std::is_same<From, bool>::value, detail::write_boolean>,
+    detail::case_<std::is_floating_point<From>::value, detail::write_number>,
+    detail::case_<std::is_integral<From>::value, detail::write_scalar>,
+    detail::case_<std::is_same<From, std::string>::value, detail::write_string>,
+    detail::case_<omni::traits::is<std::vector, From>(), write_sequence>,
+    detail::case_<omni::is_reflected<From>::value, write_record>,
+    unsupported_serialization>::type;
+
+  operation{}(from, to);
+}
+
+// C++11 callable establishes reflection before writing the record's fields.
+struct cpp11_lambda_to_tree {
+  template <typename From>
+  ::ryml::Tree operator()(omni::record_binding_t<From> from) const {
+    ::ryml::Tree tree;
+    auto root = tree.rootref();
+    root |= ::ryml::MAP;
+    fn::each(write_field{
+      /*to=*/&root,
+    }, from.public_fields());
+
+    return tree;
+  }
+};
+
+} // namespace reflected_scope
+
+/**
+ * Serialize a reflected record and its nested fields to YAML or JSON.
+ * Strings are quoted; field values are copied into the tree's arena.
+ */
+struct serialize_t {
+  ::ryml::EmitType_e format;
+
+  template <typename From>
+  std::string operator()(const From &from) const {
+    const auto tree = omni::reflected_call(
+      reflected_scope::cpp11_lambda_to_tree{}, from);
+
+    if (::ryml::EMIT_JSON != format)
+      return ::ryml::emitrs_yaml<std::string>(tree);
+
+    auto text = ::ryml::emitrs_json<std::string>(tree);
+    if (text.end() == std::find_if(text.begin(),
+          text.end(),
+          [](unsigned char c) { return 0x20 > c; }))
+      return text;
+
+    // Ad hoc: ryml 0.14 leaves some JSON control bytes unescaped. This tree
+    // emits compact JSON, so any remaining control bytes belong to strings.
+    // TODO: Remove this pass when ryml escapes every JSON control byte.
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (const unsigned char c : text) {
+      if (0x20 > c) {
+        escaped += "\\u00";
+        escaped += "0123456789abcdef"[c >> 4];
+        escaped += "0123456789abcdef"[c & 0x0f];
+      } else {
+        escaped += c;
+      }
+    }
+
+    return escaped;
+  }
+};
+
+/**
+ * Serialize reflected records to YAML text.
+ */
+constexpr serialize_t as_yaml{
+  /*format=*/::ryml::EMIT_YAML,
+};
+
+/**
+ * Serialize reflected records to JSON text.
+ */
+constexpr serialize_t as_json{
+  /*format=*/::ryml::EMIT_JSON,
 };
 
 } // namespace ryml

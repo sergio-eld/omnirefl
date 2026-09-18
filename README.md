@@ -422,6 +422,76 @@ model: reflected types must be nameable before their source declarations. See
   skipped with a warning.
 <!-- pages:limitations:end -->
 
+## Serialization Extension
+
+The optional `serialization` component provides JSON/YAML serialization
+through rapidyaml. It supports C++11 and later.
+
+```cmake
+find_package(omnirefl CONFIG REQUIRED COMPONENTS serialization)
+target_link_libraries(app PRIVATE omni::serialization)
+omni_reflected_target(app)
+```
+
+Linking `omni::serialization` supplies headers and backend dependencies.
+Call `omni_reflected_target(app)` separately for each target that uses reflection;
+it generates and force-includes metadata for that target's C++ sources.
+Reflection generation does not propagate through `target_link_libraries`.
+The backend header uses `OMNI_REQUIRE_GENERATED_REFLECTION(message)` to require
+the generated reflection header. This check does not require CMake: with another
+build system, run the tool and include or force-include its generated header
+at the start of each translation unit. Other reflection-based headers use the
+macro with their own message.
+
+Provide rapidyaml 0.14 or later (`ryml::ryml`), TartanLlama expected
+(`tl::expected`), and TartanLlama optional (`tl::optional`) through installed
+CMake packages or existing dependency targets. The base Omnirefl package does
+not require these dependencies unless this component is requested.
+
+```cpp
+#include <omnirefl/serialization/ryml.hpp>
+
+struct person {
+  std::string name;
+  int age;
+};
+
+auto result = omni::ryml::deserialize(omni::type_t<person>{},
+  R"({"name":"Ada","age":36})")
+  .map_diagnostics(omni::ryml::render_diangostics);
+// result.value holds the person; result.diagnostics is the rendered string.
+
+const auto yaml = omni::ryml::as_yaml(person{"Ada", 36});
+const auto json = omni::ryml::as_json(person{"Ada", 36});
+```
+
+`parse` returns `expected<Tree, std::string>`. `map_tree` maps a tree or node
+view, while `deserialize` composes both operations and retains syntax and
+field errors in one diagnostics result. Configuration controls the error
+budget and whether to return values despite field errors:
+
+```cpp
+constexpr omni::ryml::deserialize_t tolerant_deserialize{
+  /*strategy=*/omni::ryml::use_tolerance(2).allow_partial(true),
+};
+```
+
+Tree arguments select owning diagnostics; node views borrow the caller's tree.
+Keep borrowed trees and any external string storage alive and unchanged while
+using diagnostics. Move owning diagnostics; copying does not rebind their views.
+
+`BUILD_EXTENSIONS=ON` prepares extension targets and dependencies for source
+builds. Enabling `ENABLE_TESTING` or `ENABLE_BENCH` adds extension tests;
+`ENABLE_BENCH` also adds benchmarks.
+`ENABLE_PACKAGE` installs extension headers and component configurations
+regardless of `BUILD_EXTENSIONS`. Tests and benchmarks live under
+`tests/extensions/serialization` and are shipped with the package tests.
+
+`<omnirefl/extensions/compat.hpp>` supplies `omni::compat::optional`,
+`expected`, `unexpected`, and `nullopt`. It selects standard implementations
+when the required features are available and TartanLlama otherwise; the core
+compatibility header has no dependency on these fallback libraries.
+
 ## Packaged Tests and Examples
 
 Packaged test/example sources are available under `share/omnirefl/tests`. Copy

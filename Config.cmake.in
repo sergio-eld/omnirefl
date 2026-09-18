@@ -1,5 +1,7 @@
 @PACKAGE_INIT@
 
+set_and_check(@PROJECT_NAME@_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+
 set(@PROJECT_NAME@_RESOURCE_DIR 
     "${PACKAGE_PREFIX_DIR}/share/@PROJECT_NAME@/clang/@LLVM_VERSION@")
 if (NOT EXISTS "${@PROJECT_NAME@_RESOURCE_DIR}/include")
@@ -30,7 +32,7 @@ endif()
 # `components/<name>.cmake`. The component configuration must find its
 # dependencies and set `@PROJECT_NAME@_<name>_FOUND`; when unavailable, it must
 # also set `@PROJECT_NAME@_<name>_NOT_FOUND_MESSAGE`.
-set(_@PROJECT_NAME@_supported_components)
+set(_@PROJECT_NAME@_supported_components serialization)
 
 foreach(_component IN LISTS @PROJECT_NAME@_FIND_COMPONENTS)
     if(_component IN_LIST _@PROJECT_NAME@_supported_components)

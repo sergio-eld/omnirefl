@@ -494,6 +494,11 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/functional/CMakeLists.txt")
     add_subdirectory(functional)
 endif()
 
+# Installed-package tests also exercise the shipped extension component.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/extensions/CMakeLists.txt")
+    add_subdirectory(extensions)
+endif()
+
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
         set(_target "cpp_17.negative.${name}")
