@@ -32,7 +32,17 @@ FetchContent_Declare(tl_expected
     GIT_SHALLOW TRUE
     GIT_PROGRESS TRUE)
 
+set(OPTIONAL_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
+set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(tl_optional
+    GIT_REPOSITORY https://github.com/TartanLlama/optional.git
+    GIT_TAG v1.1.0
+    GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE)
+
 set(RYML_INSTALL OFF CACHE BOOL "" FORCE)
+# Parse errors use invocation-local jump recovery, without exceptions.
+set(RYML_DEFAULT_CALLBACK_USES_EXCEPTIONS OFF CACHE BOOL "" FORCE)
 # Keep rapidyaml's public compile feature from upgrading every versioned
 # consumer to the parent Omnirefl project's C++23 default.
 set(RYML_CXX_STANDARD 11 CACHE STRING "" FORCE)
@@ -60,6 +70,7 @@ set(CMAKE_CXX_STANDARD 11)
 FetchContent_MakeAvailable(
     googletest
     tl_expected
+    tl_optional
     rapidyaml)
 if(ENABLE_BENCH)
     FetchContent_MakeAvailable(google_benchmark)
@@ -82,33 +93,42 @@ endif()
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 foreach(_standard IN LISTS _supported_cpp_standards)
-    set(_test_target "cpp_${_standard}.sb.serialization_tree_mapping")
-    add_executable(${_test_target} serialization_tree_mapping_test.cpp)
+    set(_test_target "cpp_${_standard}.sb.deserialization")
+    add_executable(${_test_target} deserialization_test.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO)
+    # Compile the recovery path without language-level exception support.
+    if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+        target_compile_options(${_test_target} PRIVATE -fno-exceptions)
+    endif()
     target_link_libraries(${_test_target} PRIVATE
         gtest_main
         omni::refl
         ryml::ryml
-        tl::expected)
+        tl::expected
+        tl::optional)
     omni_reflected_target(${_test_target})
     add_test(NAME ${_test_target} COMMAND ${_test_target})
 
     if(ENABLE_BENCH)
-        set(_benchmark_target "cpp_${_standard}.benchmark.serialization")
+        set(_benchmark_target "cpp_${_standard}.benchmark.deserialization")
         add_executable(${_benchmark_target}
-            serialization_tree_mapping_bench.cpp)
+            deserialization_bench.cpp)
         set_target_properties(${_benchmark_target} PROPERTIES
             CXX_STANDARD ${_standard}
             CXX_STANDARD_REQUIRED YES
             CXX_EXTENSIONS NO)
+        if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+            target_compile_options(${_benchmark_target} PRIVATE -fno-exceptions)
+        endif()
         target_link_libraries(${_benchmark_target} PRIVATE
             benchmark::benchmark_main
             omni::refl
             ryml::ryml
-            tl::expected)
+            tl::expected
+            tl::optional)
         omni_reflected_target(${_benchmark_target} LOG_LEVEL silent)
     endif()
 endforeach()

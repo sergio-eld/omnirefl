@@ -647,6 +647,16 @@ if("17" IN_LIST _supported_cpp_standards)
         "definition appears later in the translation unit"
         ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
+        "composed_definition_after_use"
+        negative/composed_definition_after_use.cpp
+        1
+        "definition appears later in the translation unit"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_diagnostic_tool_run(
+        "composed_reflected_call"
+        regressions/composed_reflected_call.cpp
+        "reflected types: 1")
+    _omnirefl_negative_tool_run(
         "incomplete_template_callstack"
         negative/incomplete_template_callstack.cpp
         1

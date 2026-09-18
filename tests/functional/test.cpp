@@ -258,6 +258,24 @@ constexpr auto select_815 = omni::fn::when(
 static_assert(815 == select_815(unavailable{}),
   "partial must preserve compile-time branch selection");
 
+constexpr int direct_constant = omni::fn::ct_const<815>();
+static_assert(815 == direct_constant,
+  "ct_const must support direct value use in C++11 constant expressions");
+constexpr bool direct_false = omni::fn::ct_const<0>();
+static_assert(!direct_false,
+  "ct_const must support boolean conversion without calling the adapter");
+
+static_assert(omni::traits::is<std::integral_constant, std::true_type>(),
+  "constant-template matching must work in C++11");
+static_assert(omni::traits::is<std::integral_constant,
+                const std::integral_constant<unsigned, 3> &>(),
+  "constant-template matching must ignore cv and reference qualifiers");
+static_assert(!omni::traits::is<std::integral_constant, int>(),
+  "runtime integers are not integral_constant specializations");
+static_assert(
+  omni::traits::is<omni::fn::ct_const_t, decltype(omni::fn::ct_const<3>())>(),
+  "constant-template matching must recognize callable adapters");
+
 constexpr auto skip_unavailable = omni::fn::when(
   omni::fn::ct_pred(omni::fn::ct_const<0>()),
   unavailable{});

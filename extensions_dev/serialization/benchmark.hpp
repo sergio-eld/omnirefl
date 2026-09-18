@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data.hpp"
+#include "deserialize.hpp"
 
 #include <omnirefl/reflected_scope.hpp>
 
@@ -13,19 +14,20 @@
 
 namespace serialization_benchmark {
 
-// Results remain mutable because Google Benchmark deprecates its const-reference
-// `DoNotOptimize` overload.
-template <typename T, typename Deserialize, std::size_t Size>
+// Results remain mutable because Google Benchmark deprecates its
+// const-reference `DoNotOptimize` overload.
+template <typename Deserialize, std::size_t Size>
 void deserialize_preparsed(benchmark::State &state,
   Deserialize deserialize,
   const char (&input)[Size]) {
   const ryml::Tree tree = ryml::parse_in_arena(c4::to_csubstr(input));
 
   for (auto _ : state) {
-    auto result = omni::compat::invoke(
-      deserialize, tree.rootref(), omni::type_t<T>{});
-    if (!result) {
-      state.SkipWithError(result.error().c_str());
+    auto result =
+      omni::compat::invoke(deserialize, tree.crootref());
+    if (!result.value) {
+      state.SkipWithError(
+        omni::ryml::render_diangostics(result.diagnostics).c_str());
       break;
     }
 
@@ -42,8 +44,9 @@ void deserialize_owned(benchmark::State &state,
   const char (&input)[Size]) {
   for (auto _ : state) {
     auto result = omni::compat::invoke(deserialize, std::string{input});
-    if (!result) {
-      state.SkipWithError(result.error().c_str());
+    if (!result.value) {
+      state.SkipWithError(
+        omni::ryml::render_diangostics(result.diagnostics).c_str());
       break;
     }
 

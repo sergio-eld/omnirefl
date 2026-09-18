@@ -1549,21 +1549,65 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
   if (!is_before_definition(call.getExprLoc()))
     return false;
 
-  // A lexically later definition is valid when an enclosing template is
-  // instantiated only after that definition becomes visible.
-  clang::DynTypedNode node = clang::DynTypedNode::create(call);
-  for (auto parents = ast.getParents(node); //
-    !parents.empty(); //
-    node = parents[0], parents = ast.getParents(node)) {
-    const auto *decl = node.get<clang::FunctionDecl>();
+  // Follow the recorded instantiation through composed template calls. The
+  // immediate instantiation location may itself be inside an adapter header.
+  std::vector pending{clang::DynTypedNode::create(call)};
+  std::set<const clang::FunctionDecl *> visited;
+  while (!pending.empty()) {
+    clang::DynTypedNode node = pending.back();
+    pending.pop_back();
+    bool resolved = false;
 
-    if (decl && decl->getPointOfInstantiation().isValid()
-      && !is_before_definition(decl->getPointOfInstantiation())) {
-      return false;
+    for (auto parents = ast.getParents(node); //
+      !parents.empty(); //
+      node = parents[0], parents = ast.getParents(node)) {
+      const auto *decl = node.get<clang::FunctionDecl>();
+      if (!decl)
+        continue;
+
+      const clang::SourceLocation instantiation =
+        sm.getExpansionLoc(decl->getPointOfInstantiation());
+      if (instantiation.isInvalid())
+        continue;
+      if (!visited.emplace(decl->getCanonicalDecl()).second
+        || !is_before_definition(instantiation)) {
+        resolved = true;
+        break;
+      }
+
+      using namespace clang::ast_matchers;
+      for (const auto *declaration : decl->redecls()) {
+        const auto callers =
+          match(callExpr(callee(functionDecl(equalsNode(declaration))))
+                  .bind("caller"),
+            ast);
+        for (const auto &match : callers) {
+          const auto *caller = match.getNodeAs<clang::CallExpr>("caller");
+          const clang::SourceLocation begin =
+            sm.getExpansionLoc(caller->getBeginLoc());
+          const clang::SourceLocation end =
+            sm.getExpansionLoc(caller->getEndLoc());
+
+          if (begin.isInvalid() || end.isInvalid())
+            continue;
+
+          // A later call cannot legitimize an earlier incomplete use. When
+          // specializations share this call site, every caller must be valid.
+          if (!sm.isBeforeInTranslationUnit(instantiation, begin)
+            && !sm.isBeforeInTranslationUnit(end, instantiation)) {
+            pending.push_back(clang::DynTypedNode::create(*caller));
+            resolved = true;
+          }
+        }
+      }
+      if (resolved)
+        break;
     }
+    if (!resolved)
+      return true;
   }
 
-  return true;
+  return false;
 }
 
 meta::source_file_context append_invalid_reflection_query(

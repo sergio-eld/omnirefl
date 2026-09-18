@@ -19,11 +19,17 @@ template <template <typename...> class Template, typename... Argument>
 struct is_type_template_specialization<Template, Template<Argument...>>:
     std::true_type {};
 
-#if defined(__cpp_nontype_template_parameter_auto)
-template <template <typename, auto> class, typename>
+template <template <typename T, T> class, typename>
 struct is_type_value_template_specialization: std::false_type {};
 
-template <template <typename, auto> class Template, typename Type, auto Value>
+#if defined(__cpp_nontype_template_parameter_auto)
+// auto also matches independent value-parameter types, e.g. array<int, size_t>.
+template <template <typename T, T> class Template, typename Type, auto Value>
+struct is_type_value_template_specialization<Template, Template<Type, Value>>:
+    std::true_type {};
+#else
+// C++11 can match a constant whose type is the preceding template parameter.
+template <template <typename T, T> class Template, typename Type, Type Value>
 struct is_type_value_template_specialization<Template, Template<Type, Value>>:
     std::true_type {};
 #endif
@@ -85,15 +91,13 @@ constexpr bool is() noexcept {
     compat::remove_cvref_t<Type>>::value;
 }
 
-#if defined(__cpp_nontype_template_parameter_auto)
-/// Whether `Type` is a specialization of a template taking a type followed by
-/// one non-type parameter.
-template <template <typename, auto> class Template, typename Type>
+/// Whether `Type` specializes a template taking a type and a constant.
+/// Before C++17, the constant must have the preceding parameter's type.
+template <template <typename T, T> class Template, typename Type>
 constexpr bool is() noexcept {
   return detail::is_type_value_template_specialization<Template,
     compat::remove_cvref_t<Type>>::value;
 }
-#endif
 
 /// Report whether `To` can be brace-constructed from `Value`.
 template <typename To, typename Value, typename = void>

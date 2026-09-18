@@ -221,6 +221,11 @@ struct consume_t {
 /// Stores a constant in its type for compile-time retrieval.
 template <typename Value, Value Constant>
 struct ct_const_t {
+  /// Read the stored constant as a value.
+  constexpr operator Value() const noexcept {
+    return Constant;
+  }
+
   constexpr std::integral_constant<Value, Constant> operator()() const {
     return {};
   }
