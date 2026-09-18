@@ -1021,6 +1021,41 @@ TEST(traits_is, compares_types_and_type_templates) {
     (std::is_same<omni::type_t<int>, omni::compat::type_identity<int>>::value));
 }
 
+TEST(traits_select, prioritizes_the_first_of_overlapping_predicates) {
+  using operation = typename omni::traits::select<
+    omni::traits::case_<std::is_same<bool, bool>::value, observe>,
+    omni::traits::case_<std::is_integral<bool>::value, stringify_field>,
+    stringify_field>::type;
+
+  // stringify_field requires field metadata; its body is invalid for bool.
+  EXPECT_TRUE(operation{}(true));
+}
+
+TEST(traits_select, skips_nonmatching_cases) {
+  using operation = typename omni::traits::select<
+    omni::traits::case_<std::is_same<int, bool>::value, stringify_field>,
+    omni::traits::case_<std::is_integral<int>::value, observe>,
+    stringify_field>::type;
+
+  EXPECT_EQ(42, operation{}(42));
+}
+
+TEST(traits_select, uses_the_fallback_when_no_predicate_matches) {
+  using operation = typename omni::traits::select<
+    omni::traits::case_<std::is_integral<std::string>::value, stringify_field>,
+    omni::traits::case_<std::is_same<std::string, bool>::value,
+      stringify_field>,
+    observe>::type;
+
+  EXPECT_EQ("fallback", operation{}(std::string{"fallback"}));
+}
+
+TEST(traits_select, accepts_a_fallback_without_cases) {
+  using operation = typename omni::traits::select<observe>::type;
+
+  EXPECT_EQ("fallback", operation{}(std::string{"fallback"}));
+}
+
 TEST(fn_as, participates_only_for_constructible_values) {
   EXPECT_TRUE((accepts_type_as<omni::type_t, converted_value, int>::value));
   EXPECT_FALSE((accepts_type_as<omni::type_t, not_constructible, int>::value));

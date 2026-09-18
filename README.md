@@ -457,9 +457,9 @@ struct person {
 };
 
 auto result = omni::ryml::deserialize(omni::type_t<person>{},
-  R"({"name":"Ada","age":36})")
-  .map_diagnostics(omni::ryml::render_diangostics);
-// result.value holds the person; result.diagnostics is the rendered string.
+  R"({"name":"Ada","age":36})") //
+  .transform_error(omni::ryml::render_diangostics);
+// result holds the person on success, or a rendered message on failure.
 
 const auto yaml = omni::ryml::as_yaml(person{"Ada", 36});
 const auto json = omni::ryml::as_json(person{"Ada", 36});
@@ -467,14 +467,30 @@ const auto json = omni::ryml::as_json(person{"Ada", 36});
 
 `parse` returns `expected<Tree, std::string>`. `map_tree` maps a tree or node
 view, while `deserialize` composes both operations and retains syntax and
-field errors in one diagnostics result. Configuration controls the error
-budget and whether to return values despite field errors:
+field errors in one diagnostics result. The default `partial` is an explicit
+`std::false_type{}`, so `deserialize` and `map_tree` return
+`compat::expected<T, diagnostics<Owning>>` directly. Runtime `bool` and
+compile-time true policies return
+`with_diagnostics<T, diagnostics<Owning>>`, keeping an optional value and
+its diagnostics together. The public
+`deserialization_result<T, Strategy, Owning>` alias names that result type.
+Configuration controls the error budget and whether to return values despite
+field errors:
 
 ```cpp
-constexpr omni::ryml::deserialize_t tolerant_deserialize{
-  /*strategy=*/omni::ryml::use_tolerance(2).allow_partial(true),
-};
+constexpr auto tolerant_deserialize =
+  omni::fn::ctad<omni::ryml::deserialize_t>()(
+    omni::ryml::use_tolerance(2) //
+      .allow_partial(true));
 ```
+
+On `with_diagnostics`, `transform` aliases `map_value` and `transform_error`
+aliases `map_error` (`map_diagnostics` is also available). Diagnostics
+transformations always run and preserve the optional value, including warnings
+accompanying a value. Value transformations run only when a value is available.
+These consuming operations share expected's spelling; expected's
+`transform_error` runs only on failure. `and_then` and `or_else` for the product
+remain TODOs.
 
 During deserialization, `partial=true` treats optional and `std::vector` field
 issues as warnings, including issues within their contents. Warnings do not

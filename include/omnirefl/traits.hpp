@@ -8,6 +8,55 @@
 
 namespace omni {
 namespace traits {
+
+/**
+ * A predicate and operation in a finite, ordered type-dispatch table.
+ */
+template <bool Condition, typename Operation>
+struct case_ {};
+
+/**
+ * Select the first matching case's operation; the last type is the fallback.
+ * Only the selected operation is used, so other operation bodies need not be
+ * valid for the input. This works in C++11 without if constexpr.
+ *
+ * Use this for a finite set of operations that callers cannot extend.
+ * Overlapping predicates would make enable_if overloads ambiguous; ordering
+ * the cases makes precedence explicit and keeps every choice in one place.
+ * Readers can see the whole operation set without searching for scattered
+ * overload declarations.
+ * An extensible customization point should instead allow user overloads.
+ *
+ * C++20 example inside a function template with input type T:
+ *
+```cpp
+// bool is also integral: the boolean operation must take precedence.
+const auto write = typename omni::traits::select<
+  omni::traits::case_<std::is_same_v<T, bool>, write_boolean>,
+  omni::traits::case_<std::is_integral_v<T>, write_integer>,
+  unsupported>::type{};
+
+write(value); // For T=bool, calls write_boolean with no competing overload.
+```
+ *
+ * In C++11, use std::is_same<T, bool>::value and std::is_integral<T>::value
+ * for the predicates; the selection and invocation are unchanged.
+ */
+template <typename... Case>
+struct select;
+
+template <typename Fallback>
+struct select<Fallback> {
+  using type = Fallback;
+};
+
+template <bool Condition, typename Operation, typename... Case>
+struct select<case_<Condition, Operation>, Case...> {
+  using type = omni::compat::conditional_t<Condition,
+    Operation,
+    typename select<Case...>::type>;
+};
+
 namespace detail {
 
 // Function templates cannot be partially specialized, so the public `is`
