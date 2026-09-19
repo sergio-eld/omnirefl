@@ -5869,9 +5869,12 @@ std::string reflectable_head(const meta::nm_qual_type &t,
       return std::format(
         "{4}"
         "\nstruct _reflected<{0} {1}, omnirefl_binding> {{"
-        "\n  static_assert(std::is_same<{0} {1}, omnirefl_binding>::value,"
+        "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+        "\n  typedef {0} {1} source_type;"
+        "\n  static_assert(std::is_same<source_type, omnirefl_binding>::value,"
         "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
         "\n"
+        "\n  // Keep field inspection dependent until the source type is complete."
         "\n  using type = omnirefl_binding;"
         "\n"
         "\n  static constexpr omni::reflected_entity entity() noexcept {{"
@@ -5916,10 +5919,12 @@ std::string reflectable_head(const meta::nm_qual_type &t,
   return std::format(
     "template <typename T>"
     "\nstruct _reflected<{0} {1}, T> {{"
-    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+    "\n  typedef {0} {1} source_type;"
+    "\n  static_assert(std::is_same<source_type, T>::value,"
     "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
     "\n"
-    "\n  // Internal discovery hook for the reflected C++ type."
+    "\n  // Keep field inspection dependent until the source type is complete."
     "\n  using type = T;"
     "\n"
     "\n  static constexpr omni::reflected_entity entity() noexcept {{"
@@ -6097,7 +6102,9 @@ std::string aggregate_into_head(const meta::nm_qual_type &t,
     return std::format(
       "template <\n  {2},\n  typename T\n>"
       "\nstruct aggregate_into_t<{0} {1}, T> {{"
-      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+      "\n  typedef {0} {1} source_type;"
+      "\n  static_assert(std::is_same<source_type, T>::value,"
       "\n    \"omnirefl: unexpected types mismatch, try regenerating\");",
       reflectable_tag(d),
       generated_type_name,
@@ -6107,7 +6114,9 @@ std::string aggregate_into_head(const meta::nm_qual_type &t,
   return std::format(
     "template <typename T>"
     "\nstruct aggregate_into_t<{0} {1}, T> {{"
-    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+    "\n  typedef {0} {1} source_type;"
+    "\n  static_assert(std::is_same<source_type, T>::value,"
     "\n    \"omnirefl: unexpected types mismatch, try regenerating\");",
     reflectable_tag(d),
     meta::format(t));

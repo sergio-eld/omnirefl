@@ -10,12 +10,12 @@ namespace composed_reflected_call {
 struct mapper {
   template <typename T>
   std::size_t operator()(omni::type_t<T>) const {
-    T value{};
+    T object{};
     return omni::reflected_call(
       [](auto record) -> std::size_t {
         return std::tuple_size<decltype(record.public_fields())>::value;
       },
-      value);
+      object);
   }
 };
 

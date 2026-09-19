@@ -39,13 +39,13 @@ namespace fn {
 namespace detail {
 
 template <typename WhenTrue, typename WhenFalse>
-constexpr auto select(std::true_type, WhenTrue &when_true, WhenFalse &)
+constexpr auto select(std::true_type, WhenTrue &when_true, WhenFalse &, int)
   -> decltype(compat::invoke(std::move(when_true))) {
   return compat::invoke(std::move(when_true));
 }
 
 template <typename WhenTrue, typename WhenFalse>
-constexpr auto select(std::false_type, WhenTrue &, WhenFalse &when_false)
+constexpr auto select(std::false_type, WhenTrue &, WhenFalse &when_false, int)
   -> decltype(compat::invoke(std::move(when_false))) {
   return compat::invoke(std::move(when_false));
 }
@@ -53,7 +53,8 @@ constexpr auto select(std::false_type, WhenTrue &, WhenFalse &when_false)
 template <typename WhenTrue, typename WhenFalse>
 constexpr auto select(bool condition,
   WhenTrue &when_true,
-  WhenFalse &when_false) //
+  WhenFalse &when_false,
+  int) //
   -> decltype(condition //
       ? compat::invoke(std::move(when_true))
       : compat::invoke(std::move(when_false))) {
@@ -61,6 +62,24 @@ constexpr auto select(bool condition,
     ? compat::invoke(std::move(when_true))
     : compat::invoke(std::move(when_false));
 }
+
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC's legacy ?: rejects different integral_constant results. Unary +
+// exposes their numeric values; the int overload wins whenever it is valid,
+// preserving references and identical constant types without compiler flags.
+template <typename WhenTrue, typename WhenFalse>
+constexpr auto select(bool condition,
+  WhenTrue &when_true,
+  WhenFalse &when_false,
+  long) //
+  -> decltype(condition //
+      ? +compat::invoke(std::move(when_true))
+      : +compat::invoke(std::move(when_false))) {
+  return condition //
+    ? +compat::invoke(std::move(when_true))
+    : +compat::invoke(std::move(when_false));
+}
+#endif
 
 struct integral_constant_base_probe {
   template <typename Value, Value Constant>
@@ -96,8 +115,10 @@ struct is_compile_time_predicate<Predicate,
   compat::void_t<compile_time_result<Predicate>>>: std::true_type {};
 
 #if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201304L \
+  || !defined(__cpp_constexpr) || __cpp_constexpr < 201603L \
   || (defined(_MSC_VER) && !defined(__clang__))
 // Callable-object emulation of the generic lambda returned by `ctad`.
+// C++14 generic lambdas cannot be evaluated in constant expressions.
 // MSVC also needs it because substitution of the constrained generic lambda
 // incorrectly rejects valid template construction.
 template <template <typename...> class Template>
@@ -286,8 +307,13 @@ struct branch_t {
     WhenFalse when_false) const //
     -> decltype(detail::select(compat::invoke(predicate),
       when_true,
-      when_false)) {
-    return detail::select(compat::invoke(predicate), when_true, when_false);
+      when_false,
+      int{})) {
+    // Prefer the normal conditional expression over MSVC's numeric fallback.
+    return detail::select(compat::invoke(predicate),
+      when_true,
+      when_false,
+      int{});
   }
 
 #if 201402L <= OMNI_CPLUSPLUS

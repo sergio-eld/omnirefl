@@ -886,6 +886,29 @@ TEST(fn_branch, compile_time_selection_allows_unrelated_result_types) {
   EXPECT_EQ("oceanic", result);
 }
 
+TEST(fn_branch, selects_callable_constants_with_a_runtime_condition) {
+  const auto result = omni::fn::branch(
+    [] { return false; },
+    omni::fn::ct_const<815>(),
+    omni::fn::ct_const<108>());
+
+  static_assert(std::is_same<decltype(result), const int>::value,
+    "different integral constants must produce their common numeric type");
+  EXPECT_EQ(108, result);
+}
+
+TEST(fn_branch, preserves_identical_callable_constant_results) {
+  const auto result = omni::fn::branch(
+    [] { return false; },
+    omni::fn::ct_const<815>(),
+    omni::fn::ct_const<815>());
+
+  static_assert(std::is_same<decltype(result),
+                  const std::integral_constant<int, 815>>::value,
+    "identical integral constants must keep their type");
+  EXPECT_EQ(815, result);
+}
+
 TEST(fn_branch, invokes_selected_mutable_callable_as_rvalue) {
   EXPECT_EQ(815,
     omni::fn::branch([] { return true; },
@@ -1086,6 +1109,14 @@ TEST(fn_ctad, constrains_the_returned_type_template_conversion) {
   EXPECT_FALSE((omni::compat::is_invocable<
     decltype(omni::fn::ctad<disabled_type_template>()),
     int>::value));
+}
+
+TEST(fn_ctad, constructs_a_constant_expression) {
+  constexpr auto result = omni::fn::ctad<guided_value>()(42);
+
+  static_assert(42 == result.value,
+    "template construction must support constant evaluation");
+  EXPECT_EQ(42, result.value);
 }
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
