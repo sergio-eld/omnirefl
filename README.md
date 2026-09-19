@@ -78,14 +78,29 @@ std::string describe_fields(RecordMeta record) {
           // Use `.spelled_qualified_type_name()` to preserve namespaces.
           field.spelled_type_name());
 
+        const std::optional default_value = std::invoke(
+          [] -> std::optional<std::string> {
+            // can:   int value = 8 * 100 + 15;
+            // can't: int value = make_value();
+            if constexpr (FieldMeta::has_default_value_access()
+              && std::formattable<typename FieldMeta::type, char>)
+              return std::optional{
+                std::format(" = {}", FieldMeta::default_value())};
+
+            return std::nullopt;
+          });
+
         // Fundamental and standard-library types are not reflected, so the
         // metadata query for the actual type name is not available for them.
         if constexpr (omni::is_reflected<typename FieldMeta::type>::value)
-          return std::format("{} (resolves to {});\n",
+          return std::format("{} (resolves to {}){};\n",
             field_description,
-            omni::meta_for<typename FieldMeta::type>::type_name());
+            omni::meta_for<typename FieldMeta::type>::type_name(),
+            default_value.value_or(""));
 
-        return std::format("{};\n", field_description);
+        return std::format("{}{};\n",
+          field_description,
+          default_value.value_or(""));
       })
     | fn::foldl(std::plus{},
       std::format("{} {{\n", record.qualified_type_name()));
@@ -100,11 +115,11 @@ std::string describe_fields(RecordMeta record) {
  * }
  * oceanic::vessel {
  *   location: vessel::coordinates (resolves to vessel::position);
- *   name: string;
+ *   name: string = before;
  * }
  * oceanic::vessel::position {
- *   latitude: double;
- *   longitude: double;
+ *   latitude: double = 0;
+ *   longitude: double = 0;
  * }
  */
 
@@ -270,6 +285,9 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
     templates and `decltype`, with and without enclosing namespace
     qualification, an index local to the declaring record, documentation, and
     const/mutable/volatile/deprecated traits
+  - default member initializer presence and best-effort access to values
+    accepted for reproduction in generated metadata; skipped values emit a
+    warning and remain distinguishable from fields without an initializer
   - read access, moving through `std::move(field).value()`, writable-field
     assignment, and safe reference, dereference, and member access
   - value/reference capability queries for generic field handling
@@ -383,6 +401,12 @@ model: reflected types must be nameable before their source declarations. See
   Compound types remain valid dependency routes as listed above. Invalid-input
   detection is best effort.
 - A reflected root must be complete and defined before its `reflected_call`.
+- `default_value()` is generated only when the initializer appears safe to
+  copy into generated metadata. Detection is conservative and best effort.
+  Function calls, declaration references, `this`, macros, and dependent
+  expressions are skipped with a warning. `has_default_member_initializer()`
+  still reports the declaration, while `has_default_value_access()` reports
+  whether its value is available.
 - Incomplete dependency types are skipped with a warning. A class-template
   dependency is also skipped when instantiating it would require an incomplete
   type argument.

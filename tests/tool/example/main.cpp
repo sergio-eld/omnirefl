@@ -4,6 +4,7 @@
 #include <format>
 #include <functional>
 #include <map>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -67,14 +68,29 @@ std::string describe_fields(RecordMeta record) {
           // Use `.spelled_qualified_type_name()` to preserve namespaces.
           field.spelled_type_name());
 
+        const std::optional default_value = std::invoke(
+          [] -> std::optional<std::string> {
+            // can:   int value = 8 * 100 + 15;
+            // can't: int value = make_value();
+            if constexpr (FieldMeta::has_default_value_access()
+              && std::formattable<typename FieldMeta::type, char>)
+              return std::optional{
+                std::format(" = {}", FieldMeta::default_value())};
+
+            return std::nullopt;
+          });
+
         // Fundamental and standard-library types are not reflected, so the
         // metadata query for the actual type name is not available for them.
         if constexpr (omni::is_reflected<typename FieldMeta::type>::value)
-          return std::format("{} (resolves to {});\n",
+          return std::format("{} (resolves to {}){};\n",
             field_description,
-            omni::meta_for<typename FieldMeta::type>::type_name());
+            omni::meta_for<typename FieldMeta::type>::type_name(),
+            default_value.value_or(""));
 
-        return std::format("{};\n", field_description);
+        return std::format("{}{};\n",
+          field_description,
+          default_value.value_or(""));
       })
     | fn::foldl(std::plus{},
       std::format("{} {{\n", record.qualified_type_name()));
@@ -89,11 +105,11 @@ std::string describe_fields(RecordMeta record) {
  * }
  * oceanic::vessel {
  *   location: vessel::coordinates (resolves to vessel::position);
- *   name: string;
+ *   name: string = before;
  * }
  * oceanic::vessel::position {
- *   latitude: double;
- *   longitude: double;
+ *   latitude: double = 0;
+ *   longitude: double = 0;
  * }
  */
 

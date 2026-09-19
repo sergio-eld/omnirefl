@@ -220,6 +220,39 @@ struct field_meta_t {
   }
 
   /**
+```cpp
+struct example {
+  int initialized = 815; //< true
+  int required;          //< false
+};
+```
+   */
+  static constexpr bool has_default_member_initializer() noexcept {
+    return _M::has_default_member_initializer();
+  }
+
+  /**
+```cpp
+int example_value();
+
+struct example {
+  int literal = 815;            //< true
+  int called = example_value(); //< false
+};
+```
+   */
+  static constexpr bool has_default_value_access() noexcept {
+    return _M::has_default_value_access();
+  }
+
+  /** Return the cached default; enabled by `has_default_value_access()`. */
+  template <typename R = _M,
+    typename std::enable_if<R::has_default_value_access(), int>::type = 0>
+  static const typename R::type &default_value() {
+    return R::default_value();
+  }
+
+  /**
    * Return an lvalue reference to the field, or a copy when direct reference
    * access is unavailable.
    *
@@ -475,6 +508,23 @@ struct field_binding_t {
   /** True when the field declaration has a deprecated attribute. */
   static constexpr bool is_deprecated() noexcept {
     return meta::is_deprecated();
+  }
+
+  /** See `field_meta_t::has_default_member_initializer()`. */
+  static constexpr bool has_default_member_initializer() noexcept {
+    return meta::has_default_member_initializer();
+  }
+
+  /** See `field_meta_t::has_default_value_access()`. */
+  static constexpr bool has_default_value_access() noexcept {
+    return meta::has_default_value_access();
+  }
+
+  /** See `field_meta_t::default_value()`. */
+  template <typename M = meta,
+    typename std::enable_if<M::has_default_value_access(), int>::type = 0>
+  static const typename M::type &default_value() {
+    return M::default_value();
   }
 
   /**
