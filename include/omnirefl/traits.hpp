@@ -167,7 +167,7 @@ struct is_brace_constructible<To,
 
 /**
  * Report whether a type-parameter-only class template can construct from
- * `Values` using CTAD or the pre-C++17 value-type fallback.
+ * `Values` using CTAD or the pre-C++17 decayed-argument fallback.
  */
 template <template <typename...> class Template, typename... Values>
 struct is_type_template_constructible_from:

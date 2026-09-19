@@ -1086,13 +1086,8 @@ TEST(fn_as, participates_only_for_constructible_values) {
     (accepts_type_as<another_type_tag, converted_value, int>::value));
 }
 
-TEST(fn_as, constructs_a_class_template_from_the_value) {
-  const auto convert = omni::fn::as(omni::fn::ctad<std::vector>());
-
-  EXPECT_EQ((std::vector<int>{42}),
-    omni::fn::as(omni::fn::ctad<std::vector>(), 42));
-  EXPECT_EQ((std::vector<int>{108}), convert(108));
-  EXPECT_EQ((std::vector<int>{815}), 815 | convert);
+TEST(fn_ctad, constructs_a_class_template_from_the_values) {
+  EXPECT_EQ((std::vector<int>{42}), omni::fn::ctad<std::vector>(42));
 }
 
 TEST(fn_as, stores_class_template_construction) {
@@ -1102,17 +1097,14 @@ TEST(fn_as, stores_class_template_construction) {
   EXPECT_EQ((std::vector<int>{815}), 815 | omni::fn::as<std::vector>());
 }
 
-TEST(fn_ctad, constrains_the_returned_type_template_conversion) {
+TEST(traits_ctad, reports_an_unsupported_type_template_construction) {
   EXPECT_FALSE(
     (omni::traits::is_type_template_constructible_from<disabled_type_template,
       int &&>::value));
-  EXPECT_FALSE((omni::compat::is_invocable<
-    decltype(omni::fn::ctad<disabled_type_template>()),
-    int>::value));
 }
 
 TEST(fn_ctad, constructs_a_constant_expression) {
-  constexpr auto result = omni::fn::ctad<guided_value>()(42);
+  constexpr auto result = omni::fn::ctad<guided_value>(42);
 
   static_assert(42 == result.value,
     "template construction must support constant evaluation");
@@ -1120,7 +1112,7 @@ TEST(fn_ctad, constructs_a_constant_expression) {
 }
 
 TEST(fn_ctad, constructs_from_multiple_values) {
-  const auto result = omni::fn::ctad<std::pair>()(/*first=*/8, /*second=*/15);
+  const auto result = omni::fn::ctad<std::pair>(/*first=*/8, /*second=*/15);
   using result_type = omni::compat::decay_t<decltype(result)>;
 
   static_assert(std::is_same<result_type, std::pair<int, int>>::value,
@@ -1130,28 +1122,25 @@ TEST(fn_ctad, constructs_from_multiple_values) {
 }
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-TEST(fn_as, overloads_ctad_for_a_sized_class_template) {
+TEST(fn_ctad, constructs_a_sized_class_template) {
   EXPECT_EQ((std::array<int, 1>{42}),
-    42 | omni::fn::as(omni::fn::ctad<std::array>()));
+    omni::fn::ctad<std::array>(42));
 }
 
 TEST(fn_as, stores_sized_class_template_construction) {
   EXPECT_EQ((std::array<int, 1>{42}), 42 | omni::fn::as<std::array>());
 }
 
-TEST(fn_ctad, constrains_the_returned_type_size_template_conversion) {
+TEST(traits_ctad, reports_an_unsupported_sized_template_construction) {
   EXPECT_FALSE((omni::traits::is_type_size_template_constructible_from<
     disabled_type_size_template,
     std::array<int, 2> &&>::value));
-  EXPECT_FALSE((omni::compat::is_invocable<
-    decltype(omni::fn::ctad<disabled_type_size_template>()),
-    std::array<int, 2>>::value));
 }
 #endif
 
 TEST(fn_as, follows_the_available_class_template_deduction) {
   const int input = 42;
-  const auto result = input | omni::fn::as(omni::fn::ctad<guided_value>());
+  const auto result = input | omni::fn::as<guided_value>();
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
   EXPECT_TRUE((std::is_same<guided_value<long>,

@@ -441,7 +441,7 @@ struct with_diagnostics {
    * omni::type_t<person>{} for the type argument:
    *
   ```cpp
-  const auto load = fn::ctad<deserialize_t>()(
+  const auto load = fn::ctad<deserialize_t>(
     default_strategy() //
       .use_tolerance(4) //
       .allow_partial(true));
@@ -564,7 +564,7 @@ auto owned = map_tree(omni::type<person>, std::move(owning_tree));
 // Errors retain the moved tree; external backing strings still need an owner.
 ```
  */
-const auto map_tree = fn::ctad<map_tree_t>()(
+const auto map_tree = fn::ctad<map_tree_t>(
   /*strategy=*/default_strategy());
 
 /**
@@ -605,7 +605,7 @@ auto result = deserialize(omni::type<person>, source) //
 // expected<person, std::string>: rendering happens only on failure.
 ```
  */
-const auto deserialize = fn::ctad<deserialize_t>()(
+const auto deserialize = fn::ctad<deserialize_t>(
   /*strategy=*/default_strategy());
 
 // A generic callable keeps map_diagnostics(render_diagnostics) valid for both

@@ -20,11 +20,11 @@ namespace {
 // Runtime false keeps diagnostics on success for policy, ownership, and
 // rendering checks.
 const auto strict_deserialize =
-  omni::fn::ctad<omni::ryml::deserialize_t>()(omni::ryml::default_strategy() //
+  omni::fn::ctad<omni::ryml::deserialize_t>(omni::ryml::default_strategy() //
       .use_tolerance(0) //
       .allow_partial(false));
 const auto strict_map_tree =
-  omni::fn::ctad<omni::ryml::map_tree_t>()(omni::ryml::default_strategy() //
+  omni::fn::ctad<omni::ryml::map_tree_t>(omni::ryml::default_strategy() //
       .use_tolerance(0) //
       .allow_partial(false));
 
@@ -143,7 +143,7 @@ TEST(deserialization_strategy, static_false_rebinds_to_expected) {
       .allow_extra(true) //
       .allow_partial(true);
   const auto deserialize =
-    omni::fn::ctad<omni::ryml::deserialize_t>()(source //
+    omni::fn::ctad<omni::ryml::deserialize_t>(source //
         .allow_partial(std::false_type{}));
   EXPECT_EQ(3, deserialize.strategy.tolerance);
   EXPECT_TRUE(deserialize.strategy.extra);
@@ -168,7 +168,7 @@ TEST(deserialization_strategy, static_false_rebinds_to_expected) {
 
 TEST(deserialization_strategy, static_true_keeps_value_and_diagnostics) {
   const auto deserialize =
-    omni::fn::ctad<omni::ryml::deserialize_t>()(omni::ryml::default_strategy() //
+    omni::fn::ctad<omni::ryml::deserialize_t>(omni::ryml::default_strategy() //
         .use_tolerance(0) //
         .allow_partial(std::true_type{}));
   auto result = deserialize(omni::type_t<serialization_data::payload>{},

@@ -117,12 +117,12 @@ struct is_compile_time_predicate<Predicate,
 #if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201304L \
   || !defined(__cpp_constexpr) || __cpp_constexpr < 201603L \
   || (defined(_MSC_VER) && !defined(__clang__))
-// Callable-object emulation of the generic lambda returned by `ctad`.
+// Callable-object emulation shared by eager `ctad` and deferred `as`.
 // C++14 generic lambdas cannot be evaluated in constant expressions.
 // MSVC also needs it because substitution of the constrained generic lambda
 // incorrectly rejects valid template construction.
 template <template <typename...> class Template>
-struct type_template_ctad_fn {
+struct type_template_constructor_fn {
   template <typename... Values>
   constexpr auto operator()(Values &&...values) const //
     -> typename std::enable_if<
@@ -140,13 +140,14 @@ struct type_template_ctad_fn {
 };
 
 template <template <typename...> class Template>
-constexpr type_template_ctad_fn<Template> type_template_ctad() {
+constexpr auto type_template_constructor()
+  -> type_template_constructor_fn<Template> {
   return {};
 }
 
 #  if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
 template <template <typename, std::size_t> class Template>
-struct type_size_template_ctad_fn {
+struct type_size_template_constructor_fn {
   template <typename Value,
     typename std::enable_if<
       traits::is_type_size_template_constructible_from<Template,
@@ -159,13 +160,14 @@ struct type_size_template_ctad_fn {
 };
 
 template <template <typename, std::size_t> class Template>
-constexpr type_size_template_ctad_fn<Template> type_size_template_ctad() {
+constexpr auto type_size_template_constructor()
+  -> type_size_template_constructor_fn<Template> {
   return {};
 }
 #  endif
 #elif defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
 template <template <typename...> class Template>
-constexpr auto type_template_ctad() {
+constexpr auto type_template_constructor() {
 #  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
   return //
     []<typename... Values>(Values &&...values)
@@ -185,7 +187,7 @@ constexpr auto type_template_ctad() {
 }
 
 template <template <typename, std::size_t> class Template>
-constexpr auto type_size_template_ctad() {
+constexpr auto type_size_template_constructor() {
 #  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
   return //
     []<typename Value>(Value &&value)
@@ -205,7 +207,7 @@ constexpr auto type_size_template_ctad() {
 }
 #else
 template <template <typename...> class Template>
-constexpr auto type_template_ctad() {
+constexpr auto type_template_constructor() {
   return //
     [](auto &&...values) //
     -> typename std::enable_if<
@@ -586,15 +588,13 @@ constexpr cond_t cond{};
 #endif
 
 /**
- * Return a higher-order adapter that constructs a type-parameter-only class
- * template.
- * C++17 and newer use CTAD. Earlier standards provide best-effort
- * compatibility by deducing one template type from each argument; they cannot
- * reproduce custom deduction guides.
+ * Construct a type-parameter-only class template from forwarded values: a
+ * best-effort generic version of `make_xxx` helpers such as `make_pair`.
+ * C++17 and newer use CTAD. Earlier standards use each argument's decayed type
+ * as a template argument and cannot reproduce custom deduction guides.
  *
 ```cpp
-const auto make_pair = fn::ctad<std::pair>();
-const auto position = make_pair(
+const auto position = fn::ctad<std::pair>(
   8,  // x
   15  // y
 );
@@ -603,19 +603,25 @@ const auto position = make_pair(
 const std::pair<int, int> equivalent{8, 15};
 ```
  */
-template <template <typename...> class Template>
-constexpr decltype(detail::type_template_ctad<Template>()) ctad() {
-  return detail::type_template_ctad<Template>();
+template <template <typename...> class Template, typename... Values>
+constexpr auto ctad(Values &&...values) //
+  -> decltype(detail::type_template_constructor<Template>()(
+    std::forward<Values>(values)...)) {
+  return detail::type_template_constructor<Template>()(
+    std::forward<Values>(values)...);
 }
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
 /**
- * Return a higher-order CTAD adapter for a class template whose parameters are
- * one type followed by one `std::size_t`.
+ * Construct a class template whose parameters are one type followed by one
+ * `std::size_t` using CTAD.
  */
-template <template <typename, std::size_t> class Template>
-constexpr decltype(detail::type_size_template_ctad<Template>()) ctad() {
-  return detail::type_size_template_ctad<Template>();
+template <template <typename, std::size_t> class Template, typename Value>
+constexpr auto ctad(Value &&value) //
+  -> decltype(detail::type_size_template_constructor<Template>()(
+    std::forward<Value>(value))) {
+  return detail::type_size_template_constructor<Template>()(
+    std::forward<Value>(value));
 }
 #endif
 
@@ -1606,17 +1612,19 @@ constexpr as_closure<type_t<To>> as() {
   return as(type_t<To>{});
 }
 
-/** Store CTAD or its value-type fallback for later application. */
+/** Store CTAD or its decayed-argument fallback for later application. */
 template <template <typename...> class Template>
-constexpr auto as() -> as_closure<decltype(ctad<Template>())> {
-  return as(ctad<Template>());
+constexpr auto as() //
+  -> as_closure<decltype(detail::type_template_constructor<Template>())> {
+  return as(detail::type_template_constructor<Template>());
 }
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
 /** Store type-and-size class-template deduction for later application. */
 template <template <typename, std::size_t> class Template>
-constexpr auto as() -> as_closure<decltype(ctad<Template>())> {
-  return as(ctad<Template>());
+constexpr auto as() //
+  -> as_closure<decltype(detail::type_size_template_constructor<Template>())> {
+  return as(detail::type_size_template_constructor<Template>());
 }
 #endif
 
