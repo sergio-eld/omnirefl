@@ -23,9 +23,11 @@ namespace detail {
 // instrumented translation unit.
 namespace {
 
-/// Generated-header specialization point.
-/// The defaulted second parameter keeps generated specializations dependent,
-/// delaying their bodies until `T` is complete.
+/**
+ * Generated-header specialization point.
+ * The defaulted second parameter keeps generated specializations dependent,
+ * delaying their bodies until `T` is complete.
+ */
 template <typename T, typename = T>
 struct _reflected;
 

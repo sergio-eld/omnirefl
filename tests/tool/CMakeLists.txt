@@ -488,6 +488,17 @@ target_link_libraries(std_compat INTERFACE
 include("${CMAKE_CURRENT_LIST_DIR}/supported_cpp_standards.cmake")
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
+# The installed package places the functional suite beside this project so the
+# same tests exercise its public headers across the package-test matrix.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/functional/CMakeLists.txt")
+    add_subdirectory(functional)
+endif()
+
+# Installed-package tests also exercise the shipped extension component.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/extensions/CMakeLists.txt")
+    add_subdirectory(extensions)
+endif()
+
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
         set(_target "cpp_17.negative.${name}")
@@ -640,6 +651,16 @@ if("17" IN_LIST _supported_cpp_standards)
         1
         "definition appears later in the translation unit"
         ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "composed_definition_after_use"
+        negative/composed_definition_after_use.cpp
+        1
+        "definition appears later in the translation unit"
+        ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_diagnostic_tool_run(
+        "composed_reflected_call"
+        regressions/composed_reflected_call.cpp
+        "reflected types: 1")
     _omnirefl_negative_tool_run(
         "incomplete_template_callstack"
         negative/incomplete_template_callstack.cpp

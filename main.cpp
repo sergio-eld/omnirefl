@@ -88,25 +88,14 @@
 #include <variant>
 #include <vector>
 
+#include <omnirefl/functional.hpp>
+
 #include "std_compat.h"
 
 namespace fs = std::filesystem;
 using namespace std::string_view_literals;
 
 namespace fn {
-
-template <typename T>
-struct as_t {
-  template <typename U>
-    requires std::constructible_from<T, U>
-  constexpr T operator()(U &&value) const
-    noexcept(noexcept(T(std::forward<U>(value)))) {
-    return T(std::forward<U>(value));
-  }
-};
-
-template <typename T>
-constexpr as_t<T> as{};
 
 template <typename F>
 constexpr auto with(F &&f) {
@@ -407,12 +396,6 @@ struct source_location {
   std::filesystem::path source_file;
   std::uint32_t line;
   std::uint32_t column;
-
-  friend bool operator<(const source_location &lhs,
-    const source_location &rhs) {
-    return std::tie(lhs.source_file, lhs.line, lhs.column)
-      < std::tie(rhs.source_file, rhs.line, rhs.column);
-  }
 
   friend bool operator==(const source_location &,
     const source_location &) = default;
@@ -1187,7 +1170,7 @@ bool is_compound_dependency_route(const clang::CXXRecordDecl *record) {
            },
            record->getKind())
     && std::ranges::contains(k_compound_dependency_route_names,
-      fn::as<std::string_view>(
+      omni::fn::as<std::string_view>()(
         clang::cast<clang::ClassTemplateSpecializationDecl>(record)
           ->getSpecializedTemplate()
           ->getName()));
@@ -1428,8 +1411,8 @@ std::optional<clang::QualType> type_t_arg_type(clang::QualType type) {
       return fn::maybe(llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
         record->getDecl()));
     })
-    .and_then([](const clang::ClassTemplateSpecializationDecl *spec)
-                -> std::optional<clang::QualType> {
+    .and_then([](const clang::ClassTemplateSpecializationDecl *spec) //
+      -> std::optional<clang::QualType> {
       if ("omni::type_t"
         != spec->getSpecializedTemplate()->getQualifiedNameAsString()) {
         return std::nullopt;
@@ -1566,21 +1549,65 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
   if (!is_before_definition(call.getExprLoc()))
     return false;
 
-  // A lexically later definition is valid when an enclosing template is
-  // instantiated only after that definition becomes visible.
-  clang::DynTypedNode node = clang::DynTypedNode::create(call);
-  for (auto parents = ast.getParents(node); //
-    !parents.empty(); //
-    node = parents[0], parents = ast.getParents(node)) {
-    const auto *decl = node.get<clang::FunctionDecl>();
+  // Follow the recorded instantiation through composed template calls. The
+  // immediate instantiation location may itself be inside an adapter header.
+  std::vector pending{clang::DynTypedNode::create(call)};
+  std::set<const clang::FunctionDecl *> visited;
+  while (!pending.empty()) {
+    clang::DynTypedNode node = pending.back();
+    pending.pop_back();
+    bool resolved = false;
 
-    if (decl && decl->getPointOfInstantiation().isValid()
-      && !is_before_definition(decl->getPointOfInstantiation())) {
-      return false;
+    for (auto parents = ast.getParents(node); //
+      !parents.empty(); //
+      node = parents[0], parents = ast.getParents(node)) {
+      const auto *decl = node.get<clang::FunctionDecl>();
+      if (!decl)
+        continue;
+
+      const clang::SourceLocation instantiation =
+        sm.getExpansionLoc(decl->getPointOfInstantiation());
+      if (instantiation.isInvalid())
+        continue;
+      if (!visited.emplace(decl->getCanonicalDecl()).second
+        || !is_before_definition(instantiation)) {
+        resolved = true;
+        break;
+      }
+
+      using namespace clang::ast_matchers;
+      for (const auto *declaration : decl->redecls()) {
+        const auto callers =
+          match(callExpr(callee(functionDecl(equalsNode(declaration))))
+                  .bind("caller"),
+            ast);
+        for (const auto &match : callers) {
+          const auto *caller = match.getNodeAs<clang::CallExpr>("caller");
+          const clang::SourceLocation begin =
+            sm.getExpansionLoc(caller->getBeginLoc());
+          const clang::SourceLocation end =
+            sm.getExpansionLoc(caller->getEndLoc());
+
+          if (begin.isInvalid() || end.isInvalid())
+            continue;
+
+          // A later call cannot legitimize an earlier incomplete use. When
+          // specializations share this call site, every caller must be valid.
+          if (!sm.isBeforeInTranslationUnit(instantiation, begin)
+            && !sm.isBeforeInTranslationUnit(end, instantiation)) {
+            pending.push_back(clang::DynTypedNode::create(*caller));
+            resolved = true;
+          }
+        }
+      }
+      if (resolved)
+        break;
     }
+    if (!resolved)
+      return true;
   }
 
-  return true;
+  return false;
 }
 
 meta::source_file_context append_invalid_reflection_query(
@@ -3009,7 +3036,7 @@ std::vector<std::string> filter_tool_irrelevant_args(
   }
 
   return rendered //
-    | std::views::transform(fn::as<std::string>) //
+    | std::views::transform(omni::fn::as<std::string>()) //
     | std::ranges::to<std::vector>();
 }
 
@@ -3147,9 +3174,8 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     std::invoke([&flags,
                   response_file_directory,
                   cl_style,
-                  &driver_source,
                   &source_path,
-                  windows_drive_mount_used]
+                  windows_drive_mount_used] //
       -> std::expected<std::vector<std::string>, std::string> {
       llvm::BumpPtrAllocator allocator;
       llvm::SmallVector<const char *> args;
@@ -3178,7 +3204,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       return args //
         | std::views::transform(
-          [&driver_source, &source_path, windows_drive_mount_used](
+          [&source_path, windows_drive_mount_used](
             std::string_view arg) -> std::string {
             if (!windows_drive_mount_used)
               return std::string{arg};
@@ -3390,6 +3416,10 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   }
 
   const bool mingw_used = llvm::Triple(driver_triple).isWindowsGNUEnvironment();
+  const bool mingw_gcc_used = mingw_used
+    && ("g++" == compiler_name || "g++.exe" == compiler_name
+      || compiler_name.ends_with("-g++")
+      || compiler_name.ends_with("-g++.exe"));
 
   // FIXME(high): Remove MinGW compiler-layout discovery from this function.
   // It probes compiler-relative and system directories on every invocation;
@@ -3587,6 +3617,16 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       std::ranges::copy(driver_args, std::back_inserter(out));
 
+      if (mingw_gcc_used) {
+        // FIXME(high): Update bundled Clang to support the active GCC
+        // intrinsic headers, or provide a dedicated instrumentation-only
+        // compiler-argument override/filter mechanism.
+        // ad hoc: Clang cannot parse the active GCC intrinsic headers used by
+        // fast_float. Disable its optional SSE path only for instrumentation;
+        // the real GCC compilation retains SIMD.
+        out.emplace_back("-U__SSE2__");
+      }
+
       out.emplace_back("-fsyntax-only"); //< AST only
       out.emplace_back(
         std::format("-resource-dir={}", resource_dir.generic_string()));
@@ -3607,7 +3647,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const std::expected<std::optional<std::string>, app_error>
     driver_directory_to_restore =
-      std::invoke([&driver, &compile_directory, &source]
+      std::invoke([&driver, &compile_directory, &source] //
         -> std::expected<std::optional<std::string>, app_error> {
         if (!compile_directory)
           return std::nullopt;
@@ -3665,7 +3705,7 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   const auto &compilation_args = compilation->getJobs().begin()->getArguments();
 
   const std::vector<std::string> frontend_args = compilation_args //
-    | std::views::transform(fn::as<std::string>) //
+    | std::views::transform(omni::fn::as<std::string>()) //
     | std::ranges::to<std::vector>();
 
   log(log_level::debug, [&frontend_args] {
@@ -3892,7 +3932,8 @@ std::expected<pipeline::parsed_ast, app_error>
     .ast = std::move(ast),
 
     .includes_deps = deps_collector.getDependencies()
-      | std::views::transform(fn::as<fs::path>) | std::ranges::to<std::set>(),
+      | std::views::transform(omni::fn::as<fs::path>())
+      | std::ranges::to<std::set>(),
   };
 }
 
@@ -4872,7 +4913,7 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   assert(d);
 
   return {
-    .name = std::string(fn::as<std::string_view>(d->getName())),
+    .name = std::string(omni::fn::as<std::string_view>()(d->getName())),
     .type_name = meta::impl::field_type_name(ast, d),
     .qualified_type_name = std::invoke([&ast, d] -> std::string {
       clang::PrintingPolicy policy = ast.getPrintingPolicy();
@@ -4961,7 +5002,7 @@ util::viewable_range_of<const clang::TypedefNameDecl *> auto
       return clang::AccessSpecifier::AS_public == d->getAccess()
         && std::ranges::any_of(meta::k_supported_member_aliases,
           std::bind_front(std::equal_to<std::string_view>{},
-            fn::as<std::string_view>(d->getName())));
+            omni::fn::as<std::string_view>()(d->getName())));
     };
 
   return rd.decls() //
@@ -5478,7 +5519,7 @@ auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
   util::viewable_range_of<std::string> auto names = //
     ed.enumerators() //
     | std::views::transform(&clang::EnumDecl::getName)
-    | std::views::transform(fn::as<std::string_view>);
+    | std::views::transform(omni::fn::as<std::string_view>());
 
   // ad hoc: `underlying_type` is emitted into a private, target-specific
   // generated header which, as of this writing, is not intended for
@@ -5689,7 +5730,7 @@ std::string enclosing_root_as_dependent(const meta::nm_qual_type &inner_type) {
   std::vector elems = //
     inner_type.namespaces //
     | std::views::transform(&meta::namespace_component::name)
-    | std::views::transform(fn::as<std::string_view>)
+    | std::views::transform(omni::fn::as<std::string_view>())
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
 
@@ -5708,7 +5749,7 @@ std::string declaration_for_enclosing_root_as_dependent(
   std::vector elems = //
     inner_type.namespaces //
     | std::views::transform(&meta::namespace_component::name)
-    | std::views::transform(fn::as<std::string_view>)
+    | std::views::transform(omni::fn::as<std::string_view>())
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
 
@@ -5828,9 +5869,12 @@ std::string reflectable_head(const meta::nm_qual_type &t,
       return std::format(
         "{4}"
         "\nstruct _reflected<{0} {1}, omnirefl_binding> {{"
-        "\n  static_assert(std::is_same<{0} {1}, omnirefl_binding>::value,"
+        "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+        "\n  typedef {0} {1} source_type;"
+        "\n  static_assert(std::is_same<source_type, omnirefl_binding>::value,"
         "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
         "\n"
+        "\n  // Keep field inspection dependent until the source type is complete."
         "\n  using type = omnirefl_binding;"
         "\n"
         "\n  static constexpr omni::reflected_entity entity() noexcept {{"
@@ -5875,10 +5919,12 @@ std::string reflectable_head(const meta::nm_qual_type &t,
   return std::format(
     "template <typename T>"
     "\nstruct _reflected<{0} {1}, T> {{"
-    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+    "\n  typedef {0} {1} source_type;"
+    "\n  static_assert(std::is_same<source_type, T>::value,"
     "\n    \"omnirefl: unexpected types mismatch, try regenerating\");"
     "\n"
-    "\n  // Internal discovery hook for the reflected C++ type."
+    "\n  // Keep field inspection dependent until the source type is complete."
     "\n  using type = T;"
     "\n"
     "\n  static constexpr omni::reflected_entity entity() noexcept {{"
@@ -6056,7 +6102,9 @@ std::string aggregate_into_head(const meta::nm_qual_type &t,
     return std::format(
       "template <\n  {2},\n  typename T\n>"
       "\nstruct aggregate_into_t<{0} {1}, T> {{"
-      "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+      "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+      "\n  typedef {0} {1} source_type;"
+      "\n  static_assert(std::is_same<source_type, T>::value,"
       "\n    \"omnirefl: unexpected types mismatch, try regenerating\");",
       reflectable_tag(d),
       generated_type_name,
@@ -6066,7 +6114,9 @@ std::string aggregate_into_head(const meta::nm_qual_type &t,
   return std::format(
     "template <typename T>"
     "\nstruct aggregate_into_t<{0} {1}, T> {{"
-    "\n  static_assert(std::is_same<{0} {1}, T>::value,"
+    "\n  // Alias the tag for MSVC; typedef also supports older MinGW."
+    "\n  typedef {0} {1} source_type;"
+    "\n  static_assert(std::is_same<source_type, T>::value,"
     "\n    \"omnirefl: unexpected types mismatch, try regenerating\");",
     reflectable_tag(d),
     meta::format(t));

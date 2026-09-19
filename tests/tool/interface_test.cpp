@@ -1073,6 +1073,15 @@ TEST(enumerators, enum_type_t) {
   value_categories_test<enum_type_t>("zero,one", en::enum_type_enumerators);
 }
 
+TEST(bindings, entity_specific_aliases) {
+  namespace b = interface_test::bindings;
+
+  EXPECT_EQ("record",
+    omni::reflected_call(b::entity_type, interface_test::record_type_t{}));
+  EXPECT_EQ("enumeration",
+    omni::reflected_call(b::entity_type, interface_test::enum_type_t::zero));
+}
+
 namespace {
 
 struct validate_conversion_qualifiers_t {
@@ -1168,7 +1177,7 @@ TEST(fields, reference_and_move_access) {
     1,
     {2, 3},
     {4},
-    std::unique_ptr<int>{new int{5}},
+    omni::compat::make_unique<int>(5),
   };
 
   std::unique_ptr<int> moved =
@@ -1192,7 +1201,7 @@ TEST(fields, rvalue_value_access_preserves_const_record) {
     1,
     {2, 3},
     {4},
-    std::unique_ptr<int>{new int{5}},
+    omni::compat::make_unique<int>(5),
   };
 
   const std::unique_ptr<int> &&value =

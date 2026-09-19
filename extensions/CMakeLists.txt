@@ -1,10 +1,11 @@
 # 3.18.2 is the current project floor for CMake APIs used by the package.
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
-project(omnirefl_extensions LANGUAGES CXX)
+add_subdirectory(serialization)
 
-# TODO: Add opt-in components providing drop-in high-level utilities powered by
-# omnirefl:
-# - serialization (YAML, JSON, protobuf)
-# - CLI
-# - OpenAPI/REST mapping
+if(ENABLE_PACKAGE)
+    install(DIRECTORY include/omnirefl/
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/omnirefl")
+endif()
+
+# TODO: Consider CLI and OpenAPI/REST mapping components.

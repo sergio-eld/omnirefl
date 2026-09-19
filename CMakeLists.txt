@@ -6,12 +6,21 @@ project(omnirefl
     LANGUAGES CXX C 
     VERSION 0.0.3)
 
+include(GNUInstallDirs)
+
 # -- Configurable options --------
 option(ENABLE_PACKAGE "Enable omnirefl packaging" OFF)
 message(STATUS "ENABLE_PACKAGE: ${ENABLE_PACKAGE}")
 
 option(ENABLE_TESTING "Enable testing" OFF)
 message(STATUS "ENABLE_TESTING: ${ENABLE_TESTING}")
+
+# Preserve existing ENABLE_EXTENSIONS cache selections under the new name;
+# an absent old setting makes the initial value OFF.
+option(BUILD_EXTENSIONS
+    "Prepare extension targets and dependencies for source builds"
+    "${ENABLE_EXTENSIONS}")
+message(STATUS "BUILD_EXTENSIONS: ${BUILD_EXTENSIONS}")
 
 option(ENABLE_BENCH "Enable benchmarks" OFF)
 message(STATUS "ENABLE_BENCH: ${ENABLE_BENCH}")
@@ -117,7 +126,8 @@ set_target_properties(tool PROPERTIES
 target_include_directories(tool PRIVATE
     ${CLANG_INCLUDE_DIRS}
     ${LLVM_INCLUDE_DIRS}
-    ${PROJECT_SOURCE_DIR})
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include)
 
 target_compile_definitions(tool PRIVATE
     OMNIREFL_VERSION="${PROJECT_VERSION}"
@@ -167,6 +177,10 @@ target_include_directories(refl INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
+# Install extension headers and component configurations even when their
+# optional dependencies are not enabled in this tool build.
+add_subdirectory(extensions)
+
 # -- Testing / packaging setup --------
 if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
     if(ENABLE_TESTING)
@@ -182,6 +196,10 @@ elseif(ENABLE_BENCH OR ENABLE_TESTING)
     # These lines emulate the 'found' package.
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
+
+    if(BUILD_EXTENSIONS)
+        add_subdirectory(tests/extensions)
+    endif()
 
     add_subdirectory(tests/tool tests)
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
@@ -375,8 +393,16 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
 
     install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/tests/functional/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests/functional")
+
+    install(DIRECTORY
         ${CMAKE_SOURCE_DIR}/examples/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples")
+
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/tests/extensions/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests/extensions")
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"
@@ -393,7 +419,8 @@ if(ENABLE_PACKAGE)
     configure_package_config_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
+        PATH_VARS CMAKE_INSTALL_INCLUDEDIR)
 
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"

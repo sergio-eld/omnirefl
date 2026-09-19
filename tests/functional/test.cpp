@@ -86,6 +86,52 @@ struct observe {
   }
 };
 
+struct converted_value {
+  int value;
+};
+
+template <typename>
+struct another_type_tag {};
+
+struct not_constructible {
+  not_constructible(int) = delete;
+};
+
+template <typename T>
+struct disabled_type_template {
+  disabled_type_template(T) = delete;
+};
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+template <typename T, std::size_t Size>
+struct disabled_type_size_template {
+  disabled_type_size_template(std::array<T, Size>) = delete;
+};
+
+template <typename T, std::size_t Size>
+disabled_type_size_template(std::array<T, Size>)
+  -> disabled_type_size_template<T, Size>;
+#endif
+
+template <template <typename> class Tag,
+  typename To,
+  typename Value,
+  typename = void>
+struct accepts_type_as: std::false_type {};
+
+template <template <typename> class Tag, typename To, typename Value>
+struct accepts_type_as<Tag,
+  To,
+  Value,
+  omni::compat::void_t<decltype(omni::fn::as(Tag<To>{},
+    std::declval<Value>()))>>: std::true_type {};
+
+struct stringify {
+  std::string operator()(int value) const {
+    return std::to_string(value);
+  }
+};
+
 struct mapped_values {
   int first;
   long second;
@@ -152,6 +198,133 @@ struct add_owned {
   }
 };
 
+struct unavailable {
+  int operator()() const = delete;
+};
+
+struct mutable_result {
+  int value;
+
+  int operator()() && {
+    return ++value;
+  }
+};
+
+struct runtime_only_predicate {
+  bool operator()() const {
+    return true;
+  }
+};
+
+template <typename Value>
+struct guided_value {
+  Value value;
+};
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+guided_value(int) -> guided_value<long>;
+#endif
+
+struct sum_three {
+  constexpr int operator()(int first, int second, int third) const {
+    return first + second + third;
+  }
+};
+
+struct add_bound_owned {
+  int operator()(std::unique_ptr<int> left, int right) const {
+    return *left + right;
+  }
+};
+
+struct counted_predicate {
+  bool result;
+  std::size_t &calls;
+
+  bool operator()() const {
+    ++calls;
+    return result;
+  }
+};
+
+constexpr auto constexpr_add_to_800 =
+  omni::compat::bind_front(sum_three{}, 700, 100);
+static_assert(815 == constexpr_add_to_800(15),
+  "bind_front must remain usable in a C++11 constant expression");
+
+constexpr auto select_815 = omni::fn::when(
+  omni::fn::ct_pred(omni::fn::ct_const<42>()),
+  omni::fn::ct_const<815>());
+static_assert(815 == select_815(unavailable{}),
+  "partial must preserve compile-time branch selection");
+
+constexpr int direct_constant = omni::fn::ct_const<815>();
+static_assert(815 == direct_constant,
+  "ct_const must support direct value use in C++11 constant expressions");
+constexpr bool direct_false = omni::fn::ct_const<0>();
+static_assert(!direct_false,
+  "ct_const must support boolean conversion without calling the adapter");
+
+static_assert(omni::traits::is<std::integral_constant, std::true_type>(),
+  "constant-template matching must work in C++11");
+static_assert(omni::traits::is<std::integral_constant,
+                const std::integral_constant<unsigned, 3> &>(),
+  "constant-template matching must ignore cv and reference qualifiers");
+static_assert(!omni::traits::is<std::integral_constant, int>(),
+  "runtime integers are not integral_constant specializations");
+static_assert(
+  omni::traits::is<omni::fn::ct_const_t, decltype(omni::fn::ct_const<3>())>(),
+  "constant-template matching must recognize callable adapters");
+
+constexpr auto skip_unavailable = omni::fn::when(
+  omni::fn::ct_pred(omni::fn::ct_const<0>()),
+  unavailable{});
+static_assert(815
+    == omni::fn::cond(skip_unavailable, select_815, unavailable{}),
+  "cond must lazily select a compile-time branch");
+
+static_assert(815 == omni::fn::cond(select_815, unavailable{}),
+  "cond must not instantiate clauses after a compile-time match");
+
+static_assert(815
+    == omni::fn::branch(omni::fn::ct_const<true>(),
+      omni::fn::ct_const<815>(),
+      omni::fn::ct_const<108>()),
+  "branch must remain usable in a C++11 constant expression");
+
+static_assert(815
+    == omni::fn::branch(omni::fn::ct_pred(omni::fn::ct_const<42>()),
+      omni::fn::ct_const<815>(),
+      unavailable{}),
+  "compile-time branch must not instantiate the unselected callable");
+
+static_assert(108
+    == omni::fn::branch(omni::fn::ct_pred(omni::fn::ct_const<0>()),
+      unavailable{},
+      omni::fn::ct_const<108>()),
+  "compile-time branch must select the false callable");
+
+// Captureless lambdas become implicitly constexpr in C++17. This can make the
+// complete runtime-shaped branch a constant expression, but both callable
+// expressions must still be valid.
+#if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
+static_assert(815
+    == omni::fn::branch([] { return true; },
+      [] { return 815; },
+      [] { return 108; }),
+  "a constexpr lambda must support constant evaluation of branch");
+#endif
+
+// Captureless closure types become default-constructible in C++20.
+#if 202002L <= OMNI_CPLUSPLUS
+static_assert(815
+    == omni::fn::branch(
+      omni::fn::ct_pred([] { return true; }),
+      [] { return 815; },
+      unavailable{}),
+  "C++20 lambdas must support explicit compile-time elevation");
+#endif
+
 struct invoke_record {
   int value;
 
@@ -160,6 +333,10 @@ struct invoke_record {
   }
 
   constexpr int sum(int right) const {
+    return value + right;
+  }
+
+  int throwing_sum(int right) const {
     return value + right;
   }
 
@@ -181,7 +358,8 @@ static_assert(
     omni::compat::invoke(&invoke_record::noexcept_sum, invoked_record, 2)),
   "member invocation must preserve noexcept");
 static_assert(
-  !noexcept(omni::compat::invoke(&invoke_record::sum, invoked_record, 2)),
+  !noexcept(
+    omni::compat::invoke(&invoke_record::throwing_sum, invoked_record, 2)),
   "member invocation must preserve potentially throwing calls");
 #endif
 static_assert(std::is_same<decltype(omni::compat::invoke(&invoke_record::value,
@@ -280,6 +458,24 @@ enum class reference_category {
   const_lvalue,
   mutable_rvalue,
   const_rvalue,
+};
+
+struct callable_reference_category {
+  reference_category operator()() & {
+    return reference_category::mutable_lvalue;
+  }
+
+  reference_category operator()() const & {
+    return reference_category::const_lvalue;
+  }
+
+  reference_category operator()() && {
+    return reference_category::mutable_rvalue;
+  }
+
+  reference_category operator()() const && {
+    return reference_category::const_rvalue;
+  }
 };
 
 template <typename Reference>
@@ -423,6 +619,13 @@ struct map_reference_category {
   }
 };
 
+struct bound_reference_category {
+  template <typename Value>
+  reference_category operator()(Value &&) const {
+    return categorize<Value &&>();
+  }
+};
+
 struct reference_category_pair {
   reference_category left;
   reference_category right;
@@ -481,6 +684,505 @@ TEST(compat_invoke, invokes_members_through_supported_object_forms) {
 
   EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, pointer));
   EXPECT_EQ(108, omni::compat::invoke(&invoke_record::value, reference));
+}
+
+TEST(compat_bind_front, binds_leading_arguments) {
+  const auto add_to_800 = omni::compat::bind_front(sum_three{}, 700, 100);
+  const auto add_to_record =
+    omni::compat::bind_front(&invoke_record::sum, invoke_record{800});
+
+  EXPECT_EQ(815, add_to_800(15));
+  EXPECT_EQ(815, add_to_record(15));
+}
+
+TEST(compat_bind_front, copies_a_mutable_binder) {
+  auto original = omni::compat::bind_front(sum_three{}, 700, 100);
+  auto copy = original;
+
+  EXPECT_EQ(815, original(15));
+  EXPECT_EQ(815, copy(15));
+}
+
+TEST(compat_bind_front, preserves_the_bound_value_category) {
+  auto mutable_lvalue =
+    omni::compat::bind_front(bound_reference_category{}, 815);
+  const auto const_lvalue =
+    omni::compat::bind_front(bound_reference_category{}, 815);
+  auto mutable_rvalue =
+    omni::compat::bind_front(bound_reference_category{}, 815);
+  const auto const_rvalue =
+    omni::compat::bind_front(bound_reference_category{}, 815);
+
+  EXPECT_EQ(reference_category::mutable_lvalue, mutable_lvalue());
+  EXPECT_EQ(reference_category::const_lvalue, const_lvalue());
+  EXPECT_EQ(reference_category::mutable_rvalue, std::move(mutable_rvalue)());
+  EXPECT_EQ(reference_category::const_rvalue, std::move(const_rvalue)());
+}
+
+TEST(compat_bind_front, preserves_the_callable_value_category) {
+  auto mutable_lvalue = omni::compat::bind_front(callable_reference_category{});
+  const auto const_lvalue =
+    omni::compat::bind_front(callable_reference_category{});
+  auto mutable_rvalue = omni::compat::bind_front(callable_reference_category{});
+  const auto const_rvalue =
+    omni::compat::bind_front(callable_reference_category{});
+
+  EXPECT_EQ(reference_category::mutable_lvalue, mutable_lvalue());
+  EXPECT_EQ(reference_category::const_lvalue, const_lvalue());
+  EXPECT_EQ(reference_category::mutable_rvalue, std::move(mutable_rvalue)());
+  EXPECT_EQ(reference_category::const_rvalue, std::move(const_rvalue)());
+}
+
+TEST(compat_bind_front, consumes_a_move_only_bound_argument) {
+  auto add_to_800 = omni::compat::bind_front(add_bound_owned{},
+    omni::compat::make_unique<int>(800));
+
+  EXPECT_FALSE(
+    (omni::compat::is_invocable<decltype(add_to_800) &, int>::value));
+  EXPECT_TRUE(
+    (omni::compat::is_invocable<decltype(add_to_800) &&, int>::value));
+  EXPECT_EQ(815, std::move(add_to_800)(15));
+}
+
+TEST(fn_partial, aliases_compat_bind_front) {
+  const auto add_to_800 = omni::fn::partial(sum_three{}, 700, 100);
+
+  EXPECT_TRUE((std::is_same<decltype(omni::fn::partial(sum_three{}, 700, 100)),
+    decltype(omni::compat::bind_front(sum_three{}, 700, 100))>::value));
+  EXPECT_EQ(815, add_to_800(15));
+}
+
+TEST(fn_partial, partially_applies_branch) {
+  const auto when_true =
+    omni::fn::partial(omni::fn::branch, [] { return true; });
+  const auto otherwise = omni::fn::partial(omni::fn::branch,
+    [] { return false; },
+    [] { return 108; });
+
+  EXPECT_EQ(815, when_true([] { return 815; }, [] { return 108; }));
+  EXPECT_EQ(815, otherwise([] { return 815; }));
+}
+
+TEST(fn_when, accepts_integral_constant_derived_predicate) {
+  const auto clause =
+    omni::fn::when(std::is_same<int, int>{}, [] { return 815; });
+
+  EXPECT_EQ(815, clause(unavailable{}));
+}
+
+TEST(fn_cond, selects_the_first_matching_branch) {
+  std::size_t predicates{};
+  std::size_t actions{};
+
+  const auto result = omni::fn::cond( //
+    omni::fn::when(
+      counted_predicate{false, predicates},
+      [&actions] {
+        ++actions;
+        return 108;
+      }),
+    omni::fn::when(
+      counted_predicate{true, predicates},
+      [&actions] {
+        ++actions;
+        return 815;
+      }),
+    omni::fn::when(
+      counted_predicate{true, predicates},
+      [&actions] {
+        ++actions;
+        return 42;
+      }),
+    [&actions] {
+      ++actions;
+      return 0;
+    });
+
+  EXPECT_EQ(815, result);
+  EXPECT_EQ(2, predicates);
+  EXPECT_EQ(1, actions);
+}
+
+TEST(fn_cond, invokes_the_fallback_when_no_branch_matches) {
+  std::size_t predicates{};
+
+  const auto result = omni::fn::cond( //
+    omni::fn::when(
+      counted_predicate{false, predicates},
+      [] { return 815; }),
+    omni::fn::when(
+      counted_predicate{false, predicates},
+      [] { return 42; }),
+    [] { return 108; });
+
+  EXPECT_EQ(108, result);
+  EXPECT_EQ(2, predicates);
+  EXPECT_EQ(815, omni::fn::cond([] { return 815; }));
+}
+
+TEST(fn_cond, returns_the_selected_move_only_value) {
+  auto result = omni::fn::cond( //
+    omni::fn::when(
+      [] { return false; },
+      omni::fn::consume(omni::compat::make_unique<int>(108))),
+    omni::fn::when(
+      [] { return true; },
+      omni::fn::consume(omni::compat::make_unique<int>(815))),
+    omni::fn::consume(omni::compat::make_unique<int>(42)));
+
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(815, *result);
+  }
+}
+
+TEST(fn_cond, compile_time_selection_allows_unrelated_result_types) {
+  const auto result = omni::fn::cond( //
+    omni::fn::when(
+      omni::fn::ct_pred(omni::fn::ct_const<0>()),
+      unavailable{}),
+    omni::fn::when(
+      omni::fn::ct_pred(omni::fn::ct_const<42>()),
+      [] { return std::string{"oceanic"}; }),
+    unavailable{});
+
+  EXPECT_EQ("oceanic", result);
+}
+
+TEST(fn_branch, consumes_selected_move_only_value) {
+  auto selected = omni::fn::consume(omni::compat::make_unique<int>(815));
+
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(selected) &>::value));
+  EXPECT_TRUE((omni::compat::is_invocable<decltype(selected) &&>::value));
+
+  auto result = omni::fn::branch([] { return true; },
+    std::move(selected),
+    omni::fn::consume(omni::compat::make_unique<int>(108)));
+
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(815, *result);
+  }
+}
+
+TEST(fn_branch, preserves_selected_reference) {
+  int selected = 815;
+  int unselected = 108;
+
+  int &result = omni::fn::branch(
+    [] { return true; },
+    [&selected]() -> int & { return selected; },
+    [&unselected]() -> int & { return unselected; });
+
+  EXPECT_EQ(&selected, &result);
+}
+
+TEST(fn_branch, compile_time_selection_allows_unrelated_result_types) {
+  const auto result =
+    omni::fn::branch(omni::fn::ct_pred(omni::fn::ct_const<42>()),
+      [] { return std::string{"oceanic"}; },
+      [] { return 108; });
+
+  EXPECT_EQ("oceanic", result);
+}
+
+TEST(fn_branch, selects_callable_constants_with_a_runtime_condition) {
+  const auto result = omni::fn::branch(
+    [] { return false; },
+    omni::fn::ct_const<815>(),
+    omni::fn::ct_const<108>());
+
+  static_assert(std::is_same<decltype(result), const int>::value,
+    "different integral constants must produce their common numeric type");
+  EXPECT_EQ(108, result);
+}
+
+TEST(fn_branch, preserves_identical_callable_constant_results) {
+  const auto result = omni::fn::branch(
+    [] { return false; },
+    omni::fn::ct_const<815>(),
+    omni::fn::ct_const<815>());
+
+  static_assert(std::is_same<decltype(result),
+                  const std::integral_constant<int, 815>>::value,
+    "identical integral constants must keep their type");
+  EXPECT_EQ(815, result);
+}
+
+TEST(fn_branch, invokes_selected_mutable_callable_as_rvalue) {
+  EXPECT_EQ(815,
+    omni::fn::branch([] { return true; },
+      mutable_result{814},
+      [] { return 108; }));
+}
+
+TEST(fn_branch, selects_runtime_callable) {
+  const std::string value{"oceanic"};
+
+  EXPECT_EQ(815,
+    omni::fn::branch(
+      [value] { return value == "oceanic"; },
+      [] { return 815; },
+      [] { return 108; }));
+}
+
+TEST(fn_branch, selects_runtime_false_callable) {
+  const std::string value{"invalid"};
+
+  EXPECT_EQ("value is invalid",
+    omni::fn::branch(
+      [value] { return value == "valid"; },
+      [] { return std::string{"oceanic"}; },
+      [] { return std::string{"value is invalid"}; }));
+}
+
+TEST(fn_ct_pred, detects_runtime_only_predicate) {
+  EXPECT_FALSE((omni::fn::detail::is_compile_time_predicate<
+    runtime_only_predicate>::value));
+}
+
+TEST(fn_branch, selects_type_encoded_predicate) {
+  EXPECT_EQ(815,
+    omni::fn::branch( //
+      std::is_same<int, int>{},
+      [] { return 815; },
+      unavailable{}));
+
+  EXPECT_EQ(108,
+    omni::fn::branch( //
+      std::is_same<int, double>{},
+      unavailable{},
+      [] { return 108; }));
+}
+
+#if 202002L <= OMNI_CPLUSPLUS
+TEST(fn_branch, elevates_lambda_for_compile_time_selection_since_cpp20) {
+  EXPECT_EQ(815,
+    omni::fn::branch(
+      omni::fn::ct_pred([] { return true; }),
+      [] { return 815; },
+      unavailable{}));
+}
+#endif
+
+TEST(fn_as, converts_eager_lazy_and_piped_values) {
+  const auto convert = omni::fn::as(stringify{});
+
+  EXPECT_EQ("42", omni::fn::as(stringify{}, 42));
+  EXPECT_EQ("108", convert(108));
+  EXPECT_EQ("815", 815 | convert);
+}
+
+TEST(fn_as, preserves_the_converted_value_category) {
+  int mutable_value{};
+  const int const_value{};
+
+  EXPECT_EQ(reference_category::mutable_lvalue,
+    omni::fn::as(map_reference_category{}, mutable_value));
+  EXPECT_EQ(reference_category::const_lvalue,
+    omni::fn::as(map_reference_category{}, const_value));
+  EXPECT_EQ(reference_category::mutable_rvalue,
+    omni::fn::as(map_reference_category{}, std::move(mutable_value)));
+  EXPECT_EQ(reference_category::const_rvalue,
+    omni::fn::as(map_reference_category{}, std::move(const_value)));
+}
+
+TEST(fn_as, lazy_call_preserves_the_converted_value_category) {
+  int mutable_value{};
+  const int const_value{};
+  const auto convert = omni::fn::as(map_reference_category{});
+
+  EXPECT_EQ(reference_category::mutable_lvalue, convert(mutable_value));
+  EXPECT_EQ(reference_category::const_lvalue, convert(const_value));
+  EXPECT_EQ(reference_category::mutable_rvalue,
+    convert(std::move(mutable_value)));
+  EXPECT_EQ(reference_category::const_rvalue, convert(std::move(const_value)));
+}
+
+TEST(fn_as, pipe_preserves_the_converted_value_category) {
+  int mutable_value{};
+  const int const_value{};
+  const auto convert = omni::fn::as(map_reference_category{});
+
+  EXPECT_EQ(reference_category::mutable_lvalue, mutable_value | convert);
+  EXPECT_EQ(reference_category::const_lvalue, const_value | convert);
+  EXPECT_EQ(reference_category::mutable_rvalue,
+    std::move(mutable_value) | convert);
+  EXPECT_EQ(reference_category::const_rvalue, std::move(const_value) | convert);
+}
+
+TEST(fn_as, constructs_the_selected_type) {
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+  constexpr auto conversion = omni::type<converted_value>;
+#else
+  constexpr auto conversion = omni::type_t<converted_value>{};
+#endif
+  const auto construct = omni::fn::as(conversion);
+
+  EXPECT_TRUE((
+    std::is_same<converted_value, omni::type_t<converted_value>::type>::value));
+  EXPECT_EQ(42, omni::fn::as(conversion, 42).value);
+  EXPECT_EQ(108, construct(108).value);
+  EXPECT_EQ(815, (815 | construct).value);
+}
+
+TEST(fn_as, stores_selected_type_construction) {
+  const auto construct = omni::fn::as<converted_value>();
+
+  EXPECT_EQ(42, construct(42).value);
+  EXPECT_EQ(815, (815 | omni::fn::as<converted_value>()).value);
+}
+
+TEST(traits_is, compares_types_and_type_templates) {
+  EXPECT_TRUE((omni::traits::is<int, int>()));
+  EXPECT_FALSE((omni::traits::is<int, long>()));
+  EXPECT_TRUE((omni::traits::is<omni::type_t, omni::type_t>()));
+  EXPECT_FALSE((omni::traits::is<omni::type_t, another_type_tag>()));
+  EXPECT_TRUE((omni::traits::is<std::vector, std::vector<int>>()));
+  EXPECT_FALSE((omni::traits::is<std::vector, std::tuple<int>>()));
+  EXPECT_FALSE(
+    (std::is_same<omni::type_t<int>, omni::compat::type_identity<int>>::value));
+}
+
+TEST(traits_select, prioritizes_the_first_of_overlapping_predicates) {
+  using operation = typename omni::traits::select<
+    omni::traits::case_<std::is_same<bool, bool>::value, observe>,
+    omni::traits::case_<std::is_integral<bool>::value, stringify_field>,
+    stringify_field>::type;
+
+  // stringify_field requires field metadata; its body is invalid for bool.
+  EXPECT_TRUE(operation{}(true));
+}
+
+TEST(traits_select, skips_nonmatching_cases) {
+  using operation = typename omni::traits::select<
+    omni::traits::case_<std::is_same<int, bool>::value, stringify_field>,
+    omni::traits::case_<std::is_integral<int>::value, observe>,
+    stringify_field>::type;
+
+  EXPECT_EQ(42, operation{}(42));
+}
+
+TEST(traits_select, uses_the_fallback_when_no_predicate_matches) {
+  using operation = typename omni::traits::select<
+    omni::traits::case_<std::is_integral<std::string>::value, stringify_field>,
+    omni::traits::case_<std::is_same<std::string, bool>::value,
+      stringify_field>,
+    observe>::type;
+
+  EXPECT_EQ("fallback", operation{}(std::string{"fallback"}));
+}
+
+TEST(traits_select, accepts_a_fallback_without_cases) {
+  using operation = typename omni::traits::select<observe>::type;
+
+  EXPECT_EQ("fallback", operation{}(std::string{"fallback"}));
+}
+
+TEST(fn_as, participates_only_for_constructible_values) {
+  EXPECT_TRUE((accepts_type_as<omni::type_t, converted_value, int>::value));
+  EXPECT_FALSE((accepts_type_as<omni::type_t, not_constructible, int>::value));
+  EXPECT_FALSE(
+    (accepts_type_as<another_type_tag, converted_value, int>::value));
+}
+
+TEST(fn_ctad, constructs_a_class_template_from_the_values) {
+  EXPECT_EQ((std::vector<int>{42}), omni::fn::ctad<std::vector>(42));
+}
+
+TEST(fn_as, stores_class_template_construction) {
+  const auto construct = omni::fn::as<std::vector>();
+
+  EXPECT_EQ((std::vector<int>{42}), construct(42));
+  EXPECT_EQ((std::vector<int>{815}), 815 | omni::fn::as<std::vector>());
+}
+
+TEST(traits_ctad, reports_an_unsupported_type_template_construction) {
+  EXPECT_FALSE(
+    (omni::traits::is_type_template_constructible_from<disabled_type_template,
+      int &&>::value));
+}
+
+TEST(fn_ctad, constructs_a_constant_expression) {
+  constexpr auto result = omni::fn::ctad<guided_value>(42);
+
+  static_assert(42 == result.value,
+    "template construction must support constant evaluation");
+  EXPECT_EQ(42, result.value);
+}
+
+TEST(fn_ctad, constructs_from_multiple_values) {
+  const auto result = omni::fn::ctad<std::pair>(/*first=*/8, /*second=*/15);
+  using result_type = omni::compat::decay_t<decltype(result)>;
+
+  static_assert(std::is_same<result_type, std::pair<int, int>>::value,
+    "each argument must supply a fallback template type");
+  EXPECT_EQ(8, result.first);
+  EXPECT_EQ(15, result.second);
+}
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+TEST(fn_ctad, constructs_a_sized_class_template) {
+  EXPECT_EQ((std::array<int, 1>{42}),
+    omni::fn::ctad<std::array>(42));
+}
+
+TEST(fn_as, stores_sized_class_template_construction) {
+  EXPECT_EQ((std::array<int, 1>{42}), 42 | omni::fn::as<std::array>());
+}
+
+TEST(traits_ctad, reports_an_unsupported_sized_template_construction) {
+  EXPECT_FALSE((omni::traits::is_type_size_template_constructible_from<
+    disabled_type_size_template,
+    std::array<int, 2> &&>::value));
+}
+#endif
+
+TEST(fn_as, follows_the_available_class_template_deduction) {
+  const int input = 42;
+  const auto result = input | omni::fn::as<guided_value>();
+
+#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
+  EXPECT_TRUE((std::is_same<guided_value<long>,
+    omni::compat::remove_cvref_t<decltype(result)>>::value));
+#else
+  EXPECT_TRUE((std::is_same<guided_value<int>,
+    omni::compat::remove_cvref_t<decltype(result)>>::value));
+#endif
+  EXPECT_EQ(42, result.value);
+}
+
+TEST(fn_as, forwards_a_move_only_value_into_the_selected_type) {
+  auto source = omni::compat::make_unique<int>(42);
+
+  const auto result =
+    omni::fn::as(omni::type_t<std::unique_ptr<int>>{}, std::move(source));
+
+  EXPECT_EQ(nullptr, source);
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(42, *result);
+  }
+}
+
+TEST(fn_as, forwards_a_move_only_value) {
+  auto source = omni::compat::make_unique<int>(42);
+
+  const auto result = omni::fn::as(move_only{}, std::move(source));
+
+  EXPECT_EQ(nullptr, source);
+  EXPECT_NE(nullptr, result);
+  if (result) {
+    EXPECT_EQ(42, *result);
+  }
+}
+
+TEST(fn_as, owns_a_move_only_lazy_conversion) {
+  auto convert = omni::fn::as(add_owned_value{
+    omni::compat::make_unique<int>(773),
+  });
+
+  EXPECT_EQ(815, 42 | std::move(convert));
 }
 
 TEST(fn_concat, concatenates_eager_lazy_and_piped_tuples) {
@@ -1545,6 +2247,8 @@ TEST(fn_contract, accepts_only_tuple_like_inputs) {
 }
 
 TEST(fn_contract, exposes_lazy_closure_types) {
+  EXPECT_TRUE((std::is_same<omni::fn::as_closure<observe>,
+    decltype(omni::fn::as(observe{}))>::value));
   EXPECT_TRUE((std::is_same<omni::fn::each_closure<ignore>,
     decltype(omni::fn::each(ignore{}))>::value));
   EXPECT_TRUE((std::is_same<omni::fn::map_closure<transform>,
@@ -1568,10 +2272,30 @@ TEST(fn_contract, exposes_lazy_closure_types) {
       decltype(omni::fn::diff_by(element_type{}, std::tuple<int>{}))>::value));
 }
 
-// The tool's bundled, standard-conforming C++11 libc++ does not provide
-// constexpr tuple construction/access. These assertions contain no reflection
-// queries; normal compiler builds still evaluate them in the C++11 matrix.
-#if !defined(OMNI_TOOL_RUN) || 201402L <= OMNI_CPLUSPLUS
+TEST(fn_contract, exposes_callable_compositor_types) {
+  EXPECT_TRUE((std::is_same<omni::fn::branch_t,
+    omni::compat::decay_t<decltype(omni::fn::branch)>>::value));
+  EXPECT_TRUE((std::is_same<omni::fn::cond_t,
+    omni::compat::decay_t<decltype(omni::fn::cond)>>::value));
+}
+
+static_assert(42 == omni::fn::as(observe{}, 42),
+  "as must be usable in C++11 constexpr");
+
+constexpr auto lazy_as = omni::fn::as(observe{});
+static_assert(108 == lazy_as(108),
+  "the lazy as call must be usable in C++11 constexpr");
+static_assert(815 == (815 | omni::fn::as(observe{})),
+  "the as pipe must be usable in C++11 constexpr");
+static_assert(42 == omni::fn::as(omni::type_t<converted_value>{}, 42).value,
+  "as must construct an explicitly selected type in C++11 constexpr");
+constexpr auto lazy_selected_as = omni::fn::as<converted_value>();
+static_assert(108 == lazy_selected_as(108).value,
+  "the selected-type as closure must be usable in C++11 constexpr");
+
+// Standard tuple construction/access is not constexpr until C++14. C++11
+// builds still exercise these operations at runtime above.
+#if 201402L <= OMNI_CPLUSPLUS
 static_assert(
   (static_cast<void>(omni::fn::each(observe{}, std::tuple<int, int>{1, 2})),
     true),

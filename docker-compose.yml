@@ -387,11 +387,17 @@ services:
 
         Set-Location 'C:/with space/build'
         cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
+        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
         cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
 
+        # Windows PowerShell promotes native stderr to errors. Let CTest
+        # finish all checks and use its exit code to report failures.
+        $$ErrorActionPreference = 'Continue'
         ctest . --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
           Tee-Object C:/test/$$env:TEST_NAME.log
         $$rc = $$LASTEXITCODE
+        $$ErrorActionPreference = 'Stop'
 
         Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
         Copy-Item -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/

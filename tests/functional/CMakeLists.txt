@@ -1,8 +1,10 @@
-include("${CMAKE_CURRENT_LIST_DIR}/../tool/supported_cpp_standards.cmake")
+if(NOT COMMAND _omnirefl_supported_cpp_standards)
+    include("${CMAKE_CURRENT_LIST_DIR}/../tool/supported_cpp_standards.cmake")
+endif()
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 foreach(_standard IN LISTS _supported_cpp_standards)
-    set(_target functional_cpp_${_standard}_test)
+    set(_target "cpp_${_standard}.functional")
     add_executable(${_target} test.cpp)
     set_target_properties(${_target} PROPERTIES
         CXX_STANDARD ${_standard}
@@ -14,6 +16,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         gtest_main)
     omni_reflected_target(${_target})
 
-    add_test(NAME omnirefl.functional.cpp_${_standard}
-        COMMAND ${_target})
+    if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+        add_test(NAME "${_target}"
+            COMMAND ${_target})
+    endif()
 endforeach()
