@@ -110,6 +110,40 @@ RUN cmake -S "${LLVM_SOURCE_DIR}/llvm" -B "${LLVM_BUILD_AARCH64}" -GNinja \
       --target clangTooling \
       --parallel "$(nproc)"
 
+# The universal package uses one shared Clang resource directory. Generate the
+# ARM builtin headers separately without adding an unused backend to either
+# architecture's reflection tool.
+RUN llvm_major="${LLVM_VERSION%%.*}" \
+    && cmake -S "${LLVM_SOURCE_DIR}/llvm" \
+      -B /tmp/aarch64-resource-headers \
+      -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_PROJECTS=clang \
+      -DLLVM_TARGETS_TO_BUILD=AArch64 \
+      -DLLVM_NATIVE_TOOL_DIR="${LLVM_BUILD_X86_64}/bin" \
+      -DLLVM_TABLEGEN="${LLVM_BUILD_X86_64}/bin/llvm-tblgen" \
+      -DCLANG_TABLEGEN="${LLVM_BUILD_X86_64}/bin/clang-tblgen" \
+      -DLLVM_INCLUDE_TESTS=OFF \
+      -DLLVM_INCLUDE_BENCHMARKS=OFF \
+      -DLLVM_INCLUDE_EXAMPLES=OFF \
+      -DLLVM_INCLUDE_DOCS=OFF \
+      -DLLVM_ENABLE_BINDINGS=OFF \
+      -DLLVM_ENABLE_ZLIB=OFF \
+      -DLLVM_ENABLE_ZSTD=OFF \
+      -DLLVM_ENABLE_LIBXML2=OFF \
+      -DLLVM_ENABLE_CURL=OFF \
+      -DLLVM_ENABLE_FFI=OFF \
+      -DLLVM_ENABLE_LIBEDIT=OFF \
+      -DCLANG_INCLUDE_TESTS=OFF \
+    && cmake --build /tmp/aarch64-resource-headers \
+      --target clang-resource-headers \
+      --parallel "$(nproc)" \
+    && cp -r \
+      "/tmp/aarch64-resource-headers/lib/clang/${llvm_major}/include/." \
+      "${CLANG_RESOURCE_DIR_COSMOPOLITAN}/include/" \
+    && test -f "${CLANG_RESOURCE_DIR_COSMOPOLITAN}/include/arm_neon.h" \
+    && rm -rf /tmp/aarch64-resource-headers
+
 RUN cmake -S "${LLVM_SOURCE_DIR}/runtimes" -B /tmp/cxx-headers -GNinja \
       -DCMAKE_TOOLCHAIN_FILE=/opt/cosmopolitan.cmake \
       -DCOSMOPOLITAN_ARCH=x86_64 \

@@ -17,3 +17,6 @@ RUN set -eux; \
         *) echo "Unsupported COMPILER '$COMPILER'" >&2; exit 1 ;; \
     esac; \
     rm -rf /var/cache/apk/*
+
+# Alpine 3.23 installs upstream Ninja outside the default executable path.
+ENV PATH="/usr/lib/ninja-build/bin:${PATH}"
