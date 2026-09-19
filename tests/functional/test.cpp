@@ -1119,6 +1119,16 @@ TEST(fn_ctad, constructs_a_constant_expression) {
   EXPECT_EQ(42, result.value);
 }
 
+TEST(fn_ctad, constructs_from_multiple_values) {
+  const auto result = omni::fn::ctad<std::pair>()(/*first=*/8, /*second=*/15);
+  using result_type = omni::compat::decay_t<decltype(result)>;
+
+  static_assert(std::is_same<result_type, std::pair<int, int>>::value,
+    "each argument must supply a fallback template type");
+  EXPECT_EQ(8, result.first);
+  EXPECT_EQ(15, result.second);
+}
+
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
 TEST(fn_as, overloads_ctad_for_a_sized_class_template) {
   EXPECT_EQ((std::array<int, 1>{42}),

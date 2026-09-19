@@ -93,26 +93,30 @@ struct is_same_template<Template, Template>: std::true_type {};
 // Detects the result selected by the type-parameter-only `fn::ctad` overload.
 // Valid specializations expose the result as `type`.
 template <template <typename...> class Template,
-  typename Value,
-  typename = void>
-struct type_template_construct_result: std::false_type {};
+  typename Enable,
+  typename... Values>
+struct type_template_construct_result_impl: std::false_type {};
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-template <template <typename...> class Template, typename Value>
-struct type_template_construct_result<Template,
-  Value,
-  compat::void_t<decltype(Template{std::declval<Value>()})>>: std::true_type {
-  using type = decltype(Template{std::declval<Value>()});
+template <template <typename...> class Template, typename... Values>
+struct type_template_construct_result_impl<Template,
+  compat::void_t<decltype(Template{std::declval<Values>()...})>,
+  Values...>: std::true_type {
+  using type = decltype(Template{std::declval<Values>()...});
 };
 #else
-template <template <typename...> class Template, typename Value>
-struct type_template_construct_result<Template,
-  Value,
-  compat::void_t<decltype(Template<compat::decay_t<Value>>{
-    std::declval<Value>()})>>: std::true_type {
-  using type = Template<compat::decay_t<Value>>;
+template <template <typename...> class Template, typename... Values>
+struct type_template_construct_result_impl<Template,
+  compat::void_t<decltype(Template<compat::decay_t<Values>...>{
+    std::declval<Values>()...})>,
+  Values...>: std::true_type {
+  using type = Template<compat::decay_t<Values>...>;
 };
 #endif
+
+template <template <typename...> class Template, typename... Values>
+struct type_template_construct_result:
+    type_template_construct_result_impl<Template, void, Values...> {};
 
 // Detects the CTAD result selected by the type-and-size `fn::ctad` overload.
 // It remains invalid when deduction guides are unavailable.
@@ -132,23 +136,27 @@ struct type_size_template_construct_result<Template,
 
 } // namespace detail
 
-/// Whether `Type` is a specialization of a template whose parameters are
-/// types.
+/**
+ * Whether `Type` is a specialization of a template whose parameters are
+ * types.
+ */
 template <template <typename...> class Template, typename Type>
 constexpr bool is() noexcept {
   return detail::is_type_template_specialization<Template,
     compat::remove_cvref_t<Type>>::value;
 }
 
-/// Whether `Type` specializes a template taking a type and a constant.
-/// Before C++17, the constant must have the preceding parameter's type.
+/**
+ * Whether `Type` specializes a template taking a type and a constant.
+ * Before C++17, the constant must have the preceding parameter's type.
+ */
 template <template <typename T, T> class Template, typename Type>
 constexpr bool is() noexcept {
   return detail::is_type_value_template_specialization<Template,
     compat::remove_cvref_t<Type>>::value;
 }
 
-/// Report whether `To` can be brace-constructed from `Value`.
+/** Report whether `To` can be brace-constructed from `Value`. */
 template <typename To, typename Value, typename = void>
 struct is_brace_constructible: std::false_type {};
 
@@ -157,50 +165,52 @@ struct is_brace_constructible<To,
   Value,
   compat::void_t<decltype(To{std::declval<Value>()})>>: std::true_type {};
 
-/// Report whether a type-parameter-only class template can construct from
-/// `Value` using CTAD or the pre-C++17 value-type fallback.
-template <template <typename...> class Template, typename Value>
+/**
+ * Report whether a type-parameter-only class template can construct from
+ * `Values` using CTAD or the pre-C++17 value-type fallback.
+ */
+template <template <typename...> class Template, typename... Values>
 struct is_type_template_constructible_from:
-    detail::type_template_construct_result<Template, Value> {};
+    detail::type_template_construct_result<Template, Values...> {};
 
-/// The result selected by `is_type_template_constructible_from`.
-template <template <typename...> class Template, typename Value>
+/** The result selected by `is_type_template_constructible_from`. */
+template <template <typename...> class Template, typename... Values>
 using type_template_construct_result_t =
-  typename detail::type_template_construct_result<Template, Value>::type;
+  typename detail::type_template_construct_result<Template, Values...>::type;
 
-/// Report whether a type-and-size class template can use CTAD with `Value`.
+/** Report whether a type-and-size class template can use CTAD with `Value`. */
 template <template <typename, std::size_t> class Template, typename Value>
 struct is_type_size_template_constructible_from:
     detail::type_size_template_construct_result<Template, Value> {};
 
-/// The result selected by `is_type_size_template_constructible_from`.
+/** The result selected by `is_type_size_template_constructible_from`. */
 template <template <typename, std::size_t> class Template, typename Value>
 using type_size_template_construct_result_t =
   typename detail::type_size_template_construct_result<Template, Value>::type;
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-/// Require brace construction of `To` from `Value`.
+/** Require brace construction of `To` from `Value`. */
 template <typename To, typename Value>
 concept brace_constructible_from = is_brace_constructible<To, Value>::value;
 
-/// Require a valid type-parameter-only template construction from `Value`.
-template <template <typename...> class Template, typename Value>
+/** Require a valid type-parameter-only template construction from `Values`. */
+template <template <typename...> class Template, typename... Values>
 concept type_template_constructible_from =
-  is_type_template_constructible_from<Template, Value>::value;
+  is_type_template_constructible_from<Template, Values...>::value;
 
-/// Require valid CTAD for a type-and-size template from `Value`.
+/** Require valid CTAD for a type-and-size template from `Value`. */
 template <template <typename, std::size_t> class Template, typename Value>
 concept type_size_template_constructible_from =
   is_type_size_template_constructible_from<Template, Value>::value;
 #endif
 
-/// Compare two types.
+/** Compare two types. */
 template <typename Left, typename Right>
 constexpr bool is() {
   return std::is_same<Left, Right>::value;
 }
 
-/// Compare two templates containing only type template parameters.
+/** Compare two templates containing only type template parameters. */
 template <template <typename...> class Left,
   template <typename...> class Right>
 constexpr bool is() {

@@ -123,16 +123,18 @@ struct is_compile_time_predicate<Predicate,
 // incorrectly rejects valid template construction.
 template <template <typename...> class Template>
 struct type_template_ctad_fn {
-  template <typename Value,
-    typename std::enable_if<
-      traits::is_type_template_constructible_from<Template, Value &&>::value,
-      int>::type = 0>
-  constexpr traits::type_template_construct_result_t<Template, Value &&>
-    operator()(Value &&value) const {
+  template <typename... Values>
+  constexpr auto operator()(Values &&...values) const //
+    -> typename std::enable_if<
+      traits::is_type_template_constructible_from<Template,
+        Values &&...>::value,
+      traits::type_template_construct_result_t<Template,
+        Values &&...>>::type {
 #  if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-    return Template{std::forward<Value>(value)};
+    return Template{std::forward<Values>(values)...};
 #  else
-    return Template<compat::decay_t<Value>>{std::forward<Value>(value)};
+    return Template<compat::decay_t<Values>...>{
+      std::forward<Values>(values)...};
 #  endif
   }
 };
@@ -166,18 +168,18 @@ template <template <typename...> class Template>
 constexpr auto type_template_ctad() {
 #  if defined(__cpp_concepts) && 201907L <= __cpp_concepts
   return //
-    []<typename Value>(Value &&value)
-    requires traits::type_template_constructible_from<Template, Value &&>
-  { return Template{std::forward<Value>(value)}; };
+    []<typename... Values>(Values &&...values)
+    requires traits::type_template_constructible_from<Template, Values &&...>
+  { return Template{std::forward<Values>(values)...}; };
 #  else
   return //
-    [](auto &&value) //
+    [](auto &&...values) //
     -> typename std::enable_if<
       traits::is_type_template_constructible_from<Template,
-        decltype(value)>::value,
+        decltype(values)...>::value,
       traits::type_template_construct_result_t<Template,
-        decltype(value)>>::type {
-      return Template{std::forward<decltype(value)>(value)};
+        decltype(values)...>>::type {
+      return Template{std::forward<decltype(values)>(values)...};
     };
 #  endif
 }
@@ -205,14 +207,14 @@ constexpr auto type_size_template_ctad() {
 template <template <typename...> class Template>
 constexpr auto type_template_ctad() {
   return //
-    [](auto &&value) //
+    [](auto &&...values) //
     -> typename std::enable_if<
       traits::is_type_template_constructible_from<Template,
-        decltype(value)>::value,
+        decltype(values)...>::value,
       traits::type_template_construct_result_t<Template,
-        decltype(value)>>::type {
-      return Template<compat::decay_t<decltype(value)>>{
-        std::forward<decltype(value)>(value)};
+        decltype(values)...>>::type {
+      return Template<compat::decay_t<decltype(values)>...>{
+        std::forward<decltype(values)>(values)...};
     };
 }
 
@@ -220,7 +222,7 @@ constexpr auto type_template_ctad() {
 
 } // namespace detail
 
-/// Elevates a stateless predicate into a type-level boolean.
+/** Elevates a stateless predicate into a type-level boolean. */
 template <typename Predicate>
 struct compile_time_predicate {
   template <typename Selected = Predicate>
@@ -229,7 +231,7 @@ struct compile_time_predicate {
   }
 };
 
-/// Stores a value for a single consuming invocation.
+/** Stores a value for a single consuming invocation. */
 template <typename Value>
 struct consume_t {
   Value value;
@@ -239,10 +241,10 @@ struct consume_t {
   }
 };
 
-/// Stores a constant in its type for compile-time retrieval.
+/** Stores a constant in its type for compile-time retrieval. */
 template <typename Value, Value Constant>
 struct ct_const_t {
-  /// Read the stored constant as a value.
+  /** Read the stored constant as a value. */
   constexpr operator Value() const noexcept {
     return Constant;
   }
@@ -252,7 +254,7 @@ struct ct_const_t {
   }
 };
 
-/// Store a value for a single consuming invocation.
+/** Store a value for a single consuming invocation. */
 template <typename Value>
 consume_t<Value> consume(Value value) {
   return {std::move(value)};
@@ -260,23 +262,25 @@ consume_t<Value> consume(Value value) {
 
 #if defined(__cpp_nontype_template_parameter_auto) \
   && 201606L <= __cpp_nontype_template_parameter_auto
-/// Return a callable constant for compile-time dispatch.
+/** Return a callable constant for compile-time dispatch. */
 template <auto Value>
 constexpr ct_const_t<decltype(Value), Value> ct_const() {
   return {};
 }
 #else
-/// Return a callable constant for compile-time dispatch.
-///
-/// Before C++17, `ct_const<Value>()` is limited to `int` constants because the
-/// value type cannot be deduced as a non-type template parameter.
+/**
+ * Return a callable constant for compile-time dispatch.
+ *
+ * Before C++17, `ct_const<Value>()` is limited to `int` constants because the
+ * value type cannot be deduced as a non-type template parameter.
+ */
 template <int Value>
 constexpr ct_const_t<int, Value> ct_const() {
   return {};
 }
 #endif
 
-/// Elevate a stateless predicate into a type-level boolean.
+/** Elevate a stateless predicate into a type-level boolean. */
 template <typename Predicate>
 constexpr compile_time_predicate<Predicate> ct_pred(Predicate) {
   static_assert(std::is_empty<Predicate>::value,
@@ -286,16 +290,18 @@ constexpr compile_time_predicate<Predicate> ct_pred(Predicate) {
   return {};
 }
 
-/// C++11-compatible conditional invocation compositor.
+/** C++11-compatible conditional invocation compositor. */
 struct branch_t {
-  /// Immediately invoke a predicate and only its selected operation.
-  ///
-  /// A runtime predicate converts both operation results to the conditional
-  /// expression's common result type. A `true_type`/`false_type`-derived
-  /// predicate or `ct_pred` selects one operation at compile time, so no common
-  /// result type is required, the discarded operation need not be invocable,
-  /// and the selected result type is preserved. This provides C++11-compatible
-  /// `if constexpr`-style branching between callables.
+  /**
+   * Immediately invoke a predicate and only its selected operation.
+   *
+   * A runtime predicate converts both operation results to the conditional
+   * expression's common result type. A `true_type`/`false_type`-derived
+   * predicate or `ct_pred` selects one operation at compile time, so no common
+   * result type is required, the discarded operation need not be invocable,
+   * and the selected result type is preserved. This provides C++11-compatible
+   * `if constexpr`-style branching between callables.
+   */
   template <typename Predicate,
     typename WhenTrue,
     typename WhenFalse,
@@ -351,14 +357,14 @@ struct branch_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-/// Immediately invoke a predicate and only its selected operation.
+/** Immediately invoke a predicate and only its selected operation. */
 inline constexpr branch_t branch{};
 #else
-/// Immediately invoke a predicate and only its selected operation.
+/** Immediately invoke a predicate and only its selected operation. */
 constexpr branch_t branch{};
 #endif
 
-/// Bind leading arguments to a callable.
+/** Bind leading arguments to a callable. */
 template <typename Function,
   typename... Bound,
   typename std::enable_if<
@@ -442,7 +448,7 @@ struct partial_branch {
 
 } // namespace detail
 
-/// Bind a predicate and selected operation to `branch`.
+/** Bind a predicate and selected operation to `branch`. */
 template <typename Predicate, typename WhenTrue>
 constexpr auto partial(branch_t,
   Predicate &&predicate,
@@ -458,7 +464,7 @@ constexpr auto partial(branch_t,
     std::forward<WhenTrue>(when_true)};
 }
 
-/// Create a `cond` clause by binding a predicate and its selected operation.
+/** Create a `cond` clause by binding a predicate and its selected operation. */
 template <typename Predicate,
   typename WhenTrue,
   typename std::enable_if<
@@ -550,7 +556,7 @@ struct cond_tail<Current, Next, Rest...> {
 
 } // namespace detail
 
-/// Evaluate partially applied branches in order, ending with a fallback.
+/** Evaluate partially applied branches in order, ending with a fallback. */
 struct cond_t {
   template <typename Otherwise>
   constexpr auto operator()(Otherwise &&otherwise) const
@@ -572,25 +578,41 @@ struct cond_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-/// Evaluate partially applied branches in order, ending with a fallback.
+/** Evaluate partially applied branches in order, ending with a fallback. */
 inline constexpr cond_t cond{};
 #else
-/// Evaluate partially applied branches in order, ending with a fallback.
+/** Evaluate partially applied branches in order, ending with a fallback. */
 constexpr cond_t cond{};
 #endif
 
-/// Return a conversion using CTAD or its value-type fallback.
-///
-/// This overload accepts class templates containing only type template
-/// parameters.
+/**
+ * Return a higher-order adapter that constructs a type-parameter-only class
+ * template.
+ * C++17 and newer use CTAD. Earlier standards provide best-effort
+ * compatibility by deducing one template type from each argument; they cannot
+ * reproduce custom deduction guides.
+ *
+```cpp
+const auto make_pair = fn::ctad<std::pair>();
+const auto position = make_pair(
+  8,  // x
+  15  // y
+);
+
+// Equivalent construction:
+const std::pair<int, int> equivalent{8, 15};
+```
+ */
 template <template <typename...> class Template>
 constexpr decltype(detail::type_template_ctad<Template>()) ctad() {
   return detail::type_template_ctad<Template>();
 }
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-/// Return a CTAD conversion for a class template whose parameters are one type
-/// followed by one `std::size_t`.
+/**
+ * Return a higher-order CTAD adapter for a class template whose parameters are
+ * one type followed by one `std::size_t`.
+ */
 template <template <typename, std::size_t> class Template>
 constexpr decltype(detail::type_size_template_ctad<Template>()) ctad() {
   return detail::type_size_template_ctad<Template>();
@@ -598,12 +620,12 @@ constexpr decltype(detail::type_size_template_ctad<Template>()) ctad() {
 #endif
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-/// Construct the type selected by an Omnirefl type tag.
+/** Construct the type selected by an Omnirefl type tag. */
 template <template <typename> class Tag, typename To, typename Value>
   requires(
     traits::is<type_t, Tag>() && traits::brace_constructible_from<To, Value &&>)
 #else
-/// Construct the type selected by an Omnirefl type tag.
+/** Construct the type selected by an Omnirefl type tag. */
 template <template <typename> class Tag,
   typename To,
   typename Value,
@@ -616,11 +638,11 @@ constexpr To as(Tag<To>, Value &&value) {
 }
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-/// Convert a forwarded value with a local copy or move of `conversion`.
+/** Convert a forwarded value with a local copy or move of `conversion`. */
 template <typename Conversion, typename Value>
   requires compat::invocable<Conversion &, Value &&>
 #else
-/// Convert a forwarded value with a local copy or move of `conversion`.
+/** Convert a forwarded value with a local copy or move of `conversion`. */
 template <typename Conversion,
   typename Value,
   typename std::enable_if<compat::is_invocable<Conversion &, Value &&>::value,
@@ -960,12 +982,14 @@ template <typename Visit,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Invoke a local copy or move of `visit` once for each element of a standard
-/// tuple-like object.
-///
-/// The tuple-like protocol is used. General ranges and containers are outside
-/// this utility's contract; `each` avoids implying the broader support commonly
-/// associated with `for_each`.
+/**
+ * Invoke a local copy or move of `visit` once for each element of a standard
+ * tuple-like object.
+ *
+ * The tuple-like protocol is used. General ranges and containers are outside
+ * this utility's contract; `each` avoids implying the broader support commonly
+ * associated with `for_each`.
+ */
 constexpr detail::discard_result each(Visit visit, Tuple &&tuple) {
 #if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr \
   && defined(__cpp_generic_lambdas)
@@ -994,7 +1018,7 @@ template <typename Left,
       && detail::is_tuple_like<compat::remove_cvref_t<Right>>::value,
     int>::type = 0>
 #endif
-/// Concatenate two standard tuple-like objects into an owning tuple.
+/** Concatenate two standard tuple-like objects into an owning tuple. */
 constexpr auto concat(Left &&left, Right &&right)
 #if !defined(__cpp_return_type_deduction) \
   || __cpp_return_type_deduction < 201304L
@@ -1014,7 +1038,7 @@ template <typename Predicate,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Return whether `predicate` accepts any tuple element.
+/** Return whether `predicate` accepts any tuple element. */
 constexpr bool any_of(Predicate predicate, Tuple &&tuple) {
   return detail::any_of_values<0,
     std::tuple_size<compat::remove_cvref_t<Tuple>>::value>::call(predicate,
@@ -1030,12 +1054,12 @@ template <typename Predicate,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Return whether `predicate` rejects every tuple element.
+/** Return whether `predicate` rejects every tuple element. */
 constexpr bool none_of(Predicate predicate, Tuple &&tuple) {
   return !any_of(std::move(predicate), std::forward<Tuple>(tuple));
 }
 
-/// Invoke `predicate` and negate its result.
+/** Invoke `predicate` and negate its result. */
 template <typename Predicate, typename First, typename... Argument>
 constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
   -> decltype(!compat::invoke(predicate,
@@ -1046,7 +1070,7 @@ constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
     std::forward<Argument>(argument)...);
 }
 
-/// QoL key projection for comparing reflected fields by name.
+/** QoL key projection for comparing reflected fields by name. */
 // TODO: Constrain Field to reflected field metadata or field bindings.
 // TODO: Add reflected-field predicates for filtering fields by record/field
 // writability and value assignability before calling `set_value()`.
@@ -1068,11 +1092,13 @@ template <typename Key,
       && detail::is_tuple_like<compat::remove_cvref_t<Right>>::value,
     int>::type = 0>
 #endif
-/// Select left tuple elements unmatched by any right tuple element.
-///
-/// `Key` follows the type-projection protocol with `operator()<Element>()`.
-/// `Element` preserves the access category produced by its forwarded tuple;
-/// projected keys must support constexpr equality.
+/**
+ * Select left tuple elements unmatched by any right tuple element.
+ *
+ * `Key` follows the type-projection protocol with `operator()<Element>()`.
+ * `Element` preserves the access category produced by its forwarded tuple;
+ * projected keys must support constexpr equality.
+ */
 constexpr auto diff_by(Key, Left &&left, Right &&right)
   -> decltype(detail::diff_by_values<Key>(std::forward<Left>(left),
     std::forward<Right>(right))) {
@@ -1089,13 +1115,15 @@ template <typename Predicate,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Select tuple elements whose access types satisfy `Predicate`.
-///
-/// `Predicate` must be an empty, default-constructible type with a constexpr
-/// `operator()<Element>()`. `Element` preserves the cv/ref category produced by
-/// accessing the forwarded tuple. Selected values retain their order and are
-/// forwarded into an owning tuple. Use `filter<Trait>()` for a standard unary
-/// type trait, or `filter<Predicate>()` for a C++20 structural predicate value.
+/**
+ * Select tuple elements whose access types satisfy `Predicate`.
+ *
+ * `Predicate` must be an empty, default-constructible type with a constexpr
+ * `operator()<Element>()`. `Element` preserves the cv/ref category produced by
+ * accessing the forwarded tuple. Selected values retain their order and are
+ * forwarded into an owning tuple. Use `filter<Trait>()` for a standard unary
+ * type trait, or `filter<Predicate>()` for a C++20 structural predicate value.
+ */
 constexpr auto filter(Predicate, Tuple &&tuple)
   -> decltype(detail::filter_values<Predicate>(std::forward<Tuple>(tuple))) {
   return detail::filter_values<Predicate>(std::forward<Tuple>(tuple));
@@ -1110,7 +1138,7 @@ template <template <typename> class Predicate,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Select tuple elements accepted by a unary type trait.
+/** Select tuple elements accepted by a unary type trait. */
 constexpr auto filter(Tuple &&tuple)
   -> decltype(filter(detail::unary_trait_predicate<Predicate>{},
     std::forward<Tuple>(tuple))) {
@@ -1119,7 +1147,7 @@ constexpr auto filter(Tuple &&tuple)
 }
 
 #if OMNI_FN_HAS_NTTP_UNARY
-/// Encode a C++20 structural callable value for type-based selection.
+/** Encode a C++20 structural callable value for type-based selection. */
 template <auto Predicate>
 constexpr detail::nttp_unary_predicate<Predicate> nttp_unary() {
   return {};
@@ -1134,7 +1162,7 @@ template <auto Predicate,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #  endif
-/// Select tuple elements accepted by a C++20 structural predicate value.
+/** Select tuple elements accepted by a C++20 structural predicate value. */
 constexpr auto filter(Tuple &&tuple) {
   return filter(nttp_unary<Predicate>(), std::forward<Tuple>(tuple));
 }
@@ -1151,8 +1179,10 @@ template <typename Visit,
 #endif
 #if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr \
   && defined(__cpp_generic_lambdas)
-/// Invoke a local copy or move of `visit` for each tuple element and return
-/// the results as a tuple of values.
+/**
+ * Invoke a local copy or move of `visit` for each tuple element and return
+ * the results as a tuple of values.
+ */
 constexpr auto map(Visit visit, Tuple &&tuple) {
   return compat::apply(
     [&visit](auto &&...element) constexpr {
@@ -1163,8 +1193,10 @@ constexpr auto map(Visit visit, Tuple &&tuple) {
     std::forward<Tuple>(tuple));
 }
 #else
-/// Invoke a local copy or move of `visit` for each tuple element and return
-/// the results as a tuple of values.
+/**
+ * Invoke a local copy or move of `visit` for each tuple element and return
+ * the results as a tuple of values.
+ */
 constexpr auto map(Visit visit, Tuple &&tuple)
   -> decltype(compat::apply(detail::cpp11_map_visit<Visit>{visit},
     std::forward<Tuple>(tuple))) {
@@ -1183,15 +1215,17 @@ template <typename Visit,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Left-fold a tuple with local copies or moves of a binary visitor and an
-/// accumulator.
-///
-/// @details The accumulator's deduced value type is the result type. An empty
-/// tuple returns it without invoking `visit`. C++17 and newer assign each
-/// visitor result to a named accumulator, avoiding template recursion. C++11
-/// and C++14 instead use expression-only recursion because their
-/// constant-expression rules reject that mutation; each result directly
-/// initializes the next accumulator.
+/**
+ * Left-fold a tuple with local copies or moves of a binary visitor and an
+ * accumulator.
+ *
+ * @details The accumulator's deduced value type is the result type. An empty
+ * tuple returns it without invoking `visit`. C++17 and newer assign each
+ * visitor result to a named accumulator, avoiding template recursion. C++11
+ * and C++14 instead use expression-only recursion because their
+ * constant-expression rules reject that mutation; each result directly
+ * initializes the next accumulator.
+ */
 constexpr Accumulator
   foldl(Visit visit, Accumulator accumulator, Tuple &&tuple) {
 #if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr \
@@ -1226,13 +1260,15 @@ template <typename Visit,
     detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value,
     int>::type = 0>
 #endif
-/// Right-fold a tuple with local copies or moves of a binary visitor and an
-/// accumulator.
-///
-/// @details The accumulator's deduced value type is the result type. An empty
-/// tuple returns it without invoking `visit`. Elements are visited
-/// right-to-left; each visitor result directly initializes the accumulator
-/// used with the preceding element.
+/**
+ * Right-fold a tuple with local copies or moves of a binary visitor and an
+ * accumulator.
+ *
+ * @details The accumulator's deduced value type is the result type. An empty
+ * tuple returns it without invoking `visit`. Elements are visited
+ * right-to-left; each visitor result directly initializes the accumulator
+ * used with the preceding element.
+ */
 constexpr Accumulator
   foldr(Visit visit, Accumulator accumulator, Tuple &&tuple) {
   return compat::apply(
@@ -1240,7 +1276,7 @@ constexpr Accumulator
     std::forward<Tuple>(tuple));
 }
 
-/// Stores a conversion for deferred application.
+/** Stores a conversion for deferred application. */
 template <typename Conversion>
 struct as_closure {
   Conversion conversion;
@@ -1251,12 +1287,9 @@ struct as_closure {
     return as(conversion, std::forward<Value>(value));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Value>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Value &&value) && -> decltype(as(std::move(conversion),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Value &&value) && -> decltype(as(std::move(conversion),
       std::forward<Value>(value))) {
     return as(std::move(conversion), std::forward<Value>(value));
   }
@@ -1268,7 +1301,7 @@ struct as_closure {
   }
 };
 
-/// Stores a tuple for deferred concatenation.
+/** Stores a tuple for deferred concatenation. */
 template <typename Right>
 struct concat_closure {
   Right right;
@@ -1279,12 +1312,9 @@ struct concat_closure {
     return concat(std::forward<Left>(left), right);
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Left>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Left &&left) && -> decltype(concat(std::forward<Left>(left),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Left &&left) && -> decltype(concat(std::forward<Left>(left),
       std::move(right))) {
     return concat(std::forward<Left>(left), std::move(right));
   }
@@ -1296,7 +1326,7 @@ struct concat_closure {
   }
 };
 
-/// Stores a predicate for deferred `any_of` application.
+/** Stores a predicate for deferred `any_of` application. */
 template <typename Predicate>
 struct any_of_closure {
   Predicate predicate;
@@ -1307,12 +1337,9 @@ struct any_of_closure {
     return any_of(predicate, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(any_of(std::move(predicate),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(any_of(std::move(predicate),
       std::forward<Tuple>(tuple))) {
     return any_of(std::move(predicate), std::forward<Tuple>(tuple));
   }
@@ -1325,7 +1352,7 @@ struct any_of_closure {
   }
 };
 
-/// Stores a predicate for deferred `none_of` application.
+/** Stores a predicate for deferred `none_of` application. */
 template <typename Predicate>
 struct none_of_closure {
   Predicate predicate;
@@ -1337,12 +1364,9 @@ struct none_of_closure {
     return none_of(predicate, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(none_of(std::move(predicate),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(none_of(std::move(predicate),
       std::forward<Tuple>(tuple))) {
     return none_of(std::move(predicate), std::forward<Tuple>(tuple));
   }
@@ -1355,7 +1379,7 @@ struct none_of_closure {
   }
 };
 
-/// Stores a predicate for deferred negation.
+/** Stores a predicate for deferred negation. */
 template <typename Predicate>
 struct not_closure {
   Predicate predicate;
@@ -1375,12 +1399,9 @@ struct not_closure {
       std::forward<Argument>(argument)...);
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename First, typename... Argument>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(First &&first,
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(First &&first,
       Argument &&...argument) && -> decltype(not_(std::declval<Predicate &&>(),
       std::forward<First>(first),
       std::forward<Argument>(argument)...)) {
@@ -1397,7 +1418,7 @@ struct not_closure {
   }
 };
 
-/// Stores a key projection and right tuple for deferred `diff_by`.
+/** Stores a key projection and right tuple for deferred `diff_by`. */
 template <typename Key, typename Right>
 struct diff_by_closure {
   Key key;
@@ -1410,12 +1431,9 @@ struct diff_by_closure {
     return diff_by(key, std::forward<Left>(left), right);
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Left>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Left &&left) && -> decltype(diff_by(std::move(key),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Left &&left) && -> decltype(diff_by(std::move(key),
       std::forward<Left>(left),
       std::move(right))) {
     return diff_by(std::move(key), std::forward<Left>(left), std::move(right));
@@ -1432,7 +1450,7 @@ struct diff_by_closure {
   }
 };
 
-/// Stores a visitor for deferred `each` application.
+/** Stores a visitor for deferred `each` application. */
 template <typename Visit>
 struct each_closure {
   Visit visit;
@@ -1443,12 +1461,9 @@ struct each_closure {
     return each(visit, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(each(std::move(visit),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(each(std::move(visit),
       std::forward<Tuple>(tuple))) {
     return each(std::move(visit), std::forward<Tuple>(tuple));
   }
@@ -1460,7 +1475,7 @@ struct each_closure {
   }
 };
 
-/// Stores a type predicate for deferred `filter` application.
+/** Stores a type predicate for deferred `filter` application. */
 template <typename Predicate>
 struct filter_closure {
   Predicate predicate;
@@ -1471,12 +1486,9 @@ struct filter_closure {
     return filter(predicate, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(filter(std::move(predicate),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(filter(std::move(predicate),
       std::forward<Tuple>(tuple))) {
     return filter(std::move(predicate), std::forward<Tuple>(tuple));
   }
@@ -1489,7 +1501,7 @@ struct filter_closure {
   }
 };
 
-/// Stores a visitor for deferred `map` application.
+/** Stores a visitor for deferred `map` application. */
 template <typename Visit>
 struct map_closure {
   Visit visit;
@@ -1500,12 +1512,9 @@ struct map_closure {
     return map(visit, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(map(std::move(visit),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(map(std::move(visit),
       std::forward<Tuple>(tuple))) {
     return map(std::move(visit), std::forward<Tuple>(tuple));
   }
@@ -1517,7 +1526,7 @@ struct map_closure {
   }
 };
 
-/// Stores a visitor and accumulator for deferred `foldl` application.
+/** Stores a visitor and accumulator for deferred `foldl` application. */
 template <typename Visit, typename Accumulator>
 struct foldl_closure {
   Visit visit;
@@ -1530,12 +1539,9 @@ struct foldl_closure {
     return foldl(visit, accumulator, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(foldl(std::move(visit),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(foldl(std::move(visit),
       std::move(accumulator),
       std::forward<Tuple>(tuple))) {
     return foldl(std::move(visit),
@@ -1554,7 +1560,7 @@ struct foldl_closure {
   }
 };
 
-/// Stores a visitor and accumulator for deferred `foldr` application.
+/** Stores a visitor and accumulator for deferred `foldr` application. */
 template <typename Visit, typename Accumulator>
 struct foldr_closure {
   Visit visit;
@@ -1567,12 +1573,9 @@ struct foldr_closure {
     return foldr(visit, accumulator, std::forward<Tuple>(tuple));
   }
 
-  // C++14 removed implicit const from constexpr member functions.
   template <typename Tuple>
-#if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#endif
-    auto operator()(Tuple &&tuple) && -> decltype(foldr(std::move(visit),
+  OMNI_CPP14_CONSTEXPR auto
+    operator()(Tuple &&tuple) && -> decltype(foldr(std::move(visit),
       std::move(accumulator),
       std::forward<Tuple>(tuple))) {
     return foldr(std::move(visit),
@@ -1591,65 +1594,65 @@ struct foldr_closure {
   }
 };
 
-/// Store `conversion` for later call or pipe application.
+/** Store `conversion` for later call or pipe application. */
 template <typename Conversion>
 constexpr as_closure<Conversion> as(Conversion conversion) {
   return as_closure<Conversion>{std::move(conversion)};
 }
 
-/// Store construction of an explicitly selected type for later application.
+/** Store construction of an explicitly selected type for later application. */
 template <typename To>
 constexpr as_closure<type_t<To>> as() {
   return as(type_t<To>{});
 }
 
-/// Store CTAD or its value-type fallback for later application.
+/** Store CTAD or its value-type fallback for later application. */
 template <template <typename...> class Template>
 constexpr auto as() -> as_closure<decltype(ctad<Template>())> {
   return as(ctad<Template>());
 }
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-/// Store type-and-size class-template deduction for later application.
+/** Store type-and-size class-template deduction for later application. */
 template <template <typename, std::size_t> class Template>
 constexpr auto as() -> as_closure<decltype(ctad<Template>())> {
   return as(ctad<Template>());
 }
 #endif
 
-/// Store `visit` for later call or pipe application to a tuple-like object.
+/** Store `visit` for later call or pipe application to a tuple-like object. */
 template <typename Visit>
 constexpr each_closure<Visit> each(Visit visit) {
   return each_closure<Visit>{std::move(visit)};
 }
 
-/// Store `predicate` for later call or pipe application to a tuple-like object.
+/** Store `predicate` for later call or pipe application to a tuple-like object. */
 template <typename Predicate>
 constexpr filter_closure<Predicate> filter(Predicate predicate) {
   return filter_closure<Predicate>{std::move(predicate)};
 }
 
-/// Store a unary type trait for later call or pipe application.
+/** Store a unary type trait for later call or pipe application. */
 template <template <typename> class Predicate>
 constexpr filter_closure<detail::unary_trait_predicate<Predicate>> filter() {
   return {detail::unary_trait_predicate<Predicate>{}};
 }
 
 #if OMNI_FN_HAS_NTTP_UNARY
-/// Store a C++20 structural predicate value for later call or pipe application.
+/** Store a C++20 structural predicate value for later call or pipe application. */
 template <auto Predicate>
 constexpr auto filter() {
   return filter(nttp_unary<Predicate>());
 }
 #endif
 
-/// Store `visit` for later call or pipe application to a tuple-like object.
+/** Store `visit` for later call or pipe application to a tuple-like object. */
 template <typename Visit>
 constexpr map_closure<Visit> map(Visit visit) {
   return map_closure<Visit>{std::move(visit)};
 }
 
-/// Store `visit` and `accumulator` for later left-fold application.
+/** Store `visit` and `accumulator` for later left-fold application. */
 template <typename Visit, typename Accumulator>
 constexpr foldl_closure<Visit, Accumulator> foldl(Visit visit,
   Accumulator accumulator) {
@@ -1659,7 +1662,7 @@ constexpr foldl_closure<Visit, Accumulator> foldl(Visit visit,
   };
 }
 
-/// Store `visit` and `accumulator` for later right-fold application.
+/** Store `visit` and `accumulator` for later right-fold application. */
 template <typename Visit, typename Accumulator>
 constexpr foldr_closure<Visit, Accumulator> foldr(Visit visit,
   Accumulator accumulator) {
@@ -1669,7 +1672,7 @@ constexpr foldr_closure<Visit, Accumulator> foldr(Visit visit,
   };
 }
 
-/// Store `right` for later concatenation with a tuple-like object.
+/** Store `right` for later concatenation with a tuple-like object. */
 template <typename Right>
 constexpr concat_closure<compat::decay_t<Right>> concat(Right &&right) {
   return concat_closure<compat::decay_t<Right>>{
@@ -1677,25 +1680,25 @@ constexpr concat_closure<compat::decay_t<Right>> concat(Right &&right) {
   };
 }
 
-/// Store `predicate` for later `any_of` application.
+/** Store `predicate` for later `any_of` application. */
 template <typename Predicate>
 constexpr any_of_closure<Predicate> any_of(Predicate predicate) {
   return any_of_closure<Predicate>{std::move(predicate)};
 }
 
-/// Store `predicate` for later `none_of` application.
+/** Store `predicate` for later `none_of` application. */
 template <typename Predicate>
 constexpr none_of_closure<Predicate> none_of(Predicate predicate) {
   return none_of_closure<Predicate>{std::move(predicate)};
 }
 
-/// Store `predicate` for later negated call or type-predicate application.
+/** Store `predicate` for later negated call or type-predicate application. */
 template <typename Predicate>
 constexpr not_closure<Predicate> not_(Predicate predicate) {
   return not_closure<Predicate>{std::move(predicate)};
 }
 
-/// Store `key` and `right` for later tuple difference application.
+/** Store `key` and `right` for later tuple difference application. */
 template <typename Key, typename Right>
 constexpr diff_by_closure<Key, compat::decay_t<Right>> diff_by(Key key,
   Right &&right) {

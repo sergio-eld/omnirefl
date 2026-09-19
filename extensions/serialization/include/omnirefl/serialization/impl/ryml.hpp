@@ -299,7 +299,6 @@ struct map_record {
 struct unsupported {
   template <typename To>
   void operator()(::ryml::ConstNodeRef, To *, detail::mapping_state *) const {
-    // TODO: Define the schema representation of reflected enumerations.
     static_assert(detail::dependent_false<To>::value,
       "unsupported deserialization destination type");
   }
@@ -311,6 +310,10 @@ void map_value(::ryml::ConstNodeRef from,
   detail::mapping_state *state) {
   assert(to && state && state->diagnostics);
 
+  // TODO: [high] Handle reflected enums separately from reflected records.
+  // Map a scalar against reflected enumerator names and represent the schema
+  // with JSON Schema's enum constraint. Decide how aliases, numeric input,
+  // unknown values, and their diagnostics behave.
   const auto map = typename omni::traits::select<
     omni::traits::case_<std::is_fundamental<To>::value,
       detail::map_fundamental<To>>,

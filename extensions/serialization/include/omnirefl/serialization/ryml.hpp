@@ -101,9 +101,11 @@ const strategy runtime{
  * C++11 compatibility builders preserve the same partial types:
  *
 ```cpp
-const auto strict = use_tolerance(4) //
+const auto strict = default_strategy() //
+  .use_tolerance(4) //
   .allow_partial(std::false_type{}); // expected: value or diagnostics.
-const auto runtime = use_tolerance(4) //
+const auto runtime = default_strategy() //
+  .use_tolerance(4) //
   .allow_partial(false); // Product: optional value and diagnostics together.
 ```
  */
@@ -131,7 +133,13 @@ struct strategy {
   /**
    * Return a strategy with the new tolerance and other settings unchanged.
    *
-   * Compatibility builder for code predating C++20 designated initializers.
+   * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
+   *
+  ```cpp
+  const strategy configured{
+    .tolerance = 15,
+  };
+  ```
    */
   OMNI_CPP14_CONSTEXPR strategy use_tolerance(int t) const {
     auto result = *this;
@@ -144,7 +152,13 @@ struct strategy {
    * unchanged. Passing bool keeps the product result even when p is false;
    * passing std::false_type selects expected. See deserialization_result.
    *
-   * Compatibility builder for code predating C++20 designated initializers.
+   * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
+   *
+  ```cpp
+  const strategy configured{
+    .partial = true,
+  };
+  ```
    */
   template <typename P>
   OMNI_CPP14_CONSTEXPR strategy<P> allow_partial(P p) const {
@@ -158,7 +172,13 @@ struct strategy {
   /**
    * Return a strategy with the new extra setting and others unchanged.
    *
-   * Compatibility builder for code predating C++20 designated initializers.
+   * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
+   *
+  ```cpp
+  const strategy configured{
+    .extra = true,
+  };
+  ```
    */
   OMNI_CPP14_CONSTEXPR strategy allow_extra(bool e) const {
     auto result = *this;
@@ -199,15 +219,18 @@ struct strategy {
 };
 
 /**
- * Start configuration with the given tolerance, partial of type
- * std::false_type, and extra=false. The partial type selects expected results.
+ * Return the default configuration: zero tolerance, partial values disabled,
+ * and extra fields rejected.
  *
- * Compatibility builder for code predating C++20 designated initializers.
+ * Pre-C++20 convenience for starting a member-builder chain. Prefer direct
+ * aggregate initialization in C++20:
+ *
+```cpp
+const strategy configured{};
+```
  */
-inline OMNI_CPP14_CONSTEXPR strategy<> use_tolerance(int t) {
-  strategy<> result{};
-  result.tolerance = t;
-  return result;
+constexpr strategy<> default_strategy() {
+  return {};
 }
 
 /**
@@ -419,7 +442,8 @@ struct with_diagnostics {
    *
   ```cpp
   const auto load = fn::ctad<deserialize_t>()(
-    use_tolerance(4) //
+    default_strategy() //
+      .use_tolerance(4) //
       .allow_partial(true));
   ```
    */
@@ -541,8 +565,7 @@ auto owned = map_tree(omni::type<person>, std::move(owning_tree));
 ```
  */
 const auto map_tree = fn::ctad<map_tree_t>()(
-  /*strategy=*/use_tolerance(0) //
-    .allow_partial(std::false_type{}));
+  /*strategy=*/default_strategy());
 
 /**
  * Compose parsing and tree mapping, retaining all issues in diagnostics.
@@ -583,8 +606,7 @@ auto result = deserialize(omni::type<person>, source) //
 ```
  */
 const auto deserialize = fn::ctad<deserialize_t>()(
-  /*strategy=*/use_tolerance(0) //
-    .allow_partial(std::false_type{}));
+  /*strategy=*/default_strategy());
 
 // A generic callable keeps map_diagnostics(render_diagnostics) valid for both
 // ownership modes; an overloaded function name cannot deduce its callable type.

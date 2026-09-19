@@ -20,9 +20,9 @@
 namespace omni {
 
 enum class reflected_entity {
-  /// `struct`, `class`, or named `union`.
+  /** `struct`, `class`, or named `union`. */
   record,
-  /// `enum` or `enum class`.
+  /** `enum` or `enum class`. */
   enumeration,
 };
 
@@ -45,13 +45,13 @@ struct is_reflected;
 
 namespace omni {
 
-/// Reflected-scope-only field metadata; `_M` is opaque.
+/** Reflected-scope-only field metadata; `_M` is opaque. */
 template <typename _M>
 struct field_meta_t {
-  /// Declared field type.
+  /** Declared field type. */
   using type = typename _M::type;
 
-  /// Source-spelled field name.
+  /** Source-spelled field name. */
   static constexpr const char *name() noexcept {
     return _M::name();
   }
@@ -179,17 +179,17 @@ struct field_meta_t {
     return _M::index();
   }
 
-  /// Whether the declared field type has top-level `const` qualification.
+  /** Whether the declared field type has top-level `const` qualification. */
   static constexpr bool is_const() noexcept {
     return _M::is_const();
   }
 
-  /// Whether the field declaration uses the `mutable` specifier.
+  /** Whether the field declaration uses the `mutable` specifier. */
   static constexpr bool is_mutable() noexcept {
     return _M::is_mutable();
   }
 
-  /// Whether the declared field type has top-level `volatile` qualification.
+  /** Whether the declared field type has top-level `volatile` qualification. */
   static constexpr bool is_volatile() noexcept {
     return _M::is_volatile();
   }
@@ -214,7 +214,7 @@ struct field_meta_t {
     return _M::has_reference_access();
   }
 
-  /// True when the field declaration has a deprecated attribute.
+  /** True when the field declaration has a deprecated attribute. */
   static constexpr bool is_deprecated() noexcept {
     return _M::is_deprecated();
   }
@@ -283,7 +283,7 @@ struct field_meta_t {
  * `Record` is the cv-qualified bound record type, including the final record
  * through which inherited fields are accessed. `_M` is opaque.
  *
- * TODO(high): Decide whether this should inherit `field_meta_t<_M>`.
+ * TODO: [high] Decide whether this should inherit `field_meta_t<_M>`.
  *   This requires consistent pre-C++20 overload and C++20 concept semantics.
  *   The same static predicate should accept metadata and bindings:
  *   ```cpp
@@ -296,18 +296,18 @@ struct field_meta_t {
  */
 template <typename Record, typename _M>
 struct field_binding_t {
-  /// Cv-qualified type of the bound record object.
+  /** Cv-qualified type of the bound record object. */
   using record = Record;
 
-  /// Metadata for the bound field.
+  /** Metadata for the bound field. */
   using meta = field_meta_t<_M>;
 
-  /// Declared field type.
+  /** Declared field type. */
   using type = typename meta::type;
 
   record &_record;
 
-  /// Source-spelled field name.
+  /** Source-spelled field name. */
   static constexpr const char *name() noexcept {
     return meta::name();
   }
@@ -442,12 +442,12 @@ struct field_binding_t {
     return meta::is_const();
   }
 
-  /// Whether the field declaration uses the `mutable` specifier.
+  /** Whether the field declaration uses the `mutable` specifier. */
   static constexpr bool is_mutable() noexcept {
     return meta::is_mutable();
   }
 
-  /// Whether the declared field type has top-level `volatile` qualification.
+  /** Whether the declared field type has top-level `volatile` qualification. */
   static constexpr bool is_volatile() noexcept {
     return meta::is_volatile();
   }
@@ -472,7 +472,7 @@ struct field_binding_t {
     return meta::has_reference_access();
   }
 
-  /// True when the field declaration has a deprecated attribute.
+  /** True when the field declaration has a deprecated attribute. */
   static constexpr bool is_deprecated() noexcept {
     return meta::is_deprecated();
   }
@@ -619,7 +619,7 @@ struct field_binding_t {
   constexpr explicit field_binding_t(record &value): _record(value) {}
 };
 
-/// Reflected-scope-only metadata wrapper; `_M` is opaque.
+/** Reflected-scope-only metadata wrapper; `_M` is opaque. */
 template <typename _M,
 #if defined(OMNI_TOOL_RUN)
   // Generated entity metadata is unavailable during instrumentation.
@@ -631,7 +631,7 @@ template <typename _M,
 #endif
 struct meta_t;
 
-/// Reflected-scope-only value binding; `T` preserves cv/ref qualification.
+/** Reflected-scope-only value binding; `T` preserves cv/ref qualification. */
 template <typename T,
 #if defined(OMNI_TOOL_RUN)
   // Generated entity metadata is unavailable during instrumentation.
@@ -643,17 +643,17 @@ template <typename T,
 #endif
 struct binding_t;
 
-/// Reflected-scope-only record metadata; `_M` is opaque.
+/** Reflected-scope-only record metadata; `_M` is opaque. */
 template <typename _M>
 struct meta_t<_M, reflected_entity::record> {
-  /// Domain type recovered from generated metadata.
+  /** Domain type recovered from generated metadata. */
 #if defined(OMNI_TOOL_RUN)
   using reflected_type = compat::decay_t<_M>;
 #else
   using reflected_type = typename _M::type;
 #endif
 
-  /// Identify this wrapper as record metadata.
+  /** Identify this wrapper as record metadata. */
   static constexpr reflected_entity entity() noexcept {
     return reflected_entity::record;
   }
@@ -735,7 +735,7 @@ struct meta_t<_M, reflected_entity::record> {
     return _M::documentation();
   }
 
-  /// Whether the record directly declares any base class.
+  /** Whether the record directly declares any base class. */
   static constexpr bool has_bases() noexcept {
     return _M::has_bases();
   }
@@ -837,17 +837,17 @@ struct meta_t<_M, reflected_entity::record> {
   }
 };
 
-/// Reflected-scope-only enum metadata; `_M` is opaque.
+/** Reflected-scope-only enum metadata; `_M` is opaque. */
 template <typename _M>
 struct meta_t<_M, reflected_entity::enumeration> {
-  /// Domain type recovered from generated metadata.
+  /** Domain type recovered from generated metadata. */
 #if defined(OMNI_TOOL_RUN)
   using reflected_type = compat::decay_t<_M>;
 #else
   using reflected_type = typename _M::type;
 #endif
 
-  /// Identify this wrapper as enum metadata.
+  /** Identify this wrapper as enum metadata. */
   static constexpr reflected_entity entity() noexcept {
     return reflected_entity::enumeration;
   }
@@ -984,11 +984,11 @@ struct meta_t<_M, reflected_entity::enumeration> {
   constexpr meta_t() noexcept = default;
 };
 
-/// Reflected-scope-only record metadata; `_M` is opaque.
+/** Reflected-scope-only record metadata; `_M` is opaque. */
 template <typename _M>
 using record_meta_t = meta_t<_M, reflected_entity::record>;
 
-/// Reflected-scope-only enum metadata; `_M` is opaque.
+/** Reflected-scope-only enum metadata; `_M` is opaque. */
 template <typename _M>
 using enum_meta_t = meta_t<_M, reflected_entity::enumeration>;
 
@@ -996,7 +996,7 @@ using enum_meta_t = meta_t<_M, reflected_entity::enumeration>;
 template <typename T>
 struct type_t;
 #else
-/// Instrumentation type tag; usable without generated metadata.
+/** Instrumentation type tag; usable without generated metadata. */
 template <typename T>
 struct type_t {
   using type = T;
@@ -1022,36 +1022,38 @@ template <typename T>
 using meta_for =
 #if defined(OMNI_TOOL_RUN)
   // Ad hoc: generated metadata does not exist during instrumentation.
-  // TODO(high): Handle `meta_for` queries in the tool so this alias has one
+  // TODO: [high] Handle `meta_for` queries in the tool so this alias has one
   // definition in both passes.
   meta_t<T>;
 #else
   meta_t<detail::_meta<T>>;
 #endif
 
-/// Reflected-scope-only record binding.
-///
-/// TODO(high): Decide whether bindings should inherit their metadata wrappers.
-///   This requires coordinated pre-C++20 overload and C++20 concept semantics.
+/**
+ * Reflected-scope-only record binding.
+ *
+ * TODO: [high] Decide whether bindings should inherit their metadata wrappers.
+ *   This requires coordinated pre-C++20 overload and C++20 concept semantics.
+ */
 template <typename T>
 struct binding_t<T, reflected_entity::record> {
-  /// Bound record type with cv/ref qualification removed.
+  /** Bound record type with cv/ref qualification removed. */
   using type = compat::decay_t<T>;
 
-  /// Generated metadata for the bound record.
+  /** Generated metadata for the bound record. */
   using meta = meta_for<type>;
 
-  /// Whether the binding stores its own record instead of a reference.
+  /** Whether the binding stores its own record instead of a reference. */
   using owning = std::integral_constant<bool, !std::is_reference<T>::value>;
 
-  /// Stored record type for owning and non-owning bindings.
+  /** Stored record type for owning and non-owning bindings. */
   using storage_t = compat::conditional_t<owning::value,
     type, //< own a value
     typename std::remove_reference<T>::type &>; //< hold a reference
 
   storage_t _record;
 
-  /// Identify this wrapper as a record binding.
+  /** Identify this wrapper as a record binding. */
   static constexpr reflected_entity entity() noexcept {
     return reflected_entity::record;
   }
@@ -1120,7 +1122,7 @@ struct binding_t<T, reflected_entity::record> {
   }
 #endif
 
-  /// Return an lvalue reference to the bound record.
+  /** Return an lvalue reference to the bound record. */
   constexpr const storage_t &value() const & noexcept {
     return _record;
   }
@@ -1128,12 +1130,12 @@ struct binding_t<T, reflected_entity::record> {
 #  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
   constexpr
 #  endif
-  /// Return an rvalue reference to the bound record.
+  /** Return an rvalue reference to the bound record. */
   auto value() && noexcept -> decltype(std::move(_record)) {
     return std::move(_record);
   }
 
-  /// Return an rvalue reference through a const record binding.
+  /** Return an rvalue reference through a const record binding. */
   constexpr auto value() const && noexcept -> decltype(std::move(_record)) {
     return std::move(_record);
   }
@@ -1141,12 +1143,12 @@ struct binding_t<T, reflected_entity::record> {
 #  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
   constexpr
 #  endif
-  /// Return a direct reference to the bound record.
+  /** Return a direct reference to the bound record. */
   storage_t &ref() & noexcept {
     return _record;
   }
 
-  /// Return a direct reference through a const record binding.
+  /** Return a direct reference through a const record binding. */
   constexpr const storage_t &ref() const & noexcept {
     return _record;
   }
@@ -1252,29 +1254,31 @@ struct binding_t<T, reflected_entity::record> {
       : _record(std::forward<U>(u)) {}
 };
 
-/// Reflected-scope-only enum binding.
-///
-/// TODO(high): Decide whether bindings should inherit their metadata wrappers.
-///   This requires coordinated pre-C++20 overload and C++20 concept semantics.
+/**
+ * Reflected-scope-only enum binding.
+ *
+ * TODO: [high] Decide whether bindings should inherit their metadata wrappers.
+ *   This requires coordinated pre-C++20 overload and C++20 concept semantics.
+ */
 template <typename T>
 struct binding_t<T, reflected_entity::enumeration> {
-  /// Bound enum type with cv/ref qualification removed.
+  /** Bound enum type with cv/ref qualification removed. */
   using type = compat::decay_t<T>;
 
-  /// Generated metadata for the bound enum.
+  /** Generated metadata for the bound enum. */
   using meta = meta_for<type>;
 
-  /// Whether the binding stores its own enum value instead of a reference.
+  /** Whether the binding stores its own enum value instead of a reference. */
   using owning = std::integral_constant<bool, !std::is_reference<T>::value>;
 
-  /// Stored enum type for owning and non-owning bindings.
+  /** Stored enum type for owning and non-owning bindings. */
   using storage_t = compat::conditional_t<owning::value,
     type, //< own a value
     typename std::remove_reference<T>::type &>; //< hold a reference
 
   storage_t _enum_value;
 
-  /// Identify this wrapper as an enum binding.
+  /** Identify this wrapper as an enum binding. */
   static constexpr reflected_entity entity() noexcept {
     return reflected_entity::enumeration;
   }
@@ -1340,7 +1344,7 @@ struct binding_t<T, reflected_entity::enumeration> {
   }
 #endif
 
-  /// Return an lvalue reference to the bound enum value.
+  /** Return an lvalue reference to the bound enum value. */
   constexpr const storage_t &value() const & noexcept {
     return _enum_value;
   }
@@ -1348,12 +1352,12 @@ struct binding_t<T, reflected_entity::enumeration> {
 #  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
   constexpr
 #  endif
-  /// Return an rvalue reference to the bound enum value.
+  /** Return an rvalue reference to the bound enum value. */
   auto value() && noexcept -> decltype(std::move(_enum_value)) {
     return std::move(_enum_value);
   }
 
-  /// Return an rvalue reference through a const enum binding.
+  /** Return an rvalue reference through a const enum binding. */
   constexpr auto value() const && noexcept -> decltype(std::move(_enum_value)) {
     return std::move(_enum_value);
   }
@@ -1361,12 +1365,12 @@ struct binding_t<T, reflected_entity::enumeration> {
 #  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
   constexpr
 #  endif
-  /// Return a direct reference to the bound enum value.
+  /** Return a direct reference to the bound enum value. */
   storage_t &ref() & noexcept {
     return _enum_value;
   }
 
-  /// Return a direct reference through a const enum binding.
+  /** Return a direct reference through a const enum binding. */
   constexpr const storage_t &ref() const & noexcept {
     return _enum_value;
   }
@@ -1431,47 +1435,47 @@ struct binding_t<T, reflected_entity::enumeration> {
       : _enum_value(std::forward<U>(u)) {}
 };
 
-/// Reflected-scope-only record binding.
+/** Reflected-scope-only record binding. */
 template <typename T>
 using record_binding_t = binding_t<T, reflected_entity::record>;
 
-/// Reflected-scope-only enum binding.
+/** Reflected-scope-only enum binding. */
 template <typename T>
 using enum_binding_t = binding_t<T, reflected_entity::enumeration>;
 
 #if defined(__cpp_concepts)
-/// Whether `T` is a record or enum metadata wrapper.
+/** Whether `T` is a record or enum metadata wrapper. */
 template <typename T>
 concept meta = traits::is<meta_t, T>();
 
-/// Whether `T` is a record or enum value binding.
+/** Whether `T` is a record or enum value binding. */
 template <typename T>
 concept binding = traits::is<binding_t, T>();
 
-/// Whether `T` is field metadata.
+/** Whether `T` is field metadata. */
 template <typename T>
 concept field_meta = traits::is<field_meta_t, T>();
 
-/// Whether `T` binds field metadata to a record object.
+/** Whether `T` binds field metadata to a record object. */
 template <typename T>
 concept field_binding = traits::is<field_binding_t, T>();
 
-/// Whether `T` is record metadata.
+/** Whether `T` is record metadata. */
 template <typename T>
 concept record_meta =
   meta<T> && compat::remove_cvref_t<T>::entity() == reflected_entity::record;
 
-/// Whether `T` is enum metadata.
+/** Whether `T` is enum metadata. */
 template <typename T>
 concept enum_meta = meta<T>
   && compat::remove_cvref_t<T>::entity() == reflected_entity::enumeration;
 
-/// Whether `T` binds a reflected record object.
+/** Whether `T` binds a reflected record object. */
 template <typename T>
 concept record_binding =
   binding<T> && compat::remove_cvref_t<T>::entity() == reflected_entity::record;
 
-/// Whether `T` binds a reflected enum value.
+/** Whether `T` binds a reflected enum value. */
 template <typename T>
 concept enum_binding = binding<T>
   && compat::remove_cvref_t<T>::entity() == reflected_entity::enumeration;
@@ -1495,7 +1499,7 @@ constexpr auto reflected(T &&) noexcept
  *
  * Query `is_reflected<T>` first when metadata availability is conditional.
  *
- * TODO(high): Consider a direct unavailable-metadata diagnostic only if it
+ * TODO: [high] Consider a direct unavailable-metadata diagnostic only if it
  *   can avoid cascading errors from the incomplete generated specialization.
  */
 template <typename T>
@@ -1560,7 +1564,7 @@ struct reflected_call_t {
   // evaluation. It currently cannot be constexpr as a whole: during the tool
   // run the call is parsed and matched, but intentionally does not evaluate the
   // callable before generated reflection exists.
-  /// Invoke the callable with reflected wrappers for every argument.
+  /** Invoke the callable with reflected wrappers for every argument. */
   template <typename Impl, typename... Args>
   auto operator()(Impl &&impl, Args &&...args) const
 #if defined(OMNI_TOOL_RUN)
@@ -1679,10 +1683,10 @@ struct reflected_call_t {
  */
 constexpr reflected_call_t reflected_call{};
 
-/// Experimental utilities callable only within a reflected scope.
+/** Experimental utilities callable only within a reflected scope. */
 namespace refl {
 
-/// Reflected-scope-only query for generated aggregate construction.
+/** Reflected-scope-only query for generated aggregate construction. */
 template <typename T, typename = void>
 struct is_aggregatable: std::false_type {};
 
