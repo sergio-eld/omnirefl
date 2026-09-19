@@ -72,6 +72,110 @@ struct first_field {
 
 } // namespace reference_return
 
+namespace field_defaults {
+
+template <typename Field>
+struct can_read_default_value {
+  template <typename F>
+  static auto test(int) -> decltype(F::default_value(), std::true_type{});
+
+  template <typename>
+  static std::false_type test(...);
+
+  static const bool value = decltype(test<Field>(0))::value;
+};
+
+struct availability {
+  bool initializer;
+  bool value;
+  bool callable;
+};
+
+template <typename Field>
+availability inspect(Field field) {
+  return {
+    /*initializer=*/field.has_default_member_initializer(),
+    /*value=*/field.has_default_value_access(),
+    /*callable=*/can_read_default_value<Field>::value,
+  };
+}
+
+struct observations {
+  availability required;
+  availability number;
+  availability expression;
+  availability text;
+  availability sequence;
+  availability contextual;
+  availability called;
+  availability typed;
+  int number_value;
+  int expression_value;
+  std::string text_value;
+  std::vector<int> sequence_value;
+};
+
+struct inspect_fields {
+  template <typename Required,
+    typename Number,
+    typename Expression,
+    typename Text,
+    typename Sequence,
+    typename Contextual,
+    typename Called,
+    typename Typed>
+  observations operator()(const Required &required,
+    const Number &number,
+    const Expression &expression,
+    const Text &text,
+    const Sequence &sequence,
+    const Contextual &contextual,
+    const Called &called,
+    const Typed &typed) const {
+    return {
+      /*required=*/inspect(required),
+      /*number=*/inspect(number),
+      /*expression=*/inspect(expression),
+      /*text=*/inspect(text),
+      /*sequence=*/inspect(sequence),
+      /*contextual=*/inspect(contextual),
+      /*called=*/inspect(called),
+      /*typed=*/inspect(typed),
+      /*number_value=*/number.default_value(),
+      /*expression_value=*/expression.default_value(),
+      /*text_value=*/text.default_value(),
+      /*sequence_value=*/sequence.default_value(),
+    };
+  }
+};
+
+struct inspect_metadata {
+  template <typename _M>
+  observations operator()(omni::record_meta_t<_M> record) const {
+    return omni::compat::apply(inspect_fields{}, record.public_fields());
+  }
+};
+
+struct binding_observation {
+  bool available;
+  int value;
+};
+
+struct inspect_binding {
+  template <typename T>
+  binding_observation operator()(omni::record_binding_t<T> record) const {
+    const auto observed =
+      omni::compat::apply(inspect_fields{}, record.public_fields());
+
+    return {
+      /*available=*/observed.number.value,
+      /*value=*/observed.number_value,
+    };
+  }
+};
+
+} // namespace field_defaults
+
 // C++11 callable emulation for exact wrapper-template deduction tests.
 namespace metadata_contract {
 
@@ -757,6 +861,44 @@ TEST(fields, record_type_t) {
   static const std::vector<std::string> k_expected{"first", "second"};
 
   value_categories_test<record_type_t>(k_expected, f::record_type_fields);
+}
+
+TEST(fields, in_class_default_values) {
+  using interface_test::field_defaults_record_t;
+  using namespace interface_test::field_defaults;
+
+  const auto observed = omni::reflected_call(inspect_metadata{},
+    omni::type_t<field_defaults_record_t>{});
+
+  EXPECT_FALSE(observed.required.initializer);
+  EXPECT_FALSE(observed.required.value);
+  EXPECT_FALSE(observed.required.callable);
+  EXPECT_TRUE(observed.number.initializer);
+  EXPECT_TRUE(observed.number.value);
+  EXPECT_TRUE(observed.number.callable);
+  EXPECT_EQ(815, observed.number_value);
+  EXPECT_TRUE(observed.expression.initializer);
+  EXPECT_TRUE(observed.expression.value);
+  EXPECT_TRUE(observed.expression.callable);
+  EXPECT_EQ(815, observed.expression_value);
+  EXPECT_TRUE(observed.text.value);
+  EXPECT_EQ("oceanic", observed.text_value);
+  EXPECT_TRUE(observed.sequence.value);
+  EXPECT_EQ((std::vector<int>{8, 15}), observed.sequence_value);
+  EXPECT_TRUE(observed.contextual.initializer);
+  EXPECT_FALSE(observed.contextual.value);
+  EXPECT_FALSE(observed.contextual.callable);
+  EXPECT_TRUE(observed.called.initializer);
+  EXPECT_FALSE(observed.called.value);
+  EXPECT_FALSE(observed.called.callable);
+  EXPECT_TRUE(observed.typed.initializer);
+  EXPECT_FALSE(observed.typed.value);
+  EXPECT_FALSE(observed.typed.callable);
+
+  field_defaults_record_t value{};
+  const auto binding = omni::reflected_call(inspect_binding{}, value);
+  EXPECT_TRUE(binding.available);
+  EXPECT_EQ(815, binding.value);
 }
 
 TEST(fields, own_field_hides_inherited_fields) {

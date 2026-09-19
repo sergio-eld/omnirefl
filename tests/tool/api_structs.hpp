@@ -41,6 +41,21 @@ struct volatile_field_record_t {
   volatile unsigned flags : 3;
 };
 
+struct field_defaults_record_t {
+  static int make_number() {
+    return 42;
+  }
+
+  int required;
+  int number = 815;
+  int expression = 8 * 100 + 15;
+  std::string text{"oceanic"};
+  std::vector<int> sequence = {8, 15};
+  int contextual = number + 1;
+  int called = make_number();
+  std::string typed = std::string{"typed"};
+};
+
 struct parent_record_t {
   struct nested_record_t {
     int value;

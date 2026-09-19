@@ -548,6 +548,7 @@ struct field_data {
   std::string type_name;
   std::string qualified_type_name;
   std::string annotation;
+  std::optional<std::string> default_initializer;
 
   enum class value_access {
     reference,
@@ -555,6 +556,7 @@ struct field_data {
     misaligned_array,
   } access;
 
+  bool has_default_member_initializer;
   bool is_volatile;
   bool is_deprecated;
 
@@ -4906,6 +4908,65 @@ std::string field_type_name(const clang::ASTContext &ast,
     type_source_info->getTypeLoc().getUnqualifiedLoc());
 }
 
+bool is_replayable_default_initializer(const clang::Stmt *node) {
+  assert(node);
+
+  if (node->getBeginLoc().isMacroID() || node->getEndLoc().isMacroID())
+    return false;
+
+  if (const auto *expr = llvm::dyn_cast<clang::Expr>(node);
+    expr && (expr->isTypeDependent() || expr->isValueDependent())) {
+    return false;
+  }
+
+  // Source replay outside the record can change name lookup.
+  if (llvm::isa<clang::CallExpr,
+        clang::CXXDeleteExpr,
+        clang::CXXNewExpr,
+        clang::CXXScalarValueInitExpr,
+        clang::CXXThisExpr,
+        clang::CXXThrowExpr,
+        clang::CXXTemporaryObjectExpr,
+        clang::CXXTypeidExpr,
+        clang::DeclRefExpr,
+        clang::ExplicitCastExpr,
+        clang::LambdaExpr,
+        clang::MemberExpr,
+        clang::PredefinedExpr,
+        clang::UnaryExprOrTypeTraitExpr>(node)) {
+    return false;
+  }
+
+  return std::ranges::all_of(node->children(), [](const clang::Stmt *child) {
+    return !child || is_replayable_default_initializer(child);
+  });
+}
+
+std::optional<std::string> default_initializer_from(
+  const clang::ASTContext &ast,
+  const clang::FieldDecl *field) {
+  assert(field);
+
+  if (!field->hasInClassInitializer())
+    return std::nullopt;
+
+  const clang::Expr *initializer = field->getInClassInitializer();
+  if (field->getType()->isReferenceType() || !initializer
+    || !is_replayable_default_initializer(initializer)) {
+    return std::nullopt;
+  }
+
+  // todo: Render AST expressions with qualified names instead of source text.
+  const std::string source =
+    source_text_from(ast, initializer->getSourceRange());
+  if (source.empty())
+    return std::nullopt;
+
+  return source.starts_with('=') || source.starts_with('{')
+    ? source
+    : "= " + source;
+}
+
 } // namespace meta::impl
 
 meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
@@ -4926,6 +4987,7 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     }),
 
     .annotation = annotation_from_decl(ast, d),
+    .default_initializer = meta::impl::default_initializer_from(ast, d),
     // ad hoc: packed fields cannot always bind to references. Infer safe
     // access from the record layout and copy fields whose address may be
     // misaligned.
@@ -4952,6 +5014,7 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
         : value_access::copy;
     }),
 
+    .has_default_member_initializer = d->hasInClassInitializer(),
     .is_volatile = d->getType().isVolatileQualified(),
     .is_deprecated = d->hasAttr<clang::DeprecatedAttr>(),
     .qualified = d->isMutable()
@@ -5537,7 +5600,8 @@ auto meta::enum_data::from_type(const clang::EnumType *t) -> enum_data {
 }
 
 // refactorme: this exists only because of std::variant clumsy initialization
-meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
+meta::reflectable match_reflectable_type(const diagnostics &log,
+  const clang::ASTContext &ast,
   const clang::TagType *t) {
   assert(t);
 
@@ -5545,9 +5609,32 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
   static_assert(std::same_as<record_or_enum, decltype(meta::reflectable::data)>,
     "Inconsistency for reflectable types detected.");
 
+  const meta::type_id concrete_id = meta::canonical_type_id(ast, t);
+  record_or_enum data = clang::isa<clang::EnumType>(t)
+    ? record_or_enum(
+        meta::enum_data::from_type(clang::cast<clang::EnumType>(t)))
+    : record_or_enum(
+        meta::record_data::from_type(ast, clang::cast<clang::RecordType>(t)));
+
+  if (const auto *record = std::get_if<meta::record_data>(&data)) {
+    for (const meta::field_data &field : record->public_fields
+        | std::views::filter([](const meta::field_data &candidate) {
+            return candidate.has_default_member_initializer
+              && !candidate.default_initializer;
+          })) {
+      log(log_level::warning, [&concrete_id, &field] {
+        return std::format(
+          "\ndefault value for field '{}::{}' skipped: its initializer "
+          "cannot be copied safely into generated metadata.",
+          concrete_id,
+          field.name);
+      });
+    }
+  }
+
   return {
     .id = meta::reflectable_type_id(ast, t),
-    .concrete_id = meta::canonical_type_id(ast, t),
+    .concrete_id = concrete_id,
     .public_access_path = {},
     .annotation = std::invoke([&ast, t] {
       const auto *spec =
@@ -5557,11 +5644,7 @@ meta::reflectable match_reflectable_type(const clang::ASTContext &ast,
         spec ? static_cast<const clang::Decl *>(spec->getSpecializedTemplate())
              : static_cast<const clang::Decl *>(t->getDecl()));
     }),
-    .data = clang::isa<clang::EnumType>(t)
-      ? record_or_enum(
-          meta::enum_data::from_type(clang::cast<clang::EnumType>(t)))
-      : record_or_enum(
-          meta::record_data::from_type(ast, clang::cast<clang::RecordType>(t))),
+    .data = std::move(data),
     .definition = resolve_definition(ast, t->getDecl()),
   };
 }
@@ -5574,7 +5657,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
   const std::set<type_id> &resolved_concrete_types)
   -> std::expected<reflected_type_info, std::string> {
   const auto match_record_type = //
-    [&ast](const std::string &id, const clang::RecordType *t)
+    [&ast, &log](const std::string &id, const clang::RecordType *t)
     -> std::variant<reflectable, non_reflectable, already_reflected> {
     if (t->getDecl()->isInStdNamespace())
       return non_reflectable{
@@ -5582,7 +5665,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
         .concrete_id = canonical_type_id(ast, t),
       };
 
-    return match_reflectable_type(ast, t);
+    return match_reflectable_type(log, ast, t);
   };
 
   while (template_arg->isReferenceType())
@@ -5682,8 +5765,8 @@ auto meta::resolve_reflected_type(const diagnostics &log,
     .type = match_record_type(id, record_type),
     .dependencies = dependencies.types
       | std::views::transform(
-        [&ast, &dependencies](const clang::TagType *type) {
-          meta::reflectable reflected = match_reflectable_type(ast, type);
+        [&ast, &dependencies, &log](const clang::TagType *type) {
+          meta::reflectable reflected = match_reflectable_type(log, ast, type);
 
           if ((meta::type_definition::non_public
                 & reflected.definition.definition_flags)
@@ -6169,6 +6252,25 @@ std::string reflectable_body(const meta::record_data &d) {
     [](const auto &field_index) {
       const auto &[index, f] = field_index;
 
+      const std::string default_value = std::format(
+        "\n"
+        "\n    static constexpr bool has_default_member_initializer() noexcept"
+        " {{ return {0}; }}"
+        "\n    static constexpr bool has_default_value_access() noexcept"
+        " {{ return {1}; }}"
+        "{2}",
+        f.has_default_member_initializer,
+        f.default_initializer.has_value(),
+        f.default_initializer
+          ? std::format(
+              "\n"
+              "\n    static const type &default_value() {{"
+              "\n      static const type value {};"
+              "\n      return value;"
+              "\n    }}",
+              *f.default_initializer)
+          : std::string{});
+
       const std::string accessors = std::invoke([&f] {
         // Misaligned packed raw arrays emit metadata without accessors.
         if (meta::field_data::value_access::misaligned_array == f.access)
@@ -6245,6 +6347,7 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n    static constexpr bool is_deprecated() noexcept"
         " {{ return {7}; }}"
         "{11}"
+        "{12}"
         "\n  }};",
         // 0
         f.name,
@@ -6280,6 +6383,9 @@ std::string reflectable_body(const meta::record_data &d) {
         documentation_method(f.annotation),
 
         // 11
+        default_value,
+
+        // 12
         accessors);
     };
 

@@ -815,6 +815,12 @@ if("17" IN_LIST _supported_cpp_standards)
         ""
         warning)
     _omnirefl_diagnostic_tool_run(
+        "skipped_default_initializer"
+        diagnostic_run/skipped_default_initializer.cpp
+        "default value for field .*record::field' skipped"
+        "default value for field .*record::expanded' skipped"
+        warning)
+    _omnirefl_diagnostic_tool_run(
         "lazy_specialization_dependency"
         diagnostic_run/lazy_specialization_dependency.cpp
         "explicit template specializations are not supported"
