@@ -27,7 +27,7 @@ void deserialize_preparsed(benchmark::State &state,
     auto result = omni::compat::invoke(deserialize, tree.crootref());
     if (!result) {
       state.SkipWithError(
-        omni::ryml::render_diangostics(result.error()).c_str());
+        omni::ryml::render_diagnostics(result.error()).c_str());
       break;
     }
 
@@ -46,7 +46,7 @@ void deserialize_owned(benchmark::State &state,
     auto result = omni::compat::invoke(deserialize, std::string{input});
     if (!result) {
       state.SkipWithError(
-        omni::ryml::render_diangostics(result.error()).c_str());
+        omni::ryml::render_diagnostics(result.error()).c_str());
       break;
     }
 
@@ -64,7 +64,7 @@ void serialize_owned(benchmark::State &state,
   const auto source =
     omni::ryml::deserialize(omni::type_t<T>{}, std::string{input});
   if (!source) {
-    state.SkipWithError(omni::ryml::render_diangostics(source.error()).c_str());
+    state.SkipWithError(omni::ryml::render_diagnostics(source.error()).c_str());
     return;
   }
 

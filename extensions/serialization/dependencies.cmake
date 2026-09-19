@@ -33,6 +33,9 @@ if(NOT TARGET ryml::ryml)
         GIT_REPOSITORY https://github.com/biojppm/rapidyaml.git
         # v0.14.0 supports both clang-cl and GCC 16.
         GIT_TAG 11fa21d3fd3ca4a65df2c0e8b59fa0cc3b5c1642
+        # c4core assumes every C++20 standard library provides <span>.
+        PATCH_COMMAND git -C <SOURCE_DIR>/ext/c4core apply
+            "${CMAKE_CURRENT_LIST_DIR}/patches/c4core-span-availability.patch"
         GIT_PROGRESS TRUE)
     list(APPEND _serialization_dependencies rapidyaml)
 endif()

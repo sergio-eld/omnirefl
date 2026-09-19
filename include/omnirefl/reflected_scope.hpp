@@ -5,29 +5,6 @@
 
 #pragma once
 
-#if defined(OMNI_TOOL_RUN) \
-  || defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
-/**
- * Require a generated reflection header, reporting message when missing.
- *
- * The generator may parse before that header exists.
- *
- * static_assert carries the caller's message; macros cannot emit #error.
- */
-#  define OMNI_REQUIRE_GENERATED_REFLECTION(message) \
-    static_assert(true, message)
-#else
-/**
- * Require a generated reflection header, reporting message when missing.
- *
- * The generator may parse before that header exists.
- *
- * static_assert carries the caller's message; macros cannot emit #error.
- */
-#  define OMNI_REQUIRE_GENERATED_REFLECTION(message) \
-    static_assert(false, message)
-#endif
-
 #include <memory>
 #include <tuple>
 #include <type_traits>

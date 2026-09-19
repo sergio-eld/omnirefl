@@ -19,4 +19,6 @@ if(ENABLE_PACKAGE)
     # Installed tests fetch the same versions as source-tree extension builds.
     install(FILES dependencies.cmake
         DESTINATION "${CMAKE_INSTALL_DATADIR}/omnirefl/tests/extensions/serialization")
+    install(DIRECTORY patches
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/omnirefl/tests/extensions/serialization")
 endif()

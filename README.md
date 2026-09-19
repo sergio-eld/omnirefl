@@ -458,7 +458,7 @@ struct person {
 
 auto result = omni::ryml::deserialize(omni::type_t<person>{},
   R"({"name":"Ada","age":36})") //
-  .transform_error(omni::ryml::render_diangostics);
+  .transform_error(omni::ryml::render_diagnostics);
 // result holds the person on success, or a rendered message on failure.
 
 const auto yaml = omni::ryml::as_yaml(person{"Ada", 36});

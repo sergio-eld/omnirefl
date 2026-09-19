@@ -1,7 +1,5 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml.hpp>
-
 #include <ryml_std.hpp>
 
 #include <algorithm>
@@ -20,8 +18,7 @@ template <typename Strategy, typename T, bool Owning>
 deserialization_result<T, Strategy, Owning> make_result(
   with_diagnostics<T, diagnostics<Owning>> result) {
   return fn::branch(
-    std::integral_constant<bool,
-      !std::is_same<strategy<bool>, Strategy>::value && !Strategy{}.partial>{},
+    detail::returns_expected<Strategy>{},
     [&result]() -> compat::expected<T, diagnostics<Owning>> {
       if (result.value)
         return std::move(*result.value);
@@ -502,11 +499,17 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
     fields);
 }
 
+struct mapping_policy {
+  int tolerance;
+  bool partial;
+  bool extra;
+};
+
 // C++11 callable establishing the reflected scope for the record fold.
 template <typename To>
 struct cpp11_lambda_fold_record {
   ::ryml::ConstNodeRef from;
-  omni::ryml::strategy<bool> strategy;
+  mapping_policy policy;
 
   template <typename Meta>
   with_diagnostics<To, diagnostics</*owning=*/ false>> operator()(
@@ -520,11 +523,11 @@ struct cpp11_lambda_fold_record {
         /*diagnostics=*/
         {
           /*policy=*/{
-            /*tolerance=*/0 >= strategy.tolerance
+            /*tolerance=*/0 >= policy.tolerance
               ? 0
-              : static_cast<std::size_t>(strategy.tolerance),
-            /*partial=*/strategy.partial,
-            /*extra=*/strategy.extra,
+              : static_cast<std::size_t>(policy.tolerance),
+            /*partial=*/policy.partial,
+            /*extra=*/policy.extra,
           },
           /*tree=*/from,
           /*issues=*/{},
@@ -535,7 +538,7 @@ struct cpp11_lambda_fold_record {
       /*warning=*/false);
 
     // Keep defaults throughout the fold; apply retention once at the root.
-    if (!result.diagnostics.issues.empty() && !strategy.partial)
+    if (!result.diagnostics.issues.empty() && !policy.partial)
       result.value = compat::nullopt;
 
     return result;
@@ -595,7 +598,8 @@ struct write_sequence {
     assert(to);
     *to |= ::ryml::SEQ;
 
-    for (const auto &value : from) {
+    // Ad hoc for vector<bool>: its iterator yields a proxy instead of bool.
+    for (const typename From::value_type &value : from) {
       auto child = to->append_child();
       write_value(value, &child);
     }
@@ -673,7 +677,8 @@ struct cpp11_lambda_to_tree {
 
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options) {
-  constexpr int parse_failed = 1;
+  // Static storage lets the parser callback use the signal without captures.
+  static constexpr int parse_failed = 1;
 
   struct _error_t {
     std::jmp_buf jump;
@@ -766,7 +771,7 @@ deserialization_result<To, Strategy, /*owning=*/ false>
     omni::reflected_call(
       reflected_scope::cpp11_lambda_fold_record<To>{
         /*from=*/from,
-        /*strategy=*/{
+        /*policy=*/{
           /*tolerance=*/strategy.tolerance,
           /*partial=*/static_cast<bool>(strategy.partial),
           /*extra=*/strategy.extra,
@@ -779,9 +784,8 @@ template <typename Strategy>
 template <typename To>
 deserialization_result<To, Strategy, /*owning=*/ true>
   deserialize_t<Strategy>::operator()(omni::type_t<To> to,
-    std::string source,
-    ::ryml::ParserOptions options) const {
-  if (auto parsed = parse(std::move(source), options)) {
+    std::string source) const {
+  if (auto parsed = parse(std::move(source))) {
     return map_tree_t<Strategy>{
       /*strategy=*/strategy,
     }(to, std::move(*parsed));
@@ -813,7 +817,7 @@ deserialization_result<To, Strategy, /*owning=*/ true>
 }
 
 template <bool Owning>
-std::string render_diangostics_t::operator()(
+std::string render_diagnostics_t::operator()(
   const diagnostics<Owning> &d) const {
   std::string message;
   for (const auto &entry : d.issues) {

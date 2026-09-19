@@ -1,5 +1,12 @@
 #pragma once
 
+#if !defined(OMNI_TOOL_RUN) \
+  && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+#  error \
+    "Include the generated reflection header before this serialization header. " \
+    "With CMake, call omni_reflected_target(<target>)."
+#endif
+
 /**
  * YAML and JSON serialization backed by rapidyaml and omnirefl metadata.
  * Deserialization composes parsing, tree validation, and reflected field
@@ -7,15 +14,14 @@
  * Serialization writes reflected records with as_yaml or as_json.
  * Compatible with C++11 and later.
  *
- * Examples use C++20 syntax. In C++11, use omni::type_t<person>{} instead of
- * omni::type<person>; configuration builders are shown alongside designated
- * initializers below.
+ * Examples prefer C++20 syntax. Compatibility interfaces are available for
+ * C++11; see tests/extensions/serialization/test.cpp for complete usage.
  *
- * Given a reflected person type and a std::string source:
+ * Given a reflectable person type and a std::string source:
  *
 ```cpp
 auto result = omni::ryml::deserialize(omni::type<person>, source) //
-  .transform_error(omni::ryml::render_diangostics);
+  .transform_error(omni::ryml::render_diagnostics);
 
 if (result) {
   const auto json = omni::ryml::as_json(*result);
@@ -26,7 +32,7 @@ if (result) {
  */
 
 /**
- * TODO(high): Configure partial deserialization beyond a single bool.
+ * TODO: [high] Configure partial deserialization beyond a single bool.
  *
  * As of now, optional fields and containers default to warnings when
  * strategy.partial is true. Supported types are compat::optional (std or tl)
@@ -56,9 +62,10 @@ if (result) {
  * user-defined recovery and severity customization until these rules are clear.
  */
 
+#include <omnirefl/reflected_scope.hpp>
+
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
-#include <omnirefl/reflected_scope.hpp>
 
 #include <ryml.hpp>
 
@@ -68,10 +75,6 @@ if (result) {
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-OMNI_REQUIRE_GENERATED_REFLECTION(
-  "Include the generated reflection header before this serialization header. "
-  "With CMake, call omni_reflected_target(<target>).");
 
 namespace omni {
 namespace ryml {
@@ -110,7 +113,60 @@ struct strategy {
       || omni::traits::is<std::integral_constant, Partial>(),
     "Partial must be bool or std::integral_constant");
 
-  // TODO(high): Add a configurable input-size limit to strategy and reject
+  // Number of errors traversal may pass before stopping on the next one.
+  // Warnings do not count. Zero stops at the first error; negatives mean zero.
+  // Increase this to collect more field errors even with partial=false.
+  int tolerance = 0;
+
+  // Permit returning a value despite errors; optional/container issues become
+  // warnings. Failed, missing, and unvisited fields keep initialized defaults.
+  // std::false_type gives expected; bool and std::true_type give
+  // with_diagnostics. See deserialization_result for the full result types.
+  Partial partial = {};
+
+  // Ignore fields absent from the model at every nesting level.
+  // Duplicates of model fields remain issues.
+  bool extra = false;
+
+  /**
+   * Return a strategy with the new tolerance and other settings unchanged.
+   *
+   * Compatibility builder for code predating C++20 designated initializers.
+   */
+  OMNI_CPP14_CONSTEXPR strategy use_tolerance(int t) const {
+    auto result = *this;
+    result.tolerance = t;
+    return result;
+  }
+
+  /**
+   * Return a strategy with the partial type deduced from p and others
+   * unchanged. Passing bool keeps the product result even when p is false;
+   * passing std::false_type selects expected. See deserialization_result.
+   *
+   * Compatibility builder for code predating C++20 designated initializers.
+   */
+  template <typename P>
+  OMNI_CPP14_CONSTEXPR strategy<P> allow_partial(P p) const {
+    strategy<P> result{};
+    result.tolerance = tolerance;
+    result.partial = p;
+    result.extra = extra;
+    return result;
+  }
+
+  /**
+   * Return a strategy with the new extra setting and others unchanged.
+   *
+   * Compatibility builder for code predating C++20 designated initializers.
+   */
+  OMNI_CPP14_CONSTEXPR strategy allow_extra(bool e) const {
+    auto result = *this;
+    result.extra = e;
+    return result;
+  }
+
+  // TODO: [high] Add a configurable input-size limit to strategy and reject
   // oversized source text before parsing or allocating a tree. A std::string
   // argument is already buffered; callers must also bound request-body reads
   // to prevent oversized REST requests from consuming memory before this call.
@@ -122,72 +178,25 @@ struct strategy {
   // diagnostics; check missing fields when their object closes. Resolve YAML
   // aliases and diagnostic-view ownership before enabling the SAX path.
 
-  // TODO(high): Detect at compile time whether a model permits unbounded
+  // TODO: [high] Detect at compile time whether a model permits unbounded
   // nesting (e.g. a vector of itself); consider a traversal-depth limit in
   // strategy to prevent stack exhaustion from deeply nested or malicious input.
 
-  // Number of errors traversal may pass before stopping on the next one.
-  // Warnings do not count. Zero stops at the first error; negatives mean zero.
-  // Increase this to collect more field errors even with partial=false.
-  int tolerance;
+  // TODO: [high] Define a union deserialization policy before mapping
+  // std::variant. JSON Schema commonly represents alternatives with oneOf;
+  // trying every alternative is ambiguous and may repeat expensive work.
+  // Prefer a configurable discriminator that selects an alternative from a
+  // field value. Decide how metadata names alternatives, where the
+  // discriminator lives, and whether untagged matching is ever allowed.
 
-  // Permit returning a value despite errors; optional/container issues become
-  // warnings. Failed, missing, and unvisited fields keep initialized defaults.
-  // std::false_type gives expected; bool and std::true_type give
-  // with_diagnostics. See deserialization_result for the full result types.
-  Partial partial;
+  // TODO: Consider storing ryml::ParserOptions if rapidyaml's defaults prove
+  // insufficient. Direct storage would make strategy non-constexpr; do not
+  // mirror ParserOptions' private flags in another type.
 
-  // Ignore fields absent from the model at every nesting level.
-  // Duplicates of model fields remain issues.
-  bool extra;
-
-  /**
-   * Return a strategy with the new tolerance and other settings unchanged.
-   *
-   * Compatibility builder for code predating C++20 designated initializers.
-   */
-  constexpr strategy use_tolerance(int t) const {
-    return {
-      /*tolerance=*/t,
-      /*partial=*/partial,
-      /*extra=*/extra,
-    };
-  }
-
-  /**
-   * Return a strategy with the partial type deduced from p and others
-   * unchanged. Passing bool keeps the product result even when p is false;
-   * passing std::false_type selects expected. See deserialization_result.
-   *
-   * Compatibility builder for code predating C++20 designated initializers.
-   */
-  template <typename P>
-  constexpr strategy<P> allow_partial(P p) const {
-    return {
-      /*tolerance=*/tolerance,
-      /*partial=*/p,
-      /*extra=*/extra,
-    };
-  }
-
-  /**
-   * Return a strategy with the new extra setting and others unchanged.
-   *
-   * Compatibility builder for code predating C++20 designated initializers.
-   */
-  constexpr strategy allow_extra(bool e) const {
-    return {
-      /*tolerance=*/tolerance,
-      /*partial=*/partial,
-      /*extra=*/e,
-    };
-  }
+  // TODO: [low] Consider a C++11-only constexpr constructor and reconstructing
+  // values in the builders. Before C++14, member defaults prevent aggregate
+  // initialization and constexpr functions cannot assign to a copied value.
 };
-
-#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-template <typename Partial>
-strategy(int, Partial, bool) -> strategy<Partial>;
-#endif
 
 /**
  * Start configuration with the given tolerance, partial of type
@@ -195,12 +204,10 @@ strategy(int, Partial, bool) -> strategy<Partial>;
  *
  * Compatibility builder for code predating C++20 designated initializers.
  */
-constexpr strategy<> use_tolerance(int t) {
-  return {
-    /*tolerance=*/t,
-    /*partial=*/{},
-    /*extra=*/false,
-  };
+inline OMNI_CPP14_CONSTEXPR strategy<> use_tolerance(int t) {
+  strategy<> result{};
+  result.tolerance = t;
+  return result;
 }
 
 /**
@@ -403,7 +410,7 @@ struct with_diagnostics {
   };
   auto result = load(omni::type<person>, source);
   auto rendered = std::move(result) //
-    .transform_error(render_diangostics);
+    .transform_error(render_diagnostics);
   // rendered.value keeps the partial person; rendered.diagnostics is text.
   ```
    *
@@ -435,6 +442,20 @@ bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
   return r.value && !r.diagnostics.issues.empty();
 }
 
+namespace detail {
+
+template <typename Strategy>
+struct returns_expected;
+
+template <>
+struct returns_expected<strategy<bool>>: std::false_type {};
+
+template <typename T, T Value>
+struct returns_expected<strategy<std::integral_constant<T, Value>>>:
+  std::integral_constant<bool, !static_cast<bool>(Value)> {};
+
+} // namespace detail
+
 /**
  * Result of deserializing T using Strategy and owning or borrowed diagnostics.
  *
@@ -449,7 +470,7 @@ bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
  */
 template <typename T, typename Strategy, bool Owning>
 using deserialization_result = compat::conditional_t< //
-  !std::is_same<strategy<bool>, Strategy>::value && !Strategy{}.partial,
+  detail::returns_expected<Strategy>::value,
   compat::expected<T, diagnostics<Owning>>,
   with_diagnostics<T, diagnostics<Owning>>>;
 
@@ -464,7 +485,7 @@ using deserialization_result = compat::conditional_t< //
 auto result = parse(std::move(source)) //
   .and_then([](::ryml::Tree tree) {
     return map_tree(omni::type<person>, std::move(tree)) //
-      .transform_error(render_diangostics);
+      .transform_error(render_diagnostics);
   });
 // expected<person, std::string>: syntax and field errors are rendered text.
 ```
@@ -519,7 +540,7 @@ auto owned = map_tree(omni::type<person>, std::move(owning_tree));
 // Errors retain the moved tree; external backing strings still need an owner.
 ```
  */
-constexpr auto map_tree = fn::ctad<map_tree_t>()(
+const auto map_tree = fn::ctad<map_tree_t>()(
   /*strategy=*/use_tolerance(0) //
     .allow_partial(std::false_type{}));
 
@@ -537,13 +558,10 @@ struct deserialize_t {
   // Settings applied to every deserialization performed by this callable.
   Strategy strategy;
 
-  // TODO(high): Store ParserOptions in deserialize_t and remove the defaulted
-  // tail argument.
   template <typename To>
   deserialization_result<To, Strategy, /*owning=*/ true> operator()(
     omni::type_t<To> to,
-    std::string source,
-    ::ryml::ParserOptions options = {}) const;
+    std::string source) const;
 };
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
@@ -560,17 +578,17 @@ deserialize_t(Strategy) -> deserialize_t<Strategy>;
  *
 ```cpp
 auto result = deserialize(omni::type<person>, source) //
-  .transform_error(render_diangostics);
+  .transform_error(render_diagnostics);
 // expected<person, std::string>: rendering happens only on failure.
 ```
  */
-constexpr auto deserialize = fn::ctad<deserialize_t>()(
+const auto deserialize = fn::ctad<deserialize_t>()(
   /*strategy=*/use_tolerance(0) //
     .allow_partial(std::false_type{}));
 
-// A generic callable keeps map_diagnostics(render_diangostics) valid for both
+// A generic callable keeps map_diagnostics(render_diagnostics) valid for both
 // ownership modes; an overloaded function name cannot deduce its callable type.
-struct render_diangostics_t {
+struct render_diagnostics_t {
   template <bool Owning>
   std::string operator()(const diagnostics<Owning> &d) const;
 };
@@ -579,7 +597,7 @@ struct render_diangostics_t {
  * Render retained issues with RFC 6901 paths, separated by newlines.
  * Display the root as <root>; return an empty string when there are no issues.
  */
-constexpr render_diangostics_t render_diangostics{};
+constexpr render_diagnostics_t render_diagnostics{};
 
 /**
  * Serialize a reflected record and its nested fields to YAML or JSON.
@@ -620,4 +638,6 @@ constexpr serialize_t as_json{
 } // namespace ryml
 } // namespace omni
 
-#include <omnirefl/serialization/detail/ryml.hpp>
+// Inline and template definitions depend on the complete public interface
+// above. Including them here keeps the detail header private to this header.
+#include <omnirefl/serialization/impl/ryml.hpp>

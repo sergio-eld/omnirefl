@@ -18,6 +18,14 @@
 #  define OMNI_CPLUSPLUS __cplusplus
 #endif
 
+// Enabled in C++14 and newer for functions whose bodies cannot be constexpr
+// under C++11's single-return-statement restriction.
+#if 201402L <= OMNI_CPLUSPLUS
+#  define OMNI_CPP14_CONSTEXPR constexpr
+#else
+#  define OMNI_CPP14_CONSTEXPR
+#endif
+
 namespace omni {
 namespace compat {
 

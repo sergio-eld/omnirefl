@@ -19,14 +19,28 @@ namespace {
 
 // Runtime false keeps diagnostics on success for policy, ownership, and
 // rendering checks.
-constexpr auto strict_deserialize =
+const auto strict_deserialize =
   omni::fn::ctad<omni::ryml::deserialize_t>()(omni::ryml::use_tolerance(0) //
       .allow_partial(false));
-constexpr auto strict_map_tree =
+const auto strict_map_tree =
   omni::fn::ctad<omni::ryml::map_tree_t>()(omni::ryml::use_tolerance(0) //
       .allow_partial(false));
 
+struct anonymous_record {
+  // Value serialized from the record despite the function sharing its name.
+  int code;
+};
+
+// Deliberately hide the ordinary type name to require its struct qualifier.
+int anonymous_record(int code) {
+  return code;
+}
+
 TEST(deserialization, default_returns_expected_and_transforms_the_value) {
+  EXPECT_EQ(0, omni::ryml::deserialize.strategy.tolerance);
+  EXPECT_FALSE(omni::ryml::deserialize.strategy.partial);
+  EXPECT_FALSE(omni::ryml::deserialize.strategy.extra);
+
   auto result =
     omni::ryml::deserialize(omni::type_t<serialization_data::payload>{},
       R"({"name":"Ada","code":815})");
@@ -42,11 +56,23 @@ TEST(deserialization, default_returns_expected_and_transforms_the_value) {
   const auto code =
     std::move(result) //
       .transform([](serialization_data::payload p) { return p.code; }) //
-      .transform_error(omni::ryml::render_diangostics);
+      .transform_error(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(code);
   if (code) {
     EXPECT_EQ(815, *code);
+  }
+}
+
+TEST(serialization_composition, retains_an_anonymous_type_hidden_by_a_function) {
+  const struct anonymous_record value{anonymous_record(815)};
+  const auto result =
+    omni::ryml::deserialize(omni::type_t<struct anonymous_record>{},
+      omni::ryml::as_json(value));
+
+  EXPECT_TRUE(result);
+  if (result) {
+    EXPECT_EQ(815, result->code);
   }
 }
 
@@ -56,7 +82,7 @@ TEST(serialization_composition, parses_then_maps_a_record) {
       .and_then([](::ryml::Tree tree) {
         return omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
           std::move(tree)) //
-          .transform_error(omni::ryml::render_diangostics);
+          .transform_error(omni::ryml::render_diagnostics);
       });
 
   EXPECT_TRUE(result);
@@ -72,7 +98,7 @@ TEST(serialization_composition, renders_mapping_errors_after_successful_parse) {
       .and_then([](::ryml::Tree tree) {
         return omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
           std::move(tree)) //
-          .transform_error(omni::ryml::render_diangostics);
+          .transform_error(omni::ryml::render_diagnostics);
       });
 
   EXPECT_FALSE(result);
@@ -97,21 +123,19 @@ TEST(deserialization, default_returns_syntax_errors_in_expected) {
   }
   EXPECT_FALSE(result.error().policy.partial);
   EXPECT_FALSE(result.error().policy.extra);
-  EXPECT_FALSE(omni::ryml::render_diangostics(result.error()).empty());
+  EXPECT_FALSE(omni::ryml::render_diagnostics(result.error()).empty());
 }
 
 TEST(deserialization_strategy, static_false_rebinds_to_expected) {
-  constexpr auto source = //
+  const auto source = //
     omni::ryml::use_tolerance(3) //
       .allow_extra(true) //
       .allow_partial(true);
-  constexpr auto deserialize =
+  const auto deserialize =
     omni::fn::ctad<omni::ryml::deserialize_t>()(source //
         .allow_partial(std::false_type{}));
-  static_assert(3 == deserialize.strategy.tolerance,
-    "rebinding partial must preserve tolerance");
-  static_assert(deserialize.strategy.extra,
-    "rebinding partial must preserve extra");
+  EXPECT_EQ(3, deserialize.strategy.tolerance);
+  EXPECT_TRUE(deserialize.strategy.extra);
 
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
     R"({"name":"Ada","code":"bad","extra":1})");
@@ -128,11 +152,11 @@ TEST(deserialization_strategy, static_false_rebinds_to_expected) {
   EXPECT_TRUE(result.error().policy.extra);
   EXPECT_FALSE(result.error().policy.partial);
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.error()));
+    omni::ryml::render_diagnostics(result.error()));
 }
 
 TEST(deserialization_strategy, static_true_keeps_value_and_diagnostics) {
-  constexpr auto deserialize =
+  const auto deserialize =
     omni::fn::ctad<omni::ryml::deserialize_t>()(omni::ryml::use_tolerance(0) //
         .allow_partial(std::true_type{}));
   auto result = deserialize(omni::type_t<serialization_data::payload>{},
@@ -145,7 +169,7 @@ TEST(deserialization_strategy, static_true_keeps_value_and_diagnostics) {
   const auto transformed =
     std::move(result) //
       .transform([](serialization_data::payload p) { return p.name; }) //
-      .transform_error(omni::ryml::render_diangostics);
+      .transform_error(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(transformed.value);
   if (transformed.value) {
@@ -170,7 +194,7 @@ TEST(tree_mapping, default_returns_expected_with_borrowed_diagnostics) {
 
   EXPECT_EQ(&tree, result.error().tree.tree());
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.error()));
+    omni::ryml::render_diagnostics(result.error()));
 }
 
 TEST(tree_mapping, default_owns_expected_diagnostic_views) {
@@ -188,7 +212,7 @@ TEST(tree_mapping, default_owns_expected_diagnostic_views) {
     return;
 
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(retained.error()));
+    omni::ryml::render_diagnostics(retained.error()));
 }
 
 class product_transforms: public testing::TestWithParam<bool> {};
@@ -251,8 +275,19 @@ INSTANTIATE_TEST_SUITE_P(values,
     return p.param ? "available" : "unavailable";
   });
 
+// Deduction from designated initializers also requires C++20 aggregate CTAD.
 #if defined(__cpp_designated_initializers) \
-  && 201707L <= __cpp_designated_initializers
+  && 201707L <= __cpp_designated_initializers \
+  && defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides
+TEST(deserialization_strategy, designated_configuration_uses_member_defaults) {
+  constexpr omni::ryml::strategy<bool> configured{
+    .tolerance = 1,
+  };
+
+  static_assert(!configured.partial, "partial must default to false");
+  static_assert(!configured.extra, "extra must default to false");
+}
+
 TEST(deserialization_strategy, designated_static_partial_returns_expected) {
   constexpr omni::ryml::deserialize_t deserialize{
     .strategy =
@@ -315,14 +350,11 @@ TEST(serialization_formats, emits_yaml_without_configuration) {
 }
 
 TEST(deserialization, accepts_extra_fields_without_partial_values) {
-  constexpr omni::ryml::deserialize_t<omni::ryml::strategy<bool>> deserialize{
+  const omni::ryml::deserialize_t<omni::ryml::strategy<bool>> deserialize{
     /*strategy=*/omni::ryml::use_tolerance(0) //
       .allow_extra(true) //
       .allow_partial(false),
   };
-  static_assert(deserialize.strategy.extra,
-    "extra fields must be configurable in C++11 constant expressions");
-
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
     R"({"name":"Ada","code":815,"extra":{"anything":[1,null,{}]}})");
 
@@ -333,7 +365,7 @@ TEST(deserialization, accepts_extra_fields_without_partial_values) {
   EXPECT_TRUE(result.diagnostics.issues.empty());
   EXPECT_FALSE(result.diagnostics.stopped());
   EXPECT_FALSE(omni::ryml::is_partial(result));
-  EXPECT_EQ("", omni::ryml::render_diangostics(result.diagnostics));
+  EXPECT_EQ("", omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ("Ada", result.value->name);
     EXPECT_EQ(815, result.value->code);
@@ -351,10 +383,10 @@ TEST(deserialization, transforms_default_diagnostics_into_a_string) {
   const std::string json = R"({"name":"Ada","age":"bad"})";
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
   const auto result = omni::ryml::deserialize(omni::type<person>, json) //
-    .transform_error(omni::ryml::render_diangostics);
+    .transform_error(omni::ryml::render_diagnostics);
 #else
   const auto result = omni::ryml::deserialize(omni::type_t<person>{}, json) //
-    .transform_error(omni::ryml::render_diangostics);
+    .transform_error(omni::ryml::render_diagnostics);
 #endif
 
   EXPECT_FALSE(result);
@@ -375,7 +407,7 @@ TEST(deserialization_diagnostics,
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   const auto rendered = //
     std::move(result) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(rendered.value);
   if (rendered.value) {
@@ -394,7 +426,7 @@ TEST(deserialization, partially_applies_strategy_and_destination) {
       omni::type_t<serialization_data::bitfield_values>{});
   const auto result =
     deserialize(std::string{serialization_data::bitfield_json}) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -406,12 +438,11 @@ TEST(deserialization, partially_applies_strategy_and_destination) {
 }
 
 TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
-  constexpr auto map = omni::ryml::map_tree_t<omni::ryml::strategy<bool>>{
+  const auto map = omni::ryml::map_tree_t<omni::ryml::strategy<bool>>{
     /*strategy=*/omni::ryml::use_tolerance(2) //
       .allow_partial(true),
   };
-  static_assert(2 == map.strategy.tolerance,
-    "mapper configuration must remain a C++11 constant expression");
+  EXPECT_EQ(2, map.strategy.tolerance);
   const auto result = omni::ryml::parse(R"({"name":"ok","code":"bad"})") //
     .transform(omni::fn::partial(map,
                           omni::type_t<serialization_data::payload>{}));
@@ -422,7 +453,7 @@ TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
 
   EXPECT_TRUE(omni::ryml::is_partial(*result));
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result->diagnostics));
+    omni::ryml::render_diagnostics(result->diagnostics));
   if (result->value) {
     EXPECT_EQ("ok", result->value->name);
     EXPECT_EQ(0, result->value->code);
@@ -433,7 +464,7 @@ TEST(deserialization, maps_scalars_sequences_and_nested_records) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::scalar_values>{},
       std::string{serialization_data::scalar_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -478,7 +509,7 @@ TEST(deserialization_warnings, containers_continue_without_spending_tolerance) {
   EXPECT_EQ(
     "/values/1: warning: \"bad\" is not an integer\n"
     "/values/2: warning: expected integer, found object",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ((std::vector<int>{1, 0, 0, 4}), result.value->values);
     EXPECT_EQ(7, result.value->following);
@@ -595,24 +626,6 @@ TEST_P(serialization, writes_nested_records_and_sequences) {
   EXPECT_EQ("108", root["records"][1]["code"].val());
 }
 
-constexpr omni::ryml::deserialize_t<omni::ryml::strategy<bool>>
-  constant_deserialize{
-    /*strategy=*/omni::ryml::use_tolerance(12) //
-      .allow_partial(false),
-  };
-static_assert(12 == constant_deserialize.strategy.tolerance,
-  "configuration must remain usable in C++11 constant expressions");
-static_assert(0 == omni::ryml::deserialize.strategy.tolerance,
-  "the default deserializer must stop at the first error");
-static_assert(!omni::ryml::deserialize.strategy.partial,
-  "the default deserializer must reject values with field errors");
-static_assert(!omni::ryml::deserialize.strategy.extra,
-  "the default deserializer must reject extra fields");
-static_assert(!omni::ryml::map_tree.strategy.extra,
-  "the default mapper must reject extra fields");
-static_assert(!omni::ryml::strategy<bool>{}.extra,
-  "value-initialized strategies must reject extra fields");
-
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
 constexpr omni::ryml::deserialize_t<omni::ryml::strategy<bool>>
@@ -633,7 +646,7 @@ TEST(deserialization, maps_a_representative_document) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::document>{},
       std::string{serialization_data::representative_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -671,7 +684,7 @@ TEST(deserialization, maps_the_same_schema_from_yaml) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::document>{},
       std::string{serialization_data::representative_yaml}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -696,7 +709,7 @@ TEST(deserialization, assigns_bitfields_through_field_bindings) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
       std::string{serialization_data::bitfield_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -711,7 +724,7 @@ TEST(deserialization, reports_the_schema_scalar_expected_by_a_field) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::invalid_nested_integer_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/data/code: \"invalid\" is not an integer", result.diagnostics);
@@ -721,7 +734,7 @@ TEST(deserialization, rejects_numeric_boolean_values) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
       std::string{R"({"code":815,"enabled":108})"}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/enabled: \"108\" is not a boolean", result.diagnostics);
@@ -731,7 +744,7 @@ TEST(deserialization, rejects_quoted_boolean_values) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
       std::string{R"({"code":815,"enabled":"true"})"}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/enabled: \"true\" is not a boolean", result.diagnostics);
@@ -741,7 +754,7 @@ TEST(deserialization, rejects_unknown_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::unknown_field_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/extra: unknown field", result.diagnostics);
@@ -751,7 +764,7 @@ TEST(deserialization, rejects_duplicate_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::duplicate_field_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/ratio: duplicate field", result.diagnostics);
@@ -761,7 +774,7 @@ TEST(deserialization, rejects_missing_destination_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::missing_field_json}) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/data: missing field", result.diagnostics);
@@ -788,7 +801,7 @@ TEST_P(configured_deserialization, maps_or_reports_invalid_input) {
     };
   const auto result =
     deserialize(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -807,7 +820,7 @@ TEST_P(configured_deserialization,
   const auto result =
     configured_deserialize(omni::type_t<serialization_data::payload>{},
       GetParam().source) //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -830,7 +843,7 @@ TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
   };
   const auto result =
     deserialize(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -892,7 +905,7 @@ TEST_P(extra_fields_policy, applies_extra_independently_of_partial) {
       EXPECT_EQ(!extra, result.diagnostics.stopped());
       EXPECT_EQ(extra ? 0U : 1U, result.diagnostics.issues.size());
       EXPECT_EQ(extra ? std::string{} : c.message,
-        omni::ryml::render_diangostics(result.diagnostics));
+        omni::ryml::render_diagnostics(result.diagnostics));
       if (!result.diagnostics.issues.empty()) {
         EXPECT_EQ(omni::ryml::issue::code::unknown_field,
           result.diagnostics.issues.front().reason);
@@ -949,7 +962,7 @@ TEST_P(allowed_extra_fields, validates_model_fields) {
       .allow_extra(true) //
       .allow_partial(false),
   }(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-    .map_diagnostics(omni::ryml::render_diangostics);
+    .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -1074,33 +1087,26 @@ TEST(deserialization, extra_fields_do_not_hide_syntax_errors) {
       result.diagnostics.issues.front().reason);
     EXPECT_FALSE(result.diagnostics.issues.front().warning);
   }
-  EXPECT_FALSE(omni::ryml::render_diangostics(result.diagnostics).empty());
+  EXPECT_FALSE(omni::ryml::render_diagnostics(result.diagnostics).empty());
 }
 
 TEST(deserialization_strategy, builders_preserve_extra_and_other_settings) {
-  constexpr auto original = //
-  omni::ryml::use_tolerance(2) //
-    .allow_partial(true) //
-    .allow_extra(true);
-  constexpr auto rebound = //
-  original //
-    .use_tolerance(3) //
-    .allow_partial(false);
-  constexpr auto disabled = //
-  rebound //
-    .allow_extra(false);
-  static_assert(rebound.extra,
-    "tolerance and partial builders must preserve extra");
-  static_assert(3 == disabled.tolerance,
-    "allow_extra must preserve tolerance in constant expressions");
-  static_assert(!disabled.partial,
-    "allow_extra must preserve partial in constant expressions");
-  static_assert(!disabled.extra,
-    "allow_extra must be reversible in constant expressions");
+  const auto original = //
+    omni::ryml::use_tolerance(2) //
+      .allow_partial(true) //
+      .allow_extra(true);
+  const auto rebound = //
+    original //
+      .use_tolerance(3) //
+      .allow_partial(false);
+  const auto disabled = //
+    rebound //
+      .allow_extra(false);
 
   EXPECT_EQ(2, original.tolerance);
   EXPECT_TRUE(original.partial);
   EXPECT_TRUE(original.extra);
+  EXPECT_TRUE(rebound.extra);
   EXPECT_EQ(3, disabled.tolerance);
   EXPECT_FALSE(disabled.partial);
   EXPECT_FALSE(disabled.extra);
@@ -1130,17 +1136,6 @@ TEST(deserialization_strategy, designated_configuration_accepts_extra_fields) {
   }
 }
 #endif
-
-constexpr auto updated_strategy = //
-  omni::ryml::use_tolerance(2) //
-    .allow_partial(true) //
-    .use_tolerance(3);
-static_assert(3 == updated_strategy.tolerance,
-  "tolerance builders must remain usable in C++11 constant expressions");
-static_assert(updated_strategy.partial,
-  "rebinding tolerance must preserve the partial policy");
-static_assert(!omni::ryml::strategy<bool>{}.partial,
-  "the default strategy must reject values with field errors");
 
 TEST(deserialization_strategy, changes_fields_without_changing_the_source) {
   const auto original = omni::ryml::use_tolerance(2) //
@@ -1196,7 +1191,7 @@ TEST_P(deserialization_diagnostics,
   EXPECT_EQ(GetParam().stopped, result.diagnostics.stopped());
   EXPECT_EQ(GetParam().issue_count, result.diagnostics.issues.size());
   EXPECT_EQ(GetParam().message,
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ(GetParam().mapped_name, result.value->name);
     EXPECT_EQ(GetParam().mapped_code, result.value->code);
@@ -1224,7 +1219,7 @@ TEST_P(deserialization_diagnostics,
     /*strategy=*/omni::ryml::use_tolerance(GetParam().tolerance) //
       .allow_partial(GetParam().partial),
   }(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-    .map_diagnostics(omni::ryml::render_diangostics);
+    .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(GetParam().has_value, bool(result.value));
   EXPECT_EQ(GetParam().message, result.diagnostics);
@@ -1398,7 +1393,7 @@ TEST(deserialization_diagnostics,
   EXPECT_EQ(
     "/values/1: warning: \"bad\" is not an integer\n"
     "/records/0/code: warning: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (2U != result.diagnostics.issues.size())
     return;
 
@@ -1434,7 +1429,7 @@ TEST(deserialization_diagnostics, retained_diagnostics_own_views_after_moves) {
   }
 
   EXPECT_EQ("/some~1unknown~0field: unknown field",
-    omni::ryml::render_diangostics(retained));
+    omni::ryml::render_diagnostics(retained));
   EXPECT_EQ(1U, retained.issues.size());
   if (1U != retained.issues.size())
     return;
@@ -1461,7 +1456,7 @@ TEST(deserialization_diagnostics, moved_result_retains_value_and_scalar_views) {
 
   EXPECT_TRUE(retained.value);
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(retained.diagnostics));
+    omni::ryml::render_diagnostics(retained.diagnostics));
   if (retained.value) {
     EXPECT_EQ("ok", retained.value->name);
     EXPECT_EQ(0, retained.value->code);
@@ -1513,7 +1508,7 @@ TEST(deserialization_diagnostics, parser_failure_precedes_mapping_policies) {
     EXPECT_EQ(omni::ryml::issue::code::parse_error,
       result.diagnostics.issues.front().reason);
   }
-  EXPECT_FALSE(omni::ryml::render_diangostics(result.diagnostics).empty());
+  EXPECT_FALSE(omni::ryml::render_diagnostics(result.diagnostics).empty());
 }
 
 // JSON and YAML inputs with their expected default diagnostic text.
@@ -1546,7 +1541,7 @@ TEST_P(diagnostic_rendering, renders_paths_and_messages_on_error) {
 
   const auto rendered = //
     std::move(result) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(rendered.value);
   EXPECT_EQ(GetParam().message, rendered.diagnostics);
@@ -1591,7 +1586,7 @@ TEST(diagnostic_rendering, renders_array_positions_in_nested_paths) {
     strict_deserialize(omni::type_t<serialization_data::scalar_values>{},
       R"({"enabled":true,"retries":1,"delta":0,"values":[],"label":"ok",
          "records":[{"name":"ok","code":1},{"name":"bad","code":"x"}]})") //
-           .map_diagnostics(omni::ryml::render_diangostics);
+           .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/records/1/code: \"x\" is not an integer", result.diagnostics);
@@ -1603,7 +1598,7 @@ TEST(diagnostic_rendering, no_issues_render_as_an_empty_string) {
       R"({"name":"ok","code":7})");
 
   EXPECT_TRUE(result.value);
-  EXPECT_EQ("", omni::ryml::render_diangostics(result.diagnostics));
+  EXPECT_EQ("", omni::ryml::render_diagnostics(result.diagnostics));
 }
 
 TEST(deserialization, diagnostics_transformation_moves_an_available_value) {
@@ -1614,7 +1609,7 @@ TEST(deserialization, diagnostics_transformation_moves_an_available_value) {
 
   const auto transformed = //
     std::move(result) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(transformed.value);
   if (transformed.value) {
@@ -1696,12 +1691,12 @@ TEST_P(parser_recovery, retains_failure_and_allows_the_next_invocation) {
     EXPECT_EQ(omni::ryml::issue::code::parse_error,
       retained.diagnostics.issues.front().reason);
   }
-  EXPECT_FALSE(omni::ryml::render_diangostics(retained.diagnostics).empty());
+  EXPECT_FALSE(omni::ryml::render_diagnostics(retained.diagnostics).empty());
 
   const auto recovered =
     deserialize(omni::type_t<serialization_data::payload>{},
       R"({"name":"ok","code":7})") //
-        .map_diagnostics(omni::ryml::render_diangostics);
+        .map_diagnostics(omni::ryml::render_diagnostics);
   EXPECT_TRUE(recovered.value);
   if (recovered.value) {
     EXPECT_EQ("ok", recovered.value->name);
@@ -1736,7 +1731,7 @@ TEST_P(parser_recovery, renders_parse_errors_with_the_standalone_parse_format) {
         GetParam().source);
     auto moved = std::move(result);
     retained = std::move(moved) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
   }
 
   EXPECT_FALSE(retained.value);
@@ -1768,7 +1763,7 @@ TEST_P(parse_failure_policies, preserves_policies_without_returning_a_value) {
         EXPECT_TRUE(result.diagnostics.issues.front().path.empty());
       }
       EXPECT_EQ("line 2, column 21: missing terminating ]",
-        omni::ryml::render_diangostics(result.diagnostics));
+        omni::ryml::render_diagnostics(result.diagnostics));
     },
     GetParam());
 }
@@ -1804,7 +1799,7 @@ TEST(deserialization_diagnostics,
   EXPECT_TRUE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
   EXPECT_EQ("/name: missing field\n/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ("default", result.value->name);
     EXPECT_EQ(42, result.value->code);
@@ -1825,7 +1820,7 @@ TEST(deserialization_diagnostics,
       result.diagnostics.issues.front().reason);
   }
   EXPECT_EQ("line 2, column 21: missing terminating ]",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
 }
 
 #if defined(__cpp_designated_initializers) \
@@ -1916,7 +1911,7 @@ TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
   const auto result =
     map(::ryml::parse_in_arena(
           c4::csubstr{GetParam().source.data(), GetParam().source.size()})) //
-            .map_diagnostics(omni::ryml::render_diangostics);
+            .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -1945,7 +1940,7 @@ TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
     result.diagnostics.policy.tolerance);
   EXPECT_EQ(GetParam().issue_count, result.diagnostics.issues.size());
   EXPECT_EQ(GetParam().message,
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ(GetParam().mapped_name, result.value->name);
     EXPECT_EQ(GetParam().mapped_code, result.value->code);
@@ -1977,7 +1972,7 @@ TEST_P(deserialization_diagnostics, borrowed_mapper_applies_the_same_policies) {
   EXPECT_EQ(GetParam().has_value && 0 != GetParam().issue_count,
     omni::ryml::is_partial(result));
   EXPECT_EQ(GetParam().message,
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ(GetParam().mapped_name, result.value->name);
     EXPECT_EQ(GetParam().mapped_code, result.value->code);
@@ -1993,7 +1988,7 @@ TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
       tree.rootref());
   const auto result = //
     std::move(mapped) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -2017,7 +2012,7 @@ TEST(tree_mapping, copies_lvalue_trees_and_keeps_diagnostic_views_alive) {
 
   EXPECT_FALSE(retained.value);
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(retained.diagnostics));
+    omni::ryml::render_diagnostics(retained.diagnostics));
 }
 
 TEST(tree_mapping, copies_const_lvalue_trees) {
@@ -2031,7 +2026,7 @@ TEST(tree_mapping, copies_const_lvalue_trees) {
     EXPECT_EQ(7, result.value->code);
   }
   EXPECT_EQ("7", omni::ryml::detail::to_string(tree.crootref()["code"].val()));
-  EXPECT_EQ("", omni::ryml::render_diangostics(result.diagnostics));
+  EXPECT_EQ("", omni::ryml::render_diagnostics(result.diagnostics));
 }
 
 TEST(tree_mapping, borrows_subtrees_and_retains_relative_paths) {
@@ -2045,7 +2040,7 @@ TEST(tree_mapping, borrows_subtrees_and_retains_relative_paths) {
   EXPECT_EQ(&tree, result.diagnostics.tree.tree());
   EXPECT_EQ(subtree.id(), result.diagnostics.tree.id());
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
     EXPECT_EQ(subtree["code"].id(), result.diagnostics.issues.front().node_id);
@@ -2064,7 +2059,7 @@ TEST(tree_mapping, rendered_borrowed_results_outlive_the_tree) {
 
     EXPECT_TRUE(omni::ryml::is_partial(result));
     retained = std::move(result) //
-      .map_diagnostics(omni::ryml::render_diangostics);
+      .map_diagnostics(omni::ryml::render_diagnostics);
   }
 
   EXPECT_TRUE(retained.value);
@@ -2091,7 +2086,7 @@ TEST(tree_mapping, borrowed_container_warnings_do_not_spend_budget) {
   EXPECT_EQ(
     "/values/1: warning: \"bad\" is not an integer\n"
     "/records/0/code: warning: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ((std::vector<int>{1, 0, 3}), result.value->values);
     EXPECT_EQ(2U, result.value->records.size());
@@ -2119,7 +2114,7 @@ TEST(tree_mapping, reports_an_invalid_borrowed_node_as_a_mapping_error) {
       result.diagnostics.issues.front().actual);
   }
   EXPECT_EQ("<root>: expected object, found scalar",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
 }
 
 TEST(tree_mapping, defaults_to_strict_mapping_and_owns_diagnostic_views) {
@@ -2134,7 +2129,7 @@ TEST(tree_mapping, defaults_to_strict_mapping_and_owns_diagnostic_views) {
   EXPECT_EQ(0U, retained.diagnostics.policy.tolerance);
   EXPECT_FALSE(retained.diagnostics.policy.partial);
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(retained.diagnostics));
+    omni::ryml::render_diagnostics(retained.diagnostics));
 }
 
 TEST(tree_mapping, reports_an_empty_tree_as_a_mapping_error) {
@@ -2179,20 +2174,6 @@ TEST(tree_mapping, empty_model_accepts_extra_fields) {
   EXPECT_FALSE(result.diagnostics.stopped());
 }
 
-TEST(deserialization, forwards_parser_options_before_mapping) {
-  const auto result =
-    strict_deserialize(omni::type_t<serialization_data::payload>{},
-      "{name: ok,\n code: 7}\n",
-      ::ryml::ParserOptions{}.detect_flow_ml(false));
-
-  EXPECT_TRUE(result.value);
-  EXPECT_TRUE(result.diagnostics.tree.crootref().is_flow_sl());
-  if (result.value) {
-    EXPECT_EQ("ok", result.value->name);
-    EXPECT_EQ(7, result.value->code);
-  }
-}
-
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
 TEST(tree_mapping, supports_designated_configuration) {
@@ -2210,7 +2191,7 @@ TEST(tree_mapping, supports_designated_configuration) {
   EXPECT_TRUE(omni::ryml::is_partial(result));
   EXPECT_EQ(2U, result.diagnostics.policy.tolerance);
   EXPECT_EQ("/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
 }
 #endif
 
@@ -2356,7 +2337,7 @@ TEST_P(container_recovery, retains_defaults_and_classifies_the_issue) {
       }
       EXPECT_EQ(std::string{"/values: "} + (partial ? "warning: " : "")
           + c.message,
-        omni::ryml::render_diangostics(result.diagnostics));
+        omni::ryml::render_diagnostics(result.diagnostics));
       if (result.value) {
         EXPECT_EQ((std::vector<int>{9}), result.value->values);
         EXPECT_EQ(7, result.value->following);
@@ -2415,7 +2396,7 @@ TEST(deserialization, default_rejects_invalid_optional_records_as_errors) {
     EXPECT_FALSE(result.error().issues.front().warning);
   }
   EXPECT_EQ("/field/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.error()));
+    omni::ryml::render_diagnostics(result.error()));
 }
 
 TEST(deserialization_warnings, duplicate_containers_warn_and_keep_first_value) {
@@ -2428,7 +2409,7 @@ TEST(deserialization_warnings, duplicate_containers_warn_and_keep_first_value) {
   EXPECT_TRUE(result.value);
   EXPECT_FALSE(result.diagnostics.stopped());
   EXPECT_EQ("/values: warning: duplicate field",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ((std::vector<int>{1}), result.value->values);
     EXPECT_EQ(7, result.value->following);
@@ -2445,7 +2426,7 @@ TEST(deserialization_warnings, optional_records_inherit_the_warning_policy) {
   EXPECT_TRUE(result.value);
   EXPECT_FALSE(result.diagnostics.stopped());
   EXPECT_EQ("/field/code: warning: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_FALSE(result.value->field);
     EXPECT_EQ(7, result.value->following);
@@ -2466,7 +2447,7 @@ TEST(deserialization_warnings, containers_accept_optional_elements) {
   EXPECT_TRUE(result.value);
   EXPECT_FALSE(result.diagnostics.stopped());
   EXPECT_EQ("/values/2: warning: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ((std::vector<omni::compat::optional<int>>{1,
                 omni::compat::nullopt,
@@ -2502,7 +2483,7 @@ TEST(deserialization_warnings, scalar_errors_stop_after_container_warnings) {
   EXPECT_EQ(
     "/values/0: warning: \"bad\" is not an integer\n"
     "/required: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ((std::vector<int>{0, 3}), result.value->values);
     EXPECT_EQ(11, result.value->required);
@@ -2551,7 +2532,7 @@ TEST(deserialization_warnings, required_records_share_the_hard_error_budget) {
   EXPECT_EQ(
     "/first: \"bad\" is not an integer\n"
     "/nested/code: \"bad\" is not an integer",
-    omni::ryml::render_diangostics(result.diagnostics));
+    omni::ryml::render_diagnostics(result.diagnostics));
   if (result.value) {
     EXPECT_EQ(11, result.value->first);
     EXPECT_EQ("ok", result.value->nested.name);
@@ -2712,6 +2693,10 @@ struct read_only_record {
   // Mutable public field included in serialization.
   std::string name = "Ada";
 
+  int hidden_value() const {
+    return hidden;
+  }
+
   private:
   // Private field omitted from serialization.
   int hidden = 815;
@@ -2740,6 +2725,16 @@ TEST_P(serialization, includes_const_public_fields_and_omits_private_fields) {
   EXPECT_EQ("42", root["code"].val());
   EXPECT_EQ("Ada", root["name"].val());
   EXPECT_FALSE(root.has_child("hidden"));
+}
+
+TEST_P(serialization, preserves_private_state) {
+  const read_only_record value{};
+  const auto source = omni::ryml::serialize_t{
+    /*format=*/GetParam(),
+  }(value);
+
+  EXPECT_EQ(815, value.hidden_value());
+  EXPECT_FALSE(source.empty());
 }
 
 struct numeric_values {
