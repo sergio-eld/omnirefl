@@ -1,0 +1,53 @@
+Subject: [PATCH] Check <span> availability before enabling its adapter
+
+C++20 language mode can be used with an older standard library. GCC 9 and
+Clang 10 accept -std=c++2a while Ubuntu 20.04's libstdc++ 9 does not provide
+<span>. Checking C4_CPP alone therefore makes otherwise supported builds fail
+while including the missing header.
+
+Check that <span> is available before enabling c4core's std::span adapter.
+
+diff --git a/src/c4/std/span.hpp b/src/c4/std/span.hpp
+index 1a0bbdc..3262fad 100644
+--- a/src/c4/std/span.hpp
++++ b/src/c4/std/span.hpp
+@@ -6,7 +6,12 @@
+ #include "c4/language.hpp"
+ #endif
+-
++
++#if defined(__has_include)
++#  if __has_include(<span>)
++#    define C4CORE_HAS_STD_SPAN 1
++#  endif
++#endif
+-
++
+-#if (C4_CPP >= 20) || defined(__DOXYGEN__)
++#if (C4_CPP >= 20 && defined(C4CORE_HAS_STD_SPAN)) || defined(__DOXYGEN__)
+-
++
+ #ifndef C4CORE_SINGLE_HEADER
+ #include "c4/substr.hpp"
+diff --git a/src/c4/std/span_fwd.hpp b/src/c4/std/span_fwd.hpp
+index 25e5bba..43f8eac 100644
+--- a/src/c4/std/span_fwd.hpp
++++ b/src/c4/std/span_fwd.hpp
+@@ -9,7 +9,12 @@
+ #include "c4/language.hpp"
+ #endif
+-
++
++#if defined(__has_include)
++#  if __has_include(<span>)
++#    define C4CORE_HAS_STD_SPAN 1
++#  endif
++#endif
+-
++
+-#if (C4_CPP >= 20) || defined(__DOXYGEN__)
++#if (C4_CPP >= 20 && defined(C4CORE_HAS_STD_SPAN)) || defined(__DOXYGEN__)
+-
++
+ #ifndef C4CORE_SINGLE_HEADER
+ #include "c4/substr_fwd.hpp"

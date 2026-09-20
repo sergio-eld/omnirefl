@@ -141,6 +141,12 @@ struct method_routes {
   static int static_function() { return 0; }
 };
 
+#if 202002L <= OMNI_CPLUSPLUS
+struct immediate_method {
+  consteval int constant() const { return 815; }
+};
+#endif
+
 struct method_base {
   int inherited() const { return 815; }
 };
@@ -458,6 +464,20 @@ TEST(function_metadata, binds_non_overloaded_public_methods) {
   EXPECT_EQ(815, result.invoked_id);
 }
 
+#if 202002L <= OMNI_CPLUSPLUS
+TEST(function_metadata, omits_immediate_methods) {
+  namespace fm = function_metadata_test;
+
+  const std::size_t count = omni::reflected_call(
+    [](auto meta) -> std::size_t {
+      return std::tuple_size<decltype(meta.public_methods())>::value;
+    },
+    omni::type<fm::immediate_method>);
+
+  EXPECT_EQ(0u, count);
+}
+#endif
+
 TEST(function_metadata, binds_visible_inherited_methods) {
   namespace fm = function_metadata_test;
 
@@ -587,7 +607,7 @@ TEST(function_metadata, treats_qualified_fields_as_the_same_function_tag) {
   namespace fm = function_metadata_test;
 
   const fm::observation result = omni::reflected_call(fm::inspect_routes{},
-    fm::qualified_routes{});
+    fm::qualified_routes{fm::create_function{}});
 
   EXPECT_EQ(815, result.invoked_id);
 }

@@ -832,6 +832,20 @@ if("17" IN_LIST _supported_cpp_standards)
         warning
         1)
     _omnirefl_diagnostic_tool_run(
+        "skipped_inherited_overloaded_method"
+        diagnostic_run/skipped_inherited_overloaded_method.cpp
+        "overloaded public member function .*record::read' skipped"
+        "overload resolution is not supported"
+        warning
+        1)
+    _omnirefl_diagnostic_tool_run(
+        "skipped_implicit_overloaded_method"
+        diagnostic_run/skipped_implicit_overloaded_method.cpp
+        "overloaded public member function .*record::operator=' skipped"
+        "overload resolution is not supported"
+        warning
+        1)
+    _omnirefl_diagnostic_tool_run(
         "lazy_specialization_dependency"
         diagnostic_run/lazy_specialization_dependency.cpp
         "explicit template specializations are not supported"

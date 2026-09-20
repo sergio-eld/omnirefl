@@ -366,9 +366,11 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
     non-public bases are omitted
 - **Public function metadata:**
   - non-static public member functions without parameter packs; overloaded
-    methods are skipped with a warning, and conversion operators are omitted
+    methods are skipped with a warning, while conversion operators and
+    immediate functions are omitted
   - fixed `function_t` fields as special field members for free or static
-    functions; dependent function-tag fields in primary templates are omitted
+    functions; dependent function-tag fields in primary templates remain
+    ordinary fields without function metadata
   - source name, documentation, pointer, arity, parameter metadata, and return
     metadata; parameter and return metadata include source-spelled type names
     and tagged documentation

@@ -201,13 +201,13 @@ void print_field_updates(oceanic::telemetry telemetry,
         -> void {
         // Reflected scope: metadata is available here and in called templates.
         record.public_fields()
-          | fn::filter<[]<typename Member> {
+          | fn::filter([]<typename Member> {
               using binding = std::remove_cvref_t<Member>;
               if constexpr (omni::field_binding<binding>)
                 return binding::is_mutable();
 
               return false; //< Special function field.
-            }>()
+            })
           | fn::each([](omni::field_binding auto field) {
               constexpr std::string_view name = field.name();
 

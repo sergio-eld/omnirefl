@@ -1,11 +1,7 @@
 include(FetchContent)
 
 set(_serialization_dependencies)
-set(_serialization_add_ryml_sources FALSE)
 
-if(NOT TARGET tl::expected)
-    find_package(tl-expected CONFIG QUIET)
-endif()
 if(NOT TARGET tl::expected)
     set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
     set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -18,9 +14,6 @@ if(NOT TARGET tl::expected)
 endif()
 
 if(NOT TARGET tl::optional)
-    find_package(tl-optional CONFIG QUIET)
-endif()
-if(NOT TARGET tl::optional)
     set(OPTIONAL_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
     set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(tl_optional
@@ -32,51 +25,29 @@ if(NOT TARGET tl::optional)
 endif()
 
 if(NOT TARGET ryml::ryml)
-    find_package(ryml 0.14 CONFIG QUIET)
-endif()
-if(NOT TARGET ryml::ryml)
+    set(RYML_INSTALL OFF CACHE BOOL "" FORCE)
+    # Parse errors use invocation-local jump recovery, without exceptions.
+    set(RYML_DEFAULT_CALLBACK_USES_EXCEPTIONS OFF CACHE BOOL "" FORCE)
+    set(RYML_CXX_STANDARD 11 CACHE STRING "" FORCE)
     FetchContent_Declare(rapidyaml
         GIT_REPOSITORY https://github.com/biojppm/rapidyaml.git
         # v0.14.0 supports both clang-cl and GCC 16.
         GIT_TAG 11fa21d3fd3ca4a65df2c0e8b59fa0cc3b5c1642
-        # Populate the source without adding RapidYAML's compiled targets.
-        SOURCE_SUBDIR _omnirefl_no_cmake_build
+        # c4core assumes every C++20 standard library provides <span>.
+        PATCH_COMMAND git -C <SOURCE_DIR>/ext/c4core apply
+            "${CMAKE_CURRENT_LIST_DIR}/patches/c4core-span-availability.patch"
         GIT_PROGRESS TRUE)
     list(APPEND _serialization_dependencies rapidyaml)
-    set(_serialization_add_ryml_sources TRUE)
 endif()
 
 if(_serialization_dependencies)
+    # Do not inherit the reflection tool's C++23 standard in dependencies.
+    set(_serialization_parent_standard "${CMAKE_CXX_STANDARD}")
+    set(CMAKE_CXX_STANDARD 11)
     FetchContent_MakeAvailable(${_serialization_dependencies})
-endif()
-
-if(_serialization_add_ryml_sources)
-    set(_serialization_ryml_sources
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/common.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/node_type.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/parse.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/preprocess.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/reference_resolver.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/tag.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/tree.cpp
-        ${rapidyaml_SOURCE_DIR}/src/c4/yml/version.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/alloc.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/base64.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/char_traits.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/error.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/format.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/language.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/memory_resource.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/memory_util.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/utf.cpp
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src/c4/version.cpp)
-
-    add_library(omnirefl_ryml_sources INTERFACE)
-    add_library(ryml::ryml ALIAS omnirefl_ryml_sources)
-    target_compile_features(omnirefl_ryml_sources INTERFACE cxx_std_11)
-    target_include_directories(omnirefl_ryml_sources SYSTEM INTERFACE
-        ${rapidyaml_SOURCE_DIR}/src
-        ${rapidyaml_SOURCE_DIR}/ext/c4core/src)
-    target_sources(omnirefl_ryml_sources INTERFACE
-        ${_serialization_ryml_sources})
+    if(_serialization_parent_standard)
+        set(CMAKE_CXX_STANDARD "${_serialization_parent_standard}")
+    else()
+        unset(CMAKE_CXX_STANDARD)
+    endif()
 endif()

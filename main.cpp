@@ -5400,7 +5400,8 @@ public_method_candidates_view(
     | std::views::filter([](const clang::CXXMethodDecl *m) {
         return clang::AccessSpecifier::AS_public == m->getAccess()
           && !m->isStatic() && !m->isImplicit() && !m->isDeleted()
-          && !m->isVariadic() && !m->getDescribedFunctionTemplate()
+          && !m->isVariadic() && !m->isConsteval()
+          && !m->getDescribedFunctionTemplate()
           && !llvm::isa<clang::CXXConstructorDecl>(m)
           && !llvm::isa<clang::CXXDestructorDecl>(m)
           && !llvm::isa<clang::CXXConversionDecl>(m);
@@ -5417,16 +5418,29 @@ public_method_candidates_view(
       });
 }
 
+bool method_name_is_unambiguous(const clang::CXXRecordDecl *rd,
+  const clang::CXXMethodDecl *method) {
+  assert(rd && method);
+
+  // Implicit copy/move assignments make `&_T::operator=` ambiguous.
+  if (clang::OO_Equal == method->getOverloadedOperator())
+    return false;
+
+  return 1 == std::ranges::count_if(rd->lookup(method->getDeclName()),
+    [](const clang::NamedDecl *candidate) {
+      const clang::NamedDecl *declaration = candidate->getUnderlyingDecl();
+
+      return llvm::isa<clang::FunctionDecl>(declaration)
+        || llvm::isa<clang::FunctionTemplateDecl>(declaration);
+    });
+}
+
 util::viewable_range_of<clang::CXXMethodDecl *> auto public_methods_view(
   const clang::CXXRecordDecl *rd) {
   assert(rd);
 
   return public_method_candidates_view(rd) //
-    | std::views::filter([rd](const clang::CXXMethodDecl *m) {
-        return 1 == std::ranges::count_if(rd->methods(), [m](const auto *d) {
-          return !d->isImplicit() && d->getDeclName() == m->getDeclName();
-        });
-      });
+    | std::views::filter(std::bind_front(method_name_is_unambiguous, rd));
 }
 
 std::set<std::string> skipped_overloaded_public_method_names(
@@ -5435,11 +5449,7 @@ std::set<std::string> skipped_overloaded_public_method_names(
 
   return public_method_candidates_view(rd) //
     | std::views::filter([rd](const clang::CXXMethodDecl *method) {
-        return 1 < std::ranges::count_if(rd->methods(),
-                     [method](const clang::CXXMethodDecl *candidate) {
-                       return !candidate->isImplicit()
-                         && candidate->getDeclName() == method->getDeclName();
-                     });
+        return !method_name_is_unambiguous(rd, method);
       })
     | std::views::transform(&clang::CXXMethodDecl::getNameAsString)
     | std::ranges::to<std::set>();
