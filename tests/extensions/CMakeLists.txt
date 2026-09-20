@@ -7,6 +7,11 @@ if(NOT TARGET omni::refl)
 endif()
 
 if(NOT TARGET omni::serialization)
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../extensions/serialization/dependencies.cmake")
+        include("${CMAKE_CURRENT_LIST_DIR}/../../extensions/serialization/dependencies.cmake")
+    else()
+        include(serialization/dependencies.cmake)
+    endif()
     find_package(omnirefl CONFIG REQUIRED COMPONENTS serialization)
 endif()
 
