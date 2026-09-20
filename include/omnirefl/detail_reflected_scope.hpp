@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <omnirefl/compat.hpp>
+#include <omnirefl/traits.hpp>
 
 // Included after the public entity and availability declarations.
 namespace omni {
@@ -41,6 +42,26 @@ using _meta = //< Internal convenience accessor for generated metadata.
   _reflected<
     // Specializations are generated for unqualified types.
     compat::decay_t<T>>;
+
+template <typename Pointer, typename Record, typename... Argument>
+constexpr auto _invoke_bound_function(std::true_type,
+  Pointer f,
+  Record &record,
+  Argument &&...argument)
+  -> decltype(compat::invoke(f,
+    record,
+    std::forward<Argument>(argument)...)) {
+  return compat::invoke(f, record, std::forward<Argument>(argument)...);
+}
+
+template <typename Pointer, typename Record, typename... Argument>
+constexpr auto _invoke_bound_function(std::false_type,
+  Pointer f,
+  Record &,
+  Argument &&...argument)
+  -> decltype(compat::invoke(f, std::forward<Argument>(argument)...)) {
+  return compat::invoke(f, std::forward<Argument>(argument)...);
+}
 
 template <typename Owner, typename FieldMeta>
 struct _is_writable_field:
@@ -86,17 +107,17 @@ constexpr bool _same_field_name(const char *lhs, const char *rhs) noexcept {
   return *lhs == *rhs && ('\0' == *lhs || _same_field_name(lhs + 1, rhs + 1));
 }
 
-template <typename Field, typename Fields>
-struct _contains_field_name;
+template <typename Member, typename Members>
+struct _contains_member_name;
 
-template <typename Field>
-struct _contains_field_name<Field, std::tuple<>>: std::false_type {};
+template <typename Member>
+struct _contains_member_name<Member, std::tuple<>>: std::false_type {};
 
-template <typename Field, typename Head, typename... Tail>
-struct _contains_field_name<Field, std::tuple<Head, Tail...>>:
-    compat::conditional_t<_same_field_name(Field::name(), Head::name()),
+template <typename Member, typename Head, typename... Tail>
+struct _contains_member_name<Member, std::tuple<Head, Tail...>>:
+    compat::conditional_t<_same_field_name(Member::name(), Head::name()),
       std::true_type,
-      _contains_field_name<Field, std::tuple<Tail...>>> {};
+      _contains_member_name<Member, std::tuple<Tail...>>> {};
 
 // Generated field accessors use unqualified member access, so substitution
 // reflects C++ lookup from the final record, including base ambiguity.
@@ -107,6 +128,12 @@ template <typename Record, typename Field>
 struct _is_public_field_visible_from<Record,
   Field,
   compat::void_t<decltype(Field::value(std::declval<Record &>()))>>:
+    std::true_type {};
+
+template <typename Record, typename Meta>
+struct _is_public_field_visible_from<Record,
+  function_meta_t<Meta>,
+  compat::void_t<decltype(Meta::template pointer<Record>())>>:
     std::true_type {};
 
 template <typename Record,
@@ -129,7 +156,7 @@ struct _all_visible_public_fields<Record,
       std::tuple<Tail...>,
       compat::conditional_t<
         _is_public_field_visible_from<Record, BaseField>::value
-          && !_contains_field_name<BaseField, std::tuple<OwnField...>>::value,
+          && !_contains_member_name<BaseField, std::tuple<OwnField...>>::value,
         std::tuple<Collected..., BaseField>,
         std::tuple<Collected...>>> {};
 
@@ -159,6 +186,68 @@ using _all_visible_public_fields_t =
   typename _all_visible_public_fields<typename Meta::type,
     typename Meta::own_public_fields_t,
     typename _expand_bases<typename Meta::public_bases_t>::type>::type;
+
+template <typename Record, typename Method, typename = void>
+struct _is_public_method_visible_from: std::false_type {};
+
+template <typename Record, typename Meta>
+struct _is_public_method_visible_from<Record,
+  function_meta_t<Meta>,
+  compat::void_t<decltype(Meta::template pointer<Record>())>>:
+    std::is_same<decltype(Meta::template pointer<Record>()),
+      decltype(Meta::pointer())> {};
+
+template <typename Record,
+  typename OwnMethods,
+  typename RemainingBaseMethods,
+  typename Collected = std::tuple<>>
+struct _all_visible_public_methods;
+
+template <typename Record,
+  typename... OwnMethod,
+  typename BaseMethod,
+  typename... Tail,
+  typename... Collected>
+struct _all_visible_public_methods<Record,
+  std::tuple<OwnMethod...>,
+  std::tuple<BaseMethod, Tail...>,
+  std::tuple<Collected...>>:
+    _all_visible_public_methods<Record,
+      std::tuple<OwnMethod...>,
+      std::tuple<Tail...>,
+      compat::conditional_t<
+        _is_public_method_visible_from<Record, BaseMethod>::value
+          && !_contains_member_name<BaseMethod,
+            std::tuple<OwnMethod...>>::value,
+        std::tuple<Collected..., BaseMethod>,
+        std::tuple<Collected...>>> {};
+
+template <typename Record, typename... OwnMethod, typename... Collected>
+struct _all_visible_public_methods<Record,
+  std::tuple<OwnMethod...>,
+  std::tuple<>,
+  std::tuple<Collected...>> {
+  using type = std::tuple<Collected..., OwnMethod...>;
+};
+
+template <typename Bases>
+struct _expand_base_methods;
+
+template <typename... Bases>
+struct _expand_base_methods<std::tuple<Bases...>> {
+  using type = decltype(std::tuple_cat(std::declval<std::tuple<>>(),
+    std::declval<
+      typename _all_visible_public_methods<typename _meta<Bases>::type,
+        typename _meta<Bases>::own_public_methods_t,
+        typename _expand_base_methods<
+          typename _meta<Bases>::public_bases_t>::type>::type>()...));
+};
+
+template <typename Meta>
+using _all_visible_public_methods_t =
+  typename _all_visible_public_methods<typename Meta::type,
+    typename Meta::own_public_methods_t,
+    typename _expand_base_methods<typename Meta::public_bases_t>::type>::type;
 
 } // namespace
 } // namespace detail

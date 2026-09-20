@@ -1,7 +1,8 @@
 <!-- pages:introduction:start -->
 # Omnirefl
 
-A C++ reflection tool built for a seamless experience without macros or UB.
+A C++ reflection tool built for a seamless experience without macros* or UB.<br>
+<sub>* Some compatibility QoL before C++17/20 uses macros.</sub>
 
 <p align="center">
   <img src="omnirefl-banner.png" alt="Meme comparing Omnirefl AST parsing and template machinery with languages that have built-in reflection" width="640">
@@ -19,7 +20,7 @@ Omnirefl's C++11-compatible interfaces.
 Include directives and `main()` are omitted to keep the block compact; see the
 [complete source](tests/tool/example/main.cpp).
 
-```cpp
+````cpp
 // One .cpp; no declaration headers, metadata files, or reflection macros.
 
 namespace oceanic {
@@ -41,7 +42,32 @@ struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
 
   // Reflected field properties are queryable.
   mutable std::string name = "before"; //< `.is_mutable()` is true.
+
+  // Public non-static methods are reflected. Overloaded methods are skipped
+  // with a warning. `.documentation()` exposes the comment; Doxygen parameter
+  // descriptions, such as `@param` or `\param[in]`, are available through
+  // parameter metadata.
+
+  /** Check proximity.
+   * @param other Other position.
+   * @return Whether the positions are near.
+   */
+  bool is_near(coordinates other) const {
+    return location.latitude == other.latitude
+      && location.longitude == other.longitude;
+  }
 };
+
+// A `function_t` record field exposes this free function to reflection.
+// Free functions cannot be standalone reflection roots; see "How It Works".
+
+/** Measure a distance.
+ * @param scale Distance scale.
+ * @return The scaled distance.
+ */
+double distance(vessel, double scale) {
+  return scale;
+}
 
 // Primary templates are supported; `.type_name()` returns `"fleet"` without
 // template arguments.
@@ -49,6 +75,9 @@ template <typename T>
 struct fleet { //< Discovered as an `omni::type_t` argument to `reflected_call`.
   // Records nested inside template records are not supported.
   // struct not_supported {};
+
+  // Its signature types join dependency discovery.
+  omni::function_t<distance> measure;
 
   // `std` types are not reflected, but dependency protocols apply.
   // Here `mapped_type` discovers `T`.
@@ -69,69 +98,103 @@ struct telemetry { //< Discovered as a value argument to `reflected_call`.
 // Templates may be declared outside the reflected scope and use reflection
 // when called from it, but must not be instantiated outside that scope.
 template <omni::record_meta RecordMeta>
-std::string describe_fields(RecordMeta record) {
+std::string describe_record(RecordMeta record) {
   namespace fn = omni::fn; //< Functional QoL for tuple-like values.
 
-  const auto description = record.public_fields()
-    | fn::map([]<omni::field_meta FieldMeta>(FieldMeta field) {
-        const auto field_description = std::format("  {}: {}", field.name(),
-          // Use `.spelled_qualified_type_name()` to preserve namespaces.
-          field.spelled_type_name());
+  const auto describe_function = //
+    [](omni::function_meta auto function) {
+      const auto parameters = function.parameters()
+        | fn::map([](omni::function_param_meta auto parameter) {
+            const auto description = std::format("{}{}",
+              parameter.spelled_type_name(),
+              std::string_view{parameter.name()}.empty()
+                ? std::string{}
+                : std::format(" {}", parameter.name()));
 
-        const std::optional default_value = std::invoke(
-          [] -> std::optional<std::string> {
-            // can:   int value = 8 * 100 + 15;
-            // can't: int value = make_value();
-            if constexpr (FieldMeta::has_default_value_access()
-              && std::formattable<typename FieldMeta::type, char>)
-              return std::optional{
-                std::format(" = {}", FieldMeta::default_value())};
+            return std::string_view{parameter.documentation()}.empty()
+              ? description
+              : std::format("{} [{}]",
+                  description,
+                  parameter.documentation());
+          })
+        | fn::foldl(
+          [](std::string before, const std::string &parameter) {
+            return before.empty() ? parameter : before + ", " + parameter;
+          },
+          std::string{});
 
-            return std::nullopt;
-          });
+      return std::format("  {}({}) -> {}; // {}\n",
+        function.name(),
+        parameters,
+        function.returns().spelled_type_name(),
+        function.documentation());
+    };
 
-        // Fundamental and standard-library types are not reflected, so the
-        // metadata query for the actual type name is not available for them.
-        if constexpr (omni::is_reflected<typename FieldMeta::type>::value)
-          return std::format("{} (resolves to {}){};\n",
+  const auto fields = record.public_fields()
+    | fn::map([describe_function]<typename Member>(Member member) {
+        if constexpr (omni::function_meta<Member>)
+          return describe_function(member);
+        else {
+          static_assert(omni::field_meta<Member>);
+          const auto field_description = std::format("  {}: {}", member.name(),
+            // Use `.spelled_qualified_type_name()` to preserve namespaces.
+            member.spelled_type_name());
+
+          const std::optional default_value = std::invoke(
+            [] -> std::optional<std::string> {
+              // can:   int value = 8 * 100 + 15;
+              // can't: int value = make_value();
+              if constexpr (Member::has_default_value_access()
+                && std::formattable<typename Member::type, char>)
+                return std::optional{
+                  std::format(" = {}", Member::default_value())};
+
+              return std::nullopt;
+            });
+
+          // Fundamental and standard-library types are not reflected, so the
+          // metadata query for the actual type name is unavailable for them.
+          if constexpr (omni::is_reflected<typename Member::type>::value)
+            return std::format("{} (resolves to {}){};\n",
+              field_description,
+              omni::meta_for<typename Member::type>::type_name(),
+              default_value.value_or(""));
+
+          return std::format("{}{};\n",
             field_description,
-            omni::meta_for<typename FieldMeta::type>::type_name(),
             default_value.value_or(""));
-
-        return std::format("{}{};\n",
-          field_description,
-          default_value.value_or(""));
+        }
       })
-    | fn::foldl(std::plus{},
-      std::format("{} {{\n", record.qualified_type_name()));
+    | fn::foldl(std::plus{}, std::string{});
 
-  return description + "}";
+  const auto methods = record.public_methods()
+    | fn::map(describe_function)
+    | fn::foldl(std::plus{}, std::string{});
+
+  return std::format("{} {{\n{}{}}}",
+    record.qualified_type_name(),
+    fields,
+    methods);
 }
 
 /*
- * `main()` traverses discovered type dependencies depth-first and prints:
- * oceanic::fleet {
- *   vessels: map<std::string, T>;
- * }
- * oceanic::vessel {
- *   location: vessel::coordinates (resolves to vessel::position);
- *   name: string = before;
- * }
- * oceanic::vessel::position {
- *   latitude: double = 0;
- *   longitude: double = 0;
- * }
- */
-
-// `omni::fn::filter<Trait>()` uses `Trait<T>::value`, like
-// `std::is_integral<T>`.
-// The equivalent C++20 NTTP form for this trait is:
-//   omni::fn::filter<[]<omni::field_binding Field>() {
-//     return Field::is_mutable();
-//   }>()
-// Instantiate either form only within the reflected scope.
-template <omni::field_binding Field>
-using mutable_field = std::bool_constant<Field::is_mutable()>;
+`main()` uses `describe_record()` to print discovered records in depth-first order:
+```
+oceanic::fleet {
+  measure(vessel, double scale [Distance scale.]) -> double; // Measure a distance.
+  vessels: map<std::string, T>;
+}
+oceanic::vessel {
+  location: vessel::coordinates (resolves to vessel::position);
+  name: string = before;
+  is_near(vessel::coordinates other [Other position.]) -> bool; // Check proximity.
+}
+oceanic::vessel::position {
+  latitude: double = 0;
+  longitude: double = 0;
+}
+```
+*/
 
 void print_field_updates(oceanic::telemetry telemetry,
   const oceanic::vessel vessel) {
@@ -148,7 +211,13 @@ void print_field_updates(oceanic::telemetry telemetry,
         -> void {
         // Reflected scope: metadata is available here and in called templates.
         record.public_fields()
-          | fn::filter<mutable_field>()
+          | fn::filter<[]<typename Member> {
+              using binding = std::remove_cvref_t<Member>;
+              if constexpr (omni::field_binding<binding>)
+                return binding::is_mutable();
+
+              return false; //< Special function field.
+            }>()
           | fn::each([](omni::field_binding auto field) {
               constexpr std::string_view name = field.name();
 
@@ -171,7 +240,7 @@ void print_field_updates(oceanic::telemetry telemetry,
 // For `print_field_updates({}, {})`:
 // before: depth=42 sensor=108 name=before
 // after:  depth=815 sensor=108 name=oceanic
-```
+````
 
 Minimal CMake setup:
 
@@ -293,8 +362,16 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
   - value/reference capability queries for generic field handling
   - bitfield and misaligned packed scalar members remain readable; writable
     members remain assignable but do not expose references
-  - private/protected fields, fields inherited through non-public bases, and
-    member functions are omitted
+  - private/protected fields, static fields, and fields inherited through
+    non-public bases are omitted
+- **Public function metadata:**
+  - non-static public member functions without parameter packs; overloaded
+    methods are skipped with a warning, and conversion operators are omitted
+  - fixed `function_t` fields as special field members for free or static
+    functions; dependent function-tag fields in primary templates are omitted
+  - source name, documentation, pointer, arity, parameter metadata, and return
+    metadata; parameter and return metadata include source-spelled type names
+    and tagged documentation
 - **Enum metadata:** enumerator names and values in declaration order.
 - **Invocation and bindings:**
   - `reflected_call` value arguments produce non-owning bindings;
@@ -319,6 +396,7 @@ Additional reflected types are discovered through:
 - public field types
 - public bases and transitive public bases
 - public fields of primary template records
+- parameter and return types of supported function metadata
 - supported public member aliases:
   - `error_type`
   - `first_type`
@@ -619,6 +697,14 @@ ordinary record and enum forward declarations and defer nested lookup, but it
 cannot safely recreate local or unnamed types, non-forward-declarable enums,
 or records nested in template records. Constrained primary templates and
 explicit or partial specializations are also unsupported.
+
+Functions have no equivalent general forward-declaration strategy: reproducing
+a declaration requires its parameter types and overload identity, which may not
+be nameable before the source declaration. Therefore `function_t` is not a
+standalone reflection root. The first implementation discovers it only as a
+special field member of a reflected record, where generated access can remain
+dependent on the owning record. The function's parameter and return types then
+enter dependency discovery on a best-effort basis.
 <!-- pages:how-it-works:end -->
 
 ## Troubleshooting and Bug Reports

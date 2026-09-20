@@ -3,17 +3,7 @@ if(TARGET omni::serialization)
     return()
 endif()
 
-# Dependencies may already have been provided through FetchContent.
-# Quiet lookup lets OPTIONAL_COMPONENTS leave the base package usable.
-if(NOT TARGET ryml::ryml)
-    find_package(ryml 0.14 CONFIG QUIET)
-endif()
-if(NOT TARGET tl::expected)
-    find_package(tl-expected CONFIG QUIET)
-endif()
-if(NOT TARGET tl::optional)
-    find_package(tl-optional CONFIG QUIET)
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/serialization-dependencies.cmake")
 
 foreach(_dependency IN ITEMS ryml::ryml tl::expected tl::optional)
     if(NOT TARGET "${_dependency}")
@@ -24,8 +14,8 @@ foreach(_dependency IN ITEMS ryml::ryml tl::expected tl::optional)
     endif()
 endforeach()
 
-# Keep third-party targets out of the core export; this opt-in component
-# resolves them before defining the installed extension target.
+# Keep third-party targets out of the core export. Requesting this component
+# finds or fetches them before defining the installed extension target.
 add_library(omni::serialization INTERFACE IMPORTED)
 set_target_properties(omni::serialization PROPERTIES
     INTERFACE_COMPILE_FEATURES cxx_std_11
