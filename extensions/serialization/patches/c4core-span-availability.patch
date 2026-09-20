@@ -6,48 +6,24 @@ Clang 10 accept -std=c++2a while Ubuntu 20.04's libstdc++ 9 does not provide
 while including the missing header.
 
 Check that <span> is available before enabling c4core's std::span adapter.
+Keep the existing __DOXYGEN__ alternative so documentation can expose the
+adapter independently of the configured C++ language mode.
 
 diff --git a/src/c4/std/span.hpp b/src/c4/std/span.hpp
-index 1a0bbdc..3262fad 100644
 --- a/src/c4/std/span.hpp
 +++ b/src/c4/std/span.hpp
-@@ -6,7 +6,12 @@
- #include "c4/language.hpp"
- #endif
--
-+
-+#if defined(__has_include)
-+#  if __has_include(<span>)
-+#    define C4CORE_HAS_STD_SPAN 1
-+#  endif
-+#endif
--
-+
+@@ -11,3 +11,3 @@
 -#if (C4_CPP >= 20) || defined(__DOXYGEN__)
-+#if (C4_CPP >= 20 && defined(C4CORE_HAS_STD_SPAN)) || defined(__DOXYGEN__)
++#if (C4_CPP >= 20 && __has_include(<span>)) || defined(__DOXYGEN__)
 -
 +
  #ifndef C4CORE_SINGLE_HEADER
- #include "c4/substr.hpp"
 diff --git a/src/c4/std/span_fwd.hpp b/src/c4/std/span_fwd.hpp
-index 25e5bba..43f8eac 100644
 --- a/src/c4/std/span_fwd.hpp
 +++ b/src/c4/std/span_fwd.hpp
-@@ -9,7 +9,12 @@
- #include "c4/language.hpp"
- #endif
--
-+
-+#if defined(__has_include)
-+#  if __has_include(<span>)
-+#    define C4CORE_HAS_STD_SPAN 1
-+#  endif
-+#endif
--
-+
+@@ -13,3 +13,3 @@
 -#if (C4_CPP >= 20) || defined(__DOXYGEN__)
-+#if (C4_CPP >= 20 && defined(C4CORE_HAS_STD_SPAN)) || defined(__DOXYGEN__)
++#if (C4_CPP >= 20 && __has_include(<span>)) || defined(__DOXYGEN__)
 -
 +
  #ifndef C4CORE_SINGLE_HEADER
- #include "c4/substr_fwd.hpp"
