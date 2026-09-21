@@ -37,10 +37,12 @@ enum class reflected_entity {
 template <typename T, typename = void>
 struct is_reflected;
 
+template <typename _M>
+struct function_meta_t;
+
 } // namespace omni
 
-// Ad hoc: detail helpers depend on `reflected_entity`, so this include follows
-// its declaration instead of the other includes at the top of the file.
+// The implementation depends on the public declarations above.
 #include <omnirefl/detail_reflected_scope.hpp>
 
 namespace omni {
@@ -669,6 +671,9 @@ struct field_binding_t {
   constexpr explicit field_binding_t(record &value): _record(value) {}
 };
 
+template <typename Record, typename _M>
+struct function_binding_t;
+
 /** Reflected-scope-only metadata wrapper; `_M` is opaque. */
 template <typename _M,
 #if defined(OMNI_TOOL_RUN)
@@ -723,6 +728,9 @@ struct meta_t<_M, reflected_entity::record> {
    * Hidden and ambiguous inherited fields are omitted.
    */
   using public_fields_t = detail::_all_visible_public_fields_t<_M>;
+
+  /** Metadata tuple for visible non-overloaded public methods. */
+  using public_methods_t = detail::_all_visible_public_methods_t<_M>;
 
   /**
    * Reflected record name without namespace qualification.
@@ -809,6 +817,11 @@ struct meta_t<_M, reflected_entity::record> {
   static constexpr public_fields_t public_fields() noexcept {
     return {};
   }
+
+  /** Return visible non-overloaded public methods. */
+  static constexpr public_methods_t public_methods() noexcept {
+    return {};
+  }
 #endif
 
   /**
@@ -872,18 +885,29 @@ struct meta_t<_M, reflected_entity::record> {
   friend constexpr meta_t<detail::_meta<U>> reflected(type_t<U>) noexcept;
 #endif
 
-  // Record bindings use `_public_fields` to bind generated field metadata.
+  // Record bindings use these functions to bind generated member metadata.
   template <typename, reflected_entity>
   friend struct binding_t;
 
   constexpr meta_t() noexcept = default;
 
-  // Deduce the field pack from its tuple without a C++14 generic lambda.
-  template <typename _T, typename... FieldMeta>
-  static constexpr std::tuple<field_binding_t<_T, FieldMeta>...>
-    _public_fields(_T &t, std::tuple<field_meta_t<FieldMeta>...>) {
-    return std::tuple<field_binding_t<_T, FieldMeta>...>{
-      field_binding_t<_T, FieldMeta>{t}...};
+  template <typename _T, typename Meta>
+  static constexpr field_binding_t<_T, Meta> _bind(
+    _T &t, field_meta_t<Meta>) {
+    return field_binding_t<_T, Meta>{t};
+  }
+
+  template <typename _T, typename Meta>
+  static constexpr function_binding_t<_T, Meta> _bind(
+    _T &t, function_meta_t<Meta>) {
+    return function_binding_t<_T, Meta>{t};
+  }
+
+  // Deduce the member pack without a C++14 generic lambda.
+  template <typename _T, typename... Member>
+  static constexpr auto _bind_members(_T &t, std::tuple<Member...>)
+    -> std::tuple<decltype(_bind(t, Member{}))...> {
+    return {_bind(t, Member{})...};
   }
 };
 
@@ -1060,6 +1084,31 @@ template <typename T>
 constexpr type_t<T> type{};
 #endif
 
+#if defined(__cpp_nontype_template_parameter_auto)
+/** Instrumentation function tag; usable without generated metadata. */
+template <auto Function>
+struct function_t {};
+#else
+/** Instrumentation function tag; usable without generated metadata. */
+template <typename F, F Function>
+struct function_t {};
+#endif
+
+#if defined(__cpp_nontype_template_parameter_auto)
+/** C++17 QoL value for `function_t`; usable without generated metadata. */
+template <auto Function>
+constexpr function_t<Function> function{};
+#endif
+
+#if defined(__cpp_nontype_template_parameter_auto)
+/** Uniform tag spelling for code that also targets pre-C++17. */
+#  define OMNI_FUNCTION_TAG(Function) ::omni::function<Function>
+#else
+/** Pre-C++17 equivalent of `omni::function<Function>`. */
+#  define OMNI_FUNCTION_TAG(Function) \
+    ::omni::function_t<decltype(Function), Function>{}
+#endif
+
 /**
  * Reflected-scope-only QoL alias for metadata in dependent code.
  *
@@ -1078,6 +1127,123 @@ using meta_for =
 #else
   meta_t<detail::_meta<T>>;
 #endif
+
+// TODO(low): Consider reducing duplicated parameter and return forwarding
+// without making their distinct roles less clear in the public interface.
+/** Reflected-scope-only function parameter metadata; `_M` is opaque. */
+template <typename _M>
+struct function_param_meta_t {
+  using type = typename _M::type;
+
+  static constexpr const char *name() noexcept {
+    return _M::name();
+  }
+  static constexpr const char *documentation() noexcept {
+    return _M::documentation();
+  }
+  static constexpr const char *spelled_type_name() noexcept {
+    return _M::type_name();
+  }
+  static constexpr const char *spelled_qualified_type_name() noexcept {
+    return _M::qualified_type_name();
+  }
+};
+
+/** Reflected-scope-only function return metadata; `_M` is opaque. */
+template <typename _M>
+struct function_return_meta_t {
+  using type = typename _M::type;
+
+  static constexpr const char *documentation() noexcept {
+    return _M::documentation();
+  }
+  static constexpr const char *spelled_type_name() noexcept {
+    return _M::type_name();
+  }
+  static constexpr const char *spelled_qualified_type_name() noexcept {
+    return _M::qualified_type_name();
+  }
+};
+
+/**
+ * Reflected-scope-only function metadata; `_M` is opaque.
+ *
+ * Generated record metadata exposes non-overloaded public methods and fields
+ * whose type is `function_t`. `parameters()` returns their parameter metadata;
+ * `returns()` returns their return metadata.
+ */
+template <typename _M>
+struct function_meta_t {
+  using pointer_type = decltype(_M::pointer());
+  using return_meta = function_return_meta_t<typename _M::ret_t>;
+  using return_type = typename return_meta::type;
+  using parameters_t = typename _M::params_t;
+
+  static constexpr const char *name() noexcept {
+    return _M::name();
+  }
+
+  static constexpr pointer_type pointer() noexcept {
+    return _M::pointer();
+  }
+
+  static constexpr std::size_t arity() noexcept {
+    return std::tuple_size<parameters_t>::value;
+  }
+
+  static constexpr const char *documentation() noexcept {
+    return _M::documentation();
+  }
+
+  static constexpr parameters_t parameters() noexcept {
+    return {};
+  }
+
+  static constexpr return_meta returns() noexcept { return {}; }
+
+  // TODO(low): Consider an invoke convenience. Calling compat::invoke with
+  // `pointer()` keeps the metadata interface smaller.
+};
+
+/** Reflected-scope-only function binding. */
+template <typename Record, typename _M>
+struct function_binding_t {
+  using record = Record;
+  using meta = function_meta_t<_M>;
+  using pointer_type = typename meta::pointer_type;
+  using return_type = typename meta::return_type;
+  using return_meta = typename meta::return_meta;
+  using parameters_t = typename meta::parameters_t;
+
+  record &_record;
+
+  static constexpr const char *name() noexcept { return meta::name(); }
+  static constexpr pointer_type pointer() noexcept { return meta::pointer(); }
+  static constexpr std::size_t arity() noexcept { return meta::arity(); }
+  static constexpr const char *documentation() noexcept {
+    return meta::documentation();
+  }
+  static constexpr parameters_t parameters() noexcept {
+    return meta::parameters();
+  }
+  static constexpr return_meta returns() noexcept {
+    return meta::returns();
+  }
+
+  template <typename... Argument>
+  constexpr auto operator()(Argument &&...argument) const
+    -> decltype(detail::_invoke_bound_function(
+      std::is_member_function_pointer<pointer_type>{},
+      pointer(),
+      _record,
+      std::forward<Argument>(argument)...)) {
+    return detail::_invoke_bound_function(
+      std::is_member_function_pointer<pointer_type>{},
+      pointer(),
+      _record,
+      std::forward<Argument>(argument)...);
+  }
+};
 
 /**
  * Reflected-scope-only record binding.
@@ -1226,10 +1392,10 @@ struct binding_t<T, reflected_entity::record> {
    * @note This non-const overload is not `constexpr` in C++11 because C++11
    * requires `constexpr` member functions to be const.
    */
-  auto public_fields() & -> decltype(meta::_public_fields(
+  auto public_fields() & -> decltype(meta::_bind_members(
     std::declval<storage_t &>(),
     typename meta::public_fields_t{})) {
-    return meta::_public_fields(_record, typename meta::public_fields_t{});
+    return meta::_bind_members(_record, typename meta::public_fields_t{});
   }
 
   /**
@@ -1240,10 +1406,10 @@ struct binding_t<T, reflected_entity::record> {
    * const through this overload. Hidden and ambiguous inherited fields are
    * omitted.
    */
-  constexpr auto public_fields() const & -> decltype(meta::_public_fields(
+  constexpr auto public_fields() const & -> decltype(meta::_bind_members(
     std::declval<const storage_t &>(),
     typename meta::public_fields_t{})) {
-    return meta::_public_fields(_record, typename meta::public_fields_t{});
+    return meta::_bind_members(_record, typename meta::public_fields_t{});
   }
 
   /**
@@ -1259,7 +1425,7 @@ struct binding_t<T, reflected_entity::record> {
    * auto fields = account_binding.public_fields(); // valid
    * ```
    */
-  auto public_fields() && -> decltype(meta::_public_fields(
+  auto public_fields() && -> decltype(meta::_bind_members(
     std::declval<storage_t &>(),
     typename meta::public_fields_t{})) = delete;
 
@@ -1276,9 +1442,31 @@ struct binding_t<T, reflected_entity::record> {
    * auto fields = account_binding.public_fields(); // valid
    * ```
    */
-  auto public_fields() const && -> decltype(meta::_public_fields(
+  auto public_fields() const && -> decltype(meta::_bind_members(
     std::declval<const storage_t &>(),
     typename meta::public_fields_t{})) = delete;
+
+  /** Bind visible non-overloaded public methods to this record. */
+  auto public_methods() & -> decltype(meta::_bind_members(
+    std::declval<storage_t &>(),
+    typename meta::public_methods_t{})) {
+    return meta::_bind_members(_record, typename meta::public_methods_t{});
+  }
+
+  /** Bind visible non-overloaded public methods to this const record. */
+  constexpr auto public_methods() const & -> decltype(meta::_bind_members(
+    std::declval<const storage_t &>(),
+    typename meta::public_methods_t{})) {
+    return meta::_bind_members(_record, typename meta::public_methods_t{});
+  }
+
+  auto public_methods() && -> decltype(meta::_bind_members(
+    std::declval<storage_t &>(),
+    typename meta::public_methods_t{})) = delete;
+
+  auto public_methods() const && -> decltype(meta::_bind_members(
+    std::declval<const storage_t &>(),
+    typename meta::public_methods_t{})) = delete;
 #endif
 
   private:
@@ -1509,6 +1697,22 @@ concept field_meta = traits::is<field_meta_t, T>();
 /** Whether `T` binds field metadata to a record object. */
 template <typename T>
 concept field_binding = traits::is<field_binding_t, T>();
+
+/** `T` is function metadata. */
+template <typename T>
+concept function_meta = traits::is<function_meta_t, T>();
+
+/** `T` binds function metadata to a record object. */
+template <typename T>
+concept function_binding = traits::is<function_binding_t, T>();
+
+/** `T` is function parameter metadata. */
+template <typename T>
+concept function_param_meta = traits::is<function_param_meta_t, T>();
+
+/** `T` is function return metadata. */
+template <typename T>
+concept function_return_meta = traits::is<function_return_meta_t, T>();
 
 /** Whether `T` is record metadata. */
 template <typename T>
@@ -1792,4 +1996,5 @@ T aggregate_into(Fields &&fields) {
 }
 
 } // namespace refl
+
 } // namespace omni

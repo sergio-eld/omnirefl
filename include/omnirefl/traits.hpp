@@ -3,6 +3,7 @@
 #include <omnirefl/compat.hpp>
 
 #include <cstddef>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -156,6 +157,20 @@ constexpr bool is() noexcept {
     compat::remove_cvref_t<Type>>::value;
 }
 
+#if defined(__cpp_nontype_template_parameter_auto)
+/** Return the constant held by a one-value class template. */
+template <template <auto> class Template, auto Value>
+constexpr decltype(Value) template_value(Template<Value>) noexcept {
+  return Value;
+}
+#else
+/** Return the constant held by a type-and-value class template. */
+template <template <typename T, T> class Template, typename T, T Value>
+constexpr T template_value(Template<T, Value>) noexcept {
+  return Value;
+}
+#endif
+
 /** Report whether `To` can be brace-constructed from `Value`. */
 template <typename To, typename Value, typename = void>
 struct is_brace_constructible: std::false_type {};
@@ -164,6 +179,66 @@ template <typename To, typename Value>
 struct is_brace_constructible<To,
   Value,
   compat::void_t<decltype(To{std::declval<Value>()})>>: std::true_type {};
+
+/** Decompose a function signature from a function or pointer type. */
+template <typename Function>
+struct function_signature;
+
+template <typename Return, typename... Argument>
+struct function_signature<Return(Argument...)> {
+  using return_type = Return;
+  using argument_types = std::tuple<Argument...>;
+};
+
+template <typename Return, typename... Argument>
+struct function_signature<Return (*)(Argument...)>:
+    function_signature<Return(Argument...)> {};
+
+template <typename Return, typename Class, typename... Argument>
+struct function_signature<Return (Class::*)(Argument...)>:
+    function_signature<Return(Argument...)> {};
+
+#define OMNI_FUNCTION_SIGNATURE_MEMBER(Qualifiers)                        \
+  template <typename Return, typename Class, typename... Argument>         \
+  struct function_signature<Return (Class::*)(Argument...) Qualifiers>:    \
+      function_signature<Return(Argument...)> {}
+
+OMNI_FUNCTION_SIGNATURE_MEMBER(const);
+OMNI_FUNCTION_SIGNATURE_MEMBER(volatile);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile);
+OMNI_FUNCTION_SIGNATURE_MEMBER(&);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const &);
+OMNI_FUNCTION_SIGNATURE_MEMBER(volatile &);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile &);
+OMNI_FUNCTION_SIGNATURE_MEMBER(&&);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const &&);
+OMNI_FUNCTION_SIGNATURE_MEMBER(volatile &&);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile &&);
+
+#if defined(__cpp_noexcept_function_type)
+template <typename Return, typename... Argument>
+struct function_signature<Return(Argument...) noexcept>:
+    function_signature<Return(Argument...)> {};
+
+template <typename Return, typename... Argument>
+struct function_signature<Return (*)(Argument...) noexcept>:
+    function_signature<Return(Argument...)> {};
+
+OMNI_FUNCTION_SIGNATURE_MEMBER(noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(volatile noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(& noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const & noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(volatile & noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile & noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(&& noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const && noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(volatile && noexcept);
+OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile && noexcept);
+#endif
+
+#undef OMNI_FUNCTION_SIGNATURE_MEMBER
 
 /**
  * Report whether a type-parameter-only class template can construct from

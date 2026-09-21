@@ -618,6 +618,10 @@ if("17" IN_LIST _supported_cpp_standards)
         negative/query_functions_out_of_scope.cpp
         2)
     _omnirefl_negative_tool_run(
+        "query_function_metadata_out_of_scope"
+        negative/query_function_metadata_out_of_scope.cpp
+        4)
+    _omnirefl_negative_tool_run(
         "query_multiple"
         negative/query_multiple.cpp
         4)
@@ -820,6 +824,27 @@ if("17" IN_LIST _supported_cpp_standards)
         "default value for field .*record::field' skipped"
         "default value for field .*record::expanded' skipped"
         warning)
+    _omnirefl_diagnostic_tool_run(
+        "skipped_overloaded_method"
+        diagnostic_run/skipped_overloaded_method.cpp
+        "overloaded public member function .*record::read' skipped"
+        "overload resolution is not supported"
+        warning
+        1)
+    _omnirefl_diagnostic_tool_run(
+        "skipped_inherited_overloaded_method"
+        diagnostic_run/skipped_inherited_overloaded_method.cpp
+        "overloaded public member function .*record::read' skipped"
+        "overload resolution is not supported"
+        warning
+        1)
+    _omnirefl_diagnostic_tool_run(
+        "skipped_implicit_overloaded_method"
+        diagnostic_run/skipped_implicit_overloaded_method.cpp
+        "overloaded public member function .*record::operator=' skipped"
+        "overload resolution is not supported"
+        warning
+        1)
     _omnirefl_diagnostic_tool_run(
         "lazy_specialization_dependency"
         diagnostic_run/lazy_specialization_dependency.cpp
@@ -1084,6 +1109,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         aggregate_into/test.cpp
         dependency_alias_depth_test.cpp
         dependent_types_test.cpp
+        function_metadata_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp
         example_test.cpp

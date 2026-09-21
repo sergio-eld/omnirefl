@@ -11,6 +11,7 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/ASTTypeTraits.h>
+#include <clang/AST/Comment.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/DeclCXX.h>
@@ -542,12 +543,19 @@ struct type_definition {
   } definition_flags;
 };
 
+// Declaration-site metadata shared by fields, function parameters, and
+// returns.
+struct value_declaration_data {
+  // Empty for a function return value or an unnamed parameter.
+  std::string name;
+  std::string spelled_type_name;
+  std::string spelled_qualified_type_name;
+  std::string annotation;
+};
+
 // as of now - public only
 struct field_data {
-  std::string name;
-  std::string type_name;
-  std::string qualified_type_name;
-  std::string annotation;
+  value_declaration_data declaration;
   std::optional<std::string> default_initializer;
 
   enum class value_access {
@@ -568,6 +576,15 @@ struct field_data {
 
   static field_data from_decl(const clang::ASTContext &ast,
     const clang::FieldDecl *d);
+};
+
+struct function_data {
+  std::string name;
+  std::string generated_name;
+  std::string annotation;
+  value_declaration_data result;
+  std::vector<value_declaration_data> params;
+  bool member_method;
 };
 
 struct template_type_param {
@@ -618,6 +635,9 @@ struct record_data {
 
   /// protected and private are not supported now (too complicated)
   std::vector<field_data> public_fields;
+  std::vector<function_data> public_function_fields;
+  std::vector<function_data> public_methods;
+  std::set<std::string> skipped_overloaded_methods;
 
   enum type_t {
     is_struct,
@@ -2350,6 +2370,34 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
     });
   }
 
+  // TODO(low): Consider a strict mode that promotes skipped methods to tool
+  // errors.
+  const std::set skipped_overloaded_methods = ctx.reflected
+    | std::views::filter([](const meta::reflectable &candidate) {
+        return std::holds_alternative<meta::record_data>(candidate.data);
+      })
+    | std::views::transform([](const meta::reflectable &type) {
+        const auto &record = std::get<meta::record_data>(type.data);
+
+        return record.skipped_overloaded_methods
+          | std::views::transform([&type](const std::string &method) {
+              return std::pair{type.concrete_id, method};
+            })
+          | std::ranges::to<std::vector>();
+      })
+    | std::views::join
+    | std::ranges::to<std::set>();
+
+  for (const auto &[type, method] : skipped_overloaded_methods) {
+    log(log_level::warning, [&type, &method] {
+      return std::format(
+        "\noverloaded public member function '{}::{}' skipped: "
+        "overload resolution is not supported.",
+        type,
+        method);
+    });
+  }
+
   const auto unsupported_record_reason =
     [](const meta::reflectable &type) -> std::optional<std::string_view> {
     return std::visit(
@@ -3970,7 +4018,11 @@ std::expected<meta::source_file_context, app_error>
                 hasName("::omni::meta_t"),
                 hasName("::omni::binding_t"),
                 hasName("::omni::field_meta_t"),
-                hasName("::omni::field_binding_t")))))),
+                hasName("::omni::field_binding_t"),
+                hasName("::omni::function_meta_t"),
+                hasName("::omni::function_binding_t"),
+                hasName("::omni::function_param_meta_t"),
+                hasName("::omni::function_return_meta_t")))))),
           unless(in_deferred_visitor_signature),
           unless(hasParent(typeLoc()))),
         .fold = std::bind_front(meta::matches::fold_out_of_scope_type_query,
@@ -4388,7 +4440,8 @@ std::string format_record_data(const meta::record_data &d) {
       ? " {}"
       : std::format(" {{ {} }}",
           d.public_fields //
-            | std::views::transform(&meta::field_data::name) //
+            | std::views::transform(&meta::field_data::declaration) //
+            | std::views::transform(&meta::value_declaration_data::name) //
             | std_c::views::join_with(", "sv) //
             | util::format_range));
 }
@@ -4896,18 +4949,6 @@ std::string field_type_name_from(const clang::ASTContext &ast,
   return type_name;
 }
 
-std::string field_type_name(const clang::ASTContext &ast,
-  const clang::FieldDecl *field) {
-  assert(field);
-
-  const clang::TypeSourceInfo *type_source_info = field->getTypeSourceInfo();
-  if (!type_source_info)
-    return field->getType().getAsString(ast.getPrintingPolicy());
-
-  return field_type_name_from(ast,
-    type_source_info->getTypeLoc().getUnqualifiedLoc());
-}
-
 bool is_replayable_default_initializer(const clang::Stmt *node) {
   assert(node);
 
@@ -4967,26 +5008,270 @@ std::optional<std::string> default_initializer_from(
     : "= " + source;
 }
 
+std::string comment_text(const clang::comments::Comment *comment) {
+  if (!comment)
+    return {};
+
+  if (const auto *text = llvm::dyn_cast<clang::comments::TextComment>(comment))
+    return text->getText().trim().str();
+
+  using clang::comments::InlineCommandComment;
+
+  if (const auto *command =
+        llvm::dyn_cast<InlineCommandComment>(comment)) {
+    return std::views::iota(0u, command->getNumArgs()) //
+      | std::views::transform(std::bind_front(
+        &InlineCommandComment::getArgText,
+        command)) //
+      | std_c::views::join_with(" "sv) //
+      | std::ranges::to<std::string>();
+  }
+
+  return llvm::make_range(comment->child_begin(), comment->child_end()) //
+    | std::views::transform(comment_text) //
+    | std::views::filter([](const std::string &part) {
+        return !part.empty();
+      }) //
+    | std_c::views::join_with(" "sv) //
+    | std::ranges::to<std::string>();
+}
+
+struct function_comment_data {
+  std::string function;
+  std::vector<std::string> parameters;
+  std::string result;
+};
+
+function_comment_data function_comments(const clang::ASTContext &ast,
+  const clang::FunctionDecl &function) {
+  function_comment_data result{
+    .function = {},
+    .parameters = std::vector<std::string>(function.getNumParams()),
+    .result = {},
+  };
+  if (!ast.getLangOpts().CommentOpts.ParseAllComments)
+    return result;
+
+  const clang::FunctionDecl *commented = &function;
+  const clang::RawComment *raw = ast.getRawCommentForDeclNoCache(&function);
+  if (!raw) {
+    if (const clang::FunctionDecl *definition = function.getDefinition()) {
+      commented = definition;
+      raw = ast.getRawCommentForDeclNoCache(definition);
+    }
+  }
+  if (!raw)
+    return result;
+
+  const clang::comments::FullComment *comment =
+    raw->parse(ast, /*PP=*/nullptr, commented);
+  if (!comment)
+    return result;
+
+  const auto append = [](std::string to, std::string text) {
+    if (text.empty())
+      return to;
+
+    if (!to.empty())
+      to += '\n';
+    return to + text;
+  };
+
+  return std::ranges::fold_left(comment->getBlocks(),
+    std::move(result),
+    [&ast, &append](function_comment_data result,
+      const clang::comments::BlockContentComment *block) {
+      if (const auto *paragraph =
+            llvm::dyn_cast<clang::comments::ParagraphComment>(block)) {
+        result.function = append(std::move(result.function),
+          comment_text(paragraph));
+        return result;
+      }
+
+      if (const auto *parameter =
+            llvm::dyn_cast<clang::comments::ParamCommandComment>(block)) {
+        if (parameter->isParamIndexValid() && !parameter->isVarArgParam()
+          && parameter->getParamIndex() < result.parameters.size()) {
+          result.parameters[parameter->getParamIndex()] =
+            comment_text(parameter->getParagraph());
+        }
+        return result;
+      }
+
+      const auto *command =
+        llvm::dyn_cast<clang::comments::BlockCommandComment>(block);
+      if (!command)
+        return result;
+
+      const llvm::StringRef name =
+        command->getCommandName(ast.getCommentCommandTraits());
+      if ("return" == name || "returns" == name) {
+        result.result = comment_text(command->getParagraph());
+      } else if ("brief" == name || "details" == name) {
+        result.function = append(std::move(result.function),
+          comment_text(command->getParagraph()));
+      }
+      return result;
+    });
+}
+
+value_declaration_data value_declaration_from(
+  const clang::ASTContext &ast,
+  clang::QualType type,
+  clang::TypeLoc location,
+  std::string name,
+  std::string annotation) {
+  clang::PrintingPolicy policy = ast.getPrintingPolicy();
+  policy.FullyQualifiedName = true;
+
+  return {
+    .name = std::move(name),
+    .spelled_type_name = location.isNull()
+      ? type.getAsString(ast.getPrintingPolicy())
+      : field_type_name_from(ast, location.getUnqualifiedLoc()),
+    .spelled_qualified_type_name =
+      type.getUnqualifiedType().getAsString(policy),
+    .annotation = std::move(annotation),
+  };
+}
+
+const clang::ClassTemplateSpecializationDecl *function_tag(
+  clang::QualType type) {
+  const auto *specialization =
+    llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(
+      type.getUnqualifiedType()->getAsCXXRecordDecl());
+  if (!specialization
+    || "omni::function_t"
+      != specialization->getSpecializedTemplate()->getQualifiedNameAsString()) {
+    return nullptr;
+  }
+
+  return specialization;
+}
+
+const clang::FunctionDecl *function_from_tag(clang::QualType type) {
+  const clang::ClassTemplateSpecializationDecl *specialization =
+    function_tag(type);
+  if (!specialization)
+    return nullptr;
+
+  // Both tag forms keep the function declaration as the last argument.
+  const llvm::ArrayRef<clang::TemplateArgument> arguments =
+    specialization->getTemplateArgs().asArray();
+  if (arguments.empty()
+    || clang::TemplateArgument::Declaration != arguments.back().getKind()) {
+    return nullptr;
+  }
+
+  const auto *function = llvm::dyn_cast_or_null<clang::FunctionDecl>(
+    arguments.back().getAsDecl());
+  const auto *method = llvm::dyn_cast_or_null<clang::CXXMethodDecl>(function);
+  return !function || (method && !method->isStatic()) || function->isVariadic()
+    ? nullptr
+    : function->getCanonicalDecl();
+}
+
+const clang::FunctionDecl *function_from_field_tag(
+  const clang::FieldDecl *field) {
+  assert(field);
+
+  const clang::FunctionDecl *function = function_from_tag(field->getType());
+  if (!function)
+    return nullptr;
+
+  const auto *specialization =
+    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(field->getParent());
+  if (!specialization)
+    return function;
+
+  const auto declarations =
+    specialization->getSpecializedTemplate()->getTemplatedDecl()->lookup(
+      field->getDeclName());
+  const auto pattern = std::ranges::find_if(declarations, [](const auto *d) {
+    return llvm::isa<clang::FieldDecl>(d);
+  });
+
+  // Primary-template specializations share generated metadata, while a
+  // dependent field may resolve to a different function in each one.
+  return pattern != declarations.end()
+      && llvm::cast<clang::FieldDecl>(*pattern)->getType()->isDependentType()
+    ? nullptr
+    : function;
+}
+
+std::string method_generated_name(const clang::CXXMethodDecl &method) {
+  switch (method.getOverloadedOperator()) {
+    case clang::OO_None:
+      return "method_" + method.getNameAsString();
+
+#define OVERLOADED_OPERATOR(Name, Spelling, Token, Unary, Binary, MemberOnly) \
+  case clang::OO_##Name:                                                     \
+    return llvm::StringRef{#Name}.lower() + "_operator";
+#include <clang/Basic/OperatorKinds.def>
+    case clang::NUM_OVERLOADED_OPERATORS:
+      break;
+  }
+
+  std::unreachable();
+}
+
+function_data function_data_from(
+  const clang::ASTContext &ast,
+  std::string name,
+  const clang::FunctionDecl &declaration,
+  bool member_method) {
+  const function_comment_data comments = function_comments(ast, declaration);
+  const clang::TypeSourceInfo *source = declaration.getTypeSourceInfo();
+  const clang::FunctionTypeLoc function_location =
+    source ? source->getTypeLoc().getAs<clang::FunctionTypeLoc>()
+           : clang::FunctionTypeLoc{};
+  std::string generated_name = member_method
+    ? method_generated_name(clang::cast<clang::CXXMethodDecl>(declaration))
+    : name + "_t";
+
+  return function_data{
+    .name = std::move(name),
+    .generated_name = std::move(generated_name),
+    .annotation = comments.function,
+    .result = value_declaration_from(ast,
+      declaration.getReturnType(),
+      function_location.isNull() //
+        ? clang::TypeLoc{}
+        : function_location.getReturnLoc(),
+      /*name=*/{},
+      comments.result),
+    .params = declaration.parameters() //
+      | std_c::views::enumerate //
+      | std::views::transform([&ast, &comments](const auto &indexed) {
+        const auto &[index, parameter] = indexed;
+
+        return value_declaration_from(ast,
+          parameter->getType(),
+          parameter->getTypeSourceInfo() //
+            ? parameter->getTypeSourceInfo()->getTypeLoc()
+            : clang::TypeLoc{},
+          parameter->getNameAsString(),
+          comments.parameters[index]);
+      })
+      | std::ranges::to<std::vector>(),
+    .member_method = member_method,
+  };
+}
+
 } // namespace meta::impl
 
 meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   const clang::FieldDecl *d) {
   assert(d);
+  const clang::TypeSourceInfo *source = d->getTypeSourceInfo();
 
   return {
-    .name = std::string(omni::fn::as<std::string_view>()(d->getName())),
-    .type_name = meta::impl::field_type_name(ast, d),
-    .qualified_type_name = std::invoke([&ast, d] -> std::string {
-      clang::PrintingPolicy policy = ast.getPrintingPolicy();
-      policy.FullyQualifiedName = true;
+    .declaration = meta::impl::value_declaration_from(ast,
+      source ? source->getType() : d->getType(),
+      source ? source->getTypeLoc() : clang::TypeLoc{},
+      std::string(omni::fn::as<std::string_view>()(d->getName())),
+      annotation_from_decl(ast, d)),
 
-      const clang::TypeSourceInfo *source = d->getTypeSourceInfo();
-      const clang::QualType type = source ? source->getType() : d->getType();
-
-      return type.getUnqualifiedType().getAsString(policy);
-    }),
-
-    .annotation = annotation_from_decl(ast, d),
     .default_initializer = meta::impl::default_initializer_from(ast, d),
     // ad hoc: packed fields cannot always bind to references. Infer safe
     // access from the record layout and copy fields whose address may be
@@ -5104,6 +5389,70 @@ util::viewable_range_of<const clang::FieldDecl *> auto public_fields_view(
   return rd->fields() //
     | std::views::filter(is_public) //
     | std::views::filter(std::not_fn(&clang::FieldDecl::isUnnamedBitField));
+}
+
+util::viewable_range_of<clang::CXXMethodDecl *> auto
+public_method_candidates_view(
+  const clang::CXXRecordDecl *rd) {
+  assert(rd);
+
+  return rd->methods() //
+    | std::views::filter([](const clang::CXXMethodDecl *m) {
+        return clang::AccessSpecifier::AS_public == m->getAccess()
+          && !m->isStatic() && !m->isImplicit() && !m->isDeleted()
+          && !m->isVariadic() && !m->isConsteval()
+          && !m->getDescribedFunctionTemplate()
+          && !llvm::isa<clang::CXXConstructorDecl>(m)
+          && !llvm::isa<clang::CXXDestructorDecl>(m)
+          && !llvm::isa<clang::CXXConversionDecl>(m);
+      })
+    | std::views::filter([](const clang::CXXMethodDecl *m) {
+        // Pack expansion can change arity between specializations that share
+        // one generated primary-template metadata body.
+        const clang::FunctionDecl *pattern =
+          m->getTemplateInstantiationPattern();
+        const clang::FunctionDecl *declaration = pattern ? pattern : m;
+
+        return std::ranges::none_of(declaration->parameters(),
+          &clang::ParmVarDecl::isParameterPack);
+      });
+}
+
+bool method_name_is_unambiguous(const clang::CXXRecordDecl *rd,
+  const clang::CXXMethodDecl *method) {
+  assert(rd && method);
+
+  // Implicit copy/move assignments make `&_T::operator=` ambiguous.
+  if (clang::OO_Equal == method->getOverloadedOperator())
+    return false;
+
+  return 1 == std::ranges::count_if(rd->lookup(method->getDeclName()),
+    [](const clang::NamedDecl *candidate) {
+      const clang::NamedDecl *declaration = candidate->getUnderlyingDecl();
+
+      return llvm::isa<clang::FunctionDecl>(declaration)
+        || llvm::isa<clang::FunctionTemplateDecl>(declaration);
+    });
+}
+
+util::viewable_range_of<clang::CXXMethodDecl *> auto public_methods_view(
+  const clang::CXXRecordDecl *rd) {
+  assert(rd);
+
+  return public_method_candidates_view(rd) //
+    | std::views::filter(std::bind_front(method_name_is_unambiguous, rd));
+}
+
+std::set<std::string> skipped_overloaded_public_method_names(
+  const clang::CXXRecordDecl *rd) {
+  assert(rd);
+
+  return public_method_candidates_view(rd) //
+    | std::views::filter([rd](const clang::CXXMethodDecl *method) {
+        return !method_name_is_unambiguous(rd, method);
+      })
+    | std::views::transform(&clang::CXXMethodDecl::getNameAsString)
+    | std::ranges::to<std::set>();
 }
 
 struct collected_dependencies {
@@ -5487,8 +5836,40 @@ collected_dependencies recursively_collect_dependency_types(
         std::nullopt);
     }
 
+    const auto enqueue_signature_type =
+      [&ast, &enqueue, dependency_parent](clang::QualType type) {
+        // Reflection dependencies ignore reference and top-level cv.
+        const clang::QualType value_type = type->isReferenceType()
+          ? type->getPointeeType()
+          : type;
+        enqueue(dependency_parent,
+          ast.getCanonicalType(value_type.getUnqualifiedType()).getTypePtr(),
+          std::nullopt);
+      };
+
+    const auto enqueue_signature = [&enqueue_signature_type](
+                                     const clang::FunctionDecl *function) {
+      enqueue_signature_type(function->getReturnType());
+      std::ranges::for_each(function->parameters(),
+        enqueue_signature_type,
+        &clang::ParmVarDecl::getType);
+    };
+
+    std::ranges::for_each(
+      public_fields_view(cur_decl) //
+        | std::views::transform(meta::impl::function_from_field_tag)
+        | std::views::filter([](const auto *function) {
+            return nullptr != function;
+          }),
+      enqueue_signature);
+
+    std::ranges::for_each(public_methods_view(cur_decl), enqueue_signature);
+
     // public fields
-    for (const clang::FieldDecl *field : public_fields_view(cur_decl)) {
+    for (const clang::FieldDecl *field : public_fields_view(cur_decl)
+        | std::views::filter([](const clang::FieldDecl *field) {
+            return !meta::impl::function_tag(field->getType());
+          })) {
       std::optional public_access_path = pending.public_access_path;
 
       if (public_access_path) {
@@ -5521,6 +5902,8 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
   const clang::CXXRecordDecl *cxx_decl = t->getAsCXXRecordDecl();
   auto aggregate_fields = r_decl.fields() //
     | std::views::filter(std::not_fn(&clang::FieldDecl::isUnnamedBitField));
+  const std::vector public_field_decls =
+    public_fields_view(&r_decl) | std::ranges::to<std::vector>();
 
   return {
     .public_bases = cxx_decl ? public_bases_view(cxx_decl)
@@ -5539,10 +5922,41 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
         | std::ranges::to<std::vector>()
                              : std::vector<meta::reflectable_reference>{},
 
-    .public_fields = public_fields_view(&r_decl)
+    .public_fields = public_field_decls
       | std::views::transform(
         std::bind_front(meta::field_data::from_decl, std::cref(ast)))
       | std::ranges::to<std::vector>(),
+
+    .public_function_fields = public_field_decls
+      | std::views::transform([](const clang::FieldDecl *field) {
+          return std::pair{field,
+            meta::impl::function_from_field_tag(field)};
+        })
+      | std::views::filter([](const auto &entry) {
+          return nullptr != entry.second;
+        })
+      | std::views::transform([&ast](const auto &entry) {
+          return meta::impl::function_data_from(ast,
+            entry.first->getNameAsString(),
+            *entry.second,
+            /*member_method=*/false);
+        })
+      | std::ranges::to<std::vector>(),
+
+    .public_methods = cxx_decl
+      ? public_methods_view(cxx_decl)
+          | std::views::transform([&ast](const clang::CXXMethodDecl *method) {
+              return meta::impl::function_data_from(ast,
+                method->getNameAsString(),
+                *method,
+                /*member_method=*/true);
+            })
+          | std::ranges::to<std::vector>()
+      : std::vector<meta::function_data>{},
+
+    .skipped_overloaded_methods = cxx_decl
+      ? skipped_overloaded_public_method_names(cxx_decl)
+      : std::set<std::string>{},
 
     .type = r_decl.isStruct() //
       ? meta::record_data::is_struct
@@ -5560,6 +5974,10 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
     // member selection is not part of the Fields protocol.
     .is_aggregatable = cxx_decl && cxx_decl->isAggregate() && !r_decl.isUnion()
       && cxx_decl->bases().empty()
+      && std::ranges::none_of(public_field_decls,
+        [](const clang::FieldDecl *field) {
+          return nullptr != meta::impl::function_from_field_tag(field);
+        })
       && std::ranges::all_of(aggregate_fields,
         [](const clang::FieldDecl *field) {
           return field->getIdentifier() != nullptr;
@@ -5627,9 +6045,10 @@ meta::reflectable match_reflectable_type(const diagnostics &log,
           "\ndefault value for field '{}::{}' skipped: its initializer "
           "cannot be copied safely into generated metadata.",
           concrete_id,
-          field.name);
+          field.declaration.name);
       });
     }
+
   }
 
   return {
@@ -5795,13 +6214,15 @@ std::string escaped_string_literal_content(std::string_view s) {
   return out;
 }
 
-std::string documentation_method(std::string_view documentation) {
+std::string documentation_method(std::string_view documentation,
+  std::string_view indent = "  ") {
   return std::format(
-    "\n  static constexpr auto documentation() noexcept"
-    "\n    -> const char(&)[sizeof(\"{0}\")] {{"
-    "\n    return \"{0}\";"
-    "\n  }}",
-    escaped_string_literal_content(documentation));
+    "\n{1}static constexpr auto documentation() noexcept"
+    "\n{1}  -> const char(&)[sizeof(\"{0}\")] {{"
+    "\n{1}  return \"{0}\";"
+    "\n{1}}}",
+    escaped_string_literal_content(documentation),
+    indent);
 }
 
 // render `_omni_{root}_as_root` for `root::inner_type` as input
@@ -6247,10 +6668,163 @@ std::string reflectable_body(const meta::enum_data &d) {
       | util::format_range);
 }
 
+std::string function_parameter_metadata(
+  const meta::value_declaration_data &parameter,
+  std::size_t index) {
+  return std::format(
+    "    struct arg{0}_t {{"
+    "\n      using type = typename std::tuple_element<{0},"
+    "\n        typename function_sig::argument_types>::type;"
+    "\n"
+    "\n      static constexpr auto name() noexcept"
+    "\n        -> const char(&)[sizeof(\"{1}\")] {{"
+    "\n        return \"{1}\";"
+    "\n      }}"
+    "\n"
+    "\n      static constexpr auto type_name() noexcept"
+    "\n        -> const char(&)[sizeof(\"{2}\")] {{"
+    "\n        return \"{2}\";"
+    "\n      }}"
+    "\n"
+    "\n      static constexpr auto qualified_type_name() noexcept"
+    "\n        -> const char(&)[sizeof(\"{3}\")] {{"
+    "\n        return \"{3}\";"
+    "\n      }}"
+    "{4}"
+    "\n    }};",
+
+    // 0
+    index,
+
+    // 1
+    escaped_string_literal_content(parameter.name),
+
+    // 2
+    escaped_string_literal_content(parameter.spelled_type_name),
+
+    // 3
+    escaped_string_literal_content(parameter.spelled_qualified_type_name),
+
+    // 4
+    documentation_method(parameter.annotation, "      "));
+}
+
+std::string function_return_metadata(
+  const meta::value_declaration_data &result) {
+  return std::format(
+    "    struct ret_t {{"
+    "\n      using type = typename function_sig::return_type;"
+    "\n"
+    "\n      static constexpr auto type_name() noexcept"
+    "\n        -> const char(&)[sizeof(\"{0}\")] {{"
+    "\n        return \"{0}\";"
+    "\n      }}"
+    "\n"
+    "\n      static constexpr auto qualified_type_name() noexcept"
+    "\n        -> const char(&)[sizeof(\"{1}\")] {{"
+    "\n        return \"{1}\";"
+    "\n      }}"
+    "{2}"
+    "\n    }};",
+
+    // 0
+    escaped_string_literal_content(result.spelled_type_name),
+
+    // 1
+    escaped_string_literal_content(result.spelled_qualified_type_name),
+
+    // 2
+    documentation_method(result.annotation, "      "));
+}
+
+std::string function_metadata(const meta::function_data &function) {
+  const std::string pointer = function.member_method
+    ? std::format("&_T::{}", function.name)
+    : std::format(
+        "omni::traits::template_value("
+        "\n        omni::compat::decay_t<decltype("
+        "\n          std::declval<_T &>().{})>{{}})",
+        function.name);
+
+  return std::format(
+    "  struct {0} {{"
+    "\n    template <typename _T = typename _reflected::type>"
+    "\n    static constexpr auto pointer() noexcept"
+    "\n      -> decltype({1}) {{"
+    "\n      return {1};"
+    "\n    }}"
+    "\n"
+    "\n    using function_sig ="
+    "\n      omni::traits::function_signature<decltype(pointer())>;"
+    "\n"
+    "\n{2}"
+    "\n"
+    "\n{3}"
+    "\n"
+    "\n    using params_t = std::tuple<{4}>;"
+    "\n"
+    "\n    static constexpr auto name() noexcept"
+    "\n      -> const char(&)[sizeof(\"{5}\")] {{"
+    "\n      return \"{5}\";"
+    "\n    }}"
+    "{6}"
+    "\n  }};",
+
+    // 0
+    function.generated_name,
+
+    // 1
+    pointer,
+
+    // 2
+    function.params | std_c::views::enumerate //
+      | std::views::transform([](const auto &indexed) {
+          const auto &[index, parameter] = indexed;
+          return function_parameter_metadata(parameter, index);
+        })
+      | std_c::views::join_with("\n\n"sv) //
+      | util::format_range,
+
+    // 3
+    function_return_metadata(function.result),
+
+    // 4
+    std::views::iota(std::size_t{0}, function.params.size()) //
+      | std::views::transform([](std::size_t index) {
+          return std::format("omni::function_param_meta_t<arg{}_t>", index);
+        })
+      | std_c::views::join_with(",\n      "sv) //
+      | util::format_range,
+
+    // 5
+    escaped_string_literal_content(function.name),
+
+    // 6
+    documentation_method(function.annotation, "    "));
+}
+
+std::string indent_lines(std::string_view source) {
+  return source //
+    | std::views::split('\n')
+    | std::views::transform([](auto line) {
+        const std::string text = line | std::ranges::to<std::string>();
+        return text.empty() ? text : "  " + text;
+      })
+    | std_c::views::join_with("\n"sv)
+    | std::ranges::to<std::string>();
+}
+
 std::string reflectable_body(const meta::record_data &d) {
-  constexpr auto format_field = //
-    [](const auto &field_index) {
+  const auto format_field = //
+    [&d](const auto &field_index) {
       const auto &[index, f] = field_index;
+      const meta::value_declaration_data &declaration = f.declaration;
+
+      const auto function = std::ranges::find(d.public_function_fields,
+        declaration.name,
+        &meta::function_data::name);
+      if (function != d.public_function_fields.end())
+        return function_metadata(*function);
 
       const std::string default_value = std::format(
         "\n"
@@ -6271,7 +6845,7 @@ std::string reflectable_body(const meta::record_data &d) {
               *f.default_initializer)
           : std::string{});
 
-      const std::string accessors = std::invoke([&f] {
+      const std::string accessors = std::invoke([&f, &declaration] {
         // Misaligned packed raw arrays emit metadata without accessors.
         if (meta::field_data::value_access::misaligned_array == f.access)
           return std::string{};
@@ -6281,8 +6855,9 @@ std::string reflectable_body(const meta::record_data &d) {
 
         const std::string value_type = //
           by_reference
-          ? std::format("decltype((t.{}))", f.name)
-          : std::format("omni::compat::remove_cvref_t<decltype(t.{})>", f.name);
+          ? std::format("decltype((t.{}))", declaration.name)
+          : std::format("omni::compat::remove_cvref_t<decltype(t.{})>",
+              declaration.name);
 
         return std::format(
           "\n\n    // Emitted for reference and copy access."
@@ -6299,9 +6874,9 @@ std::string reflectable_body(const meta::record_data &d) {
           "\n      t.{0} = std::forward<V>(v);"
           "\n    }}"
           "{3}",
-          f.name,
+          declaration.name,
           value_type,
-          std::format("t.{}", f.name),
+          std::format("t.{}", declaration.name),
           by_reference
             ? std::format(
                 "\n\n    // Emitted only for fields that can bind to a reference."
@@ -6310,7 +6885,7 @@ std::string reflectable_body(const meta::record_data &d) {
                 "\n      -> decltype((t.{0})) {{"
                 "\n      return t.{0};"
                 "\n    }}",
-                f.name)
+                declaration.name)
             : std::string{});
       });
 
@@ -6350,7 +6925,7 @@ std::string reflectable_body(const meta::record_data &d) {
         "{12}"
         "\n  }};",
         // 0
-        f.name,
+        declaration.name,
 
         // 1
         index,
@@ -6374,13 +6949,14 @@ std::string reflectable_body(const meta::record_data &d) {
         f.is_deprecated,
 
         // 8
-        escaped_string_literal_content(f.type_name),
+        escaped_string_literal_content(declaration.spelled_type_name),
 
         // 9
-        escaped_string_literal_content(f.qualified_type_name),
+        escaped_string_literal_content(
+          declaration.spelled_qualified_type_name),
 
         // 10
-        documentation_method(f.annotation),
+        documentation_method(declaration.annotation, "    "),
 
         // 11
         default_value,
@@ -6389,6 +6965,22 @@ std::string reflectable_body(const meta::record_data &d) {
         accessors);
     };
 
+  const std::string fields = d.public_fields.empty()
+    ? std::string("  // no reflectable fields detected")
+    : std::format("  struct fields {{\n{}\n  }};",
+        indent_lines(d.public_fields | std_c::views::enumerate //
+          | std::views::transform(format_field)
+          | std_c::views::join_with("\n\n"sv)
+          | std::ranges::to<std::string>()));
+
+  const std::string methods = d.public_methods.empty()
+    ? std::string("  // no reflectable methods detected")
+    : std::format("  struct methods {{\n{}\n  }};",
+        indent_lines(d.public_methods //
+          | std::views::transform(function_metadata)
+          | std_c::views::join_with("\n\n"sv)
+          | std::ranges::to<std::string>()));
+
   return std::format(
     "{}"
     "\n"
@@ -6396,23 +6988,40 @@ std::string reflectable_body(const meta::record_data &d) {
     "\n  using own_public_fields_t ="
     "\n    std::tuple<{}>;"
     "\n"
+    "\n{}"
+    "\n"
+    "\n  using own_public_methods_t ="
+    "\n    std::tuple<{}>;"
+    "\n"
     "\n  static constexpr bool has_bases() noexcept {{ return {}; }}"
     "\n  static constexpr bool is_aggregatable() noexcept {{ return {}; }}"
     "\n}};",
 
-    d.public_fields.empty()
-      ? std::string("\n  // no reflectable fields detected")
-      : std::format("\n{}",
-          d.public_fields | std_c::views::enumerate //
-            | std::views::transform(format_field)
-            | std_c::views::join_with("\n\n"sv) //
-            | util::format_range),
+    fields,
 
     d.public_fields //
-      | std::views::transform(&meta::field_data::name)
-      | std::views::transform([](std::string_view f) {
-          return std::format("omni::field_meta_t<{}_t>", f);
+      | std::views::transform(&meta::field_data::declaration)
+      | std::views::transform(&meta::value_declaration_data::name)
+      | std::views::transform([&d](std::string_view field) {
+          const bool function = std::ranges::contains(
+            d.public_function_fields,
+            field,
+            &meta::function_data::name);
+          return std::format("omni::{}_meta_t<typename fields::{}_t>",
+            function ? "function" : "field",
+            field);
         }) //
+      | std_c::views::join_with(",\n      "sv) //
+      | util::format_range,
+
+    methods,
+
+    d.public_methods //
+      | std::views::transform([](const auto &function) {
+          return std::format(
+            "omni::function_meta_t<typename methods::{}>",
+            function.generated_name);
+        })
       | std_c::views::join_with(",\n      "sv) //
       | util::format_range,
 
@@ -6423,13 +7032,15 @@ std::string reflectable_body(const meta::record_data &d) {
 std::string aggregate_into_body(const meta::record_data &d) {
   const auto get_field = [](const meta::field_data &field) {
     return std::format(
-      "omni::refl::get<typename omni::detail::_meta<T>::{0}_t>(fields)",
-      field.name);
+      "omni::refl::get<typename omni::detail::_meta<T>::fields::{0}_t>(fields)",
+      field.declaration.name);
   };
 
   const std::string designated_fields = d.public_fields //
     | std::views::transform([&get_field](const meta::field_data &field) {
-        return std::format(".{0} = {1}", field.name, get_field(field));
+        return std::format(".{0} = {1}",
+          field.declaration.name,
+          get_field(field));
       }) //
     | std_c::views::join_with(",\n      "sv) //
     | std::ranges::to<std::string>();
@@ -6639,16 +7250,14 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\nnamespace detail {{"
     "\nnamespace {{"
     "\n"
+    "\n// -- reflected types --------"
     "\n{5}"
     "\n"
-    "\n// -- reflected types --------"
+    "\n// -- reflected inner types --------"
     "\n{6}"
     "\n"
-    "\n// -- reflected inner types --------"
-    "\n{7}"
-    "\n"
     "\n// -- generated fallback reflected types --------"
-    "\n{8}"
+    "\n{7}"
     "\n"
     "\n}} // namespace"
     "\n}} // namespace detail"
@@ -6659,11 +7268,11 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     "\nnamespace detail {{"
     "\n"
     "\n// -- generated aggregate initializers --------"
+    "\n{8}"
+    "\n"
     "\n{9}"
     "\n"
     "\n{10}"
-    "\n"
-    "\n{11}"
     "\n"
     "\n}} // namespace detail"
     "\n}} // namespace refl"
@@ -6717,9 +7326,6 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | util::format_range,
 
     // 5:
-    "",
-
-    // 6:
     ctx.fwd_declarables //
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::forward_declarable>,
@@ -6727,7 +7333,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 7:
+    // 6:
     ctx.nested //
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::nested_type>,
@@ -6735,7 +7341,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 8:
+    // 7:
     ctx.indexed //
       | std::views::transform(std::bind_front(
         render_reflectable<render::reflection_context::indexed_type>,
@@ -6743,7 +7349,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 9:
+    // 8:
     ctx.fwd_declarables //
       | std::views::transform(
         render_aggregate_into<reflection_context::forward_declarable>) //
@@ -6751,7 +7357,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 10:
+    // 9:
     ctx.nested //
       | std::views::transform(
         render_aggregate_into<reflection_context::nested_type>) //
@@ -6759,7 +7365,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
       | std_c::views::join_with("\n\n"sv) //
       | util::format_range,
 
-    // 11:
+    // 10:
     ctx.indexed //
       | std::views::transform(
         render_aggregate_into<reflection_context::indexed_type>) //
