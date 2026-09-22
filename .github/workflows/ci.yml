@@ -453,7 +453,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $archives = @(Get-ChildItem -Path 'artifacts/packages/current' -Recurse -File | Where-Object {
+          $archives = @(ls -Path 'artifacts/packages/current' -r -File | Where-Object {
             $_.Name -like 'omnirefl-windows-x86_64-ucrt-*.zip' -or
               $_.Name -like 'omnirefl-cosmo-universal-*.tar.gz'
           })
@@ -477,7 +477,7 @@ jobs:
           $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}'
           $extract = Join-Path $root 'extract'
           $package = Join-Path $root $runtime
-          New-Item -ItemType Directory -Force -Path $extract, $package, $results | Out-Null
+          mkdir -Force $extract, $package, $results | Out-Null
           if ($archive.Name.EndsWith('.zip')) {
             Expand-Archive -Path $archive.FullName -DestinationPath $extract -Force
           } else {
@@ -485,15 +485,16 @@ jobs:
             if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
           }
 
-          $packageRoots = @(Get-ChildItem -Path $extract -Directory -Filter 'omnirefl-*')
+          $packageRoots = @(ls -Path $extract -Directory -Filter 'omnirefl-*')
           if (1 -ne $packageRoots.Count) {
             throw "expected one package root in $($archive.Name)"
           }
 
           $install = Join-Path $package 'install'
-          Move-Item $packageRoots[0].FullName $install
-          Remove-Item -Recurse $extract
-          Copy-Item -Recurse (Join-Path $install 'share/omnirefl/tests') $package
+          mv $packageRoots[0].FullName $install
+          rm -r $extract
+          cp -r (Join-Path $install 'share/omnirefl/examples') $package
+          cp -r (Join-Path $install 'share/omnirefl/tests') $package
           & (Join-Path $install 'bin/omnirefl.exe') -h
           if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
           & (Join-Path $install 'bin/ccdb_query.exe') -h
@@ -556,25 +557,54 @@ jobs:
           $install = Join-Path $package 'install'
           $source = Join-Path $package 'tests'
           $build = Join-Path $package 'build'
+          $exampleSource = Join-Path $package 'examples'
+          $exampleBuild = Join-Path $package 'example-build'
           $results = Join-Path $env:OMNIREFL_TEST_RESULTS '${{ matrix.runtime }}'
-          New-Item -ItemType Directory -Force -Path $build, $results | Out-Null
+          mkdir -Force $build, $exampleBuild, $results | Out-Null
 
           cmake -S $source -B $build -GNinja `
             -DCMAKE_BUILD_TYPE=Release `
             "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
-            Tee-Object (Join-Path $results 'configure.log')
+            tee (Join-Path $results 'configure.log')
           if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
           cmake --build $build `
             --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
-            Tee-Object (Join-Path $results 'build.log')
+            tee (Join-Path $results 'build.log')
           if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+
+          cmake -S $exampleSource -B $exampleBuild -GNinja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
+            tee (Join-Path $results 'example-configure.log')
+          if (0 -ne $LASTEXITCODE) {
+            echo 'omnirefl: packaged example configuration failed'
+            exit $LASTEXITCODE
+          }
+
+          cmake --build $exampleBuild `
+            --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
+            tee (Join-Path $results 'example-build.log')
+          if (0 -ne $LASTEXITCODE) {
+            echo 'omnirefl: packaged example build failed'
+            exit $LASTEXITCODE
+          }
+
+          $example = Join-Path $exampleBuild 'example.exe'
+          if (Test-Path $example) {
+            & $example 2>&1 |
+              tee (Join-Path $results 'example.log')
+            if (0 -ne $LASTEXITCODE) {
+              echo 'omnirefl: packaged example execution failed'
+              exit $LASTEXITCODE
+            }
+          }
 
           ctest --test-dir $build `
             --timeout 600 `
             --output-junit (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml") `
             -V 2>&1 |
-            Tee-Object (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log")
+            tee (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log")
           exit $LASTEXITCODE
 
       - name: Run MSYS2 Package Tests
@@ -591,8 +621,10 @@ jobs:
           install="$package/install"
           source="$package/tests"
           build="$package/build"
+          example_source="$package/examples"
+          example_build="$package/example-build"
           results="$results_dir/${{ matrix.runtime }}"
-          mkdir -p "$build" "$results"
+          mkdir -p "$build" "$example_build" "$results"
 
           cmake -S "$source" -B "$build" -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -600,6 +632,27 @@ jobs:
             tee "$results/configure.log"
           cmake --build "$build" --parallel "$(nproc)" 2>&1 |
             tee "$results/build.log"
+
+          if ! cmake -S "$example_source" -B "$example_build" -GNinja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -Domnirefl_DIR="$install/lib/cmake/omnirefl" 2>&1 |
+              tee "$results/example-configure.log"; then
+            echo 'omnirefl: packaged example configuration failed' >&2
+            exit 1
+          fi
+          if ! cmake --build "$example_build" --parallel "$(nproc)" 2>&1 |
+              tee "$results/example-build.log"; then
+            echo 'omnirefl: packaged example build failed' >&2
+            exit 1
+          fi
+          if [ -x "$example_build/example.exe" ]; then
+            if ! "$example_build/example.exe" 2>&1 |
+                tee "$results/example.log"; then
+              echo 'omnirefl: packaged example execution failed' >&2
+              exit 1
+            fi
+          fi
+
           ctest --test-dir "$build" \
             --timeout 600 \
             --output-junit "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml" \
@@ -614,16 +667,16 @@ jobs:
           $build = Join-Path $package 'build'
           $results = Join-Path $env:OMNIREFL_TEST_RESULTS '${{ matrix.runtime }}'
           $diagnostics = Join-Path $results 'diagnostics'
-          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+          mkdir -Force $diagnostics | Out-Null
 
-          Copy-Item -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
+          cp -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
             (Join-Path $build 'CMakeCache.txt')
             (Join-Path $build 'compile_commands.json')
             (Join-Path $build 'Testing/Temporary/LastTest.log')
             (Join-Path $build 'CMakeFiles/CMakeError.log')
           )
 
-          $generated = @(Get-ChildItem -ErrorAction SilentlyContinue -Recurse -File `
+          $generated = @(ls -ErrorAction SilentlyContinue -r -File `
             -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
           if (0 -lt $generated.Count) {
             Compress-Archive -Path $generated.FullName `
