@@ -25,6 +25,7 @@ const sections = [
   'dependency-protocols',
   'performance',
   'install',
+  'examples-tests-and-benchmarks',
   'limitations',
   'how-it-works',
 ]

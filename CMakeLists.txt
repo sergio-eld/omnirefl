@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl 
     LANGUAGES CXX C 
-    VERSION 0.0.3)
+    VERSION 0.0.4)
 
 include(GNUInstallDirs)
 
@@ -204,6 +204,7 @@ elseif(ENABLE_BENCH OR ENABLE_TESTING)
     add_subdirectory(tests/tool tests)
     add_subdirectory(tests/ccdb_query tests/ccdb_query)
     if(ENABLE_TESTING)
+        add_subdirectory(examples)
         add_subdirectory(tests/std_compat tests/std_compat)
         add_subdirectory(tests/functional tests/functional)
     endif()

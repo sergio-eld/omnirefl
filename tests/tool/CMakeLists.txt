@@ -1081,7 +1081,6 @@ int main() {
 endif()
 
 if(_has_cxx20_reflected_guide_features)
-    add_subdirectory(example)
     add_subdirectory(comprehensive_guide)
 endif()
 

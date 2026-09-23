@@ -6,6 +6,7 @@ packages=
 name=
 results=
 cmake_arg=
+skip_example_run=false
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -28,6 +29,10 @@ while [ "$#" -gt 0 ]; do
       fi
       cmake_arg=$2
       shift 2
+      ;;
+    --skip-example-run)
+      skip_example_run=true
+      shift
       ;;
     *)
       printf 'unknown argument: %s\n' "$1" >&2
@@ -93,6 +98,9 @@ for package in "$package_musl" "$package_cosmo"; do
     --results "$results/$runtime"
   if [ -n "$cmake_arg" ]; then
     set -- "$@" --cmake-arg "$cmake_arg"
+  fi
+  if $skip_example_run; then
+    set -- "$@" --skip-example-run
   fi
   "$@"
 done

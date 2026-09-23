@@ -6,6 +6,7 @@ package=
 name=
 results=
 cmake_arg=
+skip_example_run=false
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -28,6 +29,10 @@ while [ "$#" -gt 0 ]; do
       fi
       cmake_arg=$2
       shift 2
+      ;;
+    --skip-example-run)
+      skip_example_run=true
+      shift
       ;;
     *)
       printf 'unknown argument: %s\n' "$1" >&2
@@ -56,6 +61,8 @@ fi
 readonly work=$(mktemp -d "${TMPDIR:-/tmp}/omnirefl-package-test.XXXXXX")
 readonly source="$work/with space/tests"
 readonly build="$work/with space/build"
+readonly example_source="$work/with space/examples"
+readonly example_build="$work/with space/example-build"
 deb_installed=false
 
 cleanup() {
@@ -88,7 +95,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-mkdir -p "$results" "$source" "$build"
+mkdir -p "$results" "$source" "$build" "$example_source" "$example_build"
 
 readonly package_name=$(basename "$package")
 
@@ -129,6 +136,7 @@ esac
 
 readonly install
 readonly config="$install/lib/cmake/omnirefl"
+readonly packaged_examples="$install/share/omnirefl/examples"
 readonly packaged_tests="$install/share/omnirefl/tests"
 readonly parallel=$(getconf _NPROCESSORS_ONLN 2>/dev/null \
   || sysctl -n hw.logicalcpu 2>/dev/null \
@@ -138,6 +146,7 @@ test -x "$install/bin/omnirefl"
 test -x "$install/bin/ccdb_query"
 test -d "$install/include/omnirefl"
 test -d "$config"
+test -d "$packaged_examples"
 test -d "$packaged_tests"
 
 "$install/bin/omnirefl" --help 2>&1 |
@@ -156,6 +165,46 @@ if [ "$package_runtime" = cosmo ]; then
 fi
 
 cp -R "$packaged_tests"/. "$source/"
+cp -R "$packaged_examples"/. "$example_source/"
+
+set -- cmake \
+  -S "$example_source" \
+  -B "$example_build" \
+  -GNinja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -Domnirefl_DIR="$config"
+if [ -n "$cmake_arg" ]; then
+  set -- "$@" "$cmake_arg"
+fi
+if ! "$@" 2>&1 | tee "$results/example-configure.log"; then
+  printf 'omnirefl: packaged example configuration failed\n' >&2
+  exit 1
+fi
+
+if ! cmake --build "$example_build" \
+    --target sneak_peek json_serialization \
+    --parallel "$parallel" 2>&1 | tee "$results/example-build.log"; then
+  printf 'omnirefl: packaged example build failed\n' >&2
+  exit 1
+fi
+
+if ! $skip_example_run; then
+  for example in \
+    "$example_build/sneak_peek/sneak_peek" \
+    "$example_build/extensions/serialization/ryml/json_serialization"; do
+    if [ ! -f "$example" ]; then
+      printf 'omnirefl: packaged example executable is missing: %s\n' \
+        "$example" >&2
+      exit 1
+    fi
+
+    if ! "$example" 2>&1 | tee "$results/$(basename "$example").log"; then
+      printf 'omnirefl: packaged example execution failed: %s\n' \
+        "$example" >&2
+      exit 1
+    fi
+  done
+fi
 
 set -- cmake \
   -S "$source" \

@@ -70,7 +70,7 @@ x-test-linux-command: &test-linux-command |
     mingw)
       export CC=x86_64-w64-mingw32-gcc
       export CXX=x86_64-w64-mingw32-g++
-      set -- --cmake-arg -DCMAKE_SYSTEM_NAME=Windows
+      set -- --cmake-arg -DCMAKE_SYSTEM_NAME=Windows --skip-example-run
       ;;
     *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
   esac
@@ -355,8 +355,10 @@ services:
           }
         }
 
-        New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
-        $$packages = @(Get-ChildItem -Path 'C:/install' -File | Where-Object {
+        mkdir -Force 'C:/with space/build', 'C:/with space/example-build', `
+          'C:/test', 'C:/test/diagnostics' |
+          Out-Null
+        $$packages = @(ls -Path 'C:/install' -File | Where-Object {
           $$_.Name.EndsWith('.zip') -or $$_.Name.EndsWith('.tar.gz')
         })
         if (1 -ne $$packages.Count) { throw 'expected one package in C:/install' }
@@ -367,11 +369,12 @@ services:
           if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
         }
 
-        Set-Location 'C:/with space'
-        $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
+        cd 'C:/with space'
+        $$installRoot = ls -Directory -Filter 'omnirefl-*' | Select-Object -First 1
         if ($$null -eq $$installRoot) { throw 'could not find extracted omnirefl package root' }
-        Move-Item $$installRoot.FullName ./omnirefl
-        Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
+        mv $$installRoot.FullName ./omnirefl
+        cp -r omnirefl/share/omnirefl/examples ./
+        cp -r omnirefl/share/omnirefl/tests ./
         ./omnirefl/bin/omnirefl.exe -h
         ./omnirefl/bin/ccdb_query.exe -h
 
@@ -385,28 +388,61 @@ services:
           default { throw ('Unsupported TOOLCHAIN=' + $$env:TOOLCHAIN) }
         }
 
-        Set-Location 'C:/with space/build'
+        cd 'C:/with space/build'
         cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
         if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
         cmake --build . -j $$env:NUMBER_OF_PROCESSORS
         if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
 
+        cd 'C:/with space/example-build'
+        cmake ../examples -GNinja `
+          -DCMAKE_BUILD_TYPE=Release `
+          '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
+        if (0 -ne $$LASTEXITCODE) {
+          echo 'omnirefl: packaged example configuration failed'
+          exit $$LASTEXITCODE
+        }
+        cmake --build . `
+          --target sneak_peek json_serialization `
+          -j $$env:NUMBER_OF_PROCESSORS
+        if (0 -ne $$LASTEXITCODE) {
+          echo 'omnirefl: packaged example build failed'
+          exit $$LASTEXITCODE
+        }
+        $$examples = @(
+          './sneak_peek/sneak_peek.exe'
+          './extensions/serialization/ryml/json_serialization.exe'
+        )
+        foreach ($$example in $$examples) {
+          if (-not (Test-Path $$example)) {
+            echo "omnirefl: packaged example executable is missing: $$example"
+            exit 1
+          }
+          & $$example
+          if (0 -ne $$LASTEXITCODE) {
+            echo "omnirefl: packaged example execution failed: $$example"
+            exit $$LASTEXITCODE
+          }
+        }
+
+        cd 'C:/with space/build'
+
         # Windows PowerShell promotes native stderr to errors. Let CTest
         # finish all checks and use its exit code to report failures.
         $$ErrorActionPreference = 'Continue'
         ctest . --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
-          Tee-Object C:/test/$$env:TEST_NAME.log
+          tee C:/test/$$env:TEST_NAME.log
         $$rc = $$LASTEXITCODE
         $$ErrorActionPreference = 'Stop'
 
-        Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
-        Copy-Item -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/
-        Copy-Item -ErrorAction SilentlyContinue CMakeFiles/CMakeError.log C:/test/diagnostics/
-        Get-ChildItem -Recurse -Include *.omnirefl.hpp, *.omnirefl.hpp.d -Path . |
+        cp -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
+        cp -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/
+        cp -ErrorAction SilentlyContinue CMakeFiles/CMakeError.log C:/test/diagnostics/
+        ls -r -Include *.omnirefl.hpp, *.omnirefl.hpp.d -Path . |
           Compress-Archive -DestinationPath C:/test/diagnostics/generated-reflection.zip -Force
 
         if ((0 -ne $$rc) -and $$env:KEEP_ALIVE_ON_FAILURE) {
-          Write-Host ('ctest failed with rc=' + $$rc + '; keeping container alive')
+          echo ('ctest failed with rc=' + $$rc + '; keeping container alive')
           while ($$true) { Start-Sleep -Seconds 3600 }
         }
 
@@ -454,6 +490,7 @@ services:
         install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
         test -n "$$install_root"
         mv "$$install_root" ./omnirefl
+        cp -r omnirefl/share/omnirefl/examples ./
         cp -r omnirefl/share/omnirefl/tests ./
         # refactorme(cosmo_msys2): review native archive/launcher handling.
         # ad hoc: MSYS2 reports ENOENT when launching Cosmopolitan's PE payload
@@ -477,10 +514,37 @@ services:
           *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
         esac
 
-        mkdir -p "/c/with space/build"
+        mkdir -p "/c/with space/build" "/c/with space/example-build"
         cd "/c/with space/build"
         cmake "../tests" -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
         cmake --build . -j"$$(nproc)"
+
+        cd "/c/with space/example-build"
+        if ! cmake "../examples" -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"; then
+          echo 'omnirefl: packaged example configuration failed' >&2
+          exit 1
+        fi
+        if ! cmake --build . \
+            --target sneak_peek json_serialization -j"$$(nproc)"; then
+          echo 'omnirefl: packaged example build failed' >&2
+          exit 1
+        fi
+        for example in \
+          ./sneak_peek/sneak_peek.exe \
+          ./extensions/serialization/ryml/json_serialization.exe; do
+          if [ ! -f "$$example" ]; then
+            echo "omnirefl: packaged example executable is missing: $$example" >&2
+            exit 1
+          fi
+          if ! "$$example"; then
+            echo "omnirefl: packaged example execution failed: $$example" >&2
+            exit 1
+          fi
+        done
+
+        cd "/c/with space/build"
 
         set +e
         ctest . --timeout 600 --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
