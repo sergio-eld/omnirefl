@@ -70,7 +70,7 @@ x-test-linux-command: &test-linux-command |
     mingw)
       export CC=x86_64-w64-mingw32-gcc
       export CXX=x86_64-w64-mingw32-g++
-      set -- --cmake-arg -DCMAKE_SYSTEM_NAME=Windows
+      set -- --cmake-arg -DCMAKE_SYSTEM_NAME=Windows --skip-example-run
       ;;
     *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
   esac
@@ -402,17 +402,19 @@ services:
           echo 'omnirefl: packaged example configuration failed'
           exit $$LASTEXITCODE
         }
-        cmake --build . -j $$env:NUMBER_OF_PROCESSORS
+        cmake --build . --target sneak_peek -j $$env:NUMBER_OF_PROCESSORS
         if (0 -ne $$LASTEXITCODE) {
           echo 'omnirefl: packaged example build failed'
           exit $$LASTEXITCODE
         }
-        if (Test-Path ./example.exe) {
-          ./example.exe
-          if (0 -ne $$LASTEXITCODE) {
-            echo 'omnirefl: packaged example execution failed'
-            exit $$LASTEXITCODE
-          }
+        if (-not (Test-Path ./sneak_peek/sneak_peek.exe)) {
+          echo 'omnirefl: packaged example executable is missing'
+          exit 1
+        }
+        ./sneak_peek/sneak_peek.exe
+        if (0 -ne $$LASTEXITCODE) {
+          echo 'omnirefl: packaged example execution failed'
+          exit $$LASTEXITCODE
         }
 
         cd 'C:/with space/build'
@@ -516,15 +518,17 @@ services:
           echo 'omnirefl: packaged example configuration failed' >&2
           exit 1
         fi
-        if ! cmake --build . -j"$$(nproc)"; then
+        if ! cmake --build . --target sneak_peek -j"$$(nproc)"; then
           echo 'omnirefl: packaged example build failed' >&2
           exit 1
         fi
-        if [ -x ./example.exe ]; then
-          if ! ./example.exe; then
-            echo 'omnirefl: packaged example execution failed' >&2
-            exit 1
-          fi
+        if [ ! -f ./sneak_peek/sneak_peek.exe ]; then
+          echo 'omnirefl: packaged example executable is missing' >&2
+          exit 1
+        fi
+        if ! ./sneak_peek/sneak_peek.exe; then
+          echo 'omnirefl: packaged example execution failed' >&2
+          exit 1
         fi
 
         cd "/c/with space/build"

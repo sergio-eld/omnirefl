@@ -6,6 +6,7 @@ package=
 name=
 results=
 cmake_arg=
+skip_example_run=false
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -28,6 +29,10 @@ while [ "$#" -gt 0 ]; do
       fi
       cmake_arg=$2
       shift 2
+      ;;
+    --skip-example-run)
+      skip_example_run=true
+      shift
       ;;
     *)
       printf 'unknown argument: %s\n' "$1" >&2
@@ -176,14 +181,20 @@ if ! "$@" 2>&1 | tee "$results/example-configure.log"; then
   exit 1
 fi
 
-if ! cmake --build "$example_build" --parallel "$parallel" 2>&1 |
-    tee "$results/example-build.log"; then
+if ! cmake --build "$example_build" --target sneak_peek \
+    --parallel "$parallel" 2>&1 | tee "$results/example-build.log"; then
   printf 'omnirefl: packaged example build failed\n' >&2
   exit 1
 fi
 
-if [ -z "$cmake_arg" ] && [ -x "$example_build/example" ]; then
-  if ! "$example_build/example" 2>&1 | tee "$results/example.log"; then
+if ! $skip_example_run; then
+  readonly example="$example_build/sneak_peek/sneak_peek"
+  if [ ! -f "$example" ]; then
+    printf 'omnirefl: packaged example executable is missing\n' >&2
+    exit 1
+  fi
+
+  if ! "$example" 2>&1 | tee "$results/example.log"; then
     printf 'omnirefl: packaged example execution failed\n' >&2
     exit 1
   fi

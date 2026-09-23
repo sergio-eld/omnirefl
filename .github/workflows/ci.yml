@@ -582,7 +582,7 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          cmake --build $exampleBuild `
+          cmake --build $exampleBuild --target sneak_peek `
             --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
             tee (Join-Path $results 'example-build.log')
           if (0 -ne $LASTEXITCODE) {
@@ -590,14 +590,17 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          $example = Join-Path $exampleBuild 'example.exe'
-          if (Test-Path $example) {
-            & $example 2>&1 |
-              tee (Join-Path $results 'example.log')
-            if (0 -ne $LASTEXITCODE) {
-              echo 'omnirefl: packaged example execution failed'
-              exit $LASTEXITCODE
-            }
+          $example = Join-Path $exampleBuild 'sneak_peek/sneak_peek.exe'
+          if (-not (Test-Path $example)) {
+            echo 'omnirefl: packaged example executable is missing'
+            exit 1
+          }
+
+          & $example 2>&1 |
+            tee (Join-Path $results 'example.log')
+          if (0 -ne $LASTEXITCODE) {
+            echo 'omnirefl: packaged example execution failed'
+            exit $LASTEXITCODE
           }
 
           ctest --test-dir $build `
@@ -640,17 +643,21 @@ jobs:
             echo 'omnirefl: packaged example configuration failed' >&2
             exit 1
           fi
-          if ! cmake --build "$example_build" --parallel "$(nproc)" 2>&1 |
+          if ! cmake --build "$example_build" --target sneak_peek \
+              --parallel "$(nproc)" 2>&1 |
               tee "$results/example-build.log"; then
             echo 'omnirefl: packaged example build failed' >&2
             exit 1
           fi
-          if [ -x "$example_build/example.exe" ]; then
-            if ! "$example_build/example.exe" 2>&1 |
-                tee "$results/example.log"; then
-              echo 'omnirefl: packaged example execution failed' >&2
-              exit 1
-            fi
+          example="$example_build/sneak_peek/sneak_peek.exe"
+          if [ ! -f "$example" ]; then
+            echo 'omnirefl: packaged example executable is missing' >&2
+            exit 1
+          fi
+          if ! "$example" 2>&1 |
+              tee "$results/example.log"; then
+            echo 'omnirefl: packaged example execution failed' >&2
+            exit 1
           fi
 
           ctest --test-dir "$build" \

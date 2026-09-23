@@ -113,21 +113,22 @@ struct telemetry { //< Discovered as a value argument to `reflected_call`.
 Minimal CMake setup:
 
 ```cmake
-# 3.18.2 is the current project floor for CMake APIs used by the package and
-# reflected target integration.
-cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
-project(example LANGUAGES CXX)
+project(sneak_peek LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(omnirefl CONFIG REQUIRED)
 
-add_executable(example sneak_peek/main.cpp)
-set_property(TARGET example PROPERTY CXX_STANDARD 23)
+add_executable(sneak_peek main.cpp)
 
 # Reflection is not transitive: only this target's own C++ translation units are
 # instrumented. Call omni_reflected_target for each target that should be
 # reflected.
-omni_reflected_target(example)
+omni_reflected_target(sneak_peek)
 ```
 
 Build the example:
@@ -135,14 +136,14 @@ Build the example:
 ```bash
 # Builds rerun instrumentation automatically for changed inputs.
 # To trigger it manually:
-# cmake --build build --target example.omni
-cmake --build build --target example
+# cmake --build build --target sneak_peek.omni
+cmake --build build --target sneak_peek
 ```
 
 Run it:
 
 ```console
-$ ./build/example
+$ ./build/sneak_peek
 // Primary templates are supported; names appear without template arguments.
 oceanic::fleet {
   measure(vessel, double scale [Multiplier.]) -> double; // Measure a distance.
@@ -366,15 +367,14 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 - `share/omnirefl/examples`
 - `share/omnirefl/tests` — tests and benchmarks
 
-The example requires a configured C++23 toolchain. Download and unpack the
-Cosmopolitan `.tar.gz` from the
-[latest release](https://github.com/sergio-eld/omnirefl/releases/latest) in
-your working directory. Set `prefix` to the extracted `omnirefl-*` directory,
-then run:
+The example requires CMake 3.20 and a configured C++23 toolchain. Download and
+unpack the Cosmopolitan `.tar.gz` from the
+[latest release](https://github.com/sergio-eld/omnirefl/releases/latest), or
+install a package. Set `prefix` to the absolute installation path.
 
 ```bash
-# Uncomment if Omnirefl was installed system-wide from a Debian package.
-# prefix=/usr
+# Use /usr when installed system-wide from a Debian package.
+prefix=/absolute/path/to/omnirefl
 
 cp -r "$prefix/share/omnirefl/examples" ./omnirefl-examples
 cd omnirefl-examples
@@ -382,12 +382,24 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_PREFIX_PATH=$prefix"
 cmake --build .
-./example
+./sneak_peek/sneak_peek
 ```
 
-The C++23 requirement applies only to the example. To run the packaged tests,
-copy `tests`; add `-DENABLE_BENCH=ON` while configuring to include benchmarks.
-After building, run `ctest --output-on-failure`.
+The C++23 requirement applies only to the example. From the original working
+directory, build the tests and benchmarks with:
+
+```bash
+cp -r "$prefix/share/omnirefl/tests" ./omnirefl-tests
+cd omnirefl-tests
+mkdir build
+cd build
+cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  "-DCMAKE_PREFIX_PATH=$prefix" -DENABLE_BENCH=ON
+cmake --build .
+ctest --timeout 600 --output-on-failure
+```
+
+Omit `-DENABLE_BENCH=ON` to skip benchmarks.
 <!-- pages:examples-tests-and-benchmarks:end -->
 
 <!-- pages:limitations:start -->
