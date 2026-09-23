@@ -402,19 +402,27 @@ services:
           echo 'omnirefl: packaged example configuration failed'
           exit $$LASTEXITCODE
         }
-        cmake --build . --target sneak_peek -j $$env:NUMBER_OF_PROCESSORS
+        cmake --build . `
+          --target sneak_peek json_serialization `
+          -j $$env:NUMBER_OF_PROCESSORS
         if (0 -ne $$LASTEXITCODE) {
           echo 'omnirefl: packaged example build failed'
           exit $$LASTEXITCODE
         }
-        if (-not (Test-Path ./sneak_peek/sneak_peek.exe)) {
-          echo 'omnirefl: packaged example executable is missing'
-          exit 1
-        }
-        ./sneak_peek/sneak_peek.exe
-        if (0 -ne $$LASTEXITCODE) {
-          echo 'omnirefl: packaged example execution failed'
-          exit $$LASTEXITCODE
+        $$examples = @(
+          './sneak_peek/sneak_peek.exe'
+          './extensions/serialization/ryml/json_serialization.exe'
+        )
+        foreach ($$example in $$examples) {
+          if (-not (Test-Path $$example)) {
+            echo "omnirefl: packaged example executable is missing: $$example"
+            exit 1
+          }
+          & $$example
+          if (0 -ne $$LASTEXITCODE) {
+            echo "omnirefl: packaged example execution failed: $$example"
+            exit $$LASTEXITCODE
+          }
         }
 
         cd 'C:/with space/build'
@@ -518,18 +526,23 @@ services:
           echo 'omnirefl: packaged example configuration failed' >&2
           exit 1
         fi
-        if ! cmake --build . --target sneak_peek -j"$$(nproc)"; then
+        if ! cmake --build . \
+            --target sneak_peek json_serialization -j"$$(nproc)"; then
           echo 'omnirefl: packaged example build failed' >&2
           exit 1
         fi
-        if [ ! -f ./sneak_peek/sneak_peek.exe ]; then
-          echo 'omnirefl: packaged example executable is missing' >&2
-          exit 1
-        fi
-        if ! ./sneak_peek/sneak_peek.exe; then
-          echo 'omnirefl: packaged example execution failed' >&2
-          exit 1
-        fi
+        for example in \
+          ./sneak_peek/sneak_peek.exe \
+          ./extensions/serialization/ryml/json_serialization.exe; do
+          if [ ! -f "$$example" ]; then
+            echo "omnirefl: packaged example executable is missing: $$example" >&2
+            exit 1
+          fi
+          if ! "$$example"; then
+            echo "omnirefl: packaged example execution failed: $$example" >&2
+            exit 1
+          fi
+        done
 
         cd "/c/with space/build"
 

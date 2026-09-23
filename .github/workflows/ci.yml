@@ -582,7 +582,8 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          cmake --build $exampleBuild --target sneak_peek `
+          cmake --build $exampleBuild `
+            --target sneak_peek json_serialization `
             --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
             tee (Join-Path $results 'example-build.log')
           if (0 -ne $LASTEXITCODE) {
@@ -590,17 +591,23 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          $example = Join-Path $exampleBuild 'sneak_peek/sneak_peek.exe'
-          if (-not (Test-Path $example)) {
-            echo 'omnirefl: packaged example executable is missing'
-            exit 1
-          }
+          $examples = @(
+            (Join-Path $exampleBuild 'sneak_peek/sneak_peek.exe')
+            (Join-Path $exampleBuild `
+              'extensions/serialization/ryml/json_serialization.exe')
+          )
+          foreach ($example in $examples) {
+            if (-not (Test-Path $example)) {
+              echo "omnirefl: packaged example executable is missing: $example"
+              exit 1
+            }
 
-          & $example 2>&1 |
-            tee (Join-Path $results 'example.log')
-          if (0 -ne $LASTEXITCODE) {
-            echo 'omnirefl: packaged example execution failed'
-            exit $LASTEXITCODE
+            & $example 2>&1 |
+              tee (Join-Path $results "$(Split-Path $example -Leaf).log")
+            if (0 -ne $LASTEXITCODE) {
+              echo "omnirefl: packaged example execution failed: $example"
+              exit $LASTEXITCODE
+            }
           }
 
           ctest --test-dir $build `
@@ -643,22 +650,26 @@ jobs:
             echo 'omnirefl: packaged example configuration failed' >&2
             exit 1
           fi
-          if ! cmake --build "$example_build" --target sneak_peek \
+          if ! cmake --build "$example_build" \
+              --target sneak_peek json_serialization \
               --parallel "$(nproc)" 2>&1 |
               tee "$results/example-build.log"; then
             echo 'omnirefl: packaged example build failed' >&2
             exit 1
           fi
-          example="$example_build/sneak_peek/sneak_peek.exe"
-          if [ ! -f "$example" ]; then
-            echo 'omnirefl: packaged example executable is missing' >&2
-            exit 1
-          fi
-          if ! "$example" 2>&1 |
-              tee "$results/example.log"; then
-            echo 'omnirefl: packaged example execution failed' >&2
-            exit 1
-          fi
+          for example in \
+            "$example_build/sneak_peek/sneak_peek.exe" \
+            "$example_build/extensions/serialization/ryml/json_serialization.exe"; do
+            if [ ! -f "$example" ]; then
+              echo "omnirefl: packaged example executable is missing: $example" >&2
+              exit 1
+            fi
+            if ! "$example" 2>&1 |
+                tee "$results/$(basename "$example").log"; then
+              echo "omnirefl: packaged example execution failed: $example" >&2
+              exit 1
+            fi
+          done
 
           ctest --test-dir "$build" \
             --timeout 600 \

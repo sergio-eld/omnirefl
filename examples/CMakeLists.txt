@@ -7,3 +7,5 @@ if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
 else()
     add_subdirectory(sneak_peek)
 endif()
+
+add_subdirectory(extensions/serialization/ryml)

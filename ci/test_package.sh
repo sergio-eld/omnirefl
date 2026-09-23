@@ -181,23 +181,29 @@ if ! "$@" 2>&1 | tee "$results/example-configure.log"; then
   exit 1
 fi
 
-if ! cmake --build "$example_build" --target sneak_peek \
+if ! cmake --build "$example_build" \
+    --target sneak_peek json_serialization \
     --parallel "$parallel" 2>&1 | tee "$results/example-build.log"; then
   printf 'omnirefl: packaged example build failed\n' >&2
   exit 1
 fi
 
 if ! $skip_example_run; then
-  readonly example="$example_build/sneak_peek/sneak_peek"
-  if [ ! -f "$example" ]; then
-    printf 'omnirefl: packaged example executable is missing\n' >&2
-    exit 1
-  fi
+  for example in \
+    "$example_build/sneak_peek/sneak_peek" \
+    "$example_build/extensions/serialization/ryml/json_serialization"; do
+    if [ ! -f "$example" ]; then
+      printf 'omnirefl: packaged example executable is missing: %s\n' \
+        "$example" >&2
+      exit 1
+    fi
 
-  if ! "$example" 2>&1 | tee "$results/example.log"; then
-    printf 'omnirefl: packaged example execution failed\n' >&2
-    exit 1
-  fi
+    if ! "$example" 2>&1 | tee "$results/$(basename "$example").log"; then
+      printf 'omnirefl: packaged example execution failed: %s\n' \
+        "$example" >&2
+      exit 1
+    fi
+  done
 fi
 
 set -- cmake \

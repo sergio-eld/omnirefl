@@ -367,8 +367,9 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 - `share/omnirefl/examples`
 - `share/omnirefl/tests` — tests and benchmarks
 
-The example requires CMake 3.20 and a configured C++23 toolchain. Download and
-unpack the Cosmopolitan `.tar.gz` from the
+The Sneak Peek requires CMake 3.20 and a configured C++23 toolchain. The
+RapidYAML serialization extension supports C++11. Download and unpack the
+Cosmopolitan `.tar.gz` from the
 [latest release](https://github.com/sergio-eld/omnirefl/releases/latest), or
 install a package. Set `prefix` to the absolute installation path.
 
@@ -383,10 +384,10 @@ cd build
 cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_PREFIX_PATH=$prefix"
 cmake --build .
 ./sneak_peek/sneak_peek
+./extensions/serialization/ryml/json_serialization
 ```
 
-The C++23 requirement applies only to the example. From the original working
-directory, build the tests and benchmarks with:
+From the original working directory, build the tests and benchmarks with:
 
 ```bash
 cp -r "$prefix/share/omnirefl/tests" ./omnirefl-tests
