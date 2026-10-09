@@ -583,7 +583,6 @@ jobs:
           }
 
           cmake --build $exampleBuild `
-            --target sneak_peek json_serialization `
             --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
             tee (Join-Path $results 'example-build.log')
           if (0 -ne $LASTEXITCODE) {
@@ -592,7 +591,10 @@ jobs:
           }
 
           $examples = @(
-            (Join-Path $exampleBuild 'sneak_peek/sneak_peek.exe')
+            # CMake creates this directory only when Sneak Peek is supported.
+            if (Test-Path (Join-Path $exampleBuild 'sneak_peek')) {
+              Join-Path $exampleBuild 'sneak_peek/sneak_peek.exe'
+            }
             (Join-Path $exampleBuild `
               'extensions/serialization/ryml/json_serialization.exe')
           )
@@ -651,15 +653,17 @@ jobs:
             exit 1
           fi
           if ! cmake --build "$example_build" \
-              --target sneak_peek json_serialization \
               --parallel "$(nproc)" 2>&1 |
               tee "$results/example-build.log"; then
             echo 'omnirefl: packaged example build failed' >&2
             exit 1
           fi
-          for example in \
-            "$example_build/sneak_peek/sneak_peek.exe" \
-            "$example_build/extensions/serialization/ryml/json_serialization.exe"; do
+          set -- "$example_build/extensions/serialization/ryml/json_serialization.exe"
+          # CMake creates this directory only when Sneak Peek is supported.
+          if [ -d "$example_build/sneak_peek" ]; then
+            set -- "$example_build/sneak_peek/sneak_peek.exe" "$@"
+          fi
+          for example in "$@"; do
             if [ ! -f "$example" ]; then
               echo "omnirefl: packaged example executable is missing: $example" >&2
               exit 1

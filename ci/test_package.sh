@@ -182,16 +182,18 @@ if ! "$@" 2>&1 | tee "$results/example-configure.log"; then
 fi
 
 if ! cmake --build "$example_build" \
-    --target sneak_peek json_serialization \
     --parallel "$parallel" 2>&1 | tee "$results/example-build.log"; then
   printf 'omnirefl: packaged example build failed\n' >&2
   exit 1
 fi
 
 if ! $skip_example_run; then
-  for example in \
-    "$example_build/sneak_peek/sneak_peek" \
-    "$example_build/extensions/serialization/ryml/json_serialization"; do
+  set -- "$example_build/extensions/serialization/ryml/json_serialization"
+  # CMake creates this directory only when Sneak Peek is supported.
+  if [ -d "$example_build/sneak_peek" ]; then
+    set -- "$example_build/sneak_peek/sneak_peek" "$@"
+  fi
+  for example in "$@"; do
     if [ ! -f "$example" ]; then
       printf 'omnirefl: packaged example executable is missing: %s\n' \
         "$example" >&2

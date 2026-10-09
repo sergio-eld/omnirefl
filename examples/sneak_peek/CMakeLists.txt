@@ -12,6 +12,11 @@ endif()
 
 add_executable(sneak_peek main.cpp)
 
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # MinGW's std::print terminal support lives in this library.
+    target_link_libraries(sneak_peek PRIVATE stdc++exp)
+endif()
+
 # Reflection is not transitive: only this target's own .cpp files are
 # instrumented. Call omni_reflected_target for each target that should be
 # reflected.
