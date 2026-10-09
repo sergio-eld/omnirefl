@@ -94,3 +94,9 @@ _ccdb_query_fail(missing_discriminator
 _ccdb_query_fail(missing_source
     "${_ccdb_query_missing}"
     "source does not exist")
+
+# A 256-character filename exceeds the component limit on the test filesystems.
+string(REPEAT "x" 256 _ccdb_query_invalid_filename)
+_ccdb_query_fail(invalid_source_path
+    "${CMAKE_CURRENT_BINARY_DIR}/${_ccdb_query_invalid_filename}"
+    "source does not exist")

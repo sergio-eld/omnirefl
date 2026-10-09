@@ -163,15 +163,6 @@ services:
     working_dir: /build
     command: *build-musl-command
 
-  build-benchmark-musl:
-    extends:
-      service: build-musl
-    environment:
-      CMAKE_BUILD_TYPE: Release
-    volumes:
-      - ./build-alpine/benchmark/musl/x86_64/llvm-${LLVM_VERSION}:/build:rw
-      - ${PACKAGE_DIR:-./artifacts/packages/benchmark-musl}:/packages:rw
-
   build-ucrt:
     <<: *build-musl-ucrt-image
     volumes:

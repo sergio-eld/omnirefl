@@ -754,23 +754,11 @@ jobs:
           mkdir -p "$(dirname "$BENCHMARK_HISTORY")"
           mkdir -p ./artifacts/packages/${{ matrix.libc }}
 
-      - name: Pull Benchmark Build Image
-        if: ${{ 'musl' == matrix.libc }}
-        run: docker compose pull build-benchmark-musl
-
-      - name: Build Release Benchmark Input
-        if: ${{ 'musl' == matrix.libc }}
-        run: |
-          PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
-          PACKAGE_DIR=./artifacts/packages/musl \
-            docker compose run --rm build-benchmark-musl
-
-      - name: Download Cosmo Package
-        if: ${{ 'cosmo' == matrix.libc }}
+      - name: Download Package
         uses: actions/download-artifact@v8
         with:
           name: packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}
-          path: ./artifacts/packages/cosmo
+          path: ./artifacts/packages/${{ matrix.libc }}
 
       - name: Install Cosmo Package on macOS
         if: ${{ startsWith(matrix.system, 'macos-') }}
@@ -872,11 +860,9 @@ jobs:
   benchmark-musl:
     name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
-    # The release benchmark input is built here, independently of package tests.
     needs:
-      - changes
+      - build-package-musl
       - validate-ci-matrix
-    if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
       actions: read
       contents: read

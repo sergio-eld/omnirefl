@@ -11,7 +11,8 @@ $ErrorActionPreference = 'Stop'
 $archive = Get-Item $Package
 $null = mkdir -Force $Results
 $Results = (Resolve-Path $Results).Path
-$work = Join-Path ([IO.Path]::GetTempPath()) ('omnirefl-package-test-' + [Guid]::NewGuid())
+# Keep the scratch root short: nested Git submodules hit Windows path limits.
+$work = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
 $source = "$work/with space"
 $install = "$source/install"
 $build = "$source/build"
