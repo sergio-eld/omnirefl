@@ -1,13 +1,3 @@
-cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
-
-project(omnirefl_tests LANGUAGES C CXX)
-
-enable_testing()
-
-if (NOT TARGET omni::tool)
-    find_package(omnirefl CONFIG REQUIRED)
-endif()
-
 add_test(NAME omnirefl.cli.help COMMAND $<TARGET_FILE:omni::tool> --help)
 set_tests_properties(omnirefl.cli.help PROPERTIES
     PASS_REGULAR_EXPRESSION
@@ -411,13 +401,6 @@ if(WIN32)
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 
-# -- Dependencies --------
-include(FetchContent)
-
-if(NOT TARGET omni::tool)
-    find_package(omnirefl CONFIG REQUIRED)
-endif()
-
 add_test(NAME omnirefl.integration.compile_db_working_directory
     COMMAND ${CMAKE_COMMAND}
         -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
@@ -428,11 +411,6 @@ add_test(NAME omnirefl.integration.compile_db_working_directory
         -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/compile db directory"
         -P
             "${CMAKE_CURRENT_LIST_DIR}/integration/run_compile_db_working_directory.cmake")
-
-include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/test_dependencies.cmake")
-
-include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/toolchain_checks.cmake")
-_omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
@@ -981,7 +959,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         example_test.cpp
         packed_field_test.cpp
         indexed_types.cpp
-        baseline_test.cpp
+        "${omnirefl_PROJECTS_DIR}/benchmarks/instrumentation/baseline_test.cpp"
     )
 
     add_executable(${_test_tgt} ${_test_sources})

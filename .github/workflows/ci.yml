@@ -326,10 +326,9 @@ jobs:
         # release for the same commit. `upload_symbols` retains the full-build
         # fallback used when no reusable CI run exists.
         if: >-
-          ${{ 'cosmo' != matrix.runtime && (
-            inputs.upload_symbols
-            || ('push' == github.event_name && 'refs/heads/master' == github.ref)
-          ) }}
+          ${{ 'cosmo' != matrix.runtime && (inputs.upload_symbols
+            || ('push' == github.event_name
+              && 'refs/heads/master' == github.ref)) }}
         run: |
           shopt -s nullglob
           symbol_dirs=(./build-alpine/${{ matrix.runtime }}/${{ matrix.arch }}/*/symbols)
@@ -348,10 +347,9 @@ jobs:
 
       - name: Upload Debug Symbols
         if: >-
-          ${{ 'cosmo' != matrix.runtime && (
-            inputs.upload_symbols
-            || ('push' == github.event_name && 'refs/heads/master' == github.ref)
-          ) }}
+          ${{ 'cosmo' != matrix.runtime && (inputs.upload_symbols
+            || ('push' == github.event_name
+              && 'refs/heads/master' == github.ref)) }}
         uses: actions/upload-artifact@v6
         with:
           name: symbols-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
@@ -947,10 +945,8 @@ jobs:
       - name: Download previous aggregate artifact
         id: download_previous
         if: >-
-          ${{
-            'true' == needs.changes.outputs.build_sources
-            && '' != steps.previous_aggregate.outputs.name
-          }}
+          ${{ 'true' == needs.changes.outputs.build_sources
+            && '' != steps.previous_aggregate.outputs.name }}
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.previous_aggregate.outputs.name }}
@@ -967,15 +963,11 @@ jobs:
       - name: Upload aggregated test artifact
         id: upload_agg
         if: >-
-          ${{
-            always()
+          ${{ always()
             && 'true' == needs.changes.outputs.build_sources
             && 'success' == steps.download_tests.outcome
-            && (
-              '' == steps.previous_aggregate.outputs.name
-              || 'success' == steps.download_previous.outcome
-            )
-          }}
+            && ('' == steps.previous_aggregate.outputs.name
+              || 'success' == steps.download_previous.outcome) }}
         uses: actions/upload-artifact@v6
         with:
           name: aggregated-test-results-attempt-${{ github.run_attempt }}
@@ -984,15 +976,12 @@ jobs:
 
       - name: Clean up intermediate artifacts
         if: >-
-          ${{
-            always()
+          ${{ always()
             && 'true' == needs.changes.outputs.build_sources
             && 'success' == steps.upload_agg.outcome
-            && (
-              'pull_request' != github.event_name
-              || github.event.pull_request.head.repo.full_name == github.repository
-            )
-          }}
+            && ('pull_request' != github.event_name
+              || github.event.pull_request.head.repo.full_name
+                == github.repository) }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -1050,23 +1039,15 @@ jobs:
       - benchmark-cosmo
       - benchmark-musl
     if: >-
-      ${{
-        always()
+      ${{ always()
         && 'success' == needs['required-ci'].result
-        && (
-          'false' == needs.changes.outputs.build_sources
-          || (
-            'success' == needs['benchmark-cosmo'].result
-            && 'success' == needs['benchmark-musl'].result
-          )
-        )
+        && ('false' == needs.changes.outputs.build_sources
+          || ('success' == needs['benchmark-cosmo'].result
+            && 'success' == needs['benchmark-musl'].result))
         && !inputs.skip_pages
         && 'refs/heads/master' == github.ref
-        && (
-          'push' == github.event_name
-          || 'workflow_dispatch' == github.event_name
-        )
-      }}
+        && ('push' == github.event_name
+          || 'workflow_dispatch' == github.event_name) }}
     permissions:
       actions: read
       contents: read
@@ -1166,10 +1147,8 @@ jobs:
 
       - name: Download Benchmark Records
         if: >-
-          ${{
-            'true' == steps.pages_order.outputs.deploy
-            && 'true' == needs.changes.outputs.build_sources
-          }}
+          ${{ 'true' == steps.pages_order.outputs.deploy
+            && 'true' == needs.changes.outputs.build_sources }}
         # Ad hoc: download-artifact currently fails for some artifacts uploaded
         # by Ubuntu runners. The REST download remains valid.
         # https://github.com/actions/upload-artifact/issues/811
@@ -1230,10 +1209,8 @@ jobs:
 
       - name: Update Published Benchmark History
         if: >-
-          ${{
-            'true' == steps.pages_order.outputs.deploy
-            && 'true' == needs.changes.outputs.build_sources
-          }}
+          ${{ 'true' == steps.pages_order.outputs.deploy
+            && 'true' == needs.changes.outputs.build_sources }}
         run: |
           mapfile -d '' records < <(
             find ./artifacts/benchmarks -type f -name run.json -print0)

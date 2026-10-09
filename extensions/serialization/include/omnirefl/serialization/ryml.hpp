@@ -15,7 +15,7 @@
  * Compatible with C++11 and later.
  *
  * Examples prefer C++20 syntax. Compatibility interfaces are available for
- * C++11; see tests/extensions/serialization/test.cpp for complete usage.
+ * C++11; see share/extensions/serialization/tests/test.cpp for complete usage.
  *
  * Given a reflectable person type and a std::string source:
  *

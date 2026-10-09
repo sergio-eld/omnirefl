@@ -197,13 +197,12 @@ elseif(ENABLE_BENCH OR ENABLE_TESTING)
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
 
+    set(BUILD_TESTING ${ENABLE_TESTING})
+    set(BUILD_EXAMPLES ${ENABLE_TESTING})
+    set(BUILD_BENCHMARKS ${ENABLE_BENCH})
+    add_subdirectory(share)
     if(ENABLE_TESTING)
-        add_subdirectory(tests)
-        add_subdirectory(tests/internal/std_compat)
-        add_subdirectory(examples)
-    endif()
-    if(ENABLE_BENCH)
-        add_subdirectory(benchmarks)
+        add_subdirectory(share/tests/internal/std_compat)
     endif()
 endif()
 
@@ -385,14 +384,9 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
         RENAME "CLI11.txt")
 
-    # Preserve the source layout for shared fixtures and toolchain checks.
-    install(DIRECTORY tests/
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests"
+    install(DIRECTORY share/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
         PATTERN "internal" EXCLUDE)
-    install(DIRECTORY examples benchmarks
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}")
-    install(FILES cmake/toolchain_checks.cmake cmake/test_dependencies.cmake
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/cmake")
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"

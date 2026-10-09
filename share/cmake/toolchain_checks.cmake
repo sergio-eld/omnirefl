@@ -1,4 +1,4 @@
-function(_omnirefl_supported_cpp_standards out)
+function(omnirefl_supported_cpp_standards out)
     set(_standards "")
     foreach(_feature IN LISTS CMAKE_CXX_COMPILE_FEATURES)
         if(_feature MATCHES "^cxx_std_([0-9]+)$")
@@ -30,7 +30,7 @@ function(_omnirefl_supported_cpp_standards out)
     set(${out} "${_standards}" PARENT_SCOPE)
 endfunction()
 
-function(_omnirefl_check_cxx20_language result)
+function(omnirefl_check_cxx20_language result)
     set(_omnirefl_has_cxx20_language OFF)
     if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
         include(CheckCXXSourceCompiles)
@@ -52,7 +52,7 @@ int main() { return 0; }
     set(${result} "${_omnirefl_has_cxx20_language}" PARENT_SCOPE)
 endfunction()
 
-function(_omnirefl_check_cxx23_library result)
+function(omnirefl_check_cxx23_library result)
     include(CheckCXXSourceCompiles)
     # Keep the probe's language and link settings local to this function.
     set(CMAKE_CXX_STANDARD 23)

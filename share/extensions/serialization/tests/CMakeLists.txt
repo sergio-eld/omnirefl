@@ -1,3 +1,7 @@
+if(NOT TARGET json_model)
+    add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../model" json_model)
+endif()
+
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.extensions.serialization")
     add_executable(${_test_target} test.cpp)
@@ -10,7 +14,7 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         target_compile_options(${_test_target} PRIVATE -fno-exceptions)
     endif()
     target_link_libraries(${_test_target} PRIVATE
-        gtest_main omni::serialization)
+        gtest_main omni::serialization json_model)
     omni_reflected_target(${_test_target})
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
         add_test(NAME ${_test_target} COMMAND ${_test_target})

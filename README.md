@@ -14,7 +14,7 @@ A C++ reflection tool built for a seamless experience without macros* or UB.<br>
 <!-- pages:sneak-peek:start -->
 ## Sneak Peek
 
-The [complete runnable example](examples/sneak_peek/main.cpp) implements the
+The [complete runnable example](share/examples/sneak_peek/main.cpp) implements the
 visitor and shows how to write reflected fields. Its setup and model are below:
 
 ```cpp
@@ -175,7 +175,7 @@ after:  depth=815 sensor=108 name=oceanic
 This example is included in the installed package; see
 [Examples, Tests and Benchmarks](#examples-tests-and-benchmarks).
 
-The [comprehensive guide](examples/comprehensive_guide/comprehensive_guide.cpp)
+The [comprehensive guide](share/examples/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 
@@ -215,7 +215,7 @@ const auto result = tuple
   | omni::fn::foldl(combine, initial);
 ```
 
-See the [functional tests](tests/functional/test.cpp) for detailed examples.
+See the [functional tests](share/tests/functional/test.cpp) for detailed examples.
 
 ## Reflection Utilities
 
@@ -227,7 +227,7 @@ for each reflected type and are available only within reflected scopes:
   present and constructible; additional source fields are ignored. Generated
   support currently requires an aggregate record without bases or anonymous
   aggregate members, and excludes unions. See the
-  [example](tests/tool/aggregate_into/test.cpp).
+  [example](share/tests/tool/aggregate_into/test.cpp).
 
 <!-- pages:scope:start -->
 ## Supported Scope
@@ -369,40 +369,47 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 <!-- pages:examples-tests-and-benchmarks:start -->
 ## Examples, Tests and Benchmarks
 
-- `share/omnirefl/examples`
-- `share/omnirefl/tests`
-- `share/omnirefl/benchmarks`
+`share/omnirefl` packages tests, examples, and benchmarks. You may configure
+the whole directory out of source, or any `share/omnirefl/examples/<folder>`
+as a standalone project.
 
-The Sneak Peek requires CMake 3.20 and a configured C++23 toolchain. The
-RapidYAML serialization extension supports C++11. Download and unpack the
-Cosmopolitan `.tar.gz` from the
-[latest release](https://github.com/sergio-eld/omnirefl/releases/latest), or
-install a package. Set `prefix` to the absolute installation path.
+Examples, tests, and benchmarks are enabled by default; disable a category with
+`-DBUILD_EXAMPLES=OFF`, `-DBUILD_TESTING=OFF`, or `-DBUILD_BENCHMARKS=OFF`.
+Unsupported examples are skipped with a status message.
+
+Alternatively, download and unpack the Cosmopolitan archive from the
+[latest release](https://github.com/sergio-eld/omnirefl/releases/latest)
+into `./omnirefl`:
+
+```bash
+mkdir -p omnirefl
+curl -fL "$(curl -fsSL \
+  https://api.github.com/repos/sergio-eld/omnirefl/releases/latest \
+  | sed -n 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')" \
+  | tar -xz -C omnirefl --strip-components=1
+```
 
 ```bash
 # Use /usr when installed system-wide from a Debian package.
-prefix=/absolute/path/to/omnirefl
+prefix="$PWD/omnirefl"
 
-cp -r "$prefix/share/omnirefl" ./omnirefl-sources
-cd omnirefl-sources/examples
 mkdir build && cd build
-cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_PREFIX_PATH=$prefix"
-cmake --build .
-ctest --output-on-failure --no-tests=error
-```
-
-From the original working directory, build the tests with:
-
-```bash
-cd omnirefl-sources/tests
-mkdir build && cd build
-cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+cmake "$prefix/share/omnirefl" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   "-DCMAKE_PREFIX_PATH=$prefix"
 cmake --build .
 ctest --timeout 600 --output-on-failure --no-tests=error
 ```
 
-Configure `omnirefl-sources/benchmarks` separately to build benchmarks.
+Each `share/omnirefl/examples/<folder>` directory is self-contained. Configure one
+independently, such as `share/omnirefl/examples/sneak_peek`, or copy it into
+your own workspace. The Sneak Peek requires CMake 3.20 and a configured
+C++23 toolchain.
+
+Extension examples, tests, and benchmarks are grouped under
+`share/omnirefl/extensions`:
+
+- `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
+  Its standalone example is in `serialization/examples/ryml`.
 <!-- pages:examples-tests-and-benchmarks:end -->
 
 <!-- pages:limitations:start -->
@@ -454,7 +461,7 @@ model: reflected types must be nameable before their source declarations. See
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
 - [Deprecated public fields can emit compiler deprecation diagnostics while
-  their metadata is formed](tests/tool/regressions/deprecated_public_field.cpp),
+  their metadata is formed](share/tests/tool/regressions/deprecated_public_field.cpp),
   before `is_deprecated()` can filter them.
 - Anonymous unions are not reflected correctly.
 - Compiler-packed misaligned raw arrays have no safe whole-field accessor; use
@@ -517,9 +524,9 @@ generation. The overhead target is roughly the frontend portion of a complete
 object build: about 30% as an order-of-magnitude expectation. The actual ratio
 depends on the source, included headers, compiler, and optimization level.
 
-The packaged [benchmark baseline](tests/tool/baseline_test.cpp) is intentionally
-large enough to represent a meaningful translation unit and contains a
-reasonable amount of ordinary and reflected code. CI records its reflection and
+The packaged [benchmark baseline](share/benchmarks/instrumentation/baseline_test.cpp)
+is intentionally large enough to represent a meaningful translation unit and
+contains a reasonable amount of ordinary and reflected code. CI records its reflection and
 subsequent Release object-build times across benchmarked platforms. See the
 [continuous benchmark](#continuous-benchmark) and
 [workflow history](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)

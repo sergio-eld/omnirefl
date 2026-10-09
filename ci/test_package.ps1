@@ -1,10 +1,9 @@
-# Run in PowerShell 7 with the Windows C++ toolchain environment initialized.
+# Run with the Windows C++ toolchain environment initialized.
 param(
   [Parameter(Mandatory)] [string] $Package,
   [Parameter(Mandatory)] [string] $Name,
   [Parameter(Mandatory)] [string] $Results,
-  [string] $CMakeArg,
-  [switch] $SkipExampleRun
+  [string] $CMakeArg
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +15,6 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
 $source = "$work/with space"
 $install = "$source/install"
 $build = "$source/build"
-$exampleBuild = "$source/example-build"
 $extract = "$work/extract"
 
 try {
@@ -37,6 +35,8 @@ try {
 
   mv $roots[0].FullName $install
   cp -r "$install/share/omnirefl/*" $source
+  # Windows PowerShell treats native stderr as errors; check native exit codes.
+  $ErrorActionPreference = 'Continue'
   & "$install/bin/omnirefl.exe" --help 2>&1 |
     tee "$Results/omnirefl-help.log"
   if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
@@ -44,58 +44,48 @@ try {
     tee "$Results/ccdb-query-help.log"
   if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
 
+  $ErrorActionPreference = 'Stop'
+
   $cmakeArgs = @('-GNinja', '-DCMAKE_BUILD_TYPE=Release',
     "-Domnirefl_DIR=$install/lib/cmake/omnirefl")
   if ($CMakeArg) { $cmakeArgs += $CMakeArg }
 
-  cmake -S "$source/examples" -B $exampleBuild @cmakeArgs 2>&1 |
-    tee "$Results/example-configure.log"
-  if (0 -ne $LASTEXITCODE) {
-    echo 'omnirefl: packaged example configuration failed'
-    exit $LASTEXITCODE
-  }
-
-  cmake --build $exampleBuild --parallel ([Environment]::ProcessorCount) 2>&1 |
-    tee "$Results/example-build.log"
-  if (0 -ne $LASTEXITCODE) {
-    echo 'omnirefl: packaged example build failed'
-    exit $LASTEXITCODE
-  }
-
-  if (!$SkipExampleRun) {
-    ctest --test-dir $exampleBuild --no-tests=error --timeout 600 `
-      --output-junit "$Results/$Name-examples.xml" -V 2>&1 |
-      tee "$Results/example-test.log"
-    if (0 -ne $LASTEXITCODE) {
-      echo 'omnirefl: packaged example tests failed'
-      exit $LASTEXITCODE
-    }
-  }
-
-  cmake -S "$source/tests" -B $build @cmakeArgs 2>&1 |
+  $ErrorActionPreference = 'Continue'
+  cmake -S $source -B $build @cmakeArgs `
+    -DBUILD_BENCHMARKS=OFF 2>&1 |
     tee "$Results/configure.log"
-  if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+  if (0 -ne $LASTEXITCODE) {
+    echo 'omnirefl: packaged project configuration failed'
+    exit $LASTEXITCODE
+  }
 
   cmake --build $build --parallel ([Environment]::ProcessorCount) 2>&1 |
     tee "$Results/build.log"
-  if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+  if (0 -ne $LASTEXITCODE) {
+    echo 'omnirefl: packaged project build failed'
+    exit $LASTEXITCODE
+  }
 
   ctest --test-dir $build --no-tests=error --timeout 600 `
     --output-junit "$Results/$Name.xml" -V 2>&1 |
     tee "$Results/$Name.log"
-  exit $LASTEXITCODE
+  $rc = $LASTEXITCODE
+  if (0 -ne $rc) {
+    echo 'omnirefl: packaged project tests failed'
+    if ($env:KEEP_ALIVE_ON_FAILURE) {
+      echo "ctest failed with rc=$rc; keeping container alive"
+      while ($true) { Start-Sleep -Seconds 60 }
+    }
+  }
+  exit $rc
 } finally {
+  $ErrorActionPreference = 'Stop'
   $diagnostics = "$Results/diagnostics"
   $null = mkdir -Force $diagnostics
   foreach ($file in @('CMakeCache.txt', 'compile_commands.json',
       'Testing/Temporary/LastTest.log', 'CMakeFiles/CMakeError.log')) {
     $path = "$build/$file"
     if (Test-Path $path) { cp $path $diagnostics }
-  }
-
-  $exampleLog = "$exampleBuild/Testing/Temporary/LastTest.log"
-  if (Test-Path $exampleLog) {
-    cp $exampleLog "$diagnostics/examples-LastTest.log"
   }
 
   if (Test-Path $build) {

@@ -6,7 +6,6 @@ package=
 name=
 results=
 cmake_arg=
-skip_example_run=false
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -29,10 +28,6 @@ while [ "$#" -gt 0 ]; do
       fi
       cmake_arg=$2
       shift 2
-      ;;
-    --skip-example-run)
-      skip_example_run=true
-      shift
       ;;
     *)
       printf 'unknown argument: %s\n' "$1" >&2
@@ -62,10 +57,8 @@ fi
 package=$(cd "$(dirname "$package")" && pwd)/$(basename "$package")
 
 readonly work=$(mktemp -d "${TMPDIR:-/tmp}/omnirefl-package-test.XXXXXX")
-readonly source="$work/with space/tests"
+readonly source="$work/with space"
 readonly build="$work/with space/build"
-readonly example_source="$work/with space/examples"
-readonly example_build="$work/with space/example-build"
 deb_installed=false
 
 cleanup() {
@@ -80,10 +73,6 @@ cleanup() {
       cp "$file" "$diagnostics/"
     fi
   done
-
-  if [ -f "$example_build/Testing/Temporary/LastTest.log" ]; then
-    cp "$example_build/Testing/Temporary/LastTest.log" "$diagnostics/examples-LastTest.log"
-  fi
 
   (
     cd "$build"
@@ -102,7 +91,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-mkdir -p "$results" "$source" "$build" "$example_source" "$example_build"
+mkdir -p "$results" "$source" "$build"
 
 readonly package_name=$(basename "$package")
 
@@ -198,48 +187,24 @@ fi
 cp -R "$install/share/omnirefl"/. "$work/with space/"
 
 set -- cmake \
-  -S "$example_source" \
-  -B "$example_build" \
-  -GNinja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -Domnirefl_DIR="$config"
-if [ -n "$cmake_arg" ]; then
-  set -- "$@" "$cmake_arg"
-fi
-if ! "$@" 2>&1 | tee "$results/example-configure.log"; then
-  printf 'omnirefl: packaged example configuration failed\n' >&2
-  exit 1
-fi
-
-if ! cmake --build "$example_build" \
-    --parallel "$parallel" 2>&1 | tee "$results/example-build.log"; then
-  printf 'omnirefl: packaged example build failed\n' >&2
-  exit 1
-fi
-
-if ! $skip_example_run; then
-  if ! ctest --test-dir "$example_build" --no-tests=error \
-      --timeout 600 --output-junit "$results/$name-examples.xml" \
-      -V 2>&1 | tee "$results/example-test.log"; then
-    printf 'omnirefl: packaged example tests failed\n' >&2
-    exit 1
-  fi
-fi
-
-set -- cmake \
   -S "$source" \
   -B "$build" \
+  -DBUILD_BENCHMARKS=OFF \
   -GNinja \
   -DCMAKE_BUILD_TYPE=Release \
   -Domnirefl_DIR="$config"
 if [ -n "$cmake_arg" ]; then
   set -- "$@" "$cmake_arg"
 fi
-"$@" 2>&1 |
-  tee "$results/configure.log"
+if ! "$@" 2>&1 | tee "$results/configure.log"; then
+  printf 'omnirefl: packaged project configuration failed\n' >&2
+  exit 1
+fi
 
-cmake --build "$build" --parallel "$parallel" 2>&1 |
-  tee "$results/build.log"
+if ! cmake --build "$build" --parallel "$parallel" 2>&1 | tee "$results/build.log"; then
+  printf 'omnirefl: packaged project build failed\n' >&2
+  exit 1
+fi
 
 set +e
 ctest --test-dir "$build" --no-tests=error \
@@ -249,6 +214,10 @@ ctest --test-dir "$build" --no-tests=error \
   tee "$results/$name.log"
 rc=$?
 set -e
+
+if [ 0 -ne "$rc" ]; then
+  printf 'omnirefl: packaged project tests failed\n' >&2
+fi
 
 if [ "$rc" -ne 0 ] && [ -n "${KEEP_ALIVE_ON_FAILURE:-}" ]; then
   printf 'ctest failed with rc=%d; keeping container alive\n' "$rc"

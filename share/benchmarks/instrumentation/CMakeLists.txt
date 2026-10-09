@@ -1,13 +1,3 @@
-cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
-project(instrumentation_bench LANGUAGES CXX)
-
-if(NOT TARGET omni::tool)
-    find_package(omnirefl CONFIG REQUIRED)
-endif()
-include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/test_dependencies.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/toolchain_checks.cmake")
-_omnirefl_supported_cpp_standards(_supported_cpp_standards)
-
 set(_benchmark_cpp_standard "")
 foreach(_n IN LISTS _supported_cpp_standards)
     if(_n LESS_EQUAL 23)
@@ -19,7 +9,7 @@ if(NOT _benchmark_cpp_standard)
     message(FATAL_ERROR "omnirefl: no C++ standard up to C++23 is available for benchmark.baseline")
 endif()
 
-add_library(benchmark.baseline STATIC ../../tests/tool/baseline_test.cpp)
+add_library(benchmark.baseline STATIC baseline_test.cpp)
 set_target_properties(benchmark.baseline PROPERTIES
     CXX_STANDARD ${_benchmark_cpp_standard}
     CXX_STANDARD_REQUIRED YES
