@@ -409,7 +409,7 @@ Extension examples, tests, and benchmarks are grouped under
 `share/omnirefl/extensions`:
 
 - `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
-  Its standalone example is in `serialization/examples/ryml`.
+  See the [standalone example](share/extensions/serialization/examples/ryml/main.cpp).
 <!-- pages:examples-tests-and-benchmarks:end -->
 
 <!-- pages:limitations:start -->
