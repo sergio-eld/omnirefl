@@ -21,17 +21,6 @@ FetchContent_Declare(googletest
     GIT_TAG release-1.12.1)
 FetchContent_MakeAvailable(googletest)
 
-if(ENABLE_BENCH)
-    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
-    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(google_benchmark
-        GIT_REPOSITORY https://github.com/google/benchmark.git
-        GIT_TAG v1.9.5
-        GIT_SHALLOW TRUE
-        GIT_PROGRESS TRUE)
-    FetchContent_MakeAvailable(google_benchmark)
-endif()
 if(_extension_parent_standard)
     set(CMAKE_CXX_STANDARD "${_extension_parent_standard}")
 else()
@@ -42,13 +31,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     enable_testing()
 endif()
 
-if(NOT COMMAND _omnirefl_supported_cpp_standards)
-    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../tool/supported_cpp_standards.cmake")
-        include("${CMAKE_CURRENT_LIST_DIR}/../tool/supported_cpp_standards.cmake")
-    else()
-        include("${CMAKE_CURRENT_LIST_DIR}/../supported_cpp_standards.cmake")
-    endif()
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/toolchain_checks.cmake")
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 add_subdirectory(serialization)

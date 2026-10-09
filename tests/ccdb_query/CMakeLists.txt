@@ -27,13 +27,13 @@ file(CONFIGURE
 
 function(_ccdb_query_pass name source)
     add_test(NAME "ccdb_query.${name}"
-        COMMAND ccdb_query "${_ccdb_query_db}" "${source}" ${ARGN})
+        COMMAND omni::ccdb_query "${_ccdb_query_db}" "${source}" ${ARGN})
 endfunction()
 
 function(_ccdb_query_fail name source)
     add_test(NAME "ccdb_query.${name}"
         COMMAND ${CMAKE_COMMAND}
-            -D "CCDB_QUERY=$<TARGET_FILE:ccdb_query>"
+            -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
             -D "COMPILE_DB=${_ccdb_query_db}"
             -D "SOURCE=${source}"
             -D "EXPECT=${ARGV2}"
@@ -42,7 +42,7 @@ function(_ccdb_query_fail name source)
 endfunction()
 
 add_test(NAME ccdb_query.help
-    COMMAND ccdb_query --help)
+    COMMAND omni::ccdb_query --help)
 set_tests_properties(ccdb_query.help PROPERTIES
     PASS_REGULAR_EXPRESSION
         "Usage: ccdb_query <compile_commands.json> <source.cpp> \\[output-contains\\]")
@@ -53,7 +53,7 @@ set_tests_properties(ccdb_query.unique PROPERTIES
 
 add_test(NAME ccdb_query.backslash_argument
     COMMAND ${CMAKE_COMMAND}
-        -D "CCDB_QUERY=$<TARGET_FILE:ccdb_query>"
+        -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
         -D "COMPILE_DB=${_ccdb_query_db}"
         -D "SOURCE=${_ccdb_query_unique}"
         -P "${CMAKE_CURRENT_LIST_DIR}/expect_backslash.cmake")
@@ -71,7 +71,7 @@ set_tests_properties(ccdb_query.alpha_backslash PROPERTIES
     PASS_REGULAR_EXPRESSION "ALPHA_TARGET")
 
 add_test(NAME ccdb_query.backslash_output
-    COMMAND ccdb_query
+    COMMAND omni::ccdb_query
         "${_ccdb_query_backslash_db_dir}/compile_commands.json"
         "${_ccdb_query_shared}"
         "/alpha.dir/")

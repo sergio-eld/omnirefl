@@ -125,6 +125,11 @@ find_package(omnirefl CONFIG REQUIRED)
 
 add_executable(sneak_peek main.cpp)
 
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # MinGW's std::print terminal support lives in this library.
+    target_link_libraries(sneak_peek PRIVATE stdc++exp)
+endif()
+
 # Reflection is not transitive: only this target's own C++ translation units are
 # instrumented. Call omni_reflected_target for each target that should be
 # reflected.
@@ -170,7 +175,7 @@ after:  depth=815 sensor=108 name=oceanic
 This example is included in the installed package; see
 [Examples, Tests and Benchmarks](#examples-tests-and-benchmarks).
 
-The [comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
+The [comprehensive guide](examples/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 
@@ -365,7 +370,8 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 ## Examples, Tests and Benchmarks
 
 - `share/omnirefl/examples`
-- `share/omnirefl/tests` — tests and benchmarks
+- `share/omnirefl/tests`
+- `share/omnirefl/benchmarks`
 
 The Sneak Peek requires CMake 3.20 and a configured C++23 toolchain. The
 RapidYAML serialization extension supports C++11. Download and unpack the
@@ -377,30 +383,26 @@ install a package. Set `prefix` to the absolute installation path.
 # Use /usr when installed system-wide from a Debian package.
 prefix=/absolute/path/to/omnirefl
 
-cp -r "$prefix/share/omnirefl/examples" ./omnirefl-examples
-cd omnirefl-examples
-mkdir build
-cd build
+cp -r "$prefix/share/omnirefl" ./omnirefl-sources
+cd omnirefl-sources/examples
+mkdir build && cd build
 cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_PREFIX_PATH=$prefix"
 cmake --build .
-./sneak_peek/sneak_peek
-./extensions/serialization/ryml/json_serialization
+ctest --output-on-failure --no-tests=error
 ```
 
-From the original working directory, build the tests and benchmarks with:
+From the original working directory, build the tests with:
 
 ```bash
-cp -r "$prefix/share/omnirefl/tests" ./omnirefl-tests
-cd omnirefl-tests
-mkdir build
-cd build
+cd omnirefl-sources/tests
+mkdir build && cd build
 cmake .. -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  "-DCMAKE_PREFIX_PATH=$prefix" -DENABLE_BENCH=ON
+  "-DCMAKE_PREFIX_PATH=$prefix"
 cmake --build .
-ctest --timeout 600 --output-on-failure
+ctest --timeout 600 --output-on-failure --no-tests=error
 ```
 
-Omit `-DENABLE_BENCH=ON` to skip benchmarks.
+Configure `omnirefl-sources/benchmarks` separately to build benchmarks.
 <!-- pages:examples-tests-and-benchmarks:end -->
 
 <!-- pages:limitations:start -->

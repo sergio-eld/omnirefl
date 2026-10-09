@@ -63,6 +63,12 @@ x-build-musl-command: &build-musl-command
     mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
 x-test-linux-command: &test-linux-command |
+  set -- /packages/*.tar.gz
+  if [ "$$#" -ne 1 ] || [ ! -f "$$1" ]; then
+    echo 'Expected exactly one package in /packages' >&2
+    exit 1
+  fi
+  package=$$1
   set --
   case $${TOOLCHAIN} in
     gcc) export CC=gcc; export CXX=g++ ;;
@@ -75,8 +81,8 @@ x-test-linux-command: &test-linux-command |
     *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
   esac
 
-  exec "$$PACKAGE_TEST_SHELL" /runner/test_packages.sh \
-    --packages /packages \
+  exec "$$PACKAGE_TEST_SHELL" /runner/test_package.sh \
+    --package "$$package" \
     --name "$$TEST_NAME" \
     --results /results \
     "$$@"
@@ -355,9 +361,8 @@ services:
           }
         }
 
-        mkdir -Force 'C:/with space/build', 'C:/with space/example-build', `
-          'C:/test', 'C:/test/diagnostics' |
-          Out-Null
+        $$null = mkdir -Force 'C:/with space/build', 'C:/with space/example-build', `
+          'C:/test', 'C:/test/diagnostics'
         $$packages = @(ls -Path 'C:/install' -File | Where-Object {
           $$_.Name.EndsWith('.zip') -or $$_.Name.EndsWith('.tar.gz')
         })
@@ -373,8 +378,7 @@ services:
         $$installRoot = ls -Directory -Filter 'omnirefl-*' | Select-Object -First 1
         if ($$null -eq $$installRoot) { throw 'could not find extracted omnirefl package root' }
         mv $$installRoot.FullName ./omnirefl
-        cp -r omnirefl/share/omnirefl/examples ./
-        cp -r omnirefl/share/omnirefl/tests ./
+        cp -r omnirefl/share/omnirefl/* ./
         ./omnirefl/bin/omnirefl.exe -h
         ./omnirefl/bin/ccdb_query.exe -h
 
@@ -408,23 +412,14 @@ services:
           echo 'omnirefl: packaged example build failed'
           exit $$LASTEXITCODE
         }
-        $$examples = @(
-          # CMake creates this directory only when Sneak Peek is supported.
-          if (Test-Path './sneak_peek') {
-            './sneak_peek/sneak_peek.exe'
-          }
-          './extensions/serialization/ryml/json_serialization.exe'
-        )
-        foreach ($$example in $$examples) {
-          if (-not (Test-Path $$example)) {
-            echo "omnirefl: packaged example executable is missing: $$example"
-            exit 1
-          }
-          & $$example
-          if (0 -ne $$LASTEXITCODE) {
-            echo "omnirefl: packaged example execution failed: $$example"
-            exit $$LASTEXITCODE
-          }
+        # Windows PowerShell treats native stderr as errors; use CTest's status.
+        $$ErrorActionPreference = 'Continue'
+        ctest --no-tests=error --timeout 600 -V
+        $$exampleStatus = $$LASTEXITCODE
+        $$ErrorActionPreference = 'Stop'
+        if (0 -ne $$exampleStatus) {
+          echo 'omnirefl: packaged example tests failed'
+          exit $$exampleStatus
         }
 
         cd 'C:/with space/build'
@@ -432,7 +427,7 @@ services:
         # Windows PowerShell promotes native stderr to errors. Let CTest
         # finish all checks and use its exit code to report failures.
         $$ErrorActionPreference = 'Continue'
-        ctest . --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
+        ctest --no-tests=error --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
           tee C:/test/$$env:TEST_NAME.log
         $$rc = $$LASTEXITCODE
         $$ErrorActionPreference = 'Stop'
@@ -492,8 +487,7 @@ services:
         install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
         test -n "$$install_root"
         mv "$$install_root" ./omnirefl
-        cp -r omnirefl/share/omnirefl/examples ./
-        cp -r omnirefl/share/omnirefl/tests ./
+        cp -r omnirefl/share/omnirefl/* ./
         # refactorme(cosmo_msys2): review native archive/launcher handling.
         # ad hoc: MSYS2 reports ENOENT when launching Cosmopolitan's PE payload
         # directly; PowerShell delegates it to the Windows loader.
@@ -532,26 +526,15 @@ services:
           echo 'omnirefl: packaged example build failed' >&2
           exit 1
         fi
-        set -- ./extensions/serialization/ryml/json_serialization.exe
-        # CMake creates this directory only when Sneak Peek is supported.
-        if [ -d ./sneak_peek ]; then
-          set -- ./sneak_peek/sneak_peek.exe "$$@"
+        if ! ctest --no-tests=error --timeout 600 -V; then
+          echo 'omnirefl: packaged example tests failed' >&2
+          exit 1
         fi
-        for example in "$$@"; do
-          if [ ! -f "$$example" ]; then
-            echo "omnirefl: packaged example executable is missing: $$example" >&2
-            exit 1
-          fi
-          if ! "$$example"; then
-            echo "omnirefl: packaged example execution failed: $$example" >&2
-            exit 1
-          fi
-        done
 
         cd "/c/with space/build"
 
         set +e
-        ctest . --timeout 600 --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
+        ctest --no-tests=error --timeout 600 --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
           tee "/c/test/$$TEST_NAME.log"
         rc=$${PIPESTATUS[0]}
         set -e

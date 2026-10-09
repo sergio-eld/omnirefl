@@ -4,8 +4,6 @@ project(omnirefl_tests LANGUAGES C CXX)
 
 enable_testing()
 
-option(ENABLE_BENCH "Enable omnirefl benchmark targets" OFF)
-
 if (NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
@@ -431,73 +429,10 @@ add_test(NAME omnirefl.integration.compile_db_working_directory
         -P
             "${CMAKE_CURRENT_LIST_DIR}/integration/run_compile_db_working_directory.cmake")
 
-# Enable FetchContent logging
-set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/test_dependencies.cmake")
 
-# do not let googletest install itself when run "cmake --install" / CPack
-set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
-set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_Declare(googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-     # The "newest" gtest that supports C++11.
-     # Otherwize will force its C++ version upon the test targets.
-    GIT_TAG release-1.12.1)
-
-# std-compat utility
-set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
-set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(tl_expected
-    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-    GIT_TAG v1.3.1
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS TRUE)
-
-set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(tl_optional
-    GIT_REPOSITORY https://github.com/TartanLlama/optional.git
-    GIT_TAG v1.1.0
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS TRUE)
-
-set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
-FetchContent_Declare(mpark_variant
-    GIT_REPOSITORY https://github.com/mpark/variant.git
-    GIT_TAG v1.4.0
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES ""
-    GIT_SUBMODULES_RECURSE FALSE
-)
-
-FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant googletest)
-add_library(GTest::GTest ALIAS gtest)
-
-if(DEFINED omnirefl_DIR)
-    # Keep strict project warnings out of third-party FetchContent targets.
-    include("${omnirefl_DIR}/clean_build.cmake")
-endif()
-
-# todo: move header with `compat::variant`, `compat::expected` and `compat::optional` here.
-add_library(std_compat INTERFACE)
-target_link_libraries(std_compat INTERFACE
-    tl::expected
-    tl::optional
-    mpark_variant
-)
-
-include("${CMAKE_CURRENT_LIST_DIR}/supported_cpp_standards.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/toolchain_checks.cmake")
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
-
-# The installed package places the functional suite beside this project so the
-# same tests exercise its public headers across the package-test matrix.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/functional/CMakeLists.txt")
-    add_subdirectory(functional)
-endif()
-
-# Installed-package tests also exercise the shipped extension component.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/extensions/CMakeLists.txt")
-    add_subdirectory(extensions)
-endif()
 
 if("17" IN_LIST _supported_cpp_standards)
     function(_omnirefl_negative_tool_run name source expected_diagnostics)
@@ -1015,74 +950,6 @@ if("20" IN_LIST _supported_cpp_standards)
 endif()
 
 message(VERBOSE "omnirefl: supported C++ standards (from CMAKE_CXX_COMPILE_FEATURES): ${_supported_cpp_standards}")
-
-if(ENABLE_BENCH)
-    set(_benchmark_cpp_standard "")
-    foreach(_n IN LISTS _supported_cpp_standards)
-        if(_n LESS_EQUAL 23)
-            set(_benchmark_cpp_standard "${_n}")
-        endif()
-    endforeach()
-
-    if(NOT _benchmark_cpp_standard)
-        message(FATAL_ERROR "omnirefl: no C++ standard up to C++23 is available for benchmark.baseline")
-    endif()
-
-    add_library(benchmark.baseline STATIC baseline_test.cpp)
-    set_target_properties(benchmark.baseline PROPERTIES
-        CXX_STANDARD ${_benchmark_cpp_standard}
-        CXX_STANDARD_REQUIRED YES
-        CXX_EXTENSIONS NO
-    )
-
-    target_compile_definitions(benchmark.baseline PRIVATE CXX_STANDARD=${_benchmark_cpp_standard})
-    target_link_libraries(benchmark.baseline PRIVATE GTest::GTest std_compat)
-    omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
-
-    if("20" IN_LIST _supported_cpp_standards)
-        add_subdirectory(bench/record_conversion)
-    endif()
-endif()
-
-set(_has_cxx20_reflected_guide_features OFF)
-if("20" IN_LIST _supported_cpp_standards)
-    file(WRITE
-        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features.cpp"
-        [[
-#if !defined(__cpp_concepts) || __cpp_concepts < 201907L
-#  error "C++20 concepts are required"
-#endif
-
-#if !defined(__cpp_generic_lambdas) || __cpp_generic_lambdas < 201707L
-#  error "explicit template parameter lists for lambdas are required"
-#endif
-
-static_assert(201907L <= __cpp_concepts);
-static_assert(201707L <= __cpp_generic_lambdas);
-
-int main() {
-  return 0;
-}
-]])
-    try_compile(_has_cxx20_reflected_guide_features
-        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features"
-        "${CMAKE_CURRENT_BINARY_DIR}/check_cxx20_reflected_guide_features.cpp"
-        CMAKE_FLAGS
-            "-DCMAKE_CXX_STANDARD=20"
-            "-DCMAKE_CXX_STANDARD_REQUIRED=ON"
-            "-DCMAKE_CXX_EXTENSIONS=OFF"
-        OUTPUT_VARIABLE _cxx20_reflected_guide_check_output)
-
-    if(NOT _has_cxx20_reflected_guide_features)
-        message(STATUS
-            "omnirefl: skipping C++20 examples: required C++20 language features are not available")
-        message(VERBOSE "${_cxx20_reflected_guide_check_output}")
-    endif()
-endif()
-
-if(_has_cxx20_reflected_guide_features)
-    add_subdirectory(comprehensive_guide)
-endif()
 
 add_subdirectory(aggregate_into)
 add_subdirectory(reflected)

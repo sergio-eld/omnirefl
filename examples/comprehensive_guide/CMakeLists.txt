@@ -8,13 +8,29 @@ if(NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
 
+enable_testing()
+include(FetchContent)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(INSTALL_GMOCK OFF CACHE BOOL "" FORCE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG release-1.12.1)
+set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
+FetchContent_Declare(mpark_variant
+    GIT_REPOSITORY https://github.com/mpark/variant.git
+    GIT_TAG v1.4.0
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES "")
+FetchContent_MakeAvailable(googletest mpark_variant)
+
 add_executable(comprehensive_guide comprehensive_guide.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(comprehensive_guide PRIVATE
-    GTest::GTest
+    gtest
     gtest_main
-    std_compat)
+    mpark_variant)
 
 # Index mode is experimental and not expected to be stable across compilers.
 omni_reflected_target(comprehensive_guide ENABLE_INDEX_MODE)

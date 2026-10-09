@@ -15,16 +15,28 @@ if (($#)); then
   done
 fi
 
-PACKAGE_DIR=./artifacts/packages/current docker compose run --rm build-musl
-PACKAGE_DIR=./artifacts/packages/current docker compose run --rm build-cosmo
+PACKAGE_DIR=./artifacts/packages/current/musl docker compose run --rm build-musl
+PACKAGE_DIR=./artifacts/packages/current/cosmo docker compose run --rm build-cosmo
 
-for toolchain in "${TOOLCHAINS[@]}"; do
-  TOOLCHAIN="$toolchain" docker compose run --rm test-alpine
-done
+readonly machine=$(uname -m)
 
-for version in "${UBUNTU_VERSIONS[@]}"; do
+for runtime in musl cosmo; do
   for toolchain in "${TOOLCHAINS[@]}"; do
-    UBUNTU_VERSION="$version" TOOLCHAIN="$toolchain" \
-      docker compose run --rm test-ubuntu
+    name="alpine-$machine-$runtime-$toolchain"
+    PACKAGE_DIR="./artifacts/packages/current/$runtime" \
+    TEST_NAME="$name" \
+    TEST_RESULTS_DIR="./artifacts/test-results/$name" \
+    TOOLCHAIN="$toolchain" docker compose run --rm test-alpine
+  done
+
+  for version in "${UBUNTU_VERSIONS[@]}"; do
+    for toolchain in "${TOOLCHAINS[@]}"; do
+      name="ubuntu-$version-$machine-$runtime-$toolchain"
+      PACKAGE_DIR="./artifacts/packages/current/$runtime" \
+      TEST_NAME="$name" \
+      TEST_RESULTS_DIR="./artifacts/test-results/$name" \
+      UBUNTU_VERSION="$version" TOOLCHAIN="$toolchain" \
+        docker compose run --rm test-ubuntu
+    done
   done
 done

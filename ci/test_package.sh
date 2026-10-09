@@ -58,6 +58,9 @@ if [ ! -f "$package" ]; then
   exit 2
 fi
 
+# ZIP extraction changes directory; retain an absolute archive path.
+package=$(cd "$(dirname "$package")" && pwd)/$(basename "$package")
+
 readonly work=$(mktemp -d "${TMPDIR:-/tmp}/omnirefl-package-test.XXXXXX")
 readonly source="$work/with space/tests"
 readonly build="$work/with space/build"
@@ -77,6 +80,10 @@ cleanup() {
       cp "$file" "$diagnostics/"
     fi
   done
+
+  if [ -f "$example_build/Testing/Temporary/LastTest.log" ]; then
+    cp "$example_build/Testing/Temporary/LastTest.log" "$diagnostics/examples-LastTest.log"
+  fi
 
   (
     cd "$build"
@@ -102,17 +109,32 @@ readonly package_name=$(basename "$package")
 case "$package_name" in
   *-musl-*) readonly package_runtime=musl ;;
   *-cosmo-*) readonly package_runtime=cosmo ;;
+  *-ucrt-*) readonly package_runtime=ucrt ;;
   *)
     printf 'cannot infer package runtime from: %s\n' "$package_name" >&2
     exit 2
     ;;
 esac
 
+# MSYS2 selects Windows executables rather than the Unix launchers.
+case $(uname -s) in
+  MINGW* | MSYS*) readonly executable_suffix=.exe ;;
+  *) readonly executable_suffix= ;;
+esac
+
 case "$package_name" in
-  *.tar.gz)
+  *.tar.gz | *.zip)
     archive="$work/archive"
     mkdir -p "$archive"
-    tar -xzf "$package" -C "$archive"
+    if [[ "$package_name" = *.zip ]]; then
+      (cd "$archive" && cmake -E tar xf "$package")
+    elif [ "$package_runtime" = cosmo ] && [ -n "$executable_suffix" ]; then
+      # MSYS2 tar aliases .exe names with their Unix launchers. Windows tar
+      # preserves both package files; remove this workaround when MSYS2 does.
+      /c/Windows/System32/tar.exe -xzf "$package" -C "$archive"
+    else
+      tar -xzf "$package" -C "$archive"
+    fi
 
     set -- "$archive"/omnirefl-*
     if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
@@ -142,20 +164,29 @@ readonly parallel=$(getconf _NPROCESSORS_ONLN 2>/dev/null \
   || sysctl -n hw.logicalcpu 2>/dev/null \
   || printf '1\n')
 
-test -x "$install/bin/omnirefl"
-test -x "$install/bin/ccdb_query"
+test -x "$install/bin/omnirefl$executable_suffix"
+test -x "$install/bin/ccdb_query$executable_suffix"
 test -d "$install/include/omnirefl"
 test -d "$config"
 test -d "$packaged_examples"
 test -d "$packaged_tests"
 
-"$install/bin/omnirefl" --help 2>&1 |
-  tee "$results/omnirefl-help.log"
-"$install/bin/ccdb_query" --help 2>&1 |
-  tee "$results/ccdb-query-help.log"
+for tool in omnirefl ccdb_query; do
+  if [ "$package_runtime" = cosmo ] && [ -n "$executable_suffix" ]; then
+    # MSYS2 cannot launch the Cosmo PE payload directly; PowerShell uses the
+    # Windows loader. Remove this workaround when MSYS2 can launch it.
+    OMNIREFL_TEST_EXECUTABLE="$(cygpath -w "$install/bin/$tool.exe")" \
+      powershell.exe -NoProfile -Command \
+        '& $env:OMNIREFL_TEST_EXECUTABLE --help; exit $LASTEXITCODE' 2>&1 |
+      tee "$results/${tool/_/-}-help.log"
+  else
+    "$install/bin/$tool$executable_suffix" --help 2>&1 |
+      tee "$results/${tool/_/-}-help.log"
+  fi
+done
 
 # A Cosmo archive keeps the APE payload beside its Unix launcher.
-if [ "$package_runtime" = cosmo ]; then
+if [ "$package_runtime" = cosmo ] && [ -z "$executable_suffix" ]; then
   test -f "$install/bin/omnirefl.exe"
   test -f "$install/bin/ccdb_query.exe"
   /bin/sh "$install/bin/omnirefl.exe" --help 2>&1 |
@@ -164,8 +195,7 @@ if [ "$package_runtime" = cosmo ]; then
     tee "$results/ccdb-query-payload-help.log"
 fi
 
-cp -R "$packaged_tests"/. "$source/"
-cp -R "$packaged_examples"/. "$example_source/"
+cp -R "$install/share/omnirefl"/. "$work/with space/"
 
 set -- cmake \
   -S "$example_source" \
@@ -188,24 +218,12 @@ if ! cmake --build "$example_build" \
 fi
 
 if ! $skip_example_run; then
-  set -- "$example_build/extensions/serialization/ryml/json_serialization"
-  # CMake creates this directory only when Sneak Peek is supported.
-  if [ -d "$example_build/sneak_peek" ]; then
-    set -- "$example_build/sneak_peek/sneak_peek" "$@"
+  if ! ctest --test-dir "$example_build" --no-tests=error \
+      --timeout 600 --output-junit "$results/$name-examples.xml" \
+      -V 2>&1 | tee "$results/example-test.log"; then
+    printf 'omnirefl: packaged example tests failed\n' >&2
+    exit 1
   fi
-  for example in "$@"; do
-    if [ ! -f "$example" ]; then
-      printf 'omnirefl: packaged example executable is missing: %s\n' \
-        "$example" >&2
-      exit 1
-    fi
-
-    if ! "$example" 2>&1 | tee "$results/$(basename "$example").log"; then
-      printf 'omnirefl: packaged example execution failed: %s\n' \
-        "$example" >&2
-      exit 1
-    fi
-  done
 fi
 
 set -- cmake \
@@ -213,7 +231,6 @@ set -- cmake \
   -B "$build" \
   -GNinja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_BENCH=OFF \
   -Domnirefl_DIR="$config"
 if [ -n "$cmake_arg" ]; then
   set -- "$@" "$cmake_arg"
@@ -225,7 +242,7 @@ cmake --build "$build" --parallel "$parallel" 2>&1 |
   tee "$results/build.log"
 
 set +e
-ctest --test-dir "$build" \
+ctest --test-dir "$build" --no-tests=error \
   --timeout 600 \
   --output-junit "$results/$name.xml" \
   -V 2>&1 |

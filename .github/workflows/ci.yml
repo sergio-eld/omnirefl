@@ -33,7 +33,180 @@ on:
         required: false
         default: false
 
+# CI coverage, grouped by distribution.
+# TODO: [low] Define a schema for CI_MATRIX, validate against it, and extract
+# parameters programmatically. Apply schema defaults explicitly before expansion.
+env:
+  CI_MATRIX: |
+    # Currently the primary distribution: one package for Linux, macOS, and Windows.
+    cosmo:
+      build:
+        # Readonly: packaging combines x86_64 and AArch64 into one universal package.
+        arch: [universal]
+        include:
+          - arch: universal
+            target: cosmo-universal
+            service: build-cosmo
+            runner: ubuntu-latest
+
+      test:
+        linux:
+          distro: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
+          arch: [x86_64, aarch64]
+          toolchain: [gcc, clang, mingw]
+          include:
+            - {arch: x86_64, runner: ubuntu-latest}
+            # Use a versioned native ARM runner; ubuntu-latest-arm is unavailable.
+            - {arch: aarch64, runner: ubuntu-24.04-arm}
+          # TODO: Publish and validate these ARM images, then remove the exclusions.
+          exclude:
+            # These older Ubuntu ARM image tags are not published in GHCR.
+            - {arch: aarch64, distro: ubuntu-18.04}
+            - {arch: aarch64, distro: ubuntu-20.04}
+            # ARM Clang and MinGW image tags are not published in GHCR.
+            - {arch: aarch64, toolchain: clang}
+            - {arch: aarch64, toolchain: mingw}
+        macos:
+          include:
+            - {runner: macos-15-intel, arch: x86_64, host_arch: x86_64}
+            - {runner: macos-26-intel, arch: x86_64, host_arch: x86_64}
+            - {runner: macos-15, arch: aarch64, host_arch: arm64}
+            - {runner: macos-26, arch: aarch64, host_arch: arm64}
+        windows:
+          arch: [x86_64]
+          toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
+          runner: [windows-2022]
+
+      benchmark:
+        include:
+          - system: ubuntu-22.04
+            architecture: x86_64
+            toolchain: gcc
+            runner: ubuntu-latest
+          - system: macos-26
+            architecture: x86_64
+            toolchain: apple-clang
+            runner: macos-26-intel
+            host_architecture: x86_64
+          - system: macos-26
+            architecture: aarch64
+            toolchain: apple-clang
+            runner: macos-26
+            host_architecture: arm64
+
+    musl:
+      build:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            target: linux-x86_64-musl
+            service: build-musl
+            runner: ubuntu-latest
+          - arch: aarch64
+            target: linux-aarch64-musl
+            service: build-musl-aarch64
+            # Use a versioned native ARM runner; ubuntu-latest-arm is unavailable.
+            runner: ubuntu-24.04-arm
+
+      test:
+        linux:
+          distro: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
+          arch: [x86_64, aarch64]
+          toolchain: [gcc, clang, mingw]
+          include:
+            - {arch: x86_64, runner: ubuntu-latest}
+            # Use a versioned native ARM runner; ubuntu-latest-arm is unavailable.
+            - {arch: aarch64, runner: ubuntu-24.04-arm}
+          exclude:
+            # These older Ubuntu ARM image tags are not published in GHCR.
+            - {arch: aarch64, distro: ubuntu-18.04}
+            - {arch: aarch64, distro: ubuntu-20.04}
+            # ARM Clang and MinGW image tags are not published in GHCR.
+            - {arch: aarch64, toolchain: clang}
+            - {arch: aarch64, toolchain: mingw}
+
+      benchmark:
+        include:
+          - system: ubuntu-22.04
+            architecture: x86_64
+            toolchain: gcc
+            runner: ubuntu-latest
+
+    ucrt:
+      build:
+        # The current MinGW cross-toolchain cannot build a Windows AArch64 package.
+        arch: [x86_64]
+        include:
+          - arch: x86_64
+            target: windows-x86_64-ucrt
+            service: build-ucrt
+            runner: ubuntu-latest
+
+      test:
+        windows:
+          arch: [x86_64]
+          toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
+          runner: [windows-2022]
+
 jobs:
+  validate-ci-matrix:
+    name: Validate and prepare CI matrix
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Validate YAML and prepare matrices
+        id: matrix
+        run: |
+          python3 -m pip install --quiet PyYAML==6.0.2
+          python3 - <<'PY'
+          import json
+          import os
+          import yaml
+
+          matrix = yaml.safe_load(os.environ['CI_MATRIX'])
+          if not isinstance(matrix, dict) or not matrix:
+              raise SystemExit('CI_MATRIX must be a nonempty YAML mapping')
+          for runtime, coverage in matrix.items():
+              build = coverage['build']
+              coverage['build'] = {**build, 'runtime': [runtime]}
+              packages = {row['arch']: row['target'] for row in build['include']}
+              # A universal package serves every tested architecture.
+              package_targets = [
+                  {'package_target': target} if arch == 'universal' else {
+                      'arch': arch, 'package_target': target,
+                  }
+                  for arch, target in packages.items()
+              ]
+              for platform, tests in coverage.get('test', {}).items():
+                  # Include-only matrices need the runtime on each row;
+                  # adding an axis would merge their independent rows.
+                  coverage['test'][platform] = {
+                      **tests,
+                      'runtime': [runtime],
+                      'include': tests.get('include', []) + package_targets,
+                  } if tests.keys() - {'include', 'exclude'} else {
+                      **tests,
+                      'include': [
+                          {**row, 'runtime': runtime,
+                           'package_target': packages.get(
+                               row['arch'], packages.get('universal'))}
+                          for row in tests.get('include', [])
+                      ],
+                  }
+              if 'benchmark' in coverage:
+                  coverage['benchmark'] = {'include': [
+                      {**row, 'libc': runtime,
+                       'package_target': packages.get(
+                           row['architecture'], packages.get('universal'))}
+                      for row in coverage['benchmark']['include']
+                  ]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('matrix=' + json.dumps(matrix), file=output)
+          print('CI_MATRIX YAML is valid')
+          PY
+
   # Site-only changes check and deploy Pages without rebuilding packages. A
   # manual or reusable call can force the complete path with `build_sources`.
   changes:
@@ -99,43 +272,22 @@ jobs:
 
           echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
 
-  build-package:
+  build-package-cosmo:
     name: Build package / ${{ matrix.target }}
-    # As of this writing, GitHub provides no `ubuntu-latest-arm` label. Use the
-    # versioned ARM runner to avoid emulating AArch64 builds on an x86_64 host.
-    runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    needs: changes
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - changes
+      - validate-ci-matrix
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: linux-x86_64-musl
-            runtime: musl
-            arch: x86_64
-            service: build-musl
-            symbols: true
-          - target: linux-aarch64-musl
-            runtime: musl
-            arch: aarch64
-            service: build-musl-aarch64
-            symbols: true
-          # As of this writing, the MinGW cross-toolchain does not provide a
-          # working Windows AArch64 package build.
-          - target: windows-x86_64-ucrt
-            runtime: ucrt
-            arch: x86_64
-            service: build-ucrt
-            symbols: true
-          - target: cosmo-universal
-            runtime: cosmo
-            arch: universal
-            service: build-cosmo
-            symbols: false
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).cosmo.build }}
 
-    steps:
+    # Shared by the active distro build jobs; keep packaging steps in one place.
+    steps: &build_package_steps
       - name: Checkout Repository
         uses: actions/checkout@v7
         with:
@@ -167,20 +319,17 @@ jobs:
           overwrite: true
 
       - name: Stage Debug Symbols
+        # TODO: [high] Extract Cosmo's detached symbols for each architecture
+        # before apelink, verify crash symbolization, and publish them with the
+        # package. Remove the Cosmo exclusion from both symbol steps afterward.
         # Successful protected-master artifacts can be reused by a subsequent
         # release for the same commit. `upload_symbols` retains the full-build
         # fallback used when no reusable CI run exists.
         if: >-
-          ${{
-            matrix.symbols
-            && (
-              inputs.upload_symbols
-              || (
-                'push' == github.event_name
-                && 'refs/heads/master' == github.ref
-              )
-            )
-          }}
+          ${{ 'cosmo' != matrix.runtime && (
+            inputs.upload_symbols
+            || ('push' == github.event_name && 'refs/heads/master' == github.ref)
+          ) }}
         run: |
           shopt -s nullglob
           symbol_dirs=(./build-alpine/${{ matrix.runtime }}/${{ matrix.arch }}/*/symbols)
@@ -199,22 +348,48 @@ jobs:
 
       - name: Upload Debug Symbols
         if: >-
-          ${{
-            matrix.symbols
-            && (
-              inputs.upload_symbols
-              || (
-                'push' == github.event_name
-                && 'refs/heads/master' == github.ref
-              )
-            )
-          }}
+          ${{ 'cosmo' != matrix.runtime && (
+            inputs.upload_symbols
+            || ('push' == github.event_name && 'refs/heads/master' == github.ref)
+          ) }}
         uses: actions/upload-artifact@v6
         with:
           name: symbols-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
           path: ${{ runner.temp }}/symbols
           if-no-files-found: error
           overwrite: true
+
+  build-package-musl:
+    name: Build package / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - changes
+      - validate-ci-matrix
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).musl.build }}
+
+    steps: *build_package_steps
+
+  build-package-ucrt:
+    name: Build package / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - changes
+      - validate-ci-matrix
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).ucrt.build }}
+
+    steps: *build_package_steps
 
   # Package tests use the same matrix vocabulary as docker-compose.yml:
   #
@@ -226,33 +401,22 @@ jobs:
   # separate Compose services because its Windows container environment cannot
   # be reproduced by GitHub-hosted runners. Platform runners infer package
   # runtime and archive handling from filenames.
-  test-package-linux:
-    name: Package test / linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }}
-    # As of this writing, GitHub provides no `ubuntu-latest-arm` label. Use the
-    # versioned ARM runner to execute AArch64 packages without emulation.
-    runs-on: ${{ 'aarch64' == matrix.arch && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+  test-package-linux-cosmo:
+    name: Package test / linux-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.runtime }}-${{ matrix.toolchain }}
+    runs-on: ${{ matrix.runner }}
     needs:
-      - build-package
+      - build-package-cosmo
+      - validate-ci-matrix
     permissions:
       actions: read
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        platform: [alpine, ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
-        toolchain: [gcc, clang, mingw]
-        arch: [x86_64, aarch64]
-        exclude:
-          - arch: aarch64
-            platform: ubuntu-18.04
-          - arch: aarch64
-            platform: ubuntu-20.04
-          - arch: aarch64
-            toolchain: clang
-          - arch: aarch64
-            toolchain: mingw
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).cosmo.test.linux }}
 
-    steps:
+    # Both distro jobs use the same package test procedure.
+    steps: &test_package_linux_steps
       - name: Checkout Repository
         uses: actions/checkout@v7
 
@@ -298,15 +462,12 @@ jobs:
           }
 
           download_artifact \
-            packages-linux-${{ matrix.arch }}-musl-${{ steps.commit.outputs.short_sha }} \
-            ./artifacts/packages/current
-          download_artifact \
-            packages-cosmo-universal-${{ steps.commit.outputs.short_sha }} \
+            packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }} \
             ./artifacts/packages/current
 
       - name: Prepare Docker Image
         run: |
-          platform=${{ matrix.platform }}
+          platform=${{ matrix.distro }}
           service=test-${platform%%-*}
           if [[ "$platform" == ubuntu-* ]]; then
             export UBUNTU_VERSION=${platform#ubuntu-}
@@ -329,8 +490,11 @@ jobs:
         run: |
           TOOLCHAIN=${{ matrix.toolchain }} \
           PACKAGE_DIR=./artifacts/packages/current \
-          TEST_NAME=linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
-          TEST_RESULTS_DIR=./artifacts/test-results/linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }} \
+          TEST_NAME=linux-${{ matrix.distro }}-${{ matrix.arch }}-${{
+            matrix.runtime }}-${{ matrix.toolchain }} \
+          TEST_RESULTS_DIR=./artifacts/test-results/linux-${{
+            matrix.distro }}-${{ matrix.arch }}-${{
+            matrix.runtime }}-${{ matrix.toolchain }} \
             docker compose run --rm "$TEST_SERVICE"
 
       - name: Upload Test Results
@@ -338,33 +502,39 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: >-
-            test-linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: ./artifacts/test-results/linux-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.toolchain }}
+            test-linux-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.runtime }}-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: ./artifacts/test-results/linux-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.runtime }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
-  test-package-macos:
-    name: Package test / ${{ matrix.runner }}-${{ matrix.arch }}
+  test-package-linux-musl:
+    name: Package test / linux-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
-    needs: build-package
+    needs:
+      - build-package-musl
+      - validate-ci-matrix
     permissions:
       actions: read
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15-intel
-            arch: x86_64
-            host_arch: x86_64
-          - runner: macos-26-intel
-            arch: x86_64
-            host_arch: x86_64
-          - runner: macos-15
-            arch: aarch64
-            host_arch: arm64
-          - runner: macos-26
-            arch: aarch64
-            host_arch: arm64
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).musl.test.linux }}
+
+    steps: *test_package_linux_steps
+
+  test-package-macos:
+    name: Package test / ${{ matrix.runner }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - build-package-cosmo
+      - validate-ci-matrix
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).cosmo.test.macos }}
 
     steps:
       - name: Checkout Repository
@@ -378,7 +548,7 @@ jobs:
       - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/cosmo
 
       - name: Run Package Tests
@@ -402,43 +572,24 @@ jobs:
           path: ./artifacts/test-results/${{ matrix.runner }}-${{ matrix.arch }}
           if-no-files-found: error
 
-  test-package-windows:
+  test-package-windows-cosmo:
     name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
-    runs-on: windows-2022
+    runs-on: ${{ matrix.runner }}
     needs:
       - changes
-      - build-package
-    if: >-
-      ${{
-        !cancelled()
-        && 'true' == needs.changes.outputs.build_sources
-      }}
+      - build-package-cosmo
+      - validate-ci-matrix
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
     strategy:
       fail-fast: false
-      matrix:
-        runtime: [ucrt, cosmo]
-        toolchain: [msvc, clang-cl, msys2-mingw, msys2-clang]
-        include:
-          - toolchain: msys2-mingw
-            msystem: MINGW64
-            cc: gcc
-            cxx: g++
-            packages: >-
-              git
-              mingw-w64-x86_64-cmake
-              mingw-w64-x86_64-ninja
-              mingw-w64-x86_64-gcc
-          - toolchain: msys2-clang
-            msystem: CLANG64
-            cc: clang
-            cxx: clang++
-            packages: >-
-              git
-              mingw-w64-clang-x86_64-cmake
-              mingw-w64-clang-x86_64-ninja
-              mingw-w64-clang-x86_64-clang
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).cosmo.test.windows }}
 
-    steps:
+    # Both runtimes use the same Windows package test procedure.
+    steps: &test_package_windows_steps
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
       - name: Resolve Short SHA
         id: commit
         run: '"short_sha=$($env:GITHUB_SHA.Substring(0, 12))" >> $env:GITHUB_OUTPUT'
@@ -446,83 +597,18 @@ jobs:
       - name: Download Package
         uses: actions/download-artifact@v8
         with:
-          name: packages-${{ 'ucrt' == matrix.runtime && 'windows-x86_64-ucrt' || 'cosmo-universal' }}-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/current
-
-      - name: Install Package
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $archives = @(ls -Path 'artifacts/packages/current' -r -File | Where-Object {
-            $_.Name -like 'omnirefl-windows-x86_64-ucrt-*.zip' -or
-              $_.Name -like 'omnirefl-cosmo-universal-*.tar.gz'
-          })
-          if (1 -ne $archives.Count) {
-            throw 'expected one package archive'
-          }
-
-          $archive = $archives[0]
-          if ($archive.Name -like '*-ucrt-*') {
-            $runtime = 'ucrt'
-          } elseif ($archive.Name -like '*-cosmo-*') {
-            $runtime = 'cosmo'
-          } else {
-            throw "cannot infer package runtime from $($archive.Name)"
-          }
-          if ('${{ matrix.runtime }}' -ne $runtime) {
-            throw "expected ${{ matrix.runtime }} package, found $runtime"
-          }
-
-          $root = Join-Path $env:RUNNER_TEMP 'with space/packages'
-          $results = Join-Path $env:GITHUB_WORKSPACE 'artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}'
-          $extract = Join-Path $root 'extract'
-          $package = Join-Path $root $runtime
-          mkdir -Force $extract, $package, $results | Out-Null
-          if ($archive.Name.EndsWith('.zip')) {
-            Expand-Archive -Path $archive.FullName -DestinationPath $extract -Force
-          } else {
-            tar -xzf $archive.FullName -C $extract
-            if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-          }
-
-          $packageRoots = @(ls -Path $extract -Directory -Filter 'omnirefl-*')
-          if (1 -ne $packageRoots.Count) {
-            throw "expected one package root in $($archive.Name)"
-          }
-
-          $install = Join-Path $package 'install'
-          mv $packageRoots[0].FullName $install
-          rm -r $extract
-          cp -r (Join-Path $install 'share/omnirefl/examples') $package
-          cp -r (Join-Path $install 'share/omnirefl/tests') $package
-          & (Join-Path $install 'bin/omnirefl.exe') -h
-          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-          & (Join-Path $install 'bin/ccdb_query.exe') -h
-          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-
-          @(
-            "OMNIREFL_PACKAGES_ROOT=$($root.Replace('\', '/'))"
-            "OMNIREFL_TEST_RESULTS=$($results.Replace('\', '/'))"
-          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Install MSYS2 Toolchain
-        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          release: false
-          update: true
-          install: ${{ matrix.packages }}
 
       - name: Run MSVC-compatible Package Tests
         if: ${{ 'msvc' == matrix.toolchain || 'clang-cl' == matrix.toolchain }}
         # Windows PowerShell promotes ordinary native stderr (for example,
         # Git's clone progress) to NativeCommandError under the runner's strict
         # error preference. PowerShell 7 preserves it as process output; the
-        # explicit exit-code checks below still reject real command failures.
+        # package runner checks native exit codes explicitly.
         shell: pwsh
         run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
           $vsInstall = & $vswhere -latest -products '*' `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
             -property installationPath
@@ -530,7 +616,7 @@ jobs:
             throw 'Visual Studio with the x64 C++ toolchain was not found'
           }
 
-          $vsDevCmd = Join-Path $vsInstall 'Common7/Tools/VsDevCmd.bat'
+          $vsDevCmd = "$vsInstall/Common7/Tools/VsDevCmd.bat"
           $vsEnv = & $env:ComSpec /d /c "`"$vsDevCmd`" -arch=x64 >nul && set"
           if (0 -ne $LASTEXITCODE) {
             throw 'failed to initialize the Visual Studio environment'
@@ -544,7 +630,7 @@ jobs:
 
           if ('clang-cl' -eq '${{ matrix.toolchain }}') {
             $llvmBin = 'C:/Program Files/LLVM/bin'
-            if (!(Test-Path (Join-Path $llvmBin 'clang-cl.exe'))) {
+            if (!(Test-Path "$llvmBin/clang-cl.exe")) {
               throw 'clang-cl was not found in the hosted runner LLVM installation'
             }
 
@@ -553,158 +639,41 @@ jobs:
             $env:CXX = 'clang-cl'
           }
 
-          $package = Join-Path $env:OMNIREFL_PACKAGES_ROOT '${{ matrix.runtime }}'
-          $install = Join-Path $package 'install'
-          $source = Join-Path $package 'tests'
-          $build = Join-Path $package 'build'
-          $exampleSource = Join-Path $package 'examples'
-          $exampleBuild = Join-Path $package 'example-build'
-          $results = Join-Path $env:OMNIREFL_TEST_RESULTS '${{ matrix.runtime }}'
-          mkdir -Force $build, $exampleBuild, $results | Out-Null
+          $archives = @(ls 'artifacts/packages/current' -r -File)
+          if (1 -ne $archives.Count) { throw 'expected one package archive' }
+          ./ci/test_package.ps1 -Package $archives[0].FullName `
+            -Name 'windows-${{ matrix.runtime }}-${{ matrix.toolchain }}' `
+            -Results 'artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}'
 
-          cmake -S $source -B $build -GNinja `
-            -DCMAKE_BUILD_TYPE=Release `
-            "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
-            tee (Join-Path $results 'configure.log')
-          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-
-          cmake --build $build `
-            --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
-            tee (Join-Path $results 'build.log')
-          if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
-
-          cmake -S $exampleSource -B $exampleBuild -GNinja `
-            -DCMAKE_BUILD_TYPE=Release `
-            "-Domnirefl_DIR=$install/lib/cmake/omnirefl" 2>&1 |
-            tee (Join-Path $results 'example-configure.log')
-          if (0 -ne $LASTEXITCODE) {
-            echo 'omnirefl: packaged example configuration failed'
-            exit $LASTEXITCODE
-          }
-
-          cmake --build $exampleBuild `
-            --parallel $env:NUMBER_OF_PROCESSORS 2>&1 |
-            tee (Join-Path $results 'example-build.log')
-          if (0 -ne $LASTEXITCODE) {
-            echo 'omnirefl: packaged example build failed'
-            exit $LASTEXITCODE
-          }
-
-          $examples = @(
-            # CMake creates this directory only when Sneak Peek is supported.
-            if (Test-Path (Join-Path $exampleBuild 'sneak_peek')) {
-              Join-Path $exampleBuild 'sneak_peek/sneak_peek.exe'
-            }
-            (Join-Path $exampleBuild `
-              'extensions/serialization/ryml/json_serialization.exe')
-          )
-          foreach ($example in $examples) {
-            if (-not (Test-Path $example)) {
-              echo "omnirefl: packaged example executable is missing: $example"
-              exit 1
-            }
-
-            & $example 2>&1 |
-              tee (Join-Path $results "$(Split-Path $example -Leaf).log")
-            if (0 -ne $LASTEXITCODE) {
-              echo "omnirefl: packaged example execution failed: $example"
-              exit $LASTEXITCODE
-            }
-          }
-
-          ctest --test-dir $build `
-            --timeout 600 `
-            --output-junit (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml") `
-            -V 2>&1 |
-            tee (Join-Path $results "windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log")
-          exit $LASTEXITCODE
+      - name: Install MSYS2 Toolchain
+        if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: >-
+            ${{ 'msys2-clang' == matrix.toolchain
+              && 'CLANG64' || 'MINGW64' }}
+          release: false
+          update: true
+          install: git
+          # :p selects packages for the chosen MSYS2 environment.
+          pacboy: >-
+            cmake:p ninja:p
+            ${{ 'msys2-clang' == matrix.toolchain && 'clang:p' || 'gcc:p' }}
 
       - name: Run MSYS2 Package Tests
         if: ${{ startsWith(matrix.toolchain, 'msys2-') }}
         shell: msys2 {0}
         env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
+          CC: ${{ 'msys2-clang' == matrix.toolchain && 'clang' || 'gcc' }}
+          CXX: ${{ 'msys2-clang' == matrix.toolchain && 'clang++' || 'g++' }}
         run: |
           set -euo pipefail
-          packages_root="$(cygpath -u "$OMNIREFL_PACKAGES_ROOT")"
-          results_dir="$(cygpath -u "$OMNIREFL_TEST_RESULTS")"
-          package="$packages_root/${{ matrix.runtime }}"
-          install="$package/install"
-          source="$package/tests"
-          build="$package/build"
-          example_source="$package/examples"
-          example_build="$package/example-build"
-          results="$results_dir/${{ matrix.runtime }}"
-          mkdir -p "$build" "$example_build" "$results"
-
-          cmake -S "$source" -B "$build" -GNinja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -Domnirefl_DIR="$install/lib/cmake/omnirefl" 2>&1 |
-            tee "$results/configure.log"
-          cmake --build "$build" --parallel "$(nproc)" 2>&1 |
-            tee "$results/build.log"
-
-          if ! cmake -S "$example_source" -B "$example_build" -GNinja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -Domnirefl_DIR="$install/lib/cmake/omnirefl" 2>&1 |
-              tee "$results/example-configure.log"; then
-            echo 'omnirefl: packaged example configuration failed' >&2
-            exit 1
-          fi
-          if ! cmake --build "$example_build" \
-              --parallel "$(nproc)" 2>&1 |
-              tee "$results/example-build.log"; then
-            echo 'omnirefl: packaged example build failed' >&2
-            exit 1
-          fi
-          set -- "$example_build/extensions/serialization/ryml/json_serialization.exe"
-          # CMake creates this directory only when Sneak Peek is supported.
-          if [ -d "$example_build/sneak_peek" ]; then
-            set -- "$example_build/sneak_peek/sneak_peek.exe" "$@"
-          fi
-          for example in "$@"; do
-            if [ ! -f "$example" ]; then
-              echo "omnirefl: packaged example executable is missing: $example" >&2
-              exit 1
-            fi
-            if ! "$example" 2>&1 |
-                tee "$results/$(basename "$example").log"; then
-              echo "omnirefl: packaged example execution failed: $example" >&2
-              exit 1
-            fi
-          done
-
-          ctest --test-dir "$build" \
-            --timeout 600 \
-            --output-junit "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.xml" \
-            -V 2>&1 |
-            tee "$results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}.log"
-
-      - name: Collect Test Diagnostics
-        if: always()
-        shell: powershell
-        run: |
-          $package = Join-Path $env:OMNIREFL_PACKAGES_ROOT '${{ matrix.runtime }}'
-          $build = Join-Path $package 'build'
-          $results = Join-Path $env:OMNIREFL_TEST_RESULTS '${{ matrix.runtime }}'
-          $diagnostics = Join-Path $results 'diagnostics'
-          mkdir -Force $diagnostics | Out-Null
-
-          cp -ErrorAction SilentlyContinue -Destination $diagnostics -Path @(
-            (Join-Path $build 'CMakeCache.txt')
-            (Join-Path $build 'compile_commands.json')
-            (Join-Path $build 'Testing/Temporary/LastTest.log')
-            (Join-Path $build 'CMakeFiles/CMakeError.log')
-          )
-
-          $generated = @(ls -ErrorAction SilentlyContinue -r -File `
-            -Path $build -Include '*.omnirefl.hpp', '*.omnirefl.hpp.d')
-          if (0 -lt $generated.Count) {
-            Compress-Archive -Path $generated.FullName `
-              -DestinationPath (Join-Path $diagnostics 'generated-reflection.zip') `
-              -Force
-          }
+          packages=(artifacts/packages/current/*)
+          test 1 -eq "${#packages[@]}"
+          ci/test_package.sh \
+            --package "${packages[0]}" \
+            --name windows-${{ matrix.runtime }}-${{ matrix.toolchain }} \
+            --results "$PWD/artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}"
 
       - name: Upload Test Results
         if: always()
@@ -715,50 +684,58 @@ jobs:
           path: ./artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
           if-no-files-found: error
 
+  test-package-windows-ucrt:
+    name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - changes
+      - build-package-ucrt
+      - validate-ci-matrix
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).ucrt.test.windows }}
+
+    steps: *test_package_windows_steps
+
   # Benchmarks run independently on every CI event so pull requests can report
   # regressions. Pages only persists successful master records afterward.
-  benchmark:
+  # TODO: Add Windows benchmark coverage for Cosmo and UCRT after validating
+  # the benchmark runner on Windows.
+  benchmark-cosmo:
     name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
     needs:
-      - build-package
+      - build-package-cosmo
+      - validate-ci-matrix
     permissions:
       actions: read
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - system: ubuntu-22.04
-            architecture: x86_64
-            libc: musl
-            toolchain: gcc
-            runner: ubuntu-latest
-          - system: ubuntu-22.04
-            architecture: x86_64
-            libc: cosmo
-            toolchain: gcc
-            runner: ubuntu-latest
-          - system: macos-26
-            architecture: x86_64
-            libc: cosmo
-            toolchain: apple-clang
-            runner: macos-26-intel
-            host_architecture: x86_64
-          - system: macos-26
-            architecture: aarch64
-            libc: cosmo
-            toolchain: apple-clang
-            runner: macos-26
-            host_architecture: arm64
-    env:
-      BENCHMARK_NAME: ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
-      BENCHMARK_BUILD: ./artifacts/benchmark-build/${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
-      BENCHMARK_RESULTS: ./artifacts/benchmarks/${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).cosmo.benchmark }}
+    # Shared names and paths are evaluated for each benchmark matrix row.
+    env: &benchmark_env
+      BENCHMARK_NAME: >-
+        ${{ matrix.system }}-${{ matrix.architecture }}-${{
+          matrix.libc }}-${{ matrix.toolchain }}
+      BENCHMARK_BUILD: >-
+        ./artifacts/benchmark-build/${{
+          matrix.system }}-${{ matrix.architecture }}-${{
+          matrix.libc }}-${{ matrix.toolchain }}
+      BENCHMARK_RESULTS: >-
+        ./artifacts/benchmarks/${{
+          matrix.system }}-${{ matrix.architecture }}-${{
+          matrix.libc }}-${{ matrix.toolchain }}
       BENCHMARK_HISTORY: ./artifacts/benchmark-history/history.json
-      BENCHMARK_HISTORY_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/benchmarks/history.json
+      BENCHMARK_HISTORY_URL: >-
+        https://${{ github.repository_owner }}.github.io/${{
+          github.event.repository.name }}/benchmarks/history.json
 
-    steps:
+    # Both distro jobs use the same measurement and reporting steps.
+    steps: &benchmark_steps
       - name: Checkout Repository
         uses: actions/checkout@v7
 
@@ -792,7 +769,7 @@ jobs:
         if: ${{ 'cosmo' == matrix.libc }}
         uses: actions/download-artifact@v8
         with:
-          name: packages-cosmo-universal-${{ steps.commit.outputs.short_sha }}
+          name: packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/cosmo
 
       - name: Install Cosmo Package on macOS
@@ -806,7 +783,7 @@ jobs:
 
           package="$(find artifacts/packages/cosmo \
             -maxdepth 1 -type f \
-            -name 'omnirefl-cosmo-universal-*.tar.gz' \
+            -name 'omnirefl-${{ matrix.package_target }}-*.tar.gz' \
             -print -quit)"
           test -n "$package"
           tar -xzf "$package" -C "$root"
@@ -892,6 +869,25 @@ jobs:
           path: ${{ env.BENCHMARK_RESULTS }}
           if-no-files-found: error
 
+  benchmark-musl:
+    name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
+    runs-on: ${{ matrix.runner }}
+    # The release benchmark input is built here, independently of package tests.
+    needs:
+      - changes
+      - validate-ci-matrix
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{ fromJSON(needs['validate-ci-matrix'].outputs.matrix).musl.benchmark }}
+    env: *benchmark_env
+
+    steps: *benchmark_steps
+
   check-site:
     name: Check site
     runs-on: ubuntu-latest
@@ -919,13 +915,20 @@ jobs:
   required-ci:
     name: Required CI
     runs-on: ubuntu-latest
+    # GitHub constructs the job graph before matrix outputs exist;
+    # needs must list these jobs explicitly.
     needs:
       - changes
-      - build-package
+      - validate-ci-matrix
+      - build-package-cosmo
+      - build-package-musl
+      - build-package-ucrt
       - check-site
-      - test-package-linux
+      - test-package-linux-cosmo
+      - test-package-linux-musl
       - test-package-macos
-      - test-package-windows
+      - test-package-windows-cosmo
+      - test-package-windows-ucrt
     permissions:
       contents: read
       actions: write
@@ -1027,42 +1030,30 @@ jobs:
             }
 
       - name: Require successful package and test jobs
-        if: >-
-          ${{
-            always()
-            && (
-              'success' != needs.changes.result
-              || (
-                'pull_request' == github.event_name
-                && 'success' != needs['check-site'].result
-              )
-              || (
-                'true' == needs.changes.outputs.build_sources
-                && (
-                  'success' != needs['build-package'].result
-                  || 'success' != needs['test-package-linux'].result
-                  || 'success' != needs['test-package-macos'].result
-                  || 'success' != needs['test-package-windows'].result
-                )
-              )
-            )
-          }}
+        if: always()
         env:
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          BUILD_PACKAGE_RESULT: ${{ needs['build-package'].result }}
-          CHECK_SITE_RESULT: ${{ needs['check-site'].result }}
-          TEST_PACKAGE_LINUX_RESULT: ${{ needs['test-package-linux'].result }}
-          TEST_PACKAGE_MACOS_RESULT: ${{ needs['test-package-macos'].result }}
-          TEST_PACKAGE_WINDOWS_RESULT: ${{ needs['test-package-windows'].result }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
         run: |
-          printf 'changes: %s\nbuild-package: %s\ncheck-site: %s\ntest-package-linux: %s\ntest-package-macos: %s\ntest-package-windows: %s\n' \
-            "$CHANGES_RESULT" \
-            "$BUILD_PACKAGE_RESULT" \
-            "$CHECK_SITE_RESULT" \
-            "$TEST_PACKAGE_LINUX_RESULT" \
-            "$TEST_PACKAGE_MACOS_RESULT" \
-            "$TEST_PACKAGE_WINDOWS_RESULT"
-          exit 1
+          python3 - <<'PY'
+          import json
+          import os
+
+          jobs = json.loads(os.environ['JOB_RESULTS'])
+          build_sources = 'true' == jobs['changes']['outputs'].get('build_sources')
+          failed = [
+              name for name, job in jobs.items()
+              if 'success' != job['result'] and (
+                  name in ('changes', 'validate-ci-matrix')
+                  or ('check-site' == name
+                      and 'pull_request' == os.environ['GITHUB_EVENT_NAME'])
+                  or (build_sources and name.startswith(('build-package-', 'test-package-')))
+              )
+          ]
+          for name, job in jobs.items():
+              print(f'{name}: {job["result"]}')
+          if failed:
+              raise SystemExit('Required jobs failed: ' + ', '.join(failed))
+          PY
 
   deploy-pages:
     name: Deploy Pages
@@ -1070,14 +1061,18 @@ jobs:
     needs:
       - changes
       - required-ci
-      - benchmark
+      - benchmark-cosmo
+      - benchmark-musl
     if: >-
       ${{
         always()
         && 'success' == needs['required-ci'].result
         && (
           'false' == needs.changes.outputs.build_sources
-          || 'success' == needs['benchmark'].result
+          || (
+            'success' == needs['benchmark-cosmo'].result
+            && 'success' == needs['benchmark-musl'].result
+          )
         )
         && !inputs.skip_pages
         && 'refs/heads/master' == github.ref

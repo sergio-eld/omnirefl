@@ -5,7 +5,6 @@ Configure the benchmarks from the repository root:
 ```sh
 cmake -S . -B build -GNinja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_TESTING=ON \
   -DENABLE_BENCH=ON
 ```
 
@@ -18,7 +17,7 @@ cmake --build build --target benchmark.record_conversion
 Run the record-conversion benchmark:
 
 ```sh
-./build/tests/bench/record_conversion/record_conversion_bench \
+./build/benchmarks/record_conversion/record_conversion_bench \
   --benchmark_min_time=0.1s \
   --benchmark_repetitions=7 \
   --benchmark_enable_random_interleaving=true
@@ -37,7 +36,6 @@ example, configure and build the record-conversion benchmark with counters:
 ```sh
 cmake -S . -B build-perf -GNinja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_TESTING=ON \
   -DENABLE_BENCH=ON \
   -DRECORD_CONVERSION_ENABLE_PERF_COUNTERS=ON
 cmake --build build-perf --target benchmark.record_conversion
@@ -65,7 +63,7 @@ The conversion batches are not inlined. Inspect them with:
 
 ```sh
 objdump -dC --no-show-raw-insn \
-  ./build/tests/bench/record_conversion/record_conversion_bench \
+  ./build/benchmarks/record_conversion/record_conversion_bench \
   | less
 ```
 

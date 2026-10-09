@@ -1,5 +1,5 @@
 if(NOT COMMAND _omnirefl_supported_cpp_standards)
-    include("${CMAKE_CURRENT_LIST_DIR}/../tool/supported_cpp_standards.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/toolchain_checks.cmake")
 endif()
 _omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
