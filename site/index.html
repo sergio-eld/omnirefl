@@ -283,6 +283,7 @@
         <a href="#scope">Supported Scope</a>
         <a href="#performance">Is It Slow?</a>
         <a href="#install">Install</a>
+        <a href="#examples-tests-and-benchmarks">Examples &amp; Tests</a>
         <a href="#limitations">Limitations</a>
         <a href="#how-it-works">How It Works</a>
         <a class="source" href="https://github.com/sergio-eld/omnirefl">GitHub ↗</a>
@@ -305,6 +306,7 @@
         ' ',
       ])
       let active
+      let navigationTouch
       let requested = sections.find(section => `#${section.id}` === location.hash)
       let scheduled = false
 
@@ -367,7 +369,34 @@
       window.addEventListener('scroll', schedule, {passive: true})
       window.addEventListener('resize', schedule)
       window.addEventListener('wheel', releaseRequested, {passive: true})
-      window.addEventListener('touchstart', releaseRequested, {passive: true})
+      window.addEventListener('touchstart', event => {
+        if (!navigation.contains(event.target)) {
+          releaseRequested()
+          return
+        }
+
+        const touch = event.touches[0]
+        navigationTouch = {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+        }
+      }, {passive: true})
+      window.addEventListener('touchmove', event => {
+        if (!navigationTouch)
+          return
+
+        const touch = event.touches[0]
+        const horizontal = Math.abs(touch.clientX - navigationTouch.clientX)
+        const vertical = Math.abs(touch.clientY - navigationTouch.clientY)
+        if (horizontal < vertical) {
+          navigationTouch = undefined
+          releaseRequested()
+        }
+      }, {passive: true})
+      const finishNavigationTouch = () => navigationTouch = undefined
+      window.addEventListener('touchend', finishNavigationTouch, {passive: true})
+      window.addEventListener('touchcancel', finishNavigationTouch,
+        {passive: true})
       window.addEventListener('pointerdown', event => {
         if (!navigation.contains(event.target))
           releaseRequested()

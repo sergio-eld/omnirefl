@@ -63,6 +63,12 @@ x-build-musl-command: &build-musl-command
     mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
 
 x-test-linux-command: &test-linux-command |
+  set -- /packages/*.tar.gz
+  if [ "$$#" -ne 1 ] || [ ! -f "$$1" ]; then
+    echo 'Expected exactly one package in /packages' >&2
+    exit 1
+  fi
+  package=$$1
   set --
   case $${TOOLCHAIN} in
     gcc) export CC=gcc; export CXX=g++ ;;
@@ -75,8 +81,8 @@ x-test-linux-command: &test-linux-command |
     *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
   esac
 
-  exec "$$PACKAGE_TEST_SHELL" /runner/test_packages.sh \
-    --packages /packages \
+  exec "$$PACKAGE_TEST_SHELL" /runner/test_package.sh \
+    --package "$$package" \
     --name "$$TEST_NAME" \
     --results /results \
     "$$@"
@@ -156,15 +162,6 @@ services:
       - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:rw
     working_dir: /build
     command: *build-musl-command
-
-  build-benchmark-musl:
-    extends:
-      service: build-musl
-    environment:
-      CMAKE_BUILD_TYPE: Release
-    volumes:
-      - ./build-alpine/benchmark/musl/x86_64/llvm-${LLVM_VERSION}:/build:rw
-      - ${PACKAGE_DIR:-./artifacts/packages/benchmark-musl}:/packages:rw
 
   build-ucrt:
     <<: *build-musl-ucrt-image
@@ -335,6 +332,7 @@ services:
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msvc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
+      - ./ci:C:/runner:ro
       - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:C:/install:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msvc}}:C:/test:rw
     working_dir: "C:/"
@@ -355,25 +353,10 @@ services:
           }
         }
 
-        New-Item -ItemType Directory -Force -Path 'C:/with space/build', 'C:/test', 'C:/test/diagnostics' | Out-Null
-        $$packages = @(Get-ChildItem -Path 'C:/install' -File | Where-Object {
+        $$packages = @(ls -Path 'C:/install' -File | Where-Object {
           $$_.Name.EndsWith('.zip') -or $$_.Name.EndsWith('.tar.gz')
         })
         if (1 -ne $$packages.Count) { throw 'expected one package in C:/install' }
-        if ($$packages[0].Name.EndsWith('.zip')) {
-          Expand-Archive -Path $$packages[0].FullName -DestinationPath 'C:/with space' -Force
-        } else {
-          tar -xzf $$packages[0].FullName -C 'C:/with space'
-          if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
-        }
-
-        Set-Location 'C:/with space'
-        $$installRoot = Get-ChildItem -Directory -Filter 'omnirefl-*' | Select-Object -First 1
-        if ($$null -eq $$installRoot) { throw 'could not find extracted omnirefl package root' }
-        Move-Item $$installRoot.FullName ./omnirefl
-        Copy-Item -Recurse omnirefl/share/omnirefl/tests ./
-        ./omnirefl/bin/omnirefl.exe -h
-        ./omnirefl/bin/ccdb_query.exe -h
 
         switch ($$env:TOOLCHAIN) {
           'msvc' {}
@@ -385,32 +368,11 @@ services:
           default { throw ('Unsupported TOOLCHAIN=' + $$env:TOOLCHAIN) }
         }
 
-        Set-Location 'C:/with space/build'
-        cmake ../tests -GNinja -DCMAKE_BUILD_TYPE=Release '-Domnirefl_DIR=C:/with space/omnirefl/lib/cmake/omnirefl'
-        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
-        cmake --build . -j $$env:NUMBER_OF_PROCESSORS
-        if (0 -ne $$LASTEXITCODE) { exit $$LASTEXITCODE }
-
-        # Windows PowerShell promotes native stderr to errors. Let CTest
-        # finish all checks and use its exit code to report failures.
-        $$ErrorActionPreference = 'Continue'
-        ctest . --timeout 600 --output-junit C:/test/$$env:TEST_NAME.xml -V 2>&1 |
-          Tee-Object C:/test/$$env:TEST_NAME.log
-        $$rc = $$LASTEXITCODE
-        $$ErrorActionPreference = 'Stop'
-
-        Copy-Item -ErrorAction SilentlyContinue CMakeCache.txt, compile_commands.json C:/test/diagnostics/
-        Copy-Item -ErrorAction SilentlyContinue Testing/Temporary/LastTest.log C:/test/diagnostics/
-        Copy-Item -ErrorAction SilentlyContinue CMakeFiles/CMakeError.log C:/test/diagnostics/
-        Get-ChildItem -Recurse -Include *.omnirefl.hpp, *.omnirefl.hpp.d -Path . |
-          Compress-Archive -DestinationPath C:/test/diagnostics/generated-reflection.zip -Force
-
-        if ((0 -ne $$rc) -and $$env:KEEP_ALIVE_ON_FAILURE) {
-          Write-Host ('ctest failed with rc=' + $$rc + '; keeping container alive')
-          while ($$true) { Start-Sleep -Seconds 3600 }
-        }
-
-        exit $$rc
+        & C:/runner/test_package.ps1 `
+          -Package $$packages[0].FullName `
+          -Name $$env:TEST_NAME `
+          -Results C:/test
+        exit $$LASTEXITCODE
 
   test-windows-msys2:
     image: ghcr.io/sergio-eld/omnirefl-test-windows:ltsc2019-x86_64-msys2
@@ -426,6 +388,7 @@ services:
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msys2-mingw}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
+      - ./ci:C:/runner:ro
       - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:C:/install:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msys2-mingw}}:C:/test:rw
     working_dir: "C:/"
@@ -434,34 +397,9 @@ services:
       - -lc
       - |
         set -euxo pipefail
-        mkdir -p "/c/with space" /c/test/diagnostics
         shopt -s nullglob
         packages=(/c/install/*.zip /c/install/*.tar.gz)
         test 1 -eq "$${#packages[@]}"
-        test -f "$${packages[0]}"
-        case "$${packages[0]}" in
-          *.zip) unzip -q "$${packages[0]}" -d "/c/with space" ;;
-          *.tar.gz)
-            # refactorme(cosmo_msys2): review native archive/launcher handling.
-            # ad hoc: MSYS2 aliases names with and without the .exe suffix.
-            # Windows tar preserves both launchers stored in the Cosmo package.
-            "/c/Windows/System32/tar.exe" \
-              -xzf "$${packages[0]}" -C "/c/with space"
-            ;;
-        esac
-
-        cd "/c/with space"
-        install_root="$$(find . -maxdepth 1 -type d -name "omnirefl-*" | sort | head -n 1)"
-        test -n "$$install_root"
-        mv "$$install_root" ./omnirefl
-        cp -r omnirefl/share/omnirefl/tests ./
-        # refactorme(cosmo_msys2): review native archive/launcher handling.
-        # ad hoc: MSYS2 reports ENOENT when launching Cosmopolitan's PE payload
-        # directly; PowerShell delegates it to the Windows loader.
-        powershell.exe -NoProfile -Command \
-          '& "C:/with space/omnirefl/bin/omnirefl.exe" -h; exit $$LASTEXITCODE'
-        powershell.exe -NoProfile -Command \
-          '& "C:/with space/omnirefl/bin/ccdb_query.exe" -h; exit $$LASTEXITCODE'
 
         case $${TOOLCHAIN:-msys2-mingw} in
           msys2-mingw)
@@ -477,26 +415,7 @@ services:
           *) echo "Unsupported TOOLCHAIN='$${TOOLCHAIN}'" >&2; exit 1 ;;
         esac
 
-        mkdir -p "/c/with space/build"
-        cd "/c/with space/build"
-        cmake "../tests" -GNinja -DCMAKE_BUILD_TYPE=Release -Domnirefl_DIR="C:/with space/omnirefl/lib/cmake/omnirefl"
-        cmake --build . -j"$$(nproc)"
-
-        set +e
-        ctest . --timeout 600 --output-junit "/c/test/$$TEST_NAME.xml" -V 2>&1 |
-          tee "/c/test/$$TEST_NAME.log"
-        rc=$${PIPESTATUS[0]}
-        set -e
-
-        cp -f CMakeCache.txt compile_commands.json /c/test/diagnostics/ 2>/dev/null || true
-        cp -f Testing/Temporary/LastTest.log /c/test/diagnostics/ 2>/dev/null || true
-        cp -f CMakeFiles/CMakeError.log /c/test/diagnostics/ 2>/dev/null || true
-        find . -name "*.omnirefl.hpp" -o -name "*.omnirefl.hpp.d" |
-          tar -czf /c/test/diagnostics/generated-reflection.tar.gz -T - 2>/dev/null || true
-
-        if [ 0 -ne "$$rc" ] && [ -n "$${KEEP_ALIVE_ON_FAILURE:-}" ]; then
-          echo "ctest failed with rc=$$rc; keeping container alive"
-          tail -f /dev/null
-        fi
-
-        exit "$$rc"
+        exec bash /c/runner/test_package.sh \
+          --package "$${packages[0]}" \
+          --name "$$TEST_NAME" \
+          --results /c/test

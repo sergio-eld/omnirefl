@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl 
     LANGUAGES CXX C 
-    VERSION 0.0.3)
+    VERSION 0.0.4)
 
 include(GNUInstallDirs)
 
@@ -192,20 +192,17 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
 elseif(ENABLE_BENCH OR ENABLE_TESTING)
     enable_testing()
 
-    # tests/tool is packaged and expects to work with `find_package(omnirefl)`.
-    # These lines emulate the 'found' package.
+    # Packaged tests, examples, and benchmarks use find_package(omnirefl).
+    # Provide the same reflection setup when building them from source.
     set(${PROJECT_NAME}_RESOURCE_DIR "${CLANG_RESOURCE_DIR}")
     include(cmake/reflected_target.cmake)
 
-    if(BUILD_EXTENSIONS)
-        add_subdirectory(tests/extensions)
-    endif()
-
-    add_subdirectory(tests/tool tests)
-    add_subdirectory(tests/ccdb_query tests/ccdb_query)
+    set(BUILD_TESTING ${ENABLE_TESTING})
+    set(BUILD_EXAMPLES ${ENABLE_TESTING})
+    set(BUILD_BENCHMARKS ${ENABLE_BENCH})
+    add_subdirectory(share)
     if(ENABLE_TESTING)
-        add_subdirectory(tests/std_compat tests/std_compat)
-        add_subdirectory(tests/functional tests/functional)
+        add_subdirectory(share/tests/internal/std_compat)
     endif()
 endif()
 
@@ -387,22 +384,9 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
         RENAME "CLI11.txt")
 
-    # Ship tests and examples as source so they can be used on other platforms.
-    install(DIRECTORY
-        ${CMAKE_SOURCE_DIR}/tests/tool/
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests")
-
-    install(DIRECTORY
-        ${CMAKE_SOURCE_DIR}/tests/functional/
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests/functional")
-
-    install(DIRECTORY
-        ${CMAKE_SOURCE_DIR}/examples/
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/examples")
-
-    install(DIRECTORY
-        ${CMAKE_SOURCE_DIR}/tests/extensions/
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests/extensions")
+    install(DIRECTORY share/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
+        PATTERN "internal" EXCLUDE)
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"

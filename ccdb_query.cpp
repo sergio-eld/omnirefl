@@ -14,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -216,12 +217,22 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
     return std::unexpected(std::string{e.what()});
   }
 
-  fs::path parsed_source =
-    fs::absolute(source->as<cli_path>().value).lexically_normal();
+  std::error_code error;
+  const fs::path source_path = source->as<cli_path>().value;
 
-  if (!fs::exists(parsed_source)) {
+  // Check the original path first: Cosmo prefixes missing Windows paths with
+  // the working directory when making them absolute.
+  if (!fs::exists(source_path, error)) {
     return std::unexpected(
-      std::format("source does not exist: {}", parsed_source.generic_string()));
+      std::format("source does not exist: {}", source_path.generic_string()));
+  }
+
+  fs::path parsed_source =
+    fs::absolute(source_path, error).lexically_normal();
+
+  if (error) {
+    return std::unexpected(
+      std::format("cannot resolve source: {}", error.message()));
   }
 
   return options{

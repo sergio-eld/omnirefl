@@ -14,78 +14,92 @@ A C++ reflection tool built for a seamless experience without macros* or UB.<br>
 <!-- pages:sneak-peek:start -->
 ## Sneak Peek
 
-This example intentionally uses C++23 syntax and library facilities to reduce
-verbosity. The demonstrated reflection features remain available through
-Omnirefl's C++11-compatible interfaces.
-Include directives and `main()` are omitted to keep the block compact; see the
-[complete source](tests/tool/example/main.cpp).
+The [complete runnable example](share/examples/sneak_peek/main.cpp) implements the
+visitor and shows how to write reflected fields. Its setup and model are below:
 
-````cpp
+```cpp
 // One .cpp; no declaration headers, metadata files, or reflection macros.
 
+// Example visitor that prints reflected records during a depth-first walk
+// of type dependencies. The struct keeps this logic below; an inline
+// lambda would also work.
+struct print_reachable_records {
+  template <omni::record_meta Root>
+  void operator()(Root) const;
+};
+
+template <typename T>
+void print_reflection() {
+  // `reflected_call` makes metadata for `T` and its type dependencies available
+  // inside the visitor's `operator()` and the functions it calls.
+  omni::reflected_call(print_reachable_records{}, omni::type<T>);
+}
+
+// Mutating example; its implementation showcases several reflected arguments
+// in one `reflected_call`.
+template <typename... Values>
+void update_fields(Values *...values);
+
+// Omnirefl reflects globally accessible, named records (structs, classes, or
+// unions) and enums on demand.
+
 namespace oceanic {
-/// `.documentation()` returns this text.
+/// Declaration comments are available as reflection metadata.
 struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
   // Nested structs are supported recursively inside non-template records.
   struct position { //< Discovered via the `location` field.
-    double latitude = 0;
-    double longitude = 0;
+    using degrees = double;
+
+    degrees latitude = 0;
+    degrees longitude = 0;
   };
 
-  using coordinates = position;
-
-  // Aliases are preserved for field types. For the `location` field,
-  // `.spelled_type_name()` returns the `vessel::coordinates` type name;
-  // `.type_name()` on its reflected type returns `vessel::position` without
-  // the namespace.
-  coordinates location;
+  position location;
 
   // Reflected field properties are queryable.
   mutable std::string name = "before"; //< `.is_mutable()` is true.
 
-  // Public non-static methods are reflected. Overloaded methods are skipped
-  // with a warning. `.documentation()` exposes the comment; Doxygen parameter
-  // descriptions, such as `@param` or `\param[in]`, are available through
-  // parameter metadata.
+  // Public non-static methods are reflected. Their parameter and return types
+  // join dependency discovery. Overloaded methods are skipped with a warning.
+  // Doxygen parameter descriptions, such as `@param` or `\param[in]`, are
+  // available through parameter metadata.
 
   /** Check proximity.
    * @param other Other position.
    * @return Whether the positions are near.
    */
-  bool is_near(coordinates other) const {
+  bool is_near(position other) const {
     return location.latitude == other.latitude
       && location.longitude == other.longitude;
   }
 };
 
-// A `function_t` record field exposes this free function to reflection.
-// Free functions cannot be standalone reflection roots; see "How It Works".
-
 /** Measure a distance.
- * @param scale Distance scale.
+ * @param scale Multiplier.
  * @return The scaled distance.
  */
 double distance(vessel, double scale) {
   return scale;
 }
 
-// Primary templates are supported; `.type_name()` returns `"fleet"` without
-// template arguments.
+// Primary templates are supported; names appear without template arguments.
 template <typename T>
 struct fleet { //< Discovered as an `omni::type_t` argument to `reflected_call`.
-  // Records nested inside template records are not supported.
-  // struct not_supported {};
+  // Unsupported nested records emit a warning if discovered as dependencies.
+  struct not_supported {};
 
-  // Its signature types join dependency discovery.
+  // Free functions are reflected only when discovered through a record field
+  // using the special `function_t` tag.
   omni::function_t<distance> measure;
 
-  // `std` types are not reflected, but dependency protocols apply.
-  // Here `mapped_type` discovers `T`.
+  // Standard-library types are not reflected, but their dependency protocols
+  // still apply. The specialization for `T` is discovered via `mapped_type`.
   std::map<std::string, T> vessels;
 };
 
 struct telemetry { //< Discovered as a value argument to `reflected_call`.
-  mutable unsigned depth : 10 = 42; //< `.set_value()` writes bit-fields.
+  // Writing bit-fields without UB is supported via `.set_value()`.
+  mutable unsigned depth : 10 = 42;
   const unsigned sensor = 108; //< `.is_const()` is true.
 
   // Only public fields are reflected.
@@ -94,182 +108,74 @@ struct telemetry { //< Discovered as a value argument to `reflected_call`.
 };
 
 } // namespace oceanic
-
-// Templates may be declared outside the reflected scope and use reflection
-// when called from it, but must not be instantiated outside that scope.
-template <omni::record_meta RecordMeta>
-std::string describe_record(RecordMeta record) {
-  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
-
-  const auto describe_function = //
-    [](omni::function_meta auto function) {
-      const auto parameters = function.parameters()
-        | fn::map([](omni::function_param_meta auto parameter) {
-            const auto description = std::format("{}{}",
-              parameter.spelled_type_name(),
-              std::string_view{parameter.name()}.empty()
-                ? std::string{}
-                : std::format(" {}", parameter.name()));
-
-            return std::string_view{parameter.documentation()}.empty()
-              ? description
-              : std::format("{} [{}]",
-                  description,
-                  parameter.documentation());
-          })
-        | fn::foldl(
-          [](std::string before, const std::string &parameter) {
-            return before.empty() ? parameter : before + ", " + parameter;
-          },
-          std::string{});
-
-      return std::format("  {}({}) -> {}; // {}\n",
-        function.name(),
-        parameters,
-        function.returns().spelled_type_name(),
-        function.documentation());
-    };
-
-  const auto fields = record.public_fields()
-    | fn::map([describe_function]<typename Member>(Member member) {
-        if constexpr (omni::function_meta<Member>)
-          return describe_function(member);
-        else {
-          static_assert(omni::field_meta<Member>);
-          const auto field_description = std::format("  {}: {}", member.name(),
-            // Use `.spelled_qualified_type_name()` to preserve namespaces.
-            member.spelled_type_name());
-
-          const std::optional default_value = std::invoke(
-            [] -> std::optional<std::string> {
-              // can:   int value = 8 * 100 + 15;
-              // can't: int value = make_value();
-              if constexpr (Member::has_default_value_access()
-                && std::formattable<typename Member::type, char>)
-                return std::optional{
-                  std::format(" = {}", Member::default_value())};
-
-              return std::nullopt;
-            });
-
-          // Fundamental and standard-library types are not reflected, so the
-          // metadata query for the actual type name is unavailable for them.
-          if constexpr (omni::is_reflected<typename Member::type>::value)
-            return std::format("{} (resolves to {}){};\n",
-              field_description,
-              omni::meta_for<typename Member::type>::type_name(),
-              default_value.value_or(""));
-
-          return std::format("{}{};\n",
-            field_description,
-            default_value.value_or(""));
-        }
-      })
-    | fn::foldl(std::plus{}, std::string{});
-
-  const auto methods = record.public_methods()
-    | fn::map(describe_function)
-    | fn::foldl(std::plus{}, std::string{});
-
-  return std::format("{} {{\n{}{}}}",
-    record.qualified_type_name(),
-    fields,
-    methods);
-}
-
-/*
-`main()` uses `describe_record()` to print discovered records in depth-first order:
 ```
-oceanic::fleet {
-  measure(vessel, double scale [Distance scale.]) -> double; // Measure a distance.
-  vessels: map<std::string, T>;
-}
-oceanic::vessel {
-  location: vessel::coordinates (resolves to vessel::position);
-  name: string = before;
-  is_near(vessel::coordinates other [Other position.]) -> bool; // Check proximity.
-}
-oceanic::vessel::position {
-  latitude: double = 0;
-  longitude: double = 0;
-}
-```
-*/
-
-void print_field_updates(oceanic::telemetry telemetry,
-  const oceanic::vessel vessel) {
-  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
-  using namespace std::string_view_literals;
-
-  std::println("before: depth={} sensor={} name={}",
-    static_cast<unsigned>(telemetry.depth), telemetry.sensor, vessel.name);
-
-  const auto write_fields = [](auto &value) {
-    omni::reflected_call(
-      [](omni::record_binding auto record) //< Non-owning binding to `value`.
-        // Explicit result defers scope instantiation until reflection exists.
-        -> void {
-        // Reflected scope: metadata is available here and in called templates.
-        record.public_fields()
-          | fn::filter<[]<typename Member> {
-              using binding = std::remove_cvref_t<Member>;
-              if constexpr (omni::field_binding<binding>)
-                return binding::is_mutable();
-
-              return false; //< Special function field.
-            }>()
-          | fn::each([](omni::field_binding auto field) {
-              constexpr std::string_view name = field.name();
-
-              if constexpr ("depth"sv == name)
-                field.set_value(815u); //< Writable bit-field.
-              else if constexpr ("name"sv == name)
-                field.set_value("oceanic"); //< Mutable field of a const object.
-            });
-      },
-      value);
-  };
-
-  write_fields(telemetry);
-  write_fields(vessel);
-
-  std::println("after:  depth={} sensor={} name={}",
-    static_cast<unsigned>(telemetry.depth), telemetry.sensor, vessel.name);
-}
-
-// For `print_field_updates({}, {})`:
-// before: depth=42 sensor=108 name=before
-// after:  depth=815 sensor=108 name=oceanic
-````
 
 Minimal CMake setup:
 
 ```cmake
-# 3.18.2 is the current project floor for CMake APIs used by the package and
-# reflected target integration.
-cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
-project(example LANGUAGES CXX)
+project(sneak_peek LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(omnirefl CONFIG REQUIRED)
 
-add_executable(example main.cpp)
-set_property(TARGET example PROPERTY CXX_STANDARD 23)
+add_executable(sneak_peek main.cpp)
+
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # MinGW's std::print terminal support lives in this library.
+    target_link_libraries(sneak_peek PRIVATE stdc++exp)
+endif()
 
 # Reflection is not transitive: only this target's own C++ translation units are
 # instrumented. Call omni_reflected_target for each target that should be
 # reflected.
-omni_reflected_target(example)
+omni_reflected_target(sneak_peek)
 ```
 
-Instrumentation can also be triggered explicitly through `<target>.omni`
-(`example.omni` for the `example` target):
+Build the example:
 
 ```bash
-cmake --build build -t example.omni
+# Builds rerun instrumentation automatically for changed inputs.
+# To trigger it manually:
+# cmake --build build --target sneak_peek.omni
+cmake --build build --target sneak_peek
 ```
 
-The [comprehensive guide](tests/tool/comprehensive_guide/comprehensive_guide.cpp)
+Run it:
+
+```console
+$ ./build/sneak_peek
+// Primary templates are supported; names appear without template arguments.
+oceanic::fleet {
+  measure(vessel, double scale [Multiplier.]) -> double; // Measure a distance.
+  // Standard-library types are not reflected, but their dependency protocols
+  // still apply. The specialization for `T` is discovered via `mapped_type`.
+  vessels: map<std::string, T>;
+}
+// Declaration comments are available as reflection metadata.
+oceanic::vessel {
+  location: vessel::position (resolves to vessel::position);
+  // `.is_mutable()` is true.
+  name: string = before;
+  is_near(vessel::position other [Other position.]) -> bool; // Check proximity.
+}
+// Nested structs are supported recursively inside non-template records.
+oceanic::vessel::position {
+  latitude: vessel::position::degrees = 0;
+  longitude: vessel::position::degrees = 0;
+}
+before: depth=42 sensor=108 name=before
+after:  depth=815 sensor=108 name=oceanic
+```
+
+This example is included in the installed package; see
+[Examples, Tests and Benchmarks](#examples-tests-and-benchmarks).
+
+The [comprehensive guide](share/examples/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 
@@ -291,10 +197,10 @@ required; generated metadata remains a build artifact.
 <!-- pages:status:start -->
 ## Status
 
-Omnirefl is under active testing and interface polishing while its first
-extensions are being developed. Until at least 0.1.0, interfaces and package
-layout may change without compatibility guarantees. Release notes aim to call
-out every breaking interface change.
+Omnirefl is under active testing and interface polishing. Version 0.1.0 is
+planned after the initial set of extensions is complete. Until then, interfaces
+and package layout may change without compatibility guarantees. Release notes
+aim to call out every breaking interface change.
 <!-- pages:status:end -->
 
 ## Functional Utilities
@@ -309,7 +215,7 @@ const auto result = tuple
   | omni::fn::foldl(combine, initial);
 ```
 
-See the [functional tests](tests/functional/test.cpp) for detailed examples.
+See the [functional tests](share/tests/functional/test.cpp) for detailed examples.
 
 ## Reflection Utilities
 
@@ -321,7 +227,7 @@ for each reflected type and are available only within reflected scopes:
   present and constructible; additional source fields are ignored. Generated
   support currently requires an aggregate record without bases or anonymous
   aggregate members, and excludes unions. See the
-  [example](tests/tool/aggregate_into/test.cpp).
+  [example](share/tests/tool/aggregate_into/test.cpp).
 
 <!-- pages:scope:start -->
 ## Supported Scope
@@ -460,6 +366,52 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 `omnirefl-*` directory as the installation prefix.
 <!-- pages:install:end -->
 
+<!-- pages:examples-tests-and-benchmarks:start -->
+## Examples, Tests and Benchmarks
+
+`share/omnirefl` packages tests, examples, and benchmarks. You may configure
+the whole directory out of source, or any `share/omnirefl/examples/<folder>`
+as a standalone project.
+
+Examples, tests, and benchmarks are enabled by default; disable a category with
+`-DBUILD_EXAMPLES=OFF`, `-DBUILD_TESTING=OFF`, or `-DBUILD_BENCHMARKS=OFF`.
+Unsupported examples are skipped with a status message.
+
+Alternatively, download and unpack the Cosmopolitan archive from the
+[latest release](https://github.com/sergio-eld/omnirefl/releases/latest)
+into `./omnirefl`:
+
+```bash
+mkdir -p omnirefl
+curl -fL "$(curl -fsSL \
+  https://api.github.com/repos/sergio-eld/omnirefl/releases/latest \
+  | sed -n 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')" \
+  | tar -xz -C omnirefl --strip-components=1
+```
+
+```bash
+# Use /usr when installed system-wide from a Debian package.
+prefix="$PWD/omnirefl"
+
+mkdir build && cd build
+cmake "$prefix/share/omnirefl" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  "-DCMAKE_PREFIX_PATH=$prefix"
+cmake --build .
+ctest --timeout 600 --output-on-failure --no-tests=error
+```
+
+Each `share/omnirefl/examples/<folder>` directory is self-contained. Configure one
+independently, such as `share/omnirefl/examples/sneak_peek`, or copy it into
+your own workspace. The Sneak Peek requires CMake 3.20 and a configured
+C++23 toolchain.
+
+Extension examples, tests, and benchmarks are grouped under
+`share/omnirefl/extensions`:
+
+- `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
+  See the [standalone example](share/extensions/serialization/examples/ryml/main.cpp).
+<!-- pages:examples-tests-and-benchmarks:end -->
+
 <!-- pages:limitations:start -->
 ## Limitations
 
@@ -509,7 +461,7 @@ model: reflected types must be nameable before their source declarations. See
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
 - [Deprecated public fields can emit compiler deprecation diagnostics while
-  their metadata is formed](tests/tool/regressions/deprecated_public_field.cpp),
+  their metadata is formed](share/tests/tool/regressions/deprecated_public_field.cpp),
   before `is_deprecated()` can filter them.
 - Anonymous unions are not reflected correctly.
 - Compiler-packed misaligned raw arrays have no safe whole-field accessor; use
@@ -525,42 +477,6 @@ model: reflected types must be nameable before their source declarations. See
   and C translation units are ignored. If no C++ source remains, reflection is
   skipped with a warning.
 <!-- pages:limitations:end -->
-
-## Packaged Tests and Examples
-
-Packaged test/example sources are available under `share/omnirefl/tests`. Copy
-them into a writable directory before configuring:
-
-```bash
-# Use /usr for a .deb, or the unpacked omnirefl-* directory for an archive.
-prefix=/usr
-cp -R "$prefix/share/omnirefl/tests" ./omnirefl-tests
-
-mkdir build && cd build
-
-cmake ../omnirefl-tests -GNinja \
-  "-Domnirefl_DIR=$prefix/lib/cmake/omnirefl"
-
-ctest --timeout 600 --output-on-failure
-```
-
-On Windows, run from a Visual Studio Developer PowerShell so `cl.exe` is
-configured:
-
-```powershell
-$prefix = "C:\path\to\omnirefl"
-Copy-Item -Recurse "$prefix\share\omnirefl\tests" .\omnirefl-tests
-
-New-Item -ItemType Directory build | Out-Null
-Set-Location build
-
-cmake ../omnirefl-tests -GNinja `
-  "-Domnirefl_DIR=$prefix/lib/cmake/omnirefl"
-
-ctest --timeout 600 --output-on-failure
-```
-
-The tests fetch their own test-only dependencies during CMake configuration.
 
 ## Build Packages Locally
 
@@ -608,9 +524,9 @@ generation. The overhead target is roughly the frontend portion of a complete
 object build: about 30% as an order-of-magnitude expectation. The actual ratio
 depends on the source, included headers, compiler, and optimization level.
 
-The packaged [benchmark baseline](tests/tool/baseline_test.cpp) is intentionally
-large enough to represent a meaningful translation unit and contains a
-reasonable amount of ordinary and reflected code. CI records its reflection and
+The packaged [benchmark baseline](share/benchmarks/instrumentation/baseline_test.cpp)
+is intentionally large enough to represent a meaningful translation unit and
+contains a reasonable amount of ordinary and reflected code. CI records its reflection and
 subsequent Release object-build times across benchmarked platforms. See the
 [continuous benchmark](#continuous-benchmark) and
 [workflow history](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)

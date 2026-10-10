@@ -114,10 +114,9 @@ function(_omni_classify_target_sources
         endforeach()
 
         if(is_gen)
-            # TODO(low): add an explicit per-source opt-in for reflecting
-            # generated translation units. They are excluded by default because
-            # targets commonly contain generated helper sources such as Qt moc
-            # output, which must not be instrumented.
+            # TODO(low): consider a per-source override flag to instrument
+            # selected GENERATED translation units. Keep generated helpers
+            # such as Qt moc output excluded by default.
             continue()
         endif()
 

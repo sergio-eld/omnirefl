@@ -15,6 +15,13 @@ if(NOT TARGET tl::optional)
     find_package(tl-optional CONFIG QUIET)
 endif()
 
+if(omnirefl_FIND_REQUIRED_serialization
+    AND (NOT TARGET ryml::ryml
+        OR NOT TARGET tl::expected
+        OR NOT TARGET tl::optional))
+    include("${CMAKE_CURRENT_LIST_DIR}/serialization/dependencies.cmake")
+endif()
+
 foreach(_dependency IN ITEMS ryml::ryml tl::expected tl::optional)
     if(NOT TARGET "${_dependency}")
         set(omnirefl_serialization_FOUND FALSE)
