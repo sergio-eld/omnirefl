@@ -124,8 +124,7 @@ const readmePlugin = () => ({
   },
 })
 
-export default defineConfig(({command}) => ({
-  base: 'build' === command ? '/omnirefl/' : '/',
+export default defineConfig({
   plugins: [readmePlugin()],
   server: {host: '0.0.0.0'},
-}))
+})
