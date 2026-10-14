@@ -1,0 +1,28 @@
+{
+  "name": "Omnirefl bundled examples (Ubuntu 24.04)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}/share",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "share/examples/sneak_peek/main.cpp"
+      ]
+    },
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools"
+      ],
+      "settings": {
+        "cmake.useCMakePresets": "always",
+        "cmake.options.statusBarVisibility": "visible",
+        "cmake.setBuildTargetSameAsLaunchTarget": true,
+        "terminal.integrated.cwd": "${workspaceFolder}/build",
+        "C_Cpp.debugShortcut": false,
+        "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
+      }
+    }
+  }
+}

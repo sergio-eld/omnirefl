@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "examples",
+      "displayName": "Examples (Debug)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "BUILD_EXAMPLES": true,
+        "BUILD_TESTING": false,
+        "BUILD_BENCHMARKS": false,
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "examples",
+      "configurePreset": "examples"
+    }
+  ]
+}
