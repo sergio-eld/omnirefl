@@ -4,6 +4,7 @@
     "dockerfile": "Dockerfile"
   },
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}/share",
+  "onCreateCommand": ["mkdir", "-p", "build"],
   "customizations": {
     "codespaces": {
       "openFiles": [
@@ -16,10 +17,12 @@
         "ms-vscode.cmake-tools"
       ],
       "settings": {
+        "git.openRepositoryInParentFolders": "always",
         "cmake.useCMakePresets": "always",
         "cmake.options.statusBarVisibility": "visible",
         "cmake.setBuildTargetSameAsLaunchTarget": true,
         "terminal.integrated.cwd": "${workspaceFolder}/build",
+        "workbench.secondarySideBar.defaultVisibility": "hidden",
         "C_Cpp.debugShortcut": false,
         "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
       }
