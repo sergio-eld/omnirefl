@@ -17,14 +17,31 @@ restore_binaries() {
   rm -r "${scratch_dir}"
 }
 
+for binary in "${binaries[@]}"; do
+  cp "${x86_64_build_dir}/${binary}" "${scratch_dir}/${binary}.x86_64"
+done
 trap restore_binaries EXIT
 
 mkdir -p "${package_dir}"
 
+# apelink drops DWARF sections; retain each architecture's symbols beforehand.
+for arch in x86_64 aarch64; do
+  build_dir=$x86_64_build_dir
+  if [ aarch64 = "$arch" ]; then
+    build_dir=$aarch64_build_dir
+  fi
+  mkdir -p "${x86_64_build_dir}/symbols/${arch}"
+  for binary in "${binaries[@]}"; do
+    "${cosmopolitan_root}/bin/${arch}-unknown-cosmo-objcopy" \
+      --only-keep-debug "${build_dir}/${binary}" \
+      "${x86_64_build_dir}/symbols/${arch}/${binary}.debug"
+  done
+done
+
+# Cosmopolitan supports building each architecture separately and combining
+# their executables with apelink:
+# https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md#overview
 for binary in "${binaries[@]}"; do
-  cp \
-    "${x86_64_build_dir}/${binary}" \
-    "${scratch_dir}/${binary}.x86_64"
   "${cosmopolitan_root}/bin/apelink" \
     -V -1 \
     -l "${cosmopolitan_root}/bin/ape-x86_64.elf" \
@@ -35,6 +52,10 @@ for binary in "${binaries[@]}"; do
     "${aarch64_build_dir}/${binary}"
 done
 
+# Ad hoc: CPack installs from the x86_64 build tree, so apelink temporarily
+# replaces its binaries with universal ones; the EXIT trap restores them.
+# Headers and other packaged resources are shared between architectures.
+# TODO: [low] Consider staging installation separately to leave build outputs intact.
 cpack \
   --config "${x86_64_build_dir}/CPackConfig.cmake" \
   -G TGZ \

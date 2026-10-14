@@ -319,37 +319,40 @@ jobs:
           overwrite: true
 
       - name: Stage Debug Symbols
-        # TODO: [high] Extract Cosmo's detached symbols for each architecture
-        # before apelink, verify crash symbolization, and publish them with the
-        # package. Remove the Cosmo exclusion from both symbol steps afterward.
         # Successful protected-master artifacts can be reused by a subsequent
         # release for the same commit. `upload_symbols` retains the full-build
         # fallback used when no reusable CI run exists.
         if: >-
-          ${{ 'cosmo' != matrix.runtime && (inputs.upload_symbols
+          ${{ inputs.upload_symbols
             || ('push' == github.event_name
-              && 'refs/heads/master' == github.ref)) }}
+              && 'refs/heads/master' == github.ref) }}
         run: |
           shopt -s nullglob
           symbol_dirs=(./build-alpine/${{ matrix.runtime }}/${{ matrix.arch }}/*/symbols)
-          test 1 -eq "${#symbol_dirs[@]}"
           symbol_names=(omnirefl.debug ccdb_query.debug)
-          if [ ucrt = "${{ matrix.runtime }}" ]; then
+          if [ cosmo = "${{ matrix.runtime }}" ]; then
+            symbol_dirs=(./build-alpine/cosmo/*/x86_64/symbols)
+            symbol_names=(
+              x86_64/omnirefl.debug x86_64/ccdb_query.debug
+              aarch64/omnirefl.debug aarch64/ccdb_query.debug
+            )
+          elif [ ucrt = "${{ matrix.runtime }}" ]; then
             symbol_names=(omnirefl.exe.debug ccdb_query.exe.debug)
           fi
+          test 1 -eq "${#symbol_dirs[@]}"
+          for symbol in "${symbol_names[@]}"; do
+            test -s "${symbol_dirs[0]}/$symbol"
+          done
           # Package containers may leave the mounted artifact directory owned
           # by root. Stage host-side release data in the runner-owned temp dir.
           mkdir -p "$RUNNER_TEMP/symbols"
-          for symbol in "${symbol_names[@]}"; do
-            test -s "${symbol_dirs[0]}/$symbol"
-            cp "${symbol_dirs[0]}/$symbol" "$RUNNER_TEMP/symbols/"
-          done
+          cp -r "${symbol_dirs[0]}/." "$RUNNER_TEMP/symbols/"
 
       - name: Upload Debug Symbols
         if: >-
-          ${{ 'cosmo' != matrix.runtime && (inputs.upload_symbols
+          ${{ inputs.upload_symbols
             || ('push' == github.event_name
-              && 'refs/heads/master' == github.ref)) }}
+              && 'refs/heads/master' == github.ref) }}
         uses: actions/upload-artifact@v6
         with:
           name: symbols-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}

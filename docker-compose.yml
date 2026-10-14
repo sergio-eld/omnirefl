@@ -113,7 +113,7 @@ services:
           -B /build/x86_64 \
           -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
           -DCOSMOPOLITAN_ARCH=x86_64 \
-          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DENABLE_PACKAGE=ON \
           -DENABLE_TESTING=OFF \
           -DENABLE_BENCH=OFF \
@@ -127,7 +127,7 @@ services:
           -B /build/aarch64 \
           -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
           -DCOSMOPOLITAN_ARCH=aarch64 \
-          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DENABLE_PACKAGE=OFF \
           -DENABLE_TESTING=OFF \
           -DENABLE_BENCH=OFF \

@@ -5,6 +5,8 @@
 #define _FORTIFY_SOURCE 0
 
 #pragma GCC diagnostic push
+// GCC 14 reports false null-this warnings in Clang's LazyOffsetPtr at -O2.
+#pragma GCC diagnostic ignored "-Wnonnull"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
