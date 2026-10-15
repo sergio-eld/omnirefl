@@ -16,7 +16,7 @@
   "customizations": {
     "codespaces": {
       "openFiles": [
-        "share/examples/scratch/main.cpp"
+        "examples/scratch/main.cpp"
       ]
     },
     "vscode": {
