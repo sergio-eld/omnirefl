@@ -1,7 +1,11 @@
 #include <CLI/CLI.hpp>
 
+#pragma GCC diagnostic push
+// GCC 14 reports false null-this warnings in Clang's LazyOffsetPtr at -O2.
+#pragma GCC diagnostic ignored "-Wnonnull"
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
+#pragma GCC diagnostic pop
 
 #include <algorithm>
 #include <cctype>

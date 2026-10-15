@@ -20,6 +20,7 @@ env:
     windows-x86_64-ucrt
     cosmo-universal
   RELEASE_SYMBOL_TARGETS: >-
+    cosmo-universal
     linux-x86_64-musl
     linux-aarch64-musl
     windows-x86_64-ucrt
@@ -239,7 +240,11 @@ jobs:
               "./reusable-artifacts/symbols/symbols-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
               "./reusable-artifacts/symbols/symbols-linux-aarch64-musl-${GITHUB_SHA::12}/ccdb_query.debug" \
               "./reusable-artifacts/symbols/symbols-windows-x86_64-ucrt-${GITHUB_SHA::12}/omnirefl.exe.debug" \
-              "./reusable-artifacts/symbols/symbols-windows-x86_64-ucrt-${GITHUB_SHA::12}/ccdb_query.exe.debug"; then
+              "./reusable-artifacts/symbols/symbols-windows-x86_64-ucrt-${GITHUB_SHA::12}/ccdb_query.exe.debug" \
+              "./reusable-artifacts/symbols/symbols-cosmo-universal-${GITHUB_SHA::12}/x86_64/omnirefl.debug" \
+              "./reusable-artifacts/symbols/symbols-cosmo-universal-${GITHUB_SHA::12}/x86_64/ccdb_query.debug" \
+              "./reusable-artifacts/symbols/symbols-cosmo-universal-${GITHUB_SHA::12}/aarch64/omnirefl.debug" \
+              "./reusable-artifacts/symbols/symbols-cosmo-universal-${GITHUB_SHA::12}/aarch64/ccdb_query.debug"; then
               run_id=
             fi
           fi
@@ -426,6 +431,15 @@ jobs:
               "$release_dir/omnirefl-${target}-${version}-${short_sha}-symbols.tar.gz" \
               -C "$symbols" omnirefl.debug ccdb_query.debug
           done
+
+          symbols="./artifacts/symbols/symbols-cosmo-universal-${short_sha}"
+          for arch in x86_64 aarch64; do
+            test -s "$symbols/$arch/omnirefl.debug"
+            test -s "$symbols/$arch/ccdb_query.debug"
+          done
+          tar -czf \
+            "$release_dir/omnirefl-cosmo-universal-${version}-${short_sha}-symbols.tar.gz" \
+            -C "$symbols" x86_64 aarch64
 
           symbols="./artifacts/symbols/symbols-windows-x86_64-ucrt-${short_sha}"
           test -s "$symbols/omnirefl.exe.debug"
