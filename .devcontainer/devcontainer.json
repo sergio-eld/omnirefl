@@ -1,10 +1,18 @@
 {
-  "name": "Omnirefl bundled examples (Ubuntu 24.04)",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}/share",
-  "onCreateCommand": ["mkdir", "-p", "build"],
+  "name": "Omnirefl bundled examples - latest release (Ubuntu 24.04)",
+  "dockerComposeFile": "compose.yml",
+  "service": "examples",
+  "runServices": [
+    "examples"
+  ],
+  "shutdownAction": "stopCompose",
+  "workspaceFolder": "/workspaces/omnirefl/share",
+  "initializeCommand": [
+    "bash",
+    "${localWorkspaceFolder}/.devcontainer/examples/prepare.sh",
+    "latest_release"
+  ],
+  "waitFor": "postStartCommand",
   "customizations": {
     "codespaces": {
       "openFiles": [
@@ -14,18 +22,30 @@
     "vscode": {
       "extensions": [
         "ms-vscode.cpptools",
-        "ms-vscode.cmake-tools"
+        "ms-vscode.cmake-tools",
+        "vscodevim.vim"
       ],
       "settings": {
+        "vim.disableExtension": true,
         "git.openRepositoryInParentFolders": "always",
         "cmake.useCMakePresets": "always",
         "cmake.options.statusBarVisibility": "visible",
         "cmake.setBuildTargetSameAsLaunchTarget": true,
         "terminal.integrated.cwd": "${workspaceFolder}/build",
         "workbench.secondarySideBar.defaultVisibility": "hidden",
+        "chat.disableAIFeatures": true,
         "C_Cpp.debugShortcut": false,
+        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
         "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
       }
     }
-  }
+  },
+  "postStartCommand": [
+    "tar",
+    "-xzf",
+    "/workspaces/omnirefl/artifacts/devcontainer/omnirefl.tar.gz",
+    "-C",
+    "/usr/local",
+    "--strip-components=1"
+  ]
 }

@@ -3,6 +3,8 @@ include(FetchContent)
 # Enable FetchContent logging
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
+# The tests use Google Test without Google Mock.
+set(BUILD_GMOCK OFF CACHE BOOL "Disable unused Google Mock targets" FORCE)
 # do not let googletest install itself when run "cmake --install" / CPack
 set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
 set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)

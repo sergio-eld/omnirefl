@@ -1,0 +1,24 @@
+services:
+  development:
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: .devcontainer/development/Dockerfile
+    volumes:
+      - ..:/workspaces/omnirefl
+      - omnirefl-cosmo-build:/workspaces/omnirefl/build
+    working_dir: /workspaces/omnirefl/build/x86_64
+    command: [sleep, infinity]
+
+  examples:
+    platform: linux/amd64
+    build:
+      context: ./examples
+    volumes:
+      - ..:/workspaces/omnirefl
+    # Docker creates this directory before VS Code can open a terminal there.
+    working_dir: /workspaces/omnirefl/share/build
+    command: [sleep, infinity]
+
+volumes:
+  omnirefl-cosmo-build:

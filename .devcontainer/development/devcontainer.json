@@ -1,0 +1,39 @@
+{
+  "name": "Omnirefl development (Cosmopolitan)",
+  "dockerComposeFile": "../compose.yml",
+  "service": "development",
+  "runServices": [
+    "development"
+  ],
+  "shutdownAction": "stopCompose",
+  "workspaceFolder": "/workspaces/omnirefl",
+  "onCreateCommand": [
+    "cmake",
+    "--preset",
+    "cosmo"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "vscodevim.vim"
+      ],
+      "settings": {
+        "vim.disableExtension": true,
+        "cmake.useCMakePresets": "always",
+        "cmake.options.statusBarVisibility": "visible",
+        "cmake.options.advanced": {
+          "cpack": {
+            "statusBarVisibility": "visible"
+          }
+        },
+        "terminal.integrated.cwd": "${workspaceFolder}/build/x86_64",
+        "workbench.secondarySideBar.defaultVisibility": "hidden",
+        "chat.disableAIFeatures": true,
+        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+        "C_Cpp.default.compileCommands": "${workspaceFolder}/build/x86_64/compile_commands.json"
+      }
+    }
+  }
+}
