@@ -2,39 +2,55 @@
 
 set -euo pipefail
 
-readonly x86_64_build_dir=${1:-/build/x86_64}
-readonly aarch64_build_dir=${2:-/build/aarch64}
-readonly package_dir=${3:-/packages}
+readonly build_dir=${1:-/build}
+readonly package_dir=${2:-/packages}
 readonly cosmopolitan_root=${COSMOPOLITAN_ROOT:-/opt/cosmocc}
 readonly scratch_dir=$(mktemp -d /tmp/omnirefl-cosmo-package.XXXXXX)
 readonly binaries=(omnirefl ccdb_query)
 
+architectures=("$(uname -m)")
+if [ true = "${COSMO_BUILD_UNIVERSAL:-true}" ]; then
+  architectures=(x86_64 aarch64)
+fi
+readonly -a architectures
+# The first architecture owns the CPack configuration and package input files.
+readonly primary_arch=${architectures[0]}
+
+loaders=()
+for arch in "${architectures[@]}"; do
+  loaders+=(-l "${cosmopolitan_root}/bin/ape-${arch}.elf")
+  # The macOS ARM loader source requires an AArch64 payload.
+  if [ aarch64 = "${arch}" ]; then
+    loaders+=(-M "${cosmopolitan_root}/bin/ape-m1.c")
+  fi
+done
+
+# Ad hoc: CPack installs from the primary build tree, so apelink temporarily
+# replaces its binaries with APE output. The EXIT trap restores the originals
+# on success or failure and removes the packaging scratch directory.
+# TODO: [low] Consider staging installation separately to leave build outputs intact.
 restore_binaries() {
   for binary in "${binaries[@]}"; do
-    cp "${scratch_dir}/${binary}.x86_64" "${x86_64_build_dir}/${binary}"
+    cp "${scratch_dir}/${binary}" "${build_dir}/${primary_arch}/${binary}"
   done
 
   rm -r "${scratch_dir}"
 }
 
 for binary in "${binaries[@]}"; do
-  cp "${x86_64_build_dir}/${binary}" "${scratch_dir}/${binary}.x86_64"
+  cp "${build_dir}/${primary_arch}/${binary}" "${scratch_dir}/${binary}"
 done
 trap restore_binaries EXIT
 
 mkdir -p "${package_dir}"
 
 # apelink drops DWARF sections; retain each architecture's symbols beforehand.
-for arch in x86_64 aarch64; do
-  build_dir=$x86_64_build_dir
-  if [ aarch64 = "$arch" ]; then
-    build_dir=$aarch64_build_dir
-  fi
-  mkdir -p "${x86_64_build_dir}/symbols/${arch}"
+for arch in "${architectures[@]}"; do
+  mkdir -p "${build_dir}/${primary_arch}/symbols/${arch}"
   for binary in "${binaries[@]}"; do
     "${cosmopolitan_root}/bin/${arch}-unknown-cosmo-objcopy" \
-      --only-keep-debug "${build_dir}/${binary}" \
-      "${x86_64_build_dir}/symbols/${arch}/${binary}.debug"
+      --only-keep-debug "${build_dir}/${arch}/${binary}" \
+      "${build_dir}/${primary_arch}/symbols/${arch}/${binary}.debug"
   done
 done
 
@@ -42,22 +58,21 @@ done
 # their executables with apelink:
 # https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md#overview
 for binary in "${binaries[@]}"; do
+  # Use the primary backup as input because apelink replaces its build output.
+  inputs=("${scratch_dir}/${binary}")
+  for arch in "${architectures[@]:1}"; do
+    inputs+=("${build_dir}/${arch}/${binary}")
+  done
   "${cosmopolitan_root}/bin/apelink" \
     -V -1 \
-    -l "${cosmopolitan_root}/bin/ape-x86_64.elf" \
-    -l "${cosmopolitan_root}/bin/ape-aarch64.elf" \
-    -M "${cosmopolitan_root}/bin/ape-m1.c" \
-    -o "${x86_64_build_dir}/${binary}" \
-    "${scratch_dir}/${binary}.x86_64" \
-    "${aarch64_build_dir}/${binary}"
+    "${loaders[@]}" \
+    -o "${build_dir}/${primary_arch}/${binary}" \
+    "${inputs[@]}"
 done
 
-# Ad hoc: CPack installs from the x86_64 build tree, so apelink temporarily
-# replaces its binaries with universal ones; the EXIT trap restores them.
 # Headers and other packaged resources are shared between architectures.
-# TODO: [low] Consider staging installation separately to leave build outputs intact.
 cpack \
-  --config "${x86_64_build_dir}/CPackConfig.cmake" \
+  --config "${build_dir}/${primary_arch}/CPackConfig.cmake" \
   -G TGZ \
   -B "${scratch_dir}/cpack"
 

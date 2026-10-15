@@ -386,7 +386,9 @@ if(ENABLE_PACKAGE)
 
     install(DIRECTORY share/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
-        PATTERN "internal" EXCLUDE)
+        PATTERN "internal" EXCLUDE
+        PATTERN "build*" EXCLUDE
+        PATTERN "CMakeUserPresets.json" EXCLUDE)
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"

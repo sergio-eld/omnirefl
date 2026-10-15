@@ -92,6 +92,10 @@ services:
     # Keep COSMOPOLITAN_* and cosmopolitan.cmake aligned with the upstream
     # toolchain name; project-owned services, images, paths, and packages use
     # the shorter `cosmo` runtime name.
+    # TODO: Consider support for native AArch64 development hosts. It would need
+    # an AArch64 LLVM image and host-based image/primary-architecture selection;
+    # cross-compilation would apply only to universal packages. Development
+    # currently assumes an x86_64 host.
     platform: linux/amd64
     image: ghcr.io/sergio-eld/omnirefl-build-cosmo:universal-${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}
     build:
@@ -105,41 +109,48 @@ services:
       - ./build-alpine/cosmo/${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}:/build:rw
       - ${PACKAGE_DIR:-./artifacts/packages/cosmo}:/packages:rw
     working_dir: /build
+    environment:
+      # Set false for a single-architecture package and a shorter local build.
+      COSMO_BUILD_UNIVERSAL: ${COSMO_BUILD_UNIVERSAL:-true}
     command:
       - /bin/ash
       - -euxc
       - |
-        cmake /src -GNinja \
-          -B /build/x86_64 \
-          -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
-          -DCOSMOPOLITAN_ARCH=x86_64 \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DENABLE_PACKAGE=ON \
-          -DENABLE_TESTING=OFF \
-          -DENABLE_BENCH=OFF \
-          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          -DOMNIREFL_PACKAGE_TARGET=cosmo-universal \
-          -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN_X86_64}/lib/cmake/clang \
-          -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN_X86_64}/lib/cmake/llvm \
-          -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
+        primary_arch=$$(uname -m)
+        package_arch=$$primary_arch
+        architectures=$$primary_arch
+        if [ true = "$$COSMO_BUILD_UNIVERSAL" ]; then
+          primary_arch=x86_64
+          package_arch=universal
+          architectures="x86_64 aarch64"
+        fi
 
-        cmake /src -GNinja \
-          -B /build/aarch64 \
-          -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
-          -DCOSMOPOLITAN_ARCH=aarch64 \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DENABLE_PACKAGE=OFF \
-          -DENABLE_TESTING=OFF \
-          -DENABLE_BENCH=OFF \
-          -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
-          -DClang_DIR=$${CLANG_INSTALL_COSMOPOLITAN_AARCH64}/lib/cmake/clang \
-          -DLLVM_DIR=$${CLANG_INSTALL_COSMOPOLITAN_AARCH64}/lib/cmake/llvm \
-          -DCLANG_RESOURCE_DIR=$${CLANG_RESOURCE_DIR_COSMOPOLITAN} &&
+        for arch in $$architectures; do
+          case $$arch in
+            x86_64) clang_install=$$CLANG_INSTALL_COSMOPOLITAN_X86_64 ;;
+            aarch64) clang_install=$$CLANG_INSTALL_COSMOPOLITAN_AARCH64 ;;
+          esac
+          enable_package=OFF
+          if [ "$$primary_arch" = "$$arch" ]; then
+            enable_package=ON
+          fi
+          cmake /src -GNinja \
+            -B /build/$$arch \
+            -DCMAKE_TOOLCHAIN_FILE=/src/docker/cosmopolitan.cmake \
+            -DCOSMOPOLITAN_ARCH=$$arch \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_PACKAGE=$$enable_package \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_BENCH=OFF \
+            -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-} \
+            -DOMNIREFL_PACKAGE_TARGET=cosmo-$$package_arch \
+            -DClang_DIR=$$clang_install/lib/cmake/clang \
+            -DLLVM_DIR=$$clang_install/lib/cmake/llvm \
+            -DCLANG_RESOURCE_DIR=$$CLANG_RESOURCE_DIR_COSMOPOLITAN
+          cmake --build /build/$$arch -t omnirefl ccdb_query -j$$(nproc)
+        done
 
-        cmake --build /build/x86_64 -t omnirefl ccdb_query -j$$(nproc) &&
-        cmake --build /build/aarch64 -t omnirefl ccdb_query -j$$(nproc) &&
-        bash /src/docker/package-cosmo.sh \
-          /build/x86_64 /build/aarch64 /packages
+        bash /src/docker/package-cosmo.sh /build /packages
 
   build-musl:
     <<: *build-musl-ucrt-image
