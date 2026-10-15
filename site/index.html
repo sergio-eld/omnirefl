@@ -295,7 +295,6 @@
       const links = [...navigation.querySelectorAll('a[href^="#"]')]
       const sections = links.map(link => document.querySelector(link.hash))
       const desktop = window.matchMedia('(min-width: 90rem)')
-      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
       const scrollKeys = new Set([
         'ArrowDown',
         'ArrowUp',
@@ -339,7 +338,7 @@
 
         if (!desktop.matches && navigation.clientWidth < navigation.scrollWidth)
           navigation.scrollTo({
-            behavior: reducedMotion.matches ? 'auto' : 'smooth',
+            behavior: 'instant',
             left: currentLink.offsetLeft
               - (navigation.clientWidth - currentLink.offsetWidth) / 2,
           })
@@ -361,9 +360,11 @@
         schedule()
       }
 
+      // Center the menu before the native anchor scroll. Chromium 121 cancels
+      // page scrolling if the menu scrolls afterward.
       links.forEach(link => link.addEventListener('click', () => {
         requested = sections.find(section => `#${section.id}` === link.hash)
-        schedule()
+        activate()
       }))
 
       window.addEventListener('scroll', schedule, {passive: true})
