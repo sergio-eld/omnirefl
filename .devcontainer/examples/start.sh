@@ -16,7 +16,9 @@ project(scratch LANGUAGES CXX)
 # The starter files are C++11-compatible; change this to try newer standards.
 set(CMAKE_CXX_STANDARD 11)
 
-find_package(omnirefl CONFIG REQUIRED)
+if(NOT TARGET omni::tool)
+    find_package(omnirefl CONFIG REQUIRED)
+endif()
 
 add_executable(scratch main.cpp)
 omni_reflected_target(scratch)
