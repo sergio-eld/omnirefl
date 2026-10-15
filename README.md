@@ -388,6 +388,9 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 <!-- pages:examples-tests-and-benchmarks:start -->
 ## Examples, Tests and Benchmarks
 
+For an examples sandbox in VS Code or GitHub Codespaces, see the
+[Dev Container setup](.devcontainer/README.md).
+
 `share/omnirefl` packages tests, examples, and benchmarks. You may configure
 the whole directory out of source, or any `share/omnirefl/examples/<folder>`
 as a standalone project.
