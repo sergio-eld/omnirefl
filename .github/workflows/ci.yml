@@ -978,6 +978,8 @@ jobs:
           if-no-files-found: error
 
       - name: Clean up intermediate artifacts
+        # Results are already aggregated; cleanup outages must not fail validation.
+        continue-on-error: true
         if: >-
           ${{ always()
             && 'true' == needs.changes.outputs.build_sources
@@ -987,6 +989,7 @@ jobs:
                 == github.repository) }}
         uses: actions/github-script@v8
         with:
+          retries: 3
           script: |
             const artifacts = await github.paginate(
               github.rest.actions.listWorkflowRunArtifacts,
