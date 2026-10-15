@@ -14,9 +14,14 @@ have separate checkouts.
 - **Omnirefl bundled examples - current source**: use this checkout, including
   local changes.
 
-The Explorer opens `share/`, and the terminal opens `share/build/`. Select the
-`examples` CMake preset to configure and build. Tests and benchmarks can be
-turned on through CMake's `BUILD_TESTING` and `BUILD_BENCHMARKS` options.
+The Explorer opens `share/`, and the terminal opens `share/build/`. Startup
+configures the examples; select the `examples` preset to build. Tests and
+benchmarks can be turned on through CMake's `BUILD_TESTING` and
+`BUILD_BENCHMARKS` options.
+
+Start with `examples/scratch/main.cpp`, a C++11 example using the `field_names`
+visitor in `field_names.hpp`. The scratch project is created on startup, ignored
+by Git, excluded from packages, and preserved across container restarts.
 
 Local containers require Bash, curl, and Docker Compose. On Windows, open the
 repository through WSL.

@@ -13,3 +13,4 @@ artifacts
 site/node_modules
 site/dist
 iteration.md
+share/examples/scratch

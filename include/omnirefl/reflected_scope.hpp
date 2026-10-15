@@ -1827,6 +1827,9 @@ struct reflected_call_t {
       _reflect_arg(std::declval<Args &&>())...)) {
 #elif !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
     // IDE parsing cannot name the result before generation.
+    // FIXME: [high] Suspected cpptools bug: errors from this placeholder persist
+    // after generation, despite correct type information. IntelliSense resets
+    // do not clear them; a window reload does.
     -> detail::_ungenerated_result {
 #else
     // Normal compilation invokes the callable with generated wrappers.

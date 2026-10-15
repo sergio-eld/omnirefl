@@ -387,6 +387,7 @@ if(ENABLE_PACKAGE)
     install(DIRECTORY share/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
         PATTERN "internal" EXCLUDE
+        PATTERN "scratch" EXCLUDE
         PATTERN "build*" EXCLUDE
         PATTERN "CMakeUserPresets.json" EXCLUDE)
 

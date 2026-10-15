@@ -15,6 +15,10 @@ if(BUILD_TESTING)
 endif()
 
 if(BUILD_EXAMPLES)
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/examples/scratch/CMakeLists.txt")
+        add_subdirectory(examples/scratch "${CMAKE_BINARY_DIR}/examples/scratch")
+    endif()
+
     if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
         message(STATUS "omnirefl: skipping sneak_peek: C++23 is not available")
     else()

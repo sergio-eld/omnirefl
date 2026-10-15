@@ -16,7 +16,7 @@
   "customizations": {
     "codespaces": {
       "openFiles": [
-        "share/examples/sneak_peek/main.cpp"
+        "share/examples/scratch/main.cpp"
       ]
     },
     "vscode": {
@@ -40,12 +40,13 @@
       }
     }
   },
+  "postCreateCommand": [
+    "sh",
+    "/workspaces/omnirefl/.devcontainer/examples/start.sh",
+    "--fresh"
+  ],
   "postStartCommand": [
-    "tar",
-    "-xzf",
-    "/workspaces/omnirefl/artifacts/devcontainer/omnirefl.tar.gz",
-    "-C",
-    "/usr/local",
-    "--strip-components=1"
+    "sh",
+    "/workspaces/omnirefl/.devcontainer/examples/start.sh"
   ]
 }
