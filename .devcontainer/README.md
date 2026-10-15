@@ -1,17 +1,18 @@
 # Containers
 
-On GitHub, click **Code → Codespaces → … → New with options**. Choose a
-**Dev container configuration**, then click **Create codespace** to open the
-sandbox in your browser.
+On GitHub, click **Code** and select the **Codespaces** tab. Open its three-dot
+menu and choose **New with options**. On the creation page, select the branch
+and **Dev container configuration**, then click **Create codespace** to open
+it in your browser.
 
 In local VS Code, use **Dev Containers: Switch Container**. Separate Codespaces
 have separate checkouts.
 
 ## Examples (Ubuntu 24.04)
 
-- **Omnirefl bundled examples - latest release** (default): use the latest
+- **Bundled examples - latest release** (default): use the latest
   GitHub release.
-- **Omnirefl bundled examples - current source**: use this checkout, including
+- **Bundled examples - current source**: use this checkout, including
   local changes.
 
 The Explorer opens `share/`, and the terminal opens `share/build/`. Startup
@@ -28,7 +29,7 @@ repository through WSL.
 
 ## Development (Cosmopolitan)
 
-**Omnirefl development** opens the repository and includes a prebuilt x86_64
+**Development** opens the repository and includes a prebuilt x86_64
 package. Tests, benchmarks, and extensions are enabled.
 
 Build from the repository root:

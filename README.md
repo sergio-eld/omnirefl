@@ -378,7 +378,7 @@ ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
 
     </details>
 
-  - **GitHub Codespaces:** select **Omnirefl development** when creating the
+  - **GitHub Codespaces:** select **Development** when creating the
     Codespace; see the [container setup](.devcontainer/README.md).
 
 Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its

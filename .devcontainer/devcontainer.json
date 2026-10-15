@@ -1,5 +1,5 @@
 {
-  "name": "Omnirefl bundled examples - latest release (Ubuntu 24.04)",
+  "name": "Bundled examples - latest release (Ubuntu 24.04)",
   "dockerComposeFile": "compose.yml",
   "service": "examples",
   "runServices": [

@@ -1,5 +1,5 @@
 {
-  "name": "Omnirefl development (Cosmopolitan)",
+  "name": "Development (Cosmopolitan)",
   "dockerComposeFile": "../compose.yml",
   "service": "development",
   "runServices": [
