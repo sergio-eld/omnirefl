@@ -79,6 +79,24 @@ for binary in "${binaries[@]}"; do
   chmod +x "${package_root[0]}/bin/${binary}"
 done
 
+# Native packages already export their host executable names. Only Cosmo has
+# both Unix launchers and Windows executables in the same package.
+for targets in "${package_root[0]}"/*/cmake/omnirefl/omnireflTargets-*.cmake; do
+  {
+    cat <<'EOF'
+set(_omnirefl_executable_suffix "")
+if(CMAKE_HOST_WIN32)
+  set(_omnirefl_executable_suffix ".exe")
+endif()
+EOF
+    # Adapt both imported locations and CMake's file-existence checks.
+    sed 's|${_IMPORT_PREFIX}/bin/[^"]*|&${_omnirefl_executable_suffix}|g' \
+      "${targets}"
+    printf '\nunset(_omnirefl_executable_suffix)\n'
+  } > "${scratch_dir}/targets.cmake"
+  mv "${scratch_dir}/targets.cmake" "${targets}"
+done
+
 tar -czf "${package_dir}/$(basename "${archive[0]}")" \
   -C "${archive_dir}" \
   "$(basename "${package_root[0]}")"
