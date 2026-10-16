@@ -23,11 +23,9 @@
     "vscode": {
       "extensions": [
         "ms-vscode.cpptools",
-        "ms-vscode.cmake-tools",
-        "vscodevim.vim"
+        "ms-vscode.cmake-tools"
       ],
       "settings": {
-        "vim.disableExtension": true,
         "git.openRepositoryInParentFolders": "always",
         "cmake.useCMakePresets": "always",
         "cmake.options.statusBarVisibility": "visible",
