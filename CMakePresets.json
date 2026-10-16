@@ -1,0 +1,64 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "cosmo",
+      "displayName": "Cosmopolitan x86_64",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/x86_64",
+      "toolchainFile": "${sourceDir}/docker/cosmopolitan.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "COSMOPOLITAN_ARCH": "x86_64",
+        "Clang_DIR": "$env{CLANG_INSTALL_COSMOPOLITAN_X86_64}/lib/cmake/clang",
+        "LLVM_DIR": "$env{CLANG_INSTALL_COSMOPOLITAN_X86_64}/lib/cmake/llvm",
+        "CLANG_RESOURCE_DIR": "$env{CLANG_RESOURCE_DIR_COSMOPOLITAN}",
+        "ENABLE_PACKAGE": true,
+        "ENABLE_TESTING": true,
+        "ENABLE_BENCH": true,
+        "BUILD_EXTENSIONS": true,
+        "OMNIREFL_PACKAGE_TARGET": "cosmo-x86_64"
+      }
+    },
+    {
+      "name": "cosmo-aarch64",
+      "displayName": "Cosmopolitan AArch64",
+      "inherits": "cosmo",
+      "binaryDir": "${sourceDir}/build/aarch64",
+      "cacheVariables": {
+        "COSMOPOLITAN_ARCH": "aarch64",
+        "Clang_DIR": "$env{CLANG_INSTALL_COSMOPOLITAN_AARCH64}/lib/cmake/clang",
+        "LLVM_DIR": "$env{CLANG_INSTALL_COSMOPOLITAN_AARCH64}/lib/cmake/llvm",
+        "ENABLE_PACKAGE": false,
+        "ENABLE_TESTING": false,
+        "ENABLE_BENCH": false,
+        "BUILD_EXTENSIONS": false,
+        "OMNIREFL_PACKAGE_TARGET": "cosmo-aarch64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "cosmo",
+      "configurePreset": "cosmo"
+    },
+    {
+      "name": "cosmo-aarch64",
+      "configurePreset": "cosmo-aarch64"
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "cosmo",
+      "displayName": "Cosmopolitan package",
+      "configurePreset": "cosmo",
+      "generators": ["External"],
+      "variables": {
+        "CPACK_EXTERNAL_ENABLE_STAGING": "OFF",
+        "CPACK_EXTERNAL_PACKAGE_SCRIPT": "${sourceDir}/.devcontainer/development/cpack.cmake"
+      },
+      "packageDirectory": "${sourceDir}/artifacts/devcontainer"
+    }
+  ]
+}

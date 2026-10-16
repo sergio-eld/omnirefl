@@ -358,9 +358,28 @@ ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
   run on `master` and download the package artifact for the required runtime
   and architecture. Artifacts are temporary; cancelled or partially rerun
   workflows and artifact expiration may leave no downloadable package.
-- **Build locally:**<br>
-  Use the prepared Docker images; see
-  [Build Packages Locally](#build-packages-locally).
+- **Container builds:**<br>
+  - **Docker Compose:** references cached, prebuilt toolchain images from
+    [GHCR](https://github.com/sergio-eld?tab=packages&repo_name=omnirefl).
+
+    <details>
+    <summary>Build a package locally</summary>
+
+    With Git and Docker Compose installed:
+
+    ```bash
+    git clone https://github.com/sergio-eld/omnirefl.git
+    cd omnirefl
+    docker compose run --rm build-cosmo
+    ```
+
+    The package is written to `artifacts/packages/cosmo`. For other package
+    formats and testing, see [Build Packages Locally](#build-packages-locally).
+
+    </details>
+
+  - **GitHub Codespaces:** select **Development** when creating the
+    Codespace; see the [container setup](.devcontainer/README.md).
 
 Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 `omnirefl-*` directory as the installation prefix.
@@ -368,6 +387,9 @@ Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
 
 <!-- pages:examples-tests-and-benchmarks:start -->
 ## Examples, Tests and Benchmarks
+
+For an examples sandbox in VS Code or GitHub Codespaces, see the
+[Dev Container setup](.devcontainer/README.md).
 
 `share/omnirefl` packages tests, examples, and benchmarks. You may configure
 the whole directory out of source, or any `share/omnirefl/examples/<folder>`

@@ -33,6 +33,11 @@ on:
         required: false
         default: false
 
+# New PR commits replace older runs; other events keep independent runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 # CI coverage, grouped by distribution.
 # TODO: [low] Define a schema for CI_MATRIX, validate against it, and extract
 # parameters programmatically. Apply schema defaults explicitly before expansion.
@@ -978,6 +983,8 @@ jobs:
           if-no-files-found: error
 
       - name: Clean up intermediate artifacts
+        # Results are already aggregated; cleanup outages must not fail validation.
+        continue-on-error: true
         if: >-
           ${{ always()
             && 'true' == needs.changes.outputs.build_sources
@@ -987,6 +994,7 @@ jobs:
                 == github.repository) }}
         uses: actions/github-script@v8
         with:
+          retries: 3
           script: |
             const artifacts = await github.paginate(
               github.rest.actions.listWorkflowRunArtifacts,
