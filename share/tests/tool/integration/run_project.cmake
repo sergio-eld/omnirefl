@@ -22,6 +22,7 @@ execute_process(
         "-DCMAKE_C_COMPILER=${C_COMPILER}"
         "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
         "-Domnirefl_DIR=${OMNIREFL_DIR}"
+        ${CONFIGURE_ARGS}
     RESULT_VARIABLE configure_result
     OUTPUT_VARIABLE configure_out
     ERROR_VARIABLE configure_err)

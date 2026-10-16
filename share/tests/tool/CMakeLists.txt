@@ -16,6 +16,28 @@ set_tests_properties(omnirefl.cli.version PROPERTIES
         "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)")
 
 if(DEFINED omnirefl_DIR)
+    function(_omnirefl_incremental_build_test name dependency)
+        if(CMAKE_CROSSCOMPILING)
+            set(_configure_args "-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}")
+        endif()
+        add_test(NAME "omnirefl.integration.incremental_build.${name}"
+            COMMAND ${CMAKE_COMMAND}
+                -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/incremental_build"
+                -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/incremental_build/${name}"
+                -D "DEPENDENCY=${dependency}"
+                -D "GENERATOR=${CMAKE_GENERATOR}"
+                -D "C_COMPILER=${CMAKE_C_COMPILER}"
+                -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                -D "OMNIREFL_DIR=${omnirefl_DIR}"
+                -D "CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+                -D "CONFIGURE_ARGS=${_configure_args}"
+                -D "EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/integration/run_incremental_build.cmake")
+    endfunction()
+
+    _omnirefl_incremental_build_test(direct_header model.hpp)
+    _omnirefl_incremental_build_test(transitive_header fields.hpp)
+
     add_test(NAME omnirefl.integration.dollar_path_source
         COMMAND ${CMAKE_COMMAND}
             -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/dollar_path"

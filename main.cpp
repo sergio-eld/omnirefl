@@ -95,6 +95,10 @@
 
 #include "std_compat.h"
 
+#if defined(__COSMOPOLITAN__)
+#  include <cosmo.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace std::string_view_literals;
 
@@ -2745,6 +2749,15 @@ std::expected<fs::path, std::string> write_dependencies_file(
   const auto esc = [](std::string_view s) -> std::string {
     std::string out;
     out.reserve(s.size());
+#if defined(__COSMOPOLITAN__)
+    // Native Windows build systems cannot resolve Cosmo's /C/... drive mounts.
+    if (IsWindows() && 3 <= s.size() && '/' == s[0]
+      && std::isalpha(static_cast<unsigned char>(s[1])) && '/' == s[2]) {
+      out += s[1];
+      out += ':';
+      s.remove_prefix(2);
+    }
+#endif
     for (char c : s) {
       if (c == ' ' || c == '\\' || c == '#')
         out.push_back('\\');
