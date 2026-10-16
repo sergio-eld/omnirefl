@@ -229,6 +229,149 @@ for each reflected type and are available only within reflected scopes:
   aggregate members, and excludes unions. See the
   [example](share/tests/tool/aggregate_into/test.cpp).
 
+## Direct CLI Usage
+
+`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
+require CMake:
+
+```bash
+# Cosmopolitan packages use omnirefl on Unix and omnirefl.exe on Windows.
+flags="-std=c++20 -I/path/to/omnirefl/include"
+omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
+c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
+```
+
+`-c` selects the instrumented source; compiler output options after `--` are
+ignored. `ccdb_query` prints the matching command from a compilation database;
+the optional final argument selects among commands by output-path substring:
+
+```bash
+ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
+```
+
+<!-- pages:install:start -->
+## Install
+
+- **Release archives:**<br>
+  [Latest release](https://github.com/sergio-eld/omnirefl/releases/latest) or
+  [all releases](https://github.com/sergio-eld/omnirefl/releases). The main
+  package is `omnirefl-cosmo-universal` (`.tar.gz`), supporting Linux, macOS,
+  and Windows.
+  Platform-specific packages are also available: `.deb` or `.tar.gz` for Linux,
+  and `.zip` for Windows.
+- **Container builds:**<br>
+  - **Docker Compose:** references cached, prebuilt toolchain images from
+    [GHCR](https://github.com/sergio-eld?tab=packages&repo_name=omnirefl).
+
+    <details>
+    <summary>Build a package locally</summary>
+
+    With Git and Docker Compose installed:
+
+    ```bash
+    git clone https://github.com/sergio-eld/omnirefl.git
+    cd omnirefl
+    docker compose run --rm build-cosmo
+    cd artifacts/packages/cosmo # The built package is here.
+    ```
+
+    For other package formats and testing, see
+    [Build Packages Locally](#build-packages-locally).
+
+    </details>
+
+  - **GitHub Codespaces:** select **Development** when creating the
+    Codespace; see the [container setup](.devcontainer/README.md).
+
+- **Latest CI artifact (if available):**<br>
+  Package artifacts from the latest successful
+  [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
+  run on `master`, by runtime and architecture. Artifacts are temporary;
+  cancelled or partially rerun workflows and artifact expiration may leave no
+  downloadable package.
+
+Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
+`omnirefl-*` directory as the installation prefix.
+<!-- pages:install:end -->
+
+<!-- pages:examples-tests-and-benchmarks:start -->
+## Examples, Tests and Benchmarks
+
+For an examples sandbox in VS Code or GitHub Codespaces, see the
+[Dev Container setup](.devcontainer/README.md).
+
+The installation includes tests, examples, and benchmarks in `share/omnirefl`.
+You may configure the whole directory out of source, or any
+`share/omnirefl/examples/<folder>` as a standalone project.
+
+Examples, tests, and benchmarks are enabled by default; disable a category with
+`-DBUILD_EXAMPLES=OFF`, `-DBUILD_TESTING=OFF`, or `-DBUILD_BENCHMARKS=OFF`.
+Unsupported examples are skipped with a status message.
+
+CI compares instrumentation and Release object-build times using the
+[benchmark baseline](share/benchmarks/instrumentation/baseline_test.cpp).
+
+Alternatively, download and unpack the Cosmopolitan archive from the
+[latest release](https://github.com/sergio-eld/omnirefl/releases/latest)
+into `./omnirefl`:
+
+```bash
+mkdir -p omnirefl
+curl -fL "$(curl -fsSL \
+  https://api.github.com/repos/sergio-eld/omnirefl/releases/latest \
+  | sed -n 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')" \
+  | tar -xz -C omnirefl --strip-components=1
+```
+
+```bash
+# Use /usr when installed system-wide from a Debian package.
+prefix="$PWD/omnirefl"
+
+mkdir build && cd build
+cmake "$prefix/share/omnirefl" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  "-DCMAKE_PREFIX_PATH=$prefix"
+cmake --build .
+ctest --timeout 600 --output-on-failure --no-tests=error
+```
+
+Each `share/omnirefl/examples/<folder>` directory is self-contained. Configure one
+independently, such as `share/omnirefl/examples/sneak_peek`, or copy it into
+your own workspace. The Sneak Peek requires CMake 3.20 and a configured
+C++23 toolchain.
+
+Extension examples, tests, and benchmarks are grouped under
+`share/omnirefl/extensions`:
+
+- `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
+  See the [standalone example](share/extensions/serialization/examples/ryml/main.cpp).
+<!-- pages:examples-tests-and-benchmarks:end -->
+
+<!-- pages:performance:start -->
+## Is It Slow?
+
+The overhead target is roughly the frontend portion of a full object
+build—around 30%, though AST matching and context resolution can add to it.
+
+<details>
+<summary>Incremental builds</summary>
+
+Only instrumented targets pay this cost, and reflected translation units can be
+isolated in dedicated targets. The cost is most noticeable during initial
+generation. Dependency files let the build system rerun instrumentation only
+when the source or an included header changes.
+
+</details>
+<!-- pages:performance:end -->
+
+## Continuous Benchmark
+
+CI benchmarks native musl and Cosmopolitan on Linux x86_64, plus Cosmopolitan
+on Intel and Apple Silicon macOS. Benchmark inputs use `Release`;
+distributable packages retain `RelWithDebInfo` for detached symbols.
+
+Reports compare reflection and object-build wall time for `benchmark.baseline`
+against the average of the last five stored runs.
+
 <!-- pages:scope:start -->
 ## Supported Scope
 
@@ -322,117 +465,6 @@ Standard-library record types are not traversed as reflectable records outside
 those protocol routes.
 
 <!-- pages:dependency-protocols:end -->
-
-## Direct CLI Usage
-
-`omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
-require CMake:
-
-```bash
-# Cosmopolitan packages use omnirefl on Unix and omnirefl.exe on Windows.
-flags="-std=c++20 -I/path/to/omnirefl/include"
-omnirefl -o example.omnirefl.hpp -c main.cpp -- c++ $flags
-c++ $flags -include example.omnirefl.hpp main.cpp -o example && ./example
-```
-
-`-c` selects the instrumented source; compiler output options after `--` are
-ignored. `ccdb_query` prints the matching command from a compilation database;
-the optional final argument selects among commands by output-path substring:
-
-```bash
-ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
-```
-
-<!-- pages:install:start -->
-## Install
-
-- **Release archives:**<br>
-  [Latest release](https://github.com/sergio-eld/omnirefl/releases/latest) or
-  [all releases](https://github.com/sergio-eld/omnirefl/releases). Linux
-  packages use `.deb` or `.tar.gz`; Windows packages use `.zip`. The
-  experimental Cosmopolitan `.tar.gz` package supports Linux, macOS, and
-  Windows.
-- **Latest CI artifact (if available):**<br>
-  Open the latest successful
-  [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
-  run on `master` and download the package artifact for the required runtime
-  and architecture. Artifacts are temporary; cancelled or partially rerun
-  workflows and artifact expiration may leave no downloadable package.
-- **Container builds:**<br>
-  - **Docker Compose:** references cached, prebuilt toolchain images from
-    [GHCR](https://github.com/sergio-eld?tab=packages&repo_name=omnirefl).
-
-    <details>
-    <summary>Build a package locally</summary>
-
-    With Git and Docker Compose installed:
-
-    ```bash
-    git clone https://github.com/sergio-eld/omnirefl.git
-    cd omnirefl
-    docker compose run --rm build-cosmo
-    ```
-
-    The package is written to `artifacts/packages/cosmo`. For other package
-    formats and testing, see [Build Packages Locally](#build-packages-locally).
-
-    </details>
-
-  - **GitHub Codespaces:** select **Development** when creating the
-    Codespace; see the [container setup](.devcontainer/README.md).
-
-Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
-`omnirefl-*` directory as the installation prefix.
-<!-- pages:install:end -->
-
-<!-- pages:examples-tests-and-benchmarks:start -->
-## Examples, Tests and Benchmarks
-
-For an examples sandbox in VS Code or GitHub Codespaces, see the
-[Dev Container setup](.devcontainer/README.md).
-
-`share/omnirefl` packages tests, examples, and benchmarks. You may configure
-the whole directory out of source, or any `share/omnirefl/examples/<folder>`
-as a standalone project.
-
-Examples, tests, and benchmarks are enabled by default; disable a category with
-`-DBUILD_EXAMPLES=OFF`, `-DBUILD_TESTING=OFF`, or `-DBUILD_BENCHMARKS=OFF`.
-Unsupported examples are skipped with a status message.
-
-Alternatively, download and unpack the Cosmopolitan archive from the
-[latest release](https://github.com/sergio-eld/omnirefl/releases/latest)
-into `./omnirefl`:
-
-```bash
-mkdir -p omnirefl
-curl -fL "$(curl -fsSL \
-  https://api.github.com/repos/sergio-eld/omnirefl/releases/latest \
-  | sed -n 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')" \
-  | tar -xz -C omnirefl --strip-components=1
-```
-
-```bash
-# Use /usr when installed system-wide from a Debian package.
-prefix="$PWD/omnirefl"
-
-mkdir build && cd build
-cmake "$prefix/share/omnirefl" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  "-DCMAKE_PREFIX_PATH=$prefix"
-cmake --build .
-ctest --timeout 600 --output-on-failure --no-tests=error
-```
-
-Each `share/omnirefl/examples/<folder>` directory is self-contained. Configure one
-independently, such as `share/omnirefl/examples/sneak_peek`, or copy it into
-your own workspace. The Sneak Peek requires CMake 3.20 and a configured
-C++23 toolchain.
-
-Extension examples, tests, and benchmarks are grouped under
-`share/omnirefl/extensions`:
-
-- `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
-  See the [standalone example](share/extensions/serialization/examples/ryml/main.cpp).
-<!-- pages:examples-tests-and-benchmarks:end -->
 
 <!-- pages:limitations:start -->
 ## Limitations
@@ -536,39 +568,6 @@ tests these package/platform combinations:
 
 The Linux matrix also checks MinGW cross-compilation. Windows AArch64 packaging
 is not currently supported.
-
-<!-- pages:performance:start -->
-## Is It Slow?
-
-Omnirefl uses a Clang frontend action: it preprocesses the translation unit and
-builds its AST, but does not perform object-code optimization or code
-generation. The overhead target is roughly the frontend portion of a complete
-object build: about 30% as an order-of-magnitude expectation. The actual ratio
-depends on the source, included headers, compiler, and optimization level.
-
-The packaged [benchmark baseline](share/benchmarks/instrumentation/baseline_test.cpp)
-is intentionally large enough to represent a meaningful translation unit and
-contains a reasonable amount of ordinary and reflected code. CI records its reflection and
-subsequent Release object-build times across benchmarked platforms. See the
-[continuous benchmark](#continuous-benchmark) and
-[workflow history](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
-for observed results.
-
-Only instrumented targets pay this cost, and reflected translation units can be
-isolated in dedicated targets. The impact is therefore most noticeable during
-initial generation. Omnirefl emits dependency files for the source and all its
-included headers, so Ninja reruns instrumentation only when one of those inputs
-changes.
-<!-- pages:performance:end -->
-
-## Continuous Benchmark
-
-CI benchmarks native musl and Cosmopolitan on Linux x86_64, plus Cosmopolitan
-on Intel and Apple Silicon macOS. Benchmark inputs use `Release`;
-distributable packages retain `RelWithDebInfo` for detached symbols.
-
-Reports compare reflection and object-build wall time for `benchmark.baseline`
-against the average of the last five stored runs.
 
 <!-- pages:how-it-works:start -->
 ## How It Works
