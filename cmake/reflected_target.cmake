@@ -378,8 +378,10 @@ function(omni_reflected_target target)
         # compiler args after `--` while preserving diagnostics.
         # Slash delimiters make the target's `.dir` a complete output-path
         # component instead of a suffix that can match another target name.
+        # The depfile names the header as its target; Ninja requires that output
+        # first. The stamp still forces generation after placeholder creation.
         add_custom_command(
-            OUTPUT "${_stamp}"
+            OUTPUT "${_generated_header}" "${_stamp}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
             COMMAND ${CMAKE_COMMAND}
                 -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
@@ -397,7 +399,7 @@ function(omni_reflected_target target)
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
             COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
             DEPENDS "${_src}" "${_comp_db}" omni::tool omni::ccdb_query
-            BYPRODUCTS "${_generated_header}" "${_depfile}"
+            BYPRODUCTS "${_depfile}"
             DEPFILE "${_depfile}"
             VERBATIM
         )
