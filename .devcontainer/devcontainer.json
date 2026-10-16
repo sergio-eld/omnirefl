@@ -28,6 +28,7 @@
       "settings": {
         "git.openRepositoryInParentFolders": "always",
         "cmake.useCMakePresets": "always",
+        "cmake.useFolderPropertyInBuildTargetDropdown": true,
         "cmake.options.statusBarVisibility": "visible",
         "cmake.setBuildTargetSameAsLaunchTarget": true,
         "terminal.integrated.cwd": "${workspaceFolder}/build",

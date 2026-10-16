@@ -24,7 +24,15 @@ FetchContent_Declare(mpark_variant
     GIT_TAG v1.4.0
     GIT_SHALLOW TRUE
     GIT_SUBMODULES "")
+set(_dependencies_parent_folder "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "Dependencies")
 FetchContent_MakeAvailable(googletest mpark_variant)
+# An empty parent must unset CMAKE_FOLDER, not create an empty IDE group.
+set(CMAKE_FOLDER ${_dependencies_parent_folder})
+foreach(_dependency googletest mpark_variant)
+    set_property(DIRECTORY "${${_dependency}_SOURCE_DIR}"
+        PROPERTY EXCLUDE_FROM_ALL TRUE)
+endforeach()
 
 add_executable(comprehensive_guide comprehensive_guide.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)

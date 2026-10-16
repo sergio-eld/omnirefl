@@ -40,7 +40,15 @@ FetchContent_Declare(mpark_variant
     GIT_SUBMODULES_RECURSE FALSE
 )
 
+set(_dependencies_parent_folder "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "Dependencies")
 FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant googletest)
+# An empty parent must unset CMAKE_FOLDER, not create an empty IDE group.
+set(CMAKE_FOLDER ${_dependencies_parent_folder})
+foreach(_dependency tl_expected tl_optional mpark_variant googletest)
+    set_property(DIRECTORY "${${_dependency}_SOURCE_DIR}"
+        PROPERTY EXCLUDE_FROM_ALL TRUE)
+endforeach()
 if(NOT TARGET GTest::GTest)
     add_library(GTest::GTest ALIAS gtest)
 endif()

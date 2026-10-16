@@ -428,6 +428,7 @@ function(omni_reflected_target target)
     # Common plumbing: hook outputs into build + manual force-regenerate target
     set(_gen_target "_gen.${target}.omni")
     add_custom_target(${_gen_target} DEPENDS ${_gen_outputs})
+    set_target_properties(${_gen_target} PROPERTIES FOLDER "omnirefl/internal")
     add_dependencies(${target} ${_gen_target})
 
     set(_cfg_arg "")

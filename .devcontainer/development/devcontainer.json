@@ -21,6 +21,7 @@
       ],
       "settings": {
         "cmake.useCMakePresets": "always",
+        "cmake.useFolderPropertyInBuildTargetDropdown": true,
         "cmake.options.statusBarVisibility": "visible",
         "cmake.options.advanced": {
           "cpack": {
