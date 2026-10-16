@@ -13,16 +13,20 @@ have separate checkouts.
 - **Bundled examples - latest release** (default): use the latest
   GitHub release.
 - **Bundled examples - current source**: use this checkout, including
-  local changes.
+  local changes. After changing the library, rebuild the container from the
+  command palette: **Codespaces: Rebuild Container** in the browser, or
+  **Dev Containers: Rebuild Container** locally. This rebuilds and installs the
+  package. Changes to example files only need a normal build.
 
 The Explorer opens `share/`, and the terminal opens `share/build/`. Startup
-configures the examples; select the `examples` preset to build. Tests and
-benchmarks can be turned on through CMake's `BUILD_TESTING` and
-`BUILD_BENCHMARKS` options.
+configures the examples; select the `examples` preset to build. To also enable
+tests and benchmarks, run in that terminal:
 
-Start with `examples/scratch/main.cpp`, a C++11 example using the `field_names`
-visitor in `field_names.hpp`. The scratch project is created on startup, ignored
-by Git, excluded from packages, and preserved across container restarts.
+```sh
+cmake .. -DBUILD_TESTING=ON -DBUILD_BENCHMARKS=ON
+cmake --build . --parallel
+ctest --output-on-failure
+```
 
 Local containers require Bash, curl, and Docker Compose. On Windows, open the
 repository through WSL.
