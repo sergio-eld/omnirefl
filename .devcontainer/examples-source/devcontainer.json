@@ -16,6 +16,7 @@
   "customizations": {
     "codespaces": {
       "openFiles": [
+        "examples/sneak_peek/main.cpp",
         "examples/scratch/main.cpp"
       ]
     },

@@ -33,6 +33,11 @@ on:
         required: false
         default: false
 
+# New PR commits replace older runs; other events keep independent runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 # CI coverage, grouped by distribution.
 # TODO: [low] Define a schema for CI_MATRIX, validate against it, and extract
 # parameters programmatically. Apply schema defaults explicitly before expansion.
