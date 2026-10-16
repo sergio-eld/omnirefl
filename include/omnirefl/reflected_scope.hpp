@@ -12,7 +12,6 @@
 #  define OMNI_DETAIL_UNGENERATED_REFLECTION
 #endif
 
-#include <exception>
 #include <memory>
 #include <tuple>
 #include <type_traits>
@@ -1788,6 +1787,23 @@ constexpr auto reflected(T &&t) noexcept(
 }
 #endif
 
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+// Ad hoc: this definition must remain visible when a callable has no linkage,
+// but pre-generation parsing never evaluates it and therefore it returns
+// nothing. The callable's declared result is still required by surrounding
+// source expressions.
+#  if defined(__clang__)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wreturn-type"
+#  elif defined(__GNUC__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wreturn-type"
+#  elif defined(_MSC_VER)
+#    pragma warning(push)
+#    pragma warning(disable : 4715)
+#  endif
+#endif
+
 // TODO: Replace this callable implementation type with overloaded
 // `reflected_call` functions.
 struct reflected_call_t {
@@ -1827,14 +1843,21 @@ struct reflected_call_t {
 
     (void)impl;
 
-#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-    // Only the declared result is usable before generation, never the body.
-    std::terminate();
-#else
+#if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
     return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
   }
 };
+
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+#  if defined(__clang__)
+#    pragma clang diagnostic pop
+#  elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#  elif defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
+#endif
 
 /**
  * Invoke a callable with reflection metadata or bindings for the supplied
