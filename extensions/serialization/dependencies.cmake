@@ -77,7 +77,19 @@ if(_serialization_dependencies)
     # Do not inherit the reflection tool's C++23 standard in dependencies.
     set(_serialization_parent_standard "${CMAKE_CXX_STANDARD}")
     set(CMAKE_CXX_STANDARD 11)
+    set(_serialization_parent_folder "${CMAKE_FOLDER}")
+    set(CMAKE_FOLDER "Dependencies")
     FetchContent_MakeAvailable(${_serialization_dependencies})
+    # An empty parent must unset CMAKE_FOLDER, not create an empty IDE group.
+    set(CMAKE_FOLDER ${_serialization_parent_folder})
+    foreach(_dependency IN LISTS _serialization_dependencies)
+        set_property(DIRECTORY "${${_dependency}_SOURCE_DIR}"
+            PROPERTY EXCLUDE_FROM_ALL TRUE)
+    endforeach()
+    if("rapidyaml" IN_LIST _serialization_dependencies)
+        # ryml overrides CMAKE_FOLDER with an empty folder of its own.
+        set_property(TARGET ryml PROPERTY FOLDER "Dependencies")
+    endif()
     if(_serialization_parent_standard)
         set(CMAKE_CXX_STANDARD "${_serialization_parent_standard}")
     else()

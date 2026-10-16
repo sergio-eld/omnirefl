@@ -70,23 +70,6 @@ struct _is_writable_field:
         && (!std::is_const<typename std::remove_reference<Owner>::type>::value
           || FieldMeta::is_mutable())> {};
 
-#if !defined(OMNI_TOOL_RUN) \
-  && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
-// Ad hoc: the IDE may parse before the generated header can name the callable's
-// result. This placeholder is never executed.
-struct _ungenerated_result {
-  template <typename T>
-  constexpr operator T() const
-    noexcept(std::is_nothrow_default_constructible<T>::value) {
-    return T{};
-  }
-
-  // Declaration only: this placeholder is never executed before generation.
-  template <typename T>
-  operator T &() const noexcept;
-};
-#endif
-
 namespace {
 
 #if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
