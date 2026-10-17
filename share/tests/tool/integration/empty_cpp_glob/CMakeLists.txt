@@ -11,4 +11,7 @@ file(GLOB reflected_sources CONFIGURE_DEPENDS
 # Ad hoc: Apple ar rejects empty static archives. The C placeholder keeps the
 # initial C++ source set empty while providing an archive member.
 add_library(empty_cpp_glob STATIC placeholder.c ${reflected_sources})
+set_target_properties(empty_cpp_glob PROPERTIES
+    CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED YES)
 omni_reflected_target(empty_cpp_glob LOG_LEVEL warning)

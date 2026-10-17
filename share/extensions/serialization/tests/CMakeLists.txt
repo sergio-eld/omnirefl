@@ -1,3 +1,17 @@
+# Exercise the patch helper shipped with the selected source or installed package.
+if(DEFINED omnirefl_DIR)
+    set(_serialization_patch_script
+        "${omnirefl_DIR}/components/serialization/patch_c4core_span.cmake")
+else()
+    set(_serialization_patch_script
+        "${omnirefl_SOURCE_DIR}/extensions/serialization/patch_c4core_span.cmake")
+endif()
+add_test(NAME omnirefl.serialization.patch_reapplication
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/patch-test"
+        "-DPATCH_SCRIPT=${_serialization_patch_script}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/apply_patch.cmake")
+
 if(NOT TARGET json_model)
     add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../model" json_model)
 endif()

@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 project(ccdb_query_dummy LANGUAGES CXX)
 
 add_library(unique_target STATIC unique.cpp)
+set_target_properties(unique_target PROPERTIES
+    CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED YES)
 target_compile_definitions(unique_target PRIVATE
     UNIQUE_TARGET=1
     "CCDB_BACKSLASH=R\"(left\\right)\"")

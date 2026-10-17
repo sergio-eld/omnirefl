@@ -42,7 +42,8 @@ fi
 
 timestamp_ns() {
   if command -v python3 >/dev/null; then
-    python3 -c 'import time; print(time.monotonic_ns())'
+    # Older macOS Python versions offset monotonic_ns() separately per process.
+    python3 -c 'import time; print(time.clock_gettime_ns(time.CLOCK_MONOTONIC))'
     return
   fi
 
@@ -72,7 +73,13 @@ reflection_end=$(timestamp_ns)
 reflection_ms=$(awk \
   -v start="$reflection_start" \
   -v end="$reflection_end" \
-  'BEGIN { printf "%.3f", (end - start) / 1000000 }')
+  'BEGIN {
+    if (end <= start) {
+      print "invalid reflection wall time" > "/dev/stderr"
+      exit 1
+    }
+    printf "%.3f", (end - start) / 1000000
+  }')
 
 printf 'Building benchmark with %s parallel jobs...\n' "$parallel"
 build_start=$(timestamp_ns)
@@ -87,7 +94,13 @@ build_end=$(timestamp_ns)
 build_ms=$(awk \
   -v start="$build_start" \
   -v end="$build_end" \
-  'BEGIN { printf "%.3f", (end - start) / 1000000 }')
+  'BEGIN {
+    if (end <= start) {
+      print "invalid build wall time" > "/dev/stderr"
+      exit 1
+    }
+    printf "%.3f", (end - start) / 1000000
+  }')
 
 tool_build=$(awk -v tool="$reflection_ms" -v build="$build_ms" \
   'BEGIN { printf "%.6f", (0 == build ? 0 : 100 * tool / build) }')

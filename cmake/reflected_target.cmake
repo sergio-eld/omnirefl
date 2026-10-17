@@ -1,5 +1,19 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
+# Public reflection headers use constexpr and require C++11 or newer.
+# Reject older configured modes without changing the target's requirements.
+function(_omni_check_minimum_cxx_standard target)
+    get_target_property(_standard "${target}" CXX_STANDARD)
+    if(NOT _standard)
+        set(_standard "${CMAKE_CXX_STANDARD_COMPUTED_DEFAULT}")
+    endif()
+
+    # Standard numbers are not chronological: 98 is older than 11.
+    if(_standard STREQUAL "98" OR (_standard AND _standard LESS 11))
+        message(FATAL_ERROR "omnirefl: target '${target}' uses C++${_standard}; C++11 or newer is required")
+    endif()
+endfunction()
+
 # Ninja-only: controls how CMake rewrites DEPFILE paths for Ninja rules
 if(CMAKE_GENERATOR MATCHES "Ninja" AND POLICY CMP0116)
     cmake_policy(SET CMP0116 NEW)
@@ -316,6 +330,8 @@ function(omni_reflected_target target)
 
     set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}/omni_${target}")
     set(_comp_db "${CMAKE_BINARY_DIR}/compile_commands.json")
+
+    _omni_check_minimum_cxx_standard("${target}")
 
     message(STATUS "omnirefl: reflected target `${target}`")
 

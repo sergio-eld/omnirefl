@@ -1,4 +1,7 @@
 include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 
 # Enable FetchContent logging
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
@@ -10,34 +13,26 @@ set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of googletest" FORCE)
 set(INSTALL_GMOCK OFF CACHE BOOL "Disable installation of googlemock" FORCE)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_Declare(googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-     # The "newest" gtest that supports C++11.
-     # Otherwize will force its C++ version upon the test targets.
-    GIT_TAG release-1.12.1)
+    # Last Google Test release supporting C++11.
+    URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.tar.gz
+    URL_HASH SHA256=81964fe578e9bd7c94dfdb09c8e4d6e6759e19967e397dbea48d1c10e45d0df2)
 
 # std-compat utility
 set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
 set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(tl_expected
-    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-    GIT_TAG v1.3.1
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS TRUE)
+    URL https://github.com/TartanLlama/expected/archive/refs/tags/v1.3.1.tar.gz
+    URL_HASH SHA256=9a04f4f472fbb5c30bf60402f1ca626c4a76987f867978d0b8a35d7ab3fb8fe7)
 
 set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(tl_optional
-    GIT_REPOSITORY https://github.com/TartanLlama/optional.git
-    GIT_TAG v1.1.0
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS TRUE)
+    URL https://github.com/TartanLlama/optional/archive/refs/tags/v1.1.0.tar.gz
+    URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118)
 
 set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
 FetchContent_Declare(mpark_variant
-    GIT_REPOSITORY https://github.com/mpark/variant.git
-    GIT_TAG v1.4.0
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES ""
-    GIT_SUBMODULES_RECURSE FALSE
+    URL https://github.com/mpark/variant/archive/refs/tags/v1.4.0.tar.gz
+    URL_HASH SHA256=8f6b28ab3640b5d76d5b6664dda7257a4405ce59179220431b8fd196c79b2ecb
 )
 
 set(_dependencies_parent_folder "${CMAKE_FOLDER}")

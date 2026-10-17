@@ -16,6 +16,7 @@ RUN apt update \
         unzip \
         curl \
         ca-certificates \
+        libssl-dev \
     && apt clean -y \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,7 +32,7 @@ RUN set -eux; \
         --parallel="$(nproc)" \
         --no-qt-gui \
         --no-debugger \
-        -- -DCMAKE_USE_OPENSSL=OFF; \
+        -- -DCMAKE_USE_OPENSSL=ON; \
     ninja -j"$(nproc)"; \
     mkdir -p /opt/pkg/cmake; \
     DESTDIR=/opt/pkg/cmake ninja install; \
@@ -99,6 +100,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN set -eux; \
     apt update; \
     apt install -y \
+        ca-certificates \
         git \
         ninja-build; \
     if [ "$COMPILER" = "gcc" ] || [ "$COMPILER" = "clang" ]; then \
