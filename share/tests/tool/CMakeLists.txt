@@ -15,6 +15,12 @@ set_tests_properties(omnirefl.cli.version PROPERTIES
     PASS_REGULAR_EXPRESSION
         "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)")
 
+add_test(NAME ccdb_query.cli.version
+    COMMAND $<TARGET_FILE:omni::ccdb_query> --version)
+set_tests_properties(ccdb_query.cli.version PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "ccdb_query [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)")
+
 if(DEFINED omnirefl_DIR)
     function(_omnirefl_incremental_build_test name dependency)
         if(CMAKE_CROSSCOMPILING)

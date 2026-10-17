@@ -194,6 +194,13 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
   };
   app.allow_windows_style_options(false);
 
+  app.set_version_flag("--version",
+    std::format("ccdb_query {} (commit {})",
+      OMNIREFL_VERSION,
+      std::string_view{OMNIREFL_COMMIT}.empty() //
+        ? "unknown"
+        : OMNIREFL_COMMIT));
+
   CLI::Option *compile_commands =
     app.add_option("compile_commands", "Path to compile_commands.json.")
       ->type_name("FILE")
@@ -214,7 +221,8 @@ std::expected<options, std::string> parse(int argc, const char *const *argv) {
 
   try {
     app.parse(argc, argv);
-  } catch (const CLI::CallForHelp &e) {
+  } catch (const CLI::Success &e) {
+    // CLI11 uses separate successful exceptions for --help and --version.
     app.exit(e);
     return std::unexpected(std::string{});
   } catch (const CLI::ParseError &e) {

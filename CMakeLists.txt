@@ -150,6 +150,10 @@ target_include_directories(ccdb_query SYSTEM PRIVATE
 target_include_directories(ccdb_query PRIVATE
     ${PROJECT_SOURCE_DIR})
 
+target_compile_definitions(ccdb_query PRIVATE
+    OMNIREFL_VERSION="${PROJECT_VERSION}"
+    OMNIREFL_COMMIT="${OMNIREFL_PACKAGE_COMMIT}")
+
 target_link_libraries(ccdb_query PRIVATE CLI11::CLI11 clangTooling)
 add_static_compile_options(ccdb_query)
 
