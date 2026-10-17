@@ -13,7 +13,7 @@ add_test(NAME omnirefl.cli.version
     COMMAND $<TARGET_FILE:omni::tool> --version)
 set_tests_properties(omnirefl.cli.version PROPERTIES
     PASS_REGULAR_EXPRESSION
-        "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)")
+        "omnirefl [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^,)]+, LLVM [0-9]+\\.[0-9]+\\.[0-9]+\\)")
 
 add_test(NAME ccdb_query.cli.version
     COMMAND $<TARGET_FILE:omni::ccdb_query> --version)

@@ -45,6 +45,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
 #include <llvm/Option/Option.h>
@@ -2916,11 +2917,12 @@ std::expected<cli::options, app_error> cli::parse(int argc,
   };
 
   app.set_version_flag("--version",
-    std::format("omnirefl {} (commit {})",
+    std::format("omnirefl {} (commit {}, LLVM {})",
       OMNIREFL_VERSION,
       std::string_view{OMNIREFL_COMMIT}.empty() //
         ? "unknown"
-        : OMNIREFL_COMMIT));
+        : OMNIREFL_COMMIT,
+      LLVM_VERSION_STRING));
 
   CLI::Option *const resource_dir = //
     app
