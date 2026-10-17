@@ -23,8 +23,9 @@ set_tests_properties(ccdb_query.cli.version PROPERTIES
 
 if(DEFINED omnirefl_DIR)
     function(_omnirefl_incremental_build_test name dependency)
+        set(_configure_args ${ARGN})
         if(CMAKE_CROSSCOMPILING)
-            set(_configure_args "-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}")
+            list(APPEND _configure_args "-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}")
         endif()
         add_test(NAME "omnirefl.integration.incremental_build.${name}"
             COMMAND ${CMAKE_COMMAND}
@@ -43,6 +44,8 @@ if(DEFINED omnirefl_DIR)
 
     _omnirefl_incremental_build_test(direct_header model.hpp)
     _omnirefl_incremental_build_test(transitive_header fields.hpp)
+    _omnirefl_incremental_build_test(pch.direct_header model.hpp -DUSE_PCH=ON)
+    _omnirefl_incremental_build_test(pch.transitive_header fields.hpp -DUSE_PCH=ON)
 
     add_test(NAME omnirefl.integration.dollar_path_source
         COMMAND ${CMAKE_COMMAND}
