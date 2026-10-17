@@ -10,20 +10,21 @@ endif()
 
 enable_testing()
 include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 # The guide uses Google Test without Google Mock.
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(INSTALL_GMOCK OFF CACHE BOOL "" FORCE)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_Declare(googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG release-1.12.1)
+    URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.tar.gz
+    URL_HASH SHA256=81964fe578e9bd7c94dfdb09c8e4d6e6759e19967e397dbea48d1c10e45d0df2)
 set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
 FetchContent_Declare(mpark_variant
-    GIT_REPOSITORY https://github.com/mpark/variant.git
-    GIT_TAG v1.4.0
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES "")
+    URL https://github.com/mpark/variant/archive/refs/tags/v1.4.0.tar.gz
+    URL_HASH SHA256=8f6b28ab3640b5d76d5b6664dda7257a4405ce59179220431b8fd196c79b2ecb)
 set(_dependencies_parent_folder "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "Dependencies")
 FetchContent_MakeAvailable(googletest mpark_variant)

@@ -1,4 +1,7 @@
 include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 include(CheckCXXSourceCompiles)
 
 function(_serialization_check_cxx20_span result)
@@ -25,10 +28,8 @@ if(NOT TARGET tl::expected)
     set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
     set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(tl_expected
-        GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-        GIT_TAG v1.3.1
-        GIT_SHALLOW TRUE
-        GIT_PROGRESS TRUE)
+        URL https://github.com/TartanLlama/expected/archive/refs/tags/v1.3.1.tar.gz
+        URL_HASH SHA256=9a04f4f472fbb5c30bf60402f1ca626c4a76987f867978d0b8a35d7ab3fb8fe7)
     list(APPEND _serialization_dependencies tl_expected)
 endif()
 
@@ -36,10 +37,8 @@ if(NOT TARGET tl::optional)
     set(OPTIONAL_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
     set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(tl_optional
-        GIT_REPOSITORY https://github.com/TartanLlama/optional.git
-        GIT_TAG v1.1.0
-        GIT_SHALLOW TRUE
-        GIT_PROGRESS TRUE)
+        URL https://github.com/TartanLlama/optional/archive/refs/tags/v1.1.0.tar.gz
+        URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118)
     list(APPEND _serialization_dependencies tl_optional)
 endif()
 
