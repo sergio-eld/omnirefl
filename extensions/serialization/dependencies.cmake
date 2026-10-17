@@ -49,27 +49,23 @@ if(NOT TARGET ryml::ryml)
     set(RYML_DEFAULT_CALLBACK_USES_EXCEPTIONS OFF CACHE BOOL "" FORCE)
     set(RYML_CXX_STANDARD 11 CACHE STRING "" FORCE)
 
-    # TODO(high): Make patch reapplication safe for cached source trees. When
-    # the patch command changes, FetchContent reruns it without restoring the
-    # modified files in RapidYAML's nested c4core submodule.
     # c4core assumes every C++20 standard library provides <span>.
     set(_serialization_ryml_patch)
     if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
         _serialization_check_cxx20_span(_serialization_has_cxx20_span)
         if(NOT _serialization_has_cxx20_span)
             set(_serialization_ryml_patch
-                PATCH_COMMAND git -C <SOURCE_DIR>/ext/c4core apply
-                    "${CMAKE_CURRENT_LIST_DIR}/patches/c4core-span-availability.patch")
+                PATCH_COMMAND "${CMAKE_COMMAND}"
+                    "-DSOURCE_DIR=<SOURCE_DIR>/ext/c4core"
+                    -P "${CMAKE_CURRENT_LIST_DIR}/patch_c4core_span.cmake")
         endif()
     endif()
 
     FetchContent_Declare(rapidyaml
-        GIT_REPOSITORY https://github.com/biojppm/rapidyaml.git
-        # v0.14.0 supports both clang-cl and GCC 16.
-        GIT_TAG v0.14.0
-        GIT_SHALLOW TRUE
-        ${_serialization_ryml_patch}
-        GIT_PROGRESS TRUE)
+        # The source release includes c4core and its CMake helpers.
+        URL https://github.com/biojppm/rapidyaml/releases/download/v0.14.0/rapidyaml-0.14.0-src.tgz
+        URL_HASH SHA256=6e6e67e6b766c5a1c5fcb8b80292c7e7c15a3033c01730b41f4a91eb8a31767c
+        ${_serialization_ryml_patch})
     list(APPEND _serialization_dependencies rapidyaml)
 endif()
 

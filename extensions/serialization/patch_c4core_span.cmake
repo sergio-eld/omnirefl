@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.18.2)
+
+# Older standard libraries can lack <span> even in C++20 mode. Accept the
+# original or already-fixed guard, and reject unexpected dependency changes.
+set(_original "#if (C4_CPP >= 20) || defined(__DOXYGEN__)")
+set(_replacement "#if (C4_CPP >= 20 && __has_include(<span>)) || defined(__DOXYGEN__)")
+foreach(_header span.hpp span_fwd.hpp)
+    set(_path "${SOURCE_DIR}/src/c4/std/${_header}")
+    file(READ "${_path}" _content)
+    string(FIND "${_content}" "${_original}" _position)
+    if(NOT _position EQUAL -1)
+        string(REPLACE "${_original}" "${_replacement}" _content "${_content}")
+        file(WRITE "${_path}" "${_content}")
+    else()
+        string(FIND "${_content}" "${_replacement}" _position)
+        if(_position EQUAL -1)
+            message(FATAL_ERROR "Cannot patch c4core span guard in ${_path}: unexpected content")
+        endif()
+    endif()
+endforeach()

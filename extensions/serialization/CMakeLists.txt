@@ -16,10 +16,7 @@ if(ENABLE_PACKAGE)
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/omnirefl")
     install(FILES serialization.cmake
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components")
-    install(FILES dependencies.cmake
-        DESTINATION
-            "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components/serialization")
-    install(DIRECTORY patches
+    install(FILES dependencies.cmake patch_c4core_span.cmake
         DESTINATION
             "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components/serialization")
 endif()
