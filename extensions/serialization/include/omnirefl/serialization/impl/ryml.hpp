@@ -383,43 +383,39 @@ struct cpp11_lambda_require_field {
   }
 };
 
-// C++11 callable for folding unbound field metadata over a borrowed result.
+// Bound fields keep the result in place and reuse diagnostic path storage.
 struct deserialize_field {
   ::ryml::ConstNodeRef from;
-  const std::vector<issue::path_segment> &path;
-  bool warning;
+  detail::mapping_state *state;
 
-  template <typename To, typename Field>
-  with_diagnostics<To, diagnostics</*owning=*/ false>> operator()(
-    with_diagnostics<To, diagnostics</*owning=*/ false>> result,
-    Field field) const {
-    if (result.diagnostics.stopped())
-      return result;
+  template <typename Field>
+  void operator()(Field field) const {
+    assert(state && state->diagnostics);
+
+    if (state->diagnostics->stopped())
+      return;
 
     const auto name = c4::to_csubstr(field.name());
     const auto node = from.find_child(name);
     if (node.invalid())
-      return result; // Missing fields were already reported by validation.
+      return; // Missing fields were already reported by validation.
 
-    detail::mapping_state state{
-      /*diagnostics=*/&result.diagnostics,
-      /*path=*/path,
-      /*warning=*/warning
-        || (result.diagnostics.policy.partial
-          && (omni::traits::is<compat::optional, typename Field::type>()
-            || omni::traits::is<std::vector, typename Field::type>())),
-    };
-
-    state.path.push_back({
+    // Restore the parent's warning policy before visiting a sibling field.
+    const bool warning = state->warning;
+    state->warning = warning
+      || (state->diagnostics->policy.partial
+        && (omni::traits::is<compat::optional, typename Field::type>()
+          || omni::traits::is<std::vector, typename Field::type>()));
+    state->path.push_back({
       /*field=*/name,
       /*index=*/compat::nullopt,
     });
     // Preserve initialized defaults while supporting bit-field value access.
-    typename Field::type value = field.value(*result.value);
-    map_value(node, &value, &state);
-    field.set_value(*result.value, std::move(value));
-
-    return result;
+    typename Field::type value = field.value();
+    map_value(node, &value, state);
+    field.set_value(std::move(value));
+    state->path.pop_back();
+    state->warning = warning;
   }
 };
 
@@ -446,7 +442,7 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
     return result;
   }
 
-  // Unbound metadata stays valid as foldl moves the result between fields.
+  // Structural checks use unbound metadata before binding the result's fields.
   const auto fields = omni::reflected(omni::type_t<To>{}).public_fields();
 
   // Structural validation precedes field mapping, preserving strict error
@@ -494,13 +490,13 @@ with_diagnostics<To, diagnostics</*owning=*/ false>> fold_record(
 
   // TODO: Expose these type/category rules through a schema-from-type
   // extension.
-  return omni::fn::foldl(deserialize_field{
-                           /*from=*/from,
-                           /*path=*/state.path,
-                           /*warning=*/state.warning,
-                         },
-    std::move(result),
-    fields);
+  const auto binding = omni::meta_for<To>::bind(*result.value);
+  binding.public_fields()
+    | omni::fn::each(deserialize_field{
+      /*from=*/from,
+      /*state=*/&state,
+    });
+  return result;
 }
 
 struct mapping_policy {
