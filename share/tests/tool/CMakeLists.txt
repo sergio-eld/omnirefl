@@ -112,6 +112,12 @@ if(DEFINED omnirefl_DIR)
         -D "REQUIRED_REFLECTION_STEMS=main")
     _omnirefl_accepted_cmake_project(functional_header
         -D "EXECUTABLES=functional_header")
+    if(NOT CMAKE_CROSSCOMPILING)
+        # The two executables verify reflection against their own record shapes.
+        _omnirefl_accepted_cmake_project(pch_shared_source
+            -D "EXECUTABLES=one_field;two_fields"
+            -D "EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
 
     function(_omnirefl_rejected_cmake_project name expected_diagnostics)
         add_test(NAME "omnirefl.integration.${name}"
