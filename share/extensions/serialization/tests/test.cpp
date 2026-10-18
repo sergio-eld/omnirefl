@@ -346,6 +346,33 @@ TEST(serialization_formats, emits_json_without_configuration) {
   }
 }
 
+// FIXME: [high] Optional writing fails to compile; enable this test when supported.
+// A DISABLED_ test still compiles, so exclude the reproducer at preprocessing time.
+// Before implementation, decide whether empty optional fields emit null or are
+// omitted by default, and whether a runtime/compile-time strategy selects this.
+#if 0
+struct optional_write_record {
+  std::string name;
+  omni::compat::optional<std::string> parent;
+};
+
+TEST(serialization_formats, emits_present_optional_field) {
+  const optional_write_record value{
+    "child", omni::compat::make_optional(std::string{"root"})};
+  const auto output = omni::ryml::as_json(value);
+  const auto tree = omni::ryml::parse(output);
+
+  EXPECT_TRUE(tree);
+  if (tree) {
+    const auto root = tree->rootref();
+    EXPECT_EQ(2U, root.num_children());
+    EXPECT_EQ("child", root["name"].val());
+    EXPECT_EQ("root", root["parent"].val());
+    EXPECT_TRUE(root["parent"].is_val_quoted());
+  }
+}
+#endif
+
 TEST(serialization_formats, emits_yaml_without_configuration) {
   const auto output =
     omni::ryml::as_yaml(serialization_data::payload{"Ada", 815});
