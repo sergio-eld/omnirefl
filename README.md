@@ -249,6 +249,26 @@ the optional final argument selects among commands by output-path substring:
 ccdb_query build/compile_commands.json "$PWD/main.cpp" example.dir
 ```
 
+<details>
+<summary>MSVC precompiled headers: /FI and /Yu ordering</summary>
+
+MSVC processes `/FI` headers in order. With `/Yu`, headers before the PCH
+boundary are skipped. Force-include the PCH header before the generated
+reflection header. For an existing `pch.pch`:
+
+```bat
+cl /EHsc /Yupch.hpp /Fppch.pch /FIpch.hpp /FIexample.omnirefl.hpp main.cpp
+```
+
+The order of the two `/FI` arguments matters; the position of `/Yu` does not
+set the include order. Keep Omnirefl's public reflection headers outside the
+PCH: they must be parsed after the generated metadata. See Microsoft's
+[`/FI`](https://learn.microsoft.com/en-us/cpp/build/reference/fi-name-forced-include-file)
+and [`/Yu`](https://learn.microsoft.com/en-us/cpp/build/reference/yu-use-precompiled-header-file)
+documentation.
+
+</details>
+
 <!-- pages:install:start -->
 ## Install
 

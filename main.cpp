@@ -53,6 +53,8 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
+#include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
 #pragma GCC diagnostic pop
@@ -3968,10 +3970,17 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 std::expected<pipeline::parsed_ast, app_error>
   pipeline::to_parsed_ast(const diagnostics &log, compiler_invocation ci) {
   struct deps_collector_t final: clang::DependencyCollector {
+    bool forced_includes;
+
+    explicit deps_collector_t(bool forced_includes)
+      : forced_includes(forced_includes) {}
+
     bool needSystemDependencies() override {
-      return false;
+      // PCH wrappers mark even user headers as system headers. Their transitive
+      // includes must still invalidate reflection when the wrapper is parsed.
+      return forced_includes;
     }
-  } deps_collector;
+  } deps_collector{!ci.ci->getPreprocessorOpts().Includes.empty()};
 
   struct action_t final: clang::SyntaxOnlyAction {
     clang::DependencyCollector &dc;
@@ -3983,12 +3992,85 @@ std::expected<pipeline::parsed_ast, app_error>
     }
   } action{deps_collector};
 
-  std::unique_ptr<clang::ASTUnit> ast{
-    clang::ASTUnit::LoadFromCompilerInvocationAction(ci.ci,
+  // Create the unit here to install its filesystem adapter before parsing.
+  // LoadFromCompilerInvocationAction has no filesystem parameter; given this
+  // unit, it reuses it and skips its own ASTUnit::create() call.
+  std::unique_ptr<clang::ASTUnit> ast = clang::ASTUnit::create(ci.ci,
+    log.clang_options,
+    log.clang_engine,
+    clang::CaptureDiagsKind::None,
+    /*UserFilesAreVolatile=*/false);
+
+  // UCRT's native Windows frontend already understands drive-letter paths;
+  // only Cosmo's POSIX-built frontend needs this adapter on a Windows host.
+#if defined(__COSMOPOLITAN__)
+  // A POSIX-built Clang does not recognize drive letters in header contents.
+  // Translate at file access so absolute includes also work inside PCH
+  // wrappers, without rewriting user files or compiler-generated headers.
+  // Static lets the local filesystem class call this captureless lambda
+  // without storing a callback.
+  static constexpr auto drive_prefix_to_directory =
+    [](const llvm::Twine &path) {
+      // std::filesystem uses POSIX rules in this binary. LLVM can parse the
+      // Windows spelling explicitly, including its backslash separators.
+      using llvm::sys::path::Style::windows_slash;
+      const fs::path s =
+        llvm::sys::path::convert_to_slash(path.str(), windows_slash);
+      // FileManager may prefix a working or search directory. The last drive
+      // root starts the absolute include, even if that prefix has a drive.
+      const auto mounted = std::ranges::find_last_if(s,
+          [](const fs::path &c) {
+            const auto root =
+              llvm::sys::path::root_name(c.native(), windows_slash);
+            return 2 == root.size() && ':' == root.back() && root == c.native();
+          })
+        | std::views::transform([](const fs::path &c) {
+            return c.native().ends_with(":")
+              ? std::format("/{}", c.native().front())
+              : c.string();
+          })
+        | std_c::views::join_with("/"sv)
+        | std::ranges::to<std::string>();
+      return mounted.empty() ? s.string() : mounted;
+    };
+
+  struct windows_filesystem_t final: llvm::vfs::ProxyFileSystem {
+    using ProxyFileSystem::ProxyFileSystem;
+
+    llvm::ErrorOr<llvm::vfs::Status> status(const llvm::Twine &path) override {
+      return getUnderlyingFS().status(drive_prefix_to_directory(path));
+    }
+
+    bool exists(const llvm::Twine &path) override {
+      return getUnderlyingFS().exists(drive_prefix_to_directory(path));
+    }
+
+    llvm::ErrorOr<std::unique_ptr<llvm::vfs::File>>
+      openFileForRead(const llvm::Twine &path) override {
+      return getUnderlyingFS().openFileForRead(drive_prefix_to_directory(path));
+    }
+
+    std::error_code getRealPath(const llvm::Twine &path,
+      llvm::SmallVectorImpl<char> &output) override {
+      return getUnderlyingFS().getRealPath(
+        drive_prefix_to_directory(path), output);
+    }
+  };
+
+  if (IsWindows()) {
+    ast->getFileManager().setVirtualFileSystem(
+      llvm::makeIntrusiveRefCnt<windows_filesystem_t>(
+        ast->getFileManager().getVirtualFileSystemPtr()));
+  }
+#endif
+
+  if (!clang::ASTUnit::LoadFromCompilerInvocationAction(ci.ci,
       std::make_shared<clang::PCHContainerOperations>(),
       log.clang_options,
       log.clang_engine,
-      &action)};
+      &action,
+      ast.get()))
+    ast.reset();
 
   if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
     return std::unexpected(
@@ -3999,7 +4081,15 @@ std::expected<pipeline::parsed_ast, app_error>
     .ast = std::move(ast),
 
     .includes_deps = deps_collector.getDependencies()
-      | std::views::transform(omni::fn::as<fs::path>())
+      | std::views::transform([](const std::string &p) -> fs::path {
+#if defined(__COSMOPOLITAN__)
+        // DependencyCollector retains the requested spelling, including any
+        // search-directory prefix that was discarded by the filesystem.
+        if (IsWindows())
+          return drive_prefix_to_directory(p);
+#endif
+        return p;
+      })
       | std::ranges::to<std::set>(),
   };
 }

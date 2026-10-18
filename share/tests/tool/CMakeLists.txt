@@ -23,8 +23,9 @@ set_tests_properties(ccdb_query.cli.version PROPERTIES
 
 if(DEFINED omnirefl_DIR)
     function(_omnirefl_incremental_build_test name dependency)
+        set(_configure_args ${ARGN})
         if(CMAKE_CROSSCOMPILING)
-            set(_configure_args "-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}")
+            list(APPEND _configure_args "-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}")
         endif()
         add_test(NAME "omnirefl.integration.incremental_build.${name}"
             COMMAND ${CMAKE_COMMAND}
@@ -43,6 +44,8 @@ if(DEFINED omnirefl_DIR)
 
     _omnirefl_incremental_build_test(direct_header model.hpp)
     _omnirefl_incremental_build_test(transitive_header fields.hpp)
+    _omnirefl_incremental_build_test(pch.direct_header model.hpp -DUSE_PCH=ON)
+    _omnirefl_incremental_build_test(pch.transitive_header fields.hpp -DUSE_PCH=ON)
 
     add_test(NAME omnirefl.integration.dollar_path_source
         COMMAND ${CMAKE_COMMAND}
@@ -109,6 +112,12 @@ if(DEFINED omnirefl_DIR)
         -D "REQUIRED_REFLECTION_STEMS=main")
     _omnirefl_accepted_cmake_project(functional_header
         -D "EXECUTABLES=functional_header")
+    if(NOT CMAKE_CROSSCOMPILING)
+        # The two executables verify reflection against their own record shapes.
+        _omnirefl_accepted_cmake_project(pch_shared_source
+            -D "EXECUTABLES=one_field;two_fields"
+            -D "EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
 
     function(_omnirefl_rejected_cmake_project name expected_diagnostics)
         add_test(NAME "omnirefl.integration.${name}"
