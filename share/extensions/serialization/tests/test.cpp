@@ -2674,6 +2674,77 @@ TEST_P(serialization, writes_an_empty_root_record) {
   EXPECT_EQ(0U, parsed->crootref().num_children());
 }
 
+TEST_P(serialization, writes_root_string_sequence) {
+  const auto output = omni::ryml::serialize_t{
+    /*format=*/GetParam(),
+  }(std::vector<std::string>{"first", "second"});
+  const auto parsed = omni::ryml::parse(output);
+
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+
+  const auto root = parsed->crootref();
+  EXPECT_TRUE(root.is_seq());
+  if (!root.is_seq())
+    return;
+  EXPECT_EQ(2U, root.num_children());
+  if (2U != root.num_children())
+    return;
+  EXPECT_EQ("first", root[0].val());
+  EXPECT_EQ("second", root[1].val());
+  EXPECT_TRUE(root[0].is_val_quoted());
+  EXPECT_TRUE(root[1].is_val_quoted());
+}
+
+TEST_P(serialization, writes_empty_root_sequence) {
+  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
+    /*format=*/GetParam(),
+  }(std::vector<int>{}));
+
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+  EXPECT_TRUE(parsed->crootref().is_seq());
+  EXPECT_EQ(0U, parsed->crootref().num_children());
+}
+
+TEST_P(serialization, writes_nested_root_sequences_of_records) {
+  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
+    /*format=*/GetParam(),
+  }(std::vector<std::vector<serialization_data::payload>>{
+    {serialization_data::payload{"Iris", 42}}}));
+
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+  const auto root = parsed->crootref();
+  EXPECT_TRUE(root.is_seq());
+  if (!root.is_seq())
+    return;
+  EXPECT_EQ(1U, root.num_children());
+  if (1U != root.num_children())
+    return;
+  EXPECT_TRUE(root[0].is_seq());
+  if (!root[0].is_seq())
+    return;
+  EXPECT_EQ(1U, root[0].num_children());
+  if (1U != root[0].num_children())
+    return;
+  EXPECT_TRUE(root[0][0].is_map());
+  if (!root[0][0].is_map())
+    return;
+  EXPECT_EQ("Iris", root[0][0]["name"].val());
+  EXPECT_EQ("42", root[0][0]["code"].val());
+}
+
+TEST(serialization_json, writes_scalar_roots) {
+  EXPECT_EQ("42", omni::ryml::as_json(42));
+  EXPECT_EQ("true", omni::ryml::as_json(true));
+  EXPECT_EQ("1.5", omni::ryml::as_json(1.5));
+  EXPECT_EQ(R"("text")", omni::ryml::as_json(std::string{"text"}));
+}
+
 struct boolean_values {
   // Scalar boolean to emit as a word.
   bool enabled;
