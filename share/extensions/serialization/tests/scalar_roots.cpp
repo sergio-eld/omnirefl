@@ -1,4 +1,4 @@
-#include <omnirefl/serialization/ryml.hpp>
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 
@@ -24,54 +24,19 @@ TEST(serialization_scalar_roots, writes_scalar_values_without_record_metadata) {
 }
 
 TEST(serialization_scalar_roots, writes_string_array_without_record_metadata) {
-  const auto parsed = omni::ryml::parse(omni::ryml::as_json(
-    std::vector<std::string>{"first", "second"}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_seq());
-  if (!root.is_seq())
-    return;
-  EXPECT_EQ(2U, root.num_children());
-  if (2U != root.num_children())
-    return;
-  EXPECT_EQ("first", root[0].val());
-  EXPECT_EQ("second", root[1].val());
-  EXPECT_TRUE(root[0].is_val_quoted());
-  EXPECT_TRUE(root[1].is_val_quoted());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"(["first","second"])",
+    omni::ryml::as_json(std::vector<std::string>{"first", "second"})));
 }
 
 TEST(serialization_scalar_roots, writes_boolean_array_without_record_metadata) {
-  const auto parsed = omni::ryml::parse(
-    omni::ryml::as_json(std::vector<bool>{true, false}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_seq());
-  if (!root.is_seq())
-    return;
-  EXPECT_EQ(2U, root.num_children());
-  if (2U != root.num_children())
-    return;
-  EXPECT_EQ("true", root[0].val());
-  EXPECT_EQ("false", root[1].val());
-  EXPECT_FALSE(root[0].is_val_quoted());
-  EXPECT_FALSE(root[1].is_val_quoted());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([true,false])", omni::ryml::as_json(std::vector<bool>{true, false})));
 }
 
 TEST(serialization_scalar_roots, writes_empty_array_without_record_metadata) {
-  const auto parsed =
-    omni::ryml::parse(omni::ryml::as_json(std::vector<int>{}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-  EXPECT_TRUE(parsed->crootref().is_seq());
-  EXPECT_EQ(0U, parsed->crootref().num_children());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([])", omni::ryml::as_json(std::vector<int>{})));
 }
 
 struct alternate_char_traits: std::char_traits<char> {};
@@ -99,23 +64,9 @@ TEST(serialization_scalar_roots, writes_standard_string_views) {
 }
 
 TEST(serialization_scalar_roots, writes_standard_string_view_array) {
-  const auto parsed = omni::ryml::parse(omni::ryml::as_json(
-    std::vector<std::string_view>{"first", "second"}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_seq());
-  if (!root.is_seq())
-    return;
-  EXPECT_EQ(2U, root.num_children());
-  if (2U != root.num_children())
-    return;
-  EXPECT_EQ("first", root[0].val());
-  EXPECT_EQ("second", root[1].val());
-  EXPECT_TRUE(root[0].is_val_quoted());
-  EXPECT_TRUE(root[1].is_val_quoted());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"(["first","second"])",
+    omni::ryml::as_json(std::vector<std::string_view>{"first", "second"})));
 }
 #endif
 

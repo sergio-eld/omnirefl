@@ -1,4 +1,5 @@
 #include "data.hpp"
+#include "json_match.hpp"
 
 #include <omnirefl/serialization/ryml.hpp>
 
@@ -717,27 +718,9 @@ TEST_P(serialization, writes_record_fields_with_their_document_types) {
   const auto output = omni::ryml::serialize_t{
     /*format=*/GetParam(),
   }(value);
-  const auto parsed = omni::ryml::parse(output);
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"name":"Ada","code":815})", output));
 
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_map());
-  if (!root.is_map())
-    return;
-
-  EXPECT_EQ(2U, root.num_children());
-  EXPECT_TRUE(root.has_child("name"));
-  EXPECT_TRUE(root.has_child("code"));
-  if (!root.has_child("name") || !root.has_child("code"))
-    return;
-
-  EXPECT_EQ("Ada", root["name"].val());
-  EXPECT_TRUE(root["name"].is_val_quoted());
-  EXPECT_EQ("815", root["code"].val());
-  EXPECT_FALSE(root["code"].is_val_quoted());
   if (::ryml::EMIT_JSON == GetParam()) {
     EXPECT_FALSE(output.empty());
     if (!output.empty()) {
@@ -760,64 +743,11 @@ TEST_P(serialization, writes_nested_records_and_sequences) {
   const auto output = omni::ryml::serialize_t{
     /*format=*/GetParam(),
   }(value);
-  const auto parsed = omni::ryml::parse(output);
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_map());
-  if (!root.is_map())
-    return;
-
-  EXPECT_EQ(6U, root.num_children());
-  for (const auto name : std::initializer_list<c4::csubstr>{"enabled",
-         "retries",
-         "delta",
-         "values",
-         "label",
-         "records"}) {
-    SCOPED_TRACE(omni::ryml::detail::to_string(name));
-    EXPECT_TRUE(root.has_child(name));
-    if (!root.has_child(name))
-      return;
-  }
-
-  EXPECT_EQ("true", root["enabled"].val());
-  EXPECT_FALSE(root["enabled"].is_val_quoted());
-  EXPECT_EQ("108", root["retries"].val());
-  EXPECT_EQ("-42", root["delta"].val());
-  EXPECT_TRUE(root["values"].is_seq());
-  EXPECT_EQ(2U, root["values"].num_children());
-  if (!root["values"].is_seq() || 2U != root["values"].num_children())
-    return;
-
-  EXPECT_EQ("8", root["values"][0].val());
-  EXPECT_EQ("15", root["values"][1].val());
-  EXPECT_EQ("oceanic", root["label"].val());
-  EXPECT_TRUE(root["records"].is_seq());
-  EXPECT_EQ(2U, root["records"].num_children());
-  if (!root["records"].is_seq() || 2U != root["records"].num_children())
-    return;
-
-  for (const auto record : root["records"].children()) {
-    SCOPED_TRACE(record.id());
-    EXPECT_TRUE(record.is_map());
-    if (!record.is_map())
-      return;
-
-    EXPECT_TRUE(record.has_child("name"));
-    EXPECT_TRUE(record.has_child("code"));
-    if (!record.has_child("name") || !record.has_child("code"))
-      return;
-  }
-
-  EXPECT_TRUE(root["records"][0].is_map());
-  EXPECT_EQ("Ada", root["records"][0]["name"].val());
-  EXPECT_EQ("815", root["records"][0]["code"].val());
-  EXPECT_EQ("Grace", root["records"][1]["name"].val());
-  EXPECT_EQ("108", root["records"][1]["code"].val());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"enabled":true,"retries":108,"delta":-42,"values":[8,15],
+        "label":"oceanic","records":[{"name":"Ada","code":815},
+                                    {"name":"Grace","code":108}]})",
+    output));
 }
 
 #if defined(__cpp_designated_initializers) \
@@ -2804,33 +2734,8 @@ TEST_P(serialization, retains_empty_strings_containers_and_records) {
   const auto output = omni::ryml::serialize_t{
     /*format=*/GetParam(),
   }(empty_values{});
-  const auto parsed = omni::ryml::parse(output);
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_map());
-  if (!root.is_map())
-    return;
-
-  for (const auto name :
-    std::initializer_list<c4::csubstr>{"name", "values", "records", "object"}) {
-    SCOPED_TRACE(omni::ryml::detail::to_string(name));
-    EXPECT_TRUE(root.has_child(name));
-    if (!root.has_child(name))
-      return;
-  }
-
-  EXPECT_TRUE(root["name"].val().empty());
-  EXPECT_TRUE(root["name"].is_val_quoted());
-  EXPECT_TRUE(root["values"].is_seq());
-  EXPECT_EQ(0U, root["values"].num_children());
-  EXPECT_TRUE(root["records"].is_seq());
-  EXPECT_EQ(0U, root["records"].num_children());
-  EXPECT_TRUE(root["object"].is_map());
-  EXPECT_EQ(0U, root["object"].num_children());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"name":"","values":[],"records":[],"object":{}})", output));
 
   const auto restored =
     strict_deserialize(omni::type_t<empty_values>{}, output);
@@ -2839,80 +2744,32 @@ TEST_P(serialization, retains_empty_strings_containers_and_records) {
 }
 
 TEST_P(serialization, writes_an_empty_root_record) {
-  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(empty_record{}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  EXPECT_TRUE(parsed->crootref().is_map());
-  EXPECT_EQ(0U, parsed->crootref().num_children());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({})", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(empty_record{})));
 }
 
 TEST_P(serialization, writes_root_string_sequence) {
-  const auto output = omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(std::vector<std::string>{"first", "second"});
-  const auto parsed = omni::ryml::parse(output);
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_seq());
-  if (!root.is_seq())
-    return;
-  EXPECT_EQ(2U, root.num_children());
-  if (2U != root.num_children())
-    return;
-  EXPECT_EQ("first", root[0].val());
-  EXPECT_EQ("second", root[1].val());
-  EXPECT_TRUE(root[0].is_val_quoted());
-  EXPECT_TRUE(root[1].is_val_quoted());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"(["first","second"])", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(std::vector<std::string>{"first", "second"})));
 }
 
 TEST_P(serialization, writes_empty_root_sequence) {
-  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(std::vector<int>{}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-  EXPECT_TRUE(parsed->crootref().is_seq());
-  EXPECT_EQ(0U, parsed->crootref().num_children());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([])", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(std::vector<int>{})));
 }
 
 TEST_P(serialization, writes_nested_root_sequences_of_records) {
-  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(std::vector<std::vector<serialization_data::payload>>{
-    {serialization_data::payload{"Iris", 42}}}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_seq());
-  if (!root.is_seq())
-    return;
-  EXPECT_EQ(1U, root.num_children());
-  if (1U != root.num_children())
-    return;
-  EXPECT_TRUE(root[0].is_seq());
-  if (!root[0].is_seq())
-    return;
-  EXPECT_EQ(1U, root[0].num_children());
-  if (1U != root[0].num_children())
-    return;
-  EXPECT_TRUE(root[0][0].is_map());
-  if (!root[0][0].is_map())
-    return;
-  EXPECT_EQ("Iris", root[0][0]["name"].val());
-  EXPECT_EQ("42", root[0][0]["code"].val());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([[{"name":"Iris","code":42}]])", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(std::vector<std::vector<serialization_data::payload>>{
+      {serialization_data::payload{"Iris", 42}}})));
 }
 
 TEST(serialization_json, writes_scalar_roots) {
@@ -2930,59 +2787,18 @@ struct boolean_values {
 };
 
 TEST_P(serialization, writes_booleans_and_boolean_sequences_as_words) {
-  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(boolean_values{false, {true, false}}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_map());
-  if (!root.is_map())
-    return;
-
-  EXPECT_TRUE(root.has_child("enabled"));
-  EXPECT_TRUE(root.has_child("flags"));
-  if (!root.has_child("enabled") || !root.has_child("flags"))
-    return;
-
-  EXPECT_TRUE(root["flags"].is_seq());
-  EXPECT_EQ(2U, root["flags"].num_children());
-  if (!root["flags"].is_seq() || 2U != root["flags"].num_children())
-    return;
-
-  EXPECT_EQ("false", root["enabled"].val());
-  EXPECT_FALSE(root["enabled"].is_val_quoted());
-  EXPECT_EQ("true", root["flags"][0].val());
-  EXPECT_FALSE(root["flags"][0].is_val_quoted());
-  EXPECT_EQ("false", root["flags"][1].val());
-  EXPECT_FALSE(root["flags"][1].is_val_quoted());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"enabled":false,"flags":[true,false]})", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(boolean_values{false, {true, false}})));
 }
 
 TEST_P(serialization, reads_bitfields_without_mutating_the_source) {
   const serialization_data::bitfield_values value{815, true};
-  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(value));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_map());
-  if (!root.is_map())
-    return;
-
-  EXPECT_TRUE(root.has_child("code"));
-  EXPECT_TRUE(root.has_child("enabled"));
-  if (!root.has_child("code") || !root.has_child("enabled"))
-    return;
-
-  EXPECT_EQ("815", root["code"].val());
-  EXPECT_EQ("true", root["enabled"].val());
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"code":815,"enabled":true})", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(value)));
   EXPECT_EQ(815U, value.code);
   EXPECT_TRUE(value.enabled);
 }
@@ -3003,28 +2819,10 @@ struct read_only_record {
 };
 
 TEST_P(serialization, includes_const_public_fields_and_omits_private_fields) {
-  const auto parsed = omni::ryml::parse(omni::ryml::serialize_t{
-    /*format=*/GetParam(),
-  }(read_only_record{}));
-
-  EXPECT_TRUE(parsed);
-  if (!parsed)
-    return;
-
-  const auto root = parsed->crootref();
-  EXPECT_TRUE(root.is_map());
-  if (!root.is_map())
-    return;
-
-  EXPECT_EQ(2U, root.num_children());
-  EXPECT_TRUE(root.has_child("code"));
-  EXPECT_TRUE(root.has_child("name"));
-  if (!root.has_child("code") || !root.has_child("name"))
-    return;
-
-  EXPECT_EQ("42", root["code"].val());
-  EXPECT_EQ("Ada", root["name"].val());
-  EXPECT_FALSE(root.has_child("hidden"));
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"code":42,"name":"Ada"})", omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(read_only_record{})));
 }
 
 TEST_P(serialization, preserves_private_state) {
