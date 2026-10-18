@@ -54,7 +54,7 @@ TEST(serialization_scalar_roots, writes_c4_string_views) {
   EXPECT_EQ(R"("")", omni::ryml::as_json(c4::csubstr{}));
 }
 
-#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+#if defined(__cpp_lib_string_view)
 TEST(serialization_scalar_roots, writes_standard_string_views) {
   const std::string storage{"prefix null suffix"};
   const std::string_view view{storage.data() + 7, 4};

@@ -575,7 +575,8 @@ template <typename Value>
 struct is_string_source: std::integral_constant<bool,
     omni::traits::is<std::basic_string, Value>()
       || omni::traits::is<c4::basic_substring, Value>()
-#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+#if defined(__cpp_lib_string_view)
+      // GCC 7 reports 201603; macro presence suffices for basic_string_view.
       || omni::traits::is<std::basic_string_view, Value>()
 #endif
     > {};

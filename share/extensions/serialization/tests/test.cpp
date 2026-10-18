@@ -470,7 +470,7 @@ INSTANTIATE_TEST_SUITE_P(formats,
 
 struct borrowed_string_fields {
   c4::csubstr slice;
-#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+#if defined(__cpp_lib_string_view)
   std::string_view view;
 #endif
 };
@@ -479,11 +479,11 @@ TEST(serialization_formats, emits_borrowed_string_fields) {
   const std::string storage{"prefix true suffix"};
   const borrowed_string_fields source{
     c4::csubstr{storage.data() + 7, 4},
-#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+#if defined(__cpp_lib_string_view)
     std::string_view{storage.data() + 7, 4},
 #endif
   };
-#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+#if defined(__cpp_lib_string_view)
   const std::string expected = R"({"slice": "true", "view": "true"})";
 #else
   const std::string expected = R"({"slice": "true"})";
