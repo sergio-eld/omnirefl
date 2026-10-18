@@ -33,14 +33,14 @@ struct case_ {};
 ```cpp
 // bool is also integral: the boolean operation must take precedence.
 const auto write = typename omni::traits::select<
-  omni::traits::case_<std::is_same_v<T, bool>, write_boolean>,
+  omni::traits::case_<std::is_same_v<bool, T>, write_boolean>,
   omni::traits::case_<std::is_integral_v<T>, write_integer>,
   unsupported>::type{};
 
 write(value); // For T=bool, calls write_boolean with no competing overload.
 ```
  *
- * In C++11, use std::is_same<T, bool>::value and std::is_integral<T>::value
+ * In C++11, use std::is_same<bool, T>::value and std::is_integral<T>::value
  * for the predicates; the selection and invocation are unchanged.
  */
 template <typename... Case>

@@ -77,6 +77,13 @@ if (result) {
 #include <utility>
 #include <vector>
 
+// TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
+#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
+#  if __has_include(<string_view>)
+#    include <string_view>
+#  endif
+#endif
+
 namespace omni {
 namespace ryml {
 
@@ -625,6 +632,8 @@ constexpr render_diagnostics_t render_diagnostics{};
 /**
  * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
  * Vectors may contain nested vectors or reflected records, including at the root.
+ * String sources include char-based basic_string and c4 views, plus
+ * basic_string_view when the standard library provides it.
  * Strings are quoted; field values are copied into the tree's arena.
  */
 struct serialize_t {

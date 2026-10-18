@@ -373,6 +373,44 @@ TEST(serialization_formats, emits_present_optional_field) {
 }
 #endif
 
+struct borrowed_string_fields {
+  c4::csubstr slice;
+#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+  std::string_view view;
+#endif
+};
+
+TEST(serialization_formats, emits_borrowed_string_fields) {
+  const std::string storage{"prefix true suffix"};
+  const borrowed_string_fields source{
+    c4::csubstr{storage.data() + 7, 4},
+#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+    std::string_view{storage.data() + 7, 4},
+#endif
+  };
+  const auto parsed = omni::ryml::parse(omni::ryml::as_json(source));
+
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+  const auto root = parsed->crootref();
+  EXPECT_TRUE(root.is_map());
+  if (!root.is_map())
+    return;
+  EXPECT_TRUE(root.has_child("slice"));
+  if (!root.has_child("slice"))
+    return;
+  EXPECT_EQ("true", root["slice"].val());
+  EXPECT_TRUE(root["slice"].is_val_quoted());
+#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+  EXPECT_TRUE(root.has_child("view"));
+  if (!root.has_child("view"))
+    return;
+  EXPECT_EQ("true", root["view"].val());
+  EXPECT_TRUE(root["view"].is_val_quoted());
+#endif
+}
+
 TEST(serialization_formats, emits_yaml_without_configuration) {
   const auto output =
     omni::ryml::as_yaml(serialization_data::payload{"Ada", 815});

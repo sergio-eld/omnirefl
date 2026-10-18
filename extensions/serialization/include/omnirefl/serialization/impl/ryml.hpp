@@ -126,7 +126,7 @@ struct map_fundamental {
     operator()(::ryml::ConstNodeRef from, To *to, mapping_state *state) const {
     assert(to && state);
 
-    const auto expected = std::is_same<To, bool>::value ? issue::kind::boolean
+    const auto expected = std::is_same<bool, To>::value ? issue::kind::boolean
       : std::is_unsigned<To>::value ? issue::kind::unsigned_integer
       : std::is_integral<To>::value ? issue::kind::integer
                                     : issue::kind::number;
@@ -143,7 +143,7 @@ struct map_fundamental {
     }
 
     const auto value = from.val();
-    const bool valid = std::is_same<To, bool>::value ? !from.is_val_quoted()
+    const bool valid = std::is_same<bool, To>::value ? !from.is_val_quoted()
         && ("true" == value || "false" == value || "True" == value
           || "False" == value || "TRUE" == value || "FALSE" == value)
       : std::is_unsigned<To>::value ? value.is_unsigned_integer()
@@ -165,7 +165,7 @@ struct map_fundamental {
     if (!convert(value,
           &converted,
           std::integral_constant < bool,
-          std::is_integral<To>::value && !std::is_same<To, bool>::value > {})) {
+          std::is_integral<To>::value && !std::is_same<bool, To>::value > {})) {
       state->diagnostics->issues.push_back(make_issue(issue::code::out_of_range,
         expected,
         from,
@@ -318,7 +318,7 @@ void map_value(::ryml::ConstNodeRef from,
   const auto map = typename omni::traits::select<
     omni::traits::case_<std::is_fundamental<To>::value,
       detail::map_fundamental<To>>,
-    omni::traits::case_<std::is_same<To, std::string>::value,
+    omni::traits::case_<std::is_same<std::string, To>::value,
       detail::map_string>,
     omni::traits::case_<omni::traits::is<compat::optional, To>(), map_optional>,
     omni::traits::case_<omni::traits::is<std::vector, To>(), map_sequence>,
@@ -580,10 +580,26 @@ struct write_number {
   }
 };
 
+// Owning strings and borrowed views share byte-oriented serialization. Keep this
+// classification consistent between value dispatch and root reflection discovery.
+template <typename From>
+struct is_string_source: std::integral_constant<bool,
+    omni::traits::is<std::basic_string, From>()
+      || omni::traits::is<c4::basic_substring, From>()
+#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+      || omni::traits::is<std::basic_string_view, From>()
+#endif
+    > {};
+
 struct write_string {
-  void operator()(const std::string &from, ::ryml::NodeRef *to) const {
+  template <typename From>
+  void operator()(const From &from, ::ryml::NodeRef *to) const {
     assert(to);
-    to->set_val_serialized(from);
+    static_assert(std::is_same<char,
+                    compat::remove_cvref_t<typename From::value_type>>::value,
+      "serialization requires char-based strings");
+    // Copy views into the arena so the returned text never borrows their storage.
+    to->set_val_serialized(c4::csubstr{from.data(), from.size()});
     // Strings such as "true", "12", and "null" must remain strings.
     *to |= ::ryml::VAL_DQUO;
   }
@@ -629,10 +645,7 @@ struct write_record {
     assert(to);
     *to |= ::ryml::MAP;
     const auto binding = omni::meta_for<From>::bind(from);
-    fn::each(write_field{
-               /*to=*/to,
-             },
-      binding.public_fields());
+    fn::each(write_field{/*to=*/to}, binding.public_fields());
   }
 };
 
@@ -660,11 +673,11 @@ struct write_reflected {
 template <typename From>
 void write_value(const From &from, ::ryml::NodeRef *to) {
   const auto write = typename omni::traits::select<
-    omni::traits::case_<std::is_same<From, bool>::value, detail::write_boolean>,
+    omni::traits::case_<std::is_same<bool, From>::value, detail::write_boolean>,
     omni::traits::case_<std::is_floating_point<From>::value,
       detail::write_number>,
     omni::traits::case_<std::is_integral<From>::value, detail::write_scalar>,
-    omni::traits::case_<std::is_same<From, std::string>::value,
+    omni::traits::case_<detail::is_string_source<From>::value,
       detail::write_string>,
     omni::traits::case_<omni::traits::is<std::vector, From>(), write_sequence>,
     write_reflected>::type{};
@@ -929,7 +942,7 @@ std::string serialize_t::operator()(const From &from) const {
   using root_type = typename reflected_scope::serialization_root<From>::type;
   const auto tree = reflected_scope::reflect_tree(from,
     std::integral_constant<bool, !std::is_fundamental<root_type>::value
-      && !std::is_same<root_type, std::string>::value>{});
+      && !detail::is_string_source<root_type>::value>{});
 
   if (::ryml::EMIT_JSON != format)
     return ::ryml::emitrs_yaml<std::string>(tree);
