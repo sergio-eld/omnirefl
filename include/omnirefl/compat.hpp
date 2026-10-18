@@ -255,6 +255,15 @@ constexpr auto invoke(Member Class::*member, Object &&object) noexcept(
 }
 #endif
 
+// invoke_result_t
+#if defined(__cpp_lib_is_invocable) && 201703L <= __cpp_lib_is_invocable
+using std::invoke_result_t;
+#else
+template <typename Function, typename... Argument>
+using invoke_result_t = decltype(compat::invoke(std::declval<Function>(),
+  std::declval<Argument>()...));
+#endif
+
 // is_invocable
 #if defined(__cpp_lib_is_invocable) && 201703L <= __cpp_lib_is_invocable
 using std::is_invocable;

@@ -460,8 +460,14 @@ struct decltype_record {
 };
 
 struct field_names {
-  template <typename Meta>
+#if defined(__cpp_concepts)
+  template <omni::record_meta Meta>
   std::pair<std::string, std::string> operator()(Meta meta) const {
+#else
+  template <typename _M>
+  std::pair<std::string, std::string> operator()(
+    omni::record_meta_t<_M> meta) const {
+#endif
     const auto field = std::get<0>(meta.public_fields());
     return {
       field.spelled_type_name(),
@@ -471,8 +477,13 @@ struct field_names {
 };
 
 struct spelled_type_name {
-  template <typename Meta>
+#if defined(__cpp_concepts)
+  template <omni::record_meta Meta>
   std::string operator()(Meta meta) const {
+#else
+  template <typename _M>
+  std::string operator()(omni::record_meta_t<_M> meta) const {
+#endif
     return std::get<0>(meta.public_fields()).spelled_type_name();
   }
 };

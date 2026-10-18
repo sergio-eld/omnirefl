@@ -346,6 +346,21 @@ struct invoke_record {
 };
 
 constexpr invoke_record invoked_record{40};
+static_assert(
+  std::is_same<int,
+    omni::compat::invoke_result_t<decltype(&invoke_record::sum),
+      const invoke_record &, int>>::value,
+  "invoke_result_t must support member functions");
+static_assert(
+  std::is_same<int &,
+    omni::compat::invoke_result_t<decltype(&invoke_record::value),
+      invoke_record &>>::value,
+  "invoke_result_t must preserve lvalue results");
+static_assert(
+  std::is_same<int &&,
+    omni::compat::invoke_result_t<decltype(&invoke_record::value),
+      invoke_record &&>>::value,
+  "invoke_result_t must preserve rvalue results");
 static_assert(42
     == omni::compat::invoke(&invoke_record::sum, invoked_record, 2),
   "member function invocation must support constant evaluation");

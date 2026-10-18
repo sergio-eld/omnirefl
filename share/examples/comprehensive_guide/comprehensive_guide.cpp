@@ -87,7 +87,7 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  * Only generic lambdas or callable types with templated `operator()` are
  * allowed, so the visitor body is not instantiated during the tool run.
  *
- *   []<typename... Meta>(Meta... reflected_args) -> result_type {
+ *   []<omni::meta... Meta>(Meta... reflected_args) -> result_type {
  *     // reflected scope: reflection queries are available here
  *   }
  *
@@ -99,9 +99,9 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  * `meta_t<_M>::reflected_type`, not `_M` directly.
  *
  * Field tuple mapping:
- *   omni::record_meta_t<_M>::public_fields() -> omni::field_meta_t<FieldMeta>
+ *   omni::record_meta_t<_M>::public_fields() -> omni::field_meta_t<_Field>
  *   omni::record_binding_t<T>::public_fields()
- *     -> omni::field_binding_t<Record, FieldMeta>
+ *     -> omni::field_binding_t<Record, _Field>
  *
  * `Record` carries the cv qualification of the bound record object. Field
  * bindings are always non-owning because a field cannot outlive its record.
@@ -193,7 +193,7 @@ TEST(exposition, reflected_scope_overview) {
   // Prefer captures for extra arguments that should not be reflected. This
   // exposition is artificial; a summary-only visitor should usually return by
   // value.
-  const auto render = [&ctx]<typename Meta>(Meta m) -> void {
+  const auto render = [&ctx](omni::meta auto m) -> void {
     ctx.entity =
       omni::reflected_entity::record == m.entity() ? "record"sv : "enum"sv;
     ctx.type_name = m.type_name();

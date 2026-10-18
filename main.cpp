@@ -2072,7 +2072,7 @@ meta::source_file_context meta::matches::fold_out_of_scope_type_alias_query(
   clang::ASTContext &ast,
   meta::source_file_context a,
   const clang::TypeLoc &type_loc) {
-  // While instantiating `visitor::operator()(record_meta_t<T>)`, the alias
+  // While instantiating `visitor::operator()(record_meta_t<_M>)`, the alias
   // remains dependent and has no RecordType. The visitor body is deferred until
   // generated metadata exists. A concrete `record_meta_t<record>` does have a
   // RecordType and is an out-of-scope reflection query.

@@ -11,7 +11,8 @@
  * YAML and JSON serialization backed by rapidyaml and omnirefl metadata.
  * Deserialization composes parsing, tree validation, and reflected field
  * assignment with configurable recovery and diagnostics rendered on demand.
- * Serialization writes reflected records with as_yaml or as_json.
+ * Serialization writes reflected records, supported scalars, and vectors with
+ * as_yaml or as_json.
  * Compatible with C++11 and later.
  *
  * Examples prefer C++20 syntax. Compatibility interfaces are available for
@@ -75,6 +76,13 @@ if (result) {
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+// TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
+#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
+#  if __has_include(<string_view>)
+#    include <string_view>
+#  endif
+#endif
 
 namespace omni {
 namespace ryml {
@@ -367,17 +375,12 @@ struct with_diagnostics {
    */
   template <typename F>
   auto map_value(F &&f) && -> with_diagnostics<
-    compat::decay_t<decltype(compat::invoke(std::forward<F>(f),
-      std::move(*value)))>,
-    Diagnostics> {
-    if (value)
-      return {
-        /*value=*/compat::invoke(std::forward<F>(f), std::move(*value)),
-        /*diagnostics=*/std::move(diagnostics),
-      };
-
+    compat::decay_t<compat::invoke_result_t<F &&, T &&>>, Diagnostics> {
     return {
-      /*value=*/compat::nullopt,
+      /*value=*/value
+        ? compat::make_optional(
+          compat::invoke(std::forward<F>(f), std::move(*value)))
+        : compat::nullopt,
       /*diagnostics=*/std::move(diagnostics),
     };
   }
@@ -389,8 +392,7 @@ struct with_diagnostics {
    */
   template <typename F>
   auto map_diagnostics(F &&f) && -> with_diagnostics<T,
-    compat::decay_t<decltype(compat::invoke(std::forward<F>(f),
-      std::move(diagnostics)))>> {
+    compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &&>>> {
     return {
       /*value=*/std::move(value),
       /*diagnostics=*/compat::invoke(std::forward<F>(f), std::move(diagnostics)),
@@ -431,6 +433,7 @@ struct with_diagnostics {
       .extra = false,
     },
   };
+
   auto result = load(omni::type<person>, source);
   auto rendered = std::move(result) //
     .transform_error(render_diagnostics);
@@ -533,9 +536,9 @@ struct map_tree_t {
    * Returns expected when partial has type std::false_type; bool and
    * std::true_type return with_diagnostics. See deserialization_result.
    */
-  template <typename To>
-  deserialization_result<To, Strategy, /*owning=*/ true>
-    operator()(omni::type_t<To> to, ::ryml::Tree tree) const;
+  template <typename Record>
+  deserialization_result<Record, Strategy, /*owning=*/ true>
+    operator()(omni::type_t<Record> record_type, ::ryml::Tree tree) const;
 
   /**
    * Borrow the subtree. Keep the caller's tree alive and unchanged while using
@@ -543,9 +546,10 @@ struct map_tree_t {
    * std::false_type; bool and std::true_type return with_diagnostics.
    * See deserialization_result.
    */
-  template <typename To>
-  deserialization_result<To, Strategy, /*owning=*/ false>
-    operator()(omni::type_t<To> to, ::ryml::ConstNodeRef from) const;
+  template <typename Record>
+  deserialization_result<Record, Strategy, /*owning=*/ false>
+    operator()(omni::type_t<Record> record_type,
+      ::ryml::ConstNodeRef node) const;
 };
 
 #if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
@@ -564,7 +568,7 @@ auto owned = map_tree(omni::type<person>, std::move(owning_tree));
 // Errors retain the moved tree; external backing strings still need an owner.
 ```
  */
-const auto map_tree = fn::ctad<map_tree_t>(
+constexpr auto map_tree = fn::ctad<map_tree_t>(
   /*strategy=*/default_strategy());
 
 /**
@@ -581,9 +585,9 @@ struct deserialize_t {
   // Settings applied to every deserialization performed by this callable.
   Strategy strategy;
 
-  template <typename To>
-  deserialization_result<To, Strategy, /*owning=*/ true> operator()(
-    omni::type_t<To> to,
+  template <typename Record>
+  deserialization_result<Record, Strategy, /*owning=*/ true> operator()(
+    omni::type_t<Record> record_type,
     std::string source) const;
 };
 
@@ -605,7 +609,7 @@ auto result = deserialize(omni::type<person>, source) //
 // expected<person, std::string>: rendering happens only on failure.
 ```
  */
-const auto deserialize = fn::ctad<deserialize_t>(
+constexpr auto deserialize = fn::ctad<deserialize_t>(
   /*strategy=*/default_strategy());
 
 // A generic callable keeps map_diagnostics(render_diagnostics) valid for both
@@ -622,20 +626,23 @@ struct render_diagnostics_t {
 constexpr render_diagnostics_t render_diagnostics{};
 
 /**
- * Serialize a reflected record and its nested fields to YAML or JSON.
+ * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
+ * Vectors may contain nested vectors or reflected records, including at the root.
+ * String sources include char-based basic_string and c4 views, plus
+ * basic_string_view when the standard library provides it.
  * Strings are quoted; field values are copied into the tree's arena.
+ * TODO: Define the document representation of reflected enumerations.
  */
 struct serialize_t {
   // Output format; use as_yaml or as_json for the predefined configurations.
   ::ryml::EmitType_e format;
 
-  template <typename From>
-  std::string operator()(const From &from) const;
+  template <typename Value>
+  std::string operator()(const Value &value) const;
 };
 
 /**
- * Serialize reflected records to YAML text.
- * This call is unchanged in C++11.
+ * Serialize reflected records, supported scalars, or vectors to YAML text.
  *
 ```cpp
 const auto yaml = as_yaml(value);
@@ -646,8 +653,7 @@ constexpr serialize_t as_yaml{
 };
 
 /**
- * Serialize reflected records to JSON text.
- * This call is unchanged in C++11.
+ * Serialize reflected records, supported scalars, or vectors to JSON text.
  *
 ```cpp
 const auto json = as_json(value);

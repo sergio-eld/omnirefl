@@ -272,9 +272,15 @@ struct inspect_function_field {
 };
 
 struct inspect_routes {
-  template <typename Meta>
-  observation operator()(Meta meta) const {
-    return omni::compat::apply(inspect_function_field{}, meta.public_fields());
+#if defined(__cpp_concepts)
+  template <omni::record_binding Binding>
+  observation operator()(Binding binding) const {
+#else
+  template <typename T>
+  observation operator()(omni::record_binding_t<T> binding) const {
+#endif
+    return omni::compat::apply(inspect_function_field{},
+      binding.public_fields());
   }
 };
 
@@ -318,10 +324,16 @@ struct inspect_documentation_field {
 };
 
 struct inspect_documentation_routes {
-  template <typename Meta>
-  documentation_observation operator()(Meta meta) const {
+#if defined(__cpp_concepts)
+  template <omni::record_binding Binding>
+  documentation_observation operator()(Binding binding) const {
+#else
+  template <typename T>
+  documentation_observation operator()(
+    omni::record_binding_t<T> binding) const {
+#endif
     return omni::compat::apply(inspect_documentation_field{},
-      meta.public_fields());
+      binding.public_fields());
   }
 };
 
@@ -339,10 +351,15 @@ struct inspect_specialized_fields {
 };
 
 struct inspect_specialized_routes {
-  template <typename Meta>
-  std::pair<int, int> operator()(Meta meta) const {
+#if defined(__cpp_concepts)
+  template <omni::record_binding Binding>
+  std::pair<int, int> operator()(Binding binding) const {
+#else
+  template <typename T>
+  std::pair<int, int> operator()(omni::record_binding_t<T> binding) const {
+#endif
     return omni::compat::apply(inspect_specialized_fields{},
-      meta.public_fields());
+      binding.public_fields());
   }
 };
 
@@ -364,10 +381,15 @@ struct inspect_nested_routes {
 };
 
 struct inspect_nested_owner {
-  template <typename Meta>
-  int operator()(Meta meta) const {
+#if defined(__cpp_concepts)
+  template <omni::record_binding Binding>
+  int operator()(Binding binding) const {
+#else
+  template <typename T>
+  int operator()(omni::record_binding_t<T> binding) const {
+#endif
     return omni::compat::apply(inspect_nested_routes{},
-      meta.public_fields());
+      binding.public_fields());
   }
 };
 
