@@ -433,6 +433,7 @@ struct with_diagnostics {
       .extra = false,
     },
   };
+
   auto result = load(omni::type<person>, source);
   auto rendered = std::move(result) //
     .transform_error(render_diagnostics);
@@ -567,7 +568,7 @@ auto owned = map_tree(omni::type<person>, std::move(owning_tree));
 // Errors retain the moved tree; external backing strings still need an owner.
 ```
  */
-const auto map_tree = fn::ctad<map_tree_t>(
+constexpr auto map_tree = fn::ctad<map_tree_t>(
   /*strategy=*/default_strategy());
 
 /**
@@ -608,7 +609,7 @@ auto result = deserialize(omni::type<person>, source) //
 // expected<person, std::string>: rendering happens only on failure.
 ```
  */
-const auto deserialize = fn::ctad<deserialize_t>(
+constexpr auto deserialize = fn::ctad<deserialize_t>(
   /*strategy=*/default_strategy());
 
 // A generic callable keeps map_diagnostics(render_diagnostics) valid for both
@@ -636,8 +637,8 @@ struct serialize_t {
   // Output format; use as_yaml or as_json for the predefined configurations.
   ::ryml::EmitType_e format;
 
-  template <typename From>
-  std::string operator()(const From &from) const;
+  template <typename Value>
+  std::string operator()(const Value &value) const;
 };
 
 /**
