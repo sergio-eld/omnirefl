@@ -645,6 +645,18 @@ struct unsupported_serialization {
   }
 };
 
+// Scalar/container roots are parsed outside reflected_call during instrumentation,
+// when is_reflected is incomplete. Query it only after those writers are ruled out.
+struct write_reflected {
+  template <typename From>
+  void operator()(const From &from, ::ryml::NodeRef *to) const {
+    const auto write = typename omni::traits::select<
+      omni::traits::case_<omni::is_reflected<From>::value, write_record>,
+      unsupported_serialization>::type{};
+    write(from, to);
+  }
+};
+
 template <typename From>
 void write_value(const From &from, ::ryml::NodeRef *to) {
   const auto write = typename omni::traits::select<
@@ -655,27 +667,52 @@ void write_value(const From &from, ::ryml::NodeRef *to) {
     omni::traits::case_<std::is_same<From, std::string>::value,
       detail::write_string>,
     omni::traits::case_<omni::traits::is<std::vector, From>(), write_sequence>,
-    omni::traits::case_<omni::is_reflected<From>::value, write_record>,
-    unsupported_serialization>::type{};
+    write_reflected>::type{};
 
   write(from, to);
 }
 
-// C++11 callable establishes reflection before writing the record's fields.
-struct cpp11_lambda_to_tree {
-  template <typename From>
-  ::ryml::Tree operator()(omni::record_binding_t<From> from) const {
-    ::ryml::Tree tree;
-    auto root = tree.rootref();
-    root |= ::ryml::MAP;
-    fn::each(write_field{
-               /*to=*/&root,
-             },
-      from.public_fields());
+template <typename From>
+::ryml::Tree to_tree(const From &from) {
+  ::ryml::Tree tree;
+  auto root = tree.rootref();
+  write_value(from, &root);
+  return tree;
+}
 
-    return tree;
+// reflected_call accepts record/enum roots, not containers or scalar values.
+// Peel vectors only for reflection discovery; to_tree still writes the full value.
+template <typename From>
+struct serialization_root {
+  using type = From;
+};
+
+template <typename Value, typename Allocator>
+struct serialization_root<std::vector<Value, Allocator>>:
+    serialization_root<Value> {};
+
+// The metadata argument establishes reflection for record elements, including
+// empty containers. Retain the original source to write its complete root shape.
+template <typename From>
+struct cpp11_lambda_to_tree {
+  const From &from;
+
+  template <typename Meta>
+  ::ryml::Tree operator()(Meta) const {
+    return to_tree(from);
   }
 };
+
+template <typename From>
+::ryml::Tree reflect_tree(const From &from, std::true_type) {
+  return omni::reflected_call(cpp11_lambda_to_tree<From>{from},
+    omni::type_t<typename serialization_root<From>::type>{});
+}
+
+template <typename From>
+::ryml::Tree reflect_tree(const From &from, std::false_type) {
+  return to_tree(from);
+}
 
 } // namespace reflected_scope
 
@@ -889,8 +926,10 @@ std::string render_diagnostics_t::operator()(
 
 template <typename From>
 std::string serialize_t::operator()(const From &from) const {
-  const auto tree =
-    omni::reflected_call(reflected_scope::cpp11_lambda_to_tree{}, from);
+  using root_type = typename reflected_scope::serialization_root<From>::type;
+  const auto tree = reflected_scope::reflect_tree(from,
+    std::integral_constant<bool, !std::is_fundamental<root_type>::value
+      && !std::is_same<root_type, std::string>::value>{});
 
   if (::ryml::EMIT_JSON != format)
     return ::ryml::emitrs_yaml<std::string>(tree);

@@ -11,7 +11,8 @@
  * YAML and JSON serialization backed by rapidyaml and omnirefl metadata.
  * Deserialization composes parsing, tree validation, and reflected field
  * assignment with configurable recovery and diagnostics rendered on demand.
- * Serialization writes reflected records with as_yaml or as_json.
+ * Serialization writes reflected records, supported scalars, and vectors with
+ * as_yaml or as_json.
  * Compatible with C++11 and later.
  *
  * Examples prefer C++20 syntax. Compatibility interfaces are available for
@@ -622,7 +623,8 @@ struct render_diagnostics_t {
 constexpr render_diagnostics_t render_diagnostics{};
 
 /**
- * Serialize a reflected record and its nested fields to YAML or JSON.
+ * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
+ * Vectors may contain nested vectors or reflected records, including at the root.
  * Strings are quoted; field values are copied into the tree's arena.
  */
 struct serialize_t {
@@ -634,7 +636,7 @@ struct serialize_t {
 };
 
 /**
- * Serialize reflected records to YAML text.
+ * Serialize reflected records, supported scalars, or vectors to YAML text.
  * This call is unchanged in C++11.
  *
 ```cpp
@@ -646,7 +648,7 @@ constexpr serialize_t as_yaml{
 };
 
 /**
- * Serialize reflected records to JSON text.
+ * Serialize reflected records, supported scalars, or vectors to JSON text.
  * This call is unchanged in C++11.
  *
 ```cpp
