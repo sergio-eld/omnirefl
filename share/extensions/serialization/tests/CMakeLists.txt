@@ -24,7 +24,15 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO)
     # Exercise serialization and parser recovery without exceptions.
-    if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+    # FIXME: [external] tl::optional 1.1.0 unconditionally throws in value().
+    # Under -fno-exceptions, Clang 6 rejects these bodies even when unused.
+    # Omit this test-only flag on Clang 6 until upstream guards the throws;
+    # all test cases remain enabled, and no flags propagate to consumers.
+    # https://github.com/TartanLlama/optional/issues/56
+    if("GNU" STREQUAL CMAKE_CXX_COMPILER_FRONTEND_VARIANT
+        AND NOT ("Clang" STREQUAL CMAKE_CXX_COMPILER_ID
+            AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 6
+            AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7))
         target_compile_options(${_test_target} PRIVATE -fno-exceptions)
     endif()
     target_link_libraries(${_test_target} PRIVATE
