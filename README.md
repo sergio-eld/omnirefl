@@ -1,7 +1,7 @@
 <!-- pages:introduction:start -->
 # Omnirefl
 
-A C++ reflection tool built for a seamless experience without macros* or UB.<br>
+A C++ reflection tool built for a seamless experience without macros* or UB. <sub>(C++11 minimum.)</sub><br>
 <sub>* Some compatibility QoL before C++17/20 uses macros.</sub>
 
 <p align="center">
@@ -10,6 +10,20 @@ A C++ reflection tool built for a seamless experience without macros* or UB.<br>
   <sub>Obligatory self-reflection meta joke.</sub>
 </p>
 <!-- pages:introduction:end -->
+
+<!-- pages:experience:start -->
+## Seamless Experience
+
+1. Add `omni_reflected_target(...)` for a CMake target.
+2. Use `omni::reflected_call(...)` where reflection is needed.
+
+Everything else remains regular C++. No macros, compiler-specific tricks,
+undefined behavior, or manual regeneration are required.
+
+Types can be declared and reflected directly in the same `.cpp`. No dedicated
+declaration headers, schemas, annotations, or checked-in metadata files are
+required; generated metadata remains a build artifact.
+<!-- pages:experience:end -->
 
 <!-- pages:sneak-peek:start -->
 ## Sneak Peek
@@ -178,21 +192,6 @@ This example is included in the installed package; see
 The [comprehensive guide](share/examples/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
-
-<!-- pages:experience:start -->
-## Seamless Experience
-
-1. Add `omni_reflected_target(...)` for the CMake target.
-2. Use `omni::reflected_call(...)` where reflection is needed.
-
-Everything else remains regular C++. Omnirefl discovers the argument types and
-supported dependencies, then generates and force-includes their metadata. No
-macros, compiler-specific UB, or manual regeneration are required.
-
-Types can be declared and reflected directly in the same `.cpp`. No dedicated
-declaration headers, schemas, annotations, or checked-in metadata files are
-required; generated metadata remains a build artifact.
-<!-- pages:experience:end -->
 
 <!-- pages:status:start -->
 ## Status
@@ -398,8 +397,19 @@ against the average of the last five stored runs.
 Omnirefl reflects the public data surface of named C++ records and enums (see
 [Limitations](#limitations)).
 
-- **Language:** C++11 through C++23; C++20 concepts provide the most ergonomic
-  interface.
+- **Language:** C++11 minimum; C++20 concepts provide the most ergonomic interface.
+
+  <details>
+  <summary>C++26 support</summary>
+
+  [Native compile-time reflection has been adopted for C++26](https://isocpp.org/blog/2025/06/reflection-voted-into-cpp26-whole-new-language-herb-sutter).
+  Omnirefl is recommended as an interim step until your project can use it.
+
+  C++26 support depends on the underlying LLVM/Clang version used to build
+  Omnirefl. Run `omnirefl --version` to see the bundled LLVM version.
+
+  </details>
+
 - **Reflectable declarations:**
   - named namespace-scope records (structs, classes, and unions) and enums
   - nested named records and enums inside non-template records
