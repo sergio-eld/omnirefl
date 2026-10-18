@@ -347,6 +347,37 @@ function(omni_reflected_target target)
         set(_msvc_cxx23_preview_ad_hoc 1)
     endif()
 
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        # ad hoc: CMake puts source /FI options before its PCH /FI, where MSVC
+        # skips reflection while seeking the /Yu boundary. Append a dispatcher
+        # to CMake's PCH-use options so reflection is included after that boundary.
+        # CXX_COMPILE_OPTIONS_USE_PCH is internal; it preserves CMake's resolved
+        # wrapper path, including PCH reuse and configuration-specific directories.
+        # The reflection-header suffix excludes this dispatcher from tool parsing.
+        # Evaluate PCH availability during generation: callers may enable it later.
+        string(CONCAT _msvc_pch
+            "$<AND:"
+                "$<NOT:$<BOOL:$<TARGET_PROPERTY:DISABLE_PRECOMPILE_HEADERS>>>,"
+                "$<OR:"
+                    "$<BOOL:$<TARGET_PROPERTY:PRECOMPILE_HEADERS>>,"
+                    "$<BOOL:$<TARGET_PROPERTY:PRECOMPILE_HEADERS_REUSE_FROM>>"
+                ">"
+            ">")
+        set(_pch_dispatch "${_out_dir}/internal/pch_dispatch.omnirefl.hpp")
+        # file(GENERATE) has no consuming-target context; qualify its condition.
+        string(REPLACE "$<TARGET_PROPERTY:" "$<TARGET_PROPERTY:${target},"
+            _pch_file_condition "${_msvc_pch}")
+        file(GENERATE OUTPUT "${_pch_dispatch}" CONTENT
+            "#ifdef OMNIREFL_GENERATED_HEADER\n#include OMNIREFL_GENERATED_HEADER\n#endif\n"
+            CONDITION "${_pch_file_condition}")
+        get_target_property(_pch_options ${target} CXX_COMPILE_OPTIONS_USE_PCH)
+        if(NOT _pch_options)
+            set(_pch_options "${CMAKE_CXX_COMPILE_OPTIONS_USE_PCH}")
+        endif()
+        set_property(TARGET ${target} PROPERTY CXX_COMPILE_OPTIONS_USE_PCH
+            "${_pch_options};/FI${_pch_dispatch}")
+    endif()
+
     # Shared lists for common plumbing
     set(_gen_outputs)
     set(_gen_headers)
@@ -430,13 +461,21 @@ function(omni_reflected_target target)
         # dependency graph, so the force-included header must exist immediately
         # after configuration. The placeholder is replaced by the real header
         # during the .omni generation step.
+        # Resolve the path through the consuming target: one source can belong
+        # to several targets with different compile definitions and metadata.
+        set_target_properties(${target} PROPERTIES ${_fi_prop} "${_generated_header}")
         if(MSVC)
-            set_target_properties(${target} PROPERTIES ${_fi_prop} "/FI${_generated_header}")
+            set_source_files_properties("${_src}" PROPERTIES
+                COMPILE_OPTIONS "/FI$<TARGET_PROPERTY:${_fi_prop}>")
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+                # The shared PCH dispatcher selects this translation unit's header.
+                set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_DEFINITIONS
+                    "$<${_msvc_pch}:OMNIREFL_GENERATED_HEADER=\"$<TARGET_PROPERTY:${_fi_prop}>\">")
+            endif()
         else()
-            set_target_properties(${target} PROPERTIES ${_fi_prop} "-include;${_generated_header}")
+            set_source_files_properties("${_src}" PROPERTIES
+                COMPILE_OPTIONS "-include;$<TARGET_PROPERTY:${_fi_prop}>")
         endif()
-
-        set_source_files_properties("${_src}" PROPERTIES COMPILE_OPTIONS "$<TARGET_PROPERTY:${_fi_prop}>")
     endforeach()
 
     target_link_libraries(${target} PRIVATE omni::refl)
