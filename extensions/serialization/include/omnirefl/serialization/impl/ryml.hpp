@@ -947,7 +947,12 @@ std::string serialize_t::operator()(const From &from) const {
   if (::ryml::EMIT_JSON != format)
     return ::ryml::emitrs_yaml<std::string>(tree);
 
-  auto text = ::ryml::emitrs_json<std::string>(tree);
+  // Avoid emitrs_json's sizing traversal: arena bytes hold the scalar text;
+  // allow eight punctuation bytes per node for quotes, separators and delimiters.
+  // Escaping may exceed this estimate; emitrs_json retains its resize/retry path.
+  std::string text;
+  text.reserve(tree.arena_size() + 8 * tree.size());
+  ::ryml::emitrs_json(tree, &text);
   if (text.end() == std::find_if(text.begin(), text.end(), [](unsigned char c) {
         return 0x20 > c;
       }))
