@@ -347,7 +347,8 @@ function(omni_reflected_target target)
         set(_msvc_cxx23_preview_ad_hoc 1)
     endif()
 
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    # MSVC also covers clang-cl: both use /FI and the /Yu PCH boundary.
+    if(MSVC)
         # ad hoc: CMake puts source /FI options before its PCH /FI, where MSVC
         # skips reflection while seeking the /Yu boundary. Append a dispatcher
         # to CMake's PCH-use options so reflection is included after that boundary.
@@ -467,11 +468,9 @@ function(omni_reflected_target target)
         if(MSVC)
             set_source_files_properties("${_src}" PROPERTIES
                 COMPILE_OPTIONS "/FI$<TARGET_PROPERTY:${_fi_prop}>")
-            if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-                # The shared PCH dispatcher selects this translation unit's header.
-                set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_DEFINITIONS
-                    "$<${_msvc_pch}:OMNIREFL_GENERATED_HEADER=\"$<TARGET_PROPERTY:${_fi_prop}>\">")
-            endif()
+            # The shared PCH dispatcher selects this translation unit's header.
+            set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_DEFINITIONS
+                "$<${_msvc_pch}:OMNIREFL_GENERATED_HEADER=\"$<TARGET_PROPERTY:${_fi_prop}>\">")
         else()
             set_source_files_properties("${_src}" PROPERTIES
                 COMPILE_OPTIONS "-include;$<TARGET_PROPERTY:${_fi_prop}>")
