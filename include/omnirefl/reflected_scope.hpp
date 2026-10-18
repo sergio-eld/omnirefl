@@ -898,16 +898,16 @@ struct meta_t<_M, reflected_entity::record> {
 
   constexpr meta_t() noexcept = default;
 
-  template <typename _T, typename Meta>
-  static constexpr field_binding_t<_T, Meta> _bind(
-    _T &t, field_meta_t<Meta>) {
-    return field_binding_t<_T, Meta>{t};
+  template <typename _T, typename _Field>
+  static constexpr field_binding_t<_T, _Field> _bind(
+    _T &t, field_meta_t<_Field>) {
+    return field_binding_t<_T, _Field>{t};
   }
 
-  template <typename _T, typename Meta>
-  static constexpr function_binding_t<_T, Meta> _bind(
-    _T &t, function_meta_t<Meta>) {
-    return function_binding_t<_T, Meta>{t};
+  template <typename _T, typename _Function>
+  static constexpr function_binding_t<_T, _Function> _bind(
+    _T &t, function_meta_t<_Function>) {
+    return function_binding_t<_T, _Function>{t};
   }
 
   // Deduce the member pack without a C++14 generic lambda.

@@ -113,10 +113,10 @@ struct _is_public_field_visible_from<Record,
   compat::void_t<decltype(Field::value(std::declval<Record &>()))>>:
     std::true_type {};
 
-template <typename Record, typename Meta>
+template <typename Record, typename _M>
 struct _is_public_field_visible_from<Record,
-  function_meta_t<Meta>,
-  compat::void_t<decltype(Meta::template pointer<Record>())>>:
+  function_meta_t<_M>,
+  compat::void_t<decltype(_M::template pointer<Record>())>>:
     std::true_type {};
 
 template <typename Record,
@@ -164,21 +164,21 @@ struct _expand_bases<std::tuple<Bases...>> {
           typename _meta<Bases>::public_bases_t>::type>::type>()...));
 };
 
-template <typename Meta>
+template <typename _M>
 using _all_visible_public_fields_t =
-  typename _all_visible_public_fields<typename Meta::type,
-    typename Meta::own_public_fields_t,
-    typename _expand_bases<typename Meta::public_bases_t>::type>::type;
+  typename _all_visible_public_fields<typename _M::type,
+    typename _M::own_public_fields_t,
+    typename _expand_bases<typename _M::public_bases_t>::type>::type;
 
 template <typename Record, typename Method, typename = void>
 struct _is_public_method_visible_from: std::false_type {};
 
-template <typename Record, typename Meta>
+template <typename Record, typename _M>
 struct _is_public_method_visible_from<Record,
-  function_meta_t<Meta>,
-  compat::void_t<decltype(Meta::template pointer<Record>())>>:
-    std::is_same<decltype(Meta::template pointer<Record>()),
-      decltype(Meta::pointer())> {};
+  function_meta_t<_M>,
+  compat::void_t<decltype(_M::template pointer<Record>())>>:
+    std::is_same<decltype(_M::template pointer<Record>()),
+      decltype(_M::pointer())> {};
 
 template <typename Record,
   typename OwnMethods,
@@ -226,11 +226,11 @@ struct _expand_base_methods<std::tuple<Bases...>> {
           typename _meta<Bases>::public_bases_t>::type>::type>()...));
 };
 
-template <typename Meta>
+template <typename _M>
 using _all_visible_public_methods_t =
-  typename _all_visible_public_methods<typename Meta::type,
-    typename Meta::own_public_methods_t,
-    typename _expand_base_methods<typename Meta::public_bases_t>::type>::type;
+  typename _all_visible_public_methods<typename _M::type,
+    typename _M::own_public_methods_t,
+    typename _expand_base_methods<typename _M::public_bases_t>::type>::type;
 
 } // namespace
 } // namespace detail

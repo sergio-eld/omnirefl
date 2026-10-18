@@ -371,6 +371,117 @@ TEST(serialization_formats, emits_present_optional_field) {
     EXPECT_TRUE(root["parent"].is_val_quoted());
   }
 }
+
+// TODO: [high] Implement enum-field serialization and deserialization for JSON
+// and YAML. Decide string versus integer output, acceptance of integer input,
+// unknown-value schema errors, and canonical/deprecated alias handling.
+// These candidate expectations use canonical names, accept known integers and
+// aliases, and reject unknown names/integers. Confirm policy before enabling.
+enum class execution_state {
+  stopped = 0,
+  active = 7,
+  running = active,
+#if 201402L <= OMNI_CPLUSPLUS
+  working [[deprecated("use active")]] = active
+#else
+  working = active
+#endif
+};
+
+struct enum_record {
+  execution_state state;
+};
+
+class enum_fields: public testing::TestWithParam<::ryml::EmitType_e> {};
+
+TEST_P(enum_fields, emits_a_canonical_name_for_aliased_values) {
+  for (const auto value : {execution_state::stopped,
+         execution_state::active, execution_state::running}) {
+    SCOPED_TRACE(static_cast<int>(value));
+    const auto parsed = omni::ryml::parse(
+      omni::ryml::serialize_t{/*format=*/GetParam()}(enum_record{value}));
+    EXPECT_TRUE(parsed);
+    if (!parsed)
+      continue;
+
+    const auto root = parsed->crootref();
+    EXPECT_TRUE(root.is_map());
+    EXPECT_TRUE(root.has_child("state"));
+    if (!root.has_child("state"))
+      continue;
+    EXPECT_EQ(execution_state::stopped == value ? "stopped" : "active",
+      root["state"].val());
+    EXPECT_TRUE(root["state"].is_val_quoted());
+  }
+}
+
+TEST_P(enum_fields, accepts_names_including_current_and_deprecated_aliases) {
+  for (const auto &name : {std::string{"stopped"}, std::string{"active"},
+         std::string{"running"}, std::string{"working"}}) {
+    SCOPED_TRACE(name);
+    const auto source = ::ryml::EMIT_JSON == GetParam()
+      ? std::string{"{\"state\":\""} + name + "\"}"
+      : std::string{"state: \""} + name + "\"\n";
+    const auto result = omni::ryml::deserialize(
+      omni::type_t<enum_record>{}, source);
+
+    EXPECT_TRUE(result);
+    if (result) {
+      EXPECT_EQ("stopped" == name ? execution_state::stopped
+                                  : execution_state::active,
+        result->state);
+    }
+  }
+}
+
+TEST_P(enum_fields, accepts_integers_with_declared_enumerators) {
+  for (const auto value : {0, 7}) {
+    SCOPED_TRACE(value);
+    const auto source = ::ryml::EMIT_JSON == GetParam()
+      ? std::string{"{\"state\":"} + std::to_string(value) + "}"
+      : std::string{"state: "} + std::to_string(value) + "\n";
+    const auto result = omni::ryml::deserialize(
+      omni::type_t<enum_record>{}, source);
+
+    EXPECT_TRUE(result);
+    if (result) {
+      EXPECT_EQ(static_cast<execution_state>(value), result->state);
+    }
+  }
+}
+
+TEST_P(enum_fields, reports_unknown_names_and_integers_as_schema_errors) {
+  // 8 fits the underlying type but has no declared enumerator.
+  for (const auto &value : {std::string{"\"unknown\""}, std::string{"8"}}) {
+    SCOPED_TRACE(value);
+    const auto source = ::ryml::EMIT_JSON == GetParam()
+      ? std::string{"{\"state\":"} + value + "}"
+      : std::string{"state: "} + value + "\n";
+    const auto result = omni::ryml::deserialize(
+      omni::type_t<enum_record>{}, source);
+
+    EXPECT_FALSE(result);
+    if (result)
+      continue;
+    EXPECT_EQ(1U, result.error().issues.size());
+    if (1U != result.error().issues.size())
+      continue;
+    const auto &issue = result.error().issues.front();
+    EXPECT_EQ(omni::ryml::issue::code::invalid_scalar, issue.reason);
+    EXPECT_FALSE(issue.warning);
+    EXPECT_EQ(1U, issue.path.size());
+    if (1U == issue.path.size()) {
+      EXPECT_EQ("state", issue.path.front().field);
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(formats,
+  enum_fields,
+  testing::Values(::ryml::EMIT_JSON, ::ryml::EMIT_YAML),
+  [](const testing::TestParamInfo<::ryml::EmitType_e> &p) {
+    return ::ryml::EMIT_JSON == p.param ? "json" : "yaml";
+  });
 #endif
 
 struct borrowed_string_fields {
