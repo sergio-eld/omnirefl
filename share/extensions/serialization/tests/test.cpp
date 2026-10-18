@@ -10,6 +10,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -3194,6 +3195,23 @@ TEST(serialization_json, escapes_control_bytes_as_unicode) {
   });
 
   EXPECT_NE(std::string::npos, output.find(R"("a\u0000b\u0001c\u001f")"));
+}
+
+TEST(serialization_json, round_trips_all_ascii_control_characters) {
+  std::string controls(32, '\0');
+  std::iota(controls.begin(), controls.end(), char{});
+
+  const auto output = omni::ryml::as_json(controls);
+  EXPECT_TRUE(std::none_of(output.begin(), output.end(),
+    /*is_control_byte=*/[](unsigned char c) { return 0x20 > c; }));
+
+  const auto parsed = omni::ryml::parse(output);
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+
+  const auto scalar = parsed->crootref().val();
+  EXPECT_EQ(controls, (std::string{scalar.data(), scalar.size()}));
 }
 
 } // namespace

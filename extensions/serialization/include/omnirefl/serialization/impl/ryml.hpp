@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <csetjmp>
+#include <iterator>
 #include <limits>
 
 namespace omni {
@@ -802,8 +803,8 @@ deserialization_result<Record, Strategy, /*owning=*/ false>
     /*extra=*/strategy.extra,
   };
 
-  // Construct in optional storage: moving Record{} triggers GCC 15's
-  // uninitialized-union warning for models with an empty tl::optional record.
+  // FIXME: [external] GCC 15 warns about an uninitialized union when moving
+  // Record{} with an empty tl::optional member; construct in optional storage.
   // TL's emplace() calls its throwing value() accessor; use the factory.
   auto value = compat::make_optional<Record>();
   diagnostics</*owning=*/ false> report{
@@ -966,25 +967,38 @@ std::string serialize_t::operator()(const Value &value) const {
 
   // JSON strings must escape ASCII control characters (0x00-0x1F).
   // This output is compact, so raw tabs/newlines cannot be formatting whitespace.
-  // Ad hoc: ryml 0.14 leaves some of these characters unescaped.
-  // TODO: Remove this pass when ryml escapes every JSON control character.
-  if (std::none_of(text.begin(), text.end(),
-        /*is_control_byte=*/[](unsigned char c) { return 0x20 > c; }))
+  // FIXME: [external] RapidYAML leaves some controls unescaped, even in 0.16.0.
+  // Remove this pass once upstream escapes the full 0x00-0x1F range.
+  // https://github.com/biojppm/rapidyaml/blob/master/src/c4/yml/emitter.def.hpp
+  const auto is_control_byte = [](unsigned char c) { return 0x20 > c; };
+  const auto controls = std::count_if(text.begin(), text.end(), is_control_byte);
+
+  if (0 == controls)
     return text;
 
-  std::string escaped;
-  escaped.reserve(text.size());
-  for (const unsigned char c : text) {
-    if (0x20 > c) {
-      escaped += "\\u00";
-      escaped += "0123456789abcdef"[c >> 4];
-      escaped += "0123456789abcdef"[c & 0x0f];
-    } else {
-      escaped += c;
+  // Subtract the escape's terminator and the input byte being replaced.
+  const auto extra = (sizeof(R"(\u0000)") - 2) * controls;
+  text.resize(text.size() + extra);
+
+  // Write backwards so expansion cannot overwrite unread input.
+  auto output = text.rbegin();
+  for (auto input = text.rbegin() + extra; input != text.rend(); ++input) {
+    const unsigned char c = *input;
+    if (!is_control_byte(c)) {
+      *output++ = c;
+      continue;
     }
+
+    const char escaped[]{
+      '\\', 'u', '0', '0',
+      "0123456789abcdef"[c >> 4],
+      "0123456789abcdef"[c & 0x0f],
+    };
+
+    output = std::reverse_copy(std::begin(escaped), std::end(escaped), output);
   }
 
-  return escaped;
+  return text;
 }
 
 } // namespace ryml
