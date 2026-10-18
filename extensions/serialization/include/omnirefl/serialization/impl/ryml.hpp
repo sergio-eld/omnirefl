@@ -931,14 +931,16 @@ std::string serialize_t::operator()(const From &from) const {
     std::integral_constant<bool, !std::is_fundamental<root_type>::value
       && !detail::is_string_source<root_type>::value>{});
 
-  if (::ryml::EMIT_JSON != format)
-    return ::ryml::emitrs_yaml<std::string>(tree);
-
-  // Avoid emitrs_json's sizing traversal: arena bytes hold the scalar text;
-  // allow eight punctuation bytes per node for quotes, separators and delimiters.
-  // Escaping may exceed this estimate; emitrs_json retains its resize/retry path.
+  // Avoid a sizing traversal; YAML needs more room for indentation than JSON.
+  // Escaping or deeper indentation can still require a resize and retry.
   std::string text;
-  text.reserve(tree.arena_size() + 8 * tree.size());
+  text.reserve(tree.arena_size()
+    + (::ryml::EMIT_JSON == format ? 8 : 16) * tree.size());
+  if (::ryml::EMIT_JSON != format) {
+    ::ryml::emitrs_yaml(tree, &text);
+    return text;
+  }
+
   ::ryml::emitrs_json(tree, &text);
   if (text.end() == std::find_if(text.begin(), text.end(), [](unsigned char c) {
         return 0x20 > c;
