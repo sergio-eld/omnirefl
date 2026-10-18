@@ -67,12 +67,12 @@ struct counter {
 };
 
 template <typename T, int Id>
-constexpr int unique_id(std::false_type) {
+constexpr int unique_id(/*id_exists=*/std::false_type) {
   return Id;
 }
 
 template <typename T, int Id>
-constexpr int unique_id(std::true_type);
+constexpr int unique_id(/*id_exists=*/std::true_type);
 
 template <typename T, int Id = int{}>
 constexpr int unique_id() {
@@ -80,7 +80,7 @@ constexpr int unique_id() {
 }
 
 template <typename T, int Id>
-constexpr int unique_id(std::true_type) {
+constexpr int unique_id(/*id_exists=*/std::true_type) {
   return unique_id<T, Id + 1>();
 }
 

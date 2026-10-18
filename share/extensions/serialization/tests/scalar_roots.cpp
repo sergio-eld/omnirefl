@@ -25,13 +25,13 @@ TEST(serialization_scalar_roots, writes_scalar_values_without_record_metadata) {
 
 TEST(serialization_scalar_roots, writes_string_array_without_record_metadata) {
   EXPECT_TRUE(serialization_test::matches_json(
-    R"(["first","second"])",
+    R"(["first", "second"])",
     omni::ryml::as_json(std::vector<std::string>{"first", "second"})));
 }
 
 TEST(serialization_scalar_roots, writes_boolean_array_without_record_metadata) {
   EXPECT_TRUE(serialization_test::matches_json(
-    R"([true,false])", omni::ryml::as_json(std::vector<bool>{true, false})));
+    R"([true, false])", omni::ryml::as_json(std::vector<bool>{true, false})));
 }
 
 TEST(serialization_scalar_roots, writes_empty_array_without_record_metadata) {
@@ -65,7 +65,7 @@ TEST(serialization_scalar_roots, writes_standard_string_views) {
 
 TEST(serialization_scalar_roots, writes_standard_string_view_array) {
   EXPECT_TRUE(serialization_test::matches_json(
-    R"(["first","second"])",
+    R"(["first", "second"])",
     omni::ryml::as_json(std::vector<std::string_view>{"first", "second"})));
 }
 #endif

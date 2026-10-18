@@ -14,9 +14,13 @@ namespace ryml {
 
 namespace detail {
 
+// Delay the unsupported-type assertion until the selected operation is invoked.
+template <typename>
+struct dependent_false: std::false_type {};
+
 // fn::branch preserves the different return types without requiring C++17.
 template <typename Strategy, typename T, bool Owning>
-deserialization_result<T, Strategy, Owning> make_result(
+deserialization_result<T, Strategy, Owning> select_deserialization_result(
   with_diagnostics<T, diagnostics<Owning>> result) {
   return fn::branch(
     detail::returns_expected<Strategy>{},
@@ -118,18 +122,22 @@ inline issue make_issue(issue::code reason,
   return result;
 }
 
-// Delay the unsupported-type assertion until the selected operation is invoked.
-template <typename>
-struct dependent_false: std::false_type {};
-
 template <typename Value>
 struct map_node_to_fundamental {
-  // C++11 dispatch keeps integer-only overflow checks out of bool/real reads.
-  static bool convert(c4::csubstr scalar, Value *value, std::true_type) {
+  // Overflow checking applies to integers, excluding bool.
+  template <typename ScalarValue>
+  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
+    -> typename std::enable_if<std::is_integral<ScalarValue>::value
+        && !std::is_same<bool, ScalarValue>::value,
+      bool>::type {
     return c4::from_chars(scalar, c4::fmt::overflow_checked(*value));
   }
 
-  static bool convert(c4::csubstr scalar, Value *value, std::false_type) {
+  template <typename ScalarValue>
+  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
+    -> typename std::enable_if<!std::is_integral<ScalarValue>::value
+        || std::is_same<bool, ScalarValue>::value,
+      bool>::type {
     return c4::from_chars(scalar, value);
   }
 
@@ -180,11 +188,7 @@ struct map_node_to_fundamental {
     }
 
     Value converted{};
-    if (!convert(scalar,
-          &converted,
-          std::integral_constant<bool,
-            std::is_integral<Value>::value
-              && !std::is_same<bool, Value>::value>{})) {
+    if (!from_chars(scalar, &converted)) {
       context->report(
         make_issue(issue::code::out_of_range,
           expected,
@@ -540,7 +544,7 @@ struct unsupported_serialization {
   }
 };
 
-struct write_scalar {
+struct write_integer {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
@@ -556,7 +560,7 @@ struct write_boolean {
   }
 };
 
-struct write_number {
+struct write_real {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
@@ -655,8 +659,8 @@ void write_value(const Value &value, ::ryml::NodeRef *node) {
     omni::traits::case_<std::is_same<bool, Value>::value,
       detail::write_boolean>,
     omni::traits::case_<std::is_floating_point<Value>::value,
-      detail::write_number>,
-    omni::traits::case_<std::is_integral<Value>::value, detail::write_scalar>,
+      detail::write_real>,
+    omni::traits::case_<std::is_integral<Value>::value, detail::write_integer>,
     omni::traits::case_<detail::is_string_source<Value>::value,
       detail::write_string>,
     omni::traits::case_<omni::traits::is<std::vector, Value>(), write_sequence>,
@@ -834,7 +838,7 @@ deserialization_result<Record, Strategy, /*owning=*/ false>
     },
     record_type);
 
-  return detail::make_result<Strategy>(
+  return detail::select_deserialization_result<Strategy>(
     with_diagnostics<Record, diagnostics</*owning=*/ false>>{
       /*value=*/report.issues.empty() || policy.partial
         ? std::move(value)
@@ -853,29 +857,30 @@ deserialization_result<Record, Strategy, /*owning=*/ true>
       /*strategy=*/strategy,
     }(record_type, std::move(*parsed));
   } else {
-    return detail::make_result<Strategy>(with_diagnostics<Record>{
-      /*value=*/compat::nullopt,
-      /*diagnostics=*/{
-        /*policy=*/{
-          /*tolerance=*/0 >= strategy.tolerance
-            ? 0
-            : static_cast<std::size_t>(strategy.tolerance),
-          /*partial=*/static_cast<bool>(strategy.partial),
-          /*extra=*/strategy.extra,
+    return detail::select_deserialization_result<Strategy>(
+      with_diagnostics<Record>{
+        /*value=*/compat::nullopt,
+        /*diagnostics=*/{
+          /*policy=*/{
+            /*tolerance=*/0 >= strategy.tolerance
+              ? 0
+              : static_cast<std::size_t>(strategy.tolerance),
+            /*partial=*/static_cast<bool>(strategy.partial),
+            /*extra=*/strategy.extra,
+          },
+          /*tree=*/::ryml::Tree{
+            /*node_capacity=*/0,
+            /*arena_capacity=*/0,
+          },
+          /*issues=*/{
+            detail::make_issue(issue::code::parse_error,
+              issue::kind::unknown,
+              ::ryml::ConstNodeRef{},
+              {}),
+          },
+          /*parse_message=*/std::move(parsed.error()),
         },
-        /*tree=*/::ryml::Tree{
-          /*node_capacity=*/0,
-          /*arena_capacity=*/0,
-        },
-        /*issues=*/{
-          detail::make_issue(issue::code::parse_error,
-            issue::kind::unknown,
-            ::ryml::ConstNodeRef{},
-            {}),
-        },
-        /*parse_message=*/std::move(parsed.error()),
-      },
-    });
+      });
   }
 }
 

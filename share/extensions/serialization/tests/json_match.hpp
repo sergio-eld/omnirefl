@@ -48,19 +48,24 @@ inline testing::AssertionResult match_json_nodes(::ryml::ConstNodeRef expected,
   return testing::AssertionSuccess();
 }
 
+// Compare an already-parsed node against a readable JSON or YAML document.
+inline testing::AssertionResult matches_node(std::string expected,
+  ::ryml::ConstNodeRef actual) {
+  const auto expected_tree = omni::ryml::parse(std::move(expected));
+  if (!expected_tree)
+    return testing::AssertionFailure() << "Invalid expected document: "
+      << expected_tree.error();
+  return match_json_nodes(expected_tree->crootref(), actual, "");
+}
+
 // Actual output may be JSON or YAML; the expected document is written as JSON.
 inline testing::AssertionResult matches_json(std::string expected,
   std::string actual) {
-  const auto expected_tree = omni::ryml::parse(std::move(expected));
-  if (!expected_tree)
-    return testing::AssertionFailure() << "Invalid expected JSON: "
-      << expected_tree.error();
   const auto actual_tree = omni::ryml::parse(std::move(actual));
   if (!actual_tree)
     return testing::AssertionFailure() << "Invalid output: "
       << actual_tree.error();
-  return match_json_nodes(
-    expected_tree->crootref(), actual_tree->crootref(), "");
+  return matches_node(std::move(expected), actual_tree->crootref());
 }
 
 } // namespace serialization_test

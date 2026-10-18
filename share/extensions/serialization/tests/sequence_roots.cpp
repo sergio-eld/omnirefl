@@ -15,7 +15,7 @@ struct pixel_sample {
 
 TEST(serialization_sequence_roots, discovers_nested_record_elements) {
   EXPECT_TRUE(serialization_test::matches_json(
-    R"([[{"column":7,"alpha":0.5}]])", omni::ryml::as_json(
+    R"([[{"column": 7, "alpha": 0.5}]])", omni::ryml::as_json(
       std::vector<std::vector<pixel_sample>>{{pixel_sample{7, 0.5}}})));
 }
 

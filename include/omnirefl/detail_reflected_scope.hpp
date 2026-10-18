@@ -44,7 +44,7 @@ using _meta = //< Internal convenience accessor for generated metadata.
     compat::decay_t<T>>;
 
 template <typename Pointer, typename Record, typename... Argument>
-constexpr auto _invoke_bound_function(std::true_type,
+constexpr auto _invoke_bound_function(/*is_member_function=*/std::true_type,
   Pointer f,
   Record &record,
   Argument &&...argument)
@@ -55,7 +55,7 @@ constexpr auto _invoke_bound_function(std::true_type,
 }
 
 template <typename Pointer, typename Record, typename... Argument>
-constexpr auto _invoke_bound_function(std::false_type,
+constexpr auto _invoke_bound_function(/*is_member_function=*/std::false_type,
   Pointer f,
   Record &,
   Argument &&...argument)
@@ -308,7 +308,7 @@ struct _get_t<Index, TargetField, Fields, Target, false> {
   }
 
   private:
-  static Target from(Fields &fields, std::true_type) {
+  static Target from(Fields &fields, /*same_field_name=*/std::true_type) {
     using source = decltype(std::declval<field &&>().value());
     return _construct_field_t<TargetField,
       field,
@@ -317,7 +317,7 @@ struct _get_t<Index, TargetField, Fields, Target, false> {
         source>::value>::from(std::get<Index>(fields));
   }
 
-  static Target from(Fields &fields, std::false_type) {
+  static Target from(Fields &fields, /*same_field_name=*/std::false_type) {
     return _get_t<Index + 1,
       TargetField,
       Fields,

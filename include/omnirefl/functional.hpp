@@ -39,13 +39,19 @@ namespace fn {
 namespace detail {
 
 template <typename WhenTrue, typename WhenFalse>
-constexpr auto select(std::true_type, WhenTrue &when_true, WhenFalse &, int)
+constexpr auto select(/*condition=*/std::true_type,
+  WhenTrue &when_true,
+  WhenFalse &,
+  int)
   -> decltype(compat::invoke(std::move(when_true))) {
   return compat::invoke(std::move(when_true));
 }
 
 template <typename WhenTrue, typename WhenFalse>
-constexpr auto select(std::false_type, WhenTrue &, WhenFalse &when_false, int)
+constexpr auto select(/*condition=*/std::false_type,
+  WhenTrue &,
+  WhenFalse &when_false,
+  int)
   -> decltype(compat::invoke(std::move(when_false))) {
   return compat::invoke(std::move(when_false));
 }
