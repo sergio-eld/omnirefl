@@ -18,8 +18,8 @@ const highlightTheme = {
 }
 const sections = [
   'introduction',
-  'sneak-peek',
   'experience',
+  'sneak-peek',
   'status',
   'install',
   'examples-tests-and-benchmarks',
@@ -51,16 +51,9 @@ const markdown = new Marked(markedHighlight({
   },
 }))
 
-const slogan = source => {
-  const paragraph = markdown
-    .lexer(extract(source, 'introduction'))
-    .find(token => 'paragraph' === token.type)
-
-  if (!paragraph)
-    throw new Error('README introduction is missing its slogan')
-
-  return paragraph.text
-}
+// Metadata uses plain text, without the README's markup and compatibility footnote.
+const slogan =
+  'A C++ reflection tool built for a seamless experience without macros or UB.'
 
 const renderReadme = async source => {
   const rendered = (await Promise.all(sections.map(async section =>
@@ -118,7 +111,7 @@ const readmePlugin = () => ({
 
       return html
         .replace(highlightPlaceholder, highlight)
-        .replaceAll(sloganPlaceholder, slogan(source))
+        .replaceAll(sloganPlaceholder, slogan)
         .replace(placeholder, await renderReadme(source))
     },
   },
