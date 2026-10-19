@@ -168,4 +168,38 @@ RUN cmake -S "${LLVM_SOURCE_DIR}/runtimes" -B /tmp/cxx-headers -GNinja \
     && test -f "${resource_include}/c++/v1/cxxabi.h" \
     && rm -rf /tmp/cxx-headers
 
+# Cosmopolitan 4.0.2's libcosmo.a can overrun a stack array in munmap() on
+# macOS when RLIMIT_STACK is raised, as CMake does for its children. Rebuild
+# only that archive member from the matching release with the fix applied,
+# using its flags from libc/intrin/BUILD.mk. Products link the default-mode
+# archive. This runs after LLVM to keep those layers cached; LLVM's build
+# tools are never shipped.
+COPY docker/cosmopolitan.patch /tmp/cosmopolitan.patch
+RUN git clone --quiet --depth 1 --branch "${COSMOPOLITAN_VERSION}" \
+      --filter=blob:none --sparse \
+      https://github.com/jart/cosmopolitan.git /tmp/cosmopolitan \
+    && git -C /tmp/cosmopolitan sparse-checkout set \
+      libc ape third_party/nsync third_party/dlmalloc third_party/intel \
+      third_party/aarch64 third_party/compiler_rt \
+    # FIXME: [external] Remove after upstream fixes stale map tracking.
+    # TODO: Add the upstream issue/reproducer link once published.
+    && git -C /tmp/cosmopolitan apply /tmp/cosmopolitan.patch \
+    && for arch in x86_64 aarch64; do \
+         flags="-ffreestanding -fno-sanitize=all -fno-stack-protector"; \
+         flags="${flags} -ffunction-sections"; \
+         if [ x86_64 = "${arch}" ]; then \
+           flags="${flags} -mgeneral-regs-only"; \
+         fi; \
+         mkdir "/tmp/cosmopolitan/${arch}" \
+         && "${arch}-unknown-cosmo-cc" -std=gnu23 -O2 -g -D_COSMO_SOURCE \
+           ${flags} -iquote /tmp/cosmopolitan \
+           -c /tmp/cosmopolitan/libc/intrin/mmap.c \
+           -o "/tmp/cosmopolitan/${arch}/mmap.o" \
+         && "${arch}-unknown-cosmo-ar" rs \
+           "${COSMOPOLITAN_ROOT}/${arch}-linux-cosmo/lib/libcosmo.a" \
+           "/tmp/cosmopolitan/${arch}/mmap.o" \
+         || exit 1; \
+       done \
+    && rm -rf /tmp/cosmopolitan /tmp/cosmopolitan.patch
+
 CMD ["bash"]

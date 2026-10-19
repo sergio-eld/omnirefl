@@ -1,0 +1,40 @@
+Subject: [PATCH] Untrack stale maps when the kernel returns a non-fixed mapping
+
+Cosmopolitan 4.0.2 estimates the main stack from RLIMIT_STACK and tracks an
+additional 1 MiB guard below it. On macOS arm64, raising the soft stack limit
+can put that estimated guard outside the kernel's actual stack reservation.
+CMake raises this limit to the hard limit at startup on macOS.
+
+The kernel can return non-fixed mappings inside this estimated guard.
+Inserting them without removing stale tracking entries creates overlapping
+maps. A later munmap() can then partially overlap more than two entries,
+violating __muntrack()'s bound and overrunning __munmap()'s Map temp[2].
+
+Untrack the returned range before inserting every successful non-Windows
+mapping, as fixed mappings already do. Windows keeps its reservation path.
+
+TODO: [external] Drop this downstream patch after an upstream fix is released.
+TODO: Add the upstream issue/reproducer link once published.
+---
+ libc/intrin/mmap.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/libc/intrin/mmap.c b/libc/intrin/mmap.c
+--- a/libc/intrin/mmap.c
++++ b/libc/intrin/mmap.c
+@@ -851,9 +851,12 @@ static void *__mmap_impl(char *addr, size_t size, int prot, int flags, int fd,
+   if (!IsWindows()) {
+     struct Map *deleted = 0;
+     __maps_lock();
+-    if (fixedmode)
+-      if (__muntrack(res.addr, size, &deleted, 0, 0))
+-        STRACE("memtrack compromised by hole punch oom");
++    // keep tracking consistent with the kernel, including non-fixed maps
++    // that overlap an inaccurately estimated main-stack guard. overlapping
++    // entries can overflow the two-element scratch array that __munmap()
++    // passes to __muntrack()
++    if (__muntrack(res.addr, size, &deleted, 0, 0))
++      STRACE("memtrack compromised by hole punch oom");
+     __maps_insert(map);
+     __maps_unlock();
+     __maps_free_all(deleted);
