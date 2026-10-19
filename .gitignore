@@ -9,4 +9,4 @@ sample/build*/
 sample/compile_commands.json
 site/dist/
 site/node_modules/
-/share/examples/scratch/
+/extras/examples/scratch/

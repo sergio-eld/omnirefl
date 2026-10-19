@@ -1,12 +1,12 @@
 {
-  "name": "Bundled examples - latest release (Ubuntu 24.04)",
+  "name": "Examples - latest release (Ubuntu 24.04)",
   "dockerComposeFile": "compose.yml",
   "service": "examples",
   "runServices": [
     "examples"
   ],
   "shutdownAction": "stopCompose",
-  "workspaceFolder": "/workspaces/omnirefl/share",
+  "workspaceFolder": "/workspaces/omnirefl/extras",
   "initializeCommand": [
     "bash",
     "${localWorkspaceFolder}/.devcontainer/examples/prepare.sh",

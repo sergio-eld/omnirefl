@@ -204,9 +204,9 @@ elseif(ENABLE_BENCH OR ENABLE_TESTING)
     set(BUILD_TESTING ${ENABLE_TESTING})
     set(BUILD_EXAMPLES ${ENABLE_TESTING})
     set(BUILD_BENCHMARKS ${ENABLE_BENCH})
-    add_subdirectory(share)
+    add_subdirectory(extras)
     if(ENABLE_TESTING)
-        add_subdirectory(share/tests/internal/std_compat)
+        add_subdirectory(extras/tests/internal/std_compat)
     endif()
 endif()
 
@@ -387,13 +387,6 @@ if(ENABLE_PACKAGE)
         "${cli11_proj_SOURCE_DIR}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses"
         RENAME "CLI11.txt")
-
-    install(DIRECTORY share/
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
-        PATTERN "internal" EXCLUDE
-        PATTERN "scratch" EXCLUDE
-        PATTERN "build*" EXCLUDE
-        PATTERN "CMakeUserPresets.json" EXCLUDE)
 
     install(EXPORT "${PROJECT_NAME}Targets"
         FILE "${PROJECT_NAME}Targets.cmake"

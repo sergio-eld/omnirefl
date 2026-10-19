@@ -10,7 +10,7 @@
 # Windows package tests intentionally install under `C:/with space` to catch
 # path quoting regressions.
 # When invoking `docker.exe compose` from WSL, export PACKAGE_DIR,
-# TEST_RESULTS_DIR, and TOOLCHAIN through WSLENV. Windows containers cannot bind
+# EXTRAS_DIR, TEST_RESULTS_DIR, and TOOLCHAIN through WSLENV. Windows containers cannot bind
 # mount WSL UNC paths, so package/results directories must be on a Windows drive.
 #
 # As of this writing, the committed .env file is the single source of truth for
@@ -69,6 +69,12 @@ x-test-linux-command: &test-linux-command |
     exit 1
   fi
   package=$$1
+  set -- /extras/omnirefl-extras-*.tar.gz
+  if [ "$$#" -ne 1 ] || [ ! -f "$$1" ]; then
+    echo 'Expected exactly one extras archive in /extras' >&2
+    exit 1
+  fi
+  extras=$$1
   set --
   case $${TOOLCHAIN} in
     gcc) export CC=gcc; export CXX=g++ ;;
@@ -83,11 +89,24 @@ x-test-linux-command: &test-linux-command |
 
   exec "$$PACKAGE_TEST_SHELL" /runner/test_package.sh \
     --package "$$package" \
+    --extras "$$extras" \
     --name "$$TEST_NAME" \
     --results /results \
     "$$@"
 
 services:
+  package-extras:
+    <<: *build-musl-ucrt-image
+    volumes:
+      - ./:/src:ro
+      - ${EXTRAS_DIR:-./artifacts/packages/extras}:/extras:rw
+    command:
+      - cmake
+      - -DOMNIREFL_PACKAGE_COMMIT=${PACKAGE_COMMIT:-}
+      - -DOUTPUT_DIR=/extras
+      - -P
+      - /src/extras/package.cmake
+
   build-cosmo:
     # Keep COSMOPOLITAN_* and cosmopolitan.cmake aligned with the upstream
     # toolchain name; project-owned services, images, paths, and packages use
@@ -231,6 +250,7 @@ services:
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
+      - ${EXTRAS_DIR:-./artifacts/packages/extras}:/extras:ro
       - ./ci:/runner:ro
     working_dir: /tmp/build
     entrypoint:
@@ -259,6 +279,7 @@ services:
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/ubuntu-${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
+      - ${EXTRAS_DIR:-./artifacts/packages/extras}:/extras:ro
       - ./ci:/runner:ro
     environment:
       TOOLCHAIN: ${TOOLCHAIN:-gcc}
@@ -292,6 +313,7 @@ services:
       - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/benchmarks}:/results:rw
       - ${BUILD_DIR:-./artifacts/benchmark-build}:/benchmark:rw
+      - ${EXTRAS_DIR:-./artifacts/packages/extras}:/extras:ro
       - ./ci:/runner:ro
     working_dir: /benchmark
     entrypoint:
@@ -323,6 +345,7 @@ services:
 
         exec /runner/benchmark_package.sh \
           --install "$$install" \
+          --extras /extras/omnirefl-extras-*.tar.gz \
           --build /benchmark/run/build \
           --results /results \
           --name "$${BENCHMARK_NAME:-linux-$$(uname -m)-$$package_runtime-$${TOOLCHAIN:-gcc}}"
@@ -343,6 +366,7 @@ services:
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msvc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
+      - ${EXTRAS_DIR:-./artifacts/packages/extras}:C:/extras:ro
       - ./ci:C:/runner:ro
       - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:C:/install:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msvc}}:C:/test:rw
@@ -369,6 +393,9 @@ services:
         })
         if (1 -ne $$packages.Count) { throw 'expected one package in C:/install' }
 
+        $$extras = @(ls -Path 'C:/extras' -Filter 'omnirefl-extras-*.tar.gz' -File)
+        if (1 -ne $$extras.Count) { throw 'expected one extras archive in C:/extras' }
+
         switch ($$env:TOOLCHAIN) {
           'msvc' {}
           'clang-cl' {
@@ -381,6 +408,7 @@ services:
 
         & C:/runner/test_package.ps1 `
           -Package $$packages[0].FullName `
+          -Extras $$extras[0].FullName `
           -Name $$env:TEST_NAME `
           -Results C:/test
         exit $$LASTEXITCODE
@@ -399,6 +427,7 @@ services:
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msys2-mingw}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
+      - ${EXTRAS_DIR:-./artifacts/packages/extras}:C:/extras:ro
       - ./ci:C:/runner:ro
       - ${PACKAGE_DIR:-./artifacts/packages/ucrt}:C:/install:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/windows-${TOOLCHAIN:-msys2-mingw}}:C:/test:rw
@@ -428,5 +457,6 @@ services:
 
         exec bash /c/runner/test_package.sh \
           --package "$${packages[0]}" \
+          --extras /c/extras/omnirefl-extras-*.tar.gz \
           --name "$$TEST_NAME" \
           --results /c/test

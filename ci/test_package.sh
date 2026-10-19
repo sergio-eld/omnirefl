@@ -3,6 +3,7 @@
 set -euo pipefail
 
 package=
+extras=
 name=
 results=
 cmake_arg=
@@ -11,6 +12,10 @@ while [ "$#" -gt 0 ]; do
   case $1 in
     --package)
       package=$2
+      shift 2
+      ;;
+    --extras)
+      extras=$2
       shift 2
       ;;
     --name)
@@ -50,6 +55,10 @@ if [ -z "$results" ]; then
 fi
 if [ ! -f "$package" ]; then
   printf 'package does not exist: %s\n' "$package" >&2
+  exit 2
+fi
+if [ -z "$extras" ] || [ ! -f "$extras" ]; then
+  printf 'extras archive is required: %s\n' "$extras" >&2
   exit 2
 fi
 
@@ -147,8 +156,6 @@ esac
 
 readonly install
 readonly config="$install/lib/cmake/omnirefl"
-readonly packaged_examples="$install/share/omnirefl/examples"
-readonly packaged_tests="$install/share/omnirefl/tests"
 readonly parallel=$(getconf _NPROCESSORS_ONLN 2>/dev/null \
   || sysctl -n hw.logicalcpu 2>/dev/null \
   || printf '1\n')
@@ -157,8 +164,6 @@ test -x "$install/bin/omnirefl$executable_suffix"
 test -x "$install/bin/ccdb_query$executable_suffix"
 test -d "$install/include/omnirefl"
 test -d "$config"
-test -d "$packaged_examples"
-test -d "$packaged_tests"
 
 for tool in omnirefl ccdb_query; do
   if [ "$package_runtime" = cosmo ] && [ -n "$executable_suffix" ]; then
@@ -184,7 +189,9 @@ if [ "$package_runtime" = cosmo ] && [ -z "$executable_suffix" ]; then
     tee "$results/ccdb-query-payload-help.log"
 fi
 
-cp -R "$install/share/omnirefl"/. "$work/with space/"
+tar -xzf "$extras" -C "$source" --strip-components=1
+test -d "$source/examples"
+test -d "$source/tests"
 
 set -- cmake \
   -S "$source" \

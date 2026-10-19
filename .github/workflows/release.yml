@@ -19,6 +19,7 @@ env:
     linux-aarch64-musl
     windows-x86_64-ucrt
     cosmo-universal
+    extras
   RELEASE_SYMBOL_TARGETS: >-
     cosmo-universal
     linux-x86_64-musl
@@ -235,6 +236,7 @@ jobs:
               "./reusable-artifacts/packages/packages-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl-linux-aarch64-musl-$version-${GITHUB_SHA::12}.tar.gz" \
               "./reusable-artifacts/packages/packages-windows-x86_64-ucrt-${GITHUB_SHA::12}/omnirefl-windows-x86_64-ucrt-$version-${GITHUB_SHA::12}.zip" \
               "./reusable-artifacts/packages/packages-cosmo-universal-${GITHUB_SHA::12}/omnirefl-cosmo-universal-$version-${GITHUB_SHA::12}.tar.gz" \
+              "./reusable-artifacts/packages/packages-extras-${GITHUB_SHA::12}/omnirefl-extras-$version-${GITHUB_SHA::12}.tar.gz" \
               "./reusable-artifacts/symbols/symbols-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
               "./reusable-artifacts/symbols/symbols-linux-x86_64-musl-${GITHUB_SHA::12}/ccdb_query.debug" \
               "./reusable-artifacts/symbols/symbols-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
@@ -411,6 +413,7 @@ jobs:
             "omnirefl-linux-aarch64-musl-${version}-${short_sha}.tar.gz"
             "omnirefl-windows-x86_64-ucrt-${version}-${short_sha}.zip"
             "omnirefl-cosmo-universal-${version}-${short_sha}.tar.gz"
+            "omnirefl-extras-${version}-${short_sha}.tar.gz"
           )
 
           for package in "${packages[@]}"; do
