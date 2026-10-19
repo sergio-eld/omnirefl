@@ -1,6 +1,7 @@
 build*/
 artifacts/
 .cache/
+__pycache__/
 .nvim-cmake/
 compile_commands.json
 CMakeUserPresets.json
