@@ -296,7 +296,16 @@ containers.
 <details>
 <summary>CMake FetchContent</summary>
 
-See the [landing page](https://omnirefl.io/#install) for the drop-in CMake snippet.
+Before `find_package`, acquire Omnirefl with:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(omnirefl
+    GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
+    GIT_TAG v0.0.5
+    SOURCE_SUBDIR cmake/integration)
+FetchContent_MakeAvailable(omnirefl)
+```
 
 Requires Git and CMake 3.19 or newer. Keep the declaration name `omnirefl`.
 The FetchContent integration is available starting with `v0.0.6`.
