@@ -1,18 +1,7 @@
 # Conan 2
 
-In your consumer's `conanfile.txt`:
-
-```ini
-[requires]
-omnirefl/0.0.5
-
-[generators]
-CMakeDeps
-CMakeToolchain
-```
-
-The recipe downloads and verifies the versioned Cosmo universal archive.
-To build a commit instead, add:
+For consumer requirements, see [Project integration](../README.md#project-integration).
+To build a commit instead of downloading a release, add to `conanfile.txt`:
 
 ```ini
 [options]

@@ -17,7 +17,7 @@ class OmnireflConan(ConanFile):
     license = "MIT"
     homepage = "https://omnirefl.io"
     url = "https://github.com/sergio-eld/omnirefl"
-    description = "C++ reflection through source instrumentation"
+    description = "A C++ reflection tool built for a seamless experience without macros or UB."
     required_conan_version = ">=2.0"
 
     # Universal executables and public headers do not depend on consumer settings.
