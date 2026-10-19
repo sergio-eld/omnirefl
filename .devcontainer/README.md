@@ -51,8 +51,6 @@ cpack --preset cosmo
 
 The package is written to `artifacts/devcontainer/omnirefl.tar.gz`. The image's
 prebuilt x86_64 package is at `/opt/omnirefl-packages/omnirefl.tar.gz`.
-Create the separate extras archive with `cmake -P extras/package.cmake`;
-it is written to `artifacts/packages/extras/`.
 To build a universal package from inside the development container:
 
 ```sh
