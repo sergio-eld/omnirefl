@@ -3,9 +3,12 @@
 #pragma GCC diagnostic push
 // GCC 14 reports false null-this warnings in Clang's LazyOffsetPtr at -O2.
 #pragma GCC diagnostic ignored "-Wnonnull"
+#include <clang/Options/Options.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
 #pragma GCC diagnostic pop
+
+#include <llvm/Option/ArgList.h>
 
 #include <algorithm>
 #include <cctype>
@@ -96,6 +99,29 @@ struct options {
   std::string output_contains;
 };
 
+std::string output_path(const clang::tooling::CompileCommand &command) {
+  if (!command.Output.empty())
+    return command.Output;
+
+  // The optional output can also be spelled -o PATH or -oPATH. Use Clang's
+  // option parser so unrelated arguments are not mistaken for output paths.
+  const auto argv = command.CommandLine //
+    | std::views::drop(1)
+    | std::views::transform([](std::string_view s) { return s.data(); })
+    | std::ranges::to<std::vector>();
+
+  unsigned missing_index = 0, missing_count = 0;
+  // Discover outputs only: other compiler dialects and commands without an
+  // explicit output are valid database entries, not parsing errors to report.
+  return clang::getDriverOptTable()
+    .ParseArgs(argv,
+      missing_index,
+      missing_count,
+      llvm::opt::Visibility{clang::options::ClangOption})
+    .getLastArgValue(clang::options::OPT_o)
+    .str();
+}
+
 std::expected<clang::tooling::CompileCommand, std::string> resolve_command(
   const options &o) {
   std::expected db = load_compile_db(o.compile_commands);
@@ -140,7 +166,8 @@ std::expected<clang::tooling::CompileCommand, std::string> resolve_command(
   std::vector resolved = commands //
     | std::views::filter([&output_contains, normalize_path](
                            const clang::tooling::CompileCommand &c) {
-        return normalize_path(c.Output).contains(output_contains);
+        return output_contains.empty()
+          || normalize_path(output_path(c)).contains(output_contains);
       })
     | std::ranges::to<std::vector>();
 
