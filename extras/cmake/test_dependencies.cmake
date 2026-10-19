@@ -37,7 +37,13 @@ FetchContent_Declare(mpark_variant
 
 set(_dependencies_parent_folder "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "Dependencies")
+# Dependencies keep their own warning policy; project targets retain ours.
+get_directory_property(_project_compile_options COMPILE_OPTIONS)
+set(_dependency_compile_options ${_project_compile_options})
+list(REMOVE_ITEM _dependency_compile_options -Wall -Wextra -pedantic -Werror /W4 /WX)
+set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "${_dependency_compile_options}")
 FetchContent_MakeAvailable(tl_expected tl_optional mpark_variant googletest)
+set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "${_project_compile_options}")
 # An empty parent must unset CMAKE_FOLDER, not create an empty IDE group.
 set(CMAKE_FOLDER ${_dependencies_parent_folder})
 foreach(_dependency tl_expected tl_optional mpark_variant googletest)

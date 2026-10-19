@@ -10,15 +10,15 @@ have separate checkouts.
 
 ## Examples (Ubuntu 24.04)
 
-- **Bundled examples - latest release** (default): use the latest
+- **Examples - latest release** (default): use the latest
   GitHub release.
-- **Bundled examples - current source**: use this checkout, including
+- **Examples - current source**: use this checkout, including
   local changes. After changing the library, rebuild the container from the
   command palette: **Codespaces: Rebuild Container** in the browser, or
   **Dev Containers: Rebuild Container** locally. This rebuilds and installs the
   package. Changes to example files only need a normal build.
 
-The Explorer opens `share/`, and the terminal opens `share/build/`. Startup
+The Explorer opens `extras/`, and the terminal opens `extras/build/`. Startup
 configures the examples; select the `examples` preset to build. To also enable
 tests and benchmarks, run in that terminal:
 
@@ -34,7 +34,8 @@ repository through WSL.
 ## Development (Cosmopolitan)
 
 **Development** opens the repository and includes a prebuilt x86_64
-package. Tests, benchmarks, and extensions are enabled.
+package. Examples, tests, and benchmarks build directly from `extras/` in the
+checkout; no extras archive is needed. Extensions are enabled.
 
 Build from the repository root:
 

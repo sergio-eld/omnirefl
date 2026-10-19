@@ -28,7 +28,7 @@ required; generated metadata remains a build artifact.
 <!-- pages:sneak-peek:start -->
 ## Sneak Peek
 
-The [complete runnable example](share/examples/sneak_peek/main.cpp) implements the
+The [complete runnable example](extras/examples/sneak_peek/main.cpp) implements the
 visitor and shows how to write reflected fields. Its setup and model are below:
 
 ```cpp
@@ -186,10 +186,10 @@ before: depth=42 sensor=108 name=before
 after:  depth=815 sensor=108 name=oceanic
 ```
 
-This example is included in the installed package; see
+This example is available in the extras archive; see
 [Examples, Tests and Benchmarks](#examples-tests-and-benchmarks).
 
-The [comprehensive guide](share/examples/comprehensive_guide/comprehensive_guide.cpp)
+The [comprehensive guide](extras/examples/comprehensive_guide/comprehensive_guide.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 
@@ -214,7 +214,7 @@ const auto result = tuple
   | omni::fn::foldl(combine, initial);
 ```
 
-See the [functional tests](share/tests/functional/test.cpp) for detailed examples.
+See the [functional tests](extras/tests/functional/test.cpp) for detailed examples.
 
 ## Reflection Utilities
 
@@ -226,7 +226,7 @@ for each reflected type and are available only within reflected scopes:
   present and constructible; additional source fields are ignored. Generated
   support currently requires an aggregate record without bases or anonymous
   aggregate members, and excludes unions. See the
-  [example](share/tests/tool/aggregate_into/test.cpp).
+  [example](extras/tests/tool/aggregate_into/test.cpp).
 
 ## Direct CLI Usage
 
@@ -296,7 +296,16 @@ containers.
 <details>
 <summary>CMake FetchContent</summary>
 
-See the [landing page](https://omnirefl.io/#install) for the drop-in CMake snippet.
+Before `find_package`, acquire Omnirefl with:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(omnirefl
+    GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
+    GIT_TAG v0.0.5
+    SOURCE_SUBDIR cmake/integration)
+FetchContent_MakeAvailable(omnirefl)
+```
 
 Requires Git and CMake 3.19 or newer. Keep the declaration name `omnirefl`.
 The FetchContent integration is available starting with `v0.0.6`.
@@ -421,51 +430,43 @@ shown above.
 For an examples sandbox in VS Code or GitHub Codespaces, see the
 [Dev Container setup](.devcontainer/README.md).
 
-The installation includes tests, examples, and benchmarks in `share/omnirefl`.
-You may configure the whole directory out of source, or any
-`share/omnirefl/examples/<folder>` as a standalone project.
+Download `omnirefl-extras-<version>-<commit>.tar.gz` from the
+[release matching your Omnirefl package](https://github.com/sergio-eld/omnirefl/releases).
+This platform-independent archive contains the examples, tests, and benchmarks.
 
 Examples, tests, and benchmarks are enabled by default; disable a category with
 `-DBUILD_EXAMPLES=OFF`, `-DBUILD_TESTING=OFF`, or `-DBUILD_BENCHMARKS=OFF`.
 Unsupported examples are skipped with a status message.
 
 CI compares instrumentation and Release object-build times using the
-[benchmark baseline](share/benchmarks/instrumentation/baseline_test.cpp).
+[benchmark baseline](extras/benchmarks/instrumentation/baseline_test.cpp).
 
-Alternatively, download and unpack the Cosmopolitan archive from the
-[latest release](https://github.com/sergio-eld/omnirefl/releases/latest)
-into `./omnirefl`:
+With Omnirefl unpacked into `./omnirefl`, configure the extras out of source:
 
-```bash
-mkdir -p omnirefl
-curl -fL "$(curl -fsSL \
-  https://api.github.com/repos/sergio-eld/omnirefl/releases/latest \
-  | sed -n 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')" \
-  | tar -xz -C omnirefl --strip-components=1
-```
-
-```bash
-# Use /usr when installed system-wide from a Debian package.
-prefix="$PWD/omnirefl"
-
-mkdir build && cd build
-cmake "$prefix/share/omnirefl" -GNinja \
-  -Domnirefl_ROOT="$prefix" \
+```sh
+mkdir -p extras
+tar -xzf omnirefl-extras-*.tar.gz -C extras --strip-components=1
+cmake -S extras -B extras/build -GNinja -Domnirefl_ROOT="$PWD/omnirefl" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON # Required by Omnirefl's CMake integration.
-cmake --build .
-ctest --timeout 600 --output-on-failure --no-tests=error
+cmake --build extras/build --parallel
+ctest --test-dir extras/build --timeout 600 --output-on-failure --no-tests=error
 ```
 
-Each `share/omnirefl/examples/<folder>` directory is self-contained. Configure one
-independently, such as `share/omnirefl/examples/sneak_peek`, or copy it into
+Omit `omnirefl_ROOT` when the package is installed system-wide.
+
+From a source checkout, the development build uses `extras/` directly; no
+archive is needed. See the [development container](.devcontainer/README.md#development-cosmopolitan).
+
+Each `extras/examples/<folder>` directory is self-contained. Configure one
+independently, such as `extras/examples/sneak_peek`, or copy it into
 your own workspace. The Sneak Peek requires CMake 3.20 and a configured
 C++23 toolchain.
 
 Extension examples, tests, and benchmarks are grouped under
-`share/omnirefl/extensions`:
+`extras/extensions`:
 
 - `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
-  See the [standalone example](share/extensions/serialization/examples/ryml/main.cpp).
+  See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
 <!-- pages:examples-tests-and-benchmarks:end -->
 
 <!-- pages:performance:start -->
@@ -650,7 +651,7 @@ model: reflected types must be nameable before their source declarations. See
 - Reflection queries are valid only inside the reflected scope. The tool reports
   out-of-scope queries as errors on a best-effort basis.
 - [Deprecated public fields can emit compiler deprecation diagnostics while
-  their metadata is formed](share/tests/tool/regressions/deprecated_public_field.cpp),
+  their metadata is formed](extras/tests/tool/regressions/deprecated_public_field.cpp),
   before `is_deprecated()` can filter them.
 - Anonymous unions are not reflected correctly.
 - Compiler-packed misaligned raw arrays have no safe whole-field accessor; use

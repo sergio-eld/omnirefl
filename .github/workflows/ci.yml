@@ -277,6 +277,31 @@ jobs:
 
           echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
 
+  build-package-extras:
+    name: Package extras
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Resolve Short SHA
+        id: commit
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - name: Package Extras
+        run: >-
+          cmake -DOMNIREFL_PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }}
+          -P extras/package.cmake
+      - name: Upload Extras Archive
+        uses: actions/upload-artifact@v6
+        with:
+          name: packages-extras-${{ steps.commit.outputs.short_sha }}
+          path: artifacts/packages/extras/*.tar.gz
+          if-no-files-found: error
+          overwrite: true
+
   build-package-cosmo:
     name: Build package / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
@@ -417,6 +442,7 @@ jobs:
     needs:
       - build-package-cosmo
       - validate-ci-matrix
+      - build-package-extras
     permissions:
       actions: read
       contents: read
@@ -474,6 +500,9 @@ jobs:
           download_artifact \
             packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }} \
             ./artifacts/packages/current
+          download_artifact \
+            packages-extras-${{ steps.commit.outputs.short_sha }} \
+            ./artifacts/packages/extras
 
       - name: Prepare Docker Image
         run: |
@@ -522,6 +551,7 @@ jobs:
     needs:
       - build-package-musl
       - validate-ci-matrix
+      - build-package-extras
     permissions:
       actions: read
       contents: read
@@ -538,6 +568,7 @@ jobs:
     needs:
       - build-package-cosmo
       - validate-ci-matrix
+      - build-package-extras
     permissions:
       actions: read
       contents: read
@@ -555,6 +586,12 @@ jobs:
         run: |
           echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
+      - name: Download Extras
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-extras-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/extras
+
       - name: Download Cosmo Package
         uses: actions/download-artifact@v8
         with:
@@ -570,6 +607,7 @@ jobs:
           test 1 -eq "${#packages[@]}"
           ci/test_package.sh \
             --package "${packages[0]}" \
+            --extras artifacts/packages/extras/omnirefl-extras-*.tar.gz \
             --name "${{ matrix.runner }}-${{ matrix.arch }}" \
             --results "$results"
 
@@ -589,6 +627,7 @@ jobs:
       - changes
       - build-package-cosmo
       - validate-ci-matrix
+      - build-package-extras
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     strategy:
       fail-fast: false
@@ -603,6 +642,12 @@ jobs:
       - name: Resolve Short SHA
         id: commit
         run: '"short_sha=$($env:GITHUB_SHA.Substring(0, 12))" >> $env:GITHUB_OUTPUT'
+
+      - name: Download Extras
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-extras-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/extras
 
       - name: Download Package
         uses: actions/download-artifact@v8
@@ -651,7 +696,10 @@ jobs:
 
           $archives = @(ls 'artifacts/packages/current' -r -File)
           if (1 -ne $archives.Count) { throw 'expected one package archive' }
+          $extras = @(ls 'artifacts/packages/extras/omnirefl-extras-*.tar.gz' -File)
+          if (1 -ne $extras.Count) { throw 'expected one extras archive' }
           ./ci/test_package.ps1 -Package $archives[0].FullName `
+            -Extras $extras[0].FullName `
             -Name 'windows-${{ matrix.runtime }}-${{ matrix.toolchain }}' `
             -Results 'artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}'
 
@@ -682,6 +730,7 @@ jobs:
           test 1 -eq "${#packages[@]}"
           ci/test_package.sh \
             --package "${packages[0]}" \
+            --extras artifacts/packages/extras/omnirefl-extras-*.tar.gz \
             --name windows-${{ matrix.runtime }}-${{ matrix.toolchain }} \
             --results "$PWD/artifacts/test-results/windows-${{ matrix.runtime }}-${{ matrix.toolchain }}"
 
@@ -701,6 +750,7 @@ jobs:
       - changes
       - build-package-ucrt
       - validate-ci-matrix
+      - build-package-extras
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     strategy:
       fail-fast: false
@@ -719,6 +769,7 @@ jobs:
     needs:
       - build-package-cosmo
       - validate-ci-matrix
+      - build-package-extras
     permissions:
       actions: read
       contents: read
@@ -764,6 +815,12 @@ jobs:
           mkdir -p "$(dirname "$BENCHMARK_HISTORY")"
           mkdir -p ./artifacts/packages/${{ matrix.libc }}
 
+      - name: Download Extras
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-extras-${{ steps.commit.outputs.short_sha }}
+          path: ./artifacts/packages/extras
+
       - name: Download Package
         uses: actions/download-artifact@v8
         with:
@@ -808,6 +865,7 @@ jobs:
         run: |
           ci/benchmark_package.sh \
             --install "$OMNIREFL_INSTALL_ROOT" \
+            --extras artifacts/packages/extras/omnirefl-extras-*.tar.gz \
             --build "$BENCHMARK_BUILD" \
             --results "$BENCHMARK_RESULTS" \
             --name "$BENCHMARK_NAME"
@@ -873,6 +931,7 @@ jobs:
     needs:
       - build-package-musl
       - validate-ci-matrix
+      - build-package-extras
     permissions:
       actions: read
       contents: read
@@ -925,6 +984,7 @@ jobs:
       - test-package-macos
       - test-package-windows-cosmo
       - test-package-windows-ucrt
+      - build-package-extras
     permissions:
       contents: read
       actions: write

@@ -17,7 +17,7 @@ services:
     volumes:
       - ..:/workspaces/omnirefl
     # Docker creates this directory before VS Code can open a terminal there.
-    working_dir: /workspaces/omnirefl/share/build
+    working_dir: /workspaces/omnirefl/extras/build
     command: [sleep, infinity]
 
 volumes:

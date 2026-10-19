@@ -5,10 +5,10 @@ cd "$(dirname "$0")/../.."
 tar -xzf artifacts/devcontainer/omnirefl.tar.gz -C /usr/local --strip-components=1
 
 # Seed the ignored sandbox without replacing edits on subsequent starts.
-mkdir -p share/examples/scratch
+mkdir -p extras/examples/scratch
 
-if [ ! -e share/examples/scratch/CMakeLists.txt ]; then
-  cat > share/examples/scratch/CMakeLists.txt <<'EOF'
+if [ ! -e extras/examples/scratch/CMakeLists.txt ]; then
+  cat > extras/examples/scratch/CMakeLists.txt <<'EOF'
 # Local scratchpad, ignored by Git. Edit freely to experiment with reflection.
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 project(scratch LANGUAGES CXX)
@@ -25,8 +25,8 @@ omni_reflected_target(scratch)
 EOF
 fi
 
-if [ ! -e share/examples/scratch/field_names.hpp ]; then
-  cat > share/examples/scratch/field_names.hpp <<'EOF'
+if [ ! -e extras/examples/scratch/field_names.hpp ]; then
+  cat > extras/examples/scratch/field_names.hpp <<'EOF'
 // Local scratchpad, ignored by Git. Edit freely to experiment with reflection.
 #pragma once
 
@@ -53,8 +53,8 @@ struct field_names {
 EOF
 fi
 
-if [ ! -e share/examples/scratch/main.cpp ]; then
-  cat > share/examples/scratch/main.cpp <<'EOF'
+if [ ! -e extras/examples/scratch/main.cpp ]; then
+  cat > extras/examples/scratch/main.cpp <<'EOF'
 // Local scratchpad, ignored by Git. Edit freely to experiment with reflection.
 #include "field_names.hpp"
 
@@ -78,7 +78,7 @@ EOF
 fi
 
 # Configure after creating scratch so its compile command is available.
-cd share
+cd extras
 if [ "--fresh" = "${1:-}" ]; then
   cmake --fresh --preset examples
 elif [ -f build/CMakeCache.txt ]; then

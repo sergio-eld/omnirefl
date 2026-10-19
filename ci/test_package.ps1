@@ -1,6 +1,7 @@
 # Run with the Windows C++ toolchain environment initialized.
 param(
   [Parameter(Mandatory)] [string] $Package,
+  [Parameter(Mandatory)] [string] $Extras,
   [Parameter(Mandatory)] [string] $Name,
   [Parameter(Mandatory)] [string] $Results,
   [string] $CMakeArg
@@ -34,7 +35,8 @@ try {
   }
 
   mv $roots[0].FullName $install
-  cp -r "$install/share/omnirefl/*" $source
+  tar -xzf $Extras -C $source --strip-components=1
+  if (0 -ne $LASTEXITCODE) { exit $LASTEXITCODE }
   # Windows PowerShell treats native stderr as errors; check native exit codes.
   $ErrorActionPreference = 'Continue'
   & "$install/bin/omnirefl.exe" --help 2>&1 |
