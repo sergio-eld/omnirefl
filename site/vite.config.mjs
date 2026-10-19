@@ -61,7 +61,28 @@ const renderReadme = async source => {
       ${await markdown.parse(extract(source, section))}
     </section>`))).join('\n')
 
+  const quickStart = await markdown.parse(`For the fastest drop-in setup, use
+CMake FetchContent to acquire Omnirefl.
+
+\`\`\`cmake
+# Package acquisition
+include(FetchContent)
+FetchContent_Declare(omnirefl
+    GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
+    GIT_TAG v0.0.5
+    SOURCE_SUBDIR cmake/integration)
+FetchContent_MakeAvailable(omnirefl)
+
+# Project integration
+find_package(omnirefl CONFIG REQUIRED)
+omni_reflected_target(my_target)
+\`\`\`
+
+The FetchContent integration is available starting with v0.0.6.
+`)
+
   return rendered
+    .replace('<!-- pages:install-quick-start -->', quickStart)
     .replaceAll(
       'src="omnirefl-banner.png"',
       'src="https://raw.githubusercontent.com/sergio-eld/omnirefl/master/omnirefl-banner.png"')

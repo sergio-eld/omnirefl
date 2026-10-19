@@ -53,7 +53,7 @@ mkdir -p "$build" "$results"
 cmake -S "$install/share/omnirefl" \
   -B "$build" -GNinja -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \
-  -Domnirefl_DIR="$install/lib/cmake/omnirefl" \
+  -Domnirefl_ROOT="$install" \
   -DBENCHMARK_RESULTS="$results" -DBENCHMARK_NAME="$name" 2>&1 |
   tee "$results/configure.log"
 ctest --test-dir "$build" -R '^benchmark\.instrumentation$' \

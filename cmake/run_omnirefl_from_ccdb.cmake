@@ -46,6 +46,12 @@ execute_process(
     ERROR_VARIABLE _ccdb_err)
 
 if(NOT 0 EQUAL _ccdb_result)
+    if(NOT EXISTS "${COMP_DB}")
+        message(FATAL_ERROR
+            "omnirefl: compilation database '${COMP_DB}' is missing. "
+            "Ensure CMAKE_EXPORT_COMPILE_COMMANDS=ON; generator '${GENERATOR}' "
+            "may not support it. Use a Ninja or Makefile generator.")
+    endif()
     message(FATAL_ERROR
         "ccdb_query failed with code ${_ccdb_result}\n${_ccdb_err}")
 endif()

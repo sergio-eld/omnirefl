@@ -22,7 +22,11 @@ endif()
 
 if(NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF"
         AND NOT CMAKE_EXPORT_COMPILE_COMMANDS)
-    message(STATUS "omnirefl: Forcing CMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    message(WARNING
+        "omnirefl: enabling CMAKE_EXPORT_COMPILE_COMMANDS, which is required "
+        "for reflection. Configure with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "
+        "or set it before creating targets. Targets created before "
+        "find_package(omnirefl) may still have export disabled.")
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON
         CACHE BOOL "Export compile commands" FORCE)
 endif()
@@ -435,6 +439,7 @@ function(omni_reflected_target target)
                 -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
                 -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
                 -D "COMP_DB=${_comp_db}"
+                -D "GENERATOR=${CMAKE_GENERATOR}"
                 -D "SOURCE=${_src}"
                 -D "OUTPUT_CONTAINS=/${target}.dir/"
                 -D "OUT=${_generated_header}"
