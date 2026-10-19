@@ -339,7 +339,8 @@ Save the archive in your project's root, then unpack and configure:
 ```sh
 mkdir -p omnirefl
 tar -xzf omnirefl-cosmo-universal-*.tar.gz -C omnirefl --strip-components=1
-cmake -S . -B build -Domnirefl_ROOT="$PWD/omnirefl"
+cmake -S . -B build -Domnirefl_ROOT="$PWD/omnirefl" \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON # Required by Omnirefl's CMake integration.
 cmake --build build
 ```
 
@@ -448,8 +449,9 @@ curl -fL "$(curl -fsSL \
 prefix="$PWD/omnirefl"
 
 mkdir build && cd build
-cmake "$prefix/share/omnirefl" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  "-Domnirefl_ROOT=$prefix"
+cmake "$prefix/share/omnirefl" -GNinja \
+  -Domnirefl_ROOT="$prefix" \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON # Required by Omnirefl's CMake integration.
 cmake --build .
 ctest --timeout 600 --output-on-failure --no-tests=error
 ```

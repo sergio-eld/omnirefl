@@ -22,7 +22,11 @@ endif()
 
 if(NOT OMNIREFL_FORCE_EXPORT_COMPILE_COMMANDS STREQUAL "OFF"
         AND NOT CMAKE_EXPORT_COMPILE_COMMANDS)
-    message(STATUS "omnirefl: Forcing CMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    message(WARNING
+        "omnirefl: enabling CMAKE_EXPORT_COMPILE_COMMANDS, which is required "
+        "for reflection. Configure with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "
+        "or set it before creating targets. Targets created before "
+        "find_package(omnirefl) may still have export disabled.")
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON
         CACHE BOOL "Export compile commands" FORCE)
 endif()
