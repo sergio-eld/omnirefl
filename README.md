@@ -271,47 +271,148 @@ documentation.
 <!-- pages:install:start -->
 ## Install
 
-- **Release archives:**<br>
-  [Latest release](https://github.com/sergio-eld/omnirefl/releases/latest) or
-  [all releases](https://github.com/sergio-eld/omnirefl/releases). The main
-  package is `omnirefl-cosmo-universal` (`.tar.gz`), supporting Linux, macOS,
-  and Windows.
-  Platform-specific packages are also available: `.deb` or `.tar.gz` for Linux,
-  and `.zip` for Windows.
-- **Container builds:**<br>
-  - **Docker Compose:** references cached, prebuilt toolchain images from
-    [GHCR](https://github.com/sergio-eld?tab=packages&repo_name=omnirefl).
-
-    <details>
-    <summary>Build a package locally</summary>
-
-    With Git and Docker Compose installed:
-
-    ```bash
-    git clone https://github.com/sergio-eld/omnirefl.git
-    cd omnirefl
-    docker compose run --rm build-cosmo
-    cd artifacts/packages/cosmo # The built package is here.
-    ```
-
-    For other package formats and testing, see
-    [Build Packages Locally](#build-packages-locally).
-
-    </details>
-
-  - **GitHub Codespaces:** select **Development** when creating the
-    Codespace; see the [container setup](.devcontainer/README.md).
-
-- **Latest CI artifact (if available):**<br>
-  Package artifacts from the latest successful
-  [`CI` workflow](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml)
-  run on `master`, by runtime and architecture. Artifacts are temporary;
-  cancelled or partially rerun workflows and artifact expiration may leave no
-  downloadable package.
-
-Install a `.deb` normally. Unpack a `.tar.gz` or `.zip` archive and use its
-`omnirefl-*` directory as the installation prefix.
+- **[Project integration](#project-integration):** Conan 2 and CMake FetchContent. <!-- pages:install-quick-start -->
+- **[Release archives](https://github.com/sergio-eld/omnirefl/releases/latest):** Cosmo universal package
+  for Linux, macOS, and Windows.
+- **[Container builds](#container-builds):** Docker Compose or GitHub Codespaces.
+- **[Latest CI builds](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml):** workflow artifacts
+  for unreleased changes; availability is temporary.
 <!-- pages:install:end -->
+
+### Project integration
+
+In your project's `CMakeLists.txt`, after declaring the target to reflect, use:
+
+```cmake
+find_package(omnirefl CONFIG REQUIRED)
+omni_reflected_target(my_target)
+```
+
+These adapters handle package acquisition and CMake discovery together.
+A version selects a verified prebuilt Cosmo archive; a full commit hash builds
+that revision through Docker Compose, requiring an x86_64 host with Linux
+containers.
+
+<details>
+<summary>CMake FetchContent</summary>
+
+See the [landing page](https://omnirefl.io/#install) for the drop-in CMake snippet.
+
+Requires Git and CMake 3.19 or newer. Keep the declaration name `omnirefl`.
+The FetchContent integration is available starting with `v0.0.6`.
+
+<!-- TODO: Update the landing-page example from v0.0.5 to v0.0.6 when released,
+and document the earliest usable commit hash once this PR is merged. -->
+
+</details>
+
+<details>
+<summary>Conan 2</summary>
+
+In your consumer's `conanfile.txt`:
+
+```ini
+[requires]
+omnirefl/0.0.5
+
+[generators]
+CMakeDeps
+CMakeToolchain
+```
+
+The recipe downloads the prebuilt distribution. To build a commit instead,
+set `omnirefl/*:commit` to its full hash.
+Until the recipe is published, [import just the recipe](conan/README.md#recipe-availability)
+once into your local Conan cache.
+
+</details>
+
+### Release archives
+
+Download `omnirefl-cosmo-universal` (`.tar.gz`) from the
+[latest release](https://github.com/sergio-eld/omnirefl/releases/latest).
+It supports Linux, macOS, and Windows. Linux musl and Windows UCRT packages are
+also available.
+
+Save the archive in your project's root, then unpack and configure:
+
+```sh
+mkdir -p omnirefl
+tar -xzf omnirefl-cosmo-universal-*.tar.gz -C omnirefl --strip-components=1
+cmake -S . -B build -Domnirefl_ROOT="$PWD/omnirefl"
+cmake --build build
+```
+
+`omnirefl_ROOT` tells CMake where you unpacked Omnirefl.
+
+<details>
+<summary>If you want CMake to discover Omnirefl automatically</summary>
+
+You can set the `omnirefl_ROOT` environment variable to the extracted directory
+in your shell profile, user environment, or a virtual environment's activation
+script. Configurations using that environment no longer need the
+`-Domnirefl_ROOT` argument.
+
+**Bash**, for example in your shell profile:
+
+```sh
+export omnirefl_ROOT="$HOME/tools/omnirefl"
+```
+
+**PowerShell**, for your Windows user:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+    "omnirefl_ROOT", "C:\tools\omnirefl", "User")
+```
+
+Open a new terminal or reload the relevant environment for the setting to take
+effect.
+
+Alternatively, if you want a system-wide installation on Linux or macOS,
+extract the archive into `/usr/local`, which CMake searches by default:
+
+```sh
+sudo mkdir -p /usr/local
+sudo tar -xzf omnirefl-cosmo-universal-*.tar.gz -C /usr/local --strip-components=1
+```
+
+No `omnirefl_ROOT` setting is needed. Archive installations must be removed
+manually.
+
+</details>
+
+### Container builds
+
+- **Docker Compose:** references cached, prebuilt toolchain images from
+  [GHCR](https://github.com/sergio-eld?tab=packages&repo_name=omnirefl).
+
+  <details>
+  <summary>Build a package locally</summary>
+
+  With Git and Docker Compose installed:
+
+  ```bash
+  git clone https://github.com/sergio-eld/omnirefl.git
+  cd omnirefl
+  docker compose run --rm build-cosmo
+  cd artifacts/packages/cosmo # The built package is here.
+  ```
+
+  For other package formats and testing, see
+  [Build Packages Locally](#build-packages-locally).
+
+  </details>
+
+- **GitHub Codespaces:** select **Development** when creating the
+  Codespace; see the [container setup](.devcontainer/README.md).
+
+### Latest CI artifacts
+
+For unreleased builds, package artifacts are available from successful
+[`CI` runs on master](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml).
+Their availability is temporary. Unpack the archive and configure CMake as
+shown above.
 
 <!-- pages:examples-tests-and-benchmarks:start -->
 ## Examples, Tests and Benchmarks
@@ -348,7 +449,7 @@ prefix="$PWD/omnirefl"
 
 mkdir build && cd build
 cmake "$prefix/share/omnirefl" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  "-DCMAKE_PREFIX_PATH=$prefix"
+  "-Domnirefl_ROOT=$prefix"
 cmake --build .
 ctest --timeout 600 --output-on-failure --no-tests=error
 ```
@@ -410,6 +511,8 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
 
   </details>
 
+- **CMake integration:** supports Ninja and Makefile generators, including Ninja
+  with MSVC. Visual Studio generators are not supported.
 - **Reflectable declarations:**
   - named namespace-scope records (structs, classes, and unions) and enums
   - nested named records and enums inside non-template records

@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
+# WARNING: Public FetchContent entry point. Keep cmake/integration/CMakeLists.txt
+# at this path: consumers use SOURCE_SUBDIR cmake/integration, and moving or
+# renaming it breaks their existing declarations. Repository-relative paths
+# below also depend on this directory's position beneath the repository root.
+
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
@@ -116,7 +121,7 @@ else()
 endif()
 
 set(_config "${_prefix}/lib/cmake/omnirefl")
-set(omnirefl_DIR "${_config}" PARENT_SCOPE)
+set(omnirefl_ROOT "${_prefix}" PARENT_SCOPE)
 if(CMAKE_FIND_PACKAGE_REDIRECTS_DIR)
     # FetchContent otherwise writes an empty config that masks the native one.
     # Forward components and version checks through the original package files.

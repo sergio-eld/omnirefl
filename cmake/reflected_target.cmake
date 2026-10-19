@@ -435,6 +435,7 @@ function(omni_reflected_target target)
                 -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
                 -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
                 -D "COMP_DB=${_comp_db}"
+                -D "GENERATOR=${CMAKE_GENERATOR}"
                 -D "SOURCE=${_src}"
                 -D "OUTPUT_CONTAINS=/${target}.dir/"
                 -D "OUT=${_generated_header}"

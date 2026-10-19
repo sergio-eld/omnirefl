@@ -1,35 +1,48 @@
 # Conan 2
 
-From the repository root, install the versioned universal distribution into
-your local Conan cache:
+In your consumer's `conanfile.txt`:
+
+```ini
+[requires]
+omnirefl/0.0.5
+
+[generators]
+CMakeDeps
+CMakeToolchain
+```
+
+The recipe downloads and verifies the versioned Cosmo universal archive.
+To build a commit instead, add:
+
+```ini
+[options]
+omnirefl/*:commit=<full-commit-hash>
+```
+
+The recipe checks out that commit and invokes Docker Compose. This requires
+Git, Docker with Linux-container support, and an x86_64 build host. ARM64 hosts
+can consume the prebuilt distribution.
+
+CMake consumers use Ninja or Makefiles to produce the compilation database
+required by Omnirefl. For Conan's CMake toolchain, Ninja can be selected in the
+profile:
+
+```ini
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+```
+
+## Recipe availability
+
+Until the recipe is published, fetch only its directory and export it once:
 
 ```sh
-conan profile detect
-conan create conan
+git clone --depth 1 --filter=blob:none --no-checkout https://github.com/sergio-eld/omnirefl.git omnirefl-recipe
+git -C omnirefl-recipe sparse-checkout set --no-cone /conan/
+git -C omnirefl-recipe checkout
+conan export omnirefl-recipe/conan
 ```
 
-To build the checked-out commit instead:
-
-```sh
-conan create conan -o "omnirefl/*:commit=$(git rev-parse HEAD)"
-```
-
-The `commit` option also accepts any other full Git commit hash.
-Source builds require Git, Docker Compose, and an x86_64 build host with
-Linux-container support. They pull the existing toolchain image and build a
-universal package through `build-cosmo`. ARM64 hosts can consume the prebuilt
-distribution.
-
-Add `omnirefl/0.0.5` to your consumer's Conan requirements and generate
-`CMakeToolchain` and `CMakeDeps`. To consume a source-built package, pass the same
-`omnirefl/*:commit` option to `conan install`.
-With the generated toolchain, use the installed CMake package:
-
-```cmake
-find_package(omnirefl CONFIG REQUIRED)
-omni_reflected_target(my_target)
-```
-
-The recipe preserves the distribution's CMake configuration, bundled projects,
-and Clang resource headers. Optional extensions retain their existing CMake
-dependency resolution.
+Use `--build=missing` with your normal `conan install` command so Conan runs the
+recipe when its binary package is not cached. The recipe handles acquisition
+and preserves Omnirefl's native CMake package.

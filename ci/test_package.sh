@@ -192,7 +192,7 @@ set -- cmake \
   -DBUILD_BENCHMARKS=OFF \
   -GNinja \
   -DCMAKE_BUILD_TYPE=Release \
-  -Domnirefl_DIR="$config"
+  -Domnirefl_ROOT="$install"
 if [ -n "$cmake_arg" ]; then
   set -- "$@" "$cmake_arg"
 fi

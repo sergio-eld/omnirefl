@@ -47,7 +47,7 @@ try {
   $ErrorActionPreference = 'Stop'
 
   $cmakeArgs = @('-GNinja', '-DCMAKE_BUILD_TYPE=Release',
-    "-Domnirefl_DIR=$install/lib/cmake/omnirefl")
+    "-Domnirefl_ROOT=$install")
   if ($CMakeArg) { $cmakeArgs += $CMakeArg }
 
   $ErrorActionPreference = 'Continue'

@@ -397,6 +397,10 @@ jobs:
 
     steps: *build_package_steps
 
+  # TODO: [low] Add package integration tests for Conan and CMake FetchContent with
+  # an OS × type CI matrix. Locally, warn and skip when required tools are
+  # unavailable. Add vcpkg coverage when its adapter is available.
+
   # Package tests use the same matrix vocabulary as docker-compose.yml:
   #
   #   platform=<alpine|ubuntu-18.04|ubuntu-20.04|ubuntu-22.04|windows|macos>
