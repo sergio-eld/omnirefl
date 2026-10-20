@@ -77,6 +77,92 @@ if (result.value) {
 #include <vector>
 
 namespace omni {
+// Only policies and strategies shared by JSON engines belong here.
+// TODO: Move to a shared header if another JSON parser is adopted.
+namespace json {
+
+/// Controls duplicate fields without merging occurrences.
+/// Last implies allow; warn is ignored when duplicates are rejected.
+enum duplicate_policy : std::uint8_t {
+  reject = 0,
+  allow = 1 << 0, // Keep the first occurrence, without a warning.
+  last = 1 << 1,  // Keep the last occurrence.
+  warn = 1 << 2   // Warn about repeated field names when duplicates are allowed.
+};
+
+OMNI_ENABLE_BIT_FLAGS(duplicate_policy)
+
+/// Controls input fields absent from the struct. Warn is ignored without allow.
+enum class unknown_policy : std::uint8_t {
+  reject = 0,
+  allow = 1 << 0, // Ignore unknown fields without a warning.
+  warn = 1 << 1   // Warn about unknown fields only when allow is set.
+};
+
+OMNI_ENABLE_BIT_FLAGS(unknown_policy)
+
+/**
+ * Controls mapping errors independently of the JSON or YAML parsing algorithm.
+ *
+ * @details
+ * The shared mapping interface is intended to return with_diagnostics: a valid
+ * value may accompany warnings, whereas expected<T, Diagnostics> holds either
+ * the value or diagnostics. Error limits allow collecting more diagnostics;
+ * they do not permit returning an invalid value.
+ *
+ * A partially initialized object is an implementation detail, not a result.
+ * Exposing it would constrain implementations that construct the result in
+ * one expression from mapped fields. Field types can represent recoverable
+ * invalid input explicitly. A future invalid-value recovery mechanism may
+ * define what it exposes during mapping without promising a partial result.
+ */
+struct error_policy {
+  // Number of mapping errors processing may pass before stopping on the next.
+  // Warnings do not count. Zero stops at the first error.
+  std::uint16_t error_limit = 0;
+
+  // Maximum permitted warnings; unset means unlimited. The next warning
+  // exceeds the limit, produces an error, and prevents returning a value.
+  // Zero fails on the first warning.
+  compat::optional<std::uint16_t> warning_limit = compat::nullopt;
+
+  // Reject duplicates unless allow or last is set; warn alone does not allow.
+  duplicate_policy duplicates = duplicate_policy::reject;
+
+  // Reject input fields absent from the struct by default.
+  unknown_policy unknown_fields = unknown_policy::reject;
+
+  // TODO: Consider warning thresholds per policy.
+};
+
+/**
+ * Select recovery methods for missing fields where applicable.
+ * Invalid values and explicit null are not recovered by these flags.
+ *
+ * Flags may be combined. An exposed field default takes precedence over
+ * default construction when both methods are enabled.
+ * Successful recovery does not itself produce a warning.
+ */
+enum class recovery_policy : std::uint8_t {
+  // Use field defaults where Omnirefl can expose them.
+  field_defaults = 1 << 0,
+  // Use value initialization (T{}) where supported, without a reflected default.
+  default_initializable = 1 << 1,
+
+  // TODO: Define when default initialization is valid recovery for the
+  // containing type; e.g. recovered map keys may collide and lose entries.
+  // TODO: Consider reporting defaulted fields separately from warnings.
+};
+
+OMNI_ENABLE_BIT_FLAGS(recovery_policy)
+
+#if 0 // Draft: wire recovery into the mapping options.
+// No recovery unless explicitly configured.
+compat::optional<recovery_policy> recovery = compat::nullopt;
+#endif
+
+} // namespace json
+
 namespace ryml {
 
 /**

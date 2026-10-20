@@ -26,6 +26,28 @@
 #  define OMNI_CPP14_CONSTEXPR
 #endif
 
+// Invoke beside the enum so argument-dependent lookup finds these operators.
+#define OMNI_ENABLE_BIT_FLAGS(Enum)                                        \
+  constexpr Enum operator|(Enum left, Enum right) noexcept {               \
+    return static_cast<Enum>(                                              \
+      static_cast<typename std::underlying_type<Enum>::type>(left)         \
+      | static_cast<typename std::underlying_type<Enum>::type>(right));    \
+  }                                                                        \
+  constexpr Enum operator&(Enum left, Enum right) noexcept {               \
+    return static_cast<Enum>(                                              \
+      static_cast<typename std::underlying_type<Enum>::type>(left)         \
+      & static_cast<typename std::underlying_type<Enum>::type>(right));    \
+  }                                                                        \
+  constexpr Enum operator^(Enum left, Enum right) noexcept {               \
+    return static_cast<Enum>(                                              \
+      static_cast<typename std::underlying_type<Enum>::type>(left)         \
+      ^ static_cast<typename std::underlying_type<Enum>::type>(right));    \
+  }                                                                        \
+  constexpr Enum operator~(Enum value) noexcept {                          \
+    return static_cast<Enum>(                                              \
+      ~static_cast<typename std::underlying_type<Enum>::type>(value));     \
+  }
+
 namespace omni {
 namespace compat {
 
