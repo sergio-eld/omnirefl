@@ -230,6 +230,12 @@ for each reflected type and are available only within reflected scopes:
 
 ## Direct CLI Usage
 
+<!-- TODO: [low] Add an optional C++ compiler wrapper script that instruments
+then compiles sources, as secondary QoL for direct compilation without CMake.
+Do not recommend it as CMAKE_CXX_COMPILER: although it would avoid find_package
+setup, it would instrument every source (including generated Qt moc files),
+lose per-target reflection control, and provide no instrumentation-only target. -->
+
 `omni_reflected_target(...)` is a convenience wrapper; omnirefl itself does not
 require CMake:
 
@@ -302,7 +308,7 @@ Before `find_package`, acquire Omnirefl with:
 include(FetchContent)
 FetchContent_Declare(omnirefl
     GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
-    GIT_TAG v0.0.5
+    GIT_TAG v0.0.6
     SOURCE_SUBDIR cmake/integration)
 FetchContent_MakeAvailable(omnirefl)
 ```
@@ -310,8 +316,8 @@ FetchContent_MakeAvailable(omnirefl)
 Requires Git and CMake 3.19 or newer. Keep the declaration name `omnirefl`.
 The FetchContent integration is available starting with `v0.0.6`.
 
-<!-- TODO: Update the landing-page example from v0.0.5 to v0.0.6 when released,
-and document the earliest usable commit hash once this PR is merged. -->
+The first supporting commit is
+[`388658d`](https://github.com/sergio-eld/omnirefl/commit/388658d).
 
 </details>
 

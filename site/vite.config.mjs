@@ -69,7 +69,7 @@ CMake FetchContent to acquire Omnirefl.
 include(FetchContent)
 FetchContent_Declare(omnirefl
     GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
-    GIT_TAG v0.0.5
+    GIT_TAG v0.0.6
     SOURCE_SUBDIR cmake/integration)
 FetchContent_MakeAvailable(omnirefl)
 
