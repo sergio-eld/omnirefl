@@ -24,11 +24,11 @@
 auto result = omni::ryml::deserialize(omni::type<person>, source) //
   .transform_error(omni::ryml::render_diagnostics);
 
-if (result) {
-  const auto json = omni::ryml::as_json(*result);
-  const auto yaml = omni::ryml::as_yaml(*result);
+if (result.value) {
+  const auto json = omni::ryml::as_json(*result.value);
+  const auto yaml = omni::ryml::as_yaml(*result.value);
 }
-// On failure, result.error() contains the rendered diagnostics.
+// result.diagnostics contains the rendered diagnostics.
 ```
  */
 
@@ -66,63 +66,41 @@ if (result) {
 #include <omnirefl/reflected_scope.hpp>
 
 #include <omnirefl/extensions/compat.hpp>
-#include <omnirefl/functional.hpp>
 
 #include <ryml.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
-
-// TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
-#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
-#  if __has_include(<string_view>)
-#    include <string_view>
-#  endif
-#endif
 
 namespace omni {
 namespace ryml {
 
 /**
  * Controls error collection, partial values, and acceptance of extra fields.
- * The partial setting's type selects the result type, not just its behavior.
  *
- * C++20 designated initialization with class template argument deduction:
+ * C++20 designated initialization:
  *
 ```cpp
-const strategy strict{
+const strategy configured{
   .tolerance = 4,
-  .partial = std::false_type{},
+  .partial = true,
   .extra = false,
-}; // expected: value or diagnostics.
-const strategy runtime{
-  .tolerance = 4,
-  .partial = false,
-  .extra = false,
-}; // Product: optional value and diagnostics together.
+};
 ```
  *
- * C++11 compatibility builders preserve the same partial types:
+ * C++11 compatibility builders:
  *
 ```cpp
-const auto strict = default_strategy() //
+const auto configured = default_strategy() //
   .use_tolerance(4) //
-  .allow_partial(std::false_type{}); // expected: value or diagnostics.
-const auto runtime = default_strategy() //
-  .use_tolerance(4) //
-  .allow_partial(false); // Product: optional value and diagnostics together.
+  .allow_partial(true);
 ```
  */
-template <typename Partial = std::false_type>
 struct strategy {
-  static_assert(std::is_same<bool, Partial>::value
-      || omni::traits::is<std::integral_constant, Partial>(),
-    "Partial must be bool or std::integral_constant");
-
   // Number of errors traversal may pass before stopping on the next one.
   // Warnings do not count. Zero stops at the first error; negatives mean zero.
   // Increase this to collect more field errors even with partial=false.
@@ -130,9 +108,7 @@ struct strategy {
 
   // Permit returning a value despite errors; optional/container issues become
   // warnings. Failed, missing, and unvisited fields keep initialized defaults.
-  // std::false_type gives expected; bool and std::true_type give
-  // with_diagnostics. See deserialization_result for the full result types.
-  Partial partial = {};
+  bool partial = false;
 
   // Ignore fields absent from the model at every nesting level.
   // Duplicates of model fields remain issues.
@@ -156,9 +132,7 @@ struct strategy {
   }
 
   /**
-   * Return a strategy with the partial type deduced from p and others
-   * unchanged. Passing bool keeps the product result even when p is false;
-   * passing std::false_type selects expected. See deserialization_result.
+   * Return a strategy with the new partial setting and others unchanged.
    *
    * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
    *
@@ -168,12 +142,9 @@ struct strategy {
   };
   ```
    */
-  template <typename P>
-  OMNI_CPP14_CONSTEXPR strategy<P> allow_partial(P p) const {
-    strategy<P> result{};
-    result.tolerance = tolerance;
+  OMNI_CPP14_CONSTEXPR strategy allow_partial(bool p) const {
+    auto result = *this;
     result.partial = p;
-    result.extra = extra;
     return result;
   }
 
@@ -237,7 +208,7 @@ struct strategy {
 const strategy configured{};
 ```
  */
-constexpr strategy<> default_strategy() {
+constexpr strategy default_strategy() {
   return {};
 }
 
@@ -423,7 +394,7 @@ struct with_diagnostics {
    * Alias for map_error, keeping any value while transforming diagnostics.
    * Unlike expected, calls f even when a value is available.
    *
-   * C++20 designated initialization with class template argument deduction:
+   * C++20 designated initialization:
    *
   ```cpp
   const deserialize_t load{
@@ -444,10 +415,11 @@ struct with_diagnostics {
    * omni::type_t<person>{} for the type argument:
    *
   ```cpp
-  const auto load = fn::ctad<deserialize_t>(
+  const deserialize_t load{
     default_strategy() //
       .use_tolerance(4) //
-      .allow_partial(true));
+      .allow_partial(true),
+  };
   ```
    */
   template <typename F>
@@ -469,38 +441,6 @@ bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
   return r.value && !r.diagnostics.issues.empty();
 }
 
-namespace detail {
-
-template <typename Strategy>
-struct returns_expected;
-
-template <>
-struct returns_expected<strategy<bool>>: std::false_type {};
-
-template <typename T, T Value>
-struct returns_expected<strategy<std::integral_constant<T, Value>>>:
-  std::integral_constant<bool, !static_cast<bool>(Value)> {};
-
-} // namespace detail
-
-/**
- * Result of deserializing T using Strategy and owning or borrowed diagnostics.
- *
- * strategy<std::false_type> gives expected<T, diagnostics<Owning>>:
- * a value on success or diagnostics on failure. Other std::integral_constant
- * types whose value is false give the same result type.
- *
- * strategy<bool> and strategy<std::true_type> give with_diagnostics<T,
- * diagnostics<Owning>>: an optional value and diagnostics together.
- * For strategy<bool>, the result type stays the same whether partial is true
- * or false at runtime.
- */
-template <typename T, typename Strategy, bool Owning>
-using deserialization_result = compat::conditional_t< //
-  detail::returns_expected<Strategy>::value,
-  compat::expected<T, diagnostics<Owning>>,
-  with_diagnostics<T, diagnostics<Owning>>>;
-
 /**
  * Parse text into an owning tree, returning syntax errors without throwing.
  *
@@ -510,11 +450,11 @@ using deserialization_result = compat::conditional_t< //
 ```cpp
 // Supply a reflected person and an owning std::string source.
 auto result = parse(std::move(source)) //
-  .and_then([](::ryml::Tree tree) {
+  .transform([](::ryml::Tree tree) {
     return map_tree(omni::type<person>, std::move(tree)) //
       .transform_error(render_diagnostics);
   });
-// expected<person, std::string>: syntax and field errors are rendered text.
+// Syntax errors use expected; mapping retains optional person and diagnostics.
 ```
  */
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
@@ -523,43 +463,32 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 /**
  * Map an owning tree or borrowed node view using the stored strategy.
  */
-template <typename Strategy>
 struct map_tree_t {
-  static_assert(omni::traits::is<omni::ryml::strategy, Strategy>(),
-    "Strategy must be an omni::ryml::strategy specialization");
-
   // Settings applied to every tree or subtree mapped by this callable.
-  Strategy strategy;
+  omni::ryml::strategy strategy;
 
   /**
    * Own a copy for an lvalue tree, or transfer a moved tree after traversal.
-   * Returns expected when partial has type std::false_type; bool and
-   * std::true_type return with_diagnostics. See deserialization_result.
+   * Returns an optional value and owning diagnostics.
    */
   template <typename Record>
-  deserialization_result<Record, Strategy, /*owning=*/ true>
+  with_diagnostics<Record, diagnostics</*owning=*/ true>>
     operator()(omni::type_t<Record> record_type, ::ryml::Tree tree) const;
 
   /**
    * Borrow the subtree. Keep the caller's tree alive and unchanged while using
-   * the returned diagnostics. Returns expected when partial has type
-   * std::false_type; bool and std::true_type return with_diagnostics.
-   * See deserialization_result.
+   * the returned diagnostics.
    */
   template <typename Record>
-  deserialization_result<Record, Strategy, /*owning=*/ false>
-    operator()(omni::type_t<Record> record_type,
-      ::ryml::ConstNodeRef node) const;
+  with_diagnostics<Record, diagnostics</*owning=*/ false>> operator()(
+    omni::type_t<Record> record_type,
+    ::ryml::ConstNodeRef node) const;
 };
-
-#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-template <typename Strategy>
-map_tree_t(Strategy) -> map_tree_t<Strategy>;
-#endif
 
 /**
  * Map with zero tolerance, partial values disabled, and extra fields rejected.
- * Returns expected with owning diagnostics for trees, borrowed for node views.
+ * Returns an optional value with owning diagnostics for trees, borrowed for
+ * node views.
  *
 ```cpp
 auto borrowed = map_tree(omni::type<person>, borrowed_tree.crootref());
@@ -568,49 +497,39 @@ auto owned = map_tree(omni::type<person>, std::move(owning_tree));
 // Errors retain the moved tree; external backing strings still need an owner.
 ```
  */
-constexpr auto map_tree = fn::ctad<map_tree_t>(
-  /*strategy=*/default_strategy());
+constexpr map_tree_t map_tree{
+  /*strategy=*/default_strategy(),
+};
 
 /**
  * Compose parsing and tree mapping, retaining all issues in diagnostics.
  * Parse errors always return no value; strategy.partial applies to mapping.
- * Returns expected when partial has type std::false_type; bool and
- * std::true_type return with_diagnostics. See deserialization_result.
+ * Returns an optional value and owning diagnostics, including on success.
  */
-template <typename Strategy>
 struct deserialize_t {
-  static_assert(omni::traits::is<omni::ryml::strategy, Strategy>(),
-    "Strategy must be an omni::ryml::strategy specialization");
-
   // Settings applied to every deserialization performed by this callable.
-  Strategy strategy;
+  omni::ryml::strategy strategy;
 
   template <typename Record>
-  deserialization_result<Record, Strategy, /*owning=*/ true> operator()(
-    omni::type_t<Record> record_type,
-    std::string source) const;
+  with_diagnostics<Record, diagnostics</*owning=*/ true>>
+    operator()(omni::type_t<Record> record_type, std::string source) const;
 };
-
-#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-template <typename Strategy>
-deserialize_t(Strategy) -> deserialize_t<Strategy>;
-#endif
 
 /**
  * Parse and map with zero tolerance, no partial values, and no extra fields.
- * Returns expected: the deserialized value or diagnostics that own the parsed
- * tree.
+ * Returns an optional value and diagnostics that own the parsed tree.
  *
  * Increase tolerance to collect more field errors while keeping partial=false.
  *
 ```cpp
 auto result = deserialize(omni::type<person>, source) //
   .transform_error(render_diagnostics);
-// expected<person, std::string>: rendering happens only on failure.
+// Optional person and rendered diagnostics, including on success.
 ```
  */
-constexpr auto deserialize = fn::ctad<deserialize_t>(
-  /*strategy=*/default_strategy());
+constexpr deserialize_t deserialize{
+  /*strategy=*/default_strategy(),
+};
 
 // A generic callable keeps map_diagnostics(render_diagnostics) valid for both
 // ownership modes; an overloaded function name cannot deduce its callable type.

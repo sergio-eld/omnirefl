@@ -1,5 +1,7 @@
 #pragma once
 
+#include <omnirefl/functional.hpp>
+
 #include <c4/format.hpp>
 #include <c4/std/string.hpp>
 
@@ -8,6 +10,14 @@
 #include <csetjmp>
 #include <iterator>
 #include <limits>
+#include <type_traits>
+
+// TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
+#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
+#  if __has_include(<string_view>)
+#    include <string_view>
+#  endif
+#endif
 
 namespace omni {
 namespace ryml {
@@ -17,21 +27,6 @@ namespace detail {
 // Delay the unsupported-type assertion until the selected operation is invoked.
 template <typename>
 struct dependent_false: std::false_type {};
-
-// fn::branch preserves the different return types without requiring C++17.
-template <typename Strategy, typename T, bool Owning>
-deserialization_result<T, Strategy, Owning> select_deserialization_result(
-  with_diagnostics<T, diagnostics<Owning>> result) {
-  return fn::branch(
-    detail::returns_expected<Strategy>{},
-    [&result]() -> compat::expected<T, diagnostics<Owning>> {
-      return result.value
-        ? compat::expected<T, diagnostics<Owning>>{std::move(*result.value)}
-        : compat::unexpected<diagnostics<Owning>>{
-          std::move(result.diagnostics)};
-    },
-    [&result]() { return std::move(result); });
-}
 
 inline std::string to_string(c4::csubstr s) {
   // Empty views may have null data; C++11's string constructor forbids it.
@@ -777,13 +772,11 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
     });
 }
 
-template <typename Strategy>
 template <typename Record>
-deserialization_result<Record, Strategy, /*owning=*/ true>
-  map_tree_t<Strategy>::operator()(omni::type_t<Record> record_type,
-    ::ryml::Tree tree) const {
+with_diagnostics<Record, diagnostics</*owning=*/ true>> map_tree_t::operator()(
+  omni::type_t<Record> record_type,
+  ::ryml::Tree tree) const {
   // Node references point at the tree object; move it after traversal.
-  // The product always retains diagnostics; expected retains them on error.
   return (*this)(record_type,
     tree.empty()
       ? ::ryml::ConstNodeRef{}
@@ -803,16 +796,15 @@ deserialization_result<Record, Strategy, /*owning=*/ true>
       });
 }
 
-template <typename Strategy>
 template <typename Record>
-deserialization_result<Record, Strategy, /*owning=*/ false>
-  map_tree_t<Strategy>::operator()(omni::type_t<Record> record_type,
-    ::ryml::ConstNodeRef node) const {
+with_diagnostics<Record, diagnostics</*owning=*/ false>> map_tree_t::operator()(
+  omni::type_t<Record> record_type,
+  ::ryml::ConstNodeRef node) const {
   const detail::mapping_policy policy{
     /*tolerance=*/0 >= strategy.tolerance
       ? 0
       : static_cast<std::size_t>(strategy.tolerance),
-    /*partial=*/static_cast<bool>(strategy.partial),
+    /*partial=*/strategy.partial,
     /*extra=*/strategy.extra,
   };
 
@@ -847,49 +839,46 @@ deserialization_result<Record, Strategy, /*owning=*/ false>
     },
     record_type);
 
-  return detail::select_deserialization_result<Strategy>(
-    with_diagnostics<Record, diagnostics</*owning=*/ false>>{
-      /*value=*/report.issues.empty() || policy.partial
-        ? std::move(value)
-        : compat::nullopt,
-      /*diagnostics=*/std::move(report),
-    });
+  return {
+    /*value=*/report.issues.empty() || policy.partial
+      ? std::move(value)
+      : compat::nullopt,
+    /*diagnostics=*/std::move(report),
+  };
 }
 
-template <typename Strategy>
 template <typename Record>
-deserialization_result<Record, Strategy, /*owning=*/ true>
-  deserialize_t<Strategy>::operator()(omni::type_t<Record> record_type,
+with_diagnostics<Record, diagnostics</*owning=*/ true>>
+  deserialize_t::operator()(omni::type_t<Record> record_type,
     std::string source) const {
   if (auto parsed = parse(std::move(source))) {
-    return map_tree_t<Strategy>{
+    return map_tree_t{
       /*strategy=*/strategy,
     }(record_type, std::move(*parsed));
   } else {
-    return detail::select_deserialization_result<Strategy>(
-      with_diagnostics<Record>{
-        /*value=*/compat::nullopt,
-        /*diagnostics=*/{
-          /*policy=*/{
-            /*tolerance=*/0 >= strategy.tolerance
-              ? 0
-              : static_cast<std::size_t>(strategy.tolerance),
-            /*partial=*/static_cast<bool>(strategy.partial),
-            /*extra=*/strategy.extra,
-          },
-          /*tree=*/::ryml::Tree{
-            /*node_capacity=*/0,
-            /*arena_capacity=*/0,
-          },
-          /*issues=*/{
-            detail::make_issue(issue::code::parse_error,
-              issue::kind::unknown,
-              ::ryml::ConstNodeRef{},
-              {}),
-          },
-          /*parse_message=*/std::move(parsed.error()),
+    return {
+      /*value=*/compat::nullopt,
+      /*diagnostics=*/{
+        /*policy=*/{
+          /*tolerance=*/0 >= strategy.tolerance
+            ? 0
+            : static_cast<std::size_t>(strategy.tolerance),
+          /*partial=*/strategy.partial,
+          /*extra=*/strategy.extra,
         },
-      });
+        /*tree=*/::ryml::Tree{
+          /*node_capacity=*/0,
+          /*arena_capacity=*/0,
+        },
+        /*issues=*/{
+          detail::make_issue(issue::code::parse_error,
+            issue::kind::unknown,
+            ::ryml::ConstNodeRef{},
+            {}),
+        },
+        /*parse_message=*/std::move(parsed.error()),
+      },
+    };
   }
 }
 

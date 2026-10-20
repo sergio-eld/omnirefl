@@ -25,9 +25,9 @@ void deserialize_preparsed(benchmark::State &state,
 
   for (auto _ : state) {
     auto result = omni::compat::invoke(deserialize, tree.crootref());
-    if (!result) {
+    if (!result.value) {
       state.SkipWithError(
-        omni::ryml::render_diagnostics(result.error()).c_str());
+        omni::ryml::render_diagnostics(result.diagnostics).c_str());
       break;
     }
 
@@ -44,9 +44,9 @@ void deserialize_owned(benchmark::State &state,
   const char (&input)[Size]) {
   for (auto _ : state) {
     auto result = omni::compat::invoke(deserialize, std::string{input});
-    if (!result) {
+    if (!result.value) {
       state.SkipWithError(
-        omni::ryml::render_diagnostics(result.error()).c_str());
+        omni::ryml::render_diagnostics(result.diagnostics).c_str());
       break;
     }
 
@@ -63,14 +63,15 @@ void serialize_owned(benchmark::State &state,
   const char (&input)[Size]) {
   const auto source =
     omni::ryml::deserialize(omni::type_t<T>{}, std::string{input});
-  if (!source) {
-    state.SkipWithError(omni::ryml::render_diagnostics(source.error()).c_str());
+  if (!source.value) {
+    state.SkipWithError(
+      omni::ryml::render_diagnostics(source.diagnostics).c_str());
     return;
   }
 
   std::int64_t bytes = 0;
   for (auto _ : state) {
-    auto result = omni::compat::invoke(serialize, *source);
+    auto result = omni::compat::invoke(serialize, *source.value);
     bytes += static_cast<std::int64_t>(result.size());
     benchmark::DoNotOptimize(result);
   }

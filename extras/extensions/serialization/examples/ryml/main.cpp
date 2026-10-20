@@ -28,10 +28,10 @@ int main() {
     })") //
       .transform_error(omni::ryml::render_diagnostics);
 
-  if (!result) {
-    std::cerr << result.error() << '\n';
+  if (!result.value) {
+    std::cerr << result.diagnostics << '\n';
     return EXIT_FAILURE;
   }
 
-  std::cout << omni::ryml::as_json(*result);
+  std::cout << omni::ryml::as_json(*result.value);
 }

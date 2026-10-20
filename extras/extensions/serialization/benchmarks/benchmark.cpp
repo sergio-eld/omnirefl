@@ -56,10 +56,11 @@ void tree_mapping_invalid_elements(benchmark::State &state) {
     value |= ::ryml::VAL_DQUO;
   }
 
-  const auto map = omni::fn::ctad<omni::ryml::map_tree_t>(
+  const auto map = omni::ryml::map_tree_t{
     omni::ryml::default_strategy()
       .use_tolerance(partial ? 0 : static_cast<int>(count))
-      .allow_partial(partial));
+      .allow_partial(partial),
+  };
 
   const auto probe = map(omni::type_t<diagnostic_record>{}, tree.crootref());
   if (count != probe.diagnostics.issues.size()
