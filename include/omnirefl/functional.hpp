@@ -99,16 +99,6 @@ struct is_base_of_integral_constant:
     decltype(integral_constant_base_probe::test(
       std::declval<compat::decay_t<Derived> *>())){};
 
-// C++11 cannot deduce a function return type containing a lambda closure.
-#if OMNI_CPLUSPLUS < 201402L
-template <typename Constant>
-struct cpp11_constant_predicate {
-  constexpr Constant operator()() const {
-    return {};
-  }
-};
-#endif
-
 template <typename Predicate>
 using compile_time_result =
   std::integral_constant<bool, static_cast<bool>(compat::invoke(Predicate{}))>;
@@ -330,21 +320,6 @@ struct branch_t {
       int{});
   }
 
-#if 201402L <= OMNI_CPLUSPLUS
-  template <typename Predicate,
-    typename WhenTrue,
-    typename WhenFalse,
-    typename std::enable_if<
-      detail::is_base_of_integral_constant<Predicate>::value,
-      int>::type = 0>
-  constexpr auto operator()(Predicate,
-    WhenTrue when_true,
-    WhenFalse when_false) const {
-    return (*this)([]() { return Predicate{}; },
-      std::move(when_true),
-      std::move(when_false));
-  }
-#else
   template <typename Predicate,
     typename WhenTrue,
     typename WhenFalse,
@@ -354,14 +329,9 @@ struct branch_t {
   constexpr auto operator()(Predicate,
     WhenTrue when_true,
     WhenFalse when_false) const //
-    -> decltype((*this)(detail::cpp11_constant_predicate<Predicate>{},
-      std::move(when_true),
-      std::move(when_false))) {
-    return (*this)(detail::cpp11_constant_predicate<Predicate>{},
-      std::move(when_true),
-      std::move(when_false));
+    -> decltype(detail::select(Predicate{}, when_true, when_false, int{})) {
+    return detail::select(Predicate{}, when_true, when_false, int{});
   }
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -487,19 +457,6 @@ constexpr auto when(Predicate &&predicate, WhenTrue &&when_true) //
     std::forward<WhenTrue>(when_true));
 }
 
-// C++14 can deduce a return type containing the lifted lambda closure.
-#if 201402L <= OMNI_CPLUSPLUS
-template <typename Predicate,
-  typename WhenTrue,
-  typename std::enable_if<
-    detail::is_base_of_integral_constant<Predicate>::value,
-    int>::type = 0>
-auto when(Predicate, WhenTrue &&when_true) {
-  return partial(branch,
-    []() { return compat::decay_t<Predicate>{}; },
-    std::forward<WhenTrue>(when_true));
-}
-#else
 template <typename Predicate,
   typename WhenTrue,
   typename std::enable_if<
@@ -507,13 +464,12 @@ template <typename Predicate,
     int>::type = 0>
 constexpr auto when(Predicate, WhenTrue &&when_true) //
   -> decltype(partial(branch,
-    detail::cpp11_constant_predicate<compat::decay_t<Predicate>>{},
+    Predicate{},
     std::forward<WhenTrue>(when_true))) {
   return partial(branch,
-    detail::cpp11_constant_predicate<compat::decay_t<Predicate>>{},
+    Predicate{},
     std::forward<WhenTrue>(when_true));
 }
-#endif
 
 namespace detail {
 

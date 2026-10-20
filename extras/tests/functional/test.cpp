@@ -304,6 +304,26 @@ static_assert(108
       omni::fn::ct_const<108>()),
   "compile-time branch must select the false callable");
 
+static_assert(815
+    == omni::fn::branch(std::true_type{},
+      omni::fn::ct_const<815>(),
+      unavailable{}),
+  "type-level true must preserve constant evaluation and discard invalid calls");
+static_assert(108
+    == omni::fn::branch(std::false_type{},
+      unavailable{},
+      omni::fn::ct_const<108>()),
+  "type-level false must preserve constant evaluation and discard invalid calls");
+
+constexpr auto type_encoded_true =
+  omni::fn::when(std::true_type{}, omni::fn::ct_const<815>());
+static_assert(815 == type_encoded_true(unavailable{}),
+  "type-level when must preserve constant evaluation for its selected callable");
+constexpr auto type_encoded_false =
+  omni::fn::when(std::false_type{}, unavailable{});
+static_assert(108 == type_encoded_false(omni::fn::ct_const<108>()),
+  "type-level when must preserve constant evaluation for its fallback");
+
 // Captureless lambdas become implicitly constexpr in C++17. This can make the
 // complete runtime-shaped branch a constant expression, but both callable
 // expressions must still be valid.
