@@ -43,7 +43,6 @@ struct diagnostic_record {
 
 void tree_mapping_invalid_elements(benchmark::State &state) {
   const auto count = static_cast<std::size_t>(state.range(0));
-  const bool partial = 0 != state.range(1);
   ::ryml::Tree tree;
   auto root = tree.rootref();
   root |= ::ryml::MAP;
@@ -56,15 +55,14 @@ void tree_mapping_invalid_elements(benchmark::State &state) {
     value |= ::ryml::VAL_DQUO;
   }
 
-  const auto map = omni::ryml::map_tree_t{
-    omni::ryml::default_strategy()
-      .use_tolerance(partial ? 0 : static_cast<int>(count))
-      .allow_partial(partial),
-  };
+  const auto map =
+    omni::ryml::map_tree.transform_settings([count](omni::ryml::settings s) {
+      s.error_policy.error_limit = static_cast<std::uint16_t>(count);
+      return s;
+    });
 
   const auto probe = map(omni::type_t<diagnostic_record>{}, tree.crootref());
-  if (count != probe.diagnostics.issues.size()
-    || partial != static_cast<bool>(probe.value)) {
+  if (count != probe.diagnostics.issues.size() || probe.value.has_value()) {
     state.SkipWithError("invalid-element workload did not map as expected");
     return;
   }
@@ -134,13 +132,10 @@ BENCHMARK(tree_mapping_document_yaml);
 BENCHMARK(deserialize_document_json);
 BENCHMARK(deserialize_document_yaml);
 BENCHMARK(tree_mapping_invalid_elements)
-  ->ArgNames({"elements", "partial"})
-  ->Args({16, 0})
-  ->Args({16, 1})
-  ->Args({256, 0})
-  ->Args({256, 1})
-  ->Args({4096, 0})
-  ->Args({4096, 1});
+  ->ArgName("elements")
+  ->Arg(16)
+  ->Arg(256)
+  ->Arg(4096);
 BENCHMARK(serialize_nested_json);
 BENCHMARK(serialize_nested_yaml);
 BENCHMARK(serialize_document_json);
