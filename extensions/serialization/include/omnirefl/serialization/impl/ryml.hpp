@@ -1007,5 +1007,12 @@ std::string serialize_t::operator()(const Value &value) const {
   return text;
 }
 
+#if defined(OMNI_TOOL_RUN)
+namespace detail {
+// c4 views use string writers; their methods and aliases need no metadata.
+const omni::exclude_dependencies<c4::csubstr> excluded_string_views{};
+} // namespace detail
+#endif
+
 } // namespace ryml
 } // namespace omni

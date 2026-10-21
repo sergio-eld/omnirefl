@@ -26,6 +26,21 @@
 
 namespace omni {
 
+/**
+ * Exclude types from recursive reflection dependency discovery.
+ * Lists apply throughout the translation unit, including included headers.
+ * A template specialization excludes its primary template, including other
+ * specializations. Explicit reflected_call inputs remain reflectable.
+ * Guard uses with OMNI_TOOL_RUN; ordinary compilation does not need them.
+ * Exclusion lists may live in a dedicated header included under that guard.
+ *
+ * Implementation detail: this template must stay declared before
+ * reflected_call. Clang visits its instantiations at the template declaration,
+ * collecting exclusions before reflection discovery in the same AST traversal.
+ */
+template <typename... Types>
+struct exclude_dependencies {};
+
 enum class reflected_entity {
   /** `struct`, `class`, or named `union`. */
   record,
