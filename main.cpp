@@ -733,12 +733,16 @@ std::expected<reflected_type_info, std::string> resolve_reflected_type(
   clang::Sema &sema,
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
-  const std::set<type_id> &resolved_concrete_types);
+  const std::set<type_id> &resolved_concrete_types,
+  const std::set<type_id> &excluded_dependencies);
 
 struct source_file_context {
   fs::path source;
 
   std::vector<meta::reflectable> reflected{};
+
+  std::set<meta::type_id> excluded_dependencies{};
+  std::vector<std::string> exclusion_annotations{};
 
   // Fold state used while resolving reflected calls. Tracks ids already
   // seen during direct and dependency resolution.
@@ -823,6 +827,7 @@ struct reflection_context {
 
   fs::path instrumented_source;
 
+  std::vector<std::string> exclusion_annotations;
   std::vector<forward_declarable> fwd_declarables;
   std::vector<nested_type> nested;
   std::vector<indexed_type> indexed;
@@ -2107,6 +2112,50 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
+meta::source_file_context fold_dependency_exclusions(const diagnostics &log,
+  const clang::ASTContext &ast,
+  meta::source_file_context context,
+  const clang::ClassTemplateSpecializationDecl &declaration) {
+  struct exclusions {
+    meta::source_file_context context;
+    std::vector<std::string> names{};
+  };
+
+  auto [result, names] = std::ranges::fold_left(
+    // exclude_dependencies has one template parameter: the Types... pack.
+    // TODO: Validate the argument count and pack kind before accessing it.
+    declaration.getTemplateArgs().get(/*Types...=*/0).pack_elements(),
+    exclusions{.context = std::move(context)},
+    [&ast](exclusions state, const clang::TemplateArgument &arg) {
+      const clang::QualType type =
+        ast.getCanonicalType(arg.getAsType().getNonReferenceType());
+      if (const auto *tag = type->getAs<clang::TagType>())
+        state.context.excluded_dependencies.emplace(
+          meta::reflectable_type_id(ast, tag));
+
+      const auto *specialization =
+        llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(
+          type->getAsCXXRecordDecl());
+
+      state.names.push_back(specialization
+          ? std::format("{} (primary template)",
+              specialization->getSpecializedTemplate()
+                ->getQualifiedNameAsString())
+          : meta::canonical_type_id(ast, type.getTypePtr()));
+
+      return state;
+    });
+
+  std::string annotation = std::format("dependencies excluded at {}: {}",
+    declaration.getPointOfInstantiation().printToString(ast.getSourceManager()),
+    names | std_c::views::join_with(", "sv) | util::format_range);
+
+  log(log_level::info, [&annotation] { return "\n" + annotation; });
+  result.exclusion_annotations.push_back(std::move(annotation));
+
+  return std::move(result);
+}
+
 meta::source_file_context meta::matches::fold_reflected_call(
   const diagnostics &log,
   clang::Sema &sema,
@@ -2157,7 +2206,8 @@ meta::source_file_context meta::matches::fold_reflected_call(
       sema,
       arg->reflected_call_expr->getExprLoc(),
       ast,
-      a.resolved_concrete_types);
+      a.resolved_concrete_types,
+      a.excluded_dependencies);
 
     if (!reflected) {
       a.errors.internal.emplace_back(std::move(reflected).error());
@@ -4116,6 +4166,18 @@ std::expected<meta::source_file_context, app_error>
       },
 
       ast::rule{
+        // Instantiations are visited at the primary template declaration,
+        // before reflected_call and its wrappers, regardless of list placement.
+        .pattern = ast::pattern(classTemplateSpecializationDecl,
+          hasName("::omni::exclude_dependencies"),
+          isTemplateInstantiation(),
+          isDefinition()),
+        .fold = std::bind_front(fold_dependency_exclusions,
+          std::cref(log),
+          std::cref(parsed.ast->getASTContext())),
+      },
+
+      ast::rule{
         .pattern = ast::pattern(typeLoc,
           isExpansionInMainFile(),
           loc(qualType(hasDeclaration(
@@ -4444,6 +4506,7 @@ std::expected<render::reflection_context, app_error>
   return render::reflection_context{
     .instrumented_source = std::move(ctx.source),
 
+    .exclusion_annotations = std::move(ctx.exclusion_annotations),
     .fwd_declarables = std::move(fwd),
     .nested = std::move(nested),
     .indexed = std::move(indexed),
@@ -5610,6 +5673,7 @@ collected_dependencies recursively_collect_dependency_types(
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<meta::type_id> &resolved_concrete_types,
+  const std::set<meta::type_id> &excluded_dependencies,
   clang::CXXRecordDecl &root) {
   // todo: monadic return.
   const auto template_specialization_types = //
@@ -5660,13 +5724,17 @@ collected_dependencies recursively_collect_dependency_types(
       &dependencies_by_type,
       &public_access_path_by_type,
       &resolved_concrete_types,
+      &excluded_dependencies,
       &skipped_virtual_base_dependencies,
       &to_visit](const clang::TagType *parent,
       const clang::Type *type,
       std::optional<meta::type_access_path> public_access_path) {
       const clang::TagType *dependency = type->getAs<clang::TagType>();
 
-      if (!dependency)
+      if (!dependency
+        || (!excluded_dependencies.empty()
+          && excluded_dependencies.contains(
+            meta::reflectable_type_id(ast, dependency))))
         return;
 
       auto *record = dependency->getAsCXXRecordDecl();
@@ -6180,7 +6248,8 @@ auto meta::resolve_reflected_type(const diagnostics &log,
   clang::Sema &sema,
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
-  const std::set<type_id> &resolved_concrete_types)
+  const std::set<type_id> &resolved_concrete_types,
+  const std::set<type_id> &excluded_dependencies)
   -> std::expected<reflected_type_info, std::string> {
   const auto match_record_type = //
     [&ast, &log](const std::string &id, const clang::RecordType *t)
@@ -6285,6 +6354,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
       point_of_instantiation,
       ast,
       resolved_concrete_types,
+      excluded_dependencies,
       *record_type->getAsCXXRecordDecl());
 
   return reflected_type_info{
@@ -7307,6 +7377,9 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
+
+  for (std::string_view annotation : ctx.exclusion_annotations)
+    std::format_to(std::ostreambuf_iterator<char>(file), "// {}\n", annotation);
 
   std::format_to(std::ostreambuf_iterator<char>(file),
     "// This file was generated by the omnirefl tool on {0:%F %T}."

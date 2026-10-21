@@ -1026,3 +1026,64 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
             DEPENDS "${cpp_prefix}.test.build")
     endif()
 endforeach()
+
+foreach(_cpp_standard IN ITEMS 11 23)
+    if(NOT "${_cpp_standard}" IN_LIST _supported_cpp_standards)
+        continue()
+    endif()
+    foreach(_case IN ITEMS test ordering direct wrapper include_order reverse_include_order
+            multiple_lists)
+        set(_target "cpp_${_cpp_standard}.dependency_exclusions.${_case}")
+        if("reverse_include_order" STREQUAL "${_case}")
+            set(_source include_order)
+        else()
+            set(_source "${_case}")
+        endif()
+        add_executable(${_target} EXCLUDE_FROM_ALL
+            "dependency_exclusions/${_source}.cpp")
+        if("reverse_include_order" STREQUAL "${_case}")
+            target_compile_definitions(${_target} PRIVATE EXCLUSIONS_FIRST=1)
+        endif()
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD ${_cpp_standard}
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO)
+        target_link_libraries(${_target} PRIVATE GTest::GTest gtest_main std_compat)
+        omni_reflected_target(${_target} LOG_LEVEL info)
+
+        if("test" STREQUAL "${_case}" OR "wrapper" STREQUAL "${_case}"
+                OR "include_order" STREQUAL "${_source}")
+            set(_exclusion_file exclusions.hpp)
+            set(_expected_types
+                "struct dependency_exclusions::opaque, dependency_exclusions::view (primary template), dependency_exclusions::buffer (primary template), enum dependency_exclusions::excluded_color")
+        elseif("multiple_lists" STREQUAL "${_case}")
+            set(_exclusion_file multiple_lists.cpp)
+            set(_expected_types
+                "struct multiple_exclusions::first"
+                "struct multiple_exclusions::second"
+                "struct multiple_exclusions::first, struct multiple_exclusions::second, struct multiple_exclusions::first"
+                "multiple_exclusions::view (primary template)")
+        elseif("direct" STREQUAL "${_case}")
+            set(_exclusion_file direct.cpp)
+            set(_expected_types
+                "struct direct_exclusion::record, direct_exclusion::box (primary template)")
+        else()
+            set(_exclusion_file ordering.cpp)
+            set(_expected_types
+                "struct exclusion_ordering::discovered, struct exclusion_ordering::excluded")
+        endif()
+        add_test(NAME "${_target}.build"
+            COMMAND ${CMAKE_COMMAND}
+                -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                -D "TARGET=${_target}"
+                -D "HEADER_DIR=${CMAKE_CURRENT_BINARY_DIR}/omni_${_target}"
+                -D "EXCLUSION_FILE=${_exclusion_file}"
+                -D "EXPECTED_TYPES=${_expected_types}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/dependency_exclusions/expect_exclusions.cmake")
+        if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+            add_test(NAME "${_target}" COMMAND ${_target})
+            set_tests_properties("${_target}" PROPERTIES
+                DEPENDS "${_target}.build")
+        endif()
+    endforeach()
+endforeach()
