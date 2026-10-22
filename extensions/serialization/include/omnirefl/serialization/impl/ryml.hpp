@@ -710,6 +710,11 @@ typename std::enable_if<!serialization_root<Value>::needs_reflection,
 
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options) {
+#if defined(OMNI_TOOL_RUN)
+  // TU-wide: c4 views use string writers, not generated record metadata.
+  omni::tweaks::skip_metadata<c4::csubstr>();
+#endif
+
   // Static storage lets the parser callback use the signal without captures.
   static constexpr int parse_failed = 1;
 
@@ -1006,13 +1011,6 @@ std::string serialize_t::operator()(const Value &value) const {
 
   return text;
 }
-
-#if defined(OMNI_TOOL_RUN)
-namespace detail {
-// c4 views use string writers; their methods and aliases need no metadata.
-const omni::exclude_dependencies<c4::csubstr> excluded_string_views{};
-} // namespace detail
-#endif
 
 } // namespace ryml
 } // namespace omni

@@ -34,6 +34,14 @@ struct root {
 struct inspect {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+#if !defined(OMNI_TOOL_RUN)
+    EXPECT_FALSE(omni::is_reflected<multiple_exclusions::first>::value);
+    EXPECT_FALSE(omni::is_reflected<multiple_exclusions::second>::value);
+    EXPECT_FALSE(omni::is_reflected<multiple_exclusions::view<char>>::value);
+    EXPECT_FALSE(omni::is_reflected<multiple_exclusions::view<int>>::value);
+    EXPECT_TRUE(omni::is_reflected<multiple_exclusions::retained>::value);
+#endif
+
     return std::tuple_size<decltype(meta.public_fields())>::value;
   }
 };
@@ -44,18 +52,10 @@ TEST(dependency_exclusions, combines_distinct_and_repeated_lists) {
   EXPECT_EQ(5U, omni::reflected_call(multiple_exclusions::inspect{},
     omni::type_t<multiple_exclusions::root>{}));
 #if defined(OMNI_TOOL_RUN)
-  (void)omni::exclude_dependencies<multiple_exclusions::first>{};
-  (void)omni::exclude_dependencies<multiple_exclusions::second>{};
-  (void)omni::exclude_dependencies<multiple_exclusions::first>{};
-  (void)omni::exclude_dependencies<multiple_exclusions::first,
-    multiple_exclusions::second, multiple_exclusions::first>{};
-  (void)omni::exclude_dependencies<multiple_exclusions::view<char>>{};
-  (void)omni::exclude_dependencies<multiple_exclusions::view<int>>{};
-#else
-  EXPECT_FALSE(omni::is_reflected<multiple_exclusions::first>::value);
-  EXPECT_FALSE(omni::is_reflected<multiple_exclusions::second>::value);
-  EXPECT_FALSE(omni::is_reflected<multiple_exclusions::view<char>>::value);
-  EXPECT_FALSE(omni::is_reflected<multiple_exclusions::view<int>>::value);
-  EXPECT_TRUE(omni::is_reflected<multiple_exclusions::retained>::value);
+  omni::tweaks::skip_metadata<multiple_exclusions::first>();
+  omni::tweaks::skip_metadata<multiple_exclusions::second>();
+  omni::tweaks::skip_metadata<multiple_exclusions::first>();
+  omni::tweaks::skip_metadata<multiple_exclusions::view<char>>();
+  omni::tweaks::skip_metadata<multiple_exclusions::view<int>>();
 #endif
 }

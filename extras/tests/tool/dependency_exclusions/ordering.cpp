@@ -14,9 +14,18 @@ struct before {
   discovered child;
 };
 
+struct excluded {
+  int value;
+};
+
 struct inspect {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+#if !defined(OMNI_TOOL_RUN)
+    EXPECT_FALSE(omni::is_reflected<exclusion_ordering::discovered>::value);
+    EXPECT_FALSE(omni::is_reflected<exclusion_ordering::excluded>::value);
+#endif
+
     return std::tuple_size<decltype(meta.public_fields())>::value;
   }
 };
@@ -24,10 +33,6 @@ struct inspect {
 std::size_t reflect_before() {
   return omni::reflected_call(inspect{}, omni::type_t<before>{});
 }
-
-struct excluded {
-  int value;
-};
 
 struct after {
   discovered existing;
@@ -44,10 +49,7 @@ TEST(dependency_exclusions, applies_to_earlier_reflected_calls) {
   EXPECT_EQ(1U, exclusion_ordering::reflect_before());
   EXPECT_EQ(2U, exclusion_ordering::reflect_after());
 #if defined(OMNI_TOOL_RUN)
-  (void)omni::exclude_dependencies<exclusion_ordering::discovered,
-    exclusion_ordering::excluded>{};
-#else
-  EXPECT_FALSE(omni::is_reflected<exclusion_ordering::discovered>::value);
-  EXPECT_FALSE(omni::is_reflected<exclusion_ordering::excluded>::value);
+  omni::tweaks::skip_metadata<exclusion_ordering::discovered>();
+  omni::tweaks::skip_metadata<exclusion_ordering::excluded>();
 #endif
 }

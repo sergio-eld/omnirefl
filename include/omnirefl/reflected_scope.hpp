@@ -26,20 +26,33 @@
 
 namespace omni {
 
+namespace tweaks {
+
 /**
- * Exclude types from recursive reflection dependency discovery.
- * Lists apply throughout the translation unit, including included headers.
- * A template specialization excludes its primary template, including other
- * specializations. Explicit reflected_call inputs remain reflectable.
- * Guard uses with OMNI_TOOL_RUN; ordinary compilation does not need them.
- * Exclusion lists may live in a dedicated header included under that guard.
+ * Request skipping metadata generation for Type throughout the TU.
+ * Identical requests are idempotent, including requests from different headers.
+ * A template specialization selects its primary template, including other
+ * specializations. Skipped types cannot be immediate reflected_call arguments.
+ * Supported public protocol aliases, including inherited aliases, still expose
+ * dependencies; fields, bases, and methods of skipped dependencies are not
+ * traversed for metadata.
  *
- * Implementation detail: this template must stay declared before
- * reflected_call. Clang visits its instantiations at the template declaration,
- * collecting exclusions before reflection discovery in the same AST traversal.
+ * Requests may be guarded with OMNI_TOOL_RUN or placed in a header included
+ * under that guard. Unguarded calls are valid no-ops in ordinary compilation.
+ *
+ * @details
+ * TODO: Revisit primary-template matching if partial-specialization reflection
+ * is supported, so separately reflected specializations can be distinguished.
+ *
+ * This function template must stay declared before reflected_call. Clang visits
+ * its instantiations at the template declaration, collecting requests before
+ * reflection discovery in the same AST traversal, regardless of call placement.
+ * TODO: Consider an overload accepting bare primary templates.
  */
-template <typename... Types>
-struct exclude_dependencies {};
+template <typename Type>
+void skip_metadata() {}
+
+} // namespace tweaks
 
 enum class reflected_entity {
   /** `struct`, `class`, or named `union`. */

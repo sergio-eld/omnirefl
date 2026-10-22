@@ -1032,7 +1032,7 @@ foreach(_cpp_standard IN ITEMS 11 23)
         continue()
     endif()
     foreach(_case IN ITEMS test ordering direct wrapper include_order reverse_include_order
-            multiple_lists)
+            multiple_lists protocol)
         set(_target "cpp_${_cpp_standard}.dependency_exclusions.${_case}")
         if("reverse_include_order" STREQUAL "${_case}")
             set(_source include_order)
@@ -1051,26 +1051,48 @@ foreach(_cpp_standard IN ITEMS 11 23)
         target_link_libraries(${_target} PRIVATE GTest::GTest gtest_main std_compat)
         omni_reflected_target(${_target} LOG_LEVEL info)
 
+        if("direct" STREQUAL "${_case}")
+            add_test(NAME "${_target}.reject_immediate"
+                COMMAND ${CMAKE_COMMAND}
+                    -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                    -D "TARGET=${_target}.omni"
+                    -D "EXPECTED_DIAGNOSTICS=4"
+                    -D "EXPECTED_MESSAGE=metadata generation is disabled by omni::tweaks::skip_metadata"
+                    -D "EXPECTED_MESSAGE_2=metadata skip requested at"
+                    -D "DIAGNOSTIC_REGEX=:[0-9]+:[0-9]+: reflected_call argument"
+                    -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
+            continue()
+        endif()
+
         if("test" STREQUAL "${_case}" OR "wrapper" STREQUAL "${_case}"
                 OR "include_order" STREQUAL "${_source}")
             set(_exclusion_file exclusions.hpp)
             set(_expected_types
-                "struct dependency_exclusions::opaque, dependency_exclusions::view (primary template), dependency_exclusions::buffer (primary template), enum dependency_exclusions::excluded_color")
+                "struct dependency_exclusions::opaque"
+                "dependency_exclusions::view (primary template)"
+                "dependency_exclusions::buffer (primary template)"
+                "enum dependency_exclusions::excluded_color")
         elseif("multiple_lists" STREQUAL "${_case}")
             set(_exclusion_file multiple_lists.cpp)
             set(_expected_types
                 "struct multiple_exclusions::first"
                 "struct multiple_exclusions::second"
-                "struct multiple_exclusions::first, struct multiple_exclusions::second, struct multiple_exclusions::first"
                 "multiple_exclusions::view (primary template)")
-        elseif("direct" STREQUAL "${_case}")
-            set(_exclusion_file direct.cpp)
+        elseif("protocol" STREQUAL "${_case}")
+            set(_exclusion_file protocol.cpp)
             set(_expected_types
-                "struct direct_exclusion::record, direct_exclusion::box (primary template)")
+                "struct exclusion_protocol::dictionary"
+                "exclusion_protocol::wrapper (primary template)"
+                "exclusion_protocol::virtual_wrapper (primary template)"
+                "exclusion_protocol::inherited_wrapper (primary template)"
+                "struct exclusion_protocol::private_wrapper"
+                "struct exclusion_protocol::exposed_wrapper"
+                "struct exclusion_protocol::ambiguous_wrapper")
         else()
             set(_exclusion_file ordering.cpp)
             set(_expected_types
-                "struct exclusion_ordering::discovered, struct exclusion_ordering::excluded")
+                "struct exclusion_ordering::discovered"
+                "struct exclusion_ordering::excluded")
         endif()
         add_test(NAME "${_target}.build"
             COMMAND ${CMAKE_COMMAND}
