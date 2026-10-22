@@ -2,7 +2,7 @@
 # Omnirefl
 
 A C++ reflection tool built for a seamless experience without macros* or UB. <sub>(C++11 minimum.)</sub><br>
-<sub>* Some compatibility QoL before C++17/20 uses macros.</sub>
+<sub>* optional QoL and compatibility</sub>
 
 <p align="center">
   <img src="omnirefl-banner.png" alt="Meme comparing Omnirefl AST parsing and template machinery with languages that have built-in reflection" width="640">
@@ -17,8 +17,9 @@ A C++ reflection tool built for a seamless experience without macros* or UB. <su
 1. Add `omni_reflected_target(...)` for a CMake target.
 2. Use `omni::reflected_call(...)` where reflection is needed.
 
-Everything else remains regular C++. No macros, compiler-specific tricks,
-undefined behavior, or manual regeneration are required.
+Everything else remains regular C++. No macros*, compiler-specific tricks,
+undefined behavior, or manual regeneration are required.<br>
+<sub>* Reflection uses AST instrumentation. Macros are optional conveniences or compatibility fallbacks.</sub>
 
 Types can be declared and reflected directly in the same `.cpp`. No dedicated
 declaration headers, schemas, annotations, or checked-in metadata files are
@@ -504,7 +505,7 @@ against the average of the last five stored runs.
 <!-- pages:scope:start -->
 ## Supported Scope
 
-Omnirefl reflects the public data surface of named C++ records and enums (see
+Omnirefl reflects the public interface of named C++ records and enums (see
 [Limitations](#limitations)).
 
 - **Language:** C++11 minimum; C++20 concepts provide the most ergonomic interface.
@@ -521,63 +522,35 @@ Omnirefl reflects the public data surface of named C++ records and enums (see
   </details>
 
 - **CMake integration:** supports Ninja and Makefile generators, including Ninja
-  with MSVC. Visual Studio generators are not supported.
-- **Reflectable declarations:**
-  - named namespace-scope records (structs, classes, and unions) and enums
-  - nested named records and enums inside non-template records
+  with MSVC. *Visual Studio generators are not supported.*
+- **Records:**
+  - named structs, classes, and unions declared globally or in a namespace
+  - nested named records inside non-template records
   - unconstrained primary record templates with type, non-type, and
     template-template parameters, including type packs and CRTP bases
-  - non-aggregate records and records without a default constructor, when
-    supplied as existing objects or queried through `omni::type<T>`
+- **Enums:**
+  - named enums declared globally, in a namespace, or inside non-template records
+  - enumerator names and values in declaration order
 - **Type metadata:**
-  - type names with and without enclosing namespace qualification, entity kind,
-    and documentation extracted from Doxygen-style leading and trailing
-    comments: `///`, `//!`, `/** */`, `/*! */`, `///<`, and `//!<`
-  - qualified names retain enclosing record and namespace identifiers,
-    including those of inline namespaces
-  - records additionally expose `has_bases()` and generated
-    `is_aggregatable()` capability queries
+  - qualified and unqualified type names
+  - Doxygen-style documentation
 - **Public field metadata and access:**
-  - an ordered tuple of public non-static fields, including fields inherited
-    transitively through public bases; hidden and ambiguous inherited fields
-    are omitted
-  - field name, type names preserving declaration spelling such as alias
-    templates and `decltype`, with and without enclosing namespace
-    qualification, an index local to the declaring record, documentation, and
-    const/mutable/volatile/deprecated traits
-  - default member initializer presence and best-effort access to values
-    accepted for reproduction in generated metadata; skipped values emit a
-    warning and remain distinguishable from fields without an initializer
-  - read access, moving through `std::move(field).value()`, writable-field
-    assignment, and safe reference, dereference, and member access
-  - value/reference capability queries for generic field handling
-  - bitfield and misaligned packed scalar members remain readable; writable
-    members remain assignable but do not expose references
-  - private/protected fields, static fields, and fields inherited through
-    non-public bases are omitted
+  - non-static fields accessible from the reflected type, including those
+    inherited through public bases, in declaration order
+  - field names, declared type names, and documentation
+  - field indices within the declaring record
+  - const/mutable/volatile/deprecated traits
+  - reading and writing field values, including bitfields and misaligned packed
+    scalar fields
+  - query whether each field can be read or accessed by reference
+  - default member initializer detection and best-effort access to their values
 - **Public function metadata:**
-  - non-static public member functions without parameter packs; overloaded
-    methods are skipped with a warning, while conversion operators and
-    immediate functions are omitted
-  - fixed `function_t` fields as special field members for free or static
-    functions; dependent function-tag fields in primary templates remain
-    ordinary fields without function metadata
-  - source name, documentation, pointer, arity, parameter metadata, and return
-    metadata; parameter and return metadata include source-spelled type names
-    and tagged documentation
-- **Enum metadata:** enumerator names and values in declaration order.
-- **Invocation and bindings:**
-  - `reflected_call` value arguments produce non-owning bindings;
-    `omni::type<T>` requests metadata without constructing `T`
-  - record and enum metadata expose their domain type through `reflected_type`;
-    the generated metadata template argument is intentionally opaque
-  - field bindings expose the cv-qualified bound record type separately from
-    opaque field metadata
-  - one callable can receive multiple value and type arguments
-  - value bindings preserve const/volatile and lvalue/rvalue qualification;
-    callable value and reference returns are preserved
-  - `omni::reflected(...)` and `is_reflected<T>` query generated dependency
-    metadata from inside the callable
+  - non-static member functions accessible from the reflected type, including
+    those inherited through public bases
+  - free and static functions represented by `function_t` fields;
+    see [Limitations](#limitations)
+  - names, documentation, function pointers, arity, parameter metadata, and
+    return metadata
 
 <!-- pages:scope:end -->
 
@@ -603,10 +576,35 @@ Additional reflected types are discovered through:
 
 Supported public routes may expose otherwise non-public nested dependencies.
 
-Standard-library record types are not traversed as reflectable records outside
-those protocol routes.
+Standard-library records and types explicitly skipped by the user do not receive
+metadata. Their supported member aliases and tuple/variant routes still expose
+dependencies.
 
 <!-- pages:dependency-protocols:end -->
+
+### Skipping Metadata
+
+Use `OMNI_SKIP_METADATA(...)` to omit metadata for selected types while retaining
+discovery through their supported public protocol aliases, including inherited
+aliases. For example, after declaring or including a third-party view type:
+
+```cpp
+// At the end of the .cpp, after any reflected calls.
+#if defined(OMNI_TOOL_RUN)
+OMNI_SKIP_METADATA(third_party::view<char>);
+#endif
+```
+
+The macro instantiates `omni::tweaks::skip_metadata<Types...>` without creating
+symbols. Aliases identify the underlying type; a template specialization selects
+its primary template, so this example also skips metadata for `view<int>`.
+Skipped types cannot be immediate `reflected_call` arguments.
+
+Requests apply throughout the translation unit. Keep them in one place, such as
+the end of the `.cpp` or a dedicated header included under `OMNI_TOOL_RUN`.
+This mechanism is experimental; see the
+[header annotation](include/omnirefl/reflected_scope.hpp) for details and
+conditional-use restrictions.
 
 <!-- pages:limitations:start -->
 ## Limitations
@@ -635,6 +633,13 @@ model: reflected types must be nameable before their source declarations. See
   expressions are skipped with a warning. `has_default_member_initializer()`
   still reports the declaration, while `has_default_value_access()` reports
   whether its value is available.
+- Hidden and ambiguous inherited fields, and fields inherited through
+  non-public bases, are omitted.
+- Function metadata excludes member functions with parameter packs, conversion
+  operators, and immediate functions. Overloaded methods are skipped with a
+  warning. Only fixed `function_t` field types expose free/static function
+  metadata; dependent function-tag fields in primary templates remain ordinary
+  fields.
 - Incomplete dependency types are skipped with a warning. A class-template
   dependency is also skipped when instantiating it would require an incomplete
   type argument.
@@ -660,6 +665,7 @@ model: reflected types must be nameable before their source declarations. See
   their metadata is formed](extras/tests/tool/regressions/deprecated_public_field.cpp),
   before `is_deprecated()` can filter them.
 - Anonymous unions are not reflected correctly.
+- Bitfields and misaligned packed scalar fields do not expose references.
 - Compiler-packed misaligned raw arrays have no safe whole-field accessor; use
   an aligned representation such as `std::array` when whole-field access is
   required.
