@@ -48,6 +48,9 @@ namespace tweaks {
  * its instantiations at the template declaration, collecting requests before
  * reflection discovery in the same AST traversal, regardless of call placement.
  * TODO: Consider an overload accepting bare primary templates.
+ *
+ * Requests are not scope- or position-dependent: a call applies throughout the
+ * translation unit, including reflected calls appearing before it.
  */
 template <typename Type>
 void skip_metadata() {}

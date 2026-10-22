@@ -34,6 +34,8 @@ struct root {
 struct inspect {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    // Test-only ad hoc: spell concrete fixture types to check exact metadata.
+    // Guard non-dependent queries: generated traits are absent in tool runs.
 #if !defined(OMNI_TOOL_RUN)
     EXPECT_FALSE(omni::is_reflected<multiple_exclusions::first>::value);
     EXPECT_FALSE(omni::is_reflected<multiple_exclusions::second>::value);
@@ -51,11 +53,14 @@ struct inspect {
 TEST(dependency_exclusions, combines_distinct_and_repeated_lists) {
   EXPECT_EQ(5U, omni::reflected_call(multiple_exclusions::inspect{},
     omni::type_t<multiple_exclusions::root>{}));
+}
+
 #if defined(OMNI_TOOL_RUN)
-  omni::tweaks::skip_metadata<multiple_exclusions::first>();
-  omni::tweaks::skip_metadata<multiple_exclusions::second>();
-  omni::tweaks::skip_metadata<multiple_exclusions::first>();
+extern template void omni::tweaks::skip_metadata<multiple_exclusions::first>();
+extern template void omni::tweaks::skip_metadata<multiple_exclusions::second>();
+extern template void omni::tweaks::skip_metadata<multiple_exclusions::first>();
+extern template void
   omni::tweaks::skip_metadata<multiple_exclusions::view<char>>();
+extern template void
   omni::tweaks::skip_metadata<multiple_exclusions::view<int>>();
 #endif
-}

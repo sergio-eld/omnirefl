@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Sergei Kolesnik
 
+#include <gtest/gtest.h>
 #include <omnirefl/reflected_scope.hpp>
 
 namespace direct_exclusion {
@@ -32,7 +33,8 @@ struct inspect {
 
 } // namespace direct_exclusion
 
-int main() {
+// CTest verifies four instrumentation errors; this case must not compile.
+TEST(dependency_exclusions, rejects_skipped_immediate_arguments) {
   (void)omni::reflected_call(direct_exclusion::inspect{},
     omni::type_t<direct_exclusion::record>{});
   (void)omni::reflected_call(direct_exclusion::inspect{},
@@ -41,9 +43,10 @@ int main() {
     omni::type_t<direct_exclusion::box<double>>{});
   (void)omni::reflected_call(direct_exclusion::inspect{},
     omni::type_t<direct_exclusion::status>{});
-#if defined(OMNI_TOOL_RUN)
-  omni::tweaks::skip_metadata<direct_exclusion::record>();
-  omni::tweaks::skip_metadata<direct_exclusion::box<int>>();
-  omni::tweaks::skip_metadata<direct_exclusion::status>();
-#endif
 }
+
+#if defined(OMNI_TOOL_RUN)
+extern template void omni::tweaks::skip_metadata<direct_exclusion::record>();
+extern template void omni::tweaks::skip_metadata<direct_exclusion::box<int>>();
+extern template void omni::tweaks::skip_metadata<direct_exclusion::status>();
+#endif

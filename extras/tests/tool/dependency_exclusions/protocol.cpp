@@ -106,23 +106,12 @@ struct root {
   private_wrapper blocked;
 };
 
-#if defined(OMNI_TOOL_RUN)
-// These requests apply throughout the TU; this function is never invoked.
-inline void request_metadata_skips() {
-  omni::tweaks::skip_metadata<dictionary>();
-  omni::tweaks::skip_metadata<wrapper<int>>();
-  omni::tweaks::skip_metadata<virtual_wrapper<int>>();
-  omni::tweaks::skip_metadata<inherited_wrapper<int>>();
-  omni::tweaks::skip_metadata<private_wrapper>();
-  omni::tweaks::skip_metadata<exposed_wrapper>();
-  omni::tweaks::skip_metadata<ambiguous_wrapper>();
-}
-#endif
-
 // C++11 callables keep metadata queries inside their reflected scopes.
 struct inspect_protocols {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    // Test-only ad hoc: spell concrete fixture types to check exact metadata.
+    // Guard non-dependent queries: generated traits are absent in tool runs.
 #if !defined(OMNI_TOOL_RUN)
     EXPECT_TRUE(omni::is_reflected<key>::value);
     EXPECT_TRUE(omni::is_reflected<mapped>::value);
@@ -144,6 +133,8 @@ struct inspect_protocols {
 struct inspect_virtual_protocols {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    // Test-only ad hoc: spell concrete fixture types to check exact metadata.
+    // Guard non-dependent queries: generated traits are absent in tool runs.
 #if !defined(OMNI_TOOL_RUN)
     EXPECT_TRUE(omni::is_reflected<virtual_element>::value);
     EXPECT_FALSE(omni::is_reflected<virtual_wrapper<virtual_element>>::value);
@@ -158,6 +149,8 @@ struct inspect_virtual_protocols {
 struct inspect_alias_lookup {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    // Test-only ad hoc: spell concrete fixture types to check exact metadata.
+    // Guard non-dependent queries: generated traits are absent in tool runs.
 #if !defined(OMNI_TOOL_RUN)
     EXPECT_TRUE(omni::is_reflected<exposed_element>::value);
     EXPECT_FALSE(omni::is_reflected<ambiguous_first>::value);
@@ -187,3 +180,20 @@ TEST(dependency_exclusions, resolves_public_using_and_ambiguous_aliases) {
   EXPECT_EQ(2U, omni::reflected_call(exclusion_protocol::inspect_alias_lookup{},
     omni::type_t<exclusion_protocol::lookup_root>{}));
 }
+
+#if defined(OMNI_TOOL_RUN)
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::dictionary>();
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::wrapper<int>>();
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::virtual_wrapper<int>>();
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::inherited_wrapper<int>>();
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::private_wrapper>();
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::exposed_wrapper>();
+extern template void
+  omni::tweaks::skip_metadata<exclusion_protocol::ambiguous_wrapper>();
+#endif

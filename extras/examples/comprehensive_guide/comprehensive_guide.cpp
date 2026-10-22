@@ -447,6 +447,21 @@ TEST(example, reflected_value_query) {
     omni::reflected_call(query_value, exposition::foobar_record{}));
 }
 
+TEST(example, guarded_non_dependent_query) {
+  const auto concrete_query = [](omni::record_meta auto) -> void {
+    // Footgun: naming a concrete type makes the query non-dependent. C++ checks
+    // it while parsing the generic body, before the visitor is instantiated.
+    // Generated traits are unavailable at that point during instrumentation.
+    // Prefer querying types derived from the reflected parameters instead.
+    // This guard is an ad hoc workaround; a fix is under consideration.
+#if !defined(OMNI_TOOL_RUN)
+    EXPECT_TRUE(omni::is_reflected<exposition::foobar_record>::value);
+#endif
+  };
+
+  omni::reflected_call(concrete_query, omni::type<exposition::foobar_record>);
+}
+
 TEST(example, meta_bind_and_field_metadata) {
   const auto inspect = [](omni::record_meta auto record) -> int {
     // `meta.bind()` default-constructs an owning binding when the reflected

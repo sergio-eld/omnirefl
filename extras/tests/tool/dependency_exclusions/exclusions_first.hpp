@@ -12,9 +12,6 @@
 #include "model.hpp"
 
 #if defined(OMNI_TOOL_RUN)
-namespace exclusion_requests_first {
-inline void request_metadata_skip() {
+extern template void
   omni::tweaks::skip_metadata<dependency_exclusions::opaque_alias>();
-}
-} // namespace exclusion_requests_first
 #endif

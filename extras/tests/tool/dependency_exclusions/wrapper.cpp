@@ -11,6 +11,8 @@ namespace wrapped_exclusion {
 struct inspect {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    // Test-only ad hoc: spell concrete fixture types to check exact metadata.
+    // Guard non-dependent queries: generated traits are absent in tool runs.
 #if !defined(OMNI_TOOL_RUN)
     EXPECT_FALSE(omni::is_reflected<dependency_exclusions::opaque>::value);
 #endif
