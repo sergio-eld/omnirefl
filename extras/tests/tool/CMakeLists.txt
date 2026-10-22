@@ -1031,8 +1031,8 @@ foreach(_cpp_standard IN ITEMS 11 23)
     if(NOT "${_cpp_standard}" IN_LIST _supported_cpp_standards)
         continue()
     endif()
-    foreach(_case IN ITEMS test ordering direct wrapper include_order reverse_include_order
-            multiple_lists protocol)
+    foreach(_case IN ITEMS test ordering direct_reflected_call_args wrapper include_order
+            reverse_include_order multiple_lists protocol)
         set(_target "cpp_${_cpp_standard}.dependency_exclusions.${_case}")
         if("reverse_include_order" STREQUAL "${_case}")
             set(_source include_order)
@@ -1051,7 +1051,7 @@ foreach(_cpp_standard IN ITEMS 11 23)
         target_link_libraries(${_target} PRIVATE GTest::GTest gtest_main std_compat)
         omni_reflected_target(${_target} LOG_LEVEL info)
 
-        if("direct" STREQUAL "${_case}")
+        if("direct_reflected_call_args" STREQUAL "${_case}")
             add_test(NAME "${_target}.reject_immediate"
                 COMMAND ${CMAKE_COMMAND}
                     -D "BUILD_DIR=${CMAKE_BINARY_DIR}"
