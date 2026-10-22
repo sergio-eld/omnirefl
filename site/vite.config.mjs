@@ -1,4 +1,5 @@
 import {readFile} from 'node:fs/promises'
+import {watch} from 'node:fs'
 import {fileURLToPath} from 'node:url'
 import path from 'node:path'
 
@@ -98,11 +99,13 @@ The FetchContent integration is available starting with v0.0.6.
 const readmePlugin = () => ({
   name: 'omnirefl-readme',
   configureServer(server) {
-    server.watcher.add(readme)
-    server.watcher.on('change', changed => {
-      if (path.resolve(changed) === readme)
+    // Watch the directory so replacing README.md during Git operations or
+    // atomic editor saves does not leave a watch attached to the old file.
+    const watcher = watch(repository, (_event, filename) => {
+      if (filename === 'README.md')
         server.ws.send({type: 'full-reload'})
     })
+    server.httpServer?.once('close', () => watcher.close())
   },
   transformIndexHtml: {
     order: 'pre',
