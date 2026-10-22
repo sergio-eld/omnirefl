@@ -182,18 +182,11 @@ TEST(dependency_exclusions, resolves_public_using_and_ambiguous_aliases) {
 }
 
 #if defined(OMNI_TOOL_RUN)
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::dictionary>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::wrapper<int>>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::virtual_wrapper<int>>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::inherited_wrapper<int>>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::private_wrapper>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::exposed_wrapper>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_protocol::ambiguous_wrapper>();
+OMNI_SKIP_METADATA(exclusion_protocol::dictionary);
+OMNI_SKIP_METADATA(exclusion_protocol::wrapper<int>);
+OMNI_SKIP_METADATA(exclusion_protocol::virtual_wrapper<int>);
+OMNI_SKIP_METADATA(exclusion_protocol::inherited_wrapper<int>);
+OMNI_SKIP_METADATA(exclusion_protocol::private_wrapper);
+OMNI_SKIP_METADATA(exclusion_protocol::exposed_wrapper);
+OMNI_SKIP_METADATA(exclusion_protocol::ambiguous_wrapper);
 #endif

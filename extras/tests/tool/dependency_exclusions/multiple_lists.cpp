@@ -56,11 +56,8 @@ TEST(dependency_exclusions, combines_distinct_and_repeated_lists) {
 }
 
 #if defined(OMNI_TOOL_RUN)
-extern template void omni::tweaks::skip_metadata<multiple_exclusions::first>();
-extern template void omni::tweaks::skip_metadata<multiple_exclusions::second>();
-extern template void omni::tweaks::skip_metadata<multiple_exclusions::first>();
-extern template void
-  omni::tweaks::skip_metadata<multiple_exclusions::view<char>>();
-extern template void
-  omni::tweaks::skip_metadata<multiple_exclusions::view<int>>();
+OMNI_SKIP_METADATA(multiple_exclusions::first, multiple_exclusions::second);
+OMNI_SKIP_METADATA(multiple_exclusions::first);
+OMNI_SKIP_METADATA(multiple_exclusions::view<char>);
+OMNI_SKIP_METADATA(multiple_exclusions::view<int>);
 #endif

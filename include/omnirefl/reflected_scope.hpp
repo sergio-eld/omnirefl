@@ -29,8 +29,24 @@ namespace omni {
 namespace tweaks {
 
 /**
- * Request skipping metadata generation for Type throughout the TU.
- * Identical requests are idempotent, including requests from different headers.
+ * Instantiating this struct is interpreted as a request to skip metadata
+ * generation for Types... throughout the TU.
+ *
+ * @warning @parblock
+ * This approach is experimental: it matches resolved types in the AST using
+ * their type IDs, so aliases identify the underlying type rather than a spelling.
+ *
+ * Requests are not scope- or position-dependent: they apply throughout the TU.
+ * Keep them in a single place. As of this writing, placing them at the end of
+ * the TU works, as does a dedicated header included under OMNI_TOOL_RUN.
+ *
+ * Avoid conditional template usage. It may appear to work, but is not supported
+ * tool usage; consider other approaches when conditional behavior is needed.
+ * @endparblock
+ *
+ * OMNI_SKIP_METADATA(Types...) is a convenience for namespace-scope requests:
+ * static_assert with sizeof instantiates the struct without creating symbols.
+ *
  * A template specialization selects its primary template, including other
  * specializations. Skipped types cannot be immediate reflected_call arguments.
  * Supported public protocol aliases, including inherited aliases, still expose
@@ -38,24 +54,25 @@ namespace tweaks {
  * traversed for metadata.
  *
  * Requests may be guarded with OMNI_TOOL_RUN or placed in a header included
- * under that guard. Unguarded calls are valid no-ops in ordinary compilation.
+ * under that guard. Unguarded objects are empty in ordinary compilation.
  *
  * @details
  * TODO: Revisit primary-template matching if partial-specialization reflection
  * is supported, so separately reflected specializations can be distinguished.
  *
- * This function template must stay declared before reflected_call. Clang visits
+ * This struct template must stay declared before reflected_call. Clang visits
  * its instantiations at the template declaration, collecting requests before
  * reflection discovery in the same AST traversal, regardless of call placement.
- * TODO: Consider an overload accepting bare primary templates.
- *
- * Requests are not scope- or position-dependent: a call applies throughout the
- * translation unit, including reflected calls appearing before it.
+ * TODO: Consider support for bare primary templates.
  */
-template <typename Type>
-void skip_metadata() {}
+template <typename... Types>
+struct skip_metadata {};
 
 } // namespace tweaks
+
+/** Request skipping metadata generation for the listed types throughout the TU. */
+#define OMNI_SKIP_METADATA(...) \
+  static_assert(sizeof(::omni::tweaks::skip_metadata<__VA_ARGS__>), "")
 
 enum class reflected_entity {
   /** `struct`, `class`, or named `union`. */

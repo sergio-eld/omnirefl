@@ -46,7 +46,7 @@ TEST(dependency_exclusions, rejects_skipped_immediate_arguments) {
 }
 
 #if defined(OMNI_TOOL_RUN)
-extern template void omni::tweaks::skip_metadata<direct_exclusion::record>();
-extern template void omni::tweaks::skip_metadata<direct_exclusion::box<int>>();
-extern template void omni::tweaks::skip_metadata<direct_exclusion::status>();
+OMNI_SKIP_METADATA(direct_exclusion::record);
+OMNI_SKIP_METADATA(direct_exclusion::box<int>);
+OMNI_SKIP_METADATA(direct_exclusion::status);
 #endif

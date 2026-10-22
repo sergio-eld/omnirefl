@@ -53,8 +53,6 @@ TEST(dependency_exclusions, applies_to_earlier_reflected_calls) {
 }
 
 #if defined(OMNI_TOOL_RUN)
-extern template void
-  omni::tweaks::skip_metadata<exclusion_ordering::discovered>();
-extern template void
-  omni::tweaks::skip_metadata<exclusion_ordering::excluded>();
+OMNI_SKIP_METADATA(exclusion_ordering::discovered);
+OMNI_SKIP_METADATA(exclusion_ordering::excluded);
 #endif

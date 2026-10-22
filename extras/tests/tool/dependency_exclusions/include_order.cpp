@@ -38,5 +38,4 @@ TEST(dependency_exclusions, headers_accept_both_exclusion_include_orders) {
 }
 
 // Guards are optional; ordinary compilation also accepts the no-op request.
-extern template void
-  omni::tweaks::skip_metadata<dependency_exclusions::opaque>();
+OMNI_SKIP_METADATA(dependency_exclusions::opaque);

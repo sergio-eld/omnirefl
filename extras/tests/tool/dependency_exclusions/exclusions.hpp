@@ -7,12 +7,8 @@
 
 #include "model.hpp"
 
-extern template void
-  omni::tweaks::skip_metadata<dependency_exclusions::opaque_alias>();
+OMNI_SKIP_METADATA(dependency_exclusions::opaque_alias);
 // A specialization identifies the primary template for all its arguments.
-extern template void
-  omni::tweaks::skip_metadata<dependency_exclusions::view<char>>();
-extern template void
-  omni::tweaks::skip_metadata<dependency_exclusions::buffer<int, 2>>();
-extern template void
-  omni::tweaks::skip_metadata<dependency_exclusions::excluded_color>();
+OMNI_SKIP_METADATA(dependency_exclusions::view<char>);
+OMNI_SKIP_METADATA(dependency_exclusions::buffer<int, 2>);
+OMNI_SKIP_METADATA(dependency_exclusions::excluded_color);

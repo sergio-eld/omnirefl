@@ -1012,5 +1012,5 @@ std::string serialize_t::operator()(const Value &value) const {
 
 #if defined(OMNI_TOOL_RUN)
 // TU-wide: c4 views use string writers, not generated record metadata.
-extern template void omni::tweaks::skip_metadata<c4::csubstr>();
+OMNI_SKIP_METADATA(c4::csubstr);
 #endif

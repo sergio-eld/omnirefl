@@ -12,6 +12,5 @@
 #include "model.hpp"
 
 #if defined(OMNI_TOOL_RUN)
-extern template void
-  omni::tweaks::skip_metadata<dependency_exclusions::opaque_alias>();
+OMNI_SKIP_METADATA(dependency_exclusions::opaque_alias);
 #endif

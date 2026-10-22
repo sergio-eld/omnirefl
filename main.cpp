@@ -2129,41 +2129,58 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
+// TODO: [high] Consider type-name rendering without metadata specializations,
+// so skipped types can still be named at runtime. Emit separate SFINAE type-name
+// renderer specializations while keeping is_reflected false and metadata
+// unavailable.
 meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,
-  const clang::FunctionDecl &declaration) {
-  const clang::TemplateArgumentList *args =
-    declaration.getTemplateSpecializationArgs();
-
-  if (!args || 1 != args->size()
-    || clang::TemplateArgument::Type != args->get(/*Type=*/0).getKind()) {
+  const clang::ClassTemplateSpecializationDecl &declaration) {
+  const auto &args = declaration.getTemplateArgs();
+  if (1 != args.size()
+    || clang::TemplateArgument::Pack != args.get(/*Types...=*/0).getKind()) {
     context.errors.internal.emplace_back(
       "invalid omni::tweaks::skip_metadata signature");
 
     return context;
   }
 
-  const clang::QualType type = ast.getCanonicalType(
-    args->get(/*Type=*/0).getAsType().getNonReferenceType());
-  if (const auto *tag = type->getAs<clang::TagType>())
-    context.metadata_skips.emplace(meta::reflectable_type_id(ast, tag));
+  return std::ranges::fold_left(args.get(/*Types...=*/0).pack_elements(),
+    std::move(context),
+    [&log, &ast, &declaration](meta::source_file_context state,
+      const clang::TemplateArgument &arg) {
+      if (clang::TemplateArgument::Type != arg.getKind()) {
+        state.errors.internal.emplace_back(
+          "invalid omni::tweaks::skip_metadata type argument");
 
-  const auto *specialization =
-    llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(
-      type->getAsCXXRecordDecl());
+        return state;
+      }
 
-  std::string message = std::format("metadata skip requested at {}: {}",
-    declaration.getPointOfInstantiation().printToString(ast.getSourceManager()),
-    specialization
-      ? std::format("{} (primary template)",
-          specialization->getSpecializedTemplate()->getQualifiedNameAsString())
-      : meta::canonical_type_id(ast, type.getTypePtr()));
+      const clang::QualType type =
+        ast.getCanonicalType(arg.getAsType().getNonReferenceType());
+      if (const auto *tag = type->getAs<clang::TagType>())
+        state.metadata_skips.emplace(meta::reflectable_type_id(ast, tag));
 
-  log(log_level::info, [&message] { return "\n" + message; });
-  context.skip_request_messages.push_back(std::move(message));
+      const auto *specialization =
+        llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(
+          type->getAsCXXRecordDecl());
 
-  return context;
+      std::string message = std::format("metadata skip requested at {}: {}",
+        ast.getSourceManager()
+          .getExpansionLoc(declaration.getPointOfInstantiation())
+          .printToString(ast.getSourceManager()),
+        specialization
+          ? std::format("{} (primary template)",
+              specialization->getSpecializedTemplate()
+                ->getQualifiedNameAsString())
+          : meta::canonical_type_id(ast, type.getTypePtr()));
+
+      log(log_level::info, [&message] { return "\n" + message; });
+      state.skip_request_messages.push_back(std::move(message));
+
+      return state;
+    });
 }
 
 meta::source_file_context meta::matches::fold_reflected_call(
@@ -4193,10 +4210,10 @@ std::expected<meta::source_file_context, app_error>
       ast::rule{
         // Instantiations are visited at the primary template declaration,
         // before reflected_call and its wrappers, regardless of list placement.
-        .pattern = ast::pattern(functionDecl,
+        .pattern = ast::pattern(classTemplateSpecializationDecl,
           hasName("::omni::tweaks::skip_metadata"),
-          // Repeated namespace-scope requests may be extern instantiations.
-          isTemplateInstantiation()),
+          isTemplateInstantiation(),
+          isDefinition()),
         .fold = std::bind_front(fold_metadata_skips,
           std::cref(log),
           std::cref(parsed.ast->getASTContext())),
