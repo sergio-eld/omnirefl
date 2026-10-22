@@ -32,7 +32,8 @@ struct root {
 struct inspect {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
-    // Generated metadata is unavailable during instrumentation.
+    // Test-only ad hoc: spell concrete fixture types to check exact metadata.
+    // Guard non-dependent queries: generated traits are absent in tool runs.
 #if !defined(OMNI_TOOL_RUN)
     static_assert(!omni::is_reflected<opaque>::value,
       "an excluded concrete type has no dependency metadata");

@@ -7,6 +7,16 @@ if(NOT 0 EQUAL rc)
     message(FATAL_ERROR "Exclusion test build failed:\n${out}\n${err}")
 endif()
 
+if("${out}${err}" MATCHES
+        "overloaded public member function '[^'\r\n]*dependency_exclusions::opaque::")
+    message(FATAL_ERROR "Skipped metadata must not produce member warnings:\n${out}\n${err}")
+endif()
+
+if("${out}${err}" MATCHES
+        "reflection dependency '[^'\r\n]*exclusion_protocol::virtual_wrapper[^'\r\n]*' skipped: records with virtual bases")
+    message(FATAL_ERROR "Metadata restrictions must not block skipped discovery routes:\n${out}\n${err}")
+endif()
+
 file(GLOB headers "${HEADER_DIR}/*.omnirefl.hpp")
 list(LENGTH headers count)
 if(NOT 1 EQUAL count)
@@ -14,7 +24,7 @@ if(NOT 1 EQUAL count)
 endif()
 file(READ "${headers}" header)
 string(REGEX MATCHALL
-    "// dependencies excluded at [^\r\n]*${EXCLUSION_FILE}:[0-9]+:[0-9]+: [^\r\n]*"
+    "// metadata skip requested at [^\r\n]*${EXCLUSION_FILE}:[0-9]+:[0-9]+: [^\r\n]*"
     annotations "${header}")
 if(NOT annotations)
     message(FATAL_ERROR "Generated header does not identify the exclusion location")
@@ -22,7 +32,7 @@ endif()
 
 set(reported_types)
 foreach(annotation IN LISTS annotations)
-    string(REGEX REPLACE "^// dependencies excluded at .*:[0-9]+:[0-9]+: " ""
+    string(REGEX REPLACE "^// metadata skip requested at .*:[0-9]+:[0-9]+: " ""
         types "${annotation}")
     list(APPEND reported_types "${types}")
 

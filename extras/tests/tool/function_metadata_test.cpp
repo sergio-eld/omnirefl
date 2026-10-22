@@ -257,6 +257,7 @@ struct inspect_function_field {
       meta::returns().spelled_qualified_type_name(),
       /*return_actual_type=*/
       std::is_same<response, typename meta::return_type>::value,
+      // Test-only ad hoc: concrete request/response queries are non-dependent.
 #if defined(OMNI_TOOL_RUN)
       // Generated dependency metadata is available only after discovery.
       /*request_reflected=*/false,

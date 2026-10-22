@@ -40,6 +40,7 @@
 #include <clang/Lex/Lexer.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Options/Options.h>
+#include <clang/Sema/Lookup.h>
 #include <clang/Sema/Sema.h>
 #include <clang/Serialization/PCHContainerOperations.h>
 #include <llvm/ADT/ArrayRef.h>
@@ -734,15 +735,15 @@ std::expected<reflected_type_info, std::string> resolve_reflected_type(
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types,
-  const std::set<type_id> &excluded_dependencies);
+  const std::set<type_id> &metadata_skips);
 
 struct source_file_context {
   fs::path source;
 
   std::vector<meta::reflectable> reflected{};
 
-  std::set<meta::type_id> excluded_dependencies{};
-  std::vector<std::string> exclusion_annotations{};
+  std::set<meta::type_id> metadata_skips{};
+  std::vector<std::string> skip_request_messages{};
 
   // Fold state used while resolving reflected calls. Tracks ids already
   // seen during direct and dependency resolution.
@@ -827,7 +828,7 @@ struct reflection_context {
 
   fs::path instrumented_source;
 
-  std::vector<std::string> exclusion_annotations;
+  std::vector<std::string> skip_request_messages;
   std::vector<forward_declarable> fwd_declarables;
   std::vector<nested_type> nested;
   std::vector<indexed_type> indexed;
@@ -1196,6 +1197,10 @@ type_id reflectable_type_id(const clang::ASTContext &ast,
       ->getQualifiedNameAsString());
 }
 
+// Tuple/variant wrappers have no value_type alias exposing all heterogeneous
+// elements, so discover their template arguments instead of implementation
+// members. Unqualified primary-template names cover standard and compatibility
+// wrappers.
 bool is_compound_dependency_route(const clang::CXXRecordDecl *record) {
   assert(record);
 
@@ -1758,6 +1763,7 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
   validate_reflected_call_arg(clang::ASTContext &ast,
     const clang::CXXOperatorCallExpr &call,
     const clang::Expr *arg_expr,
+    const std::set<meta::type_id> &metadata_skips,
     clang::QualType type) {
   assert(arg_expr);
 
@@ -1810,6 +1816,15 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
   }
 
   const auto &tag = clang::cast<clang::TagType>(canonical);
+
+  if (!metadata_skips.empty()
+    && metadata_skips.contains(meta::reflectable_type_id(ast, &tag))) {
+    return std::unexpected(invalid_arg_error(
+      /*reason*/ //
+      "metadata generation is disabled by omni::tweaks::skip_metadata",
+      /*suggestion*/ //
+      "remove the skip request or omit this reflected_call argument"));
+  }
 
   const clang::TagDecl *const definition = tag.getDecl()->getDefinition();
 
@@ -1942,13 +1957,15 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
   validate_reflected_call_expression(clang::Sema &sema,
     clang::ASTContext &ast,
     const clang::CXXOperatorCallExpr &call,
+    const std::set<meta::type_id> &metadata_skips,
     const clang::Expr *arg_expr) {
   assert(arg_expr);
 
   const auto validate_arg = std::bind_front(validate_reflected_call_arg,
     std::ref(ast),
     std::cref(call),
-    arg_expr);
+    arg_expr,
+    std::cref(metadata_skips));
 
   const std::optional type_arg = type_t_arg_type(arg_expr->getType());
 
@@ -2112,48 +2129,58 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
-meta::source_file_context fold_dependency_exclusions(const diagnostics &log,
+// TODO: [high] Consider type-name rendering without metadata specializations,
+// so skipped types can still be named at runtime. Emit separate SFINAE type-name
+// renderer specializations while keeping is_reflected false and metadata
+// unavailable.
+meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,
   const clang::ClassTemplateSpecializationDecl &declaration) {
-  struct exclusions {
-    meta::source_file_context context;
-    std::vector<std::string> names{};
-  };
+  const auto &args = declaration.getTemplateArgs();
+  if (1 != args.size()
+    || clang::TemplateArgument::Pack != args.get(/*Types...=*/0).getKind()) {
+    context.errors.internal.emplace_back(
+      "invalid omni::tweaks::skip_metadata signature");
 
-  auto [result, names] = std::ranges::fold_left(
-    // exclude_dependencies has one template parameter: the Types... pack.
-    // TODO: Validate the argument count and pack kind before accessing it.
-    declaration.getTemplateArgs().get(/*Types...=*/0).pack_elements(),
-    exclusions{.context = std::move(context)},
-    [&ast](exclusions state, const clang::TemplateArgument &arg) {
+    return context;
+  }
+
+  return std::ranges::fold_left(args.get(/*Types...=*/0).pack_elements(),
+    std::move(context),
+    [&log, &ast, &declaration](meta::source_file_context state,
+      const clang::TemplateArgument &arg) {
+      if (clang::TemplateArgument::Type != arg.getKind()) {
+        state.errors.internal.emplace_back(
+          "invalid omni::tweaks::skip_metadata type argument");
+
+        return state;
+      }
+
       const clang::QualType type =
         ast.getCanonicalType(arg.getAsType().getNonReferenceType());
       if (const auto *tag = type->getAs<clang::TagType>())
-        state.context.excluded_dependencies.emplace(
-          meta::reflectable_type_id(ast, tag));
+        state.metadata_skips.emplace(meta::reflectable_type_id(ast, tag));
 
       const auto *specialization =
         llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(
           type->getAsCXXRecordDecl());
 
-      state.names.push_back(specialization
+      std::string message = std::format("metadata skip requested at {}: {}",
+        ast.getSourceManager()
+          .getExpansionLoc(declaration.getPointOfInstantiation())
+          .printToString(ast.getSourceManager()),
+        specialization
           ? std::format("{} (primary template)",
               specialization->getSpecializedTemplate()
                 ->getQualifiedNameAsString())
           : meta::canonical_type_id(ast, type.getTypePtr()));
 
+      log(log_level::info, [&message] { return "\n" + message; });
+      state.skip_request_messages.push_back(std::move(message));
+
       return state;
     });
-
-  std::string annotation = std::format("dependencies excluded at {}: {}",
-    declaration.getPointOfInstantiation().printToString(ast.getSourceManager()),
-    names | std_c::views::join_with(", "sv) | util::format_range);
-
-  log(log_level::info, [&annotation] { return "\n" + annotation; });
-  result.exclusion_annotations.push_back(std::move(annotation));
-
-  return std::move(result);
 }
 
 meta::source_file_context meta::matches::fold_reflected_call(
@@ -2185,7 +2212,8 @@ meta::source_file_context meta::matches::fold_reflected_call(
         std::bind_front(impl::validate_reflected_call_expression,
           std::ref(sema),
           std::ref(ast),
-          std::cref(call)))) {
+          std::cref(call),
+          std::cref(a.metadata_skips)))) {
     if (!arg) {
       std::visit(
         [&a]<typename Error>(Error error) {
@@ -2207,7 +2235,7 @@ meta::source_file_context meta::matches::fold_reflected_call(
       arg->reflected_call_expr->getExprLoc(),
       ast,
       a.resolved_concrete_types,
-      a.excluded_dependencies);
+      a.metadata_skips);
 
     if (!reflected) {
       a.errors.internal.emplace_back(std::move(reflected).error());
@@ -4114,6 +4142,20 @@ std::expected<pipeline::parsed_ast, app_error>
   }
 #endif
 
+  // FIXME: [high] Valid-looking reflected callables can fail before discovery:
+  //   struct known_record {};
+  //   struct visitor {
+  //     template <typename _M>
+  //     bool operator()(omni::record_meta_t<_M>) const {
+  //       return omni::is_reflected<known_record>::value;
+  //     }
+  //   };
+  // Clang checks the concrete trait while parsing the template definition,
+  // before callable instantiation or reflected-scope discovery. The incomplete
+  // trait currently prevents AST creation unless the query is guarded during
+  // OMNI_TOOL_RUN. This is a footgun: users should not need to distinguish
+  // dependent queries or guard valid visitor code. Support these queries
+  // while retaining reflected-scope restrictions.
   if (!clang::ASTUnit::LoadFromCompilerInvocationAction(ci.ci,
       std::make_shared<clang::PCHContainerOperations>(),
       log.clang_options,
@@ -4169,10 +4211,10 @@ std::expected<meta::source_file_context, app_error>
         // Instantiations are visited at the primary template declaration,
         // before reflected_call and its wrappers, regardless of list placement.
         .pattern = ast::pattern(classTemplateSpecializationDecl,
-          hasName("::omni::exclude_dependencies"),
+          hasName("::omni::tweaks::skip_metadata"),
           isTemplateInstantiation(),
           isDefinition()),
-        .fold = std::bind_front(fold_dependency_exclusions,
+        .fold = std::bind_front(fold_metadata_skips,
           std::cref(log),
           std::cref(parsed.ast->getASTContext())),
       },
@@ -4506,7 +4548,7 @@ std::expected<render::reflection_context, app_error>
   return render::reflection_context{
     .instrumented_source = std::move(ctx.source),
 
-    .exclusion_annotations = std::move(ctx.exclusion_annotations),
+    .skip_request_messages = std::move(ctx.skip_request_messages),
     .fwd_declarables = std::move(fwd),
     .nested = std::move(nested),
     .indexed = std::move(indexed),
@@ -5655,6 +5697,9 @@ bool template_argument_requires_undefined_type(
       template_argument_requires_undefined_type);
 }
 
+// TODO: Collect type warnings for finalization and emit each diagnostic once
+// per translation unit, even across reflected calls; retain distinct causes
+// and member/field warnings for the same type.
 void log_skipped_dependency(const diagnostics &log,
   const clang::ASTContext &ast,
   const clang::CXXRecordDecl &record,
@@ -5673,7 +5718,7 @@ collected_dependencies recursively_collect_dependency_types(
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<meta::type_id> &resolved_concrete_types,
-  const std::set<meta::type_id> &excluded_dependencies,
+  const std::set<meta::type_id> &metadata_skips,
   clang::CXXRecordDecl &root) {
   // todo: monadic return.
   const auto template_specialization_types = //
@@ -5724,23 +5769,24 @@ collected_dependencies recursively_collect_dependency_types(
       &dependencies_by_type,
       &public_access_path_by_type,
       &resolved_concrete_types,
-      &excluded_dependencies,
+      &metadata_skips,
       &skipped_virtual_base_dependencies,
       &to_visit](const clang::TagType *parent,
       const clang::Type *type,
       std::optional<meta::type_access_path> public_access_path) {
       const clang::TagType *dependency = type->getAs<clang::TagType>();
 
-      if (!dependency
-        || (!excluded_dependencies.empty()
-          && excluded_dependencies.contains(
-            meta::reflectable_type_id(ast, dependency))))
+      if (!dependency)
         return;
 
       auto *record = dependency->getAsCXXRecordDecl();
 
+      // Exclusion suppresses metadata, not the dependency discovery protocol.
       if (dependency->getDecl()->isInStdNamespace()
-        || (record && meta::is_compound_dependency_route(record))) {
+        || (record && meta::is_compound_dependency_route(record))
+        || (!metadata_skips.empty()
+          && metadata_skips.contains(
+            meta::reflectable_type_id(ast, dependency)))) {
         if (record) {
           to_visit.push({
             .parent = parent,
@@ -5850,7 +5896,8 @@ collected_dependencies recursively_collect_dependency_types(
       // A dependent wrapper may not have been instantiated by the program,
       // but its supported aliases still form part of the dependency protocol.
       if (primary_definition
-        && !member_aliases_view(*primary_definition).empty()) {
+        && (!member_aliases_view(*primary_definition).empty()
+          || 0 != primary_definition->getNumBases())) {
         const bool failed = sema.InstantiateClassTemplateSpecialization(
           point_of_instantiation,
           specialization,
@@ -5886,24 +5933,36 @@ collected_dependencies recursively_collect_dependency_types(
 
     cur_decl = cur_definition;
 
-    if (meta::has_virtual_bases(*cur_decl)) {
-      skipped_virtual_base_dependencies.emplace(meta::canonical_type_id(ast,
-        meta::map_decl_to_canonical_type(ast, cur_decl)));
-
-      continue;
-    }
-
     const clang::TagType *cur_type =
       meta::map_decl_to_canonical_type(ast, cur_decl);
 
     const bool in_std = cur_decl->isInStdNamespace();
     const bool is_compound_dependency =
       meta::is_compound_dependency_route(cur_decl);
+    const bool is_excluded = !pending.is_root
+      && !metadata_skips.empty()
+      && metadata_skips.contains(
+        meta::reflectable_type_id(ast, cur_type));
+
+    // Virtual bases prevent record metadata, not discovery through aliases.
+    if (!is_excluded && meta::has_virtual_bases(*cur_decl)) {
+      skipped_virtual_base_dependencies.emplace(concrete_id(cur_type));
+
+      continue;
+    }
 
     const clang::TagType *dependency_parent =
-      in_std || is_compound_dependency ? pending.parent : cur_type;
+      in_std || is_compound_dependency || is_excluded
+        ? pending.parent
+        : cur_type;
 
-    if (!pending.is_root && !in_std && !is_compound_dependency) {
+    // The caller registers roots; std records and explicit metadata skips
+    // expose discovery protocols without metadata of their own.
+    // Ad hoc: compound wrappers also omit metadata because record metadata does
+    // not describe tuple positions or variant alternatives.
+    // TODO: Revisit compound exclusion when compound metadata is supported.
+    if (!pending.is_root && !in_std && !is_compound_dependency
+      && !is_excluded) {
       dependencies_by_type[concrete_id(pending.parent)].emplace(
         concrete_id(cur_type));
 
@@ -5922,7 +5981,23 @@ collected_dependencies recursively_collect_dependency_types(
     if (!visited.emplace(dependency_parent, cur_decl).second)
       continue;
 
-    for (const clang::TypedefNameDecl *alias : member_aliases_view(*cur_decl)) {
+    for (std::string_view name : meta::k_supported_member_aliases) {
+      clang::LookupResult lookup(sema,
+        &ast.Idents.get(llvm::StringRef{name}),
+        point_of_instantiation,
+        clang::Sema::LookupMemberName);
+      // Optional protocols follow C++ lookup, including inheritance and hiding.
+      lookup.suppressDiagnostics();
+      if (!sema.LookupQualifiedName(lookup, cur_decl)
+        || !lookup.isSingleResult()
+        || clang::AS_public != lookup.begin().getAccess())
+        continue;
+
+      const auto *alias = llvm::dyn_cast<clang::TypedefNameDecl>(
+        lookup.getFoundDecl()->getUnderlyingDecl());
+      if (!alias)
+        continue;
+
       std::optional public_access_path = pending.public_access_path;
 
       if (public_access_path) {
@@ -5985,11 +6060,10 @@ collected_dependencies recursively_collect_dependency_types(
       continue;
     }
 
-    // Standard-library wrappers may expose dependency protocol aliases above,
-    // but unsupported wrappers are not themselves reflectable records. Do not
-    // traverse their bases/fields: some declarations visible through bundled
-    // headers have no definition data, and Clang's `bases()` requires it.
-    if (in_std)
+    // Standard-library and excluded records expose protocol aliases above,
+    // without reflecting their own fields, bases, or methods. Some standard
+    // declarations also lack definition data required by Clang's bases().
+    if (in_std || is_excluded)
       continue;
 
     // bases
@@ -6249,7 +6323,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types,
-  const std::set<type_id> &excluded_dependencies)
+  const std::set<type_id> &metadata_skips)
   -> std::expected<reflected_type_info, std::string> {
   const auto match_record_type = //
     [&ast, &log](const std::string &id, const clang::RecordType *t)
@@ -6354,7 +6428,7 @@ auto meta::resolve_reflected_type(const diagnostics &log,
       point_of_instantiation,
       ast,
       resolved_concrete_types,
-      excluded_dependencies,
+      metadata_skips,
       *record_type->getAsCXXRecordDecl());
 
   return reflected_type_info{
@@ -7378,8 +7452,8 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();
 
-  for (std::string_view annotation : ctx.exclusion_annotations)
-    std::format_to(std::ostreambuf_iterator<char>(file), "// {}\n", annotation);
+  for (std::string_view message : ctx.skip_request_messages)
+    std::format_to(std::ostreambuf_iterator<char>(file), "// {}\n", message);
 
   std::format_to(std::ostreambuf_iterator<char>(file),
     "// This file was generated by the omnirefl tool on {0:%F %T}."

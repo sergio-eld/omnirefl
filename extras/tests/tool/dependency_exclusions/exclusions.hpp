@@ -7,10 +7,8 @@
 
 #include "model.hpp"
 
-namespace dependency_exclusions {
-
+OMNI_SKIP_METADATA(dependency_exclusions::opaque_alias);
 // A specialization identifies the primary template for all its arguments.
-omni::exclude_dependencies<opaque_alias, view<char>, buffer<int, 2>,
-  excluded_color> exclusions;
-
-} // namespace dependency_exclusions
+OMNI_SKIP_METADATA(dependency_exclusions::view<char>);
+OMNI_SKIP_METADATA(dependency_exclusions::buffer<int, 2>);
+OMNI_SKIP_METADATA(dependency_exclusions::excluded_color);
