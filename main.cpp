@@ -1572,6 +1572,11 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
   while (!pending.empty()) {
     clang::DynTypedNode node = pending.back();
     pending.pop_back();
+    if (const auto *caller = node.get<clang::CallExpr>();
+      caller && caller->getExprLoc().isValid()
+      && !is_before_definition(caller->getExprLoc()))
+      continue;
+
     bool resolved = false;
 
     for (auto parents = ast.getParents(node); //
@@ -1583,10 +1588,13 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
 
       const clang::SourceLocation instantiation =
         sm.getExpansionLoc(decl->getPointOfInstantiation());
-      if (instantiation.isInvalid())
+
+      // Clang can omit the instantiation location on instantiated template
+      // declarations. Follow their callers to find the actual use instead.
+      if (instantiation.isInvalid() && !decl->isTemplateInstantiation())
         continue;
       if (!visited.emplace(decl->getCanonicalDecl()).second
-        || !is_before_definition(instantiation)) {
+        || (instantiation.isValid() && !is_before_definition(instantiation))) {
         resolved = true;
         break;
       }
@@ -1609,8 +1617,9 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
 
           // A later call cannot legitimize an earlier incomplete use. When
           // specializations share this call site, every caller must be valid.
-          if (!sm.isBeforeInTranslationUnit(instantiation, begin)
-            && !sm.isBeforeInTranslationUnit(end, instantiation)) {
+          if (instantiation.isInvalid()
+            || (!sm.isBeforeInTranslationUnit(instantiation, begin)
+              && !sm.isBeforeInTranslationUnit(end, instantiation))) {
             pending.push_back(clang::DynTypedNode::create(*caller));
             resolved = true;
           }
@@ -1819,7 +1828,7 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
       "the reflected_call argument is incomplete at this call; "
       "its definition appears later in the translation unit",
       /*suggestion*/ //
-      "move the type definition before this reflected_call"));
+      "ensure the type is fully defined upon instantiation of this reflected_call"));
   }
 
   if (tag.getDecl()->isInStdNamespace()) {
