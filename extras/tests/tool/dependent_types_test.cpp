@@ -1146,4 +1146,28 @@ TEST(suite_discovery, incidental_query_sees_model_discovered_by_a_later_call) {
     omni::type_t<sd::later_model>{}));
 }
 
+namespace tuple_apply_discovery {
+
+struct invoke {
+  template <typename Model>
+  std::size_t operator()(omni::type_t<Model>) const {
+    return omni::reflected_call(suite_discovery::touch{}, omni::type_t<Model>{});
+  }
+};
+
+// Complete before invocation; generic callable definitions may precede models.
+struct model {
+  int value;
+};
+
+} // namespace tuple_apply_discovery
+
+TEST(suite_discovery, tuple_apply_accepts_a_model_defined_after_the_callable) {
+  // Discovered when a model defined after its generic visitor was passed
+  // through std::apply: the tool incorrectly reported it as incomplete.
+  // Uses std::apply in C++17 and newer, the local implementation before C++17.
+  EXPECT_EQ(1U, omni::compat::apply(tuple_apply_discovery::invoke{},
+    std::make_tuple(omni::type_t<tuple_apply_discovery::model>{})));
+}
+
 } // namespace
