@@ -2129,10 +2129,17 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
-// TODO: [high] Consider type-name rendering without metadata specializations,
-// so skipped types can still be named at runtime. Emit separate SFINAE type-name
-// renderer specializations while keeping is_reflected false and metadata
-// unavailable.
+// TODO: Investigate type-name customization independently of metadata. Generated
+// forward declarations still limit which types can be named. Consider separate
+// user-provided name-renderer and metadata specializations; establish concrete
+// use cases before designing the interface. is_template() already lets users
+// select their own naming logic without general-purpose type-name rendering.
+
+// TODO: [high] Consider specialization_of<Template>() for skips without dummy
+// arguments, accounting for C++11 and mixed template parameter signatures.
+// General reflected_call support needs substantial template-metadata/tag design.
+// CTAD-based return use cases remain speculative, while the visitor return type
+// must already be known without body instantiation. Establish the benefit first.
 meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,
@@ -2475,6 +2482,9 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
     | std::views::join
     | std::ranges::to<std::set>();
 
+  // TODO(high): Report the triggering reflection callsite and dependency path:
+  // a string-like field can cause unrelated overloaded-method warnings, while
+  // generated headers annotate declarations but not the calls that requested them.
   for (const auto &[type, method] : skipped_overloaded_methods) {
     log(log_level::warning, [&type, &method] {
       return std::format(
@@ -5712,6 +5722,8 @@ void log_skipped_dependency(const diagnostics &log,
   });
 }
 
+// TODO(high): Add customization to exclude types from recursive dependency
+// reflection, e.g. c4 string views serialized directly without their metadata.
 collected_dependencies recursively_collect_dependency_types(
   const diagnostics &log,
   clang::Sema &sema,
@@ -7232,6 +7244,8 @@ std::string reflectable_body(const meta::record_data &d) {
           | std_c::views::join_with("\n\n"sv)
           | std::ranges::to<std::string>()));
 
+  // REFACTORME: Consider rendering named subparts, as fields and methods already
+  // do, to shorten the format call and keep placeholders near their arguments.
   return std::format(
     "{}"
     "\n"
@@ -7246,6 +7260,8 @@ std::string reflectable_body(const meta::record_data &d) {
     "\n"
     "\n  static constexpr bool has_bases() noexcept {{ return {}; }}"
     "\n  static constexpr bool is_aggregatable() noexcept {{ return {}; }}"
+    "\n  static constexpr bool is_union() noexcept {{ return {}; }}"
+    "\n  static constexpr bool is_template() noexcept {{ return {}; }}"
     "\n}};",
 
     fields,
@@ -7277,7 +7293,9 @@ std::string reflectable_body(const meta::record_data &d) {
       | util::format_range,
 
     d.has_bases,
-    d.is_aggregatable);
+    d.is_aggregatable,
+    meta::record_data::is_union == d.type,
+    d.template_info.has_value());
 }
 
 std::string aggregate_into_body(const meta::record_data &d) {

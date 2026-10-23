@@ -284,6 +284,10 @@ documentation.
 - **[Container builds](#container-builds):** Docker Compose or GitHub Codespaces.
 - **[Latest CI builds](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml):** workflow artifacts
   for unreleased changes; availability is temporary.
+
+<!-- TODO: Near Install, explain that the page tracks master and may include
+unreleased features; link to the README at the current release tag, currently
+https://github.com/sergio-eld/omnirefl/blob/v0.0.6/README.md. -->
 <!-- pages:install:end -->
 
 ### Project integration

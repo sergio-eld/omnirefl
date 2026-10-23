@@ -63,7 +63,6 @@ namespace tweaks {
  * This struct template must stay declared before reflected_call. Clang visits
  * its instantiations at the template declaration, collecting requests before
  * reflection discovery in the same AST traversal, regardless of call placement.
- * TODO: Consider support for bare primary templates.
  */
 template <typename... Types>
 struct skip_metadata {};
@@ -105,6 +104,17 @@ namespace omni {
 /** Reflected-scope-only field metadata; `_M` is opaque. */
 template <typename _M>
 struct field_meta_t {
+  // TODO: Consider is_type_dependent(); establish a useful consumer before
+  // adding the query. For example:
+  // ```cpp
+  // template <typename T>
+  // struct example {
+  //   T value;           // Spelled "T"; the resolved type depends on T.
+  //   std::string name;  // Spelling is independent of T.
+  // };
+  // ```
+  // A consumer might choose a resolved type name for value, but that also
+  // requires type-name queries independent of metadata specializations.
   /** Declared field type. */
   using type = typename _M::type;
 
@@ -132,6 +142,9 @@ struct field_meta_t {
    * distinct from its underlying type. Field declarations have no such
    * limitation, so their source spelling can be preserved as text for uses
    * such as schema generation.
+   * A field declared as a template parameter retains that parameter's name,
+   * not the substituted type name. Its resolved `type` may lack metadata
+   * (for example, `std::string`); independent type-name queries are pending.
    *
    * @note The `type` alias names the actual C++ field type. Within a reflected
    * scope, access its metadata by value or by type with:
@@ -851,6 +864,19 @@ struct meta_t<_M, reflected_entity::record> {
   /** Whether the record directly declares any base class. */
   static constexpr bool has_bases() noexcept {
     return _M::has_bases();
+  }
+
+  /** Whether the reflected record is a union. */
+  static constexpr bool is_union() noexcept {
+    return _M::is_union();
+  }
+
+  /**
+   * Whether the record is an instantiation of a primary class or union template.
+   * Having a template base or member does not make a record a template.
+   */
+  static constexpr bool is_template() noexcept {
+    return _M::is_template();
   }
 
   /**

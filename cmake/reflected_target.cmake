@@ -416,12 +416,18 @@ function(omni_reflected_target target)
             set(_timings 1)
         endif()
 
-        # TODO: Extend CMake timing mode to report the complete build wall and
-        # each Omnirefl phase as a percentage of it after the build finishes.
-        # This is needed to evaluate the roughly 30% overhead target on real
-        # builds; CI currently measures only an isolated translation unit.
-        # Account for overlapping parallel tool runs rather than summing their
-        # wall times as though they ran sequentially.
+        # TODO: [medium] Report instrumentation overhead per reflected target.
+        # Store the latest instrumentation and compilation times per object and
+        # configuration in the build tree, with separate records for parallel
+        # writers. Compare instrumentation with compilation time for that
+        # target's instrumented objects; unrelated targets dilute the ratio.
+        # Separate this build's work from historical measurements: incremental
+        # builds often skip instrumentation. Warn only when instrumentation ran
+        # and a configurable threshold is exceeded (consider 50% by default).
+        # Suggest isolating reflected code to limit regeneration and overhead.
+        # Compilation timing may use an optional launcher, preserving existing
+        # launchers. Summed operation times are not parallel build wall time;
+        # report after the target builds, without claiming whole-build timing.
 
         # The compiler command is only available at build time from
         # compile_commands.json, so this cannot be expressed as a static

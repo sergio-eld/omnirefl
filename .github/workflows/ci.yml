@@ -969,6 +969,9 @@ jobs:
 
   required-ci:
     name: Required CI
+    # TODO: [low] Revisit cancelled runs appearing as failed when GitHub fixes
+    # https://github.com/actions/runner/issues/4047. Prefer a cancelled badge
+    # only if no job had failed before cancellation was requested.
     runs-on: ubuntu-latest
     # GitHub constructs the job graph before matrix outputs exist;
     # needs must list these jobs explicitly.

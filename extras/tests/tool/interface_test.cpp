@@ -12,6 +12,116 @@
 #include <vector>
 
 namespace interface_test {
+namespace record_properties {
+
+struct plain_struct {};
+class plain_class {};
+union plain_union { int integer; double real; };
+union empty_union {};
+
+template <typename T>
+struct struct_template { T value; };
+
+template <typename T>
+class class_template {};
+
+template <typename T>
+union union_template { T value; };
+
+template <typename T, std::size_t Size>
+struct mixed_template { T values[Size]; };
+
+struct owner {
+  struct nested_struct {};
+  union nested_union { int value; };
+
+  template <typename T>
+  struct nested_template { T value; };
+};
+
+struct template_member { struct_template<int> value; };
+struct template_base: struct_template<int> {};
+using template_alias = struct_template<long>;
+using union_alias = plain_union;
+
+struct observation {
+  bool is_union;
+  bool is_template;
+};
+
+struct inspect {
+  template <typename _M>
+  observation operator()(omni::record_meta_t<_M> m) const {
+    constexpr bool union_record = m.is_union();
+    constexpr bool template_record = m.is_template();
+    static_assert(noexcept(m.is_union()), "is_union must be noexcept");
+    static_assert(noexcept(m.is_template()), "is_template must be noexcept");
+    return {union_record, template_record};
+  }
+};
+
+struct test_case {
+  std::string name;
+  observation actual;
+  observation expected;
+};
+
+class record_properties: public testing::TestWithParam<test_case> {};
+
+TEST_P(record_properties, identifies_union_and_template_records) {
+  const auto &test = GetParam();
+  EXPECT_EQ(test.expected.is_union, test.actual.is_union);
+  EXPECT_EQ(test.expected.is_template, test.actual.is_template);
+}
+
+// Binding reflection during registration keeps the heterogeneous record types
+// out of the runtime case representation. inspect checks constant evaluation.
+const test_case cases[]{
+  {"Struct", omni::reflected_call(inspect{}, omni::type_t<plain_struct>{}),
+    {false, false}},
+  {"Class", omni::reflected_call(inspect{}, omni::type_t<plain_class>{}),
+    {false, false}},
+  {"Union", omni::reflected_call(inspect{}, omni::type_t<plain_union>{}),
+    {true, false}},
+  {"EmptyUnion", omni::reflected_call(inspect{}, omni::type_t<empty_union>{}),
+    {true, false}},
+  {"StructTemplateInt", omni::reflected_call(inspect{},
+    omni::type_t<struct_template<int>>{}), {false, true}},
+  {"StructTemplateDouble", omni::reflected_call(inspect{},
+    omni::type_t<struct_template<double>>{}), {false, true}},
+  {"ClassTemplate", omni::reflected_call(inspect{},
+    omni::type_t<class_template<int>>{}), {false, true}},
+  {"UnionTemplateInt", omni::reflected_call(inspect{},
+    omni::type_t<union_template<int>>{}), {true, true}},
+  {"UnionTemplateDouble", omni::reflected_call(inspect{},
+    omni::type_t<union_template<double>>{}), {true, true}},
+  {"MixedTemplate", omni::reflected_call(inspect{},
+    omni::type_t<mixed_template<int, 2>>{}), {false, true}},
+  {"NestedStruct", omni::reflected_call(inspect{},
+    omni::type_t<owner::nested_struct>{}), {false, false}},
+  {"NestedUnion", omni::reflected_call(inspect{},
+    omni::type_t<owner::nested_union>{}), {true, false}},
+  {"NestedTemplate", omni::reflected_call(inspect{},
+    omni::type_t<owner::nested_template<int>>{}), {false, true}},
+  {"TemplateMember", omni::reflected_call(inspect{},
+    omni::type_t<template_member>{}), {false, false}},
+  {"TemplateBase", omni::reflected_call(inspect{},
+    omni::type_t<template_base>{}), {false, false}},
+  {"TemplateAlias", omni::reflected_call(inspect{},
+    omni::type_t<template_alias>{}), {false, true}},
+  {"UnionAlias", omni::reflected_call(inspect{}, omni::type_t<union_alias>{}),
+    {true, false}},
+};
+
+INSTANTIATE_TEST_SUITE_P(declarations,
+  record_properties,
+  testing::ValuesIn(cases),
+  /*case name=*/[](const testing::TestParamInfo<test_case> &t) {
+    return t.param.name;
+  });
+
+} // namespace record_properties
+
 namespace field_visibility {
 
 struct left_base {

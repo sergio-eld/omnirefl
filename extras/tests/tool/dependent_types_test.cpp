@@ -86,6 +86,109 @@ static const struct first_field_type_is_reflected_t {
 
 } // namespace dependency_types
 
+namespace suite_discovery {
+
+struct first_model { int first; };
+struct second_model { int second; };
+struct third_model { int third; };
+struct first_direct_model { int first; };
+struct second_direct_model { int second; };
+struct third_direct_model { int third; };
+struct touched_model { int touched; };
+struct later_model { int later; };
+struct unrelated_root { int unrelated; };
+
+template <typename Model>
+struct mapping_case {
+  // No Model field: discovery must follow this alias through each tuple case.
+  using value_type = Model;
+};
+
+template <typename Duplicates, typename UnknownFields>
+struct conformance_suite {
+  /// Duplicate-field cases.
+  Duplicates duplicates;
+
+  /// Unknown-field cases.
+  UnknownFields unknown_fields;
+};
+
+struct inspect_case {
+  template <typename _M>
+  std::string operator()(omni::record_meta_t<_M>) const {
+    using model = typename omni::record_meta_t<_M>::reflected_type::value_type;
+    return std::get</*model field=*/0>(
+      omni::reflected(omni::type_t<model>{}).public_fields()).name();
+  }
+};
+
+struct inspect_suite {
+  template <typename _M>
+  std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
+    const auto fields = meta.public_fields();
+    const auto duplicates = std::get</*duplicates=*/0>(fields);
+    const auto unknown = std::get</*unknown_fields=*/1>(fields);
+    using first_case = typename std::tuple_element</*first case=*/0,
+      typename decltype(duplicates)::type>::type;
+    using second_case = typename std::tuple_element</*second case=*/1,
+      typename decltype(duplicates)::type>::type;
+    using third_case = typename std::tuple_element</*first case=*/0,
+      typename decltype(unknown)::type>::type;
+
+    return {
+      duplicates.name(), duplicates.spelled_type_name(),
+      duplicates.documentation(), unknown.name(), unknown.spelled_type_name(),
+      unknown.documentation(),
+      std::get</*model field=*/0>(omni::reflected(
+        omni::type_t<typename first_case::value_type>{}).public_fields()).name(),
+      std::get</*model field=*/0>(omni::reflected(
+        omni::type_t<typename second_case::value_type>{}).public_fields()).name(),
+      std::get</*model field=*/0>(omni::reflected(
+        omni::type_t<typename third_case::value_type>{}).public_fields()).name(),
+    };
+  }
+};
+
+struct touch {
+  template <typename _M>
+  std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    return std::tuple_size<decltype(meta.public_fields())>::value;
+  }
+};
+
+struct inspect_later_model {
+  template <typename _M>
+  bool operator()(omni::record_meta_t<_M>) const {
+    // Test-only ad hoc: this deliberately concrete query is non-dependent.
+    // C++ checks it before instantiation; generated traits are absent in tool
+    // runs. The guard lets the test inspect the TU-wide result at runtime.
+#if !defined(OMNI_TOOL_RUN)
+    return omni::is_reflected<later_model>::value;
+#else
+    return false;
+#endif
+  }
+};
+
+struct touch_assignment {
+  template <typename Model>
+  std::size_t operator=(omni::type_t<Model>) const {
+    return omni::reflected_call(touch{}, omni::type_t<Model>{});
+  }
+};
+
+template <typename Model>
+struct inspect_touched {
+  template <typename _M>
+  std::string operator()(omni::record_meta_t<_M>) const {
+    // Model is not reachable from the immediate reflected_call root.
+    return std::get</*model field=*/0>(
+      omni::reflected(omni::type_t<Model>{}).public_fields()).name();
+  }
+};
+
+} // namespace suite_discovery
+
 namespace {
 
 TEST(example_value, field_names) {
@@ -994,6 +1097,53 @@ TEST(negative_public_only, mixed_access_keeps_only_public_members) {
     }),
     omni::reflected_call(dt::inspect::field_names,
       dt::mixed_access_derived{1, "visible", 2, 3.5}));
+}
+
+TEST(suite_discovery, tuple_cases_discover_every_model_specialization) {
+  namespace sd = suite_discovery;
+  using suite = sd::conformance_suite<
+    std::tuple<sd::mapping_case<sd::first_model>,
+      sd::mapping_case<sd::second_model>>,
+    std::tuple<sd::mapping_case<sd::third_model>>>;
+
+  EXPECT_EQ((std::vector<std::string>{
+              "duplicates", "Duplicates", "Duplicate-field cases.",
+              "unknown_fields", "UnknownFields", "Unknown-field cases.",
+              "first", "second", "third",
+            }),
+    omni::reflected_call(sd::inspect_suite{}, omni::type_t<suite>{}));
+}
+
+TEST(suite_discovery, separate_calls_discover_every_model_specialization) {
+  namespace sd = suite_discovery;
+
+  EXPECT_EQ("first", omni::reflected_call(sd::inspect_case{},
+    omni::type_t<sd::mapping_case<sd::first_direct_model>>{}));
+  EXPECT_EQ("second", omni::reflected_call(sd::inspect_case{},
+    omni::type_t<sd::mapping_case<sd::second_direct_model>>{}));
+  EXPECT_EQ("third", omni::reflected_call(sd::inspect_case{},
+    omni::type_t<sd::mapping_case<sd::third_direct_model>>{}));
+}
+
+TEST(suite_discovery, assignment_touch_exposes_model_in_another_reflected_scope) {
+  namespace sd = suite_discovery;
+
+  EXPECT_EQ(1U, (sd::touch_assignment{} = omni::type_t<sd::touched_model>{}));
+  EXPECT_EQ("touched", omni::reflected_call(
+    sd::inspect_touched<sd::touched_model>{},
+    omni::type_t<sd::unrelated_root>{}));
+}
+
+// Incidental reflection: the later call supplies TU-wide metadata used by the
+// earlier concrete query. Avoid this pattern: removing an unrelated call would
+// change the query's result. Derive queries from the root or a discovery route.
+TEST(suite_discovery, incidental_query_sees_model_discovered_by_a_later_call) {
+  namespace sd = suite_discovery;
+
+  EXPECT_TRUE(omni::reflected_call(sd::inspect_later_model{},
+    omni::type_t<sd::unrelated_root>{}));
+  EXPECT_EQ(1U, omni::reflected_call(sd::touch{},
+    omni::type_t<sd::later_model>{}));
 }
 
 } // namespace
