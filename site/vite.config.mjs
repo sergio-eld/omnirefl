@@ -27,8 +27,8 @@ const sections = [
   'performance',
   'scope',
   'dependency-protocols',
-  'limitations',
   'how-it-works',
+  'limitations',
 ]
 
 const extract = (markdown, section) => {
