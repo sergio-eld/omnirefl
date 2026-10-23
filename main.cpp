@@ -2134,6 +2134,12 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
 // user-provided name-renderer and metadata specializations; establish concrete
 // use cases before designing the interface. is_template() already lets users
 // select their own naming logic without general-purpose type-name rendering.
+
+// TODO: [high] Consider specialization_of<Template>() for skips without dummy
+// arguments, accounting for C++11 and mixed template parameter signatures.
+// General reflected_call support needs substantial template-metadata/tag design.
+// CTAD-based return use cases remain speculative, while the visitor return type
+// must already be known without body instantiation. Establish the benefit first.
 meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,

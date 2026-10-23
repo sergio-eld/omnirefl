@@ -63,11 +63,6 @@ namespace tweaks {
  * This struct template must stay declared before reflected_call. Clang visits
  * its instantiations at the template declaration, collecting requests before
  * reflection discovery in the same AST traversal, regardless of call placement.
- * TODO: [high] Support primary-template requests without placeholder arguments.
- * Consider omni::specialization_of<tl::optional>() returning a family tag for
- * mixing primary templates and concrete types in the variadic pack. Function
- * overloads could handle different signatures; account for C++11 and mixed
- * type/non-type parameters.
  */
 template <typename... Types>
 struct skip_metadata {};
