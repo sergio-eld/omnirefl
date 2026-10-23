@@ -2129,10 +2129,11 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
-// TODO: [high] Consider type-name rendering without metadata specializations,
-// so skipped types can still be named at runtime. Emit separate SFINAE type-name
-// renderer specializations while keeping is_reflected false and metadata
-// unavailable.
+// TODO: [very high] Provide type-name queries independently of metadata, including
+// skipped and standard-library types. For `template<class T> struct box { T v; }`,
+// field.spelled_type_name() can report "T", but naming Field::type = std::string
+// through meta_for fails because that type has no metadata. Consider separate
+// SFINAE name renderers, preserving is_reflected == false and no metadata access.
 meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,
@@ -2475,6 +2476,9 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
     | std::views::join
     | std::ranges::to<std::set>();
 
+  // TODO(high): Report the triggering reflection callsite and dependency path:
+  // a string-like field can cause unrelated overloaded-method warnings, while
+  // generated headers annotate declarations but not the calls that requested them.
   for (const auto &[type, method] : skipped_overloaded_methods) {
     log(log_level::warning, [&type, &method] {
       return std::format(
@@ -5712,6 +5716,8 @@ void log_skipped_dependency(const diagnostics &log,
   });
 }
 
+// TODO(high): Add customization to exclude types from recursive dependency
+// reflection, e.g. c4 string views serialized directly without their metadata.
 collected_dependencies recursively_collect_dependency_types(
   const diagnostics &log,
   clang::Sema &sema,

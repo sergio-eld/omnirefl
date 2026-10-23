@@ -63,7 +63,11 @@ namespace tweaks {
  * This struct template must stay declared before reflected_call. Clang visits
  * its instantiations at the template declaration, collecting requests before
  * reflection discovery in the same AST traversal, regardless of call placement.
- * TODO: Consider support for bare primary templates.
+ * TODO: [high] Support primary-template requests without placeholder arguments.
+ * Consider omni::specialization_of<tl::optional>() returning a family tag for
+ * mixing primary templates and concrete types in the variadic pack. Function
+ * overloads could handle different signatures; account for C++11 and mixed
+ * type/non-type parameters.
  */
 template <typename... Types>
 struct skip_metadata {};
@@ -105,6 +109,17 @@ namespace omni {
 /** Reflected-scope-only field metadata; `_M` is opaque. */
 template <typename _M>
 struct field_meta_t {
+  // TODO: Consider is_type_dependent(); establish a useful consumer before
+  // adding the query. For example:
+  // ```cpp
+  // template <typename T>
+  // struct example {
+  //   T value;           // Spelled "T"; the resolved type depends on T.
+  //   std::string name;  // Spelling is independent of T.
+  // };
+  // ```
+  // A consumer might choose a resolved type name for value, but that also
+  // requires type-name queries independent of metadata specializations.
   /** Declared field type. */
   using type = typename _M::type;
 
@@ -132,6 +147,9 @@ struct field_meta_t {
    * distinct from its underlying type. Field declarations have no such
    * limitation, so their source spelling can be preserved as text for uses
    * such as schema generation.
+   * A field declared as a template parameter retains that parameter's name,
+   * not the substituted type name. Its resolved `type` may lack metadata
+   * (for example, `std::string`); independent type-name queries are pending.
    *
    * @note The `type` alias names the actual C++ field type. Within a reflected
    * scope, access its metadata by value or by type with:
@@ -756,6 +774,9 @@ struct binding_t;
 /** Reflected-scope-only record metadata; `_M` is opaque. */
 template <typename _M>
 struct meta_t<_M, reflected_entity::record> {
+  // TODO: [high] Expose is_union(); entity() currently groups unions with
+  // structs and classes as reflected_entity::record.
+  // TODO: Expose is_template() to identify record template instantiations.
   /** Domain type recovered from generated metadata. */
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
   using reflected_type = compat::decay_t<_M>;
