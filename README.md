@@ -465,20 +465,22 @@ ctest --test-dir extras/build --timeout 600 --output-on-failure --no-tests=error
 
 Omit `omnirefl_ROOT` when the package is installed system-wide.
 
-From a source checkout, the development build uses `extras/` directly; no
-archive is needed. See the [development container](.devcontainer/README.md#development-cosmopolitan).
-
 Each `extras/examples/<folder>` directory is self-contained. Configure one
 independently, such as `extras/examples/sneak_peek`, or copy it into
 your own workspace. The Sneak Peek requires CMake 3.20 and a configured
 C++23 toolchain.
 
-Extension examples, tests, and benchmarks are grouped under
-`extras/extensions`:
-
-- `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
-  See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
+Extension examples, tests, and benchmarks are grouped under `extras/extensions`.
 <!-- pages:examples-tests-and-benchmarks:end -->
+
+<!-- pages:extensions:start -->
+## Extensions
+
+- **Serialization:** RapidYAML-backed JSON/YAML serialization, compatible with
+  C++11. See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
+- Further extensions under consideration include RPC mapping, schema generation,
+  and command-line interfaces.
+<!-- pages:extensions:end -->
 
 <!-- pages:performance:start -->
 ## Is It Slow?
@@ -509,8 +511,15 @@ against the average of the last five stored runs.
 <!-- pages:scope:start -->
 ## Supported Scope
 
-Omnirefl reflects the public interface of named C++ records and enums (see
-[Limitations](#limitations)).
+Omnirefl aims to make it possible to cover the most common reflection needs
+with a focused feature set and reasonable customization: serialization, RPC
+mapping, schema generation, and command-line interfaces (see
+[Extensions](#extensions)). Full reflection of the C++ language is outside its
+intended scope: supporting every language construct would lead to a
+combinatorial explosion of cases.
+
+Current support covers named C++ records and enums, including public fields
+and functions. See [Limitations](#limitations) for details.
 
 - **Language:** C++11 minimum; C++20 concepts provide the most ergonomic interface.
 
@@ -578,7 +587,8 @@ Additional reflected types are discovered through:
   - `value_type`
 - template-pack routes named `tuple` or `variant`
 
-Supported public routes may expose otherwise non-public nested dependencies.
+Types declared privately can still be discovered through a public field or a
+supported public alias such as `value_type`.
 
 Standard-library records and types explicitly skipped by the user do not receive
 metadata. Their supported member aliases and tuple/variant routes still expose
@@ -609,80 +619,6 @@ the end of the `.cpp` or a dedicated header included under `OMNI_TOOL_RUN`.
 This mechanism is experimental; see the
 [header annotation](include/omnirefl/reflected_scope.hpp) for details and
 conditional-use restrictions.
-
-<!-- pages:limitations:start -->
-## Limitations
-
-Several declaration-shape constraints below follow from the generated-header
-model: reflected types must be nameable before their source declarations. See
-[How It Works](#how-it-works).
-
-- `reflected_call` is the instrumentation boundary. The callable must be either
-  a generic lambda or a type with a templated `operator()`. Its return type must
-  not depend on instantiating the callable body during the tool run; for lambdas,
-  this means an explicit trailing return type, including `-> void`.
-  Consequently, a lambda cannot currently return a type declared inside its
-  body. `constexpr auto result = reflected_call(...)` is not supported: it
-  forces evaluation and breaks that instrumentation boundary.
-- `reflected_call` accepts reflected records and enums only. The caller must
-  convert or dispatch other top-level shapes before the call; use `std::visit`
-  or `mpark::visit` for variants. Scalars, pointers, raw arrays,
-  standard-library records, and compound types are not accepted directly.
-  Compound types remain valid dependency routes as listed above. Invalid-input
-  detection is best effort.
-- A reflected root must be complete and defined before its `reflected_call`.
-- `default_value()` is generated only when the initializer appears safe to
-  copy into generated metadata. Detection is conservative and best effort.
-  Function calls, declaration references, `this`, macros, and dependent
-  expressions are skipped with a warning. `has_default_member_initializer()`
-  still reports the declaration, while `has_default_value_access()` reports
-  whether its value is available.
-- Hidden and ambiguous inherited fields, and fields inherited through
-  non-public bases, are omitted.
-- Function metadata excludes member functions with parameter packs, conversion
-  operators, and immediate functions. Overloaded methods are skipped with a
-  warning. Only fixed `function_t` field types expose free/static function
-  metadata; dependent function-tag fields in primary templates remain ordinary
-  fields.
-- Incomplete dependency types are skipped with a warning. A class-template
-  dependency is also skipped when instantiating it would require an incomplete
-  type argument.
-- Local and unnamed types are not supported as reflected roots.
-- Namespace-scope unscoped enums require a fixed underlying type so the
-  generated header can forward-declare them.
-- Records nested inside template records are not supported.
-- Public access paths to non-public nested dependencies are not preserved when
-  the exposing field is inherited from a public base. A public nested type
-  inside a private enclosing record is also not currently nameable.
-- Records with direct or inherited virtual bases are not supported. They are
-  rejected as `reflected_call` inputs and skipped with a warning when found as
-  dependencies.
-- Constrained primary record templates and explicit or partial record-template
-  specializations are not supported. `reflected_call` rejects them as roots;
-  explicit or partial specialization dependencies are skipped with a warning.
-- Direct recursive `reflected_call` is not supported inside a reflected scope.
-  A nested reflection call can only work if that reflected path was already
-  instantiated independently.
-- Reflection queries are valid only inside the reflected scope. The tool reports
-  out-of-scope queries as errors on a best-effort basis.
-- [Deprecated public fields can emit compiler deprecation diagnostics while
-  their metadata is formed](extras/tests/tool/regressions/deprecated_public_field.cpp),
-  before `is_deprecated()` can filter them.
-- Anonymous unions are not reflected correctly.
-- Bitfields and misaligned packed scalar fields do not expose references.
-- Compiler-packed misaligned raw arrays have no safe whole-field accessor; use
-  an aligned representation such as `std::array` when whole-field access is
-  required.
-- Pointer/reference pointees and raw-array element types are not dependency
-  routes, regardless of whether their definitions are visible.
-- Standard-library public bases are ignored. Other unsupported public bases are
-  skipped with a warning, and their inherited fields are omitted.
-- `omni_reflected_target` does not support OBJECT or INTERFACE libraries.
-- The CMake wrapper instruments concrete, non-generated C++ translation units.
-  Generated sources are skipped, source generator expressions are rejected,
-  and C translation units are ignored. If no C++ source remains, reflection is
-  skipped with a warning.
-<!-- pages:limitations:end -->
 
 ## Build Packages Locally
 
@@ -724,29 +660,21 @@ is not currently supported.
 <!-- pages:how-it-works:start -->
 ## How It Works
 
-`reflected_call` identifies root records and enums. Omnirefl walks their public
-[dependency protocols](#dependency-protocols), then force-includes a generated
-header before the translation unit.
+Omnirefl combines two mechanisms:
 
-The generated header is an internal, per-translation-unit build artifact. It is
-not intended to be installed or published as a reusable interface: its metadata
-reflects the exact compiler invocation, including preprocessor definitions,
-language and target flags, and include paths. The same source may therefore
-produce different metadata in another target or project. The header does not
-`#include` user declaration headers or reproduce their definitions.
+- **Seamless integration:** type-based SFINAE selects generated metadata using
+  forward declarations, without including user declaration headers. Types that
+  can be forward-declared and matched through SFINAE instantiation are therefore
+  potentially supportable. These requirements also set the main limitation:
+  concepts cannot be forward-declared, and unnamed or function-local types
+  cannot be declared in the generated header. Nested types require a usable
+  public path through an enclosing record.
+- **Discovery through instrumentation:** Omnirefl recognizes `reflected_call`
+  in the AST, identifies its root records and enums, and follows their public
+  [dependency protocols](#dependency-protocols). It emits metadata into a header
+  that is force-included before compiling the translation unit.
 
-> Earlier iterations attempted to reconstruct the required user includes, but
-> that becomes a separate build-integration problem: a declaration may live
-> only in a `.cpp`, a third-party header's supported include path may differ
-> from its filesystem path, and project headers may rely on transitive includes
-> or a particular include order.
-
-The current design avoids guessing. It forward-declares namespace-scope roots
-where C++ permits it; not every type can be forward-declared (see
-[Limitations](#limitations)). Field access remains dependent on a template
-parameter, delaying instantiation until the source definition is available.
-Nested-type lookup uses the same mechanism through SFINAE. A simplified
-generated shape is:
+A simplified generated shape is:
 
 ```cpp
 namespace app {
@@ -756,26 +684,9 @@ struct root; // The definition may remain in the translation unit.
 namespace omni {
 namespace detail {
 
-// Field accessors use T, so their instantiation is delayed until app::root is
-// complete.
+// Field accessors use T, delaying instantiation until app::root is complete.
 template <typename T>
 struct _reflected<struct app::root, T> {
-  // Internal discovery hook for the reflected C++ type.
-  using type = T;
-
-  // Metadata omitted.
-};
-
-// _wrt means "with respect to": its type is app::root, but remains
-// syntactically dependent on T so nested-name lookup is delayed.
-template <typename T>
-struct _reflected<T,
-  typename std::enable_if<
-    std::is_same<T, typename _wrt<app::root, T>::type::nested>::value,
-    T>::type> {
-  // Internal discovery hook for the reflected C++ type.
-  using type = T;
-
   // Metadata omitted.
 };
 
@@ -783,20 +694,112 @@ struct _reflected<T,
 } // namespace omni
 ```
 
-This model also defines the declaration boundary. Generated code can reproduce
-ordinary record and enum forward declarations and defer nested lookup, but it
-cannot safely recreate local or unnamed types, non-forward-declarable enums,
-or records nested in template records. Constrained primary templates and
-explicit or partial specializations are also unsupported.
+Each translation unit gets an internal header tied to its compiler invocation:
+preprocessor definitions, language and target flags, and include paths. The same
+source can therefore produce different metadata in different targets. This
+header is not a reusable interface and does not reproduce user definitions.
+See [Limitations](#limitations) for the declaration restrictions.
 
-Functions have no equivalent general forward-declaration strategy: reproducing
-a declaration requires its parameter types and overload identity, which may not
-be nameable before the source declaration. Therefore `function_t` is not a
-standalone reflection root. The first implementation discovers it only as a
-special field member of a reflected record, where generated access can remain
-dependent on the owning record. The function's parameter and return types then
-enter dependency discovery on a best-effort basis.
+> **Earlier design considerations**
+>
+> Reconstructing user includes was considered, but declarations may exist only
+> in `.cpp` files, library include paths may differ from filesystem paths, and
+> headers may rely on transitive includes or a particular include order.
+>
+> An experimental indexed mode demonstrated reflection without forward-declaring
+> user types, but proved brittle. It registered types during template instantiation,
+> relying on an order the C++ standard does not guarantee. The standard
+> [permits some instantiations to be deferred](https://eel.is/c++draft/temp.inst#10),
+> even when referenced by non-dependent expressions.
+> Discovery and compilation could therefore associate different types with the
+> same index. Matching metadata directly by forward-declared type became the
+> core approach.
 <!-- pages:how-it-works:end -->
+
+<!-- pages:limitations:start -->
+## Limitations
+
+### CMake integration
+
+- `omni_reflected_target` does not support OBJECT or INTERFACE libraries.
+- The wrapper instruments concrete, non-generated C++ translation units.
+  Generated sources are skipped, source generator expressions are rejected,
+  and C translation units are ignored. If no C++ source remains, reflection is
+  skipped with a warning.
+
+### `reflected_call`
+
+- `reflected_call` is the instrumentation boundary. Its visitor must be a
+  generic lambda or have a templated `operator()`. The return type must be known
+  without instantiating its body during the tool run. Lambdas need
+  an explicit trailing return type, including `-> void`, and cannot return a
+  type declared inside their body.
+- Roots must be complete records or enums defined before the call. Other
+  top-level shapes need dispatch or conversion first; for variants, use
+  `std::visit` or `mpark::visit`.
+- Queries belong inside a reflected scope. Direct recursive `reflected_call`
+  is unsupported; a nested call can work only when its reflected path was
+  instantiated independently. Out-of-scope queries are reported as errors on a
+  best-effort basis.
+- `constexpr auto result = reflected_call(...)` is unsupported: forcing
+  evaluation breaks the instrumentation boundary.
+
+<details>
+<summary>Type declarations and dependency discovery</summary>
+
+The generated header must name types before their source declarations, which
+limits the declarations it can represent.
+
+- Local and unnamed types are unsupported as roots. Namespace-scope unscoped
+  enums need a fixed underlying type so they can be forward-declared.
+- Records nested inside template records are unsupported.
+- Constrained primary record templates and explicit or partial record-template
+  specializations are rejected as roots. Explicit or partial specialization
+  dependencies are skipped with a warning.
+- Records with direct or inherited virtual bases are rejected as roots and
+  skipped with a warning as dependencies.
+- Public access paths to non-public nested dependencies are not preserved when
+  the exposing field is inherited from a public base. Public nested types
+  inside private enclosing records are also not currently nameable.
+- Incomplete dependencies are skipped with a warning, including class-template
+  dependencies whose instantiation requires an incomplete type argument.
+- Scalars, pointers, raw arrays, standard-library records, and compound types
+  are not accepted directly as roots. Compound types can still expose
+  [dependencies through supported protocols](#dependency-protocols).
+  Invalid-input detection is best effort.
+- Pointer/reference pointees and raw-array element types are not discovery
+  routes, even when their definitions are visible.
+- Standard-library public bases are ignored. Other unsupported public bases are
+  skipped with a warning, and their inherited fields are omitted.
+
+</details>
+
+<details>
+<summary>Metadata and field access</summary>
+
+- `default_value()` is generated only when the initializer appears safe to copy
+  into generated metadata. Detection is conservative and best effort:
+  function calls, declaration references, `this`, macros, and dependent
+  expressions are skipped with a warning. `has_default_member_initializer()`
+  still reports the declaration; `has_default_value_access()` reports whether
+  the value is available.
+- Hidden and ambiguous inherited fields, and fields inherited through
+  non-public bases, are omitted.
+- Function metadata excludes member functions with parameter packs, conversion
+  operators, and immediate functions. Overloaded methods are skipped with a
+  warning. Only fixed `function_t` field types expose free/static function
+  metadata; dependent function-tag fields in primary templates remain ordinary
+  fields.
+- [Deprecated public fields can emit compiler deprecation diagnostics while
+  metadata is formed](extras/tests/tool/regressions/deprecated_public_field.cpp),
+  before `is_deprecated()` can filter them.
+- Anonymous unions are not reflected correctly.
+- Bitfields and misaligned packed scalar fields do not expose references.
+  Compiler-packed misaligned raw arrays have no safe whole-field accessor;
+  use an aligned representation such as `std::array` for whole-field access.
+
+</details>
+<!-- pages:limitations:end -->
 
 ## Troubleshooting and Bug Reports
 

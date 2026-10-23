@@ -24,11 +24,12 @@ const sections = [
   'status',
   'install',
   'examples-tests-and-benchmarks',
+  'extensions',
   'performance',
   'scope',
   'dependency-protocols',
-  'limitations',
   'how-it-works',
+  'limitations',
 ]
 
 const extract = (markdown, section) => {
