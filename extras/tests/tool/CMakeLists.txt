@@ -607,6 +607,12 @@ if("17" IN_LIST _supported_cpp_standards)
         1
         "definition appears later in the translation unit"
         ":[0-9]+:[0-9]+: reflected_call argument")
+    _omnirefl_negative_tool_run(
+        "tuple_apply_definition_after_use"
+        negative/tuple_apply_definition_after_use.cpp
+        1
+        "definition appears later in the translation unit"
+        ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_diagnostic_tool_run(
         "composed_reflected_call"
         regressions/composed_reflected_call.cpp
