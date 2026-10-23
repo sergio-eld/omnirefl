@@ -34,35 +34,35 @@ inline std::string to_string(c4::csubstr s) {
   return s.empty() ? std::string{} : std::string{s.data(), s.size()};
 }
 
-inline issue::kind node_kind(::ryml::ConstNodeRef n) {
+inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
   if (n.invalid())
-    return issue::kind::unknown;
+    return json::value_kind::unknown;
   if (n.is_map())
-    return issue::kind::mapping;
+    return json::value_kind::mapping;
   if (n.is_seq())
-    return issue::kind::sequence;
+    return json::value_kind::sequence;
   if (n.has_val())
-    return n.val_is_null() ? issue::kind::null : issue::kind::scalar;
-  return issue::kind::unknown;
+    return n.val_is_null() ? json::value_kind::null : json::value_kind::scalar;
+  return json::value_kind::unknown;
 }
 
-inline std::string kind_name(issue::kind k) {
+inline std::string kind_name(json::value_kind k) {
   switch (k) {
-  case issue::kind::mapping:
+  case json::value_kind::mapping:
     return "object";
-  case issue::kind::sequence:
+  case json::value_kind::sequence:
     return "array";
-  case issue::kind::string:
+  case json::value_kind::string:
     return "string";
-  case issue::kind::boolean:
+  case json::value_kind::boolean:
     return "boolean";
-  case issue::kind::integer:
+  case json::value_kind::integer:
     return "integer";
-  case issue::kind::unsigned_integer:
+  case json::value_kind::unsigned_integer:
     return "unsigned integer";
-  case issue::kind::number:
+  case json::value_kind::number:
     return "real number";
-  case issue::kind::null:
+  case json::value_kind::null:
     return "null";
   default:
     return "scalar";
@@ -85,7 +85,7 @@ struct mapping_context {
     if (diagnostics->issues.back().warning && options.error_policy.warning_limit
       && *options.error_policy.warning_limit < warning_count) {
       auto exceeded = diagnostics->issues.back();
-      exceeded.reason = issue::code::warning_limit_exceeded;
+      exceeded.reason = json::issue_code::warning_limit_exceeded;
       exceeded.warning = false;
       diagnostics->issues.push_back(std::move(exceeded));
       ++error_count;
@@ -99,8 +99,8 @@ struct mapping_context {
   }
 };
 
-inline issue make_issue(issue::code reason,
-  issue::kind expected,
+inline issue make_issue(json::issue_code reason,
+  json::value_kind expected,
   ::ryml::ConstNodeRef node,
   const std::vector<issue::path_segment> &path,
   bool warning = false) {
@@ -146,13 +146,13 @@ struct map_node_to_fundamental {
     assert(value && context);
 
     constexpr auto expected = std::is_same<bool, Value>::value
-      ? issue::kind::boolean
-      : std::is_unsigned<Value>::value ? issue::kind::unsigned_integer
-      : std::is_integral<Value>::value ? issue::kind::integer
-                                       : issue::kind::number;
+      ? json::value_kind::boolean
+      : std::is_unsigned<Value>::value ? json::value_kind::unsigned_integer
+      : std::is_integral<Value>::value ? json::value_kind::integer
+                                       : json::value_kind::number;
 
     if (!node.has_val() || node.is_container()) {
-      context->report(make_issue(issue::code::unexpected_kind,
+      context->report(make_issue(json::issue_code::unexpected_kind,
         expected,
         node,
         context->path));
@@ -169,16 +169,20 @@ struct map_node_to_fundamental {
                                        : scalar.is_real();
 
     if (!valid) {
-      context->report(
-        make_issue(issue::code::invalid_scalar, expected, node, context->path));
+      context->report(make_issue(json::issue_code::invalid_scalar,
+        expected,
+        node,
+        context->path));
 
       return;
     }
 
     Value converted{};
     if (!from_chars(scalar, &converted)) {
-      context->report(
-        make_issue(issue::code::out_of_range, expected, node, context->path));
+      context->report(make_issue(json::issue_code::out_of_range,
+        expected,
+        node,
+        context->path));
 
       return;
     }
@@ -194,8 +198,8 @@ struct map_node_to_string {
     assert(value && context);
 
     if (!node.has_val() || node.is_container()) {
-      context->report(make_issue(issue::code::unexpected_kind,
-        issue::kind::string,
+      context->report(make_issue(json::issue_code::unexpected_kind,
+        json::value_kind::string,
         node,
         context->path));
 
@@ -247,8 +251,8 @@ struct map_node_to_sequence {
     assert(sequence && context);
 
     if (!node.is_seq()) {
-      context->report(detail::make_issue(issue::code::unexpected_kind,
-        issue::kind::sequence,
+      context->report(detail::make_issue(json::issue_code::unexpected_kind,
+        json::value_kind::sequence,
         node,
         context->path));
 
@@ -329,8 +333,8 @@ struct cpp11_lambda_require_field {
       /*field=*/name,
       /*index=*/compat::nullopt,
     });
-    context->report(detail::make_issue(issue::code::missing_field,
-      issue::kind::unknown,
+    context->report(detail::make_issue(json::issue_code::missing_field,
+      json::value_kind::unknown,
       ::ryml::ConstNodeRef{},
       context->path));
     context->path.pop_back();
@@ -434,8 +438,8 @@ struct map_node_to_record {
     assert(record && context && context->diagnostics);
 
     if (node.invalid() || !node.is_map()) {
-      context->report(detail::make_issue(issue::code::unexpected_kind,
-        issue::kind::mapping,
+      context->report(detail::make_issue(json::issue_code::unexpected_kind,
+        json::value_kind::mapping,
         node,
         context->path));
 
@@ -485,8 +489,9 @@ struct map_node_to_record {
         /*index=*/compat::nullopt,
       });
       context->report(detail::make_issue(
-        duplicate ? issue::code::duplicate_field : issue::code::unknown_field,
-        issue::kind::unknown,
+        duplicate ? json::issue_code::duplicate_field
+                  : json::issue_code::unknown_field,
+        json::value_kind::unknown,
         child,
         context->path,
         allowed));
@@ -860,8 +865,8 @@ with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
         },
         /*issues=*/
         {
-          detail::make_issue(issue::code::parse_error,
-            issue::kind::unknown,
+          detail::make_issue(json::issue_code::parse_error,
+            json::value_kind::unknown,
             ::ryml::ConstNodeRef{},
             {}),
         },
@@ -881,7 +886,7 @@ std::string render_diagnostics_t::operator()(
     if (!message.empty())
       message += '\n';
 
-    if (issue::code::parse_error == entry.reason) {
+    if (json::issue_code::parse_error == entry.reason) {
       message += d.parse_message;
       continue;
     }
@@ -910,30 +915,30 @@ std::string render_diagnostics_t::operator()(
       message += "warning: ";
 
     switch (entry.reason) {
-    case issue::code::warning_limit_exceeded:
+    case json::issue_code::warning_limit_exceeded:
       message += "warning limit exceeded";
       break;
-    case issue::code::missing_field:
+    case json::issue_code::missing_field:
       message += "missing field";
       break;
-    case issue::code::unknown_field:
+    case json::issue_code::unknown_field:
       message += "unknown field";
       break;
-    case issue::code::duplicate_field:
+    case json::issue_code::duplicate_field:
       message += "duplicate field";
       break;
-    case issue::code::unexpected_kind:
+    case json::issue_code::unexpected_kind:
       message += "expected " + detail::kind_name(entry.expected) + ", found "
         + detail::kind_name(entry.actual);
 
       break;
     default:
       message += '"' + detail::to_string(entry.value) + "\" ";
-      message += issue::code::out_of_range == entry.reason
+      message += json::issue_code::out_of_range == entry.reason
         ? "could not be converted to the destination scalar"
         : std::string{"is not "}
-          + (issue::kind::integer == entry.expected
-                || issue::kind::unsigned_integer == entry.expected
+          + (json::value_kind::integer == entry.expected
+                || json::value_kind::unsigned_integer == entry.expected
               ? "an "
               : "a ")
           + detail::kind_name(entry.expected);

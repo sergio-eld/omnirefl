@@ -117,7 +117,7 @@ TEST(deserialization, default_retains_syntax_errors) {
 
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+    EXPECT_EQ(omni::json::issue_code::parse_error,
       result.diagnostics.issues.front().reason);
   }
   EXPECT_FALSE(result.diagnostics.settings.recovery.has_value());
@@ -448,7 +448,7 @@ TEST_P(enum_fields, reports_unknown_names_and_integers_as_schema_errors) {
     if (1U != result.diagnostics.issues.size())
       continue;
     const auto &issue = result.diagnostics.issues.front();
-    EXPECT_EQ(omni::ryml::issue::code::invalid_scalar, issue.reason);
+    EXPECT_EQ(omni::json::issue_code::invalid_scalar, issue.reason);
     EXPECT_FALSE(issue.warning);
     EXPECT_EQ(1U, issue.path.size());
     if (1U == issue.path.size()) {
@@ -1016,7 +1016,7 @@ TEST_P(extra_fields_policy, applies_extra_independently_of_recovery) {
       EXPECT_EQ(extra ? std::string{} : c.message,
         omni::ryml::render_diagnostics(result.diagnostics));
       if (!result.diagnostics.issues.empty()) {
-        EXPECT_EQ(omni::ryml::issue::code::unknown_field,
+        EXPECT_EQ(omni::json::issue_code::unknown_field,
           result.diagnostics.issues.front().reason);
         EXPECT_FALSE(result.diagnostics.issues.front().warning);
       }
@@ -1220,7 +1220,7 @@ TEST(deserialization, extra_fields_do_not_hide_syntax_errors) {
   EXPECT_FALSE(result.diagnostics.settings.recovery.has_value());
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+    EXPECT_EQ(omni::json::issue_code::parse_error,
       result.diagnostics.issues.front().reason);
     EXPECT_FALSE(result.diagnostics.issues.front().warning);
   }
@@ -1524,9 +1524,9 @@ data:
     return;
 
   const auto &d = result.diagnostics.issues.front();
-  EXPECT_EQ(omni::ryml::issue::code::invalid_scalar, d.reason);
-  EXPECT_EQ(omni::ryml::issue::kind::integer, d.expected);
-  EXPECT_EQ(omni::ryml::issue::kind::scalar, d.actual);
+  EXPECT_EQ(omni::json::issue_code::invalid_scalar, d.reason);
+  EXPECT_EQ(omni::json::value_kind::integer, d.expected);
+  EXPECT_EQ(omni::json::value_kind::scalar, d.actual);
   EXPECT_EQ(2U, d.path.size());
   if (2U != d.path.size())
     return;
@@ -1669,7 +1669,7 @@ TEST(deserialization_diagnostics, parser_failure_precedes_mapping_policies) {
   EXPECT_TRUE(result.diagnostics.settings.recovery.has_value());
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+    EXPECT_EQ(omni::json::issue_code::parse_error,
       result.diagnostics.issues.front().reason);
   }
   EXPECT_FALSE(omni::ryml::render_diagnostics(result.diagnostics).empty());
@@ -1705,7 +1705,7 @@ TEST_P(diagnostic_rendering, renders_paths_and_messages_on_error) {
     std::count_if(result.diagnostics.issues.begin(),
       result.diagnostics.issues.end(),
       [](const omni::ryml::issue &e) {
-        return omni::ryml::issue::code::parse_error == e.reason;
+        return omni::json::issue_code::parse_error == e.reason;
       }));
 
   const auto rendered = //
@@ -1869,7 +1869,7 @@ TEST_P(parser_recovery, retains_failure_and_allows_the_next_invocation) {
   EXPECT_FALSE(retained.value);
   EXPECT_EQ(1U, retained.diagnostics.issues.size());
   if (1U == retained.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+    EXPECT_EQ(omni::json::issue_code::parse_error,
       retained.diagnostics.issues.front().reason);
   }
   EXPECT_FALSE(omni::ryml::render_diagnostics(retained.diagnostics).empty());
@@ -1943,7 +1943,7 @@ TEST_P(parse_failure_policies, preserves_policies_without_returning_a_value) {
       EXPECT_TRUE(result.diagnostics.tree.empty());
       EXPECT_EQ(1U, result.diagnostics.issues.size());
       if (1U == result.diagnostics.issues.size()) {
-        EXPECT_EQ(omni::ryml::issue::code::parse_error,
+        EXPECT_EQ(omni::json::issue_code::parse_error,
           result.diagnostics.issues.front().reason);
         EXPECT_EQ(::ryml::NONE, result.diagnostics.issues.front().node_id);
         EXPECT_TRUE(result.diagnostics.issues.front().path.empty());
@@ -2000,7 +2000,7 @@ TEST(deserialization_diagnostics,
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+    EXPECT_EQ(omni::json::issue_code::parse_error,
       result.diagnostics.issues.front().reason);
   }
   EXPECT_EQ("line 2, column 21: missing terminating ]",
@@ -2301,9 +2301,9 @@ TEST(tree_mapping, reports_an_invalid_borrowed_node_as_a_mapping_error) {
   EXPECT_TRUE(result.diagnostics.tree.invalid());
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::unexpected_kind,
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind,
       result.diagnostics.issues.front().reason);
-    EXPECT_EQ(omni::ryml::issue::kind::unknown,
+    EXPECT_EQ(omni::json::value_kind::unknown,
       result.diagnostics.issues.front().actual);
   }
   EXPECT_EQ("<root>: expected object, found scalar",
@@ -2333,11 +2333,11 @@ TEST(tree_mapping, reports_an_empty_tree_as_a_mapping_error) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::ryml::issue::code::unexpected_kind,
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind,
       result.diagnostics.issues.front().reason);
-    EXPECT_EQ(omni::ryml::issue::kind::mapping,
+    EXPECT_EQ(omni::json::value_kind::mapping,
       result.diagnostics.issues.front().expected);
-    EXPECT_EQ(omni::ryml::issue::kind::unknown,
+    EXPECT_EQ(omni::json::value_kind::unknown,
       result.diagnostics.issues.front().actual);
   }
 }
@@ -2713,7 +2713,7 @@ TEST(deserialization_warnings, syntax_errors_remain_errors_in_recovery_mode) {
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
     EXPECT_FALSE(result.diagnostics.issues.front().warning);
-    EXPECT_EQ(omni::ryml::issue::code::parse_error,
+    EXPECT_EQ(omni::json::issue_code::parse_error,
       result.diagnostics.issues.front().reason);
   }
 }

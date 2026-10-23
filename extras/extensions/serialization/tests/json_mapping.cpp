@@ -1,14 +1,23 @@
 // Draft engine-independent mapping conformance tables.
 // Each engine must produce the same result for a given struct, settings and JSON.
 // Preserve repeated field names in the source text; do not normalize the input.
-// Executable case declarations will follow once the test DSL is defined.
+// Duplicate cases are stored as data; the remaining tables use pseudo notation.
+// TODO: Collect the case groups in one struct, conceptually initialized with
+// .duplicates = ..., .unknown_fields = ..., etc. Annotate each field with its
+// group's description; reflection can use field names and comments to register
+// and describe suites, automatically including new groups. Reuse the same data
+// across engines and benchmarks, retaining heterogeneous model types per group.
 
 #include <omnirefl/serialization/ryml.hpp>
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -27,54 +36,180 @@ and JSON are case data. Expected results are derived from these inputs, not an
 independent Cartesian axis.
 */
 
+namespace dsl {
+
+struct expected_issue {
+  omni::json::issue_code reason;
+  omni::json::value_kind expected;
+  std::string path;
+  bool warning;
+};
+
+template <typename Model>
+struct expectation {
+  omni::compat::optional<Model> value;
+  std::vector<expected_issue> issues;
+  std::size_t warnings;
+};
+
+struct input {
+  omni::json::error_policy policy;
+  std::string json;
+};
+
+template <typename Model>
+struct mapping_case {
+  // Expose the model through the public dependency-discovery protocol.
+  using value_type = Model;
+
+  input from;
+  expectation<Model> expected;
+};
+
+template <typename Model>
+expectation<Model> expect(Model value,
+  std::vector<expected_issue> issues,
+  std::size_t warnings) {
+  return {std::move(value), std::move(issues), warnings};
+}
+
+template <typename Model>
+expectation<Model> expect(omni::compat::nullopt_t,
+  std::vector<expected_issue> issues,
+  std::size_t warnings) {
+  return {omni::compat::nullopt, std::move(issues), warnings};
+}
+
+// Bind the model from the expectation; execution belongs to the engine runner.
+template <typename Model>
+mapping_case<Model> operator>>(input from, expectation<Model> expected) {
+  return {std::move(from), std::move(expected)};
+}
+
+constexpr auto none = omni::compat::nullopt;
+
+} // namespace dsl
+
+namespace models {
+
+struct record {
+  int value;
+};
+
+struct text_record {
+  std::string value;
+};
+
+} // namespace models
+
 namespace duplicate_fields {
-/*
-S = struct { int value; }
-duplicates: duplicate_policy
-D(duplicates, JSON) = result for S
-Edup = duplicate-field error at /value
-Etype = invalid-integer error at /value
-Wdup = duplicate-field warning at /value
 
-D(reject, {"value": 7})                         = ({7}, [], 0)
-D(reject, {"value": 7, "value": 42})            = (none, [Edup], 0)
-D(allow,  {"value": 7, "value": 42})            = ({7}, [], 0)
-D(allow,  {"value": 7, "value": "bad"})         = ({7}, [], 0)
-D(allow,  {"value": "bad", "value": 42})        = (none, [Etype], 0)
+using dsl::expect;
+using dsl::none;
 
-D(last, {"value": 7, "value": 42})              = ({42}, [], 0)
-D(last, {"value": "bad", "value": 42})          = ({42}, [], 0)
-D(last, {"value": 7, "value": "bad"})           = (none, [Etype], 0)
+dsl::input D(omni::json::duplicate_policy duplicates,
+  std::string json,
+  std::uint16_t error_limit = 0) {
+  omni::json::error_policy policy;
+  policy.duplicates = duplicates;
+  policy.error_limit = error_limit;
+  return {std::move(policy), std::move(json)};
+}
 
-D(warn,         {"value": 7, "value": 42})      = (none, [Edup], 0)
-D(allow | warn, {"value": 7, "value": 42})      = ({7}, [Wdup], 1)
-D(last | warn,  {"value": 7, "value": 42})      = ({42}, [Wdup], 1)
+const dsl::expected_issue Edup{
+  omni::json::issue_code::duplicate_field,
+  omni::json::value_kind::unknown,
+  "/value",
+  false,
+};
 
-D(allow | last, JSON) = D(last, JSON)
-D(reject | warn, JSON) = D(reject, JSON)
+const dsl::expected_issue Etype{
+  omni::json::issue_code::invalid_scalar,
+  omni::json::value_kind::integer,
+  "/value",
+  false,
+};
 
-D(reject, {"value": 1, "value": 2, "value": 3})
-  = (none, [Edup], 0)
-D(allow | warn, {"value": 1, "value": 2, "value": 3})
-  = ({1}, [Wdup, Wdup], 2)
-D(last | warn, {"value": 1, "value": 2, "value": 3})
-  = ({3}, [Wdup, Wdup], 2)
-D(allow | warn, {"value": "bad", "value": 42})
-  = (none, [Wdup, Etype], 1)
-D(last | warn, {"value": 7, "value": "bad"})
-  = (none, [Wdup, Etype], 1)
+const dsl::expected_issue Wdup{
+  omni::json::issue_code::duplicate_field,
+  omni::json::value_kind::unknown,
+  "/value",
+  true,
+};
 
-D(allow, {"value": 7, "value": {}})   = ({7}, [], 0)
-D(allow, {"value": 7, "value": []})   = ({7}, [], 0)
-D(allow, {"value": 7, "value": null}) = ({7}, [], 0)
-D(last, {"value": {}, "value": 42})   = ({42}, [], 0)
-D(last, {"value": [], "value": 42})   = ({42}, [], 0)
-D(last, {"value": null, "value": 42}) = ({42}, [], 0)
+using omni::json::duplicate_policy;
 
-With error_limit = 1:
-  D(reject, {"value": 1, "value": 2, "value": 3})
-    = (none, [Edup, Edup], 0)
-*/
+// The tuple retains each model type for later engine binding.
+const auto duplicates = std::make_tuple(
+  D(duplicate_policy::reject, R"({"value": 7})")
+    >> expect(models::record{7}, {}, 0),
+  D(duplicate_policy::reject, R"({"value": 7, "value": 42})")
+    >> expect<models::record>(none, {Edup}, 0),
+  D(duplicate_policy::allow, R"({"value": 7, "value": 42})")
+    >> expect(models::record{7}, {}, 0),
+  D(duplicate_policy::allow, R"({"value": 7, "value": "bad"})")
+    >> expect(models::record{7}, {}, 0),
+  D(duplicate_policy::allow, R"({"value": "bad", "value": 42})")
+    >> expect<models::record>(none, {Etype}, 0),
+
+  D(duplicate_policy::last, R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {}, 0),
+  D(duplicate_policy::last, R"({"value": "bad", "value": 42})")
+    >> expect(models::record{42}, {}, 0),
+  D(duplicate_policy::last, R"({"value": 7, "value": "bad"})")
+    >> expect<models::record>(none, {Etype}, 0),
+
+  D(duplicate_policy::warn, R"({"value": 7, "value": 42})")
+    >> expect<models::record>(none, {Edup}, 0),
+  D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": 7, "value": 42})")
+    >> expect(models::record{7}, {Wdup}, 1),
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {Wdup}, 1),
+  D(duplicate_policy::allow | duplicate_policy::last,
+    R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {}, 0),
+
+  D(duplicate_policy::reject, R"({"value": 1, "value": 2, "value": 3})")
+    >> expect<models::record>(none, {Edup}, 0),
+  D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": 1, "value": 2, "value": 3})")
+    >> expect(models::record{1}, {Wdup, Wdup}, 2),
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"value": 1, "value": 2, "value": 3})")
+    >> expect(models::record{3}, {Wdup, Wdup}, 2),
+  D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": "bad", "value": 42})")
+    >> expect<models::record>(none, {Wdup, Etype}, 1),
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"value": 7, "value": "bad"})")
+    >> expect<models::record>(none, {Wdup, Etype}, 1),
+
+  D(duplicate_policy::allow, R"({"value": 7, "value": {}})")
+    >> expect(models::record{7}, {}, 0),
+  D(duplicate_policy::allow, R"({"value": 7, "value": []})")
+    >> expect(models::record{7}, {}, 0),
+  D(duplicate_policy::allow, R"({"value": 7, "value": null})")
+    >> expect(models::record{7}, {}, 0),
+  D(duplicate_policy::last, R"({"value": {}, "value": 42})")
+    >> expect(models::record{42}, {}, 0),
+  D(duplicate_policy::last, R"({"value": [], "value": 42})")
+    >> expect(models::record{42}, {}, 0),
+  D(duplicate_policy::last, R"({"value": null, "value": 42})")
+    >> expect(models::record{42}, {}, 0),
+
+  D(duplicate_policy::reject,
+    R"({"value": 1, "value": 2, "value": 3})", /*error_limit=*/1)
+    >> expect<models::record>(none, {Edup, Edup}, 0),
+
+  D(duplicate_policy::allow, R"({"value": "first", "value": "last"})")
+    >> expect(models::text_record{"first"}, {}, 0),
+  D(duplicate_policy::last, R"({"value": "first", "value": "last"})")
+    >> expect(models::text_record{"last"}, {}, 0),
+  D(duplicate_policy::reject, R"({"value": "first", "value": "last"})")
+    >> expect<models::text_record>(none, {Edup}, 0));
+
 } // namespace duplicate_fields
 
 namespace unknown_fields {

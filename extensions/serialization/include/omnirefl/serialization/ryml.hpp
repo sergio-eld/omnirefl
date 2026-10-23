@@ -47,9 +47,37 @@ if (result.value) {
 #include <vector>
 
 namespace omni {
-// Only policies and strategies shared by JSON engines belong here.
+// Only backend-independent JSON/YAML mapping contracts belong here.
 // TODO: Move to a shared header if another JSON parser is adopted.
 namespace json {
+
+/// JSON/YAML parsing and mapping failures, independent of the parser backend.
+/// Field presence and diagnostic limits refer to the requested mapping contract.
+enum class issue_code : std::uint8_t {
+  unexpected_kind,
+  invalid_scalar,
+  out_of_range, // Value lies outside the range accepted by the mapping.
+  missing_field,
+  unknown_field,
+  duplicate_field,
+  parse_error,
+  warning_limit_exceeded
+};
+
+/// Value categories used in mapping expectations and observed input.
+/// These describe values, not destination-language storage types.
+enum class value_kind : std::uint8_t {
+  unknown, // No category is known or applicable.
+  scalar, // A non-collection value whose category has not been resolved.
+  mapping,
+  sequence,
+  string,
+  boolean,
+  integer, // An integral number.
+  unsigned_integer, // A non-negative integral number.
+  number,
+  null
+};
 
 /// Controls duplicate fields without merging occurrences.
 /// Last implies allow; warn is ignored when duplicates are rejected.
@@ -173,30 +201,6 @@ struct settings {
  * Describes an input issue without rendering a message or deciding failure.
  */
 struct issue {
-  enum class code : std::uint8_t {
-    unexpected_kind,
-    invalid_scalar,
-    out_of_range,
-    missing_field,
-    unknown_field,
-    duplicate_field,
-    parse_error,
-    warning_limit_exceeded
-  };
-
-  enum class kind : std::uint8_t {
-    unknown,
-    scalar,
-    mapping,
-    sequence,
-    string,
-    boolean,
-    integer,
-    unsigned_integer,
-    number,
-    null
-  };
-
   struct path_segment {
     // Field name borrowed from metadata or the retained tree.
     c4::csubstr field;
@@ -207,13 +211,13 @@ struct issue {
 
   // Group byte-sized kinds and the warning flag before rendering data.
   // Validation or conversion that failed.
-  code reason;
+  json::issue_code reason;
 
   // Input kind required by the destination field.
-  kind expected;
+  json::value_kind expected;
 
   // Input kind encountered at the failing node.
-  kind actual;
+  json::value_kind actual;
 
   // True for accepted input conditions reported by the selected policy.
   bool warning = false;
@@ -275,7 +279,7 @@ struct diagnostics {
         issues.begin(),
         issues.end(),
         [](const issue &e) {
-          return issue::code::warning_limit_exceeded == e.reason;
+          return json::issue_code::warning_limit_exceeded == e.reason;
         });
   }
 };
