@@ -3130,4 +3130,60 @@ TEST(serialization_json, round_trips_all_ascii_control_characters) {
   EXPECT_EQ(controls, (std::string{scalar.data(), scalar.size()}));
 }
 
+struct optional_metadata_record {
+  int code;
+};
+
+struct expected_metadata_record {
+  int code;
+};
+
+struct expected_metadata_error {
+  int code;
+};
+
+struct compatibility_metadata_record {
+  omni::compat::optional<optional_metadata_record> maybe;
+  omni::compat::expected<expected_metadata_record, expected_metadata_error> result;
+};
+
+struct compatibility_metadata_observation {
+  bool optional_wrapper;
+  bool expected_wrapper;
+  bool optional_value;
+  bool expected_value;
+  bool expected_error;
+};
+
+struct inspect_compatibility_metadata {
+  template <typename _M>
+  compatibility_metadata_observation operator()(omni::record_meta_t<_M>) const {
+    // Test-only ad hoc: concrete queries are checked before body instantiation;
+    // generated traits are absent during instrumentation.
+#if !defined(OMNI_TOOL_RUN)
+    return {
+      omni::is_reflected<omni::compat::optional<optional_metadata_record>>::value,
+      omni::is_reflected<omni::compat::expected<expected_metadata_record,
+        expected_metadata_error>>::value,
+      omni::is_reflected<optional_metadata_record>::value,
+      omni::is_reflected<expected_metadata_record>::value,
+      omni::is_reflected<expected_metadata_error>::value,
+    };
+#else
+    return {};
+#endif
+  }
+};
+
+TEST(serialization_reflection, skips_wrappers_and_discovers_their_record_types) {
+  const auto result = omni::reflected_call(inspect_compatibility_metadata{},
+    omni::type_t<compatibility_metadata_record>{});
+
+  EXPECT_FALSE(result.optional_wrapper);
+  EXPECT_FALSE(result.expected_wrapper);
+  EXPECT_TRUE(result.optional_value);
+  EXPECT_TRUE(result.expected_value);
+  EXPECT_TRUE(result.expected_error);
+}
+
 } // namespace

@@ -1007,6 +1007,12 @@ std::string serialize_t::operator()(const Value &value) const {
 } // namespace omni
 
 #if defined(OMNI_TOOL_RUN)
-// TU-wide: c4 views use string writers, not generated record metadata.
-OMNI_SKIP_METADATA(c4::csubstr);
+// TU-wide: c4 views use string writers; compatibility wrappers expose their
+// contents through value_type/error_type without needing wrapper metadata.
+// Ad hoc: skip requests accept types, so int fills the required template
+// arguments. Matching selects the primary templates, so every specialization
+// is skipped.
+OMNI_SKIP_METADATA(c4::csubstr,
+  omni::compat::optional<int>,
+  omni::compat::expected<int, int>);
 #endif
