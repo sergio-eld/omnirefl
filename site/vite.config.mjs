@@ -24,6 +24,7 @@ const sections = [
   'status',
   'install',
   'examples-tests-and-benchmarks',
+  'extensions',
   'performance',
   'scope',
   'dependency-protocols',

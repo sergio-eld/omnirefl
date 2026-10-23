@@ -465,20 +465,22 @@ ctest --test-dir extras/build --timeout 600 --output-on-failure --no-tests=error
 
 Omit `omnirefl_ROOT` when the package is installed system-wide.
 
-From a source checkout, the development build uses `extras/` directly; no
-archive is needed. See the [development container](.devcontainer/README.md#development-cosmopolitan).
-
 Each `extras/examples/<folder>` directory is self-contained. Configure one
 independently, such as `extras/examples/sneak_peek`, or copy it into
 your own workspace. The Sneak Peek requires CMake 3.20 and a configured
 C++23 toolchain.
 
-Extension examples, tests, and benchmarks are grouped under
-`extras/extensions`:
-
-- `serialization`: RapidYAML-backed JSON/YAML serialization (C++11 compatible).
-  See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
+Extension examples, tests, and benchmarks are grouped under `extras/extensions`.
 <!-- pages:examples-tests-and-benchmarks:end -->
+
+<!-- pages:extensions:start -->
+## Extensions
+
+- **Serialization:** RapidYAML-backed JSON/YAML serialization, compatible with
+  C++11. See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
+- Further extensions under consideration include RPC mapping, schema generation,
+  and command-line interfaces.
+<!-- pages:extensions:end -->
 
 <!-- pages:performance:start -->
 ## Is It Slow?
@@ -509,8 +511,15 @@ against the average of the last five stored runs.
 <!-- pages:scope:start -->
 ## Supported Scope
 
-Omnirefl reflects the public interface of named C++ records and enums (see
-[Limitations](#limitations)).
+Omnirefl aims to make it possible to cover the most common reflection needs
+with a focused feature set and reasonable customization: serialization, RPC
+mapping, schema generation, and command-line interfaces (see
+[Extensions](#extensions)). Full reflection of the C++ language is outside its
+intended scope: supporting every language construct would lead to a
+combinatorial explosion of cases.
+
+Current support covers named C++ records and enums, including public fields
+and functions. See [Limitations](#limitations) for details.
 
 - **Language:** C++11 minimum; C++20 concepts provide the most ergonomic interface.
 

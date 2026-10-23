@@ -115,11 +115,8 @@
       }
 
       h3 {
+        margin: 1rem 0 0.5rem;
         font-size: 1.25em;
-      }
-
-      #install li > pre {
-        margin-top: 0.75rem;
       }
 
       p {
@@ -149,7 +146,7 @@
       ul,
       ol {
         margin-top: 0;
-        margin-bottom: 1rem;
+        margin-bottom: 0.75rem;
         padding-left: 2em;
       }
 
@@ -157,32 +154,20 @@
         color: var(--foreground);
       }
 
-      li > p:has(+ details) {
+      li > p {
         margin-bottom: 0.25rem;
       }
 
-      #scope li > p {
-        margin-bottom: 0.25rem;
-      }
-
-      #scope li > ul {
+      li > ul,
+      li > ol {
         margin-bottom: 0.5rem;
       }
 
-      #limitations h3 {
-        margin: 1rem 0 0.5rem;
+      li > pre {
+        margin-top: 0.75rem;
       }
 
-      #limitations li > p {
-        margin-bottom: 0.25rem;
-      }
-
-      #limitations ul,
-      #limitations ol {
-        margin-bottom: 0.75rem;
-      }
-
-      #limitations details > p {
+      details > p {
         margin: 0.5rem 0;
       }
 
@@ -333,6 +318,7 @@
         <a href="#status">Status</a>
         <a href="#install">Install</a>
         <a href="#examples-tests-and-benchmarks">Examples &amp; Tests</a>
+        <a href="#extensions">Extensions</a>
         <a href="#performance">Is It Slow?</a>
         <a href="#scope">Supported Scope</a>
         <a href="#how-it-works">How It Works</a>
