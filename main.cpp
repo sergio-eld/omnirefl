@@ -2129,11 +2129,11 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
-// TODO: [very high] Provide type-name queries independently of metadata, including
-// skipped and standard-library types. For `template<class T> struct box { T v; }`,
-// field.spelled_type_name() can report "T", but naming Field::type = std::string
-// through meta_for fails because that type has no metadata. Consider separate
-// SFINAE name renderers, preserving is_reflected == false and no metadata access.
+// TODO: Investigate type-name customization independently of metadata. Generated
+// forward declarations still limit which types can be named. Consider separate
+// user-provided name-renderer and metadata specializations; establish concrete
+// use cases before designing the interface. is_template() already lets users
+// select their own naming logic without general-purpose type-name rendering.
 meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,
@@ -7238,6 +7238,8 @@ std::string reflectable_body(const meta::record_data &d) {
           | std_c::views::join_with("\n\n"sv)
           | std::ranges::to<std::string>()));
 
+  // REFACTORME: Consider rendering named subparts, as fields and methods already
+  // do, to shorten the format call and keep placeholders near their arguments.
   return std::format(
     "{}"
     "\n"
@@ -7252,6 +7254,8 @@ std::string reflectable_body(const meta::record_data &d) {
     "\n"
     "\n  static constexpr bool has_bases() noexcept {{ return {}; }}"
     "\n  static constexpr bool is_aggregatable() noexcept {{ return {}; }}"
+    "\n  static constexpr bool is_union() noexcept {{ return {}; }}"
+    "\n  static constexpr bool is_template() noexcept {{ return {}; }}"
     "\n}};",
 
     fields,
@@ -7283,7 +7287,9 @@ std::string reflectable_body(const meta::record_data &d) {
       | util::format_range,
 
     d.has_bases,
-    d.is_aggregatable);
+    d.is_aggregatable,
+    meta::record_data::is_union == d.type,
+    d.template_info.has_value());
 }
 
 std::string aggregate_into_body(const meta::record_data &d) {

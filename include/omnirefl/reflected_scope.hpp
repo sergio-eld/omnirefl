@@ -774,9 +774,6 @@ struct binding_t;
 /** Reflected-scope-only record metadata; `_M` is opaque. */
 template <typename _M>
 struct meta_t<_M, reflected_entity::record> {
-  // TODO: [high] Expose is_union(); entity() currently groups unions with
-  // structs and classes as reflected_entity::record.
-  // TODO: Expose is_template() to identify record template instantiations.
   /** Domain type recovered from generated metadata. */
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
   using reflected_type = compat::decay_t<_M>;
@@ -872,6 +869,19 @@ struct meta_t<_M, reflected_entity::record> {
   /** Whether the record directly declares any base class. */
   static constexpr bool has_bases() noexcept {
     return _M::has_bases();
+  }
+
+  /** Whether the reflected record is a union. */
+  static constexpr bool is_union() noexcept {
+    return _M::is_union();
+  }
+
+  /**
+   * Whether the record is an instantiation of a primary class or union template.
+   * Having a template base or member does not make a record a template.
+   */
+  static constexpr bool is_template() noexcept {
+    return _M::is_template();
   }
 
   /**
