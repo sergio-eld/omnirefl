@@ -470,11 +470,7 @@ if("17" IN_LIST _supported_cpp_standards)
         )
         target_compile_definitions(${_target} PRIVATE CXX_STANDARD=17)
         target_link_libraries(${_target} PRIVATE std_compat)
-        if("NO_INDEX" STREQUAL "${ARGV6}")
-            omni_reflected_target(${_target})
-        else()
-            omni_reflected_target(${_target} ENABLE_INDEX_MODE)
-        endif()
+        omni_reflected_target(${_target})
 
         add_test(NAME "${_target}.run_omni"
             COMMAND ${CMAKE_COMMAND}
@@ -484,7 +480,7 @@ if("17" IN_LIST _supported_cpp_standards)
                 -D "EXPECTED_MESSAGE=${_expected_message}"
                 -D "DIAGNOSTIC_REGEX=${_diagnostic_regex}"
                 -D "EXPECTED_MESSAGE_2=${_expected_message_2}"
-                -D "UNEXPECTED_MESSAGE=${ARGV7}"
+                -D "UNEXPECTED_MESSAGE=${ARGV6}"
                 -P "${CMAKE_CURRENT_LIST_DIR}/expect_negative_tool_run.cmake")
     endfunction()
 
@@ -627,18 +623,13 @@ if("17" IN_LIST _supported_cpp_standards)
         3
         "local types are not supported"
         ":[0-9]+:[0-9]+: reflected_call argument"
-        "unnamed types are not supported"
-        NO_INDEX
-        "ENABLE_INDEX_MODE|indexed support|index mode")
+        "unnamed types are not supported")
     _omnirefl_negative_tool_run(
-        "unscoped_enum_without_index"
-        negative/unscoped_enum_without_index.cpp
+        "unfixed_enum"
+        negative/unfixed_enum.cpp
         1
         "enum cannot be forward-declared"
-        ":[0-9]+:[0-9]+: reflected_call argument"
-        ""
-        NO_INDEX
-        "ENABLE_INDEX_MODE|indexed support|index mode")
+        ":[0-9]+:[0-9]+: reflected_call argument")
     _omnirefl_negative_tool_run(
         "explicit_specialization"
         negative/explicit_specialization.cpp
@@ -982,7 +973,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
     target_compile_definitions(${_static_odr_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_static_odr_tgt} PRIVATE GTest::GTest std_compat)
-    omni_reflected_target(${_static_odr_tgt} ENABLE_INDEX_MODE)
+    omni_reflected_target(${_static_odr_tgt})
 
     set(_test_tgt "${cpp_prefix}.test")
     set(_test_sources
@@ -995,7 +986,6 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         interface_test.cpp
         example_test.cpp
         packed_field_test.cpp
-        indexed_types.cpp
         "${omnirefl_PROJECTS_DIR}/benchmarks/instrumentation/baseline_test.cpp"
     )
 
@@ -1009,7 +999,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
     target_compile_definitions(${_test_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_test_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
-    omni_reflected_target(${_test_tgt} ENABLE_INDEX_MODE)
+    omni_reflected_target(${_test_tgt})
 
     add_test(NAME "${cpp_prefix}.test.run_omni"
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t "${_test_tgt}.omni")

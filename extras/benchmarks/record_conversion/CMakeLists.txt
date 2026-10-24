@@ -18,12 +18,4 @@ if(RECORD_CONVERSION_ENABLE_PERF_COUNTERS)
         RECORD_CONVERSION_HAS_PERF_COUNTERS)
 endif()
 
-option(RECORD_CONVERSION_ENABLE_INDEX_MODE
-    "Enable omnirefl index mode for the record conversion benchmark" ON)
-
-set(_reflection_options LOG_LEVEL silent)
-if(RECORD_CONVERSION_ENABLE_INDEX_MODE)
-    list(APPEND _reflection_options ENABLE_INDEX_MODE)
-endif()
-
-omni_reflected_target(benchmark.record_conversion ${_reflection_options})
+omni_reflected_target(benchmark.record_conversion LOG_LEVEL silent)

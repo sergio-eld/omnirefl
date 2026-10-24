@@ -13,7 +13,7 @@ function(_aggregate_into_compile_failure cpp_standard name expected_message unex
     )
     target_compile_definitions(${_target} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_target} PRIVATE std_compat)
-    omni_reflected_target(${_target} ENABLE_INDEX_MODE)
+    omni_reflected_target(${_target})
 
     add_test(NAME "${_target}.build"
         COMMAND ${CMAKE_COMMAND}

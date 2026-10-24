@@ -20,10 +20,6 @@
 #include <omnirefl/compat.hpp>
 #include <omnirefl/traits.hpp>
 
-#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
-#  include <omnirefl/unique_id.hpp>
-#endif
-
 namespace omni {
 
 namespace tweaks {
@@ -1904,16 +1900,7 @@ struct reflected_call_t {
   auto operator()(Impl &&impl, Args &&...args) const
     -> decltype(std::declval<Impl &&>()(
       _reflect_arg(std::declval<Args &&>())...)) {
-#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
-    // C++11 pack expansion instantiates registrations in argument order.
-    int registered[] = {0,
-      ((void)detail::_reflected_indexed_type<
-         typename detail::reflected_arg_type<compat::decay_t<Args>>::type>{},
-        0)...};
-    (void)registered;
-#else
     (void)sizeof...(args);
-#endif
 
     (void)impl;
 

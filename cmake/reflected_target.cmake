@@ -177,7 +177,7 @@ function(omni_reflected_target target)
 
     cmake_parse_arguments(
         OMNIREFL
-        "ENABLE_INDEX_MODE;NO_ANNOTATIONS;TIMINGS;_DISABLE_PREVIEW_AD_HOC"
+        "NO_ANNOTATIONS;TIMINGS;_DISABLE_PREVIEW_AD_HOC"
         "LOG_LEVEL"
         ""
         ${ARGN})
@@ -299,10 +299,6 @@ function(omni_reflected_target target)
     endif()
 
     set_target_properties(${target} PROPERTIES _OMNIREFL_PROCESSED TRUE)
-
-    if(OMNIREFL_ENABLE_INDEX_MODE)
-        target_compile_definitions(${target} PRIVATE OMNI_ENABLE_INDEX_MODE=1)
-    endif()
 
     _omni_classify_target_sources(
         ${target}
