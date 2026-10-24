@@ -1,5 +1,5 @@
 // Expected failure: local and unnamed records require unsupported generated
-// declarations when index mode is disabled.
+// declarations.
 #include <omnirefl/reflected_scope.hpp>
 
 namespace negative_local_and_unnamed_types {

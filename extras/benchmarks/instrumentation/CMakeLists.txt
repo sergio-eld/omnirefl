@@ -18,7 +18,7 @@ set_target_properties(benchmark.baseline PROPERTIES
 
 target_compile_definitions(benchmark.baseline PRIVATE CXX_STANDARD=${_benchmark_cpp_standard})
 target_link_libraries(benchmark.baseline PRIVATE GTest::GTest std_compat)
-omni_reflected_target(benchmark.baseline ENABLE_INDEX_MODE TIMINGS LOG_LEVEL silent)
+omni_reflected_target(benchmark.baseline TIMINGS LOG_LEVEL silent)
 
 
 # Measure fresh instrumentation and compilation, rather than a prebuilt target.

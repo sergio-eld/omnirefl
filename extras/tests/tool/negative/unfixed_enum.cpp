@@ -1,8 +1,8 @@
 // Expected failure: an unscoped enum cannot be forward-declared for generated
-// reflection when index mode is disabled.
+// reflection without a fixed underlying type.
 #include <omnirefl/reflected_scope.hpp>
 
-namespace negative_unscoped_enum_without_index {
+namespace negative_unfixed_enum {
 
 enum state {
   ready,
@@ -13,4 +13,4 @@ void run() {
   (void)omni::reflected_call([](auto) -> void {}, value);
 }
 
-} // namespace negative_unscoped_enum_without_index
+} // namespace negative_unfixed_enum

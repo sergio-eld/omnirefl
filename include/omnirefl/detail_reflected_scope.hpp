@@ -72,19 +72,6 @@ struct _is_writable_field:
 
 namespace {
 
-#if defined(OMNI_ENABLE_INDEX_MODE) && OMNI_ENABLE_INDEX_MODE
-// Index registrations must unwrap type tags to register the domain type.
-template <typename T>
-struct reflected_arg_type {
-  using type = T;
-};
-
-template <typename T>
-struct reflected_arg_type<type_t<T>> {
-  using type = T;
-};
-#endif
-
 // C++11 constexpr functions require a single return expression.
 constexpr bool _same_field_name(const char *lhs, const char *rhs) noexcept {
   return *lhs == *rhs && ('\0' == *lhs || _same_field_name(lhs + 1, rhs + 1));

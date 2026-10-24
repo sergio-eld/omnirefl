@@ -44,7 +44,7 @@ target_link_libraries(comprehensive_guide PRIVATE
     mpark_variant)
 
 # Index mode is experimental and not expected to be stable across compilers.
-omni_reflected_target(comprehensive_guide ENABLE_INDEX_MODE)
+omni_reflected_target(comprehensive_guide)
 
 add_test(NAME "comprehensive_guide.run_omni"
     COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" -t comprehensive_guide.omni)
