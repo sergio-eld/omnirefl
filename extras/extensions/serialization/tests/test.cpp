@@ -568,7 +568,7 @@ TEST(deserialization_diagnostics,
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   const auto rendered = //
     std::move(result) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(rendered.value);
   if (rendered.value) {
@@ -587,7 +587,7 @@ TEST(deserialization, partially_applies_settings_and_type) {
     omni::type_t<serialization_data::bitfield_values>{});
   const auto result =
     deserialize(std::string{serialization_data::bitfield_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -626,7 +626,7 @@ TEST(deserialization, maps_scalars_sequences_and_nested_records) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::scalar_values>{},
       std::string{serialization_data::scalar_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -741,7 +741,7 @@ TEST(deserialization, maps_a_representative_document) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::document>{},
       std::string{serialization_data::representative_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -779,7 +779,7 @@ TEST(deserialization, maps_the_same_schema_from_yaml) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::document>{},
       std::string{serialization_data::representative_yaml}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -804,7 +804,7 @@ TEST(deserialization, assigns_bitfields_through_field_bindings) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
       std::string{serialization_data::bitfield_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(result.value);
   if (!result.value)
@@ -819,7 +819,7 @@ TEST(deserialization, reports_the_schema_scalar_expected_by_a_field) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::invalid_nested_integer_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/data/code: \"invalid\" is not an integer", result.diagnostics);
@@ -829,7 +829,7 @@ TEST(deserialization, rejects_numeric_boolean_values) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
       std::string{R"({"code": 815, "enabled": 108})"}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/enabled: \"108\" is not a boolean", result.diagnostics);
@@ -839,7 +839,7 @@ TEST(deserialization, rejects_quoted_boolean_values) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
       std::string{R"({"code": 815, "enabled": "true"})"}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/enabled: \"true\" is not a boolean", result.diagnostics);
@@ -849,7 +849,7 @@ TEST(deserialization, rejects_unknown_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::unknown_field_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/extra: unknown field", result.diagnostics);
@@ -859,7 +859,7 @@ TEST(deserialization, rejects_duplicate_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::duplicate_field_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/ratio: duplicate field", result.diagnostics);
@@ -869,7 +869,7 @@ TEST(deserialization, rejects_missing_destination_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::missing_field_json}) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/data: missing field", result.diagnostics);
@@ -898,7 +898,7 @@ TEST_P(configured_deserialization, maps_or_reports_invalid_input) {
     });
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
     GetParam().source) //
-                        .map_diagnostics(omni::ryml::render_diagnostics);
+                        .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -917,7 +917,7 @@ TEST_P(configured_deserialization,
   const auto result =
     configured_deserialize(omni::type_t<serialization_data::payload>{},
       GetParam().source) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -940,7 +940,7 @@ TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
   };
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
     GetParam().source) //
-                        .map_diagnostics(omni::ryml::render_diagnostics);
+                        .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -1085,7 +1085,7 @@ TEST_P(allowed_extra_fields, validates_model_fields) {
         s.recovery = omni::compat::nullopt;
         return s;
       })(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -1378,7 +1378,7 @@ TEST_P(deserialization_diagnostics,
           : omni::compat::nullopt;
         return s;
       })(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(GetParam().has_value, bool(result.value));
   EXPECT_EQ(GetParam().message, result.diagnostics);
@@ -1710,7 +1710,7 @@ TEST_P(diagnostic_rendering, renders_paths_and_messages_on_error) {
 
   const auto rendered = //
     std::move(result) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(rendered.value);
   EXPECT_EQ(GetParam().message, rendered.diagnostics);
@@ -1766,7 +1766,7 @@ TEST(diagnostic_rendering, renders_array_positions_in_nested_paths) {
           {"name": "bad", "code": "x"}
         ]
       })") //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/records/1/code: \"x\" is not an integer", result.diagnostics);
@@ -1789,7 +1789,7 @@ TEST(deserialization, diagnostics_transformation_moves_an_available_value) {
 
   const auto transformed = //
     std::move(result) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_TRUE(transformed.value);
   if (transformed.value) {
@@ -1810,7 +1810,7 @@ TEST(deserialization, transforms_move_only_diagnostics_repeatedly) {
 
   auto rendered =
     std::move(result) //
-      .map_diagnostics([](std::unique_ptr<int> d) {
+      .transform_diagnostics([](std::unique_ptr<int> d) {
         return omni::compat::make_unique<std::string>(std::to_string(*d));
       });
 
@@ -1828,7 +1828,7 @@ TEST(deserialization, transforms_move_only_diagnostics_repeatedly) {
 
   const auto measured = //
     std::move(rendered) //
-      .map_diagnostics(
+      .transform_diagnostics(
         [](std::unique_ptr<std::string> d) { return d->size(); });
 
   EXPECT_TRUE(measured.value);
@@ -1877,7 +1877,7 @@ TEST_P(parser_recovery, retains_failure_and_allows_the_next_invocation) {
   const auto recovered =
     deserialize(omni::type_t<serialization_data::payload>{},
       R"({"name": "ok", "code": 7})") //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
   EXPECT_TRUE(recovered.value);
   if (recovered.value) {
     EXPECT_EQ("ok", recovered.value->name);
@@ -1912,7 +1912,7 @@ TEST_P(parser_recovery, renders_parse_errors_with_the_standalone_parse_format) {
         GetParam().source);
     auto moved = std::move(result);
     retained = std::move(moved) //
-                 .map_diagnostics(omni::ryml::render_diagnostics);
+                 .transform_diagnostics(omni::ryml::render_diagnostics);
   }
 
   EXPECT_FALSE(retained.value);
@@ -2098,7 +2098,7 @@ TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
   const auto result =
     map(::ryml::parse_in_arena(
           c4::csubstr{GetParam().source.data(), GetParam().source.size()})) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -2180,7 +2180,7 @@ TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
       tree.rootref());
   const auto result = //
     std::move(mapped) //
-      .map_diagnostics(omni::ryml::render_diagnostics);
+      .transform_diagnostics(omni::ryml::render_diagnostics);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
@@ -2256,7 +2256,7 @@ code: bad
       })(omni::type_t<serialization_data::payload>{}, tree.crootref());
 
     retained = std::move(result) //
-                 .map_diagnostics(omni::ryml::render_diagnostics);
+                 .transform_diagnostics(omni::ryml::render_diagnostics);
   }
 
   EXPECT_FALSE(retained.value);

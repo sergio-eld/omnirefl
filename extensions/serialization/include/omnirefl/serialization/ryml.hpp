@@ -322,7 +322,7 @@ struct with_diagnostics {
    * the value. The returned diagnostics have the type returned by f.
    */
   template <typename F>
-  auto map_diagnostics(F &&f) && -> with_diagnostics<T,
+  auto transform_diagnostics(F &&f) && -> with_diagnostics<T,
     compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &&>>> {
     return {
       /*value=*/std::move(value),
@@ -332,13 +332,13 @@ struct with_diagnostics {
   }
 
   /**
-   * Alias for map_diagnostics: transform diagnostics even alongside a value.
+   * Alias for transform_diagnostics, including when a value is available.
    */
   template <typename F>
-  auto map_error(F &&f) && -> decltype(std::move(*this).map_diagnostics(
+  auto map_error(F &&f) && -> decltype(std::move(*this).transform_diagnostics(
     std::forward<F>(f))) {
     return std::move(*this) //
-      .map_diagnostics(std::forward<F>(f));
+      .transform_diagnostics(std::forward<F>(f));
   }
 
   /**
@@ -478,8 +478,8 @@ struct deserialize_t {
 OMNI_CPP14_CONSTEXPR const map_tree_t map_tree{};
 OMNI_CPP14_CONSTEXPR const deserialize_t deserialize{};
 
-// A generic callable keeps map_diagnostics(render_diagnostics) valid for both
-// ownership modes; an overloaded function name cannot deduce its callable type.
+// A generic callable lets transform_diagnostics(render_diagnostics) work with
+// both ownership modes; an overloaded function name cannot deduce its type.
 struct render_diagnostics_t {
   template <bool Owning>
   std::string operator()(const diagnostics<Owning> &d) const;

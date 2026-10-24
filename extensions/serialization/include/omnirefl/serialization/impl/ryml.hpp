@@ -48,6 +48,28 @@ inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
   return json::value_kind::unknown;
 }
 
+inline std::string render_path(const std::vector<issue::path_segment> &segments) {
+  std::string path;
+  for (const auto &segment : segments) {
+    path += '/';
+    if (segment.index) {
+      path += std::to_string(*segment.index);
+      continue;
+    }
+
+    for (const char ch : segment.field) {
+      if ('~' == ch)
+        path += "~0";
+      else if ('/' == ch)
+        path += "~1";
+      else
+        path += ch;
+    }
+  }
+
+  return path;
+}
+
 inline std::string kind_name(json::value_kind k) {
   switch (k) {
   case json::value_kind::mapping:
@@ -893,23 +915,7 @@ std::string render_diagnostics_t::operator()(
       continue;
     }
 
-    std::string path;
-    for (const auto &segment : entry.path) {
-      path += '/';
-      if (segment.index) {
-        path += std::to_string(*segment.index);
-        continue;
-      }
-
-      for (const char ch : segment.field) {
-        if ('~' == ch)
-          path += "~0";
-        else if ('/' == ch)
-          path += "~1";
-        else
-          path += ch;
-      }
-    }
+    const auto path = detail::render_path(entry.path);
 
     message += path.empty() ? std::string{"<root>"} : path;
     message += ": ";

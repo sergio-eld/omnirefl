@@ -12,8 +12,12 @@
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
+#include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <iterator>
+#include <memory>
+#include <ostream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -38,6 +42,15 @@ independent Cartesian axis.
 
 namespace dsl {
 
+template <typename TransformSettings>
+struct input {
+  /// Callable `Settings(Settings)`: changes one or more settings for this case
+  /// in a copy of the engine's settings.
+  TransformSettings transform_settings;
+
+  std::string json;
+};
+
 struct expected_issue {
   omni::json::issue_code reason;
   omni::json::value_kind expected;
@@ -45,46 +58,127 @@ struct expected_issue {
   bool warning;
 };
 
-template <typename Model>
-struct expectation {
-  omni::compat::optional<Model> value;
-  std::vector<expected_issue> issues;
-  std::size_t warnings;
-};
-
-struct input {
-  omni::json::error_policy policy;
-  std::string json;
-};
-
-template <typename Model>
+template <typename Model, typename TransformSettings>
 struct mapping_case {
-  // Expose the model through the public dependency-discovery protocol.
-  using value_type = Model;
+  input<TransformSettings> from;
+  omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected;
 
-  input from;
-  expectation<Model> expected;
+  template <typename Engine>
+  omni::ryml::with_diagnostics<Model> operator()(Engine engine) const {
+    return engine.transform_settings(from.transform_settings)(
+      omni::type_t<Model>{}, from.json);
+  }
 };
 
 template <typename Model>
-expectation<Model> expect(Model value,
-  std::vector<expected_issue> issues,
-  std::size_t warnings) {
-  return {std::move(value), std::move(issues), warnings};
+omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expect(
+  Model value,
+  std::vector<expected_issue> issues) {
+  return {std::move(value), std::move(issues)};
 }
 
 template <typename Model>
-expectation<Model> expect(omni::compat::nullopt_t,
-  std::vector<expected_issue> issues,
-  std::size_t warnings) {
-  return {omni::compat::nullopt, std::move(issues), warnings};
+omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expect(
+  omni::compat::nullopt_t,
+  std::vector<expected_issue> issues) {
+  return {omni::compat::nullopt, std::move(issues)};
 }
 
-// Bind the model from the expectation; execution belongs to the engine runner.
-template <typename Model>
-mapping_case<Model> operator>>(input from, expectation<Model> expected) {
+// Bind the model from the expectation; the engine is supplied on invocation.
+template <typename TransformSettings, typename Model>
+mapping_case<Model, TransformSettings> operator>>(
+  input<TransformSettings> from,
+  omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected) {
   return {std::move(from), std::move(expected)};
 }
+
+// Test-only value erasure keeps ValuesIn homogeneous without erasing diagnostics.
+struct erased_value {
+  std::shared_ptr<const void> storage;
+  bool (*equal)(const void *, const void *);
+  void (*print)(const void *, std::ostream *);
+
+  template <typename Model>
+  erased_value(Model model)
+      : storage{std::make_shared<Model>(std::move(model))}
+      , equal{[](const void *left, const void *right) {
+        return *static_cast<const Model *>(left)
+          == *static_cast<const Model *>(right);
+      }}
+      , print{[](const void *value, std::ostream *out) {
+        *out << *static_cast<const Model *>(value);
+      }} {}
+};
+
+bool operator==(const erased_value &left, const erased_value &right) {
+  // Each Model specialization has its own callback; check before casting storage.
+  return left.equal == right.equal
+    && left.equal(left.storage.get(), right.storage.get());
+}
+
+void PrintTo(const erased_value &value, std::ostream *out) {
+  value.print(value.storage.get(), out);
+}
+
+bool operator==(const expected_issue &left, const expected_issue &right) {
+  return std::tie(left.reason, left.expected, left.path, left.warning)
+    == std::tie(right.reason, right.expected, right.path, right.warning);
+}
+
+void PrintTo(const expected_issue &issue, std::ostream *out) {
+  *out << "{code: " << int(issue.reason) << ", kind: " << int(issue.expected)
+       << ", path: " << issue.path << ", warning: " << issue.warning << '}';
+}
+
+bool operator==(
+  const omni::ryml::with_diagnostics<erased_value,
+    std::vector<expected_issue>> &left,
+  const omni::ryml::with_diagnostics<erased_value,
+    std::vector<expected_issue>> &right) {
+  return left.value == right.value && left.diagnostics == right.diagnostics;
+}
+
+void PrintTo(const omni::ryml::with_diagnostics<erased_value,
+               std::vector<expected_issue>> &result,
+  std::ostream *out) {
+  *out << "{value: ";
+  if (result.value)
+    PrintTo(*result.value, out);
+  else
+    *out << "none";
+  *out << ", issues: " << ::testing::PrintToString(result.diagnostics) << '}';
+}
+
+struct erase_value {
+  template <typename Model>
+  erased_value operator()(Model model) const {
+    return {std::move(model)};
+  }
+};
+
+struct scenario {
+  std::string json;
+  std::function<omni::ryml::with_diagnostics<erased_value>()> run;
+  omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>> expected;
+};
+
+template <typename Engine, typename Case>
+scenario bind_engine(Engine engine, Case c) {
+  return {c.from.json,
+    [engine, c] { return c(engine).map_value(erase_value{}); },
+    std::move(c.expected).map_value(erase_value{})};
+}
+
+// C++11 compat for a generic capturing lambda, binding each case before erasure.
+template <typename Engine>
+struct bind_cases {
+  Engine engine;
+
+  template <typename... Cases>
+  std::vector<scenario> operator()(const Cases &...cases) const {
+    return {bind_engine(engine, cases)...};
+  }
+};
 
 constexpr auto none = omni::compat::nullopt;
 
@@ -100,6 +194,22 @@ struct text_record {
   std::string value;
 };
 
+bool operator==(const record &left, const record &right) {
+  return left.value == right.value;
+}
+
+bool operator==(const text_record &left, const text_record &right) {
+  return left.value == right.value;
+}
+
+std::ostream &operator<<(std::ostream &out, const record &value) {
+  return out << "{value: " << value.value << '}';
+}
+
+std::ostream &operator<<(std::ostream &out, const text_record &value) {
+  return out << "{value: \"" << value.value << "\"}";
+}
+
 } // namespace models
 
 namespace duplicate_fields {
@@ -107,13 +217,33 @@ namespace duplicate_fields {
 using dsl::expect;
 using dsl::none;
 
-dsl::input D(omni::json::duplicate_policy duplicates,
+/**
+ * Overrides the duplicate policy and, when supplied, the error limit.
+ *
+ * C++11 equivalent of a generic capturing lambda: these fields are its inputs,
+ * and the settings type is deduced from the engine.
+ */
+struct override_settings {
+  omni::json::duplicate_policy duplicate_policy;
+
+  // Preserve the engine's limit unless the case explicitly overrides it.
+  omni::compat::optional<std::uint16_t> error_limit;
+
+  template <typename Settings>
+  OMNI_CPP14_CONSTEXPR Settings operator()(Settings settings) const {
+    settings.error_policy.duplicates = duplicate_policy;
+    if (error_limit)
+      settings.error_policy.error_limit = *error_limit;
+
+    return settings;
+  }
+};
+
+dsl::input<override_settings> D(
+  omni::json::duplicate_policy duplicate_policy,
   std::string json,
-  std::uint16_t error_limit = 0) {
-  omni::json::error_policy policy;
-  policy.duplicates = duplicates;
-  policy.error_limit = error_limit;
-  return {std::move(policy), std::move(json)};
+  omni::compat::optional<std::uint16_t> error_limit = omni::compat::nullopt) {
+  return {{duplicate_policy, error_limit}, std::move(json)};
 }
 
 const dsl::expected_issue Edup{
@@ -139,76 +269,170 @@ const dsl::expected_issue Wdup{
 
 using omni::json::duplicate_policy;
 
-// The tuple retains each model type for later engine binding.
+// Axes: [model][duplicate policy][valid/invalid mapping input].
+// All JSON is well-formed; valid inputs produce a value and precede failures.
+// D(policy, JSON) >> expect(value or none, ordered issues).
 const auto duplicates = std::make_tuple(
+  // [models::record][reject]
   D(duplicate_policy::reject, R"({"value": 7})")
-    >> expect(models::record{7}, {}, 0),
+    >> expect(models::record{7}, {}),
   D(duplicate_policy::reject, R"({"value": 7, "value": 42})")
-    >> expect<models::record>(none, {Edup}, 0),
-  D(duplicate_policy::allow, R"({"value": 7, "value": 42})")
-    >> expect(models::record{7}, {}, 0),
-  D(duplicate_policy::allow, R"({"value": 7, "value": "bad"})")
-    >> expect(models::record{7}, {}, 0),
-  D(duplicate_policy::allow, R"({"value": "bad", "value": 42})")
-    >> expect<models::record>(none, {Etype}, 0),
-
-  D(duplicate_policy::last, R"({"value": 7, "value": 42})")
-    >> expect(models::record{42}, {}, 0),
-  D(duplicate_policy::last, R"({"value": "bad", "value": 42})")
-    >> expect(models::record{42}, {}, 0),
-  D(duplicate_policy::last, R"({"value": 7, "value": "bad"})")
-    >> expect<models::record>(none, {Etype}, 0),
-
-  D(duplicate_policy::warn, R"({"value": 7, "value": 42})")
-    >> expect<models::record>(none, {Edup}, 0),
-  D(duplicate_policy::allow | duplicate_policy::warn,
-    R"({"value": 7, "value": 42})")
-    >> expect(models::record{7}, {Wdup}, 1),
-  D(duplicate_policy::last | duplicate_policy::warn,
-    R"({"value": 7, "value": 42})")
-    >> expect(models::record{42}, {Wdup}, 1),
-  D(duplicate_policy::allow | duplicate_policy::last,
-    R"({"value": 7, "value": 42})")
-    >> expect(models::record{42}, {}, 0),
-
+    >> expect<models::record>(none, {Edup}),
   D(duplicate_policy::reject, R"({"value": 1, "value": 2, "value": 3})")
-    >> expect<models::record>(none, {Edup}, 0),
-  D(duplicate_policy::allow | duplicate_policy::warn,
-    R"({"value": 1, "value": 2, "value": 3})")
-    >> expect(models::record{1}, {Wdup, Wdup}, 2),
-  D(duplicate_policy::last | duplicate_policy::warn,
-    R"({"value": 1, "value": 2, "value": 3})")
-    >> expect(models::record{3}, {Wdup, Wdup}, 2),
-  D(duplicate_policy::allow | duplicate_policy::warn,
-    R"({"value": "bad", "value": 42})")
-    >> expect<models::record>(none, {Wdup, Etype}, 1),
-  D(duplicate_policy::last | duplicate_policy::warn,
-    R"({"value": 7, "value": "bad"})")
-    >> expect<models::record>(none, {Wdup, Etype}, 1),
-
-  D(duplicate_policy::allow, R"({"value": 7, "value": {}})")
-    >> expect(models::record{7}, {}, 0),
-  D(duplicate_policy::allow, R"({"value": 7, "value": []})")
-    >> expect(models::record{7}, {}, 0),
-  D(duplicate_policy::allow, R"({"value": 7, "value": null})")
-    >> expect(models::record{7}, {}, 0),
-  D(duplicate_policy::last, R"({"value": {}, "value": 42})")
-    >> expect(models::record{42}, {}, 0),
-  D(duplicate_policy::last, R"({"value": [], "value": 42})")
-    >> expect(models::record{42}, {}, 0),
-  D(duplicate_policy::last, R"({"value": null, "value": 42})")
-    >> expect(models::record{42}, {}, 0),
-
+    >> expect<models::record>(none, {Edup}),
   D(duplicate_policy::reject,
     R"({"value": 1, "value": 2, "value": 3})", /*error_limit=*/1)
-    >> expect<models::record>(none, {Edup, Edup}, 0),
+    >> expect<models::record>(none, {Edup, Edup}),
 
-  D(duplicate_policy::allow, R"({"value": "first", "value": "last"})")
-    >> expect(models::text_record{"first"}, {}, 0),
-  D(duplicate_policy::last, R"({"value": "first", "value": "last"})")
-    >> expect(models::text_record{"last"}, {}, 0),
+  // [models::record][allow]
+  D(duplicate_policy::allow, R"({"value": 7, "value": 42})")
+    >> expect(models::record{7}, {}),
+  D(duplicate_policy::allow, R"({"value": 7, "value": "bad"})")
+    >> expect(models::record{7}, {}),
+  D(duplicate_policy::allow, R"({"value": 7, "value": {}})")
+    >> expect(models::record{7}, {}),
+  D(duplicate_policy::allow, R"({"value": 7, "value": []})")
+    >> expect(models::record{7}, {}),
+  D(duplicate_policy::allow, R"({"value": 7, "value": null})")
+    >> expect(models::record{7}, {}),
+  D(duplicate_policy::allow, R"({"value": "bad", "value": 42})")
+    >> expect<models::record>(none, {Etype}),
+
+  // [models::record][last]
+  D(duplicate_policy::last, R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {}),
+  D(duplicate_policy::last, R"({"value": "bad", "value": 42})")
+    >> expect(models::record{42}, {}),
+  D(duplicate_policy::last, R"({"value": {}, "value": 42})")
+    >> expect(models::record{42}, {}),
+  D(duplicate_policy::last, R"({"value": [], "value": 42})")
+    >> expect(models::record{42}, {}),
+  D(duplicate_policy::last, R"({"value": null, "value": 42})")
+    >> expect(models::record{42}, {}),
+  D(duplicate_policy::last, R"({"value": 7, "value": "bad"})")
+    >> expect<models::record>(none, {Etype}),
+
+  // [models::record][warn]
+  D(duplicate_policy::warn, R"({"value": 7, "value": 42})")
+    >> expect<models::record>(none, {Edup}),
+
+  // [models::record][allow | warn]
+  D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": 7, "value": 42})")
+    >> expect(models::record{7}, {Wdup}),
+  D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": 1, "value": 2, "value": 3})")
+    >> expect(models::record{1}, {Wdup, Wdup}),
+  D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": "bad", "value": 42})")
+    >> expect<models::record>(none, {Wdup, Etype}),
+
+  // [models::record][last | warn]
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {Wdup}),
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"value": 1, "value": 2, "value": 3})")
+    >> expect(models::record{3}, {Wdup, Wdup}),
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"value": 7, "value": "bad"})")
+    >> expect<models::record>(none, {Wdup, Etype}),
+
+  // [models::record][allow | last]
+  D(duplicate_policy::allow | duplicate_policy::last,
+    R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {}),
+
+  // [models::text_record][reject]
   D(duplicate_policy::reject, R"({"value": "first", "value": "last"})")
-    >> expect<models::text_record>(none, {Edup}, 0));
+    >> expect<models::text_record>(none, {Edup}),
+
+  // [models::text_record][allow]
+  D(duplicate_policy::allow, R"({"value": "first", "value": "last"})")
+    >> expect(models::text_record{"first"}, {}),
+
+  // [models::text_record][last]
+  D(duplicate_policy::last, R"({"value": "first", "value": "last"})")
+    >> expect(models::text_record{"last"}, {}));
+
+class duplicate_mapping: public ::testing::TestWithParam<dsl::scenario> {};
+
+TEST_P(duplicate_mapping, conforms_to_expected_mapping) {
+  SCOPED_TRACE(GetParam().json);
+  const auto actual = GetParam().run().transform_diagnostics(
+    [](omni::ryml::diagnostics<true> diagnostics) {
+      std::vector<dsl::expected_issue> issues;
+      std::transform(diagnostics.issues.begin(), diagnostics.issues.end(),
+        std::back_inserter(issues), [](const omni::ryml::issue &issue) {
+          return dsl::expected_issue{issue.reason, issue.expected,
+            omni::ryml::detail::render_path(issue.path), issue.warning};
+        });
+      return issues;
+    });
+
+  EXPECT_EQ(GetParam().expected, actual);
+}
+
+INSTANTIATE_TEST_SUITE_P(ryml,
+  duplicate_mapping,
+  ::testing::ValuesIn(omni::compat::apply(
+    dsl::bind_cases<omni::ryml::deserialize_t>{
+      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+    duplicates)));
+
+TEST(json_mapping_dsl, binds_the_model_and_transforms_engine_defaults) {
+  const auto c = D(duplicate_policy::last, R"({"value": 7, "value": 42})")
+    >> expect(models::record{42}, {});
+
+  const auto result = c(omni::ryml::deserialize);
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(c.expected.value->value, result.value->value);
+  }
+
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(duplicate_policy::last,
+    result.diagnostics.settings.error_policy.duplicates);
+  EXPECT_EQ(duplicate_policy::reject,
+    omni::ryml::deserialize.settings.error_policy.duplicates);
+}
+
+TEST(json_mapping_dsl, preserves_settings_outside_the_case_transformation) {
+  const auto engine =
+    omni::ryml::deserialize.transform_settings([](omni::ryml::settings settings) {
+      settings.error_policy.warning_limit = 0;
+      settings.error_policy.error_limit = 3;
+      return settings;
+    });
+
+  const auto c = D(duplicate_policy::allow | duplicate_policy::warn,
+    R"({"value": 7, "value": 42})")
+    >> expect<models::record>(none,
+      {
+        Wdup,
+        {
+          omni::json::issue_code::warning_limit_exceeded,
+          omni::json::value_kind::unknown,
+          "/value",
+          false,
+        },
+      });
+
+  const auto result = c(engine);
+  EXPECT_FALSE(result.value);
+  EXPECT_TRUE(result.diagnostics.stopped());
+  EXPECT_EQ(c.expected.diagnostics.size(), result.diagnostics.issues.size());
+  if (2U == result.diagnostics.issues.size()) {
+    EXPECT_EQ(c.expected.diagnostics[0].reason,
+      result.diagnostics.issues[0].reason);
+    EXPECT_TRUE(result.diagnostics.issues[0].warning);
+    EXPECT_EQ(c.expected.diagnostics[1].reason,
+      result.diagnostics.issues[1].reason);
+    EXPECT_FALSE(result.diagnostics.issues[1].warning);
+  }
+  EXPECT_EQ(3, result.diagnostics.settings.error_policy.error_limit);
+  EXPECT_EQ(duplicate_policy::reject, engine.settings.error_policy.duplicates);
+}
 
 } // namespace duplicate_fields
 
