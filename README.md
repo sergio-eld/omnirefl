@@ -713,7 +713,8 @@ See [Limitations](#limitations) for the declaration restrictions.
 > even when referenced by non-dependent expressions.
 > Discovery and compilation could therefore associate different types with the
 > same index. Matching metadata directly by forward-declared type became the
-> core approach.
+> core approach. The indexed implementation was subsequently
+> [removed](https://github.com/sergio-eld/omnirefl/commit/f65775ebacc7071a5a6eff3e5c4f5c2980aec96e).
 <!-- pages:how-it-works:end -->
 
 <!-- pages:limitations:start -->
