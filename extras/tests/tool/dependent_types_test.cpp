@@ -4,6 +4,7 @@
 
 #include <omnirefl/reflected_scope.hpp>
 
+#include <functional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1168,6 +1169,33 @@ TEST(suite_discovery, tuple_apply_accepts_a_model_defined_after_the_callable) {
   // Uses std::apply in C++17 and newer, the local implementation before C++17.
   EXPECT_EQ(1U, omni::compat::apply(tuple_apply_discovery::invoke{},
     std::make_tuple(omni::type_t<tuple_apply_discovery::model>{})));
+}
+
+namespace lambda_instantiation {
+
+struct count_fields {
+  template <typename _M>
+  std::size_t operator()(omni::record_meta_t<_M> meta) const {
+    return std::tuple_size<decltype(meta.public_fields())>::value;
+  }
+};
+
+template <typename Model>
+std::function<std::size_t()> defer_field_count(omni::type_t<Model> type) {
+  return [type] { return omni::reflected_call(count_fields{}, type); };
+}
+
+// Keep the model after the template: completeness must be checked at
+// instantiation, rather than at the template's definition.
+struct model { int value; };
+
+} // namespace lambda_instantiation
+
+TEST(suite_discovery, lambda_in_function_template_accepts_complete_model) {
+  namespace li = lambda_instantiation;
+
+  const auto count = li::defer_field_count(omni::type_t<li::model>{});
+  EXPECT_EQ(1U, count());
 }
 
 } // namespace
