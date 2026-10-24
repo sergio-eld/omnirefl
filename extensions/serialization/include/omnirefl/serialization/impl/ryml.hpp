@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cassert>
+// FIXME: [low] Freestanding: parse-error recovery requires setjmp/longjmp,
+// which are not guaranteed by a freestanding implementation.
 #include <csetjmp>
 #include <iterator>
 #include <limits>

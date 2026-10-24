@@ -6,6 +6,8 @@
 
 #include <functional>
 #include <memory>
+// FIXME: [low] Freestanding: separate the owning-string/to_string helpers and
+// this hosted dependency from the common compatibility header.
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -498,6 +500,8 @@ constexpr auto bind_front(Function &&function, Bound &&...bound) //
 #endif
 
 // make_unique
+// FIXME: [low] Freestanding: keep allocating helpers separate; make_unique is
+// not part of the guaranteed freestanding <memory> subset.
 #if OMNI_CPLUSPLUS >= 201402L
 using std::make_unique;
 #else

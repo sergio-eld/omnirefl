@@ -41,6 +41,8 @@ if (result.value) {
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+// FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
+// owning strings and vectors; provide an alternative representation.
 #include <string>
 #include <type_traits>
 #include <utility>
