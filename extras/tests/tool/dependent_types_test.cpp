@@ -208,14 +208,6 @@ TEST(example_value, field_count) {
       dt::example_value{"station", 4, 8.15}));
 }
 
-TEST(example_value, field_indices) {
-  namespace dt = dependency_types;
-
-  EXPECT_EQ((std::vector<std::size_t>{0, 1, 2}),
-    omni::reflected_call(dt::inspect::field_indices,
-      dt::example_value{"station", 4, 8.15}));
-}
-
 TEST(example_value, reflected_name) {
   namespace dt = dependency_types;
 
@@ -850,15 +842,6 @@ TEST(inheritance_dependency, std_enable_shared_from_this_base_is_ignored) {
     }),
     omni::reflected_call(dt::inspect::field_names,
       dt::shared_from_this_derived{"record", 7}));
-}
-
-TEST(inheritance_dependency, public_base_indices) {
-  namespace dt = dependency_types;
-
-  EXPECT_EQ(
-    (std::vector<std::size_t>{0, 0}),
-    omni::reflected_call(dt::inspect::field_indices,
-      dt::derived_struct{4, 8.15}));
 }
 
 TEST(inheritance_dependency, multi_base_fields_are_flattened) {

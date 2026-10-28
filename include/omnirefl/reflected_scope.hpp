@@ -224,27 +224,6 @@ struct field_meta_t {
     return _M::documentation();
   }
 
-  /**
-   * Zero-based index among reflected fields declared by the field's record.
-   *
-   * ```cpp
-   * struct item {
-   *   int first;  // index 0
-   * private:
-   *   int hidden; // not reflected; no index
-   * public:
-   *   int second; // index 1
-   *   int third;  // index 2
-   * };
-   * ```
-   *
-   * Inherited fields retain their declaring-record index, so indexes can repeat
-   * in a flattened `public_fields()` tuple.
-   */
-  static constexpr std::size_t index() noexcept {
-    return _M::index();
-  }
-
   /** Whether the declared field type has top-level `const` qualification. */
   static constexpr bool is_const() noexcept {
     return _M::is_const();
@@ -509,27 +488,6 @@ struct field_binding_t {
    */
   static constexpr const char *documentation() noexcept {
     return meta::documentation();
-  }
-
-  /**
-   * Zero-based index among reflected fields declared by the field's record.
-   *
-   * ```cpp
-   * struct item {
-   *   int first;  // index 0
-   * private:
-   *   int hidden; // not reflected; no index
-   * public:
-   *   int second; // index 1
-   *   int third;  // index 2
-   * };
-   * ```
-   *
-   * Inherited fields retain their declaring-record index, so indexes can repeat
-   * in a flattened `public_fields()` tuple.
-   */
-  static constexpr std::size_t index() noexcept {
-    return meta::index();
   }
 
   /**
