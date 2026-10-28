@@ -29,7 +29,7 @@ TEST(regression,
 
   EXPECT_TRUE(omni::reflected_call(
     [](auto binding) -> bool {
-      using fields_t = decltype(binding.public_fields());
+      using fields_t = decltype(binding.accessible_data_members());
       using child_t = typename std::tuple_element_t<0, fields_t>::type;
       return omni::is_reflected<child_t>::value;
     },

@@ -126,7 +126,7 @@ struct inspect_protocols {
     EXPECT_FALSE(omni::is_reflected<std::vector<standard_element>>::value);
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 
@@ -142,7 +142,7 @@ struct inspect_virtual_protocols {
     EXPECT_FALSE(omni::is_reflected<alias_base<virtual_element>>::value);
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 
@@ -159,7 +159,7 @@ struct inspect_alias_lookup {
     EXPECT_FALSE(omni::is_reflected<ambiguous_wrapper>::value);
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 

@@ -76,8 +76,8 @@ namespace inspect {
 static const struct first_field_type_is_reflected_t {
   template <typename Binding>
   bool operator()(const Binding &binding) const {
-    using field =
-      typename std::tuple_element<0, decltype(binding.public_fields())>::type;
+    using field = typename std::tuple_element<0,
+      decltype(binding.accessible_data_members())>::type;
 
     return omni::is_reflected<typename field::type>::value;
   }
@@ -119,14 +119,15 @@ struct inspect_case {
   std::string operator()(omni::record_meta_t<_M>) const {
     using model = typename omni::record_meta_t<_M>::reflected_type::value_type;
     return std::get</*model field=*/0>(
-      omni::reflected(omni::type_t<model>{}).public_fields()).name();
+      omni::reflected(omni::type_t<model>{}).accessible_data_members())
+      .name();
   }
 };
 
 struct inspect_suite {
   template <typename _M>
   std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
-    const auto fields = meta.public_fields();
+    const auto fields = meta.accessible_data_members();
     const auto duplicates = std::get</*duplicates=*/0>(fields);
     const auto unknown = std::get</*unknown_fields=*/1>(fields);
     using first_case = typename std::tuple_element</*first case=*/0,
@@ -137,15 +138,24 @@ struct inspect_suite {
       typename decltype(unknown)::type>::type;
 
     return {
-      duplicates.name(), duplicates.spelled_type_name(),
-      duplicates.documentation(), unknown.name(), unknown.spelled_type_name(),
+      duplicates.name(),
+      duplicates.spelled_type_name(),
+      duplicates.documentation(),
+      unknown.name(),
+      unknown.spelled_type_name(),
       unknown.documentation(),
-      std::get</*model field=*/0>(omni::reflected(
-        omni::type_t<typename first_case::value_type>{}).public_fields()).name(),
-      std::get</*model field=*/0>(omni::reflected(
-        omni::type_t<typename second_case::value_type>{}).public_fields()).name(),
-      std::get</*model field=*/0>(omni::reflected(
-        omni::type_t<typename third_case::value_type>{}).public_fields()).name(),
+      std::get</*model field=*/0>(
+        omni::reflected(omni::type_t<typename first_case::value_type>{})
+          .accessible_data_members())
+        .name(),
+      std::get</*model field=*/0>(
+        omni::reflected(omni::type_t<typename second_case::value_type>{})
+          .accessible_data_members())
+        .name(),
+      std::get</*model field=*/0>(
+        omni::reflected(omni::type_t<typename third_case::value_type>{})
+          .accessible_data_members())
+        .name(),
     };
   }
 };
@@ -153,7 +163,7 @@ struct inspect_suite {
 struct touch {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 
@@ -184,7 +194,8 @@ struct inspect_touched {
   std::string operator()(omni::record_meta_t<_M>) const {
     // Model is not reachable from the immediate reflected_call root.
     return std::get</*model field=*/0>(
-      omni::reflected(omni::type_t<Model>{}).public_fields()).name();
+      omni::reflected(omni::type_t<Model>{}).accessible_data_members())
+      .name();
   }
 };
 
@@ -1159,7 +1170,7 @@ namespace lambda_instantiation {
 struct count_fields {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 

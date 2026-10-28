@@ -26,7 +26,7 @@ TEST(diagnostic, lazy_virtual_base_dependency) {
   diagnostic_lazy_virtual_base_dependency::record value{815};
   omni::reflected_call(
     [](auto binding) -> void {
-      EXPECT_EQ(815, std::get<0>(binding.public_fields()).value());
+      EXPECT_EQ(815, std::get<0>(binding.accessible_data_members()).value());
     },
     value);
 }

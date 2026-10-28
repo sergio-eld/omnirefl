@@ -22,7 +22,7 @@ struct box {
 struct inspect {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> meta) const {
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 
   template <typename _M>

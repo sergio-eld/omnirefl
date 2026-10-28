@@ -46,16 +46,22 @@ TEST(diagnostic, virtual_base_dependency) {
 
   omni::reflected_call(
     [](auto first_binding, auto second_binding, auto template_binding) -> void {
-      static_assert(
-        2 == std::tuple_size_v<decltype(first_binding.public_fields())>);
-      static_assert(
-        2 == std::tuple_size_v<decltype(second_binding.public_fields())>);
-      static_assert(
-        2 == std::tuple_size_v<decltype(template_binding.public_fields())>);
+      static_assert(2
+        == std::tuple_size_v<
+          decltype(first_binding.accessible_data_members())>);
+      static_assert(2
+        == std::tuple_size_v<
+          decltype(second_binding.accessible_data_members())>);
+      static_assert(2
+        == std::tuple_size_v<
+          decltype(template_binding.accessible_data_members())>);
 
-      EXPECT_EQ(23, std::get<1>(first_binding.public_fields()).value());
-      EXPECT_EQ(29, std::get<1>(second_binding.public_fields()).value());
-      EXPECT_EQ(31, std::get<1>(template_binding.public_fields()).value());
+      EXPECT_EQ(23,
+        std::get<1>(first_binding.accessible_data_members()).value());
+      EXPECT_EQ(29,
+        std::get<1>(second_binding.accessible_data_members()).value());
+      EXPECT_EQ(31,
+        std::get<1>(template_binding.accessible_data_members()).value());
     },
     first,
     second,

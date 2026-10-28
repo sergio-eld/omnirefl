@@ -28,7 +28,7 @@ struct inspect {
     EXPECT_FALSE(omni::is_reflected<exclusion_ordering::excluded>::value);
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 

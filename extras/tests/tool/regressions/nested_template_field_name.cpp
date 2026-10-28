@@ -98,7 +98,7 @@ struct spelled_type_name {
   template <typename _M>
   std::string operator()(omni::record_meta_t<_M> meta) const {
 #endif
-    return std::get<0>(meta.public_fields()).spelled_type_name();
+    return std::get<0>(meta.accessible_data_members()).spelled_type_name();
   }
 };
 

@@ -222,7 +222,7 @@ struct spelled_qualified_field_type_names_visitor {
 struct first_field_actual_type_name_t {
   template <typename _M>
   std::string operator()(omni::record_meta_t<_M> record) const {
-    using fields = decltype(record.public_fields());
+    using fields = decltype(record.accessible_data_members());
     using field = typename std::tuple_element<0, fields>::type;
     using actual_type = typename field::type;
     using actual_meta = omni::meta_for<actual_type>;
@@ -236,7 +236,8 @@ struct first_field_actual_type_name_t {
 struct record_type_fields_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(fields_visitor{}, binding.public_fields());
+    return omni::compat::apply(fields_visitor{},
+      binding.accessible_data_members());
   }
 };
 
@@ -248,7 +249,7 @@ struct record_type_spelled_field_type_names_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(spelled_field_type_names_visitor{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 } const static record_type_spelled_field_type_names{};
 
@@ -256,7 +257,7 @@ struct record_type_spelled_qualified_field_type_names_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(spelled_qualified_field_type_names_visitor{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 } const static record_type_spelled_qualified_field_type_names{};
 
@@ -284,7 +285,8 @@ struct field_values_visitor {
 struct record_type_field_values_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(field_values_visitor{}, binding.public_fields());
+    return omni::compat::apply(field_values_visitor{},
+      binding.accessible_data_members());
   }
 };
 
@@ -375,8 +377,9 @@ struct additional_volatile_forms_t {
   int operator()(
     omni::record_binding_t<const volatile T &> const_volatile_binding,
     omni::record_binding_t<T &> mutable_binding) const {
-    auto const_volatile_fields = const_volatile_binding.public_fields();
-    auto mutable_fields = mutable_binding.public_fields();
+    auto const_volatile_fields =
+      const_volatile_binding.accessible_data_members();
+    auto mutable_fields = mutable_binding.accessible_data_members();
     typedef decltype(std::get<0>(const_volatile_fields)
         .value()) const_volatile_reference;
     typedef decltype(std::get<1>(const_volatile_fields)
@@ -421,21 +424,24 @@ additional_volatile_forms_t const static additional_volatile_forms{};
 struct field_flags_from_meta_t {
   template <typename _M>
   std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
-    return omni::compat::apply(field_flags_visitor{}, meta.public_fields());
+    return omni::compat::apply(field_flags_visitor{},
+      meta.accessible_data_members());
   }
 };
 
 struct field_flags_from_binding_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(field_flags_visitor{}, binding.public_fields());
+    return omni::compat::apply(field_flags_visitor{},
+      binding.accessible_data_members());
   }
 };
 
 struct meta_write_availability_t {
   template <typename _M>
   std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
-    return omni::compat::apply(meta_write_visitor{}, meta.public_fields());
+    return omni::compat::apply(meta_write_visitor{},
+      meta.accessible_data_members());
   }
 };
 
@@ -443,7 +449,7 @@ struct binding_write_availability_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
     return omni::compat::apply(binding_write_visitor{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 };
 
@@ -491,7 +497,8 @@ struct record_type_field_write_t {
   template <typename T>
   void operator()(omni::record_binding_t<T &> binding,
     const record_type_t &expected) const {
-    omni::compat::apply(assign_fields{expected}, binding.public_fields());
+    omni::compat::apply(assign_fields{expected},
+      binding.accessible_data_members());
   }
 };
 
@@ -499,7 +506,8 @@ struct record_type_field_write_and_return_t {
   template <typename T>
   omni::compat::decay_t<T> operator()(omni::record_binding_t<T> binding,
     const record_type_t &expected) const {
-    omni::compat::apply(assign_fields{expected}, binding.public_fields());
+    omni::compat::apply(assign_fields{expected},
+      binding.accessible_data_members());
     return std::move(binding).value();
   }
 };

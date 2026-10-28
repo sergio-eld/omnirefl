@@ -53,7 +53,7 @@ struct inspect {
       "other dependencies remain reflected");
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 

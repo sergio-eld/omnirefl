@@ -97,9 +97,9 @@ struct function_meta_t;
 
 namespace omni {
 
-/** Reflected-scope-only field metadata; `_M` is opaque. */
+/** Reflected-scope-only data-member metadata; `_M` is opaque. */
 template <typename _M>
-struct field_meta_t {
+struct data_member_meta_t {
   // TODO: Consider is_type_dependent(); establish a useful consumer before
   // adding the query. For example:
   // ```cpp
@@ -145,14 +145,15 @@ struct field_meta_t {
    * @note The `type` alias names the actual C++ field type. Within a reflected
    * scope, access its metadata by value or by type with:
    * ```cpp
-   * template <omni::field_meta FieldMeta>
+   * template <omni::data_member_meta FieldMeta>
    * void inspect(FieldMeta) {
    *   const auto field_type_metadata =
    *     omni::reflected(omni::type_t<typename FieldMeta::type>{});
    *   using field_type_meta = omni::meta_for<typename FieldMeta::type>;
    * }
    * ```
-   * Before C++20, use `omni::field_meta_t<_FieldMeta>` as the parameter type.
+   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter
+   * type.
    */
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
@@ -181,14 +182,15 @@ struct field_meta_t {
    * @note The `type` alias names the actual C++ field type. Within a reflected
    * scope, access its metadata by value or by type with:
    * ```cpp
-   * template <omni::field_meta FieldMeta>
+   * template <omni::data_member_meta FieldMeta>
    * void inspect(FieldMeta) {
    *   const auto field_type_metadata =
    *     omni::reflected(omni::type_t<typename FieldMeta::type>{});
    *   using field_type_meta = omni::meta_for<typename FieldMeta::type>;
    * }
    * ```
-   * Before C++20, use `omni::field_meta_t<_FieldMeta>` as the parameter type.
+   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter
+   * type.
    */
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
@@ -306,7 +308,7 @@ struct example {
    * returned by value.
    *
    * @details `R` keeps lookup dependent, so an unavailable generated accessor
-   * fails only when used rather than while forming `public_fields()`.
+   * fails only when used rather than while forming `accessible_data_members()`.
    */
   template <typename T,
     typename R = _M,
@@ -322,7 +324,7 @@ struct example {
    * for bit-fields and packed fields without safe reference alignment.
    *
    * @details `R` keeps lookup dependent, so an unavailable generated accessor
-   * fails only when used rather than while forming `public_fields()`.
+   * fails only when used rather than while forming `accessible_data_members()`.
    */
   template <typename T,
     typename R = _M,
@@ -356,29 +358,29 @@ struct example {
 };
 
 /**
- * Reflected-scope-only field binding.
+ * Reflected-scope-only data-member binding.
  *
  * `Record` is the cv-qualified bound record type, including the final record
  * through which inherited fields are accessed. `_M` is opaque.
  *
- * TODO: [high] Decide whether this should inherit `field_meta_t<_M>`.
+ * TODO: [high] Decide whether this should inherit `data_member_meta_t<_M>`.
  *   This requires consistent pre-C++20 overload and C++20 concept semantics.
  *   The same static predicate should accept metadata and bindings:
  *   ```cpp
- *   template <omni::field_meta Field>
+ *   template <omni::data_member_meta Field>
  *   using mutable_field = std::bool_constant<Field::is_mutable()>;
  *
- *   metadata.public_fields() | omni::fn::filter<mutable_field>();
- *   binding.public_fields() | omni::fn::filter<mutable_field>();
+ *   metadata.accessible_data_members() | omni::fn::filter<mutable_field>();
+ *   binding.accessible_data_members() | omni::fn::filter<mutable_field>();
  *   ```
  */
 template <typename Record, typename _M>
-struct field_binding_t {
+struct data_member_binding_t {
   /** Cv-qualified type of the bound record object. */
   using record = Record;
 
   /** Metadata for the bound field. */
-  using meta = field_meta_t<_M>;
+  using meta = data_member_meta_t<_M>;
 
   /** Declared field type. */
   using type = typename meta::type;
@@ -411,14 +413,14 @@ struct field_binding_t {
    * @note The `type` alias names the actual C++ field type. Within a reflected
    * scope, access its metadata by value or by type with:
    * ```cpp
-   * template <omni::field_binding FieldBinding>
+   * template <omni::data_member_binding FieldBinding>
    * void inspect(FieldBinding) {
    *   const auto field_type_metadata =
    *     omni::reflected(omni::type_t<typename FieldBinding::type>{});
    *   using field_type_meta = omni::meta_for<typename FieldBinding::type>;
    * }
    * ```
-   * Before C++20, use `omni::field_binding_t<Record, _FieldMeta>` as the
+   * Before C++20, use `omni::data_member_binding_t<Record, _FieldMeta>` as the
    * parameter type.
    */
   static constexpr const char *spelled_type_name() noexcept {
@@ -446,14 +448,14 @@ struct field_binding_t {
    * @note The `type` alias names the actual C++ field type. Within a reflected
    * scope, access its metadata by value or by type with:
    * ```cpp
-   * template <omni::field_binding FieldBinding>
+   * template <omni::data_member_binding FieldBinding>
    * void inspect(FieldBinding) {
    *   const auto field_type_metadata =
    *     omni::reflected(omni::type_t<typename FieldBinding::type>{});
    *   using field_type_meta = omni::meta_for<typename FieldBinding::type>;
    * }
    * ```
-   * Before C++20, use `omni::field_binding_t<Record, _FieldMeta>` as the
+   * Before C++20, use `omni::data_member_binding_t<Record, _FieldMeta>` as the
    * parameter type.
    */
   static constexpr const char *spelled_qualified_type_name() noexcept {
@@ -534,17 +536,17 @@ struct field_binding_t {
     return meta::is_deprecated();
   }
 
-  /** See `field_meta_t::has_default_member_initializer()`. */
+  /** See `data_member_meta_t::has_default_member_initializer()`. */
   static constexpr bool has_default_member_initializer() noexcept {
     return meta::has_default_member_initializer();
   }
 
-  /** See `field_meta_t::has_default_value_access()`. */
+  /** See `data_member_meta_t::has_default_value_access()`. */
   static constexpr bool has_default_value_access() noexcept {
     return meta::has_default_value_access();
   }
 
-  /** See `field_meta_t::default_value()`. */
+  /** See `data_member_meta_t::default_value()`. */
   template <typename M = meta,
     typename std::enable_if<M::has_default_value_access(), int>::type = 0>
   static const typename M::type &default_value() {
@@ -690,7 +692,7 @@ struct field_binding_t {
     M::set_value(_record, std::forward<V>(v));
   }
 
-  constexpr explicit field_binding_t(record &value): _record(value) {}
+  constexpr explicit data_member_binding_t(record &value): _record(value) {}
 };
 
 template <typename Record, typename _M>
@@ -744,15 +746,20 @@ struct meta_t<_M, reflected_entity::record> {
     "Inconsistent reflection");
 
   /**
-   * Metadata tuple for visible public fields:
-   * `std::tuple<field_meta_t<_FieldMeta>...>`.
+   * Metadata tuple for data members accessible from the reflected type:
+   * `std::tuple<data_member_meta_t<_FieldMeta>...>`.
    *
-   * Hidden and ambiguous inherited fields are omitted.
+   * Includes accessible inherited members; hidden and ambiguous members are
+   * omitted.
    */
-  using public_fields_t = detail::_all_visible_public_fields_t<_M>;
+  using accessible_data_members_t = detail::_all_visible_public_fields_t<_M>;
 
-  /** Metadata tuple for visible non-overloaded public methods. */
-  using public_methods_t = detail::_all_visible_public_methods_t<_M>;
+  /**
+   * Metadata tuple for non-overloaded member functions accessible from the
+   * reflected type.
+   */
+  using accessible_member_functions_t =
+    detail::_all_visible_public_methods_t<_M>;
 
   /**
    * Reflected record name without namespace qualification.
@@ -844,17 +851,22 @@ struct meta_t<_M, reflected_entity::record> {
   }
 
   /**
-   * Return visible public fields as
-   * `std::tuple<field_meta_t<_FieldMeta>...>`.
+   * Return data members accessible from the reflected type as
+   * `std::tuple<data_member_meta_t<_FieldMeta>...>`.
    *
-   * Hidden and ambiguous inherited fields are omitted.
+   * Includes accessible inherited members; hidden and ambiguous members are
+   * omitted.
    */
-  static constexpr public_fields_t public_fields() noexcept {
+  static constexpr accessible_data_members_t
+    accessible_data_members() noexcept {
     return {};
   }
 
-  /** Return visible non-overloaded public methods. */
-  static constexpr public_methods_t public_methods() noexcept {
+  /**
+   * Return non-overloaded member functions accessible from the reflected type.
+   */
+  static constexpr accessible_member_functions_t
+    accessible_member_functions() noexcept {
     return {};
   }
 #endif
@@ -927,9 +939,9 @@ struct meta_t<_M, reflected_entity::record> {
   constexpr meta_t() noexcept = default;
 
   template <typename _T, typename _Field>
-  static constexpr field_binding_t<_T, _Field> _bind(
-    _T &t, field_meta_t<_Field>) {
-    return field_binding_t<_T, _Field>{t};
+  static constexpr data_member_binding_t<_T, _Field> _bind(_T &t,
+    data_member_meta_t<_Field>) {
+    return data_member_binding_t<_T, _Field>{t};
   }
 
   template <typename _T, typename _Function>
@@ -1419,89 +1431,94 @@ struct binding_t<T, reflected_entity::record> {
   constexpr
 #  endif
   /**
-   * Bind visible public fields from a non-const lvalue record binding as
-   * `std::tuple<field_binding_t<Record, _FieldMeta>...>`.
+   * Bind accessible data members from a non-const lvalue record binding as
+   * `std::tuple<data_member_binding_t<Record, _FieldMeta>...>`.
    *
-   * Hidden and ambiguous inherited fields are omitted.
+   * Includes accessible inherited members; hidden and ambiguous members are
+   * omitted.
    *
    * @note This non-const overload is not `constexpr` in C++11 because C++11
    * requires `constexpr` member functions to be const.
    */
-  auto public_fields() & -> decltype(meta::_bind_members(
+  auto accessible_data_members() & -> decltype(meta::_bind_members(
     std::declval<storage_t &>(),
-    typename meta::public_fields_t{})) {
-    return meta::_bind_members(_record, typename meta::public_fields_t{});
+    typename meta::accessible_data_members_t{})) {
+    return meta::_bind_members(_record,
+      typename meta::accessible_data_members_t{});
   }
 
   /**
-   * Bind visible public fields from a const lvalue record binding as
-   * `std::tuple<field_binding_t<Record, _FieldMeta>...>`.
+   * Bind accessible data members from a const lvalue record binding as
+   * `std::tuple<data_member_binding_t<Record, _FieldMeta>...>`.
    *
    * Referenced records keep their own cv-qualification. An owned record is
    * const through this overload. Hidden and ambiguous inherited fields are
    * omitted.
    */
-  constexpr auto public_fields() const & -> decltype(meta::_bind_members(
-    std::declval<const storage_t &>(),
-    typename meta::public_fields_t{})) {
-    return meta::_bind_members(_record, typename meta::public_fields_t{});
+  constexpr auto accessible_data_members()
+    const & -> decltype(meta::_bind_members(std::declval<const storage_t &>(),
+      typename meta::accessible_data_members_t{})) {
+    return meta::_bind_members(_record,
+      typename meta::accessible_data_members_t{});
   }
 
   /**
-   * Bind visible public fields from an rvalue record binding.
+   * Bind accessible data members from an rvalue record binding.
    *
    * Deleted to prevent dangling bindings from an owning temporary:
    *
    * ```cpp
    * auto dangling_fields =
-   *   omni::reflected(account{}).public_fields(); // rejected
+   *   omni::reflected(account{}).accessible_data_members(); // rejected
    *
    * auto account_binding = omni::reflected(account{});
-   * auto fields = account_binding.public_fields(); // valid
+   * auto fields = account_binding.accessible_data_members(); // valid
    * ```
    */
-  auto public_fields() && -> decltype(meta::_bind_members(
+  auto accessible_data_members() && -> decltype(meta::_bind_members(
     std::declval<storage_t &>(),
-    typename meta::public_fields_t{})) = delete;
+    typename meta::accessible_data_members_t{})) = delete;
 
   /**
-   * Bind visible public fields from a const rvalue record binding.
+   * Bind accessible data members from a const rvalue record binding.
    *
    * Deleted to prevent dangling bindings from an owning temporary:
    *
    * ```cpp
    * const auto account_binding = omni::reflected(account{});
    * auto dangling_fields =
-   *   std::move(account_binding).public_fields(); // rejected
+   *   std::move(account_binding).accessible_data_members(); // rejected
    *
-   * auto fields = account_binding.public_fields(); // valid
+   * auto fields = account_binding.accessible_data_members(); // valid
    * ```
    */
-  auto public_fields() const && -> decltype(meta::_bind_members(
+  auto accessible_data_members() const && -> decltype(meta::_bind_members(
     std::declval<const storage_t &>(),
-    typename meta::public_fields_t{})) = delete;
+    typename meta::accessible_data_members_t{})) = delete;
 
-  /** Bind visible non-overloaded public methods to this record. */
-  auto public_methods() & -> decltype(meta::_bind_members(
+  /** Bind accessible non-overloaded member functions to this record. */
+  auto accessible_member_functions() & -> decltype(meta::_bind_members(
     std::declval<storage_t &>(),
-    typename meta::public_methods_t{})) {
-    return meta::_bind_members(_record, typename meta::public_methods_t{});
+    typename meta::accessible_member_functions_t{})) {
+    return meta::_bind_members(_record,
+      typename meta::accessible_member_functions_t{});
   }
 
-  /** Bind visible non-overloaded public methods to this const record. */
-  constexpr auto public_methods() const & -> decltype(meta::_bind_members(
-    std::declval<const storage_t &>(),
-    typename meta::public_methods_t{})) {
-    return meta::_bind_members(_record, typename meta::public_methods_t{});
+  /** Bind accessible non-overloaded member functions to this const record. */
+  constexpr auto accessible_member_functions()
+    const & -> decltype(meta::_bind_members(std::declval<const storage_t &>(),
+      typename meta::accessible_member_functions_t{})) {
+    return meta::_bind_members(_record,
+      typename meta::accessible_member_functions_t{});
   }
 
-  auto public_methods() && -> decltype(meta::_bind_members(
+  auto accessible_member_functions() && -> decltype(meta::_bind_members(
     std::declval<storage_t &>(),
-    typename meta::public_methods_t{})) = delete;
+    typename meta::accessible_member_functions_t{})) = delete;
 
-  auto public_methods() const && -> decltype(meta::_bind_members(
+  auto accessible_member_functions() const && -> decltype(meta::_bind_members(
     std::declval<const storage_t &>(),
-    typename meta::public_methods_t{})) = delete;
+    typename meta::accessible_member_functions_t{})) = delete;
 #endif
 
   private:
@@ -1725,13 +1742,13 @@ concept meta = traits::is<meta_t, T>();
 template <typename T>
 concept binding = traits::is<binding_t, T>();
 
-/** Whether `T` is field metadata. */
+/** Whether `T` is data-member metadata. */
 template <typename T>
-concept field_meta = traits::is<field_meta_t, T>();
+concept data_member_meta = traits::is<data_member_meta_t, T>();
 
-/** Whether `T` binds field metadata to a record object. */
+/** Whether `T` binds data-member metadata to a record object. */
 template <typename T>
-concept field_binding = traits::is<field_binding_t, T>();
+concept data_member_binding = traits::is<data_member_binding_t, T>();
 
 /** `T` is function metadata. */
 template <typename T>
@@ -1932,7 +1949,7 @@ struct reflected_call_t {
  *     // this body.
  *     return {
  *       RecordMeta::qualified_type_name(),
- *       std::tuple_size<decltype(record.public_fields())>::value,
+ *       std::tuple_size<decltype(record.accessible_data_members())>::value,
  *     };
  *   };
  *

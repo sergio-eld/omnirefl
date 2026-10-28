@@ -45,14 +45,14 @@ static const struct field_names_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &v) const {
-    return omni::compat::apply(collect{}, v.public_fields());
+    return omni::compat::apply(collect{}, v.accessible_data_members());
   }
 } field_names;
 
 static const struct field_count_t {
   template <typename T>
   std::size_t operator()(const T &v) const {
-    return std::tuple_size<decltype(v.public_fields())>::value;
+    return std::tuple_size<decltype(v.accessible_data_members())>::value;
   }
 } field_count;
 
@@ -80,15 +80,15 @@ static const struct field_annotations_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &v) const {
-    return omni::compat::apply(collect{}, v.public_fields());
+    return omni::compat::apply(collect{}, v.accessible_data_members());
   }
 } field_annotations;
 
 static const struct constexpr_annotations_t {
   template <typename T>
   bool operator()(const T &v) const {
-    typedef typename std::tuple_element<0, decltype(v.public_fields())>::type
-      first_field;
+    typedef typename std::tuple_element<0,
+      decltype(v.accessible_data_members())>::type first_field;
 
     static_assert('a' == T::documentation()[0],
       "type annotation must be constexpr");
@@ -102,7 +102,7 @@ static const struct constexpr_annotations_t {
 static const struct first_field_type_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type field_type;
 
@@ -113,7 +113,7 @@ static const struct first_field_type_name_t {
 static const struct second_field_type_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<1>(fields);
     typedef typename decltype(f)::type field_type;
 
@@ -143,7 +143,7 @@ namespace as_field {
 static const struct get_dependency_name_t {
   template <typename ParentType>
   std::string operator()(const ParentType &v) const {
-    const auto f = std::get<0>(v.public_fields());
+    const auto f = std::get<0>(v.accessible_data_members());
     using field_type = typename decltype(f)::type;
 
     return std::string(v.type_name()) + "::"
@@ -155,13 +155,13 @@ static const struct get_dependency_name_t {
 static const struct get_dependency_name_layer_2_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto outer_fields = v.public_fields();
+    const auto outer_fields = v.accessible_data_members();
     const auto outer_f = std::get<0>(outer_fields);
     using intermediate_type = typename decltype(outer_f)::type;
 
     const auto inner = outer_f.value();
     auto inner_reflection = omni::reflected(inner);
-    const auto inner_fields = inner_reflection.public_fields();
+    const auto inner_fields = inner_reflection.accessible_data_members();
     const auto inner_f = std::get<0>(inner_fields);
     using dep_type = typename decltype(inner_f)::type;
 
@@ -216,7 +216,7 @@ namespace as_template_arg {
 static const struct get_dependency_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     using tuple_type = typename decltype(f)::type;
     using dep_type = typename std::tuple_element<0, tuple_type>::type;
@@ -238,7 +238,7 @@ static const struct get_dependency_name_layer_2_t {
 
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto outer_fields = v.public_fields();
+    const auto outer_fields = v.accessible_data_members();
     const auto outer_f = std::get<0>(outer_fields);
     using outer_field_type = typename decltype(outer_f)::type;
 
@@ -260,7 +260,7 @@ namespace as_sequence_arg {
 static const struct get_vector_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type vector_type;
     typedef typename vector_type::value_type value_type;
@@ -276,7 +276,7 @@ static const struct get_vector_value_name_t {
 static const struct get_tuple_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type tuple_type;
     typedef typename std::tuple_element<0, tuple_type>::type value_type;
@@ -292,7 +292,7 @@ static const struct get_tuple_value_name_t {
 static const struct get_tuple_second_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type tuple_type;
     typedef typename std::tuple_element<1, tuple_type>::type value_type;
@@ -308,7 +308,7 @@ static const struct get_tuple_second_value_name_t {
 static const struct get_pair_first_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type pair_type;
     typedef typename pair_type::first_type value_type;
@@ -324,7 +324,7 @@ static const struct get_pair_first_value_name_t {
 static const struct get_pair_second_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type pair_type;
     typedef typename pair_type::second_type value_type;
@@ -367,7 +367,7 @@ static const struct get_variant_value_name_t {
 
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type variant_type;
     typedef typename first_variant_arg<variant_type>::type value_type;
@@ -383,7 +383,7 @@ static const struct get_variant_value_name_t {
 static const struct get_nested_vector_tuple_value_name_t {
   template <typename T>
   std::string operator()(const T &v) const {
-    const auto fields = v.public_fields();
+    const auto fields = v.accessible_data_members();
     const auto f = std::get<0>(fields);
     typedef typename decltype(f)::type vector_type;
     typedef typename vector_type::value_type tuple_type;

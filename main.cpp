@@ -4171,8 +4171,8 @@ std::expected<meta::source_file_context, app_error>
               anyOf(hasName("::omni::is_reflected"),
                 hasName("::omni::meta_t"),
                 hasName("::omni::binding_t"),
-                hasName("::omni::field_meta_t"),
-                hasName("::omni::field_binding_t"),
+                hasName("::omni::data_member_meta_t"),
+                hasName("::omni::data_member_binding_t"),
                 hasName("::omni::function_meta_t"),
                 hasName("::omni::function_binding_t"),
                 hasName("::omni::function_param_meta_t"),
@@ -7066,7 +7066,7 @@ std::string reflectable_body(const meta::record_data &d) {
             field,
             &meta::function_data::name);
           return std::format("omni::{}_meta_t<typename fields::{}_t>",
-            function ? "function" : "field",
+            function ? "function" : "data_member",
             field);
         }) //
       | std_c::views::join_with(",\n      "sv) //

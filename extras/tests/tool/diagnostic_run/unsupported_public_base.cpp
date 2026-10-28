@@ -26,7 +26,7 @@ TEST(diagnostic, unsupported_public_base) {
   diagnostic_unsupported_public_base::record input{};
   omni::reflected_call(
     [](auto binding) -> void {
-      using fields_t = decltype(binding.public_fields());
+      using fields_t = decltype(binding.accessible_data_members());
 
       static_assert(1 == std::tuple_size_v<fields_t>);
       EXPECT_EQ(std::string_view{"own_value"},

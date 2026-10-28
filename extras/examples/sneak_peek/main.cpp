@@ -157,7 +157,7 @@ std::string describe_function(omni::function_meta auto function) {
     function.documentation());
 }
 
-template <omni::field_meta Field>
+template <omni::data_member_meta Field>
 std::string describe_field(Field field) {
   const auto annotation = render_annotation(field.documentation(), 2u);
   const auto field_description = std::format("  {}: {}", field.name(),
@@ -202,7 +202,7 @@ std::string describe_field(Field field) {
 std::string describe_record(omni::record_meta auto record) {
   namespace fn = omni::fn;
 
-  const auto fields = record.public_fields()
+  const auto fields = record.accessible_data_members()
     | fn::foldl(
       []<typename Member>(std::string before, Member member) {
         if constexpr (omni::function_meta<Member>)
@@ -216,7 +216,7 @@ std::string describe_record(omni::record_meta auto record) {
     [](omni::function_meta auto... m) {
       return (std::string{} + ... + ("  " + describe_function(m)));
     },
-    record.public_methods());
+    record.accessible_member_functions());
 
   return std::format("{}{} {{\n{}{}}}",
     render_annotation(record.documentation()),
@@ -237,9 +237,9 @@ void print_reachable_records::operator()(Root) const {
       if constexpr (omni::is_reflected<T>::value) {
         const auto metadata = omni::reflected(omni::type<T>);
         std::println("{}", reflected_scope::describe_record(metadata));
-        metadata.public_fields()
+        metadata.accessible_data_members()
           | fn::each([&self]<typename Member>(Member) {
-              if constexpr (omni::field_meta<Member>)
+              if constexpr (omni::data_member_meta<Member>)
                 self(self, omni::type<typename Member::type>);
             });
       } else if constexpr (requires { typename T::mapped_type; }) {
@@ -262,15 +262,15 @@ void update_fields(Values *...values) {
       -> void {
       // Reflected scope: metadata is available here and in called templates.
       const auto update = [](omni::record_binding auto r) {
-        r.public_fields()
+        r.accessible_data_members()
           | fn::filter([]<typename Member> {
               using binding = std::remove_cvref_t<Member>;
-              if constexpr (omni::field_binding<binding>)
+              if constexpr (omni::data_member_binding<binding>)
                 return binding::is_mutable();
 
               return false; //< Special function field.
             })
-          | fn::each([](omni::field_binding auto field) {
+          | fn::each([](omni::data_member_binding auto field) {
               constexpr std::string_view name = field.name();
 
               if constexpr ("depth"sv == name)

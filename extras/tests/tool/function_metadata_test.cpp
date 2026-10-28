@@ -281,7 +281,7 @@ struct inspect_routes {
   observation operator()(omni::record_binding_t<T> binding) const {
 #endif
     return omni::compat::apply(inspect_function_field{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 };
 
@@ -334,7 +334,7 @@ struct inspect_documentation_routes {
     omni::record_binding_t<T> binding) const {
 #endif
     return omni::compat::apply(inspect_documentation_field{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 };
 
@@ -360,7 +360,7 @@ struct inspect_specialized_routes {
   std::pair<int, int> operator()(omni::record_binding_t<T> binding) const {
 #endif
     return omni::compat::apply(inspect_specialized_fields{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 };
 
@@ -377,7 +377,7 @@ struct inspect_nested_routes {
     using meta = omni::meta_for<typename Field::type>;
 
     return omni::compat::apply(inspect_nested_function{},
-      meta::public_fields());
+      meta::accessible_data_members());
   }
 };
 
@@ -390,7 +390,7 @@ struct inspect_nested_owner {
   int operator()(omni::record_binding_t<T> binding) const {
 #endif
     return omni::compat::apply(inspect_nested_routes{},
-      binding.public_fields());
+      binding.accessible_data_members());
   }
 };
 
@@ -436,7 +436,8 @@ struct inspect_method {
 struct inspect_methods {
   template <typename Binding>
   method_observation operator()(Binding binding) const {
-    return omni::compat::apply(inspect_method{}, binding.public_methods());
+    return omni::compat::apply(inspect_method{},
+      binding.accessible_member_functions());
   }
 };
 
@@ -451,27 +452,28 @@ struct inspect_inherited_methods {
   template <typename Binding>
   std::pair<std::string, int> operator()(Binding binding) const {
     return omni::compat::apply(inspect_inherited_method{},
-      binding.public_methods());
+      binding.accessible_member_functions());
   }
 };
 
 struct inspect_method_count {
   template <typename Binding>
   std::size_t operator()(Binding binding) const {
-    return std::tuple_size<decltype(binding.public_methods())>::value;
+    return std::tuple_size<
+      decltype(binding.accessible_member_functions())>::value;
   }
 };
 
 struct inspect_field_count {
   template <typename Binding>
   std::size_t operator()(Binding binding) const {
-    return std::tuple_size<decltype(binding.public_fields())>::value;
+    return std::tuple_size<decltype(binding.accessible_data_members())>::value;
   }
 };
 
 } // namespace function_metadata_test
 
-TEST(function_metadata, binds_non_overloaded_public_methods) {
+TEST(function_metadata, binds_accessible_non_overloaded_member_functions) {
   namespace fm = function_metadata_test;
 
   const fm::method_observation result = omni::reflected_call(
@@ -493,7 +495,8 @@ TEST(function_metadata, omits_immediate_methods) {
 
   const std::size_t count = omni::reflected_call(
     [](auto meta) -> std::size_t {
-      return std::tuple_size<decltype(meta.public_methods())>::value;
+      return std::tuple_size<
+        decltype(meta.accessible_member_functions())>::value;
     },
     omni::type<fm::immediate_method>);
 

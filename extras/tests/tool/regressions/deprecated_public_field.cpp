@@ -23,10 +23,8 @@ TEST(regression,
     omni::reflected_call(
       [](auto binding) -> int {
         return omni::compat::apply(
-          [](auto... field) -> int {
-            return (field.value() + ...);
-          },
-          binding.public_fields());
+          [](auto... field) -> int { return (field.value() + ...); },
+          binding.accessible_data_members());
       },
       input));
 }

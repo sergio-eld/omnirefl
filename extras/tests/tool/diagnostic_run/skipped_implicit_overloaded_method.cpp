@@ -22,7 +22,8 @@ TEST(diagnostic, skipped_implicit_overloaded_method) {
 
   const std::size_t count = omni::reflected_call(
     [](auto binding) -> std::size_t {
-      return std::tuple_size<decltype(binding.public_methods())>::value;
+      return std::tuple_size<
+        decltype(binding.accessible_member_functions())>::value;
     },
     record{/*value=*/815});
 

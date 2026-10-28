@@ -13,7 +13,8 @@ struct mapper {
     T object{};
     return omni::reflected_call(
       [](auto record) -> std::size_t {
-        return std::tuple_size<decltype(record.public_fields())>::value;
+        return std::tuple_size<
+          decltype(record.accessible_data_members())>::value;
       },
       object);
   }

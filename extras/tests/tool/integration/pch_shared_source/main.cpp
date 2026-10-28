@@ -9,7 +9,7 @@
 struct field_count {
   template <typename _M>
   std::size_t operator()(omni::record_meta_t<_M> record) const {
-    return std::tuple_size<decltype(record.public_fields())>::value;
+    return std::tuple_size<decltype(record.accessible_data_members())>::value;
   }
 };
 
