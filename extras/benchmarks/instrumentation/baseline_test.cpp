@@ -90,7 +90,7 @@ struct print_field_names_simple_t {
 
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(_visit{}, binding.public_fields());
+    return omni::compat::apply(_visit{}, binding.accessible_data_members());
   }
 } const static print_field_names_simple{};
 
@@ -104,7 +104,7 @@ struct print_field_annotations_simple_t {
 
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(_visit{}, binding.public_fields());
+    return omni::compat::apply(_visit{}, binding.accessible_data_members());
   }
 } const static print_field_annotations_simple{};
 
@@ -133,7 +133,7 @@ struct maybe_print_field_names_t {
 struct field_values_simple_t {
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    return omni::compat::apply(*this, t.public_fields());
+    return omni::compat::apply(*this, t.accessible_data_members());
   }
 
   template <typename... Field>
@@ -235,7 +235,7 @@ struct write_fields_from_std_map {
     auto nested_binding =
       omni::reflected(omni::type_t<typename Field::type>{}).bind();
     omni::compat::apply(_bind_map<std::map<std::string, V>>{from},
-      nested_binding.public_fields());
+      nested_binding.accessible_data_members());
 
     // TODO: use the frontend mutability interface once it exists.
     field.set_value(nested_binding);
@@ -250,7 +250,7 @@ struct write_fields_from_std_map {
     auto nested_binding =
       omni::reflected(omni::type_t<typename Field::type>{}).bind();
     omni::compat::apply(_bind_map<Nested>{*nested},
-      nested_binding.public_fields());
+      nested_binding.accessible_data_members());
 
     // TODO: use the frontend mutability interface once it exists.
     field.set_value(nested_binding);
@@ -300,7 +300,7 @@ struct from_std_map_adapter {
 
   template <typename T>
   void operator()(T to) const {
-    omni::compat::apply(*this, to.public_fields());
+    omni::compat::apply(*this, to.accessible_data_members());
   }
 
   template <typename... Field>
@@ -315,7 +315,7 @@ struct from_std_map_return_adapter {
 
   template <typename Binding>
   T operator()(Binding value) const {
-    omni::compat::apply(*this, value.public_fields());
+    omni::compat::apply(*this, value.accessible_data_members());
     return value;
   }
 
@@ -331,7 +331,7 @@ void from_std_map(const std::map<std::string, V> &from, T &to) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   omni::reflected_call(
     [&from](auto binding) -> void {
-      auto fields = binding.public_fields();
+      auto fields = binding.accessible_data_members();
       omni::compat::apply(
         [&from](auto... field) { write_fields_from_std_map{}(from, field...); },
         fields);
@@ -347,7 +347,7 @@ T from_std_map(const std::map<std::string, V> &from) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
   return omni::reflected_call(
     [&from](auto binding) -> T {
-      auto fields = binding.public_fields();
+      auto fields = binding.accessible_data_members();
       omni::compat::apply(
         [&from](auto... field) { write_fields_from_std_map{}(from, field...); },
         fields);
@@ -2112,7 +2112,7 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 //   } p{1, 2, 3};
 //
 //   omni::reflected_call([](auto &v) {
-//     const auto fields = omni::reflected(v).public_fields();
+//     const auto fields = omni::reflected(v).accessible_data_members();
 //     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
 //   }, p);
 //
@@ -2129,7 +2129,7 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 //   } p{4, 5, 6};
 //
 //   omni::reflected_call([](auto &v) {
-//     const auto fields = omni::reflected(v).public_fields();
+//     const auto fields = omni::reflected(v).accessible_data_members();
 //     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
 //   }, p);
 //
@@ -2151,7 +2151,7 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 //   } p{1, 2, 3, "same"};
 //
 //   omni::reflected_call([](auto &v) {
-//     const auto fields = omni::reflected(v).public_fields();
+//     const auto fields = omni::reflected(v).accessible_data_members();
 //     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
 //   }, p);
 //
@@ -2170,7 +2170,7 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 //   } p{1, "unchanged", 2, 3.5};
 //
 //   omni::reflected_call([](auto &v) {
-//     const auto fields = omni::reflected(v).public_fields();
+//     const auto fields = omni::reflected(v).accessible_data_members();
 //     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
 //   }, p);
 //
@@ -2224,7 +2224,7 @@ TEST(print_names, in_cpp_protected_crtp_public_only) {
 //   } p{};
 //
 //   omni::reflected_call([](auto &v) {
-//     const auto fields = omni::reflected(v).public_fields();
+//     const auto fields = omni::reflected(v).accessible_data_members();
 //     omni::compat::apply(example_impl::_write_foo_bar{}, fields);
 //   }, p);
 //

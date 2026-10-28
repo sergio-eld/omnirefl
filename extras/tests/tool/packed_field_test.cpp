@@ -59,7 +59,7 @@ struct can_ref {
 struct write_value {
   template <typename T>
   std::uint16_t operator()(omni::record_binding_t<T> binding) const {
-    const auto fields = binding.public_fields();
+    const auto fields = binding.accessible_data_members();
     typedef typename std::tuple_element<0, decltype(fields)>::type marker_field;
     typedef typename std::tuple_element<1, decltype(fields)>::type value_field;
     typedef typename std::tuple_element<2, decltype(fields)>::type array_field;
@@ -102,7 +102,7 @@ write_value const static write{};
 struct reference_address {
   template <typename T>
   int *operator()(omni::record_binding_t<T> binding) const {
-    const auto field = std::get<0>(binding.public_fields());
+    const auto field = std::get<0>(binding.accessible_data_members());
 
     static_assert(field.has_reference_access(),
       "reference fields must preserve the referent");

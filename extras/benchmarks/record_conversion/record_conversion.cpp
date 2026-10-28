@@ -70,13 +70,15 @@ To reflected_convert(From &&from, omni::type_t<To> target_type) {
   // GCC 15 does not count the dependent call from the nested generic visitor
   // when evaluating -Wunused-but-set-variable.
   [[maybe_unused]] static const auto assign_matching_field = //
-    [](omni::field_binding auto to, omni::field_binding auto... from) -> void {
+    [](omni::data_member_binding auto to,
+      omni::data_member_binding auto... from) -> void {
     static_assert(
       ((std::string_view(to.name()) == std::string_view(from.name())) || ...),
       "source has no same-named field");
 
     (std::invoke(
-       [](omni::field_binding auto from, omni::field_binding auto to) -> void {
+       [](omni::data_member_binding auto from,
+         omni::data_member_binding auto to) -> void {
          if constexpr (std::string_view(to.name())
            == std::string_view(from.name())) {
            static_assert(requires { to.ref() = std::move(from).value(); });
@@ -95,15 +97,15 @@ To reflected_convert(From &&from, omni::type_t<To> target_type) {
     To result{};
     omni::record_binding auto destination = target.bind(result);
     std::apply(
-      [&source](omni::field_binding auto... to) -> void {
+      [&source](omni::data_member_binding auto... to) -> void {
         (std::apply( //
-           [&to](omni::field_binding auto... from) -> void {
+           [&to](omni::data_member_binding auto... from) -> void {
              assign_matching_field(to, from...);
            },
-           source.public_fields()),
+           source.accessible_data_members()),
           ...);
       },
-      destination.public_fields());
+      destination.accessible_data_members());
 
     return result;
   };
@@ -115,7 +117,7 @@ template <typename From, typename To>
 To aggregate_into_convert(From &&from, omni::type_t<To> target_type) {
   return omni::reflected_call(
     [](omni::record_binding auto source, omni::record_meta auto) -> To {
-      return omni::refl::aggregate_into<To>(source.public_fields());
+      return omni::refl::aggregate_into<To>(source.accessible_data_members());
     },
     std::forward<From>(from),
     target_type);

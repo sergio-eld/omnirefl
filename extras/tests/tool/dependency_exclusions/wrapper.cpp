@@ -17,7 +17,7 @@ struct inspect {
     EXPECT_FALSE(omni::is_reflected<dependency_exclusions::opaque>::value);
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 

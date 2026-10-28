@@ -24,7 +24,7 @@ TEST(regression, variant_named_record_is_reflected) {
   EXPECT_EQ(std::string_view{"value"},
     omni::reflected_call(
       [](auto binding) -> std::string_view {
-        return std::get<0>(binding.public_fields()).name();
+        return std::get<0>(binding.accessible_data_members()).name();
       },
       value));
 }

@@ -40,7 +40,7 @@ if [ ! -e extras/examples/scratch/field_names.hpp ]; then
 struct field_names {
   template <typename _M>
   std::vector<std::string> operator()(omni::record_meta_t<_M> record) const {
-    return names(record.public_fields());
+    return names(record.accessible_data_members());
   }
 
   private:

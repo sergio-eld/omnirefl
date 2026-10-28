@@ -44,7 +44,7 @@ struct inspect {
     EXPECT_TRUE(omni::is_reflected<multiple_exclusions::retained>::value);
 #endif
 
-    return std::tuple_size<decltype(meta.public_fields())>::value;
+    return std::tuple_size<decltype(meta.accessible_data_members())>::value;
   }
 };
 

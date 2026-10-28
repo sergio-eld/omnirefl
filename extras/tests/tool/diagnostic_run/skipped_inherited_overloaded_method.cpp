@@ -25,14 +25,15 @@ TEST(diagnostic, skipped_inherited_overloaded_method) {
 
   const int value = omni::reflected_call(
     [](auto binding) -> int {
-      static_assert(std::tuple_size_v<decltype(binding.public_fields())> == 1,
+      static_assert(
+        std::tuple_size_v<decltype(binding.accessible_data_members())> == 1,
         "ordinary fields must remain available");
-      static_assert(std::tuple_size_v<decltype(binding.public_methods())> == 0,
+      static_assert(
+        std::tuple_size_v<decltype(binding.accessible_member_functions())> == 0,
         "using-imported overloads must be skipped");
 
-      return omni::compat::apply(
-        [](auto field) { return field.value(); },
-        binding.public_fields());
+      return omni::compat::apply([](auto field) { return field.value(); },
+        binding.accessible_data_members());
     },
     record{/*base=*/{}, /*value=*/815});
 

@@ -70,7 +70,7 @@ static const struct print_field_names_simple_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    return omni::compat::apply(_get_field_names{}, t.public_fields());
+    return omni::compat::apply(_get_field_names{}, t.accessible_data_members());
   }
 } print_field_names_simple{};
 
@@ -86,7 +86,7 @@ static const struct print_field_names_recursive_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &t) const {
-    return omni::compat::apply(_print{}, t.public_fields());
+    return omni::compat::apply(_print{}, t.accessible_data_members());
   }
 } print_field_names_recursive{};
 

@@ -23,10 +23,11 @@ TEST(regression, private_nested_type_is_reflectable) {
   EXPECT_EQ(std::string_view{"nested_value"},
     omni::reflected_call(
       [](auto binding) -> std::string_view {
-        using fields_t = decltype(binding.public_fields());
+        using fields_t = decltype(binding.accessible_data_members());
         using hidden_t = typename std::tuple_element_t<0, fields_t>::type;
         using hidden_fields_t =
-          decltype(omni::reflected(omni::type_t<hidden_t>{}).public_fields());
+          decltype(omni::reflected(omni::type_t<hidden_t>{})
+              .accessible_data_members());
 
         static_assert(1 == std::tuple_size_v<hidden_fields_t>);
         return std::tuple_element_t<0, hidden_fields_t>::name();

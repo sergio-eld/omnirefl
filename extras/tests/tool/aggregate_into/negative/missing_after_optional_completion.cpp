@@ -23,9 +23,10 @@ struct convert {
     omni::record_meta_t<_M> target) const {
     return omni::refl::aggregate_into<
       typename omni::record_meta_t<_M>::reflected_type>(
-      omni::fn::concat(from.public_fields(),
-        target.public_fields() //
-          | omni::fn::diff_by(omni::fn::field_name{}, from.public_fields())
+      omni::fn::concat(from.accessible_data_members(),
+        target.accessible_data_members() //
+          | omni::fn::diff_by(omni::fn::field_name{},
+            from.accessible_data_members())
           | omni::fn::filter(aggregate_test::optional_field{})
           | omni::fn::map(aggregate_test::supply_missing{})));
   }

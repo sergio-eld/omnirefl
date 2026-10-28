@@ -44,7 +44,7 @@ TEST(regression, private_nested_type_through_wrappers) {
   EXPECT_EQ(expected,
     omni::reflected_call(
       [](auto binding) -> std::array<std::string_view, 3> {
-        using fields_t = decltype(binding.public_fields());
+        using fields_t = decltype(binding.accessible_data_members());
         using vector_t = typename std::tuple_element_t<0, fields_t>::type;
         using tuple_t = typename std::tuple_element_t<1, fields_t>::type;
         using variant_t = typename std::tuple_element_t<2, fields_t>::type;
@@ -55,13 +55,13 @@ TEST(regression, private_nested_type_through_wrappers) {
 
         using vector_fields_t =
           decltype(omni::reflected(omni::type_t<vector_child_t>{})
-              .public_fields());
+              .accessible_data_members());
         using tuple_fields_t =
           decltype(omni::reflected(omni::type_t<tuple_child_t>{})
-              .public_fields());
+              .accessible_data_members());
         using variant_fields_t =
           decltype(omni::reflected(omni::type_t<variant_child_t>{})
-              .public_fields());
+              .accessible_data_members());
 
         return {
           std::tuple_element_t<0, vector_fields_t>::name(),

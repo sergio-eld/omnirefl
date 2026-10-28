@@ -20,7 +20,7 @@ TEST(diagnostic, std_public_base) {
   EXPECT_EQ(std::string_view{"value"},
     omni::reflected_call(
       [](auto binding) -> std::string_view {
-        using fields_t = decltype(binding.public_fields());
+        using fields_t = decltype(binding.accessible_data_members());
 
         static_assert(1 == std::tuple_size_v<fields_t>);
         return std::tuple_element_t<0, fields_t>::name();

@@ -13,7 +13,7 @@ struct convert {
     omni::record_meta_t<_M>) const {
     using To = typename omni::record_meta_t<_M>::reflected_type;
 
-    return omni::refl::aggregate_into<To>(from.public_fields());
+    return omni::refl::aggregate_into<To>(from.accessible_data_members());
   }
 };
 

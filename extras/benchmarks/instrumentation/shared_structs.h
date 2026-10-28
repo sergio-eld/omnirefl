@@ -147,7 +147,7 @@ struct field_names_t {
 
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    return omni::compat::apply(_visit{}, value.public_fields());
+    return omni::compat::apply(_visit{}, value.accessible_data_members());
   }
 } const static field_names{};
 
@@ -230,7 +230,7 @@ struct query_mixed_non_reflected_then_field_names_t {
 struct field_values_t {
   template <typename T>
   std::vector<std::string> operator()(const T &value) const {
-    return omni::compat::apply(*this, value.public_fields());
+    return omni::compat::apply(*this, value.accessible_data_members());
   }
 
   template <typename... Field>
@@ -402,7 +402,7 @@ struct from_std_map_adapter {
 
   template <typename T>
   void operator()(T to) const {
-    omni::compat::apply(*this, to.public_fields());
+    omni::compat::apply(*this, to.accessible_data_members());
   }
 
   template <typename... Field>
@@ -417,7 +417,7 @@ struct from_std_map_return_adapter {
 
   template <typename Binding>
   T operator()(Binding value) const {
-    omni::compat::apply(*this, value.public_fields());
+    omni::compat::apply(*this, value.accessible_data_members());
     return value;
   }
 
@@ -440,7 +440,7 @@ T from_std_map(const std::map<std::string, V> &from) {
 struct write_foo_bar_t {
   template <typename T>
   void operator()(T value) const {
-    omni::compat::apply(*this, value.public_fields());
+    omni::compat::apply(*this, value.accessible_data_members());
   }
 
   template <typename... Field>

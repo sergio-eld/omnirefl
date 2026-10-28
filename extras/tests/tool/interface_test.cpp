@@ -164,7 +164,8 @@ struct name_values {
   template <typename T>
   std::vector<std::pair<std::string, int>> operator()(
     omni::record_binding_t<T> binding) const {
-    return omni::compat::apply(collect_name_values{}, binding.public_fields());
+    return omni::compat::apply(collect_name_values{},
+      binding.accessible_data_members());
   }
 };
 
@@ -262,7 +263,8 @@ struct inspect_fields {
 struct inspect_metadata {
   template <typename _M>
   observations operator()(omni::record_meta_t<_M> record) const {
-    return omni::compat::apply(inspect_fields{}, record.public_fields());
+    return omni::compat::apply(inspect_fields{},
+      record.accessible_data_members());
   }
 };
 
@@ -275,7 +277,7 @@ struct inspect_binding {
   template <typename T>
   binding_observation operator()(omni::record_binding_t<T> record) const {
     const auto observed =
-      omni::compat::apply(inspect_fields{}, record.public_fields());
+      omni::compat::apply(inspect_fields{}, record.accessible_data_members());
 
     return {
       /*available=*/observed.number.value,
@@ -307,7 +309,7 @@ struct second_enumerator {
 
 struct field_name {
   template <typename _M>
-  std::string operator()(omni::field_meta_t<_M> field) const {
+  std::string operator()(omni::data_member_meta_t<_M> field) const {
     return field.name();
   }
 };
@@ -315,13 +317,14 @@ struct field_name {
 struct first_field_name {
   template <typename _M>
   std::string operator()(omni::record_meta_t<_M> record) const {
-    return field_name{}(std::get<0>(record.public_fields()));
+    return field_name{}(std::get<0>(record.accessible_data_members()));
   }
 };
 
 struct record_is_const {
   template <typename Record, typename _M>
-  constexpr bool operator()(omni::field_binding_t<Record, _M>) const noexcept {
+  constexpr bool operator()(
+    omni::data_member_binding_t<Record, _M>) const noexcept {
     return std::is_const<Record>::value;
   }
 };
@@ -329,7 +332,7 @@ struct record_is_const {
 struct first_field_record_is_const {
   template <typename T>
   bool operator()(omni::record_binding_t<T> record) const {
-    return record_is_const{}(std::get<0>(record.public_fields()));
+    return record_is_const{}(std::get<0>(record.accessible_data_members()));
   }
 };
 
@@ -436,14 +439,14 @@ struct field_address {
   template <typename T>
   const overloaded_address *operator()(
     omni::record_binding_t<T> binding) const {
-    return std::get<0>(binding.public_fields()).operator->();
+    return std::get<0>(binding.accessible_data_members()).operator->();
   }
 };
 
 struct read_write_move {
   template <typename T>
   std::unique_ptr<int> operator()(omni::record_binding_t<T> binding) const {
-    auto fields = binding.public_fields();
+    auto fields = binding.accessible_data_members();
     typedef typename std::tuple_element<0, decltype(fields)>::type scalar_field;
     typedef typename std::tuple_element<1, decltype(fields)>::type array_field;
     typedef typename std::tuple_element<3, decltype(fields)>::type owned_field;
@@ -489,7 +492,7 @@ struct const_move_access {
   template <typename T>
   const std::unique_ptr<int> &&operator()(
     omni::record_binding_t<T> binding) const {
-    const auto fields = binding.public_fields();
+    const auto fields = binding.accessible_data_members();
     auto field = std::get<3>(fields);
 
     static_assert(std::is_same<const std::unique_ptr<int> &&,
@@ -504,7 +507,7 @@ struct move_once {
 
   template <typename T>
   void operator()(omni::record_binding_t<T> binding) const {
-    const auto fields = binding.public_fields();
+    const auto fields = binding.accessible_data_members();
     auto field = std::get<0>(fields);
     output = std::move(field).value();
   }
@@ -515,7 +518,7 @@ struct write_through_meta {
 
   template <typename _M>
   void operator()(omni::record_meta_t<_M> meta) const {
-    std::get<0>(meta.public_fields()).ref(input) = 17;
+    std::get<0>(meta.accessible_data_members()).ref(input) = 17;
   }
 };
 
@@ -578,7 +581,7 @@ struct field_names {
   std::pair<std::string, std::string> operator()(
     omni::record_meta_t<_M> meta) const {
 #endif
-    const auto field = std::get<0>(meta.public_fields());
+    const auto field = std::get<0>(meta.accessible_data_members());
     return {
       field.spelled_type_name(),
       field.spelled_qualified_type_name(),
@@ -594,7 +597,7 @@ struct spelled_type_name {
   template <typename _M>
   std::string operator()(omni::record_meta_t<_M> meta) const {
 #endif
-    return std::get<0>(meta.public_fields()).spelled_type_name();
+    return std::get<0>(meta.accessible_data_members()).spelled_type_name();
   }
 };
 
@@ -638,7 +641,7 @@ namespace definition_order {
 struct field_count {
   template <typename Binding>
   std::size_t operator()(Binding binding) const {
-    return std::tuple_size<decltype(binding.public_fields())>::value;
+    return std::tuple_size<decltype(binding.accessible_data_members())>::value;
   }
 };
 
@@ -822,9 +825,9 @@ TEST(cpp20_template_lambdas, record_binding) {
   EXPECT_EQ(k_expected,
     omni::reflected_call(
       [](omni::record_binding auto value) -> std::vector<std::string> {
-        const auto fields = value.public_fields();
+        const auto fields = value.accessible_data_members();
         return omni::compat::apply(
-          [](const omni::field_binding auto &...field) {
+          [](const omni::data_member_binding auto &...field) {
             return std::vector<std::string>{
               omni::compat::to_string(field.value())...,
             };
@@ -1518,8 +1521,8 @@ TEST(record_type_t, reflected_rvalue_binding_can_be_named) {
   EXPECT_EQ(true, result.owns_value);
 
   // Direct rvalue field access is intentionally invalid:
-  // omni::reflected(record_type_t{}).public_fields();
-  // omni::reflected(std::move(value)).public_fields();
+  // omni::reflected(record_type_t{}).accessible_data_members();
+  // omni::reflected(std::move(value)).accessible_data_members();
 }
 
 TEST(record_type_t, field_value_write) {

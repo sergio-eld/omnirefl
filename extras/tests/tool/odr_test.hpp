@@ -14,7 +14,8 @@ struct get_field_name_values_t {
   template <typename T>
   std::vector<std::string> operator()(omni::record_binding_t<T> value) const {
     // todo: use range for loop
-    return omni::compat::apply(_collect_fields_info{}, value.public_fields());
+    return omni::compat::apply(_collect_fields_info{},
+      value.accessible_data_members());
   }
 
   private:

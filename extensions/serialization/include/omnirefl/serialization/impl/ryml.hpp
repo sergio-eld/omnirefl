@@ -451,7 +451,7 @@ struct map_node_to_record {
     }
 
     constexpr auto fields =
-      omni::reflected(omni::type_t<Record>{}).public_fields();
+      omni::reflected(omni::type_t<Record>{}).accessible_data_members();
 
     // Structural validation precedes field mapping, preserving strict error
     // order.
@@ -497,9 +497,10 @@ struct map_node_to_record {
 
     // TODO: Expose these type/category rules through a schema-from-type
     // extension.
-    // public_fields() requires a binding that outlives field traversal.
+    // accessible_data_members() requires a binding that outlives field
+    // traversal.
     const auto binding = omni::meta_for<Record>::bind(*record);
-    binding.public_fields()
+    binding.accessible_data_members()
       | omni::fn::each(map_node_to_field{
         /*node=*/node,
         /*context=*/context,
@@ -635,9 +636,10 @@ struct write_record {
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
     *node |= ::ryml::MAP;
-    // public_fields() requires a binding that outlives field traversal.
+    // accessible_data_members() requires a binding that outlives field
+    // traversal.
     const auto binding = omni::meta_for<Value>::bind(value);
-    binding.public_fields() | fn::each(write_field{/*node=*/node});
+    binding.accessible_data_members() | fn::each(write_field{/*node=*/node});
   }
 };
 

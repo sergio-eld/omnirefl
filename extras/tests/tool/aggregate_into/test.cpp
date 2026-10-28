@@ -102,8 +102,8 @@ struct project_request {
 
     // Each cheap binding tuple moves only its target's same-named fields.
     return {
-      omni::refl::aggregate_into<Domain>(from.public_fields()),
-      omni::refl::aggregate_into<Context>(from.public_fields()),
+      omni::refl::aggregate_into<Domain>(from.accessible_data_members()),
+      omni::refl::aggregate_into<Context>(from.accessible_data_members()),
     };
   }
 };
@@ -154,9 +154,10 @@ struct convert_with_missing_values {
     omni::record_meta_t<_M> target) const {
     return omni::refl::aggregate_into<
       typename omni::record_meta_t<_M>::reflected_type>(
-      omni::fn::concat(from.public_fields(),
-        target.public_fields() //
-          | omni::fn::diff_by(omni::fn::field_name{}, from.public_fields())
+      omni::fn::concat(from.accessible_data_members(),
+        target.accessible_data_members() //
+          | omni::fn::diff_by(omni::fn::field_name{},
+            from.accessible_data_members())
           | omni::fn::map(supply_missing{})));
   }
 };

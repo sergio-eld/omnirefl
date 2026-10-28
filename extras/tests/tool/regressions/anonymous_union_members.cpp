@@ -28,7 +28,7 @@ TEST(regression, DISABLED_anonymous_union_exposes_promoted_public_members) {
           [](auto... field) -> std::array<std::string_view, 3> {
             return {{field.name()...}};
           },
-          meta.public_fields());
+          meta.accessible_data_members());
       },
       omni::type<regression_anonymous_union_members::record>));
 }

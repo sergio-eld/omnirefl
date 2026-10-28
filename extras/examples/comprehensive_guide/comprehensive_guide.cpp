@@ -98,10 +98,11 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  * Public metadata wraps an opaque generated `_M`; use
  * `meta_t<_M>::reflected_type`, not `_M` directly.
  *
- * Field tuple mapping:
- *   omni::record_meta_t<_M>::public_fields() -> omni::field_meta_t<_Field>
- *   omni::record_binding_t<T>::public_fields()
- *     -> omni::field_binding_t<Record, _Field>
+ * Data-member tuple mapping:
+ *   omni::record_meta_t<_M>::accessible_data_members()
+ *     -> omni::data_member_meta_t<_Field>
+ *   omni::record_binding_t<T>::accessible_data_members()
+ *     -> omni::data_member_binding_t<Record, _Field>
  *
  * `Record` carries the cv qualification of the bound record object. Field
  * bindings are always non-owning because a field cannot outlive its record.
@@ -203,7 +204,8 @@ TEST(exposition, reflected_scope_overview) {
     if constexpr (omni::reflected_entity::record == m.entity()) {
       // `omni::compat::apply` provides the same shape for earlier standards.
       std::apply(
-        [&ctx]<omni::field_meta... FieldMeta>(FieldMeta... field) -> void {
+        [&ctx]<omni::data_member_meta... FieldMeta>(
+          FieldMeta... field) -> void {
           (ctx.fields.push_back({
              .name = field.name(),
              // Field declaration spelling with the outer namespace omitted.
@@ -220,7 +222,7 @@ TEST(exposition, reflected_scope_overview) {
            }),
             ...);
         },
-        m.public_fields());
+        m.accessible_data_members());
     } else {
       static_assert(omni::reflected_entity::enumeration == m.entity());
       for (const auto &value_name : m.enumerators())
@@ -317,8 +319,8 @@ TEST(exposition, write_foobar) {
   const auto write_foobar = //
     [](omni::record_binding auto b) -> exposition::foobar_record {
     omni::compat::apply(
-      [](omni::field_binding auto... field) {
-        const auto write = [](omni::field_binding auto field) {
+      [](omni::data_member_binding auto... field) {
+        const auto write = [](omni::data_member_binding auto field) {
           constexpr std::string_view field_name = field.name();
 
           if constexpr (field_name.find("foo") != std::string_view::npos)
@@ -330,7 +332,7 @@ TEST(exposition, write_foobar) {
 
         (write(field), ...);
       },
-      b.public_fields());
+      b.accessible_data_members());
 
     return std::move(b).value();
   };
@@ -471,13 +473,13 @@ TEST(example, meta_bind_and_field_metadata) {
     auto non_owning = record.bind(owned.ref());
 
     return std::apply(
-      [&non_owning]<omni::field_meta... Field>(Field... field) {
+      [&non_owning]<omni::data_member_meta... Field>(Field... field) {
         // Field metadata can be used without first creating field bindings.
         (field.set_value(non_owning.ref(), typename Field::type{1}), ...);
 
         return (field.value(non_owning.ref()) + ...);
       },
-      record.public_fields());
+      record.accessible_data_members());
   };
 
   EXPECT_EQ(3,
@@ -522,8 +524,8 @@ TEST(example, primary_template_read_data) {
     std::vector<rendered_field> out;
 
     omni::compat::apply(
-      [&out](omni::field_binding auto... field) {
-        const auto render = [&out](omni::field_binding auto field) {
+      [&out](omni::data_member_binding auto... field) {
+        const auto render = [&out](omni::data_member_binding auto field) {
           constexpr std::string_view field_name = field.name();
 
           if constexpr ("title"sv == field_name) {
@@ -545,7 +547,7 @@ TEST(example, primary_template_read_data) {
 
         (render(field), ...);
       },
-      b.public_fields());
+      b.accessible_data_members());
 
     return out;
   };
@@ -674,13 +676,13 @@ TEST(example, primary_template_from_map) {
     };
 
     return std::apply(
-      [&init]<omni::field_meta... Field>(
+      [&init]<omni::data_member_meta... Field>(
         Field... field) -> primary_template::result {
         return {
           init(omni::type<typename Field::type>, field.name())...,
         };
       },
-      result_type.public_fields());
+      result_type.accessible_data_members());
   };
 
   const primary_template::result record =
@@ -931,9 +933,9 @@ TEST(example, annotated_dependencies) {
       }
 
       omni::compat::apply(
-        [&out, render_type](omni::field_meta auto... field) {
+        [&out, render_type](omni::data_member_meta auto... field) {
           const auto render = //
-            [&out, render_type]<omni::field_meta Field>(Field field) {
+            [&out, render_type]<omni::data_member_meta Field>(Field field) {
               out.public_fields.push_back({
                 .name = field.name(),
                 .type_name = field.spelled_type_name(),
@@ -975,7 +977,7 @@ TEST(example, annotated_dependencies) {
 
           (render(field), ...);
         },
-        record.public_fields());
+        record.accessible_data_members());
 
       return out;
     },
@@ -1189,14 +1191,14 @@ To convert(From &&from, omni::type_t<To> target_type) {
   const auto visit = //
     [](omni::record_binding auto source, omni::record_meta auto target) -> To {
     [[maybe_unused]] static auto assign_matching_field = //
-      [](omni::field_binding auto from,
-        omni::field_binding auto... to) -> void {
+      [](omni::data_member_binding auto from,
+        omni::data_member_binding auto... to) -> void {
       constexpr bool found = //
         ((std::string_view(to.name()) == std::string_view(from.name())) || ...);
 
       static_assert(found, "destination has no same-named field");
       (std::invoke(
-         [&from](omni::field_binding auto to) -> void {
+         [&from](omni::data_member_binding auto to) -> void {
            if constexpr (std::string_view(to.name())
              == std::string_view(from.name())) {
              static_assert(requires { to.ref() = std::move(from).value(); });
@@ -1215,15 +1217,15 @@ To convert(From &&from, omni::type_t<To> target_type) {
     // the complete object into and back out of binding storage.
     omni::record_binding auto destination = target.bind(result);
     std::apply(
-      [&destination](omni::field_binding auto... f) -> void {
+      [&destination](omni::data_member_binding auto... f) -> void {
         std::apply(
-          [&f...](omni::field_binding auto... to_field) -> void {
+          [&f...](omni::data_member_binding auto... to_field) -> void {
             (std::invoke(assign_matching_field, std::move(f), to_field...),
               ...);
           },
-          destination.public_fields());
+          destination.accessible_data_members());
       },
-      source.public_fields());
+      source.accessible_data_members());
 
     return result;
   };
@@ -1295,9 +1297,9 @@ TEST(example, filter_fields_before_set_value) {
   omni::reflected_call(
     [](omni::record_binding auto binding) -> void {
       std::apply(
-        [](omni::field_binding auto... field) -> void {
+        [](omni::data_member_binding auto... field) -> void {
           const auto set_if_assignable = //
-            []<omni::field_binding Field>(Field field) -> void {
+            []<omni::data_member_binding Field>(Field field) -> void {
             constexpr std::string_view field_name = field.name();
             constexpr auto replacement = std::array{42, 43};
 
@@ -1318,7 +1320,7 @@ TEST(example, filter_fields_before_set_value) {
 
           (set_if_assignable(field), ...);
         },
-        binding.public_fields());
+        binding.accessible_data_members());
     },
     input);
 
@@ -1361,7 +1363,7 @@ struct ambiguous_bases: repeated_base<int>, repeated_base<double> {
 
 } // namespace field_visibility
 
-TEST(example, public_fields_follow_member_visibility) {
+TEST(example, accessible_data_members_follow_member_visibility) {
   using namespace std::string_view_literals;
 
   field_visibility::record input{};
@@ -1378,25 +1380,25 @@ TEST(example, public_fields_follow_member_visibility) {
     std::pair{"own"sv, 5},
   };
 
-  // `middle_base::shared` hides `root_base::shared`, so `public_fields()`
-  // exposes only the member visible through `record`. Accessing hidden base
-  // storage through a derived binding is not considered a worthwhile scenario
-  // for the current implementation.
+  // `middle_base::shared` hides `root_base::shared`, so
+  // `accessible_data_members()` exposes only the member visible through
+  // `record`. Accessing hidden base storage through a derived binding is not
+  // considered a worthwhile scenario for the current implementation.
   EXPECT_EQ(expected,
     omni::reflected_call(
       [](omni::record_binding auto binding)
         -> std::vector<std::pair<std::string_view, int>> {
         return std::apply(
-          [](omni::field_binding auto... field)
+          [](omni::data_member_binding auto... field)
             -> std::vector<std::pair<std::string_view, int>> {
             return {{field.name(), field.value()}...};
           },
-          binding.public_fields());
+          binding.accessible_data_members());
       },
       input));
 }
 
-TEST(example, public_fields_omit_ambiguous_base_members) {
+TEST(example, accessible_data_members_omit_ambiguous_base_members) {
   using namespace std::string_view_literals;
 
   field_visibility::ambiguous_bases input{};
@@ -1409,17 +1411,18 @@ TEST(example, public_fields_omit_ambiguous_base_members) {
   };
 
   // Both inherited `value` members require explicit base qualification, so
-  // neither is visible through `ambiguous_bases` or exposed by public_fields().
+  // neither is visible through `ambiguous_bases` or exposed by
+  // accessible_data_members().
   EXPECT_EQ(expected,
     omni::reflected_call(
       [](omni::record_binding auto binding)
         -> std::vector<std::pair<std::string_view, int>> {
         return std::apply(
-          [](omni::field_binding auto... field)
+          [](omni::data_member_binding auto... field)
             -> std::vector<std::pair<std::string_view, int>> {
             return {{field.name(), field.value()}...};
           },
-          binding.public_fields());
+          binding.accessible_data_members());
       },
       input));
 }
@@ -1547,9 +1550,9 @@ void render_schema(std::ostringstream &out,
     out << indent << "properties:\n";
 
     omni::compat::apply(
-      [&out, indent](omni::field_meta auto... field) {
+      [&out, indent](omni::data_member_meta auto... field) {
         const auto render_field = //
-          [&out, indent]<omni::field_meta Field>(Field field) {
+          [&out, indent]<omni::data_member_meta Field>(Field field) {
             out << indent << "  - name: " << field.name() << '\n';
             out << indent << "    documentation: " << field.documentation()
                 << '\n';
@@ -1561,7 +1564,7 @@ void render_schema(std::ostringstream &out,
 
         (render_field(field), ...);
       },
-      schema.public_fields());
+      schema.accessible_data_members());
   } else {
     static_assert(omni::reflected_entity::enumeration == schema.entity());
 

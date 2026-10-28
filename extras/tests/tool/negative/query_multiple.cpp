@@ -37,9 +37,10 @@ struct field_like {
 
 constexpr bool forced_meta = 0 < sizeof(omni::meta_t<first_record>);
 constexpr bool forced_binding = 0 < sizeof(omni::binding_t<second_record &>);
-constexpr bool forced_field_meta = 0 < sizeof(omni::field_meta_t<field_like>);
+constexpr bool forced_field_meta =
+  0 < sizeof(omni::data_member_meta_t<field_like>);
 constexpr bool forced_field_binding =
-  0 < sizeof(omni::field_binding_t<first_record, field_like>);
+  0 < sizeof(omni::data_member_binding_t<first_record, field_like>);
 
 void use_queries() {
   (void)forced_meta;

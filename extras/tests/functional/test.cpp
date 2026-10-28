@@ -50,9 +50,10 @@ struct do_emplace_back {
 struct transform_record {
   template <typename T>
   // The tool pass needs the explicit result before generated metadata makes
-  // `record_binding_t<T>::public_fields()` available for return deduction.
+  // `record_binding_t<T>::accessible_data_members()` available for return
+  // deduction.
   std::vector<std::string> operator()(omni::record_binding_t<T> binding) const {
-    return binding.public_fields() //
+    return binding.accessible_data_members() //
       | omni::fn::filter(without_internal_name{})
       | omni::fn::map(stringify_field{})
       | omni::fn::foldl(do_emplace_back{}, std::vector<std::string>{});

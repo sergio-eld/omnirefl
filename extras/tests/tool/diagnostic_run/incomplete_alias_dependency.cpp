@@ -23,7 +23,7 @@ TEST(diagnostic, incomplete_alias_dependency) {
   diagnostic_incomplete_alias_dependency::record value{815};
   omni::reflected_call(
     [](auto binding) -> void {
-      EXPECT_EQ(815, std::get<0>(binding.public_fields()).value());
+      EXPECT_EQ(815, std::get<0>(binding.accessible_data_members()).value());
     },
     value);
 }

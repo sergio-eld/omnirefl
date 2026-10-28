@@ -30,11 +30,11 @@ TEST(regression, partial_specialization_does_not_prune_primary) {
   EXPECT_EQ(std::string_view{"primary_value"},
     omni::reflected_call(
       [](auto binding) -> std::string_view {
-        using record_fields_t = decltype(binding.public_fields());
+        using record_fields_t = decltype(binding.accessible_data_members());
         using primary_t =
           typename std::tuple_element_t<0, record_fields_t>::type;
-        using fields_t =
-          decltype(omni::reflected(omni::type_t<primary_t>{}).public_fields());
+        using fields_t = decltype(omni::reflected(omni::type_t<primary_t>{})
+            .accessible_data_members());
 
         static_assert(1 == std::tuple_size_v<fields_t>);
         return std::tuple_element_t<0, fields_t>::name();
