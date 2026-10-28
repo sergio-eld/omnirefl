@@ -100,12 +100,6 @@ struct _is_public_field_visible_from<Record,
   compat::void_t<decltype(Field::value(std::declval<Record &>()))>>:
     std::true_type {};
 
-template <typename Record, typename _M>
-struct _is_public_field_visible_from<Record,
-  function_meta_t<_M>,
-  compat::void_t<decltype(_M::template pointer<Record>())>>:
-    std::true_type {};
-
 template <typename Record,
   typename OwnFields,
   typename RemainingBaseFields,

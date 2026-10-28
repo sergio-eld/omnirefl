@@ -6840,7 +6840,8 @@ std::string function_return_metadata(
     documentation_method(result.annotation, "      "));
 }
 
-std::string function_metadata(const meta::function_data &function) {
+std::string function_metadata(const meta::function_data &function,
+  std::string_view generated_name) {
   const std::string pointer = function.member_method
     ? std::format("&_T::{}", function.name)
     : std::format(
@@ -6874,7 +6875,7 @@ std::string function_metadata(const meta::function_data &function) {
     "\n  }};",
 
     // 0
-    function.generated_name,
+    generated_name,
 
     // 1
     pointer,
@@ -6925,8 +6926,18 @@ std::string reflectable_body(const meta::record_data &d) {
       const auto function = std::ranges::find(d.public_function_fields,
         declaration.name,
         &meta::function_data::name);
-      if (function != d.public_function_fields.end())
-        return function_metadata(*function);
+
+      const std::string callable_metadata = std::format(
+        "\n    static constexpr bool has_callable_metadata() noexcept"
+        " {{ return {}; }}"
+        "{}",
+        function != d.public_function_fields.end(),
+        function != d.public_function_fields.end()
+          ? std::format("\n\n{}\n"
+                        "    using callable_metadata ="
+                        " omni::function_meta_t<callable_t>;",
+              indent_lines(function_metadata(*function, "callable_t")))
+          : std::string{});
 
       const std::string default_value = std::format(
         "\n"
@@ -7023,6 +7034,7 @@ std::string reflectable_body(const meta::record_data &d) {
         " {{ return {6}; }}"
         "{10}"
         "{11}"
+        "{12}"
         "\n  }};",
         // 0
         declaration.name,
@@ -7049,8 +7061,7 @@ std::string reflectable_body(const meta::record_data &d) {
         escaped_string_literal_content(declaration.spelled_type_name),
 
         // 8
-        escaped_string_literal_content(
-          declaration.spelled_qualified_type_name),
+        escaped_string_literal_content(declaration.spelled_qualified_type_name),
 
         // 9
         documentation_method(declaration.annotation, "    "),
@@ -7059,7 +7070,10 @@ std::string reflectable_body(const meta::record_data &d) {
         default_value,
 
         // 11
-        accessors);
+        accessors,
+
+        // 12
+        callable_metadata);
     };
 
   const std::string fields = d.public_fields.empty()
@@ -7074,7 +7088,9 @@ std::string reflectable_body(const meta::record_data &d) {
     ? std::string("  // no reflectable methods detected")
     : std::format("  struct methods {{\n{}\n  }};",
         indent_lines(d.public_methods //
-          | std::views::transform(function_metadata)
+          | std::views::transform([](const auto &function) {
+              return function_metadata(function, function.generated_name);
+            })
           | std_c::views::join_with("\n\n"sv)
           | std::ranges::to<std::string>()));
 
@@ -7101,16 +7117,9 @@ std::string reflectable_body(const meta::record_data &d) {
     fields,
 
     d.public_fields //
-      | std::views::transform(&meta::field_data::declaration)
-      | std::views::transform(&meta::value_declaration_data::name)
-      | std::views::transform([&d](std::string_view field) {
-          const bool function = std::ranges::contains(
-            d.public_function_fields,
-            field,
-            &meta::function_data::name);
-          return std::format("omni::{}_meta_t<typename fields::{}_t>",
-            function ? "function" : "data_member",
-            field);
+      | std::views::transform([](const auto &field) {
+          return std::format("omni::data_member_meta_t<typename fields::{}_t>",
+            field.declaration.name);
         }) //
       | std_c::views::join_with(",\n      "sv) //
       | util::format_range,

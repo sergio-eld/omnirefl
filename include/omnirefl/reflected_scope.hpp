@@ -152,8 +152,7 @@ struct data_member_meta_t {
    *   using field_type_meta = omni::meta_for<typename FieldMeta::type>;
    * }
    * ```
-   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter
-   * type.
+   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter type.
    */
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
@@ -189,8 +188,7 @@ struct data_member_meta_t {
    *   using field_type_meta = omni::meta_for<typename FieldMeta::type>;
    * }
    * ```
-   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter
-   * type.
+   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter type.
    */
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
@@ -224,6 +222,26 @@ struct data_member_meta_t {
    */
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
+  }
+
+  /**
+   * Whether this field exposes metadata for its associated callable.
+   * Recognizes fixed `function_t` tags, not arbitrary callable field types.
+   */
+  static constexpr bool has_callable_metadata() noexcept {
+    return _M::has_callable_metadata();
+  }
+
+  /**
+   * Return function metadata for the callable represented by this field.
+   *
+   * Available only when `has_callable_metadata()` is true.
+   */
+  template <typename R = _M>
+  static constexpr auto callable_metadata() noexcept ->
+    typename std::enable_if<R::has_callable_metadata(),
+      typename R::callable_metadata>::type {
+    return {};
   }
 
   /** Whether the declared field type has top-level `const` qualification. */
@@ -386,6 +404,26 @@ struct data_member_binding_t {
   using type = typename meta::type;
 
   record &_record;
+
+  /**
+   * Whether this field exposes metadata for its associated callable.
+   * Recognizes fixed `function_t` tags, not arbitrary callable field types.
+   */
+  static constexpr bool has_callable_metadata() noexcept {
+    return meta::has_callable_metadata();
+  }
+
+  /**
+   * Return function metadata for the callable represented by this field.
+   *
+   * Available only when `has_callable_metadata()` is true.
+   */
+  template <typename R = _M>
+  static constexpr auto callable_metadata() noexcept ->
+    typename std::enable_if<R::has_callable_metadata(),
+      typename R::callable_metadata>::type {
+    return {};
+  }
 
   /** Source-spelled field name. */
   static constexpr const char *name() noexcept {
@@ -939,8 +977,8 @@ struct meta_t<_M, reflected_entity::record> {
   constexpr meta_t() noexcept = default;
 
   template <typename _T, typename _Field>
-  static constexpr data_member_binding_t<_T, _Field> _bind(_T &t,
-    data_member_meta_t<_Field>) {
+  static constexpr data_member_binding_t<_T, _Field> _bind(
+    _T &t, data_member_meta_t<_Field>) {
     return data_member_binding_t<_T, _Field>{t};
   }
 
@@ -1215,9 +1253,9 @@ struct function_return_meta_t {
 /**
  * Reflected-scope-only function metadata; `_M` is opaque.
  *
- * Generated record metadata exposes non-overloaded public methods and fields
- * whose type is `function_t`. `parameters()` returns their parameter metadata;
- * `returns()` returns their return metadata.
+ * `accessible_member_functions()` returns non-overloaded member functions.
+ * Fixed `function_t` fields expose this metadata through `callable_metadata()`.
+ * `parameters()` returns parameter metadata; `returns()` returns return metadata.
  */
 template <typename _M>
 struct function_meta_t {

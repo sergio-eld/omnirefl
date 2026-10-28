@@ -205,8 +205,8 @@ std::string describe_record(omni::record_meta auto record) {
   const auto fields = record.accessible_data_members()
     | fn::foldl(
       []<typename Member>(std::string before, Member member) {
-        if constexpr (omni::function_meta<Member>)
-          return before + "  " + describe_function(member);
+        if constexpr (member.has_callable_metadata())
+          return before + "  " + describe_function(member.callable_metadata());
         else
           return before + describe_field(member);
       },
@@ -264,11 +264,7 @@ void update_fields(Values *...values) {
       const auto update = [](omni::record_binding auto r) {
         r.accessible_data_members()
           | fn::filter([]<typename Member> {
-              using binding = std::remove_cvref_t<Member>;
-              if constexpr (omni::data_member_binding<binding>)
-                return binding::is_mutable();
-
-              return false; //< Special function field.
+              return std::remove_cvref_t<Member>::is_mutable();
             })
           | fn::each([](omni::data_member_binding auto field) {
               constexpr std::string_view name = field.name();

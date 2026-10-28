@@ -6,6 +6,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace function_metadata_test {
 
@@ -193,6 +194,83 @@ struct stable_function_routes {
   create_function create;
 };
 
+struct callable_object {
+  int operator()() const { return 815; }
+};
+
+struct mixed_fields {
+  create_function operation;
+  int value;
+  callable_object functor;
+};
+
+struct inherited_fields: mixed_fields {};
+
+template <typename Field, typename = void>
+struct has_callable_accessor: std::false_type {};
+
+template <typename Field>
+struct has_callable_accessor<Field,
+  omni::compat::void_t<decltype(Field::callable_metadata())>>:
+    std::true_type {};
+
+struct inspect_field_metadata {
+  template <typename... _M>
+  std::vector<std::pair<bool, bool>> operator()(
+    omni::data_member_meta_t<_M>... field) const {
+#if defined(__cpp_concepts)
+    static_assert((omni::data_member_meta<decltype(field)> && ...));
+#endif
+    return {{field.has_callable_metadata(),
+      has_callable_accessor<decltype(field)>::value}...};
+  }
+};
+
+struct inspect_field_bindings {
+  template <typename Record, typename... _M>
+  std::vector<std::pair<bool, bool>> operator()(
+    omni::data_member_binding_t<Record, _M>... field) const {
+#if defined(__cpp_concepts)
+    static_assert((omni::data_member_binding<decltype(field)> && ...));
+#endif
+    return {{field.has_callable_metadata(),
+      has_callable_accessor<decltype(field)>::value}...};
+  }
+};
+
+struct inspect_metadata_contract {
+  template <typename _M>
+  std::vector<std::pair<bool, bool>> operator()(
+    omni::record_meta_t<_M> record) const {
+    return omni::compat::apply(inspect_field_metadata{},
+      record.accessible_data_members());
+  }
+};
+
+struct inspect_binding_contract {
+  template <typename T>
+  std::vector<std::pair<bool, bool>> operator()(
+    omni::record_binding_t<T> record) const {
+    return omni::compat::apply(inspect_field_bindings{},
+      record.accessible_data_members());
+  }
+};
+
+struct inspect_callable_type {
+  template <typename _M>
+  std::pair<bool, int> operator()(omni::record_meta_t<_M> record) const {
+    const auto field = std::get<0>(record.accessible_data_members());
+    const auto callable = field.callable_metadata();
+#if defined(__cpp_concepts)
+    static_assert(omni::function_meta<decltype(callable)>);
+#endif
+    return {
+      std::is_same<create_function, typename decltype(field)::type>::value,
+      omni::compat::invoke(callable.pointer(), request{815}, false, nullptr).id,
+    };
+  }
+};
+
 struct parameter_observation {
   std::string first_name;
   std::string first_documentation;
@@ -244,7 +322,11 @@ struct observation {
 struct inspect_function_field {
   template <typename Field>
   observation operator()(Field) const {
-    using meta = typename Field::meta;
+    using meta = decltype(Field::callable_metadata());
+    static_assert(Field::has_callable_metadata(),
+      "fixed function tags must expose callable metadata");
+    static_assert(omni::traits::is<omni::function_meta_t, meta>(),
+      "callable_metadata must return function metadata");
 
     return {
       /*documentation=*/meta::documentation(),
@@ -310,7 +392,11 @@ struct inspect_parameter_documentation {
 struct inspect_documentation_field {
   template <typename Field>
   documentation_observation operator()(Field) const {
-    using meta = typename Field::meta;
+    using meta = decltype(Field::callable_metadata());
+    static_assert(Field::has_callable_metadata(),
+      "fixed function tags must expose callable metadata");
+    static_assert(omni::traits::is<omni::function_meta_t, meta>(),
+      "callable_metadata must return function metadata");
     const parameter_documentation parameter = omni::compat::apply(
       inspect_parameter_documentation{},
       meta::parameters());
@@ -341,8 +427,8 @@ struct inspect_documentation_routes {
 struct inspect_specialized_fields {
   template <typename First, typename Second>
   std::pair<int, int> operator()(First, Second) const {
-    using first = typename First::meta;
-    using second = typename Second::meta;
+    using first = decltype(First::callable_metadata());
+    using second = decltype(Second::callable_metadata());
 
     return {
       omni::compat::invoke(first::pointer()),
@@ -367,7 +453,7 @@ struct inspect_specialized_routes {
 struct inspect_nested_function {
   template <typename Function>
   int operator()(Function) const {
-    return omni::compat::invoke(Function::pointer());
+    return omni::compat::invoke(Function::callable_metadata().pointer());
   }
 };
 
@@ -472,6 +558,37 @@ struct inspect_field_count {
 };
 
 } // namespace function_metadata_test
+
+TEST(function_metadata, callable_tags_remain_fields) {
+  namespace fm = function_metadata_test;
+
+  // Each entry checks the capability query and SFINAE accessor availability.
+  const std::vector<std::pair<bool, bool>> expected{{true, true},
+    {false, false},
+    {false, false}};
+
+  EXPECT_EQ(expected,
+    omni::reflected_call(fm::inspect_metadata_contract{},
+      omni::type_t<fm::mixed_fields>{}));
+  EXPECT_EQ(expected,
+    omni::reflected_call(fm::inspect_binding_contract{}, fm::mixed_fields{}));
+  EXPECT_EQ(expected,
+    omni::reflected_call(fm::inspect_metadata_contract{},
+      omni::type_t<fm::inherited_fields>{}));
+  EXPECT_EQ(expected,
+    omni::reflected_call(fm::inspect_binding_contract{},
+      fm::inherited_fields{}));
+}
+
+TEST(function_metadata, callable_field_preserves_type_and_function_access) {
+  namespace fm = function_metadata_test;
+
+  const auto result = omni::reflected_call(fm::inspect_callable_type{},
+    omni::type_t<fm::mixed_fields>{});
+
+  EXPECT_TRUE(result.first);
+  EXPECT_EQ(815, result.second);
+}
 
 TEST(function_metadata, binds_accessible_non_overloaded_member_functions) {
   namespace fm = function_metadata_test;
