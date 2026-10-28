@@ -473,18 +473,14 @@ TEST(example, meta_bind_and_field_metadata) {
     return std::apply(
       [&non_owning]<omni::field_meta... Field>(Field... field) {
         // Field metadata can be used without first creating field bindings.
-        // Indexes are local to the declaring record and follow declaration
-        // order for this simple non-inherited record.
-        ((field.set_value(non_owning.ref(),
-           static_cast<typename Field::type>(field.index() + 1))),
-          ...);
+        (field.set_value(non_owning.ref(), typename Field::type{1}), ...);
 
         return (field.value(non_owning.ref()) + ...);
       },
       record.public_fields());
   };
 
-  EXPECT_EQ(6,
+  EXPECT_EQ(3,
     omni::reflected_call(inspect, omni::type<exposition::foobar_record>));
 }
 

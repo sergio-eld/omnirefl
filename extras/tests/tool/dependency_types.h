@@ -49,20 +49,6 @@ static const struct field_names_t {
   }
 } field_names;
 
-static const struct field_indices_t {
-  struct collect {
-    template <typename... Field>
-    std::vector<std::size_t> operator()(const Field &...f) const {
-      return std::vector<std::size_t>{f.index()...};
-    }
-  };
-
-  template <typename T>
-  std::vector<std::size_t> operator()(const T &v) const {
-    return omni::compat::apply(collect{}, v.public_fields());
-  }
-} field_indices;
-
 static const struct field_count_t {
   template <typename T>
   std::size_t operator()(const T &v) const {

@@ -551,7 +551,6 @@ and functions. See [Limitations](#limitations) for details.
   - non-static fields accessible from the reflected type, including those
     inherited through public bases, in declaration order
   - field names, declared type names, and documentation
-  - field indices within the declaring record
   - const/mutable/volatile/deprecated traits
   - reading and writing field values, including bitfields and misaligned packed
     scalar fields

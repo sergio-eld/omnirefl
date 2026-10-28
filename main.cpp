@@ -6876,8 +6876,7 @@ std::string indent_lines(std::string_view source) {
 
 std::string reflectable_body(const meta::record_data &d) {
   const auto format_field = //
-    [&d](const auto &field_index) {
-      const auto &[index, f] = field_index;
+    [&d](const meta::field_data &f) {
       const meta::value_declaration_data &declaration = f.declaration;
 
       const auto function = std::ranges::find(d.public_function_fields,
@@ -6954,81 +6953,76 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n    using type ="
         "\n      decltype(std::declval<typename _reflected::type &>().{0});"
         "\n"
-        "\n    static constexpr std::size_t index() noexcept {{ return {1}; }}"
-        "\n"
         "\n    static constexpr auto name() noexcept"
         "\n      -> const char(&)[sizeof(\"{0}\")] {{"
         "\n      return \"{0}\";"
         "\n    }}"
         "\n"
         "\n    static constexpr auto type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{8}\")] {{"
-        "\n      return \"{8}\";"
+        "\n      -> const char(&)[sizeof(\"{7}\")] {{"
+        "\n      return \"{7}\";"
         "\n    }}"
         "\n"
         "\n    static constexpr auto qualified_type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{9}\")] {{"
-        "\n      return \"{9}\";"
+        "\n      -> const char(&)[sizeof(\"{8}\")] {{"
+        "\n      return \"{8}\";"
         "\n    }}"
-        "{10}"
+        "{9}"
         "\n"
-        "\n    static constexpr bool is_const() noexcept {{ return {2}; }}"
-        "\n    static constexpr bool is_mutable() noexcept {{ return {3}; }}"
-        "\n    static constexpr bool is_volatile() noexcept {{ return {4}; }}"
+        "\n    static constexpr bool is_const() noexcept {{ return {1}; }}"
+        "\n    static constexpr bool is_mutable() noexcept {{ return {2}; }}"
+        "\n    static constexpr bool is_volatile() noexcept {{ return {3}; }}"
         "\n    static constexpr bool has_value_access() noexcept"
-        " {{ return {5}; }}"
+        " {{ return {4}; }}"
         "\n    static constexpr bool has_reference_access() noexcept"
-        " {{ return {6}; }}"
+        " {{ return {5}; }}"
         "\n    static constexpr bool is_deprecated() noexcept"
-        " {{ return {7}; }}"
+        " {{ return {6}; }}"
+        "{10}"
         "{11}"
-        "{12}"
         "\n  }};",
         // 0
         declaration.name,
 
         // 1
-        index,
-
-        // 2
         bool(meta::field_data::as_const == f.qualified),
 
-        // 3
+        // 2
         bool(meta::field_data::as_mutable == f.qualified),
 
-        // 4
+        // 3
         f.is_volatile,
 
-        // 5
+        // 4
         meta::field_data::value_access::misaligned_array != f.access,
 
-        // 6
+        // 5
         meta::field_data::value_access::reference == f.access,
 
-        // 7
+        // 6
         f.is_deprecated,
 
-        // 8
+        // 7
         escaped_string_literal_content(declaration.spelled_type_name),
 
-        // 9
+        // 8
         escaped_string_literal_content(
           declaration.spelled_qualified_type_name),
 
-        // 10
+        // 9
         documentation_method(declaration.annotation, "    "),
 
-        // 11
+        // 10
         default_value,
 
-        // 12
+        // 11
         accessors);
     };
 
   const std::string fields = d.public_fields.empty()
     ? std::string("  // no reflectable fields detected")
     : std::format("  struct fields {{\n{}\n  }};",
-        indent_lines(d.public_fields | std_c::views::enumerate //
+        indent_lines(d.public_fields //
           | std::views::transform(format_field)
           | std_c::views::join_with("\n\n"sv)
           | std::ranges::to<std::string>()));

@@ -2,8 +2,6 @@
 // outside a reflected scope.
 #include <omnirefl/reflected_scope.hpp>
 
-#include <cstddef>
-
 namespace negative_query_multiple {
 struct first_record {
   int value;
@@ -26,10 +24,6 @@ struct field_like {
 
   static constexpr const char *documentation() noexcept {
     return "";
-  }
-
-  static constexpr std::size_t index() noexcept {
-    return 0;
   }
 
   static int &value(first_record &r) {
