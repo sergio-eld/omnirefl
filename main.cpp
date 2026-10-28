@@ -1589,6 +1589,13 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
       const clang::SourceLocation instantiation =
         sm.getExpansionLoc(decl->getPointOfInstantiation());
 
+      // A nested lambda is instantiated with its enclosing function. Its call
+      // operator can lack a separate location, especially after type erasure.
+      if (const auto *method = clang::dyn_cast<clang::CXXMethodDecl>(decl);
+        instantiation.isInvalid() && method && method->getParent()->isLambda()
+        && method->getParent()->getDeclContext()->isFunctionOrMethod())
+        continue;
+
       // Clang can omit the instantiation location on instantiated template
       // declarations. Follow their callers to find the actual use instead.
       if (instantiation.isInvalid() && !decl->isTemplateInstantiation())
