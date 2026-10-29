@@ -203,7 +203,7 @@ std::string describe_record(omni::record_meta auto record) {
   namespace fn = omni::fn;
 
   const auto fields = record.accessible_data_members()
-    | fn::filter(fn::non_static{})
+    | fn::filter<fn::non_static>()
     | fn::foldl(
       []<typename Member>(std::string before, Member member) {
         if constexpr (member.has_callable_metadata())
@@ -238,7 +238,7 @@ void print_reachable_records::operator()(Root) const {
       if constexpr (omni::is_reflected<T>::value) {
         const auto metadata = omni::reflected(omni::type<T>);
         std::println("{}", reflected_scope::describe_record(metadata));
-        metadata.accessible_data_members() | fn::filter(fn::non_static{})
+        metadata.accessible_data_members() | fn::filter<fn::non_static>()
           | fn::each([&self]<typename Member>(Member) {
               if constexpr (omni::data_member_meta<Member>)
                 self(self, omni::type<typename Member::type>);
@@ -263,7 +263,7 @@ void update_fields(Values *...values) {
       -> void {
       // Reflected scope: metadata is available here and in called templates.
       const auto update = [](omni::record_binding auto r) {
-        r.accessible_data_members() | fn::filter(fn::non_static{})
+        r.accessible_data_members() | fn::filter<fn::non_static>()
           | fn::filter([]<typename Member> {
               return std::remove_cvref_t<Member>::is_mutable();
             })

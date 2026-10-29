@@ -114,9 +114,9 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  */
 
 // accessible_data_members() and accessible_member_functions() include static
-// members. Filter instance data with omni::fn::filter(omni::fn::non_static{});
-// omni::fn::is_static{} selects shared members instead. Access and bindings
-// still use a record object for both paths.
+// members. Filter instance data with omni::fn::filter<omni::fn::non_static>();
+// omni::fn::filter<omni::fn::is_static>() selects shared members instead.
+// Access and bindings still use a record object for both paths.
 
 /// API exposition -------------------------------------------------------------
 
@@ -1446,28 +1446,30 @@ struct counter {
 
 } // namespace static_access
 
+// TODO: [medium] Replace this synthetic counter with a practical example of
+// static-member access and filtering.
 TEST(example, accesses_static_members_through_a_record_binding) {
   const static_access::counter input{7};
   const auto result = omni::reflected_call(
-    [](omni::record_binding auto record) -> std::pair<int, int> {
-      const int shared = std::apply(
-        [](omni::data_member_binding auto field) {
-          static_assert(field.is_static());
-          return field.value();
-        },
+    [](omni::record_binding auto record)
+      -> std::pair<std::tuple<int>, std::tuple<int>> {
+      return {
         record.accessible_data_members()
-          | omni::fn::filter(omni::fn::is_static{}));
-      const int advanced = std::apply(
-        [](omni::function_binding auto function) { return function(5); },
+          | omni::fn::filter<omni::fn::is_static>()
+          | omni::fn::map([](omni::data_member_binding auto field) {
+              return field.value();
+            }),
         record.accessible_member_functions()
-          | omni::fn::filter(omni::fn::is_static{}));
-
-      return {shared, advanced};
+          | omni::fn::filter<omni::fn::is_static>()
+          | omni::fn::map([](omni::function_binding auto function) {
+              return function(5);
+            }),
+      };
     },
     input);
 
-  EXPECT_EQ(10, result.first);
-  EXPECT_EQ(15, result.second);
+  EXPECT_EQ(std::tuple{10}, result.first);
+  EXPECT_EQ(std::tuple{15}, result.second);
   EXPECT_EQ(7, input.local);
 }
 

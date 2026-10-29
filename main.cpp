@@ -993,8 +993,8 @@ int main(int argc, char **argv) {
     std::bind_front(measured("fold matches", pipeline::fold_matches),
       std::cref(log));
 
-  const auto resolve_reflection_context =
-    measured("resolve reflection context", pipeline::resolve_reflection_context);
+  const auto resolve_reflection_context = measured("resolve reflection context",
+    pipeline::resolve_reflection_context);
 
   const auto emit_outputs =
     std::bind_front(measured("emit outputs", pipeline::emit_outputs),
@@ -2122,17 +2122,19 @@ meta::source_file_context meta::matches::fold_out_of_scope_function_query(
     "reflection query function instantiated during the tool run");
 }
 
-// TODO: Investigate type-name customization independently of metadata. Generated
-// forward declarations still limit which types can be named. Consider separate
-// user-provided name-renderer and metadata specializations; establish concrete
-// use cases before designing the interface. is_template() already lets users
-// select their own naming logic without general-purpose type-name rendering.
+// TODO: Investigate type-name customization independently of metadata.
+// Generated forward declarations still limit which types can be named. Consider
+// separate user-provided name-renderer and metadata specializations; establish
+// concrete use cases before designing the interface. is_template() already lets
+// users select their own naming logic without general-purpose type-name
+// rendering.
 
 // TODO: [high] Consider specialization_of<Template>() for skips without dummy
 // arguments, accounting for C++11 and mixed template parameter signatures.
-// General reflected_call support needs substantial template-metadata/tag design.
-// CTAD-based return use cases remain speculative, while the visitor return type
-// must already be known without body instantiation. Establish the benefit first.
+// General reflected_call support needs substantial template-metadata/tag
+// design. CTAD-based return use cases remain speculative, while the visitor
+// return type must already be known without body instantiation. Establish the
+// benefit first.
 meta::source_file_context fold_metadata_skips(const diagnostics &log,
   const clang::ASTContext &ast,
   meta::source_file_context context,
@@ -2428,7 +2430,8 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
 
   // TODO(high): Report the triggering reflection callsite and dependency path:
   // a string-like field can cause unrelated overloaded-method warnings, while
-  // generated headers annotate declarations but not the calls that requested them.
+  // generated headers annotate declarations but not the calls that requested
+  // them.
   for (const auto &[type, method] : skipped_overloaded_methods) {
     log(log_level::warning, [&type, &method] {
       return std::format(
@@ -4084,15 +4087,15 @@ std::expected<pipeline::parsed_ast, app_error>
       return getUnderlyingFS().exists(drive_prefix_to_directory(path));
     }
 
-    llvm::ErrorOr<std::unique_ptr<llvm::vfs::File>>
-      openFileForRead(const llvm::Twine &path) override {
+    llvm::ErrorOr<std::unique_ptr<llvm::vfs::File>> openFileForRead(
+      const llvm::Twine &path) override {
       return getUnderlyingFS().openFileForRead(drive_prefix_to_directory(path));
     }
 
     std::error_code getRealPath(const llvm::Twine &path,
       llvm::SmallVectorImpl<char> &output) override {
-      return getUnderlyingFS().getRealPath(
-        drive_prefix_to_directory(path), output);
+      return getUnderlyingFS().getRealPath(drive_prefix_to_directory(path),
+        output);
     }
   };
 
@@ -4118,11 +4121,11 @@ std::expected<pipeline::parsed_ast, app_error>
   // dependent queries or guard valid visitor code. Support these queries
   // while retaining reflected-scope restrictions.
   if (!clang::ASTUnit::LoadFromCompilerInvocationAction(ci.ci,
-      std::make_shared<clang::PCHContainerOperations>(),
-      log.clang_options,
-      log.clang_engine,
-      &action,
-      ast.get()))
+        std::make_shared<clang::PCHContainerOperations>(),
+        log.clang_options,
+        log.clang_engine,
+        &action,
+        ast.get()))
     ast.reset();
 
   if (!ast || ast->getDiagnostics().hasUncompilableErrorOccurred())
@@ -5106,11 +5109,9 @@ std::string comment_text(const clang::comments::Comment *comment) {
 
   using clang::comments::InlineCommandComment;
 
-  if (const auto *command =
-        llvm::dyn_cast<InlineCommandComment>(comment)) {
+  if (const auto *command = llvm::dyn_cast<InlineCommandComment>(comment)) {
     return std::views::iota(0u, command->getNumArgs()) //
-      | std::views::transform(std::bind_front(
-        &InlineCommandComment::getArgText,
+      | std::views::transform(std::bind_front(&InlineCommandComment::getArgText,
         command)) //
       | std_c::views::join_with(" "sv) //
       | std::ranges::to<std::string>();
@@ -5172,8 +5173,8 @@ function_comment_data function_comments(const clang::ASTContext &ast,
       const clang::comments::BlockContentComment *block) {
       if (const auto *paragraph =
             llvm::dyn_cast<clang::comments::ParagraphComment>(block)) {
-        result.function = append(std::move(result.function),
-          comment_text(paragraph));
+        result.function =
+          append(std::move(result.function), comment_text(paragraph));
         return result;
       }
 
@@ -5204,8 +5205,7 @@ function_comment_data function_comments(const clang::ASTContext &ast,
     });
 }
 
-value_declaration_data value_declaration_from(
-  const clang::ASTContext &ast,
+value_declaration_data value_declaration_from(const clang::ASTContext &ast,
   clang::QualType type,
   clang::TypeLoc location,
   std::string name,
@@ -5252,8 +5252,8 @@ const clang::FunctionDecl *function_from_tag(clang::QualType type) {
     return nullptr;
   }
 
-  const auto *function = llvm::dyn_cast_or_null<clang::FunctionDecl>(
-    arguments.back().getAsDecl());
+  const auto *function =
+    llvm::dyn_cast_or_null<clang::FunctionDecl>(arguments.back().getAsDecl());
   const auto *method = llvm::dyn_cast_or_null<clang::CXXMethodDecl>(function);
   return !function || (method && !method->isStatic()) || function->isVariadic()
     ? nullptr
@@ -5293,30 +5293,29 @@ const clang::FunctionDecl *function_from_field_tag(
 
 std::string method_generated_name(const clang::CXXMethodDecl &method) {
   switch (method.getOverloadedOperator()) {
-    case clang::OO_None:
-      return "method_" + method.getNameAsString();
+  case clang::OO_None:
+    return "method_" + method.getNameAsString();
 
 #define OVERLOADED_OPERATOR(Name, Spelling, Token, Unary, Binary, MemberOnly) \
-  case clang::OO_##Name:                                                     \
+  case clang::OO_##Name: \
     return llvm::StringRef{#Name}.lower() + "_operator";
 #include <clang/Basic/OperatorKinds.def>
-    case clang::NUM_OVERLOADED_OPERATORS:
-      break;
+  case clang::NUM_OVERLOADED_OPERATORS:
+    break;
   }
 
   std::unreachable();
 }
 
-function_data function_data_from(
-  const clang::ASTContext &ast,
+function_data function_data_from(const clang::ASTContext &ast,
   std::string name,
   const clang::FunctionDecl &declaration,
   bool member_method) {
   const function_comment_data comments = function_comments(ast, declaration);
   const clang::TypeSourceInfo *source = declaration.getTypeSourceInfo();
-  const clang::FunctionTypeLoc function_location =
-    source ? source->getTypeLoc().getAs<clang::FunctionTypeLoc>()
-           : clang::FunctionTypeLoc{};
+  const clang::FunctionTypeLoc function_location = source
+    ? source->getTypeLoc().getAs<clang::FunctionTypeLoc>()
+    : clang::FunctionTypeLoc{};
   std::string generated_name = member_method
     ? method_generated_name(clang::cast<clang::CXXMethodDecl>(declaration))
     : name + "_t";
@@ -5335,16 +5334,16 @@ function_data function_data_from(
     .params = declaration.parameters() //
       | std_c::views::enumerate //
       | std::views::transform([&ast, &comments](const auto &indexed) {
-          const auto &[index, parameter] = indexed;
+        const auto &[index, parameter] = indexed;
 
-          return value_declaration_from(ast,
-            parameter->getType(),
-            parameter->getTypeSourceInfo() //
-              ? parameter->getTypeSourceInfo()->getTypeLoc()
-              : clang::TypeLoc{},
-            parameter->getNameAsString(),
-            comments.parameters[index]);
-        })
+        return value_declaration_from(ast,
+          parameter->getType(),
+          parameter->getTypeSourceInfo() //
+            ? parameter->getTypeSourceInfo()->getTypeLoc()
+            : clang::TypeLoc{},
+          parameter->getNameAsString(),
+          comments.parameters[index]);
+      })
       | std::ranges::to<std::vector>(),
     .member_method = member_method,
     .is_static = llvm::isa<clang::CXXMethodDecl>(declaration)
@@ -5495,17 +5494,6 @@ util::viewable_range_of<clang::NamedDecl *> auto
 
         auto *member = named->getUnderlyingDecl();
         if (llvm::isa<clang::UsingShadowDecl>(named)) {
-          // Repeated introductions of one function are not overloads.
-          const auto declarations = definition->lookup(member->getDeclName());
-          const auto first =
-            std::ranges::find_if(declarations, [member](auto *candidate) {
-              return clang::AS_public == candidate->getAccess()
-                && candidate->getUnderlyingDecl()->getCanonicalDecl()
-                == member->getCanonicalDecl();
-            });
-          if (first != declarations.end() && *first != named)
-            return nullptr;
-
           const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(member);
           if (llvm::isa<clang::FieldDecl>(member)
             || (method && !method->isStatic())) {
@@ -5543,8 +5531,7 @@ util::viewable_range_of<const clang::DeclaratorDecl *> auto public_fields_view(
 }
 
 util::viewable_range_of<clang::CXXMethodDecl *> auto
-public_method_candidates_view(
-  const clang::CXXRecordDecl *rd) {
+  public_method_candidates_view(const clang::CXXRecordDecl *rd) {
   assert(rd);
 
   return public_member_declarations_view(rd) //
@@ -5578,16 +5565,13 @@ bool method_name_is_unambiguous(const clang::CXXRecordDecl *rd,
   if (clang::OO_Equal == method->getOverloadedOperator())
     return false;
 
-  const auto declarations = rd->lookup(method->getDeclName());
-  return !declarations.empty()
-    && std::ranges::all_of(declarations,
-      [method](const clang::NamedDecl *candidate) {
-        const clang::NamedDecl *declaration = candidate->getUnderlyingDecl();
+  return 1 == std::ranges::count_if(rd->lookup(method->getDeclName()),
+    [](const clang::NamedDecl *candidate) {
+      const clang::NamedDecl *declaration = candidate->getUnderlyingDecl();
 
-        return !llvm::isa<clang::FunctionDecl, clang::FunctionTemplateDecl>(
-                 declaration)
-          || declaration->getCanonicalDecl() == method->getCanonicalDecl();
-      });
+      return llvm::isa<clang::FunctionDecl>(declaration)
+        || llvm::isa<clang::FunctionTemplateDecl>(declaration);
+    });
 }
 
 util::viewable_range_of<clang::CXXMethodDecl *> auto public_methods_view(
@@ -6130,7 +6114,8 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
     public_fields_view(&r_decl) | std::ranges::to<std::vector>();
 
   return {
-    .public_bases = cxx_decl ? public_bases_view(cxx_decl)
+    .public_bases = cxx_decl //
+      ? public_bases_view(cxx_decl) //
         | std::views::filter([](const clang::CXXRecordDecl *base) {
             return !base->isInStdNamespace();
           })
@@ -6144,7 +6129,7 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
             };
           })
         | std::ranges::to<std::vector>()
-                             : std::vector<meta::reflectable_reference>{},
+      : std::vector<meta::reflectable_reference>{},
 
     .public_fields = public_field_decls
       | std::views::transform(
@@ -6153,8 +6138,7 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
 
     .public_function_fields = public_field_decls
       | std::views::transform([](const clang::DeclaratorDecl *field) {
-          return std::pair{field,
-            meta::impl::function_from_field_tag(field)};
+          return std::pair{field, meta::impl::function_from_field_tag(field)};
         })
       | std::views::filter(
         [](const auto &entry) { return nullptr != entry.second; })
@@ -6166,7 +6150,8 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
         })
       | std::ranges::to<std::vector>(),
 
-    .public_methods = cxx_decl ? public_methods_view(cxx_decl)
+    .public_methods = cxx_decl //
+      ? public_methods_view(cxx_decl) //
         | std::views::transform([&ast](const clang::CXXMethodDecl *method) {
             return meta::impl::function_data_from(ast,
               method->getNameAsString(),
@@ -6174,7 +6159,7 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
               /*member_method=*/true);
           })
         | std::ranges::to<std::vector>()
-                               : std::vector<meta::function_data>{},
+      : std::vector<meta::function_data>{},
 
     .declared_member_names = r_decl.getDefinitionOrSelf()->lookups()
       | std::views::filter(
@@ -6279,7 +6264,6 @@ meta::reflectable match_reflectable_type(const diagnostics &log,
           field.declaration.name);
       });
     }
-
   }
 
   return {
@@ -7032,9 +7016,10 @@ std::string reflectable_body(const meta::record_data &d) {
         "{}",
         function != d.public_function_fields.end(),
         function != d.public_function_fields.end()
-          ? std::format("\n\n{}\n"
-                        "    using callable_metadata ="
-                        " omni::function_meta_t<callable_t>;",
+          ? std::format( //
+              "\n\n{}\n"
+              "    using callable_metadata ="
+              " omni::function_meta_t<callable_t>;",
               indent_lines(function_metadata(*function, "callable_t")))
           : std::string{});
 
@@ -7048,7 +7033,7 @@ std::string reflectable_body(const meta::record_data &d) {
         f.has_default_member_initializer,
         f.default_initializer.has_value(),
         f.default_initializer
-          ? std::format(
+          ? std::format( //
               "\n"
               "\n    static const type &default_value() {{"
               "\n      static const type value {};"
@@ -7204,8 +7189,9 @@ std::string reflectable_body(const meta::record_data &d) {
     "\n    return {};"
     "\n  }}",
     d.declared_member_names.empty() ? "" : "name",
-    d.declared_member_names.empty() ? "false"
-                                    : d.declared_member_names
+    d.declared_member_names.empty() //
+      ? "false"
+      : d.declared_member_names //
         | std::views::transform([](std::string_view name) {
             return std::format("omni::detail::_same_field_name(name, \"{}\")",
               escaped_string_literal_content(name));
@@ -7213,8 +7199,9 @@ std::string reflectable_body(const meta::record_data &d) {
         | std_c::views::join_with(" ||\n      "sv)
         | std::ranges::to<std::string>());
 
-  // REFACTORME: Consider rendering named subparts, as fields and methods already
-  // do, to shorten the format call and keep placeholders near their arguments.
+  // REFACTORME: Consider rendering named subparts, as fields and methods
+  // already do, to shorten the format call and keep placeholders near their
+  // arguments.
   return std::format(
     "{}"
     "\n"
@@ -7247,8 +7234,7 @@ std::string reflectable_body(const meta::record_data &d) {
 
     d.public_methods //
       | std::views::transform([](const auto &function) {
-          return std::format(
-            "omni::function_meta_t<typename methods::{}>",
+          return std::format("omni::function_meta_t<typename methods::{}>",
             function.generated_name);
         })
       | std_c::views::join_with(",\n      "sv) //
@@ -7337,10 +7323,10 @@ std::string render_reflectable_head(const S &r) {
 // specialization's dependent bases and promoted using-declaration properties.
 // Member names, data/function categories, types, and traits can differ across
 // specializations, producing incorrect metadata or ill-formed accessors.
-// Consider comparing accessible base members across encountered specializations:
-// a data/function category mismatch could be an error; other differences could
-// warn. Detection is deferred because its implementation effort is not currently
-// justified.
+// Consider comparing accessible base members across encountered
+// specializations: a data/function category mismatch could be an error; other
+// differences could warn. Detection is deferred because its implementation
+// effort is not currently justified.
 std::string render_public_bases(
   const std::map<meta::type_id, meta::nm_qual_type> &type_name_by_id,
   const meta::record_data &r) {

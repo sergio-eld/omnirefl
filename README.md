@@ -477,8 +477,7 @@ Extension examples, tests, and benchmarks are grouped under `extras/extensions`.
 ## Extensions
 
 - **Serialization:** RapidYAML-backed JSON/YAML serialization, compatible with
-  C++11. Static data members are excluded from serialization and mapping.
-  See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
+  C++11. See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
 - Further extensions under consideration include RPC mapping, schema generation,
   and command-line interfaces.
 <!-- pages:extensions:end -->
@@ -757,11 +756,9 @@ limits the declarations it can represent.
 - Constrained primary record templates and explicit or partial record-template
   specializations are rejected as roots. Explicit or partial specialization
   dependencies are skipped with a warning.
-- When a primary template's base type depends on its template arguments,
-  inherited members can be reported incorrectly across specializations,
-  including members exposed through `using` declarations. Names, types, and
-  traits may be wrong, and data members may be confused with functions.
-  This case is not diagnosed yet.
+- Primary-template support assumes inherited member names and kinds stay the
+  same across specializations. Different inherited member sets, or a member
+  changing between data and function, are unsupported.
 - Records with direct or inherited virtual bases are rejected as roots and
   skipped with a warning as dependencies.
 - Public access paths to non-public nested dependencies are not preserved when

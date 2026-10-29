@@ -450,9 +450,12 @@ struct map_node_to_record {
       return;
     }
 
-    constexpr auto fields =
+    // FIXME: [medium] C++11 does not require tuple element-taking constructors
+    // to be constexpr. Investigate default-constructing the filtered metadata
+    // tuple type instead, since these metadata objects carry no state.
+    OMNI_CPP14_CONSTEXPR const auto fields =
       omni::reflected(omni::type_t<Record>{}).accessible_data_members()
-      | omni::fn::filter(omni::fn::non_static{});
+      | omni::fn::filter<omni::fn::non_static>();
 
     // Structural validation precedes field mapping, preserving strict error
     // order.
@@ -501,7 +504,7 @@ struct map_node_to_record {
     // accessible_data_members() requires a binding that outlives field
     // traversal.
     const auto binding = omni::meta_for<Record>::bind(*record);
-    binding.accessible_data_members() | omni::fn::filter(omni::fn::non_static{})
+    binding.accessible_data_members() | omni::fn::filter<omni::fn::non_static>()
       | omni::fn::each(map_node_to_field{
         /*node=*/node,
         /*context=*/context,
@@ -641,7 +644,7 @@ struct write_record {
     // accessible_data_members() requires a binding that outlives field
     // traversal.
     const auto binding = omni::meta_for<Value>::bind(value);
-    binding.accessible_data_members() | fn::filter(fn::non_static{})
+    binding.accessible_data_members() | fn::filter<fn::non_static>()
       | fn::each(write_field{/*node=*/node});
   }
 };

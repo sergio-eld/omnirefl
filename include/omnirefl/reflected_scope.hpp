@@ -632,10 +632,8 @@ struct data_member_binding_t {
   template <typename M = meta,
     typename std::enable_if<M::has_value_access() && M::has_reference_access(),
       int>::type = 0>
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#endif
-    auto value() && noexcept -> decltype(std::move(M::ref(_record))) {
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(std::move(M::ref(_record))) {
     return std::move(M::ref(_record));
   }
 
@@ -653,10 +651,7 @@ struct data_member_binding_t {
   template <typename M = meta,
     typename std::enable_if<M::has_value_access() && !M::has_reference_access(),
       int>::type = 0>
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#endif
-    auto value() && noexcept -> decltype(M::value(_record)) {
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept -> decltype(M::value(_record)) {
     return M::value(_record);
   }
 
@@ -1364,10 +1359,12 @@ struct function_binding_t {
 
   /// Invoke through the bound record, honoring ordinary lookup and default
   /// arguments.
-  template <typename... Argument>
+  // Defer invocation metadata lookup until the call, so naming a binding can
+  // reach the tool's out-of-scope diagnostic without requiring that metadata.
+  template <typename... Argument, typename M = _M>
   constexpr auto operator()(Argument &&...argument) const
-    -> decltype(_M::invoke(_record, std::forward<Argument>(argument)...)) {
-    return _M::invoke(_record, std::forward<Argument>(argument)...);
+    -> decltype(M::invoke(_record, std::forward<Argument>(argument)...)) {
+    return M::invoke(_record, std::forward<Argument>(argument)...);
   }
 };
 
@@ -1469,15 +1466,13 @@ struct binding_t<T, reflected_entity::record> {
     return _record;
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-    /**
-     * Return an rvalue reference to the bound record.
-     *
-     * @note `constexpr` from C++14; C++11 would make this accessor const.
-     */
-    auto value() && noexcept -> decltype(std::move(_record)) {
+  /**
+   * Return an rvalue reference to the bound record.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(std::move(_record)) {
     return std::move(_record);
   }
 
@@ -1486,15 +1481,12 @@ struct binding_t<T, reflected_entity::record> {
     return std::move(_record);
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-    /**
-     * Return a direct reference to the bound record.
-     *
-     * @note `constexpr` from C++14; C++11 would make this accessor const.
-     */
-    storage_t &ref() & noexcept {
+  /**
+   * Return a direct reference to the bound record.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR storage_t &ref() & noexcept {
     return _record;
   }
 
@@ -1743,15 +1735,13 @@ struct binding_t<T, reflected_entity::enumeration> {
     return _enum_value;
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-    /**
-     * Return an rvalue reference to the bound enum value.
-     *
-     * @note `constexpr` from C++14; C++11 would make this accessor const.
-     */
-    auto value() && noexcept -> decltype(std::move(_enum_value)) {
+  /**
+   * Return an rvalue reference to the bound enum value.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(std::move(_enum_value)) {
     return std::move(_enum_value);
   }
 
@@ -1760,15 +1750,12 @@ struct binding_t<T, reflected_entity::enumeration> {
     return std::move(_enum_value);
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-    /**
-     * Return a direct reference to the bound enum value.
-     *
-     * @note `constexpr` from C++14; C++11 would make this accessor const.
-     */
-    storage_t &ref() & noexcept {
+  /**
+   * Return a direct reference to the bound enum value.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR storage_t &ref() & noexcept {
     return _enum_value;
   }
 

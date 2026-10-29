@@ -260,7 +260,7 @@ struct inspect_binding_contract {
 struct inspect_callable_type {
   template <typename _M>
   std::pair<bool, int> operator()(omni::record_meta_t<_M> record) const {
-    const auto field = std::get<0>(record.accessible_data_members());
+    const auto field = std::get</*callable_field=*/0>(record.accessible_data_members());
     const auto callable = field.callable_metadata();
 #if defined(__cpp_concepts)
     static_assert(omni::function_meta<decltype(callable)>);
@@ -525,7 +525,7 @@ struct inspect_methods {
   method_observation operator()(Binding binding) const {
     return omni::compat::apply(inspect_method{},
       binding.accessible_member_functions()
-        | omni::fn::filter(omni::fn::non_static{}));
+        | omni::fn::filter<omni::fn::non_static>());
   }
 };
 

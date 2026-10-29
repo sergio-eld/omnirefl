@@ -166,9 +166,8 @@ struct alternative_read {
   static int read(int value) { return value + 2; }
 };
 
-struct duplicate_function_selection: left_base, right_base, alternative_read {
+struct selected_function_path: left_base, right_base, alternative_read {
   using left_base::read;
-  using right_base::read;
 };
 
 struct enumerator_hiding: selection_left {
@@ -209,13 +208,13 @@ struct inspect_data {
   }
 };
 
-template <typename Predicate>
+template <template <typename> class Predicate>
 struct select_data {
   template <typename _M>
   std::vector<std::pair<std::string, bool>> operator()(
     omni::record_meta_t<_M> record) const {
     return omni::compat::apply(member_properties{},
-      record.accessible_data_members() | omni::fn::filter(Predicate{}));
+      record.accessible_data_members() | omni::fn::filter<Predicate>());
   }
 };
 
@@ -274,7 +273,7 @@ struct update_static {
   std::pair<int, int *> operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(assign_shared{},
       record.accessible_data_members()
-        | omni::fn::filter(omni::fn::is_static{}));
+        | omni::fn::filter<omni::fn::is_static>());
   }
 };
 
@@ -330,7 +329,7 @@ struct invoke_static {
   int operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(invoke_function{},
       record.accessible_member_functions()
-        | omni::fn::filter(omni::fn::is_static{}));
+        | omni::fn::filter<omni::fn::is_static>());
   }
 };
 
@@ -562,14 +561,14 @@ TEST(static_members, public_using_of_private_base_members_uses_record_access) {
     omni::reflected_call(invoke_selected{}, public_selection{}));
 }
 
-TEST(static_members, repeated_using_of_the_same_function_is_not_an_overload) {
+TEST(static_members, using_selects_a_static_function_through_repeated_base_paths) {
   const std::vector<std::pair<std::string, bool>> expected{{"read", true}};
 
   EXPECT_EQ(expected,
     omni::reflected_call(inspect_functions{},
-      omni::type_t<duplicate_function_selection>{}));
+      omni::type_t<selected_function_path>{}));
   EXPECT_EQ(6,
-    omni::reflected_call(invoke_static{}, duplicate_function_selection{}));
+    omni::reflected_call(invoke_static{}, selected_function_path{}));
 }
 
 TEST(static_members, non_data_declarations_hide_inherited_data_members) {
