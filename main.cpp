@@ -7086,6 +7086,11 @@ std::string reflectable_body(const meta::record_data &d) {
             : std::string{});
       });
 
+      // TODO: [high] Research specialization-dependent field qualifiers in
+      // shared primary-template metadata: `T field` with T = const A must
+      // report const even if the first reflected specialization used plain A.
+      // Check whether the generated `type` alias can drive is_const() and
+      // is_volatile() per specialization within the existing metadata struct.
       return std::format(
         "  struct {0}_t {{"
         "\n    using type ="

@@ -759,6 +759,8 @@ limits the declarations it can represent.
 - Primary-template support assumes inherited member names and kinds stay the
   same across specializations. Different inherited member sets, or a member
   changing between data and function, are unsupported.
+- Const/volatile traits of dependent fields such as `T field` can retain the
+  first specialization's qualifiers instead of the actual template argument's.
 - Records with direct or inherited virtual bases are rejected as roots and
   skipped with a warning as dependencies.
 - Public access paths to non-public nested dependencies are not preserved when
