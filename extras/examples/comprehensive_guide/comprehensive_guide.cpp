@@ -105,6 +105,12 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  *   omni::record_binding_t<T>::accessible_data_members()
  *     -> omni::data_member_binding_t<Record, _Field>
  *
+ * Bindings publicly inherit their metadata wrappers. A binding can be passed
+ * to a metadata parameter and satisfies the corresponding metadata concept;
+ * binding concepts refine metadata concepts for overload selection.
+ * Static metadata queries are inherited; object access remains bound.
+ * `binding.as_meta()` returns metadata by value, without the bound object.
+ *
  * `Record` carries the cv qualification of the bound record object. Field
  * bindings are always non-owning because a field cannot outlive its record.
  *
@@ -490,6 +496,19 @@ TEST(example, meta_bind_and_field_metadata) {
 
   EXPECT_EQ(3,
     omni::reflected_call(inspect, omni::type<exposition::foobar_record>));
+}
+
+TEST(example, binding_as_metadata) {
+  // A record binding satisfies record_meta and retains its bound object.
+  const auto inspect = [](omni::record_meta auto record) -> std::size_t {
+    // The binding's member query returns bindings. as_meta() selects the
+    // inherited unbound query, which returns metadata instead.
+    return std::tuple_size<decltype(
+      record.as_meta().accessible_data_members())>::value;
+  };
+
+  exposition::foobar_record value{};
+  EXPECT_EQ(3U, omni::reflected_call(inspect, value));
 }
 
 namespace primary_template {
