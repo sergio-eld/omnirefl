@@ -793,6 +793,20 @@ if("17" IN_LIST _supported_cpp_standards)
         warning
         1)
     _omnirefl_diagnostic_tool_run(
+        "undeduced_member_return"
+        diagnostic_run/undeduced_member_return.cpp
+        "return dependency of 'diagnostic_undeduced_return::record::make' skipped at .*undeduced_member_return.cpp:[0-9]+:[0-9]+"
+        "function definition is unavailable for return-type deduction"
+        warning
+        1)
+    _omnirefl_diagnostic_tool_run(
+        "local_member_return"
+        diagnostic_run/local_member_return.cpp
+        "unsupported reflection dependency '.*result' skipped"
+        "function-local types cannot be forward-declared for generated metadata"
+        warning
+        1)
+    _omnirefl_diagnostic_tool_run(
         "lazy_specialization_dependency"
         diagnostic_run/lazy_specialization_dependency.cpp
         "explicit template specializations are not supported"
