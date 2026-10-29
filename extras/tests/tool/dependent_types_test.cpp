@@ -1210,6 +1210,11 @@ struct inspect {
   }
 };
 
+template <typename T>
+struct static_record {
+  static T value;
+};
+
 } // namespace dependent_field_qualifiers
 
 TEST(dependent_types, qualifiers_follow_each_primary_template_specialization) {
@@ -1230,6 +1235,42 @@ TEST(dependent_types, qualifiers_follow_each_primary_template_specialization) {
   EXPECT_EQ(std::make_pair(true, true),
     omni::reflected_call(fields::inspect{},
       omni::type_t<fields::record<const volatile int>>{}));
+}
+
+TEST(dependent_types, qualifiers_describe_declared_types) {
+  namespace fields = dependent_field_qualifiers;
+
+  EXPECT_EQ(std::make_pair(false, false),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<const fields::record<int>>{}));
+
+  EXPECT_EQ(std::make_pair(false, false),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<fields::record<const volatile int *>>{}));
+
+  EXPECT_EQ(std::make_pair(true, true),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<fields::record<int *const volatile>>{}));
+
+  EXPECT_EQ(std::make_pair(false, false),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<fields::record<const volatile int &>>{}));
+
+  EXPECT_EQ(std::make_pair(true, true),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<fields::record<const volatile int[2]>>{}));
+}
+
+TEST(dependent_types, static_member_qualifiers_follow_each_specialization) {
+  namespace fields = dependent_field_qualifiers;
+
+  EXPECT_EQ(std::make_pair(false, false),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<fields::static_record<int>>{}));
+
+  EXPECT_EQ(std::make_pair(true, true),
+    omni::reflected_call(fields::inspect{},
+      omni::type_t<fields::static_record<const volatile int>>{}));
 }
 
 } // namespace

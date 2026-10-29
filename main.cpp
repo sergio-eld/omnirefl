@@ -589,6 +589,9 @@ struct field_data {
 
   static field_data from_decl(const clang::ASTContext &ast,
     const clang::DeclaratorDecl *d);
+
+  // TODO: [medium] Remove AST-collected const/volatile flags; generated queries
+  // use the declared field type. Replace the qualifier enum with is_mutable.
 };
 
 struct function_data {
@@ -7086,11 +7089,6 @@ std::string reflectable_body(const meta::record_data &d) {
             : std::string{});
       });
 
-      // TODO: [high] Research specialization-dependent field qualifiers in
-      // shared primary-template metadata: `T field` with T = const A must
-      // report const even if the first reflected specialization used plain A.
-      // Check whether the generated `type` alias can drive is_const() and
-      // is_volatile() per specialization within the existing metadata struct.
       return std::format(
         "  struct {0}_t {{"
         "\n    using type ="
@@ -7102,70 +7100,66 @@ std::string reflectable_body(const meta::record_data &d) {
         "\n    }}"
         "\n"
         "\n    static constexpr auto type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{7}\")] {{"
-        "\n      return \"{7}\";"
+        "\n      -> const char(&)[sizeof(\"{5}\")] {{"
+        "\n      return \"{5}\";"
         "\n    }}"
         "\n"
         "\n    static constexpr auto qualified_type_name() noexcept"
-        "\n      -> const char(&)[sizeof(\"{8}\")] {{"
-        "\n      return \"{8}\";"
+        "\n      -> const char(&)[sizeof(\"{6}\")] {{"
+        "\n      return \"{6}\";"
         "\n    }}"
-        "{9}"
+        "{7}"
         "\n"
-        "\n    static constexpr bool is_const() noexcept {{ return {1}; }}"
-        "\n    static constexpr bool is_mutable() noexcept {{ return {2}; }}"
-        "\n    static constexpr bool is_volatile() noexcept {{ return {3}; }}"
+        "\n    static constexpr bool is_const() noexcept"
+        " {{ return std::is_const<type>::value; }}"
+        "\n    static constexpr bool is_mutable() noexcept {{ return {1}; }}"
+        "\n    static constexpr bool is_volatile() noexcept"
+        " {{ return std::is_volatile<type>::value; }}"
         "\n    static constexpr bool has_value_access() noexcept"
-        " {{ return {4}; }}"
+        " {{ return {2}; }}"
         "\n    static constexpr bool has_reference_access() noexcept"
-        " {{ return {5}; }}"
+        " {{ return {3}; }}"
         "\n    static constexpr bool is_deprecated() noexcept"
-        " {{ return {6}; }}"
+        " {{ return {4}; }}"
+        "{8}"
+        "{9}"
         "{10}"
-        "{11}"
-        "{12}"
-        "\n    static constexpr bool is_static() noexcept {{ return {13}; }}"
+        "\n    static constexpr bool is_static() noexcept {{ return {11}; }}"
         "\n  }};",
         // 0
         declaration.name,
 
         // 1
-        bool(meta::field_data::as_const == f.qualified),
-
-        // 2
         bool(meta::field_data::as_mutable == f.qualified),
 
-        // 3
-        f.is_volatile,
-
-        // 4
+        // 2
         meta::field_data::value_access::misaligned_array != f.access,
 
-        // 5
+        // 3
         meta::field_data::value_access::reference == f.access,
 
-        // 6
+        // 4
         f.is_deprecated,
 
-        // 7
+        // 5
         escaped_string_literal_content(declaration.spelled_type_name),
 
-        // 8
+        // 6
         escaped_string_literal_content(declaration.spelled_qualified_type_name),
 
-        // 9
+        // 7
         documentation_method(declaration.annotation, "    "),
 
-        // 10
+        // 8
         default_value,
 
-        // 11
+        // 9
         accessors,
 
-        // 12
+        // 10
         callable_metadata,
 
-        // 13
+        // 11
         f.is_static);
     };
 
