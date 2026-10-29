@@ -81,6 +81,9 @@ jobs:
               const sha = releaseArtifactSha(artifact)
               const keep =
                 artifact.name.startsWith('aggregated-test-results-') ||
+                // Failed-job reruns reuse successful benchmark jobs; Pages
+                // still needs their artifacts when deployment runs later.
+                artifact.name.startsWith('benchmark-') ||
                 (
                   isReleaseArtifact(artifact) &&
                   masterShortSha === sha
