@@ -5957,13 +5957,22 @@ collected_dependencies recursively_collect_dependency_types(
           std::nullopt);
       };
 
-    const auto enqueue_signature = [&enqueue_signature_type](
-                                     const clang::FunctionDecl *function) {
-      enqueue_signature_type(function->getReturnType());
-      std::ranges::for_each(function->parameters(),
-        enqueue_signature_type,
-        &clang::ParmVarDecl::getType);
-    };
+    const auto enqueue_signature =
+      [&enqueue_signature_type, &sema, point_of_instantiation](
+        const clang::FunctionDecl *function) {
+        // Completing a class specialization leaves unused auto-return members
+        // undeduced. Sema must instantiate the body before its result can be
+        // discovered; its API updates the declaration in place.
+        if (function->getReturnType()->isUndeducedType()
+          && sema.DeduceReturnType(const_cast<clang::FunctionDecl *>(function),
+            point_of_instantiation))
+          return;
+
+        enqueue_signature_type(function->getReturnType());
+        std::ranges::for_each(function->parameters(),
+          enqueue_signature_type,
+          &clang::ParmVarDecl::getType);
+      };
 
     std::ranges::for_each(
       public_fields_view(cur_decl) //
