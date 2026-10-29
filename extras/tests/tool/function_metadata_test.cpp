@@ -691,3 +691,51 @@ TEST(function_metadata, resolves_a_function_through_a_public_dependency) {
     omni::reflected_call(fm::inspect_nested_owner{},
       fm::public_dependency_owner{}));
 }
+
+#if defined(__cpp_return_type_deduction)
+namespace maker_return_dependency {
+
+struct inferred_payload {
+  int value;
+};
+
+struct explicit_payload {
+  int value;
+};
+
+template <typename T>
+struct maker {
+  auto make() { return T{}; }
+};
+
+template <typename T>
+struct explicit_maker {
+  T make() { return T{}; }
+};
+
+struct inspect_function {
+  template <typename Function>
+  bool operator()(Function) const {
+    return omni::is_reflected<typename Function::return_type>::value;
+  }
+};
+
+struct inspect {
+  template <typename _M>
+  bool operator()(omni::record_meta_t<_M> meta) const {
+    return omni::compat::apply(inspect_function{},
+      meta.accessible_member_functions());
+  }
+};
+
+} // namespace maker_return_dependency
+
+TEST(function_metadata, discovers_deduced_member_return_dependencies) {
+  namespace maker = maker_return_dependency;
+
+  EXPECT_TRUE(omni::reflected_call(maker::inspect{},
+    omni::type_t<maker::maker<maker::inferred_payload>>{}));
+  EXPECT_TRUE(omni::reflected_call(maker::inspect{},
+    omni::type_t<maker::explicit_maker<maker::explicit_payload>>{}));
+}
+#endif
