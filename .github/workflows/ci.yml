@@ -1224,6 +1224,7 @@ jobs:
         run: npm run build
 
       - name: Download Benchmark Records
+        id: benchmark_records
         if: >-
           ${{ 'true' == steps.pages_order.outputs.deploy
             && 'true' == needs.changes.outputs.build_sources }}
@@ -1257,7 +1258,10 @@ jobs:
               "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
               --jq '.artifacts[] | select(.name | startswith("benchmark-")) | [.id, .name, .digest] | @tsv'
           )
-          $found
+          echo "available=$found" >> "$GITHUB_OUTPUT"
+          if ! $found; then
+            echo '::warning::No benchmark artifacts found; preserving published benchmark history.'
+          fi
 
       # The deployed JSON is the durable history. Only a missing file starts a
       # new history; other download failures must not replace it with an empty
@@ -1288,7 +1292,8 @@ jobs:
       - name: Update Published Benchmark History
         if: >-
           ${{ 'true' == steps.pages_order.outputs.deploy
-            && 'true' == needs.changes.outputs.build_sources }}
+            && 'true' == needs.changes.outputs.build_sources
+            && 'true' == steps.benchmark_records.outputs.available }}
         run: |
           mapfile -d '' records < <(
             find ./artifacts/benchmarks -type f -name run.json -print0)
