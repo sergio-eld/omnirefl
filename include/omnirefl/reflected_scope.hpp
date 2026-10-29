@@ -2,6 +2,8 @@
 // Copyright (c) 2024 Sergei Kolesnik
 
 // Public reflection interface and generated metadata contract.
+// Layout: member metadata/bindings; record and enum metadata; function tags and
+// metadata; record/enum bindings; concepts; reflected entry points; QoL helpers.
 
 #pragma once
 
@@ -53,15 +55,15 @@ namespace tweaks {
  * under that guard. Unguarded objects are empty in ordinary compilation.
  *
  * @details
- * TODO: Revisit primary-template matching if partial-specialization reflection
- * is supported, so separately reflected specializations can be distinguished.
- *
  * This struct template must stay declared before reflected_call. Clang visits
  * its instantiations at the template declaration, collecting requests before
  * reflection discovery in the same AST traversal, regardless of call placement.
  */
 template <typename... Types>
-struct skip_metadata {};
+struct skip_metadata {
+  // TODO: Revisit primary-template matching if partial-specialization reflection
+  // is supported, so separately reflected specializations can be distinguished.
+};
 
 } // namespace tweaks
 
@@ -100,17 +102,6 @@ namespace omni {
 /** Reflected-scope-only data-member metadata; `_M` is opaque. */
 template <typename _M>
 struct data_member_meta_t {
-  // TODO: Consider is_type_dependent(); establish a useful consumer before
-  // adding the query. For example:
-  // ```cpp
-  // template <typename T>
-  // struct example {
-  //   T value;           // Spelled "T"; the resolved type depends on T.
-  //   std::string name;  // Spelling is independent of T.
-  // };
-  // ```
-  // A consumer might choose a resolved type name for value, but that also
-  // requires type-name queries independent of metadata specializations.
   /** Declared field type. */
   using type = typename _M::type;
 
@@ -237,7 +228,9 @@ struct data_member_meta_t {
    *
    * Available only when `has_callable_metadata()` is true.
    */
-  template <typename R = _M>
+  template <
+    // Keep lookup dependent so non-callable fields can still form metadata.
+    typename R = _M>
   static constexpr auto callable_metadata() noexcept ->
     typename std::enable_if<R::has_callable_metadata(),
       typename R::callable_metadata>::type {
@@ -290,33 +283,35 @@ struct data_member_meta_t {
   }
 
   /**
-```cpp
-struct example {
-  int initialized = 815; //< true
-  int required;          //< false
-};
-```
+   * ```cpp
+   * struct example {
+   *   int initialized = 815; //< true
+   *   int required;          //< false
+   * };
+   * ```
    */
   static constexpr bool has_default_member_initializer() noexcept {
     return _M::has_default_member_initializer();
   }
 
   /**
-```cpp
-int example_value();
-
-struct example {
-  int literal = 815;            //< true
-  int called = example_value(); //< false
-};
-```
+   * ```cpp
+   * int example_value();
+   *
+   * struct example {
+   *   int literal = 815;            //< true
+   *   int called = example_value(); //< false
+   * };
+   * ```
    */
   static constexpr bool has_default_value_access() noexcept {
     return _M::has_default_value_access();
   }
 
   /** Return the cached default; enabled by `has_default_value_access()`. */
-  template <typename R = _M,
+  template <
+    // Keep default-value lookup and availability checks dependent until use.
+    typename R = _M,
     typename std::enable_if<R::has_default_value_access(), int>::type = 0>
   static const typename R::type &default_value() {
     return R::default_value();
@@ -329,11 +324,10 @@ struct example {
    * Available only when `has_value_access()` is true. Referenceable fields
    * return an lvalue reference; bit-fields and misaligned packed scalars are
    * returned by value.
-   *
-   * @details `R` keeps lookup dependent, so an unavailable generated accessor
-   * fails only when used rather than while forming `accessible_data_members()`.
    */
   template <typename T,
+    // Keep lookup dependent so unavailable accessors do not prevent forming
+    // accessible_data_members().
     typename R = _M,
     typename std::enable_if<R::has_value_access(), int>::type = 0>
   static constexpr auto value(T &t) noexcept -> decltype(R::value(t)) {
@@ -345,11 +339,10 @@ struct example {
    *
    * Available only when `has_reference_access()` is true; the check is false
    * for bit-fields and packed fields without safe reference alignment.
-   *
-   * @details `R` keeps lookup dependent, so an unavailable generated accessor
-   * fails only when used rather than while forming `accessible_data_members()`.
    */
   template <typename T,
+    // Keep lookup dependent so unavailable accessors do not prevent forming
+    // accessible_data_members().
     typename R = _M,
     typename std::enable_if<R::has_reference_access(), int>::type = 0>
   static constexpr auto ref(T &t) noexcept -> decltype(R::ref(t)) {
@@ -365,12 +358,10 @@ struct example {
    * Requires `has_value_access()` and a writable field for the supplied record.
    * Declared `const` members are not writable. A const record prevents writing
    * non-static, non-`mutable` fields; it does not change static-member access.
-   *
-   * @details `R` keeps generated assignment lookup and availability checks
-   * dependent until use.
    */
   template <typename T,
     typename V,
+    // Keep assignment lookup and availability checks dependent until use.
     typename R = _M,
     typename std::enable_if<R::has_value_access()
         && detail::_is_writable_field<T &&, R>::value,
@@ -378,6 +369,18 @@ struct example {
   static void set_value(T &&t, V &&v) {
     R::set_value(std::forward<T>(t), std::forward<V>(v));
   }
+
+  // TODO: Consider is_type_dependent(); establish a useful consumer before
+  // adding the query. For example:
+  // ```cpp
+  // template <typename T>
+  // struct example {
+  //   T value;           // Spelled "T"; the resolved type depends on T.
+  //   std::string name;  // Spelling is independent of T.
+  // };
+  // ```
+  // A consumer might choose a resolved type name for value, but that also
+  // requires type-name queries independent of metadata specializations.
 };
 
 /**
@@ -386,220 +389,23 @@ struct example {
  * `Record` is the cv-qualified bound record type, including the final record
  * through which inherited fields are accessed. `_M` is opaque.
  *
- * TODO: [high] Decide whether this should inherit `data_member_meta_t<_M>`.
- *   This requires consistent pre-C++20 overload and C++20 concept semantics.
- *   The same static predicate should accept metadata and bindings:
- *   ```cpp
- *   template <omni::data_member_meta Field>
- *   using mutable_field = std::bool_constant<Field::is_mutable()>;
- *
- *   metadata.accessible_data_members() | omni::fn::filter<mutable_field>();
- *   binding.accessible_data_members() | omni::fn::filter<mutable_field>();
- *   ```
+ * Inherits data-member metadata; object access uses the bound record.
+ * Bound accessors hide same-named metadata overloads. Use `as_meta()` to select
+ * the unbound interface, for example `field.as_meta().value(other_record)`.
+ * Record bindings follow the same rule for their member queries.
  */
 template <typename Record, typename _M>
-struct data_member_binding_t {
+struct data_member_binding_t: data_member_meta_t<_M> {
   /** Cv-qualified type of the bound record object. */
   using record = Record;
 
   /** Metadata for the bound field. */
   using meta = data_member_meta_t<_M>;
 
-  /** Declared field type. */
-  using type = typename meta::type;
+  /** Return metadata without the bound object. */
+  constexpr meta as_meta() const noexcept { return *this; }
 
   record &_record;
-
-  /**
-   * Whether this field exposes metadata for its associated callable.
-   * Recognizes fixed `function_t` tags, not arbitrary callable field types.
-   */
-  static constexpr bool has_callable_metadata() noexcept {
-    return meta::has_callable_metadata();
-  }
-
-  /**
-   * Return function metadata for the callable represented by this field.
-   *
-   * Available only when `has_callable_metadata()` is true.
-   */
-  template <typename R = _M>
-  static constexpr auto callable_metadata() noexcept ->
-    typename std::enable_if<R::has_callable_metadata(),
-      typename R::callable_metadata>::type {
-    return {};
-  }
-
-  /// Whether this is a static data member.
-  static constexpr bool is_static() noexcept {
-    return meta::is_static();
-  }
-
-  /** Source-spelled field name. */
-  static constexpr const char *name() noexcept {
-    return meta::name();
-  }
-
-  /**
-   * Source-spelled field type with namespace qualifiers omitted.
-   *
-   * ```cpp
-   * namespace app {
-   * using account_id = int;
-   * }
-   * struct account {
-   *   app::account_id id;
-   * };
-   * ```
-   *
-   * For `account::id`, returns the source-spelled alias `"account_id"`.
-   *
-   * @details The field spelling can be preserved as generated text even though
-   * an alias cannot be forward-declared or have metadata distinct from its
-   * underlying type. Preserved spellings can be used when deriving schemas.
-   *
-   * @note The `type` alias names the actual C++ field type. Within a reflected
-   * scope, access its metadata by value or by type with:
-   * ```cpp
-   * template <omni::data_member_binding FieldBinding>
-   * void inspect(FieldBinding) {
-   *   const auto field_type_metadata =
-   *     omni::reflected(omni::type_t<typename FieldBinding::type>{});
-   *   using field_type_meta = omni::meta_for<typename FieldBinding::type>;
-   * }
-   * ```
-   * Before C++20, use `omni::data_member_binding_t<Record, _FieldMeta>` as the
-   * parameter type.
-   */
-  static constexpr const char *spelled_type_name() noexcept {
-    return meta::spelled_type_name();
-  }
-
-  /**
-   * Source-spelled field type including enclosing namespaces and records.
-   *
-   * ```cpp
-   * namespace app {
-   * using account_id = int;
-   * }
-   * struct account {
-   *   app::account_id id;
-   * };
-   * ```
-   *
-   * For `account::id`, returns the source spelling `"app::account_id"`.
-   *
-   * @details The field spelling can be preserved as generated text even though
-   * an alias cannot be forward-declared or have metadata distinct from its
-   * underlying type. Preserved spellings can be used when deriving schemas.
-   *
-   * @note The `type` alias names the actual C++ field type. Within a reflected
-   * scope, access its metadata by value or by type with:
-   * ```cpp
-   * template <omni::data_member_binding FieldBinding>
-   * void inspect(FieldBinding) {
-   *   const auto field_type_metadata =
-   *     omni::reflected(omni::type_t<typename FieldBinding::type>{});
-   *   using field_type_meta = omni::meta_for<typename FieldBinding::type>;
-   * }
-   * ```
-   * Before C++20, use `omni::data_member_binding_t<Record, _FieldMeta>` as the
-   * parameter type.
-   */
-  static constexpr const char *spelled_qualified_type_name() noexcept {
-    return meta::spelled_qualified_type_name();
-  }
-
-  /**
-   * Documentation comment attached to the field declaration.
-   *
-   * ```cpp
-   * struct account {
-   *   /// Stable identifier used to reference this account
-   *   /// across requests and persisted records.
-   *   ///
-   *   /// Assigned by the storage layer when the account is created.
-   *   int id;
-   * };
-   * ```
-   *
-   * Returns:
-   *
-   * ```text
-   * Stable identifier used to reference this account
-   * across requests and persisted records.
-   *
-   * Assigned by the storage layer when the account is created.
-   * ```
-   *
-   * Comment markers and common indentation are removed. Line breaks and later
-   * paragraphs are preserved. Returns an empty string when no documentation
-   * comment is attached or generation uses `--no-annotations`.
-   */
-  static constexpr const char *documentation() noexcept {
-    return meta::documentation();
-  }
-
-  /**
-   * Whether the declared field type has top-level `const` qualification.
-   *
-   * This does not describe the bound record's cv-qualification.
-   */
-  static constexpr bool is_const() noexcept {
-    return meta::is_const();
-  }
-
-  /** Whether the field declaration uses the `mutable` specifier. */
-  static constexpr bool is_mutable() noexcept {
-    return meta::is_mutable();
-  }
-
-  /** Whether the declared field type has top-level `volatile` qualification. */
-  static constexpr bool is_volatile() noexcept {
-    return meta::is_volatile();
-  }
-
-  /**
-   * Whether `value()` is available.
-   *
-   * Safely aligned fields are returned by reference; bit-fields and misaligned
-   * packed scalars are returned by value.
-   * Misaligned packed arrays have no value access.
-   */
-  static constexpr bool has_value_access() noexcept {
-    return meta::has_value_access();
-  }
-
-  /**
-   * Whether `ref()` can expose a direct field reference.
-   *
-   * Bit-fields and packed fields without safe reference alignment cannot.
-   */
-  static constexpr bool has_reference_access() noexcept {
-    return meta::has_reference_access();
-  }
-
-  /** True when the field declaration has a deprecated attribute. */
-  static constexpr bool is_deprecated() noexcept {
-    return meta::is_deprecated();
-  }
-
-  /** See `data_member_meta_t::has_default_member_initializer()`. */
-  static constexpr bool has_default_member_initializer() noexcept {
-    return meta::has_default_member_initializer();
-  }
-
-  /** See `data_member_meta_t::has_default_value_access()`. */
-  static constexpr bool has_default_value_access() noexcept {
-    return meta::has_default_value_access();
-  }
-
-  /** See `data_member_meta_t::default_value()`. */
-  template <typename M = meta,
-    typename std::enable_if<M::has_default_value_access(), int>::type = 0>
-  static const typename M::type &default_value() {
-    return M::default_value();
-  }
 
   /**
    * Return an lvalue reference to the field, or a copy when direct reference
@@ -609,13 +415,14 @@ struct data_member_binding_t {
    * return an lvalue reference; bit-fields and misaligned packed scalars are
    * returned by value. Move the binding to select its rvalue-qualified access
    * path.
-   *
-   * @details `M` keeps lookup dependent until the accessor is used.
    */
-  template <typename M = meta,
-    typename std::enable_if<M::has_value_access(), int>::type = 0>
-  constexpr auto value() const & noexcept -> decltype(M::value(_record)) {
-    return M::value(_record);
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_value_access(), int>::type = 0>
+  constexpr auto value() const & noexcept
+    -> decltype(MemberMeta::value(_record)) {
+    return MemberMeta::value(_record);
   }
 
   /**
@@ -626,15 +433,16 @@ struct data_member_binding_t {
    * reference to the field.
    *
    * @note `constexpr` from C++14; C++11 would make this accessor const.
-   *
-   * @details `M` keeps lookup and the availability check dependent until use.
    */
-  template <typename M = meta,
-    typename std::enable_if<M::has_value_access() && M::has_reference_access(),
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_value_access()
+        && MemberMeta::has_reference_access(),
       int>::type = 0>
   OMNI_CPP14_CONSTEXPR auto value() && noexcept
-    -> decltype(std::move(M::ref(_record))) {
-    return std::move(M::ref(_record));
+    -> decltype(std::move(MemberMeta::ref(_record))) {
+    return std::move(MemberMeta::ref(_record));
   }
 
   /**
@@ -645,14 +453,16 @@ struct data_member_binding_t {
    * overload copies.
    *
    * @note `constexpr` from C++14; C++11 would make this accessor const.
-   *
-   * @details `M` keeps lookup and the availability check dependent until use.
    */
-  template <typename M = meta,
-    typename std::enable_if<M::has_value_access() && !M::has_reference_access(),
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_value_access()
+        && !MemberMeta::has_reference_access(),
       int>::type = 0>
-  OMNI_CPP14_CONSTEXPR auto value() && noexcept -> decltype(M::value(_record)) {
-    return M::value(_record);
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(MemberMeta::value(_record)) {
+    return MemberMeta::value(_record);
   }
 
   /**
@@ -661,13 +471,13 @@ struct data_member_binding_t {
    * Available only when `has_reference_access()` is true. Use
    * `std::move(field).value()` when the field should be moved; copy-only fields
    * still return a copy.
-   *
-   * @details `M` keeps lookup and the availability check dependent until use.
    */
-  template <typename M = meta,
-    typename std::enable_if<M::has_reference_access(), int>::type = 0>
-  constexpr auto ref() const noexcept -> decltype(M::ref(_record)) {
-    return M::ref(_record);
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_reference_access(), int>::type = 0>
+  constexpr auto ref() const noexcept -> decltype(MemberMeta::ref(_record)) {
+    return MemberMeta::ref(_record);
   }
 
   /**
@@ -675,12 +485,12 @@ struct data_member_binding_t {
    * conversion.
    *
    * Available only when `has_value_access()` is true.
-   *
-   * @details `M` keeps lookup dependent until the conversion is used.
    */
-  template <typename M = meta,
-    typename std::enable_if<M::has_value_access(), int>::type = 0>
-  constexpr operator decltype(M::value(_record))() const noexcept {
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_value_access(), int>::type = 0>
+  constexpr operator decltype(MemberMeta::value(_record))() const noexcept {
     return value();
   }
 
@@ -688,13 +498,14 @@ struct data_member_binding_t {
    * Return the direct field reference exposed by `ref()`.
    *
    * Available only when `has_reference_access()` is true.
-   *
-   * @details `M` keeps lookup and the availability check dependent until use.
    */
-  template <typename M = meta,
-    typename std::enable_if<M::has_reference_access(), int>::type = 0>
-  constexpr auto operator*() const noexcept -> decltype(M::ref(_record)) {
-    return M::ref(_record);
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_reference_access(), int>::type = 0>
+  constexpr auto operator*() const noexcept
+    -> decltype(MemberMeta::ref(_record)) {
+    return MemberMeta::ref(_record);
   }
 
   /**
@@ -703,18 +514,18 @@ struct data_member_binding_t {
    * Available only when `has_reference_access()` is true. `std::addressof` is
    * available since C++11 but is `constexpr` only since C++17, so this accessor
    * follows the same constant-evaluation boundary.
-   *
-   * @details `M` keeps lookup and the availability check dependent until use.
-  */
-  template <typename M = meta,
-    typename std::enable_if<M::has_reference_access(), int>::type = 0>
+   */
+  template <
+    // Keep lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_reference_access(), int>::type = 0>
   auto
 #if defined(__cpp_lib_addressof_constexpr)
     constexpr
 #endif
     operator->() const noexcept
-    -> decltype(std::addressof(M::ref(_record))) {
-    return std::addressof(M::ref(_record));
+    -> decltype(std::addressof(MemberMeta::ref(_record))) {
+    return std::addressof(MemberMeta::ref(_record));
   }
 
   /**
@@ -726,17 +537,15 @@ struct data_member_binding_t {
    * Requires `has_value_access()` and a writable field for the bound record.
    * Declared `const` members are not writable. A const record prevents writing
    * non-static, non-`mutable` fields; it does not change static-member access.
-   *
-   * @details `M` keeps generated assignment lookup and availability checks
-   * dependent until use.
    */
   template <typename V,
-    typename M = meta,
-    typename std::enable_if<M::has_value_access()
-        && detail::_is_writable_field<record &, M>::value,
+    // Keep assignment lookup and availability checks dependent until use.
+    typename MemberMeta = meta,
+    typename std::enable_if<MemberMeta::has_value_access()
+        && detail::_is_writable_field<record &, MemberMeta>::value,
       int>::type = 0>
   void set_value(V &&v) {
-    M::set_value(_record, std::forward<V>(v));
+    MemberMeta::set_value(_record, std::forward<V>(v));
   }
 
   constexpr explicit data_member_binding_t(record &value): _record(value) {}
@@ -747,37 +556,19 @@ struct function_binding_t;
 
 /** Reflected-scope-only metadata wrapper; `_M` is opaque. */
 template <typename _M,
-#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  // Generated entity metadata is not available yet.
-  reflected_entity = std::is_enum<compat::decay_t<_M>>::value
-    ? reflected_entity::enumeration
-    : reflected_entity::record>
-#else
-  reflected_entity = _M::entity()>
-#endif
+  reflected_entity = detail::_metadata_entity<_M>()>
 struct meta_t;
 
 /** Reflected-scope-only value binding; `T` preserves cv/ref qualification. */
 template <typename T,
-#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  // Generated entity metadata is not available yet.
-  reflected_entity = std::is_enum<compat::decay_t<T>>::value
-    ? reflected_entity::enumeration
-    : reflected_entity::record>
-#else
-  reflected_entity = detail::_meta<T>::entity()>
-#endif
+  reflected_entity = detail::_metadata_entity<detail::_meta<T>>()>
 struct binding_t;
 
 /** Reflected-scope-only record metadata; `_M` is opaque. */
 template <typename _M>
 struct meta_t<_M, reflected_entity::record> {
   /** Domain type recovered from generated metadata. */
-#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  using reflected_type = compat::decay_t<_M>;
-#else
-  using reflected_type = typename _M::type;
-#endif
+  using reflected_type = detail::_reflected_type<_M>;
 
   /** Identify this wrapper as record metadata. */
   static constexpr reflected_entity entity() noexcept {
@@ -1024,11 +815,7 @@ struct meta_t<_M, reflected_entity::record> {
 template <typename _M>
 struct meta_t<_M, reflected_entity::enumeration> {
   /** Domain type recovered from generated metadata. */
-#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  using reflected_type = compat::decay_t<_M>;
-#else
-  using reflected_type = typename _M::type;
-#endif
+  using reflected_type = detail::_reflected_type<_M>;
 
   /** Identify this wrapper as enum metadata. */
   static constexpr reflected_entity entity() noexcept {
@@ -1164,6 +951,9 @@ struct meta_t<_M, reflected_entity::enumeration> {
   friend constexpr meta_t<detail::_meta<U>> reflected(type_t<U>) noexcept;
 #endif
 
+  template <typename, reflected_entity>
+  friend struct binding_t;
+
   constexpr meta_t() noexcept = default;
 };
 
@@ -1210,52 +1000,42 @@ constexpr function_t<Function> function{};
 #endif
 
 #if defined(__cpp_nontype_template_parameter_auto)
-/** Uniform tag spelling for code that also targets pre-C++17. */
-#  define OMNI_FUNCTION_TAG(Function) ::omni::function<Function>
+/** C++11-compatible spelling of `omni::function<Function>`. */
+#  define OMNI_FUNCTION(Function) ::omni::function<Function>
 #else
-/** Pre-C++17 equivalent of `omni::function<Function>`. */
-#  define OMNI_FUNCTION_TAG(Function) \
-    ::omni::function_t<decltype(Function), Function>{}
-#endif
-
 /**
- * Reflected-scope-only QoL alias for metadata in dependent code.
- *
- * Names the metadata type returned by `reflected(type_t<T>{})`.
- *
- * @warning Do not add reflection specializations. This accessor names only
- * metadata emitted by Omnirefl instrumentation.
+ * C++11-compatible spelling of `omni::function<Function>`.
+ * Infers the explicit function-pointer type required before C++17.
  */
-template <typename T>
-using meta_for =
-#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  // Generated metadata is not available during instrumentation or IDE startup.
-  // TODO: [high] Handle `meta_for` queries in the tool so this alias has one
-  // definition in both passes.
-  meta_t<T>;
-#else
-  meta_t<detail::_meta<T>>;
+#  define OMNI_FUNCTION(Function) \
+    ::omni::function_t<::omni::compat::decay_t<decltype(Function)>, Function>{}
 #endif
 
-// TODO(low): Consider reducing duplicated parameter and return forwarding
-// without making their distinct roles less clear in the public interface.
 /** Reflected-scope-only function parameter metadata; `_M` is opaque. */
 template <typename _M>
 struct function_param_meta_t {
+  /**
+   * Parameter type from the function signature. References and referred-to
+   * qualification are preserved; top-level cv on by-value parameters is not.
+   */
   using type = typename _M::type;
 
+  /** Source-spelled parameter name. */
   static constexpr const char *name() noexcept {
     return _M::name();
   }
 
+  /** Text of the matching `@param` command; empty when absent. */
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
   }
 
+  /** Source-spelled type with namespace qualifiers omitted. */
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
   }
 
+  /** Source-spelled type including enclosing namespaces and records. */
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
   }
@@ -1264,16 +1044,20 @@ struct function_param_meta_t {
 /** Reflected-scope-only function return metadata; `_M` is opaque. */
 template <typename _M>
 struct function_return_meta_t {
+  /** Declared C++ type, preserving cv/ref qualification. */
   using type = typename _M::type;
 
+  /** Text of the `@return` or `@returns` command; empty when absent. */
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
   }
 
+  /** Source-spelled type with namespace qualifiers omitted. */
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
   }
 
+  /** Source-spelled type including enclosing namespaces and records. */
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
   }
@@ -1293,6 +1077,7 @@ struct function_meta_t {
   using return_type = typename return_meta::type;
   using parameters_t = typename _M::params_t;
 
+  /** Source-spelled function name. */
   static constexpr const char *name() noexcept {
     return _M::name();
   }
@@ -1302,85 +1087,76 @@ struct function_meta_t {
     return _M::is_static();
   }
 
+  /**
+   * Member-function pointer, or ordinary pointer for static/free functions.
+   */
   static constexpr pointer_type pointer() noexcept {
     return _M::pointer();
   }
 
+  /** Number of declared parameters, excluding the implicit object parameter. */
   static constexpr std::size_t arity() noexcept {
     return std::tuple_size<parameters_t>::value;
   }
 
+  /** Documentation attached to this declaration; empty when absent. */
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
   }
 
+  /** Parameter metadata tuple in declaration order. */
   static constexpr parameters_t parameters() noexcept {
     return {};
   }
 
+  /** Return-type metadata, rather than a function result. */
   static constexpr return_meta returns() noexcept { return {}; }
 
   // TODO(low): Consider an invoke convenience. Calling compat::invoke with
   // `pointer()` keeps the metadata interface smaller.
 };
 
-/** Reflected-scope-only function binding. */
+/** Reflected-scope-only function binding, inheriting function metadata. */
 template <typename Record, typename _M>
-struct function_binding_t {
+struct function_binding_t: function_meta_t<_M> {
   using record = Record;
   using meta = function_meta_t<_M>;
-  using pointer_type = typename meta::pointer_type;
-  using return_type = typename meta::return_type;
-  using return_meta = typename meta::return_meta;
-  using parameters_t = typename meta::parameters_t;
+
+  /** Return metadata without the bound object. */
+  constexpr meta as_meta() const noexcept { return *this; }
 
   record &_record;
 
-  static constexpr const char *name() noexcept { return meta::name(); }
-
-  /// Whether the represented function is a static member function.
-  static constexpr bool is_static() noexcept {
-    return meta::is_static();
-  }
-
-  static constexpr pointer_type pointer() noexcept { return meta::pointer(); }
-  static constexpr std::size_t arity() noexcept { return meta::arity(); }
-  static constexpr const char *documentation() noexcept {
-    return meta::documentation();
-  }
-
-  static constexpr parameters_t parameters() noexcept {
-    return meta::parameters();
-  }
-
-  static constexpr return_meta returns() noexcept {
-    return meta::returns();
-  }
+  // Classes with bases cannot be aggregates before C++17.
+  constexpr explicit function_binding_t(record &value) noexcept
+      : _record(value) {}
 
   /// Invoke through the bound record, honoring ordinary lookup and default
   /// arguments.
-  // Defer invocation metadata lookup until the call, so naming a binding can
-  // reach the tool's out-of-scope diagnostic without requiring that metadata.
-  template <typename... Argument, typename M = _M>
+  template <typename... Argument,
+    // Defer invocation lookup so naming a binding can reach the tool's
+    // out-of-scope diagnostic without requiring invocation metadata.
+    typename GeneratedMeta = _M>
   constexpr auto operator()(Argument &&...argument) const
-    -> decltype(M::invoke(_record, std::forward<Argument>(argument)...)) {
-    return M::invoke(_record, std::forward<Argument>(argument)...);
+    -> decltype(GeneratedMeta::invoke(_record,
+      std::forward<Argument>(argument)...)) {
+    return GeneratedMeta::invoke(_record, std::forward<Argument>(argument)...);
   }
 };
 
-/**
- * Reflected-scope-only record binding.
- *
- * TODO: [high] Decide whether bindings should inherit their metadata wrappers.
- *   This requires coordinated pre-C++20 overload and C++20 concept semantics.
- */
+/** Reflected-scope-only record binding, inheriting record metadata. */
 template <typename T>
-struct binding_t<T, reflected_entity::record> {
-  /** Bound record type with cv/ref qualification removed. */
-  using type = compat::decay_t<T>;
+struct binding_t<T, reflected_entity::record>:
+    meta_t<detail::_meta<T>, reflected_entity::record> {
+  /** Metadata for the bound record. */
+  // Qualify the injected base name because the base depends on T.
+  using meta = typename binding_t::meta_t;
 
-  /** Generated metadata for the bound record. */
-  using meta = meta_for<type>;
+  /** Bound record type with cv/ref qualification removed. */
+  using type = typename meta::reflected_type;
+
+  /** Return metadata without the bound object. */
+  constexpr meta as_meta() const noexcept { return *this; }
 
   /** Whether the binding stores its own record instead of a reference. */
   using owning = std::integral_constant<bool, !std::is_reference<T>::value>;
@@ -1391,75 +1167,6 @@ struct binding_t<T, reflected_entity::record> {
     typename std::remove_reference<T>::type &>; //< hold a reference
 
   storage_t _record;
-
-  /** Identify this wrapper as a record binding. */
-  static constexpr reflected_entity entity() noexcept {
-    return reflected_entity::record;
-  }
-
-#if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  /**
-   * Reflected record name without namespace qualification.
-   *
-   * ```cpp
-   * namespace app {
-   * struct outer { struct item {}; };
-   * }
-   * auto item = app::outer::item{};
-   * omni::reflected(item).type_name(); // "outer::item"
-   * ```
-   *
-   * Class-template specializations report the primary template name.
-   */
-  static constexpr const char *type_name() noexcept {
-    return meta::type_name();
-  }
-
-  /**
-   * Reflected record name including enclosing namespaces and records.
-   *
-   * ```cpp
-   * namespace app {
-   * struct outer { struct item {}; };
-   * }
-   * auto item = app::outer::item{};
-   * omni::reflected(item).qualified_type_name(); // "app::outer::item"
-   * ```
-   *
-   * Class-template specializations report the primary template name.
-   */
-  static constexpr const char *qualified_type_name() noexcept {
-    return meta::qualified_type_name();
-  }
-
-  /**
-   * Documentation comment attached to the bound record's declaration.
-   *
-   * ```cpp
-   * /// Account returned to API clients.
-   * ///
-   * /// The identifier remains stable across requests.
-   * struct account {
-   *   int id;
-   * };
-   * ```
-   *
-   * Returns:
-   *
-   * ```text
-   * Account returned to API clients.
-   *
-   * The identifier remains stable across requests.
-   * ```
-   *
-   * Comment markers and common indentation are removed. Line breaks and later
-   * paragraphs are preserved. Returns an empty string when no documentation
-   * comment is attached or generation uses `--no-annotations`.
-   */
-  static constexpr const char *documentation() noexcept {
-    return meta::documentation();
-  }
-#endif
 
   /** Return an lvalue reference to the bound record. */
   constexpr const storage_t &value() const & noexcept {
@@ -1640,19 +1347,19 @@ struct binding_t<T, reflected_entity::record> {
       : _record(std::forward<U>(u)) {}
 };
 
-/**
- * Reflected-scope-only enum binding.
- *
- * TODO: [high] Decide whether bindings should inherit their metadata wrappers.
- *   This requires coordinated pre-C++20 overload and C++20 concept semantics.
- */
+/** Reflected-scope-only enum binding, inheriting enum metadata. */
 template <typename T>
-struct binding_t<T, reflected_entity::enumeration> {
-  /** Bound enum type with cv/ref qualification removed. */
-  using type = compat::decay_t<T>;
+struct binding_t<T, reflected_entity::enumeration>:
+    meta_t<detail::_meta<T>, reflected_entity::enumeration> {
+  /** Metadata for the bound enum. */
+  // Qualify the injected base name because the base depends on T.
+  using meta = typename binding_t::meta_t;
 
-  /** Generated metadata for the bound enum. */
-  using meta = meta_for<type>;
+  /** Bound enum type with cv/ref qualification removed. */
+  using type = typename meta::reflected_type;
+
+  /** Return metadata without the bound object. */
+  constexpr meta as_meta() const noexcept { return *this; }
 
   /** Whether the binding stores its own enum value instead of a reference. */
   using owning = std::integral_constant<bool, !std::is_reference<T>::value>;
@@ -1663,72 +1370,6 @@ struct binding_t<T, reflected_entity::enumeration> {
     typename std::remove_reference<T>::type &>; //< hold a reference
 
   storage_t _enum_value;
-
-  /** Identify this wrapper as an enum binding. */
-  static constexpr reflected_entity entity() noexcept {
-    return reflected_entity::enumeration;
-  }
-
-#if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  /**
-   * Reflected enum name without namespace qualification.
-   *
-   * ```cpp
-   * namespace app {
-   * struct outer { enum class state { ready }; };
-   * }
-   * auto state = app::outer::state::ready;
-   * omni::reflected(state).type_name(); // "outer::state"
-   * ```
-   */
-  static constexpr const char *type_name() noexcept {
-    return meta::type_name();
-  }
-
-  /**
-   * Reflected enum name including enclosing namespaces and records.
-   *
-   * ```cpp
-   * namespace app {
-   * struct outer { enum class state { ready }; };
-   * }
-   * auto state = app::outer::state::ready;
-   * omni::reflected(state).qualified_type_name(); // "app::outer::state"
-   * ```
-   */
-  static constexpr const char *qualified_type_name() noexcept {
-    return meta::qualified_type_name();
-  }
-
-  /**
-   * Documentation comment attached to the bound enum's declaration.
-   *
-   * ```cpp
-   * /// Current account state.
-   * ///
-   * /// Stored values remain stable across releases.
-   * enum class status {
-   *   active,
-   *   suspended,
-   * };
-   * ```
-   *
-   * Returns:
-   *
-   * ```text
-   * Current account state.
-   *
-   * Stored values remain stable across releases.
-   * ```
-   *
-   * Comment markers and common indentation are removed. Line breaks and later
-   * paragraphs are preserved. Returns an empty string when no documentation
-   * comment is attached or generation uses `--no-annotations`.
-   */
-  static constexpr const char *documentation() noexcept {
-    return meta::documentation();
-  }
-#endif
 
   /** Return an lvalue reference to the bound enum value. */
   constexpr const storage_t &value() const & noexcept {
@@ -1774,33 +1415,6 @@ struct binding_t<T, reflected_entity::enumeration> {
     return value();
   }
 
-#if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-  /**
-   * Return enumerators in declaration order as `{value, name}` pairs.
-   *
-   * Given this enum:
-   * ```cpp
-   * enum class status { draft, active };
-   * ```
-   * Inside a reflected scope:
-   * ```cpp
-   * constexpr auto binding = omni::reflected(status::active);
-   *
-   * constexpr std::array pairs = binding.enumerators();
-   * for (const std::pair entry : pairs) {
-   *   const auto &[value, name] = entry;
-   *   std::cout << name << ": " << static_cast<int>(value) << '\n';
-   * }
-   * // draft: 0
-   * // active: 1
-   * ```
-   */
-  static constexpr auto enumerators() noexcept
-    -> decltype(meta::enumerators()) {
-    return meta::enumerators();
-  }
-#endif
-
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
@@ -1833,29 +1447,35 @@ template <typename T>
 using enum_binding_t = binding_t<T, reflected_entity::enumeration>;
 
 #if defined(__cpp_concepts)
-/** Whether `T` is a record or enum metadata wrapper. */
+// Binding concepts explicitly refine metadata concepts so constrained overloads
+// prefer the binding overload.
+/** Whether `T` provides record or enum metadata, including bindings. */
 template <typename T>
-concept meta = traits::is<meta_t, T>();
+concept meta = traits::is<meta_t, T>() || traits::is<binding_t, T>();
 
 /** Whether `T` is a record or enum value binding. */
 template <typename T>
-concept binding = traits::is<binding_t, T>();
+concept binding = meta<T> && traits::is<binding_t, T>();
 
-/** Whether `T` is data-member metadata. */
+/** Whether `T` provides data-member metadata, including bindings. */
 template <typename T>
-concept data_member_meta = traits::is<data_member_meta_t, T>();
+concept data_member_meta = traits::is<data_member_meta_t, T>()
+  || traits::is<data_member_binding_t, T>();
 
 /** Whether `T` binds data-member metadata to a record object. */
 template <typename T>
-concept data_member_binding = traits::is<data_member_binding_t, T>();
+concept data_member_binding = data_member_meta<T>
+  && traits::is<data_member_binding_t, T>();
 
-/** `T` is function metadata. */
+/** Whether `T` provides function metadata, including bindings. */
 template <typename T>
-concept function_meta = traits::is<function_meta_t, T>();
+concept function_meta = traits::is<function_meta_t, T>()
+  || traits::is<function_binding_t, T>();
 
 /** `T` binds function metadata to a record object. */
 template <typename T>
-concept function_binding = traits::is<function_binding_t, T>();
+concept function_binding = function_meta<T>
+  && traits::is<function_binding_t, T>();
 
 /** `T` is function parameter metadata. */
 template <typename T>
@@ -1877,20 +1497,18 @@ concept enum_meta = meta<T>
 
 /** Whether `T` binds a reflected record object. */
 template <typename T>
-concept record_binding =
-  binding<T> && compat::remove_cvref_t<T>::entity() == reflected_entity::record;
+concept record_binding = binding<T> && record_meta<T>;
 
 /** Whether `T` binds a reflected enum value. */
 template <typename T>
-concept enum_binding = binding<T>
-  && compat::remove_cvref_t<T>::entity() == reflected_entity::enumeration;
+concept enum_binding = binding<T> && enum_meta<T>;
 #endif
 
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
 // Dependent reflected queries must be declared while the visitor body is
 // parsed. Their definitions require generated metadata and remain unavailable.
 template <typename T>
-constexpr meta_for<T> reflected(type_t<T>) noexcept;
+constexpr meta_t<detail::_meta<T>> reflected(type_t<T>) noexcept;
 
 template <typename T,
   typename std::enable_if<!traits::is<type_t, compat::decay_t<T>>(),
@@ -1903,12 +1521,9 @@ constexpr auto reflected(T &&) noexcept
  * Access generated metadata for a reflected type tag.
  *
  * Query `is_reflected<T>` first when metadata availability is conditional.
- *
- * TODO: [high] Consider a direct unavailable-metadata diagnostic only if it
- *   can avoid cascading errors from the incomplete generated specialization.
  */
 template <typename T>
-constexpr meta_for<T> reflected(type_t<T>) noexcept {
+constexpr meta_t<detail::_meta<T>> reflected(type_t<T>) noexcept {
   return {};
 }
 
@@ -1925,9 +1540,9 @@ template <typename T,
   typename std::enable_if<!traits::is<type_t, compat::decay_t<T>>(),
     int>::type = 0>
 constexpr auto reflected(T &&t) noexcept(
-  noexcept(meta_for<T>::bind(std::forward<T>(t))))
-  -> decltype(meta_for<T>::bind(std::forward<T>(t))) {
-  return meta_for<T>::bind(std::forward<T>(t));
+  noexcept(meta_t<detail::_meta<T>>::bind(std::forward<T>(t))))
+  -> decltype(meta_t<detail::_meta<T>>::bind(std::forward<T>(t))) {
+  return meta_t<detail::_meta<T>>::bind(std::forward<T>(t));
 }
 #endif
 
@@ -1948,13 +1563,11 @@ constexpr auto reflected(T &&t) noexcept(
 #  endif
 #endif
 
-// TODO: Replace this callable implementation type with overloaded
-// `reflected_call` functions.
 struct reflected_call_t {
   private:
   // These factories need this class's friendship to construct public wrappers.
   template <typename T>
-  static constexpr meta_for<T> _reflect_arg(type_t<T>) noexcept {
+  static constexpr meta_t<detail::_meta<T>> _reflect_arg(type_t<T>) noexcept {
     return {};
   }
 
@@ -1965,10 +1578,6 @@ struct reflected_call_t {
   }
 
   public:
-  // TODO: Decide whether `reflected_call` should support constexpr
-  // evaluation. It currently cannot be constexpr as a whole: during the tool
-  // run the call is parsed and matched, but intentionally does not evaluate the
-  // callable before generated reflection exists.
   /** Invoke the callable with reflected wrappers for every argument. */
   template <typename Impl, typename... Args>
   auto operator()(Impl &&impl, Args &&...args) const
@@ -1982,6 +1591,14 @@ struct reflected_call_t {
     return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
   }
+
+  // TODO: Replace this callable implementation type with overloaded
+  // `reflected_call` functions.
+
+  // TODO: Decide whether `reflected_call` should support constexpr
+  // evaluation. It currently cannot be constexpr as a whole: during the tool
+  // run the call is parsed and matched, but intentionally does not evaluate the
+  // callable before generated reflection exists.
 };
 
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
@@ -2065,6 +1682,17 @@ struct reflected_call_t {
  */
 constexpr reflected_call_t reflected_call{};
 
+/**
+ * Reflected-scope-only QoL alias for metadata in dependent code.
+ *
+ * Names the metadata type returned by `reflected(type_t<T>{})`.
+ *
+ * @warning Do not add reflection specializations. This accessor names only
+ * metadata emitted by Omnirefl instrumentation.
+ */
+template <typename T>
+using meta_for = meta_t<detail::_meta<T>>;
+
 /** Experimental utilities callable only within a reflected scope. */
 namespace refl {
 
@@ -2074,8 +1702,9 @@ struct is_aggregatable: std::false_type {};
 
 template <typename T>
 struct is_aggregatable<T,
-  compat::void_t<decltype(omni::meta_for<T>::is_aggregatable())>>:
-    std::integral_constant<bool, omni::meta_for<T>::is_aggregatable()> {};
+  compat::void_t<decltype(meta_t<omni::detail::_meta<T>>::is_aggregatable())>>:
+    std::integral_constant<bool,
+      meta_t<omni::detail::_meta<T>>::is_aggregatable()> {};
 
 /**
  * Field-lookup customization point used by `aggregate_into`.
@@ -2083,10 +1712,6 @@ struct is_aggregatable<T,
  * The tuple overload finds the first same-named field, moves from its
  * `.value()`, and constructs `Target`. Missing or incompatible fields are
  * compile-time errors.
- *
- * REFACTORME: Decide whether this provisional tuple-only lookup remains the
- *   aggregate-construction customization point before stabilizing the
- *   interface.
  */
 template <typename TargetField, typename... Field>
 typename TargetField::type get(std::tuple<Field...> &fields) {
@@ -2123,7 +1748,16 @@ T aggregate_into(Fields &&fields) {
   return detail::aggregate_into_t<T>::from(std::forward<Fields>(fields));
 }
 
+// REFACTORME: Decide whether get()'s provisional tuple-only lookup remains the
+// aggregate-construction customization point before stabilizing the interface.
+
 } // namespace refl
+
+// TODO(low): Consider reducing duplicated parameter and return forwarding
+// without making their distinct roles less clear in the public interface.
+
+// TODO: [high] Consider a direct unavailable-metadata diagnostic for reflected()
+// only if it can avoid cascading errors from incomplete generated metadata.
 
 } // namespace omni
 

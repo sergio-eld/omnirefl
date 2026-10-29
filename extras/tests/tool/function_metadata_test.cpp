@@ -64,25 +64,29 @@ using undocumented_function = omni::function_t<undocumented>;
 
 static_assert( //
   omni::traits::is<create_function,
-    omni::compat::decay_t<decltype(OMNI_FUNCTION_TAG(&create))>>(),
+    omni::compat::decay_t<decltype(OMNI_FUNCTION(&create))>>(),
   "the compatibility tag must preserve the modern function tag type");
 #else
 using create_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&create))>;
+  OMNI_FUNCTION(&create))>;
 using undocumented_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&undocumented))>;
+  OMNI_FUNCTION(&undocumented))>;
 #endif
 
+static_assert(std::is_same<decltype(OMNI_FUNCTION(create)),
+  decltype(OMNI_FUNCTION(&create))>::value,
+  "function names and addresses must produce the same function tag");
+
 using command_documented_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&command_documented))>;
+  OMNI_FUNCTION(&command_documented))>;
 using first_specialization_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&specialized_operation<1>))>;
+  OMNI_FUNCTION(&specialized_operation<1>))>;
 using second_specialization_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&specialized_operation<2>))>;
+  OMNI_FUNCTION(&specialized_operation<2>))>;
 using inaccessible_owner_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&inaccessible_owner_only))>;
+  OMNI_FUNCTION(&inaccessible_owner_only))>;
 using public_dependency_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&public_dependency_only))>;
+  OMNI_FUNCTION(&public_dependency_only))>;
 
 static_assert(std::is_empty<create_function>::value,
   "a function tag must not carry metadata");

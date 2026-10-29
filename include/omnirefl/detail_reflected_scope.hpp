@@ -38,10 +38,39 @@ struct _reflected;
 // the alias itself is in the unnamed namespace. Keep only the generated
 // specialization local to the translation unit.
 template <typename T>
-using _meta = //< Internal convenience accessor for generated metadata.
-  _reflected<
-    // Specializations are generated for unqualified types.
-    compat::decay_t<T>>;
+using _meta =
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+  // Use the domain type as a placeholder before generated metadata exists.
+  compat::decay_t<T>;
+#else
+  // Specializations are generated for unqualified types.
+  _reflected<compat::decay_t<T>>;
+#endif
+
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+// Before generation, metadata wrappers receive the domain type as a placeholder.
+template <typename _M>
+constexpr reflected_entity _metadata_entity() noexcept {
+  return std::is_enum<compat::decay_t<_M>>::value
+    ? reflected_entity::enumeration
+    : reflected_entity::record;
+}
+#else
+// Keep lookup in the signature so unavailable metadata fails by substitution
+// when reflected(type_t<T>{}) also considers the value-binding overload.
+template <typename _M>
+constexpr auto _metadata_entity() noexcept -> decltype(_M::entity()) {
+  return _M::entity();
+}
+#endif
+
+template <typename _M>
+using _reflected_type =
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+  compat::decay_t<_M>;
+#else
+  typename _M::type;
+#endif
 
 template <typename Owner, typename FieldMeta>
 struct _is_writable_field:
@@ -193,6 +222,10 @@ using _all_visible_public_methods_t =
     typename _expand_base_methods<typename _M::public_bases_t>::type>::type;
 
 } // namespace
+
+// TODO: [high] Handle `meta_for` queries in the tool so _meta no longer needs
+// a domain-type placeholder before generation.
+
 } // namespace detail
 
 namespace refl {

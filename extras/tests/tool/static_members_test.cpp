@@ -75,7 +75,7 @@ struct signature_record {
 };
 
 using shared_function = omni::compat::decay_t<decltype(
-  OMNI_FUNCTION_TAG(&function_record::shared))>;
+  OMNI_FUNCTION(&function_record::shared))>;
 
 struct tagged_functions {
   shared_function local;
