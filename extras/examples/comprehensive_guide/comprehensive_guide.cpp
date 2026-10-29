@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
 
 #include <mpark/variant.hpp>
@@ -111,6 +112,11 @@ concept map_like = range_like<T> && requires { typename T::mapped_type; };
  * this file covers enums, bindings, dependency routes, documentation,
  * bitfields, primary templates, and schema-style traversal.
  */
+
+// accessible_data_members() and accessible_member_functions() include static
+// members. Filter instance data with omni::fn::filter(omni::fn::non_static{});
+// omni::fn::is_static{} selects shared members instead. Access and bindings
+// still use a record object for both paths.
 
 /// API exposition -------------------------------------------------------------
 
@@ -1425,6 +1431,44 @@ TEST(example, accessible_data_members_omit_ambiguous_base_members) {
           binding.accessible_data_members());
       },
       input));
+}
+
+/// Static members ------------------------------------------------------------
+
+namespace static_access {
+
+struct counter {
+  int local;
+  inline static int total = 10;
+
+  static int advance(int delta) { return total + delta; }
+};
+
+} // namespace static_access
+
+TEST(example, accesses_static_members_through_a_record_binding) {
+  const static_access::counter input{7};
+  const auto result = omni::reflected_call(
+    [](omni::record_binding auto record) -> std::pair<int, int> {
+      const int shared = std::apply(
+        [](omni::data_member_binding auto field) {
+          static_assert(field.is_static());
+          return field.value();
+        },
+        record.accessible_data_members()
+          | omni::fn::filter(omni::fn::is_static{}));
+      const int advanced = std::apply(
+        [](omni::function_binding auto function) { return function(5); },
+        record.accessible_member_functions()
+          | omni::fn::filter(omni::fn::is_static{}));
+
+      return {shared, advanced};
+    },
+    input);
+
+  EXPECT_EQ(10, result.first);
+  EXPECT_EQ(15, result.second);
+  EXPECT_EQ(7, input.local);
 }
 
 namespace variant_visitation {

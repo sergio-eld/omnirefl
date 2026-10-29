@@ -43,31 +43,12 @@ using _meta = //< Internal convenience accessor for generated metadata.
     // Specializations are generated for unqualified types.
     compat::decay_t<T>>;
 
-template <typename Pointer, typename Record, typename... Argument>
-constexpr auto _invoke_bound_function(/*is_member_function=*/std::true_type,
-  Pointer f,
-  Record &record,
-  Argument &&...argument)
-  -> decltype(compat::invoke(f,
-    record,
-    std::forward<Argument>(argument)...)) {
-  return compat::invoke(f, record, std::forward<Argument>(argument)...);
-}
-
-template <typename Pointer, typename Record, typename... Argument>
-constexpr auto _invoke_bound_function(/*is_member_function=*/std::false_type,
-  Pointer f,
-  Record &,
-  Argument &&...argument)
-  -> decltype(compat::invoke(f, std::forward<Argument>(argument)...)) {
-  return compat::invoke(f, std::forward<Argument>(argument)...);
-}
-
 template <typename Owner, typename FieldMeta>
 struct _is_writable_field:
     std::integral_constant<bool,
       !FieldMeta::is_const()
-        && (!std::is_const<typename std::remove_reference<Owner>::type>::value
+        && (FieldMeta::is_static()
+          || !std::is_const<typename std::remove_reference<Owner>::type>::value
           || FieldMeta::is_mutable())> {};
 
 namespace {
@@ -76,18 +57,6 @@ namespace {
 constexpr bool _same_field_name(const char *lhs, const char *rhs) noexcept {
   return *lhs == *rhs && ('\0' == *lhs || _same_field_name(lhs + 1, rhs + 1));
 }
-
-template <typename Member, typename Members>
-struct _contains_member_name;
-
-template <typename Member>
-struct _contains_member_name<Member, std::tuple<>>: std::false_type {};
-
-template <typename Member, typename Head, typename... Tail>
-struct _contains_member_name<Member, std::tuple<Head, Tail...>>:
-    compat::conditional_t<_same_field_name(Member::name(), Head::name()),
-      std::true_type,
-      _contains_member_name<Member, std::tuple<Tail...>>> {};
 
 // Generated field accessors use unqualified member access, so substitution
 // reflects C++ lookup from the final record, including base ambiguity.
@@ -100,6 +69,7 @@ struct _is_public_field_visible_from<Record,
   compat::void_t<decltype(Field::value(std::declval<Record &>()))>>:
     std::true_type {};
 
+// Multiple inheritance paths to one static declaration share a metadata type.
 template <typename Record,
   typename OwnFields,
   typename RemainingBaseFields,
@@ -120,7 +90,10 @@ struct _all_visible_public_fields<Record,
       std::tuple<Tail...>,
       compat::conditional_t<
         _is_public_field_visible_from<Record, BaseField>::value
-          && !_contains_member_name<BaseField, std::tuple<OwnField...>>::value,
+          && !_meta<Record>::declares_member_name(BaseField::name())
+          && (!BaseField::is_static()
+            || !compat::disjunction<
+              std::is_same<BaseField, Collected>...>::value),
         std::tuple<Collected..., BaseField>,
         std::tuple<Collected...>>> {};
 
@@ -158,8 +131,12 @@ template <typename Record, typename _M>
 struct _is_public_method_visible_from<Record,
   function_meta_t<_M>,
   compat::void_t<decltype(_M::template pointer<Record>())>>:
-    std::is_same<decltype(_M::template pointer<Record>()),
-      decltype(_M::pointer())> {};
+    std::integral_constant<bool,
+      std::is_same<decltype(_M::template pointer<Record>()),
+        decltype(_M::pointer())>::value
+        && (_M::is_static()
+          || std::is_convertible<Record *, typename _M::owner_type *>::value)> {
+};
 
 template <typename Record,
   typename OwnMethods,
@@ -181,8 +158,10 @@ struct _all_visible_public_methods<Record,
       std::tuple<Tail...>,
       compat::conditional_t<
         _is_public_method_visible_from<Record, BaseMethod>::value
-          && !_contains_member_name<BaseMethod,
-            std::tuple<OwnMethod...>>::value,
+          && !_meta<Record>::declares_member_name(BaseMethod::name())
+          && (!BaseMethod::is_static()
+            || !compat::disjunction<
+              std::is_same<BaseMethod, Collected>...>::value),
         std::tuple<Collected..., BaseMethod>,
         std::tuple<Collected...>>> {};
 

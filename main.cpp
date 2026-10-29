@@ -13,10 +13,12 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/ASTTypeTraits.h>
+#include <clang/AST/CXXInheritance.h>
 #include <clang/AST/Comment.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/DeclLookups.h>
 #include <clang/AST/DeclTemplate.h>
 #include <clang/AST/RawCommentList.h>
 #include <clang/AST/Type.h>
@@ -577,6 +579,7 @@ struct field_data {
   bool has_default_member_initializer;
   bool is_volatile;
   bool is_deprecated;
+  bool is_static;
 
   enum {
     none = 0,
@@ -585,7 +588,7 @@ struct field_data {
   } qualified;
 
   static field_data from_decl(const clang::ASTContext &ast,
-    const clang::FieldDecl *d);
+    const clang::DeclaratorDecl *d);
 };
 
 struct function_data {
@@ -595,6 +598,7 @@ struct function_data {
   value_declaration_data result;
   std::vector<value_declaration_data> params;
   bool member_method;
+  bool is_static;
 };
 
 struct template_type_param {
@@ -647,6 +651,7 @@ struct record_data {
   std::vector<field_data> public_fields;
   std::vector<function_data> public_function_fields;
   std::vector<function_data> public_methods;
+  std::set<std::string> declared_member_names;
   std::set<std::string> skipped_overloaded_methods;
 
   enum type_t {
@@ -5256,7 +5261,7 @@ const clang::FunctionDecl *function_from_tag(clang::QualType type) {
 }
 
 const clang::FunctionDecl *function_from_field_tag(
-  const clang::FieldDecl *field) {
+  const clang::DeclaratorDecl *field) {
   assert(field);
 
   const clang::FunctionDecl *function = function_from_tag(field->getType());
@@ -5264,7 +5269,8 @@ const clang::FunctionDecl *function_from_field_tag(
     return nullptr;
 
   const auto *specialization =
-    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(field->getParent());
+    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+      field->getDeclContext());
   if (!specialization)
     return function;
 
@@ -5272,13 +5278,15 @@ const clang::FunctionDecl *function_from_field_tag(
     specialization->getSpecializedTemplate()->getTemplatedDecl()->lookup(
       field->getDeclName());
   const auto pattern = std::ranges::find_if(declarations, [](const auto *d) {
-    return llvm::isa<clang::FieldDecl>(d);
+    return llvm::isa<clang::FieldDecl, clang::VarDecl>(d);
   });
 
   // Primary-template specializations share generated metadata, while a
   // dependent field may resolve to a different function in each one.
   return pattern != declarations.end()
-      && llvm::cast<clang::FieldDecl>(*pattern)->getType()->isDependentType()
+      && llvm::cast<clang::DeclaratorDecl>(*pattern)
+           ->getType()
+           ->isDependentType()
     ? nullptr
     : function;
 }
@@ -5327,26 +5335,29 @@ function_data function_data_from(
     .params = declaration.parameters() //
       | std_c::views::enumerate //
       | std::views::transform([&ast, &comments](const auto &indexed) {
-        const auto &[index, parameter] = indexed;
+          const auto &[index, parameter] = indexed;
 
-        return value_declaration_from(ast,
-          parameter->getType(),
-          parameter->getTypeSourceInfo() //
-            ? parameter->getTypeSourceInfo()->getTypeLoc()
-            : clang::TypeLoc{},
-          parameter->getNameAsString(),
-          comments.parameters[index]);
-      })
+          return value_declaration_from(ast,
+            parameter->getType(),
+            parameter->getTypeSourceInfo() //
+              ? parameter->getTypeSourceInfo()->getTypeLoc()
+              : clang::TypeLoc{},
+            parameter->getNameAsString(),
+            comments.parameters[index]);
+        })
       | std::ranges::to<std::vector>(),
     .member_method = member_method,
+    .is_static = llvm::isa<clang::CXXMethodDecl>(declaration)
+      && llvm::cast<clang::CXXMethodDecl>(declaration).isStatic(),
   };
 }
 
 } // namespace meta::impl
 
 meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
-  const clang::FieldDecl *d) {
+  const clang::DeclaratorDecl *d) {
   assert(d);
+  const auto *field = llvm::dyn_cast<clang::FieldDecl>(d);
   const clang::TypeSourceInfo *source = d->getTypeSourceInfo();
 
   return {
@@ -5356,12 +5367,16 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
       std::string(omni::fn::as<std::string_view>()(d->getName())),
       annotation_from_decl(ast, d)),
 
-    .default_initializer = meta::impl::default_initializer_from(ast, d),
+    .default_initializer =
+      field ? meta::impl::default_initializer_from(ast, field) : std::nullopt,
     // ad hoc: packed fields cannot always bind to references. Infer safe
     // access from the record layout and copy fields whose address may be
     // misaligned.
-    .access = std::invoke([&ast, d] -> value_access {
-      if (d->isBitField())
+    .access = std::invoke([&ast, d, field] -> value_access {
+      if (!field)
+        return value_access::reference;
+
+      if (field->isBitField())
         return value_access::copy;
 
       if (d->getType()->isReferenceType())
@@ -5371,9 +5386,9 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
         ast.getTypeAlignInChars(d->getType());
 
       if (field_alignment.isOne()
-        || (field_alignment
-            <= ast.getTypeAlignInChars(ast.getCanonicalTagType(d->getParent()))
-          && ast.toCharUnitsFromBits(ast.getFieldOffset(d))
+        || (field_alignment <= ast.getTypeAlignInChars(
+              ast.getCanonicalTagType(field->getParent()))
+          && ast.toCharUnitsFromBits(ast.getFieldOffset(field))
             .isMultipleOf(field_alignment))) {
         return value_access::reference;
       }
@@ -5383,10 +5398,11 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
         : value_access::copy;
     }),
 
-    .has_default_member_initializer = d->hasInClassInitializer(),
+    .has_default_member_initializer = field && field->hasInClassInitializer(),
     .is_volatile = d->getType().isVolatileQualified(),
     .is_deprecated = d->hasAttr<clang::DeprecatedAttr>(),
-    .qualified = d->isMutable()
+    .is_static = !field,
+    .qualified = field && field->isMutable()
       ? as_mutable
       : (d->getType().isConstQualified() ? as_const : none),
   };
@@ -5463,16 +5479,67 @@ util::viewable_range_of<const clang::CXXRecordDecl *> auto public_bases_view(
     | std::views::filter([](const auto *base) { return nullptr != base; });
 }
 
-util::viewable_range_of<const clang::FieldDecl *> auto public_fields_view(
-  const clang::RecordDecl *rd) {
-  const auto is_public = //
-    [](const clang::FieldDecl *f) {
-      return clang::AccessSpecifier::AS_public == f->getAccess();
-    };
+// Public using-declarations select a member in this record's lookup scope.
+// Emit that selection here so it hides the other inherited declarations.
+util::viewable_range_of<clang::NamedDecl *> auto
+  public_member_declarations_view(const clang::RecordDecl *rd) {
+  const auto *definition = rd->getDefinitionOrSelf();
 
-  return rd->fields() //
-    | std::views::filter(is_public) //
-    | std::views::filter(std::not_fn(&clang::FieldDecl::isUnnamedBitField));
+  return definition->decls() //
+    | std::views::filter(
+      [](const clang::Decl *d) { return clang::AS_public == d->getAccess(); })
+    | std::views::transform([definition](clang::Decl *d) -> clang::NamedDecl * {
+        auto *named = llvm::dyn_cast<clang::NamedDecl>(d);
+        if (!named)
+          return nullptr;
+
+        auto *member = named->getUnderlyingDecl();
+        if (llvm::isa<clang::UsingShadowDecl>(named)) {
+          // Repeated introductions of one function are not overloads.
+          const auto declarations = definition->lookup(member->getDeclName());
+          const auto first =
+            std::ranges::find_if(declarations, [member](auto *candidate) {
+              return clang::AS_public == candidate->getAccess()
+                && candidate->getUnderlyingDecl()->getCanonicalDecl()
+                == member->getCanonicalDecl();
+            });
+          if (first != declarations.end() && *first != named)
+            return nullptr;
+
+          const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(member);
+          if (llvm::isa<clang::FieldDecl>(member)
+            || (method && !method->isStatic())) {
+            // A using-declaration does not resolve ambiguous object subobjects.
+            const auto *record = llvm::cast<clang::CXXRecordDecl>(definition);
+            const auto *owner =
+              llvm::cast<clang::CXXRecordDecl>(member->getDeclContext());
+            clang::CXXBasePaths paths(/*FindAmbiguities=*/true,
+              /*RecordPaths=*/false,
+              /*DetectVirtual=*/false);
+            const auto &ast = record->getASTContext();
+            if (record->isDerivedFrom(owner, paths)
+              && paths.isAmbiguous(ast.getCanonicalTagType(owner)))
+              return nullptr;
+          }
+        }
+        return member;
+      })
+    | std::views::filter([](const auto *d) { return nullptr != d; });
+}
+
+util::viewable_range_of<const clang::DeclaratorDecl *> auto public_fields_view(
+  const clang::RecordDecl *rd) {
+  return public_member_declarations_view(rd) //
+    | std::views::transform(
+      [](const clang::NamedDecl *d) -> const clang::DeclaratorDecl * {
+        if (const auto *field = llvm::dyn_cast<clang::FieldDecl>(d))
+          return field->isUnnamedBitField() ? nullptr : field;
+        if (const auto *variable = llvm::dyn_cast<clang::VarDecl>(d);
+          variable && variable->isStaticDataMember())
+          return variable;
+        return nullptr;
+      })
+    | std::views::filter([](const auto *d) { return nullptr != d; });
 }
 
 util::viewable_range_of<clang::CXXMethodDecl *> auto
@@ -5480,12 +5547,13 @@ public_method_candidates_view(
   const clang::CXXRecordDecl *rd) {
   assert(rd);
 
-  return rd->methods() //
+  return public_member_declarations_view(rd) //
+    | std::views::transform([](clang::NamedDecl *d) {
+        return llvm::dyn_cast<clang::CXXMethodDecl>(d);
+      })
     | std::views::filter([](const clang::CXXMethodDecl *m) {
-        return clang::AccessSpecifier::AS_public == m->getAccess()
-          && !m->isStatic() && !m->isImplicit() && !m->isDeleted()
-          && !m->isVariadic() && !m->isConsteval()
-          && !m->getDescribedFunctionTemplate()
+        return m && !m->isImplicit() && !m->isDeleted() && !m->isVariadic()
+          && !m->isConsteval() && !m->getDescribedFunctionTemplate()
           && !llvm::isa<clang::CXXConstructorDecl>(m)
           && !llvm::isa<clang::CXXDestructorDecl>(m)
           && !llvm::isa<clang::CXXConversionDecl>(m);
@@ -5510,13 +5578,16 @@ bool method_name_is_unambiguous(const clang::CXXRecordDecl *rd,
   if (clang::OO_Equal == method->getOverloadedOperator())
     return false;
 
-  return 1 == std::ranges::count_if(rd->lookup(method->getDeclName()),
-    [](const clang::NamedDecl *candidate) {
-      const clang::NamedDecl *declaration = candidate->getUnderlyingDecl();
+  const auto declarations = rd->lookup(method->getDeclName());
+  return !declarations.empty()
+    && std::ranges::all_of(declarations,
+      [method](const clang::NamedDecl *candidate) {
+        const clang::NamedDecl *declaration = candidate->getUnderlyingDecl();
 
-      return llvm::isa<clang::FunctionDecl>(declaration)
-        || llvm::isa<clang::FunctionTemplateDecl>(declaration);
-    });
+        return !llvm::isa<clang::FunctionDecl, clang::FunctionTemplateDecl>(
+                 declaration)
+          || declaration->getCanonicalDecl() == method->getCanonicalDecl();
+      });
 }
 
 util::viewable_range_of<clang::CXXMethodDecl *> auto public_methods_view(
@@ -6019,8 +6090,8 @@ collected_dependencies recursively_collect_dependency_types(
     std::ranges::for_each(public_methods_view(cur_decl), enqueue_signature);
 
     // public fields
-    for (const clang::FieldDecl *field : public_fields_view(cur_decl)
-        | std::views::filter([](const clang::FieldDecl *field) {
+    for (const clang::DeclaratorDecl *field : public_fields_view(cur_decl)
+        | std::views::filter([](const clang::DeclaratorDecl *field) {
             return !meta::impl::function_tag(field->getType());
           })) {
       std::optional public_access_path = pending.public_access_path;
@@ -6081,13 +6152,12 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
       | std::ranges::to<std::vector>(),
 
     .public_function_fields = public_field_decls
-      | std::views::transform([](const clang::FieldDecl *field) {
+      | std::views::transform([](const clang::DeclaratorDecl *field) {
           return std::pair{field,
             meta::impl::function_from_field_tag(field)};
         })
-      | std::views::filter([](const auto &entry) {
-          return nullptr != entry.second;
-        })
+      | std::views::filter(
+        [](const auto &entry) { return nullptr != entry.second; })
       | std::views::transform([&ast](const auto &entry) {
           return meta::impl::function_data_from(ast,
             entry.first->getNameAsString(),
@@ -6096,16 +6166,23 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
         })
       | std::ranges::to<std::vector>(),
 
-    .public_methods = cxx_decl
-      ? public_methods_view(cxx_decl)
-          | std::views::transform([&ast](const clang::CXXMethodDecl *method) {
-              return meta::impl::function_data_from(ast,
-                method->getNameAsString(),
-                *method,
-                /*member_method=*/true);
-            })
-          | std::ranges::to<std::vector>()
-      : std::vector<meta::function_data>{},
+    .public_methods = cxx_decl ? public_methods_view(cxx_decl)
+        | std::views::transform([&ast](const clang::CXXMethodDecl *method) {
+            return meta::impl::function_data_from(ast,
+              method->getNameAsString(),
+              *method,
+              /*member_method=*/true);
+          })
+        | std::ranges::to<std::vector>()
+                               : std::vector<meta::function_data>{},
+
+    .declared_member_names = r_decl.getDefinitionOrSelf()->lookups()
+      | std::views::filter(
+        [](auto declarations) { return !declarations.empty(); })
+      | std::views::transform([](auto declarations) {
+          return declarations.front()->getNameAsString();
+        })
+      | std::ranges::to<std::set>(),
 
     .skipped_overloaded_methods = cxx_decl
       ? skipped_overloaded_public_method_names(cxx_decl)
@@ -6128,8 +6205,9 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
     .is_aggregatable = cxx_decl && cxx_decl->isAggregate() && !r_decl.isUnion()
       && cxx_decl->bases().empty()
       && std::ranges::none_of(public_field_decls,
-        [](const clang::FieldDecl *field) {
-          return nullptr != meta::impl::function_from_field_tag(field);
+        [](const clang::DeclaratorDecl *field) {
+          return llvm::isa<clang::FieldDecl>(field)
+            && nullptr != meta::impl::function_from_field_tag(field);
         })
       && std::ranges::all_of(aggregate_fields,
         [](const clang::FieldDecl *field) {
@@ -6850,8 +6928,19 @@ std::string function_metadata(const meta::function_data &function,
         "\n          std::declval<_T &>().{})>{{}})",
         function.name);
 
+  const std::string invocation = function.member_method
+    ? std::format(
+        "\n\n    template <typename _T, typename... Argument>"
+        "\n    static constexpr auto invoke(_T &record, Argument &&...argument)"
+        "\n      -> decltype(record.{0}(std::forward<Argument>(argument)...)) {{"
+        "\n      return record.{0}(std::forward<Argument>(argument)...);"
+        "\n    }}",
+        function.name)
+    : std::string{};
+
   return std::format(
     "  struct {0} {{"
+    "\n    using owner_type = typename _reflected::type;"
     "\n    template <typename _T = typename _reflected::type>"
     "\n    static constexpr auto pointer() noexcept"
     "\n      -> decltype({1}) {{"
@@ -6872,6 +6961,8 @@ std::string function_metadata(const meta::function_data &function,
     "\n      return \"{5}\";"
     "\n    }}"
     "{6}"
+    "\n    static constexpr bool is_static() noexcept {{ return {7}; }}"
+    "{8}"
     "\n  }};",
 
     // 0
@@ -6904,7 +6995,13 @@ std::string function_metadata(const meta::function_data &function,
     escaped_string_literal_content(function.name),
 
     // 6
-    documentation_method(function.annotation, "    "));
+    documentation_method(function.annotation, "    "),
+
+    // 7
+    function.is_static,
+
+    // 8
+    invocation);
 }
 
 std::string indent_lines(std::string_view source) {
@@ -6918,6 +7015,8 @@ std::string indent_lines(std::string_view source) {
     | std::ranges::to<std::string>();
 }
 
+// TODO: [high] Add an "as static" access path for static members without a
+// record object; preserve the existing record-based access and bindings.
 std::string reflectable_body(const meta::record_data &d) {
   const auto format_field = //
     [&d](const meta::field_data &f) {
@@ -7035,6 +7134,7 @@ std::string reflectable_body(const meta::record_data &d) {
         "{10}"
         "{11}"
         "{12}"
+        "\n    static constexpr bool is_static() noexcept {{ return {13}; }}"
         "\n  }};",
         // 0
         declaration.name,
@@ -7073,7 +7173,10 @@ std::string reflectable_body(const meta::record_data &d) {
         accessors,
 
         // 12
-        callable_metadata);
+        callable_metadata,
+
+        // 13
+        f.is_static);
     };
 
   const std::string fields = d.public_fields.empty()
@@ -7093,6 +7196,22 @@ std::string reflectable_body(const meta::record_data &d) {
             })
           | std_c::views::join_with("\n\n"sv)
           | std::ranges::to<std::string>()));
+
+  // Non-emitted declarations (for example enumerators or consteval functions)
+  // still hide inherited members with the same name.
+  const std::string declared_names = std::format(
+    "\n\n  static constexpr bool declares_member_name(const char *{}) noexcept {{"
+    "\n    return {};"
+    "\n  }}",
+    d.declared_member_names.empty() ? "" : "name",
+    d.declared_member_names.empty() ? "false"
+                                    : d.declared_member_names
+        | std::views::transform([](std::string_view name) {
+            return std::format("omni::detail::_same_field_name(name, \"{}\")",
+              escaped_string_literal_content(name));
+          })
+        | std_c::views::join_with(" ||\n      "sv)
+        | std::ranges::to<std::string>());
 
   // REFACTORME: Consider rendering named subparts, as fields and methods already
   // do, to shorten the format call and keep placeholders near their arguments.
@@ -7114,7 +7233,7 @@ std::string reflectable_body(const meta::record_data &d) {
     "\n  static constexpr bool is_template() noexcept {{ return {}; }}"
     "\n}};",
 
-    fields,
+    fields + declared_names,
 
     d.public_fields //
       | std::views::transform([](const auto &field) {
@@ -7142,13 +7261,17 @@ std::string reflectable_body(const meta::record_data &d) {
 }
 
 std::string aggregate_into_body(const meta::record_data &d) {
+  // filter_view caches its first matching iterator, so iteration is non-const.
+  auto fields = d.public_fields //
+    | std::views::filter([](const auto &field) { return !field.is_static; });
+
   const auto get_field = [](const meta::field_data &field) {
     return std::format(
       "omni::refl::get<typename omni::detail::_meta<T>::fields::{0}_t>(fields)",
       field.declaration.name);
   };
 
-  const std::string designated_fields = d.public_fields //
+  const std::string designated_fields = fields //
     | std::views::transform([&get_field](const meta::field_data &field) {
         return std::format(".{0} = {1}",
           field.declaration.name,
@@ -7157,7 +7280,7 @@ std::string aggregate_into_body(const meta::record_data &d) {
     | std_c::views::join_with(",\n      "sv) //
     | std::ranges::to<std::string>();
 
-  const std::string positional_fields = d.public_fields //
+  const std::string positional_fields = fields //
     | std::views::transform(get_field) //
     | std_c::views::join_with(",\n      "sv) //
     | std::ranges::to<std::string>();
@@ -7176,16 +7299,16 @@ std::string aggregate_into_body(const meta::record_data &d) {
     "\n}};",
 
     // 0
-    d.public_fields.empty() ? "" : "\n      ",
+    fields.empty() ? "" : "\n      ",
 
     // 1
-    d.public_fields.empty() ? "" : designated_fields + "\n    ",
+    fields.empty() ? "" : designated_fields + "\n    ",
 
     // 2
-    d.public_fields.empty() ? "" : positional_fields + "\n    ",
+    fields.empty() ? "" : positional_fields + "\n    ",
 
     // 3
-    d.public_fields.empty() ? "" : "fields");
+    fields.empty() ? "" : "fields");
 }
 
 } // namespace render::impl
@@ -7210,6 +7333,14 @@ std::string render_reflectable_head(const S &r) {
     r.type.data);
 }
 
+// FIXME: [high] Shared primary-template metadata freezes the first
+// specialization's dependent bases and promoted using-declaration properties.
+// Member names, data/function categories, types, and traits can differ across
+// specializations, producing incorrect metadata or ill-formed accessors.
+// Consider comparing accessible base members across encountered specializations:
+// a data/function category mismatch could be an error; other differences could
+// warn. Detection is deferred because its implementation effort is not currently
+// justified.
 std::string render_public_bases(
   const std::map<meta::type_id, meta::nm_qual_type> &type_name_by_id,
   const meta::record_data &r) {

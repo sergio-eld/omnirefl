@@ -1038,6 +1038,24 @@ constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
     std::forward<Argument>(argument)...);
 }
 
+/// Select static data-member or function metadata and bindings in `filter`.
+struct is_static {
+  template <typename Member>
+  constexpr auto operator()() const
+    -> decltype(compat::remove_cvref_t<Member>::is_static()) {
+    return compat::remove_cvref_t<Member>::is_static();
+  }
+};
+
+/// Select non-static data-member or function metadata and bindings in `filter`.
+struct non_static {
+  template <typename Member>
+  constexpr auto operator()() const
+    -> decltype(!compat::remove_cvref_t<Member>::is_static()) {
+    return !compat::remove_cvref_t<Member>::is_static();
+  }
+};
+
 /** QoL key projection for comparing reflected fields by name. */
 // TODO: Constrain Field to reflected field metadata or field bindings.
 // TODO: Add reflected-field predicates for filtering fields by record/field

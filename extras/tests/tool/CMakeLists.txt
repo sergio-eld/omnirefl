@@ -1002,6 +1002,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         dependency_alias_depth_test.cpp
         dependent_types_test.cpp
         function_metadata_test.cpp
+        static_members_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp
         example_test.cpp
