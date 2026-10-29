@@ -2497,6 +2497,19 @@ meta::source_file_context meta::matches::finalize(const diagnostics &log,
           return std::nullopt;
         }
 
+        const auto flags = type.definition.definition_flags;
+        if (meta::type_definition::local & flags)
+          return "function-local types cannot be forward-declared for "
+                 "generated metadata"sv;
+        if (!type.definition.type_name.name)
+          return "unnamed types cannot be named by generated metadata"sv;
+        if (meta::type_definition::non_public & flags)
+          return "non-public types cannot be named by generated metadata"sv;
+        if (!type.definition.type_name.enclosing_records.empty()
+          && type.definition.type_name.enclosing_records.front().empty())
+          return "types enclosed by unnamed records cannot be named by "
+                 "generated metadata"sv;
+
         return "the type cannot be named by a supported generated metadata route"sv;
       });
 
@@ -5957,13 +5970,43 @@ collected_dependencies recursively_collect_dependency_types(
           std::nullopt);
       };
 
-    const auto enqueue_signature = [&enqueue_signature_type](
-                                     const clang::FunctionDecl *function) {
-      enqueue_signature_type(function->getReturnType());
-      std::ranges::for_each(function->parameters(),
-        enqueue_signature_type,
-        &clang::ParmVarDecl::getType);
-    };
+    const auto enqueue_signature =
+      [&enqueue_signature_type, &sema, &log, &ast, point_of_instantiation](
+        const clang::FunctionDecl *function) {
+        // Completing a class specialization leaves unused auto-return members
+        // undeduced. Sema must instantiate the body before its result can be
+        // discovered; its API updates the declaration in place.
+        // Leave invalid-code diagnostics to the compiler; report the skipped
+        // dependency here without adding a compilation error.
+        const bool deduction_failed =
+          function->getReturnType()->isUndeducedType()
+          && sema.DeduceReturnType(const_cast<clang::FunctionDecl *>(function),
+            point_of_instantiation,
+            /*Diagnose=*/false);
+
+        if (deduction_failed || function->getReturnType()->isUndeducedType()) {
+          log(log_level::warning, [&ast, function, deduction_failed] {
+            const auto *pattern = function->getTemplateInstantiationPattern();
+            const std::string_view reason =
+              !function->isDefined() && (!pattern || !pattern->isDefined())
+              ? "function definition is unavailable for return-type deduction"
+              : deduction_failed
+                ? "return-type deduction failed"
+                : "return type remains undeduced";
+
+            return std::format("\nreturn dependency of '{}' skipped at {}: {}.",
+              function->getQualifiedNameAsString(),
+              function->getLocation().printToString(ast.getSourceManager()),
+              reason);
+          });
+        } else {
+          enqueue_signature_type(function->getReturnType());
+        }
+
+        std::ranges::for_each(function->parameters(),
+          enqueue_signature_type,
+          &clang::ParmVarDecl::getType);
+      };
 
     std::ranges::for_each(
       public_fields_view(cur_decl) //
