@@ -2783,6 +2783,56 @@ TEST_P(serialization, retains_empty_strings_containers_and_records) {
   EXPECT_TRUE(restored.diagnostics.issues.empty());
 }
 
+struct record_with_shared_state {
+  int value;
+  static int shared;
+};
+
+int record_with_shared_state::shared = 42;
+
+TEST_P(serialization, omits_static_data_members) {
+  EXPECT_TRUE(serialization_test::matches_json(R"({"value": 7})",
+    omni::ryml::serialize_t{
+      /*format=*/GetParam(),
+    }(record_with_shared_state{7})));
+}
+
+TEST_P(serialization, does_not_require_or_write_static_data_members) {
+  const auto result =
+    strict_deserialize(omni::type_t<record_with_shared_state>{},
+      R"({"value": 7})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(7, result.value->value);
+  }
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(42, record_with_shared_state::shared);
+
+  const auto invalid =
+    strict_deserialize(omni::type_t<record_with_shared_state>{},
+      R"({"value": 7, "shared": 99})");
+
+  EXPECT_FALSE(invalid.value);
+  EXPECT_EQ(42, record_with_shared_state::shared);
+}
+
+TEST(deserialization, allowed_extra_fields_do_not_write_static_storage) {
+  const int saved = record_with_shared_state::shared;
+  const auto deserialize = omni::fn::ctad<omni::ryml::deserialize_t>(
+    strict_deserialize.strategy.allow_extra(true));
+  const auto result = deserialize(omni::type_t<record_with_shared_state>{},
+    R"({"value": 7, "shared": 99})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(7, result.value->value);
+  }
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(saved, record_with_shared_state::shared);
+  record_with_shared_state::shared = saved;
+}
+
 TEST_P(serialization, writes_an_empty_root_record) {
   EXPECT_TRUE(serialization_test::matches_json(
     R"({})", omni::ryml::serialize_t{

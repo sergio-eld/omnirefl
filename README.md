@@ -74,8 +74,8 @@ struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
   // Reflected field properties are queryable.
   mutable std::string name = "before"; //< `.is_mutable()` is true.
 
-  // Public non-static methods are reflected. Their parameter and return types
-  // join dependency discovery. Overloaded methods are skipped with a warning.
+  // Public static and non-static methods are reflected. Parameter and return
+  // types join dependency discovery. Overloaded methods are skipped with a warning.
   // Doxygen parameter descriptions, such as `@param` or `\param[in]`, are
   // available through parameter metadata.
 
@@ -547,18 +547,18 @@ and functions. See [Limitations](#limitations) for details.
 - **Type metadata:**
   - qualified and unqualified type names
   - Doxygen-style documentation
-- **Public field metadata and access:**
-  - non-static fields accessible from the reflected type, including those
-    inherited through public bases, in declaration order
+- **Public data-member metadata and access:**
+  - static and non-static data members accessible from the reflected type,
+    including those inherited through public bases, in declaration order
   - field names, declared type names, and documentation
-  - const/mutable/volatile/deprecated traits
+  - static/const/mutable/volatile/deprecated traits
   - reading and writing field values, including bitfields and misaligned packed
     scalar fields
   - query whether each field can be read or accessed by reference
   - default member initializer detection and best-effort access to their values
 - **Public function metadata:**
-  - non-static member functions accessible from the reflected type, including
-    those inherited through public bases
+  - non-overloaded static and non-static member functions accessible from the
+    reflected type, including those inherited through public bases
   - free and static functions represented by `function_t` fields;
     see [Limitations](#limitations)
   - names, documentation, function pointers, arity, parameter metadata, and
@@ -756,6 +756,9 @@ limits the declarations it can represent.
 - Constrained primary record templates and explicit or partial record-template
   specializations are rejected as roots. Explicit or partial specialization
   dependencies are skipped with a warning.
+- Primary-template support assumes inherited member names and kinds stay the
+  same across specializations. Different inherited member sets, or a member
+  changing between data and function, are unsupported.
 - Records with direct or inherited virtual bases are rejected as roots and
   skipped with a warning as dependencies.
 - Public access paths to non-public nested dependencies are not preserved when

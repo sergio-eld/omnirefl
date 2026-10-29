@@ -58,8 +58,8 @@ struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
   // Reflected field properties are queryable.
   mutable std::string name = "before"; //< `.is_mutable()` is true.
 
-  // Public non-static methods are reflected. Their parameter and return types
-  // join dependency discovery. Overloaded methods are skipped with a warning.
+  // Public static and non-static methods are reflected. Parameter and return
+  // types join dependency discovery. Overloaded methods are skipped with a warning.
   // Doxygen parameter descriptions, such as `@param` or `\param[in]`, are
   // available through parameter metadata.
 
@@ -203,10 +203,11 @@ std::string describe_record(omni::record_meta auto record) {
   namespace fn = omni::fn;
 
   const auto fields = record.accessible_data_members()
+    | fn::filter<fn::non_static>()
     | fn::foldl(
       []<typename Member>(std::string before, Member member) {
-        if constexpr (omni::function_meta<Member>)
-          return before + "  " + describe_function(member);
+        if constexpr (member.has_callable_metadata())
+          return before + "  " + describe_function(member.callable_metadata());
         else
           return before + describe_field(member);
       },
@@ -237,7 +238,7 @@ void print_reachable_records::operator()(Root) const {
       if constexpr (omni::is_reflected<T>::value) {
         const auto metadata = omni::reflected(omni::type<T>);
         std::println("{}", reflected_scope::describe_record(metadata));
-        metadata.accessible_data_members()
+        metadata.accessible_data_members() | fn::filter<fn::non_static>()
           | fn::each([&self]<typename Member>(Member) {
               if constexpr (omni::data_member_meta<Member>)
                 self(self, omni::type<typename Member::type>);
@@ -262,13 +263,9 @@ void update_fields(Values *...values) {
       -> void {
       // Reflected scope: metadata is available here and in called templates.
       const auto update = [](omni::record_binding auto r) {
-        r.accessible_data_members()
+        r.accessible_data_members() | fn::filter<fn::non_static>()
           | fn::filter([]<typename Member> {
-              using binding = std::remove_cvref_t<Member>;
-              if constexpr (omni::data_member_binding<binding>)
-                return binding::is_mutable();
-
-              return false; //< Special function field.
+              return std::remove_cvref_t<Member>::is_mutable();
             })
           | fn::each([](omni::data_member_binding auto field) {
               constexpr std::string_view name = field.name();

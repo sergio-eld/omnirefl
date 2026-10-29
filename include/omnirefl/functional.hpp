@@ -370,10 +370,7 @@ struct partial_branch {
       , when_true{std::forward<TrueValue>(when_true_)} {}
 
   template <typename WhenFalse>
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#endif
-    auto operator()(WhenFalse &&when_false) & //
+  OMNI_CPP14_CONSTEXPR auto operator()(WhenFalse &&when_false) & //
     noexcept(noexcept(branch(predicate,
       when_true,
       std::forward<WhenFalse>(when_false))))
@@ -395,10 +392,7 @@ struct partial_branch {
   }
 
   template <typename WhenFalse>
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#endif
-    auto operator()(WhenFalse &&when_false) && //
+  OMNI_CPP14_CONSTEXPR auto operator()(WhenFalse &&when_false) && //
     noexcept(noexcept(branch(std::move(predicate),
       std::move(when_true),
       std::forward<WhenFalse>(when_false))))
@@ -1037,6 +1031,15 @@ constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
     std::forward<First>(first),
     std::forward<Argument>(argument)...);
 }
+
+/// Select static data-member or function metadata and bindings in `filter`.
+template <typename Member>
+struct is_static
+  : std::integral_constant<bool, compat::remove_cvref_t<Member>::is_static()> {};
+
+/// Select non-static data-member or function metadata and bindings in `filter`.
+template <typename Member>
+struct non_static : std::integral_constant<bool, !is_static<Member>::value> {};
 
 /** QoL key projection for comparing reflected fields by name. */
 // TODO: Constrain Field to reflected field metadata or field bindings.

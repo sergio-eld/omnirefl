@@ -410,10 +410,7 @@ struct bind_front_t {
   }
 
   template <typename... Argument>
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-    auto operator()(Argument &&...argument) & //
+  OMNI_CPP14_CONSTEXPR auto operator()(Argument &&...argument) & //
     noexcept(noexcept(call(std::declval<bind_front_t &>(),
       indices{},
       std::forward<Argument>(argument)...)))
@@ -435,10 +432,7 @@ struct bind_front_t {
   }
 
   template <typename... Argument>
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-    auto operator()(Argument &&...argument) && //
+  OMNI_CPP14_CONSTEXPR auto operator()(Argument &&...argument) && //
     noexcept(noexcept(call(std::declval<bind_front_t &&>(),
       indices{},
       std::forward<Argument>(argument)...)))

@@ -152,8 +152,7 @@ struct data_member_meta_t {
    *   using field_type_meta = omni::meta_for<typename FieldMeta::type>;
    * }
    * ```
-   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter
-   * type.
+   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter type.
    */
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
@@ -189,8 +188,7 @@ struct data_member_meta_t {
    *   using field_type_meta = omni::meta_for<typename FieldMeta::type>;
    * }
    * ```
-   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter
-   * type.
+   * Before C++20, use `omni::data_member_meta_t<_FieldMeta>` as the parameter type.
    */
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
@@ -224,6 +222,31 @@ struct data_member_meta_t {
    */
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
+  }
+
+  /**
+   * Whether this field exposes metadata for its associated callable.
+   * Recognizes fixed `function_t` tags, not arbitrary callable field types.
+   */
+  static constexpr bool has_callable_metadata() noexcept {
+    return _M::has_callable_metadata();
+  }
+
+  /**
+   * Return function metadata for the callable represented by this field.
+   *
+   * Available only when `has_callable_metadata()` is true.
+   */
+  template <typename R = _M>
+  static constexpr auto callable_metadata() noexcept ->
+    typename std::enable_if<R::has_callable_metadata(),
+      typename R::callable_metadata>::type {
+    return {};
+  }
+
+  /// Whether this is a static data member.
+  static constexpr bool is_static() noexcept {
+    return _M::is_static();
   }
 
   /** Whether the declared field type has top-level `const` qualification. */
@@ -340,8 +363,8 @@ struct example {
    * `t.field_name = std::forward<V>(v)`.
    *
    * Requires `has_value_access()` and a writable field for the supplied record.
-   * Declared `const` fields and non-`mutable` fields of const records are not
-   * writable.
+   * Declared `const` members are not writable. A const record prevents writing
+   * non-static, non-`mutable` fields; it does not change static-member access.
    *
    * @details `R` keeps generated assignment lookup and availability checks
    * dependent until use.
@@ -386,6 +409,31 @@ struct data_member_binding_t {
   using type = typename meta::type;
 
   record &_record;
+
+  /**
+   * Whether this field exposes metadata for its associated callable.
+   * Recognizes fixed `function_t` tags, not arbitrary callable field types.
+   */
+  static constexpr bool has_callable_metadata() noexcept {
+    return meta::has_callable_metadata();
+  }
+
+  /**
+   * Return function metadata for the callable represented by this field.
+   *
+   * Available only when `has_callable_metadata()` is true.
+   */
+  template <typename R = _M>
+  static constexpr auto callable_metadata() noexcept ->
+    typename std::enable_if<R::has_callable_metadata(),
+      typename R::callable_metadata>::type {
+    return {};
+  }
+
+  /// Whether this is a static data member.
+  static constexpr bool is_static() noexcept {
+    return meta::is_static();
+  }
 
   /** Source-spelled field name. */
   static constexpr const char *name() noexcept {
@@ -577,15 +625,15 @@ struct data_member_binding_t {
    * `std::move(field).value()` selects this overload and returns an rvalue
    * reference to the field.
    *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   *
    * @details `M` keeps lookup and the availability check dependent until use.
    */
   template <typename M = meta,
     typename std::enable_if<M::has_value_access() && M::has_reference_access(),
       int>::type = 0>
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#endif
-    auto value() && noexcept -> decltype(std::move(M::ref(_record))) {
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(std::move(M::ref(_record))) {
     return std::move(M::ref(_record));
   }
 
@@ -596,15 +644,14 @@ struct data_member_binding_t {
    * Bit-fields and packed scalars cannot expose an rvalue reference, so this
    * overload copies.
    *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   *
    * @details `M` keeps lookup and the availability check dependent until use.
    */
   template <typename M = meta,
     typename std::enable_if<M::has_value_access() && !M::has_reference_access(),
       int>::type = 0>
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#endif
-    auto value() && noexcept -> decltype(M::value(_record)) {
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept -> decltype(M::value(_record)) {
     return M::value(_record);
   }
 
@@ -677,8 +724,8 @@ struct data_member_binding_t {
    * `t.field_name = std::forward<V>(v)`.
    *
    * Requires `has_value_access()` and a writable field for the bound record.
-   * Declared `const` fields and non-`mutable` fields of const records are not
-   * writable.
+   * Declared `const` members are not writable. A const record prevents writing
+   * non-static, non-`mutable` fields; it does not change static-member access.
    *
    * @details `M` keeps generated assignment lookup and availability checks
    * dependent until use.
@@ -749,14 +796,21 @@ struct meta_t<_M, reflected_entity::record> {
    * Metadata tuple for data members accessible from the reflected type:
    * `std::tuple<data_member_meta_t<_FieldMeta>...>`.
    *
-   * Includes accessible inherited members; hidden and ambiguous members are
-   * omitted.
+   * Includes static and non-static members, including inherited members.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
    */
   using accessible_data_members_t = detail::_all_visible_public_fields_t<_M>;
 
   /**
    * Metadata tuple for non-overloaded member functions accessible from the
    * reflected type.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
    */
   using accessible_member_functions_t =
     detail::_all_visible_public_methods_t<_M>;
@@ -854,8 +908,11 @@ struct meta_t<_M, reflected_entity::record> {
    * Return data members accessible from the reflected type as
    * `std::tuple<data_member_meta_t<_FieldMeta>...>`.
    *
-   * Includes accessible inherited members; hidden and ambiguous members are
-   * omitted.
+   * Includes static and non-static members, including inherited members.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
    */
   static constexpr accessible_data_members_t
     accessible_data_members() noexcept {
@@ -863,7 +920,12 @@ struct meta_t<_M, reflected_entity::record> {
   }
 
   /**
-   * Return non-overloaded member functions accessible from the reflected type.
+   * Return non-overloaded static and non-static member functions accessible
+   * from the reflected type.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
    */
   static constexpr accessible_member_functions_t
     accessible_member_functions() noexcept {
@@ -939,8 +1001,8 @@ struct meta_t<_M, reflected_entity::record> {
   constexpr meta_t() noexcept = default;
 
   template <typename _T, typename _Field>
-  static constexpr data_member_binding_t<_T, _Field> _bind(_T &t,
-    data_member_meta_t<_Field>) {
+  static constexpr data_member_binding_t<_T, _Field> _bind(
+    _T &t, data_member_meta_t<_Field>) {
     return data_member_binding_t<_T, _Field>{t};
   }
 
@@ -1185,12 +1247,15 @@ struct function_param_meta_t {
   static constexpr const char *name() noexcept {
     return _M::name();
   }
+
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
   }
+
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
   }
+
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
   }
@@ -1204,9 +1269,11 @@ struct function_return_meta_t {
   static constexpr const char *documentation() noexcept {
     return _M::documentation();
   }
+
   static constexpr const char *spelled_type_name() noexcept {
     return _M::type_name();
   }
+
   static constexpr const char *spelled_qualified_type_name() noexcept {
     return _M::qualified_type_name();
   }
@@ -1215,9 +1282,9 @@ struct function_return_meta_t {
 /**
  * Reflected-scope-only function metadata; `_M` is opaque.
  *
- * Generated record metadata exposes non-overloaded public methods and fields
- * whose type is `function_t`. `parameters()` returns their parameter metadata;
- * `returns()` returns their return metadata.
+ * `accessible_member_functions()` returns non-overloaded member functions.
+ * Fixed `function_t` fields expose this metadata through `callable_metadata()`.
+ * `parameters()` returns parameter metadata; `returns()` returns return metadata.
  */
 template <typename _M>
 struct function_meta_t {
@@ -1228,6 +1295,11 @@ struct function_meta_t {
 
   static constexpr const char *name() noexcept {
     return _M::name();
+  }
+
+  /// Whether the represented function is a static member function.
+  static constexpr bool is_static() noexcept {
+    return _M::is_static();
   }
 
   static constexpr pointer_type pointer() noexcept {
@@ -1265,30 +1337,34 @@ struct function_binding_t {
   record &_record;
 
   static constexpr const char *name() noexcept { return meta::name(); }
+
+  /// Whether the represented function is a static member function.
+  static constexpr bool is_static() noexcept {
+    return meta::is_static();
+  }
+
   static constexpr pointer_type pointer() noexcept { return meta::pointer(); }
   static constexpr std::size_t arity() noexcept { return meta::arity(); }
   static constexpr const char *documentation() noexcept {
     return meta::documentation();
   }
+
   static constexpr parameters_t parameters() noexcept {
     return meta::parameters();
   }
+
   static constexpr return_meta returns() noexcept {
     return meta::returns();
   }
 
-  template <typename... Argument>
+  /// Invoke through the bound record, honoring ordinary lookup and default
+  /// arguments.
+  // Defer invocation metadata lookup until the call, so naming a binding can
+  // reach the tool's out-of-scope diagnostic without requiring that metadata.
+  template <typename... Argument, typename M = _M>
   constexpr auto operator()(Argument &&...argument) const
-    -> decltype(detail::_invoke_bound_function(
-      std::is_member_function_pointer<pointer_type>{},
-      pointer(),
-      _record,
-      std::forward<Argument>(argument)...)) {
-    return detail::_invoke_bound_function(
-      std::is_member_function_pointer<pointer_type>{},
-      pointer(),
-      _record,
-      std::forward<Argument>(argument)...);
+    -> decltype(M::invoke(_record, std::forward<Argument>(argument)...)) {
+    return M::invoke(_record, std::forward<Argument>(argument)...);
   }
 };
 
@@ -1390,11 +1466,13 @@ struct binding_t<T, reflected_entity::record> {
     return _record;
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-  /** Return an rvalue reference to the bound record. */
-  auto value() && noexcept -> decltype(std::move(_record)) {
+  /**
+   * Return an rvalue reference to the bound record.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(std::move(_record)) {
     return std::move(_record);
   }
 
@@ -1403,11 +1481,12 @@ struct binding_t<T, reflected_entity::record> {
     return std::move(_record);
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-  /** Return a direct reference to the bound record. */
-  storage_t &ref() & noexcept {
+  /**
+   * Return a direct reference to the bound record.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR storage_t &ref() & noexcept {
     return _record;
   }
 
@@ -1427,22 +1506,21 @@ struct binding_t<T, reflected_entity::record> {
   }
 
 #if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
   /**
    * Bind accessible data members from a non-const lvalue record binding as
    * `std::tuple<data_member_binding_t<Record, _FieldMeta>...>`.
    *
-   * Includes accessible inherited members; hidden and ambiguous members are
-   * omitted.
+   * Includes static and non-static members, including inherited members.
    *
-   * @note This non-const overload is not `constexpr` in C++11 because C++11
-   * requires `constexpr` member functions to be const.
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
    */
-  auto accessible_data_members() & -> decltype(meta::_bind_members(
-    std::declval<storage_t &>(),
-    typename meta::accessible_data_members_t{})) {
+  OMNI_CPP14_CONSTEXPR auto accessible_data_members() &
+    -> decltype(meta::_bind_members(std::declval<storage_t &>(),
+      typename meta::accessible_data_members_t{})) {
     return meta::_bind_members(_record,
       typename meta::accessible_data_members_t{});
   }
@@ -1452,8 +1530,11 @@ struct binding_t<T, reflected_entity::record> {
    * `std::tuple<data_member_binding_t<Record, _FieldMeta>...>`.
    *
    * Referenced records keep their own cv-qualification. An owned record is
-   * const through this overload. Hidden and ambiguous inherited fields are
-   * omitted.
+   * const through this overload.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
    */
   constexpr auto accessible_data_members()
     const & -> decltype(meta::_bind_members(std::declval<const storage_t &>(),
@@ -1496,15 +1577,30 @@ struct binding_t<T, reflected_entity::record> {
     std::declval<const storage_t &>(),
     typename meta::accessible_data_members_t{})) = delete;
 
-  /** Bind accessible non-overloaded member functions to this record. */
-  auto accessible_member_functions() & -> decltype(meta::_bind_members(
-    std::declval<storage_t &>(),
-    typename meta::accessible_member_functions_t{})) {
+  /**
+   * Bind accessible non-overloaded member functions to this record.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR auto
+    accessible_member_functions() & -> decltype(meta::_bind_members(
+      std::declval<storage_t &>(),
+      typename meta::accessible_member_functions_t{})) {
     return meta::_bind_members(_record,
       typename meta::accessible_member_functions_t{});
   }
 
-  /** Bind accessible non-overloaded member functions to this const record. */
+  /**
+   * Bind accessible non-overloaded member functions to this const record.
+   *
+   * Selection follows ordinary `a.member` lookup on the reflected type.
+   * Hidden declarations and ambiguous, inaccessible, or otherwise ill-formed
+   * member access are excluded.
+   */
   constexpr auto accessible_member_functions()
     const & -> decltype(meta::_bind_members(std::declval<const storage_t &>(),
       typename meta::accessible_member_functions_t{})) {
@@ -1639,11 +1735,13 @@ struct binding_t<T, reflected_entity::enumeration> {
     return _enum_value;
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-  /** Return an rvalue reference to the bound enum value. */
-  auto value() && noexcept -> decltype(std::move(_enum_value)) {
+  /**
+   * Return an rvalue reference to the bound enum value.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR auto value() && noexcept
+    -> decltype(std::move(_enum_value)) {
     return std::move(_enum_value);
   }
 
@@ -1652,11 +1750,12 @@ struct binding_t<T, reflected_entity::enumeration> {
     return std::move(_enum_value);
   }
 
-#  if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  constexpr
-#  endif
-  /** Return a direct reference to the bound enum value. */
-  storage_t &ref() & noexcept {
+  /**
+   * Return a direct reference to the bound enum value.
+   *
+   * @note `constexpr` from C++14; C++11 would make this accessor const.
+   */
+  OMNI_CPP14_CONSTEXPR storage_t &ref() & noexcept {
     return _enum_value;
   }
 
