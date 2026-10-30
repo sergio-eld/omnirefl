@@ -7161,10 +7161,6 @@ std::string reflectable_body(const meta::record_data &d) {
 
         // 11
         f.is_static);
-
-      // FIXME: [high, external] Clang 6 drops const from
-      // decltype(std::declval<Record &>().constant) for static const int.
-      // Keep the qualified member form; both must denote the declared type.
     };
 
   const std::string fields = d.public_fields.empty()
