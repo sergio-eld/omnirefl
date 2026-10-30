@@ -242,6 +242,21 @@ struct data_member_meta_t {
     return _M::is_static();
   }
 
+  /** Whether the member is declared as a bitfield. */
+  static constexpr bool is_bitfield() noexcept {
+    return _M::is_bitfield();
+  }
+
+  /** Width in bits; unavailable for template-dependent width expressions. */
+  template <
+    // Keep lookup dependent for fields without a generated width accessor.
+    typename R = _M>
+  static constexpr auto bit_width() noexcept ->
+    typename std::enable_if<R::is_bitfield(),
+      decltype(R::bit_width())>::type {
+    return R::bit_width();
+  }
+
   /** Whether the declared field type has top-level `const` qualification. */
   static constexpr bool is_const() noexcept {
     return _M::is_const();
@@ -370,6 +385,12 @@ struct data_member_meta_t {
     R::set_value(std::forward<T>(t), std::forward<V>(v));
   }
 
+  // TODO: [high] Provide constexpr, by-value default_value() where the field
+  // type and literal initializer permit it; the current static cache prevents
+  // constant evaluation. Preserve runtime access for types requiring it.
+  // Initializer replay is restricted because namespace-dependent name lookup
+  // cannot yet be reproduced reliably in the generated scope.
+
   // TODO: Consider is_type_dependent(); establish a useful consumer before
   // adding the query. For example:
   // ```cpp
@@ -381,6 +402,10 @@ struct data_member_meta_t {
   // ```
   // A consumer might choose a resolved type name for value, but that also
   // requires type-name queries independent of metadata specializations.
+
+  // TODO: [high] Support dependent bit_width() expressions (N + 1, sizeof(T),
+  // etc.) across specializations. They currently disable the accessor with
+  // a warning instead of reusing one specialization's width.
 };
 
 /**
