@@ -1,12 +1,51 @@
-// The guide is written for compilers with the C++20 features used by
-// omnirefl's public concepts. It deliberately avoids <concepts>; the package
-// matrix still covers toolchains where C++20 is partial. Similar small
-// substitutions are preferred here, such as std::find_if instead of
-// std::ranges::find_if.
+/** Executable reflection guide.
+ *
+ * For each suite.test entry below, search for TEST(suite, test) to find its
+ * entry point; topics may have dedicated namespaces.
+ * The suite.test name can also be passed to --gtest_filter.
+ *
+ * Basics
+ *   basics.reflected_scope - introduce reflected_call with a generic visitor
+ *   basics.reflected_scope_cpp11 - C++11 equivalent with a named visitor
+ *   basics.reflected_scope_indirection - metadata through a called function
+ *   basics.enum_metadata - enumerator names, values, and declaration order
+ *   basics.enum_declarations - enum class and plain enum support requirements
+ *   basics.accessing_members - accessible own and inherited members as tuples
+ *   basics.data_member_queries - inspect qualifiers, bitfields, and deprecation
+ *   basics.discovering_dependencies - follow supported type discovery routes
+ *
+ * Advanced
+ *   advanced.reflected_call_args - argument conversion and value categories
+ *
+ * Previous examples
+ *   exposition.reflected_scope_overview
+ *   exposition.write_foobar
+ *   example.enum_names
+ *   example.binding_storage_forms
+ *   example.reflected_value_query
+ *   example.guarded_non_dependent_query
+ *   example.meta_bind_and_field_metadata
+ *   example.binding_as_metadata
+ *   example.primary_template_read_data
+ *   example.primary_template_from_map
+ *   example.annotated_dependencies
+ *   example.cpp14_cpp17_binding_name
+ *   example.cpp11_struct_visitors
+ *   example.convert_moves_same_named_fields
+ *   example.filter_fields_before_set_value
+ *   example.accessible_data_members_follow_member_visibility
+ *   example.accessible_data_members_omit_ambiguous_base_members
+ *   example.accesses_static_members_through_a_record_binding
+ *   example.visit_compound_variant_inputs
+ *   example.annotated_schema_profile
+ *   example.annotated_schema_address_book
+ *   example.annotated_schema_small_record
+ */
 
 #include <gtest/gtest.h>
 
 #include <omnirefl/functional.hpp>
+// Public reflection entry point, metadata queries, and object bindings.
 #include <omnirefl/reflected_scope.hpp>
 
 #include <mpark/variant.hpp>
@@ -25,6 +64,409 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+namespace basics {
+
+struct address {
+  int postal_code;
+};
+
+struct account {
+  address contact;
+  int retries;
+};
+
+enum class status {
+  idle,
+  active,
+};
+
+/** Omnirefl uses reflected_call as the instrumentation boundary for reflection.
+ * To access reflection, pass a generic visitor.
+ *
+ * reflected_call invokes the visitor with reflected arguments and returns its
+ * result. Here, omni::type<T> requests metadata without constructing T.
+ *
+ * An explicit visitor return type keeps its body from being instantiated during
+ * instrumentation, before generated metadata exists.
+ *
+ * These examples use C++20 concepts; named visitors also support C++11. */
+TEST(basics, reflected_scope) {
+  const auto name = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::string_view {
+      // Reflected scope: metadata for the arguments and their discovered
+      // dependencies is available here and in functions called from here.
+      return record.type_name();
+    },
+    omni::type<account>);
+
+  EXPECT_EQ("account", name);
+}
+
+// C++11 has no generic lambdas; use a named template callable instead.
+struct cpp11_lambda_type_name {
+  // _M is internal and required for this template declaration.
+  // In C++20, the corresponding concept is omni::record_meta.
+  template <typename _M>
+  std::string operator()(omni::record_meta_t<_M> record) const {
+    return record.type_name();
+  }
+};
+
+TEST(basics, reflected_scope_cpp11) {
+  const std::string name = omni::reflected_call(
+    cpp11_lambda_type_name{}, omni::type_t<account>{});
+
+  EXPECT_EQ("account", name);
+}
+
+// NOTE: Keeping reflection helpers in a dedicated namespace makes their scope
+// requirement visible and helps avoid accidental out-of-scope calls. This
+// convention is not required by instrumentation.
+namespace reflection_helpers {
+
+// Allowed within a reflected scope, including functions called by the visitor.
+// Calling it outside that scope is not allowed.
+std::string_view qualified_type_name(omni::record_meta auto record) {
+  // Includes enclosing namespaces: "account" becomes "basics::account".
+  return record.qualified_type_name();
+}
+
+} // namespace reflection_helpers
+
+/** Indirections within a reflected scope are supported.
+ * NOTE: Nested reflected_call calls are unsupported and are not detected,
+ * including calls reached indirectly through other functions. Metadata for
+ * their types may be available incidentally; this does not make nesting valid. */
+TEST(basics, reflected_scope_indirection) {
+  // Omnirefl detects out-of-scope metadata use on a best-effort basis.
+  // Uncomment to get an instrumentation error.
+  // reflection_helpers::qualified_type_name(omni::reflected(omni::type<account>));
+
+  const auto name = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::string_view {
+      // Functions called from the visitor can also query reflection metadata.
+      return reflection_helpers::qualified_type_name(record);
+    },
+    omni::type<account>);
+
+  EXPECT_EQ("basics::account", name);
+}
+
+// Enumerators are value/name pairs in declaration order.
+TEST(basics, enum_metadata) {
+  const auto enumerators = omni::reflected_call(
+    [](omni::enum_meta auto e)
+      -> std::vector<std::pair<status, std::string_view>> {
+      const auto entries = e.enumerators();
+      return {entries.begin(), entries.end()};
+    },
+    omni::type<status>);
+
+  const std::vector<std::pair<status, std::string_view>> expected{
+    {status::idle, "idle"},
+    {status::active, "active"},
+  };
+
+  EXPECT_EQ(expected, enumerators);
+}
+
+// NOTE: enum class works with or without an explicit underlying type.
+// A plain enum needs an explicit underlying type, such as `: int`, so generated
+// metadata can forward-declare it.
+// Local and unnamed enums are unsupported as reflected_call inputs.
+namespace enum_declarations {
+
+enum class scoped { idle, active };
+enum unscoped_supported : int { ready, stopped };
+enum unscoped_unsupported { first, last };
+
+} // namespace enum_declarations
+
+// A plain enum needs an explicit underlying type; enum class does not.
+TEST(basics, enum_declarations) {
+  using namespace enum_declarations;
+
+  const auto name = [](omni::enum_meta auto e) -> std::string_view {
+    return e.type_name();
+  };
+
+  EXPECT_EQ("scoped", omni::reflected_call(name, omni::type<scoped>));
+  EXPECT_EQ("unscoped_supported",
+    omni::reflected_call(name, omni::type<unscoped_supported>));
+
+  // Uncomment to get an instrumentation error: this plain enum has no fixed
+  // underlying type and cannot be forward-declared by generated metadata.
+  // omni::reflected_call(name, omni::type<unscoped_unsupported>);
+}
+
+namespace accessible_members {
+
+struct base {
+  int inherited;
+  inline static const int shared = 7;
+  int inherited_function() const { return inherited; }
+};
+
+struct derived: base {
+  int own;
+  const int fixed = 1;
+  mutable int cache;
+  volatile int observed;
+  unsigned flags : 3;
+  [[deprecated]] int legacy;
+  int own_function() const { return john_cena; }
+private:
+  int john_cena; // Can't see.
+};
+
+} // namespace accessible_members
+
+/** A member is accessible when foo.member is valid from global scope, where
+ * foo has the reflected type: no ambiguity or private/protected access error.
+ * This also includes inherited members made publicly accessible by that type,
+ * regardless of their original access level.
+ * Metadata is returned as tuples whose sizes are known at compile time. */
+TEST(basics, accessing_members) {
+  struct member_counts {
+    std::size_t data_members;
+    std::size_t member_functions;
+  };
+
+  const auto counts = omni::reflected_call(
+    [](omni::record_meta auto record) -> member_counts {
+      return {
+        .data_members = std::tuple_size<
+          decltype(record.accessible_data_members())>::value,
+        .member_functions = std::tuple_size<
+          decltype(record.accessible_member_functions())>::value,
+      };
+    },
+    omni::type<accessible_members::derived>);
+
+  EXPECT_EQ(8U, counts.data_members);
+  EXPECT_EQ(2U, counts.member_functions);
+}
+
+// Inspecting deprecated-member metadata is intentional in this example.
+#if defined(_MSC_VER)
+#  pragma warning(push)
+#  pragma warning(disable: 4996)
+#elif defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+// Metadata describes member qualifiers without constructing or reading an
+// object. Mapping the tuple renders a description for each accessible member.
+TEST(basics, data_member_queries) {
+  // GCC reports this static local as unused despite its use in the visitor.
+  [[maybe_unused]] static const auto format_member =
+    [](omni::data_member_meta auto field) {
+      std::ostringstream out;
+      out << (field.is_static() ? "static " : "")
+          << (field.is_const() ? "const " : "")
+          << (field.is_mutable() ? "mutable " : "")
+          << (field.is_volatile() ? "volatile " : "")
+          << (field.is_bitfield() ? "bitfield " : "")
+          << (field.is_deprecated() ? "deprecated " : "")
+          << field.name();
+      return out.str();
+    };
+
+  const auto descriptions = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::vector<std::string> {
+      return std::apply(
+        [](auto... description) {
+          return std::vector{std::move(description)...};
+        },
+        record.accessible_data_members() | omni::fn::map(format_member));
+    },
+    omni::type<accessible_members::derived>);
+
+  const std::vector<std::string> expected{
+    "inherited",
+    "static const shared",
+    "own",
+    "const fixed",
+    "mutable cache",
+    "volatile observed",
+    "bitfield flags",
+    "deprecated legacy",
+  };
+
+  EXPECT_EQ(expected, descriptions);
+}
+
+#if defined(_MSC_VER)
+#  pragma warning(pop)
+#elif defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
+
+namespace discovering_dependencies {
+
+struct base { int id; };
+struct location { double latitude; };
+struct request { int limit; };
+struct response { bool accepted; };
+struct sample { int value; };
+struct note { std::string text; };
+enum class state { idle, active };
+
+struct document: base { // Public bases are discovered.
+  // Supported public alias names: type, value_type, first_type, second_type,
+  // key_type, mapped_type, error_type, and value.
+  //
+  // Arbitrary aliases are not discovery routes. Here vector's own value_type
+  // leads to sample.
+  using value_type = std::vector<sample>;
+  location where; // Public data-member types are discovered.
+  std::tuple<note, int> info; // Tuple elements are discovered.
+  std::variant<state, int> status; // Variant alternatives are discovered.
+  response process(request) const; // Parameter and return types are discovered.
+};
+
+} // namespace discovering_dependencies
+
+/** Reflection discovers dependencies of a reflected_call argument's type
+ * through the routes shown above, following them transitively. Their metadata
+ * is available in the same reflected scope; no additional reflected_call is
+ * needed.
+ * Standard-library records do not receive metadata, but their supported aliases
+ * and tuple/variant elements still expose dependencies. */
+TEST(basics, discovering_dependencies) {
+  using namespace discovering_dependencies;
+
+  [[maybe_unused]] static const auto name =
+    []<typename T>(omni::type_t<T>) -> std::string_view {
+      if constexpr (omni::is_reflected<T>::value)
+        return omni::reflected(omni::type<T>).type_name();
+      else
+        return "not reflected";
+    };
+
+  const auto names = omni::reflected_call(
+    [](omni::record_meta auto) -> std::vector<std::string_view> {
+      return {
+        // Test-only ad hoc: name each concrete type to check that its discovery
+        // route works. C++ may check these calls before metadata is generated,
+        // so hide them during instrumentation. Application code should instead
+        // obtain these types from the visitor's reflected parameters.
+#if !defined(OMNI_TOOL_RUN)
+        name(omni::type<base>),
+        name(omni::type<location>),
+        name(omni::type<request>),
+        name(omni::type<response>),
+        name(omni::type<sample>),
+        name(omni::type<note>),
+        name(omni::type<state>),
+        name(omni::type<document::value_type>),
+        name(omni::type<decltype(document::info)>),
+        name(omni::type<decltype(document::status)>),
+#endif
+      };
+    },
+    omni::type<document>);
+
+  const std::vector<std::string_view> expected{
+    "base",
+    "location",
+    "request",
+    "response",
+    "sample",
+    "note",
+    "state",
+    "not reflected", // std::vector
+    "not reflected", // std::tuple
+    "not reflected", // std::variant
+  };
+
+  EXPECT_EQ(expected, names);
+}
+
+} // namespace basics
+
+/// Advanced examples ----------------------------------------------------------
+
+namespace call_arguments {
+
+struct payload {
+  std::unique_ptr<int> value;
+};
+
+enum class mode { read, write };
+
+} // namespace call_arguments
+
+/** reflected_call accepts 1..N arguments. Each is converted to a reflected
+ * wrapper and passed to the corresponding visitor parameter; the visitor's
+ * signature must accept that number and those kinds of arguments.
+ *
+ * omni::type_t<Record> becomes record metadata; omni::type_t<Enum> becomes
+ * enum metadata. Objects become bindings that refer to the original objects,
+ * including rvalue arguments. The call itself does not move their values.
+ * Owning bindings are created separately with meta.bind(...), as demonstrated
+ * in example.meta_bind_and_field_metadata.
+ *
+ * NOTE: Types the tool cannot reflect are rejected as direct arguments with
+ * hard instrumentation errors. As discovered dependencies, such types are
+ * skipped with warnings instead. */
+TEST(advanced, reflected_call_args) {
+  using namespace call_arguments;
+
+  const auto names = omni::reflected_call(
+    [](omni::record_meta auto record, omni::enum_meta auto e)
+      -> std::pair<std::string_view, std::string_view> {
+      return {record.type_name(), e.type_name()};
+    },
+    omni::type<payload>,
+    omni::type<mode>);
+
+  const std::pair<std::string_view, std::string_view> expected_names{
+    "payload", "mode"};
+
+  EXPECT_EQ(expected_names, names);
+
+  payload original{std::make_unique<int>(7)};
+  const auto value = omni::reflected_call(
+    [](omni::record_binding auto binding) -> int {
+      static_assert(!decltype(binding)::owning::value);
+      return *binding.ref().value;
+    },
+    original);
+
+  EXPECT_EQ(7, value);
+  EXPECT_EQ(7, *original.value);
+
+  const auto move_value = [](omni::record_binding auto binding) -> payload && {
+    static_assert(!decltype(binding)::owning::value);
+    return std::move(binding).value();
+  };
+
+  payload source{std::make_unique<int>(42)};
+  payload &&returned = omni::reflected_call(move_value, std::move(source));
+  static_assert(std::is_rvalue_reference_v<decltype(returned)>);
+  EXPECT_EQ(42, *source.value); // Returning an xvalue has not moved it yet.
+
+  payload destination = std::move(returned);
+  EXPECT_EQ(42, *destination.value);
+  EXPECT_EQ(nullptr, source.value);
+
+  // Consume the returned xvalue before this temporary's lifetime ends.
+  payload temporary = omni::reflected_call(
+    move_value, payload{std::make_unique<int>(15)});
+
+  EXPECT_EQ(15, *temporary.value);
+}
+
+/// Previous examples ----------------------------------------------------------
+
+// The guide is written for compilers with the C++20 features used by
+// omnirefl's public concepts. It deliberately avoids <concepts>; the package
+// matrix still covers toolchains where C++20 is partial. Similar small
+// substitutions are preferred here, such as std::find_if instead of
+// std::ranges::find_if.
 
 namespace {
 
@@ -1207,8 +1649,6 @@ TEST(example, cpp11_struct_visitors) {
     omni::reflected_call(cpp11::type_name{}, omni::type<example::status>));
 }
 
-/// Advanced examples ----------------------------------------------------------
-
 namespace record_conversion {
 
 template <typename From, typename To>
@@ -1793,3 +2233,6 @@ TEST(example, annotated_schema_small_record) {
   EXPECT_EQ(k_expected_feature_toggle,
     schema::annotate_schema(omni::type<schema::feature_toggle>));
 }
+
+// TODO: [high] Add advanced examples for nested records and enums, explaining
+// their supported discovery routes and declaration restrictions.

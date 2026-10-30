@@ -43,7 +43,6 @@ target_link_libraries(comprehensive_guide PRIVATE
     gtest_main
     mpark_variant)
 
-# Index mode is experimental and not expected to be stable across compilers.
 omni_reflected_target(comprehensive_guide)
 
 add_test(NAME "comprehensive_guide.run_omni"
