@@ -385,6 +385,12 @@ struct data_member_meta_t {
     R::set_value(std::forward<T>(t), std::forward<V>(v));
   }
 
+  // TODO: [high] Provide constexpr, by-value default_value() where the field
+  // type and literal initializer permit it; the current static cache prevents
+  // constant evaluation. Preserve runtime access for types requiring it.
+  // Initializer replay is restricted because namespace-dependent name lookup
+  // cannot yet be reproduced reliably in the generated scope.
+
   // TODO: Consider is_type_dependent(); establish a useful consumer before
   // adding the query. For example:
   // ```cpp
