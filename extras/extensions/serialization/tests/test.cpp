@@ -2838,8 +2838,11 @@ TEST_P(serialization, does_not_require_or_write_static_data_members) {
 
 TEST(deserialization, allowed_extra_fields_do_not_write_static_storage) {
   const int saved = record_with_shared_state::shared;
-  const auto deserialize = omni::fn::ctad<omni::ryml::deserialize_t>(
-    strict_deserialize.strategy.allow_extra(true));
+  const auto deserialize =
+    strict_deserialize.transform_settings([](omni::ryml::settings s) {
+      s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
+      return s;
+    });
   const auto result = deserialize(omni::type_t<record_with_shared_state>{},
     R"({"value": 7, "shared": 99})");
 
