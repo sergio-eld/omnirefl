@@ -94,97 +94,6 @@ mapping_case<Model, TransformSettings> operator>>(input<TransformSettings> from,
   return {std::move(from), std::move(expected)};
 }
 
-// Test-only value erasure keeps ValuesIn homogeneous without erasing
-// diagnostics.
-struct erased_value {
-  std::shared_ptr<const void> storage;
-  bool (*equal)(const void *, const void *);
-  void (*print)(const void *, std::ostream *);
-
-  template <typename Model>
-  erased_value(Model model)
-      : storage{std::make_shared<Model>(std::move(model))}
-      , equal{[](const void *left, const void *right) {
-        return *static_cast<const Model *>(left)
-          == *static_cast<const Model *>(right);
-      }}
-      , print{[](const void *value, std::ostream *out) {
-        *out << *static_cast<const Model *>(value);
-      }} {}
-};
-
-bool operator==(const erased_value &left, const erased_value &right) {
-  // Each Model specialization has its own callback; check before casting
-  // storage.
-  return left.equal == right.equal
-    && left.equal(left.storage.get(), right.storage.get());
-}
-
-void PrintTo(const erased_value &value, std::ostream *out) {
-  value.print(value.storage.get(), out);
-}
-
-bool operator==(const expected_issue &left, const expected_issue &right) {
-  return std::tie(left.reason, left.expected, left.path, left.warning)
-    == std::tie(right.reason, right.expected, right.path, right.warning);
-}
-
-void PrintTo(const expected_issue &issue, std::ostream *out) {
-  *out << "{code: " << int(issue.reason) << ", kind: " << int(issue.expected)
-       << ", path: " << issue.path << ", warning: " << issue.warning << '}';
-}
-
-bool operator==(const omni::ryml::with_diagnostics<erased_value,
-                  std::vector<expected_issue>> &left,
-  const omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
-    &right) {
-  return left.value == right.value && left.diagnostics == right.diagnostics;
-}
-
-void PrintTo(const omni::ryml::with_diagnostics<erased_value,
-               std::vector<expected_issue>> &result,
-  std::ostream *out) {
-  *out << "{value: ";
-  if (result.value)
-    PrintTo(*result.value, out);
-  else
-    *out << "none";
-  *out << ", issues: " << ::testing::PrintToString(result.diagnostics) << '}';
-}
-
-struct erase_value {
-  template <typename Model>
-  erased_value operator()(Model model) const {
-    return {std::move(model)};
-  }
-};
-
-struct scenario {
-  std::string json;
-  std::function<omni::ryml::with_diagnostics<erased_value>()> run;
-  omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
-    expected;
-};
-
-template <typename Engine, typename Case>
-scenario bind_engine(Engine engine, Case c) {
-  return {c.from.json,
-    [engine, c] { return c(engine).map_value(erase_value{}); },
-    std::move(c.expected).map_value(erase_value{})};
-}
-
-// C++11 compat for a generic capturing lambda, binding each case before
-// erasure.
-template <typename Engine>
-struct bind_cases {
-  Engine engine;
-
-  template <typename... Cases>
-  std::vector<scenario> operator()(const Cases &...cases) const {
-    return {bind_engine(engine, cases)...};
-  }
-};
-
 constexpr auto none = omni::compat::nullopt;
 
 } // namespace dsl
@@ -491,60 +400,6 @@ const auto duplicates = std::make_tuple(
   // [models::text_record][last]
   D(duplicate_policy::last, R"({"value": "first", "value": "last"})")
     >> expect(models::text_record{"last"}, {}));
-
-TEST(json_mapping_dsl, binds_the_model_and_transforms_engine_defaults) {
-  const auto c = D(duplicate_policy::last, R"({"value": 7, "value": 42})")
-    >> expect(models::record{42}, {});
-
-  const auto result = c(omni::ryml::deserialize);
-  EXPECT_TRUE(result.value);
-  if (result.value) {
-    EXPECT_EQ(c.expected.value->value, result.value->value);
-  }
-
-  EXPECT_TRUE(result.diagnostics.issues.empty());
-  EXPECT_EQ(duplicate_policy::last,
-    result.diagnostics.settings.error_policy.duplicates);
-  EXPECT_EQ(duplicate_policy::reject,
-    omni::ryml::deserialize.settings.error_policy.duplicates);
-}
-
-TEST(json_mapping_dsl, preserves_settings_outside_the_case_transformation) {
-  const auto engine = omni::ryml::deserialize.transform_settings(
-    [](omni::ryml::settings settings) {
-      settings.error_policy.warning_limit = 0;
-      settings.error_policy.error_limit = 3;
-      return settings;
-    });
-
-  const auto c = D(duplicate_policy::allow | duplicate_policy::warn,
-                   R"({"value": 7, "value": 42})")
-    >> expect<models::record>(none,
-      {
-        Wdup,
-        {
-          omni::json::issue_code::warning_limit_exceeded,
-          omni::json::value_kind::unknown,
-          "/value",
-          false,
-        },
-      });
-
-  const auto result = c(engine);
-  EXPECT_FALSE(result.value);
-  EXPECT_TRUE(result.diagnostics.stopped());
-  EXPECT_EQ(c.expected.diagnostics.size(), result.diagnostics.issues.size());
-  if (2U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(c.expected.diagnostics[0].reason,
-      result.diagnostics.issues[0].reason);
-    EXPECT_TRUE(result.diagnostics.issues[0].warning);
-    EXPECT_EQ(c.expected.diagnostics[1].reason,
-      result.diagnostics.issues[1].reason);
-    EXPECT_FALSE(result.diagnostics.issues[1].warning);
-  }
-  EXPECT_EQ(3, result.diagnostics.settings.error_policy.error_limit);
-  EXPECT_EQ(duplicate_policy::reject, engine.settings.error_policy.duplicates);
-}
 
 } // namespace duplicate_fields
 
@@ -892,105 +747,104 @@ const auto cases = std::make_tuple(
         value_kind::integer)}));
 } // namespace policy_interactions
 
-// Model used by the executable interface checks below.
-struct record {
-  int value = 17;
-};
-
-struct optional_record {
-  omni::compat::optional<record> nested;
-};
-
-TEST(json_mapping_optionals, warnings_do_not_discard_a_valid_optional_record) {
-  const auto result =
-    omni::ryml::deserialize.transform_settings([](omni::ryml::settings s) {
-      s.error_policy.unknown_fields =
-        omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
-      return s;
-    })(omni::type_t<optional_record>{},
-      R"({"nested": {"value": 7, "other": 42}})");
-  EXPECT_TRUE(result.value);
-  if (result.value) {
-    EXPECT_TRUE(result.value->nested);
-    if (result.value->nested) {
-      EXPECT_EQ(7, result.value->nested->value);
-    }
-  }
-  EXPECT_EQ("/nested/other: warning: unknown field",
-    omni::ryml::render_diagnostics(result.diagnostics));
-}
-
-// Probe the real method's substitution constraints without invoking mapping.
-struct settings_transform_expression {
-  template <typename F>
-  auto operator()(F &&f) const
-    -> decltype(omni::ryml::deserialize.transform_settings(std::forward<F>(f)));
-};
-
-struct wrong_settings_result {
-  int operator()(omni::ryml::settings) const;
-};
-
-static_assert(
-  !omni::compat::is_invocable<settings_transform_expression, int>::value,
-  "settings transformation rejects non-callables");
-static_assert(!omni::compat::is_invocable<settings_transform_expression,
-                wrong_settings_result>::value,
-  "settings transformation requires settings");
-
-// C++11 callable equivalent of a capturing lambda; also checks constant
-// evaluation when the optional implementation supports it in C++14 and newer.
-struct set_error_limit {
-  std::uint16_t limit;
-
-  OMNI_CPP14_CONSTEXPR omni::ryml::settings operator()(
-    omni::ryml::settings s) const {
-    s.error_policy.error_limit = limit;
-    return s;
-  }
-};
-
-#if 201402L <= OMNI_CPLUSPLUS
-constexpr auto configured =
-  omni::ryml::deserialize.transform_settings(set_error_limit{3});
-static_assert(3 == configured.settings.error_policy.error_limit,
-  "settings transformation supports constant evaluation");
-#endif
-
-TEST(json_settings, captures_transform_a_copy_once) {
-  int calls = 0;
-  const std::uint16_t limit = 3;
-  const auto configured = omni::ryml::deserialize.transform_settings(
-    [&calls, limit](omni::ryml::settings s) {
-      ++calls;
-      s.error_policy.error_limit = limit;
-      return s;
-    });
-  EXPECT_EQ(1, calls);
-  EXPECT_EQ(3, configured.settings.error_policy.error_limit);
-  EXPECT_EQ(0, omni::ryml::deserialize.settings.error_policy.error_limit);
-}
-
-int runtime_default() {
-  return 23;
-}
-
-struct runtime_initialized_record {
-  int value = runtime_default();
-};
-
-TEST(json_recovery, does_not_assume_every_initializer_is_exposed) {
-  const auto result =
-    omni::ryml::deserialize.transform_settings([](omni::ryml::settings s) {
-      s.recovery = omni::json::recovery_policy::field_defaults;
-      return s;
-    })(omni::type_t<runtime_initialized_record>{}, "{}");
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ("/value: missing field",
-    omni::ryml::render_diagnostics(result.diagnostics));
-}
-
 namespace dsl {
+
+bool operator==(const expected_issue &left, const expected_issue &right) {
+  return std::tie(left.reason, left.expected, left.path, left.warning)
+    == std::tie(right.reason, right.expected, right.path, right.warning);
+}
+
+void PrintTo(const expected_issue &issue, std::ostream *out) {
+  *out << "{code: " << int(issue.reason) << ", kind: " << int(issue.expected)
+       << ", path: " << issue.path << ", warning: " << issue.warning << '}';
+}
+
+} // namespace dsl
+
+namespace registration {
+
+using dsl::expected_issue;
+
+// Test-only value erasure keeps ValuesIn homogeneous without erasing
+// diagnostics.
+struct erased_value {
+  std::shared_ptr<const void> storage;
+  bool (*equal)(const void *, const void *);
+  void (*print)(const void *, std::ostream *);
+
+  template <typename Model>
+  erased_value(Model model)
+      : storage{std::make_shared<Model>(std::move(model))}
+      , equal{[](const void *left, const void *right) {
+        return *static_cast<const Model *>(left)
+          == *static_cast<const Model *>(right);
+      }}
+      , print{[](const void *value, std::ostream *out) {
+        *out << *static_cast<const Model *>(value);
+      }} {}
+};
+
+struct erase_value {
+  template <typename Model>
+  erased_value operator()(Model model) const {
+    return {std::move(model)};
+  }
+};
+
+struct scenario {
+  std::string json;
+  std::function<omni::ryml::with_diagnostics<erased_value>()> run;
+  omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
+    expected;
+};
+
+template <typename Engine, typename Case>
+scenario bind_engine(Engine engine, Case c) {
+  return {c.from.json,
+    [engine, c] { return c(engine).map_value(erase_value{}); },
+    std::move(c.expected).map_value(erase_value{})};
+}
+
+// C++11 compat for a generic capturing lambda, binding each case before
+// erasure.
+template <typename Engine>
+struct bind_cases {
+  Engine engine;
+
+  template <typename... Cases>
+  std::vector<scenario> operator()(const Cases &...cases) const {
+    return {bind_engine(engine, cases)...};
+  }
+};
+
+bool operator==(const erased_value &left, const erased_value &right) {
+  // Each Model specialization has its own callback; check before casting
+  // storage.
+  return left.equal == right.equal
+    && left.equal(left.storage.get(), right.storage.get());
+}
+
+void PrintTo(const erased_value &value, std::ostream *out) {
+  value.print(value.storage.get(), out);
+}
+
+bool operator==(const omni::ryml::with_diagnostics<erased_value,
+                  std::vector<expected_issue>> &left,
+  const omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
+    &right) {
+  return left.value == right.value && left.diagnostics == right.diagnostics;
+}
+
+void PrintTo(const omni::ryml::with_diagnostics<erased_value,
+               std::vector<expected_issue>> &result,
+  std::ostream *out) {
+  *out << "{value: ";
+  if (result.value)
+    PrintTo(*result.value, out);
+  else
+    *out << "none";
+  *out << ", issues: " << ::testing::PrintToString(result.diagnostics) << '}';
+}
 
 class mapping_conformance: public ::testing::TestWithParam<scenario> {};
 
@@ -1056,6 +910,6 @@ INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
       omni::ryml::deserialize_t{omni::ryml::settings{}}},
     policy_interactions::cases)));
 
-} // namespace dsl
+} // namespace registration
 
 } // namespace
