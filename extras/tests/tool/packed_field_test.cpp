@@ -5,6 +5,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace packed_field_test {
 
@@ -112,6 +113,42 @@ struct reference_address {
 
 reference_address const static address{};
 
+struct bitfield_record {
+  int signed_value : 4;
+  unsigned : 0;
+  mutable unsigned count : 3;
+  volatile unsigned flag : 1;
+  int ordinary;
+  int &reference;
+  static int shared;
+};
+
+struct inherited_bitfields: bitfield_record {};
+
+struct bitfield_flags {
+  template <typename... Field>
+  std::vector<bool> operator()(Field...) const {
+    // Require a constant expression, including in C++11.
+    return {std::integral_constant<bool, Field::is_bitfield()>::value...};
+  }
+};
+
+struct inspect_bitfield_metadata {
+  template <typename _M>
+  std::vector<bool> operator()(omni::record_meta_t<_M> record) const {
+    return omni::compat::apply(bitfield_flags{},
+      record.accessible_data_members());
+  }
+};
+
+struct inspect_bitfield_bindings {
+  template <typename T>
+  std::vector<bool> operator()(omni::record_binding_t<T> record) const {
+    return omni::compat::apply(bitfield_flags{},
+      record.accessible_data_members());
+  }
+};
+
 } // namespace packed_field_test
 
 TEST(fields, packed_field_is_read_by_value) {
@@ -133,4 +170,30 @@ TEST(fields, packed_reference_field_preserves_referent) {
   packed_field_test::reference_record input{value};
 
   EXPECT_EQ(&value, omni::reflected_call(packed_field_test::address, input));
+}
+
+TEST(fields, bitfield_query_identifies_declarations_and_inherited_members) {
+  const std::vector<bool> expected{true, true, true, false, false, false};
+
+  EXPECT_EQ(expected,
+    omni::reflected_call(packed_field_test::inspect_bitfield_metadata{},
+      omni::type_t<packed_field_test::bitfield_record>{}));
+  EXPECT_EQ(expected,
+    omni::reflected_call(packed_field_test::inspect_bitfield_metadata{},
+      omni::type_t<packed_field_test::inherited_bitfields>{}));
+}
+
+TEST(fields, bitfield_query_is_inherited_by_bindings) {
+  int value = 7;
+  packed_field_test::bitfield_record input{3, 5, 1, 11, value};
+
+  EXPECT_EQ((std::vector<bool>{true, true, true, false, false, false}),
+    omni::reflected_call(packed_field_test::inspect_bitfield_bindings{},
+      input));
+}
+
+TEST(fields, packed_members_are_not_bitfields) {
+  EXPECT_EQ((std::vector<bool>{false, false, false, false}),
+    omni::reflected_call(packed_field_test::inspect_bitfield_metadata{},
+      omni::type_t<packed_field_test::record>{}));
 }

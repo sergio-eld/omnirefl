@@ -242,6 +242,11 @@ struct data_member_meta_t {
     return _M::is_static();
   }
 
+  /** Whether the member is declared as a bitfield. */
+  static constexpr bool is_bitfield() noexcept {
+    return _M::is_bitfield();
+  }
+
   /** Whether the declared field type has top-level `const` qualification. */
   static constexpr bool is_const() noexcept {
     return _M::is_const();

@@ -580,6 +580,7 @@ struct field_data {
   bool is_volatile;
   bool is_deprecated;
   bool is_static;
+  bool is_bitfield;
 
   enum {
     none = 0,
@@ -5404,6 +5405,7 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     .is_volatile = d->getType().isVolatileQualified(),
     .is_deprecated = d->hasAttr<clang::DeprecatedAttr>(),
     .is_static = !field,
+    .is_bitfield = field && field->isBitField(),
     .qualified = field && field->isMutable()
       ? as_mutable
       : (d->getType().isConstQualified() ? as_const : none),
@@ -7125,6 +7127,7 @@ std::string reflectable_body(const meta::record_data &d) {
         "{9}"
         "{10}"
         "\n    static constexpr bool is_static() noexcept {{ return {11}; }}"
+        "\n    static constexpr bool is_bitfield() noexcept {{ return {12}; }}"
         "\n  }};",
         // 0
         declaration.name,
@@ -7160,7 +7163,10 @@ std::string reflectable_body(const meta::record_data &d) {
         callable_metadata,
 
         // 11
-        f.is_static);
+        f.is_static,
+
+        // 12
+        f.is_bitfield);
     };
 
   const std::string fields = d.public_fields.empty()
