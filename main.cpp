@@ -581,6 +581,7 @@ struct field_data {
   bool is_deprecated;
   bool is_static;
   bool is_bitfield;
+  std::optional<unsigned> bit_width;
 
   enum {
     none = 0,
@@ -5264,6 +5265,25 @@ const clang::FunctionDecl *function_from_tag(clang::QualType type) {
     : function->getCanonicalDecl();
 }
 
+const clang::DeclaratorDecl *primary_member_declaration(
+  const clang::DeclaratorDecl *member) {
+  const auto *specialization =
+    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+      member->getDeclContext());
+  if (!specialization)
+    return member;
+
+  const auto declarations =
+    specialization->getSpecializedTemplate()->getTemplatedDecl()->lookup(
+      member->getDeclName());
+  const auto pattern = std::ranges::find_if(declarations, [](const auto *d) {
+    return llvm::isa<clang::FieldDecl, clang::VarDecl>(d);
+  });
+  return pattern != declarations.end()
+    ? llvm::cast<clang::DeclaratorDecl>(*pattern)
+    : member;
+}
+
 const clang::FunctionDecl *function_from_field_tag(
   const clang::DeclaratorDecl *field) {
   assert(field);
@@ -5272,25 +5292,9 @@ const clang::FunctionDecl *function_from_field_tag(
   if (!function)
     return nullptr;
 
-  const auto *specialization =
-    llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
-      field->getDeclContext());
-  if (!specialization)
-    return function;
-
-  const auto declarations =
-    specialization->getSpecializedTemplate()->getTemplatedDecl()->lookup(
-      field->getDeclName());
-  const auto pattern = std::ranges::find_if(declarations, [](const auto *d) {
-    return llvm::isa<clang::FieldDecl, clang::VarDecl>(d);
-  });
-
   // Primary-template specializations share generated metadata, while a
   // dependent field may resolve to a different function in each one.
-  return pattern != declarations.end()
-      && llvm::cast<clang::DeclaratorDecl>(*pattern)
-           ->getType()
-           ->isDependentType()
+  return primary_member_declaration(field)->getType()->isDependentType()
     ? nullptr
     : function;
 }
@@ -5361,6 +5365,12 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
   const clang::DeclaratorDecl *d) {
   assert(d);
   const auto *field = llvm::dyn_cast<clang::FieldDecl>(d);
+
+  // Shared primary-template metadata must not freeze an instantiated width.
+  const auto *pattern = field && field->isBitField()
+    ? llvm::dyn_cast<clang::FieldDecl>(
+        meta::impl::primary_member_declaration(field))
+    : nullptr;
   const clang::TypeSourceInfo *source = d->getTypeSourceInfo();
 
   return {
@@ -5406,6 +5416,10 @@ meta::field_data meta::field_data::from_decl(const clang::ASTContext &ast,
     .is_deprecated = d->hasAttr<clang::DeprecatedAttr>(),
     .is_static = !field,
     .is_bitfield = field && field->isBitField(),
+    .bit_width = pattern && pattern->isBitField()
+        && !pattern->getBitWidth()->isValueDependent()
+      ? std::optional{field->getBitWidthValue()}
+      : std::nullopt,
     .qualified = field && field->isMutable()
       ? as_mutable
       : (d->getType().isConstQualified() ? as_const : none),
@@ -6269,6 +6283,19 @@ meta::reflectable match_reflectable_type(const diagnostics &log,
           field.declaration.name);
       });
     }
+
+    for (const meta::field_data &field : record->public_fields
+        | std::views::filter([](const meta::field_data &candidate) {
+            return candidate.is_bitfield && !candidate.bit_width;
+          })) {
+      log(log_level::warning, [&concrete_id, &field] {
+        return std::format(
+          "\nbit width for field '{}::{}' skipped: template-dependent "
+          "width expressions are not supported yet.",
+          concrete_id,
+          field.declaration.name);
+      });
+    }
   }
 
   return {
@@ -7128,6 +7155,7 @@ std::string reflectable_body(const meta::record_data &d) {
         "{10}"
         "\n    static constexpr bool is_static() noexcept {{ return {11}; }}"
         "\n    static constexpr bool is_bitfield() noexcept {{ return {12}; }}"
+        "{13}"
         "\n  }};",
         // 0
         declaration.name,
@@ -7166,7 +7194,15 @@ std::string reflectable_body(const meta::record_data &d) {
         f.is_static,
 
         // 12
-        f.is_bitfield);
+        f.is_bitfield,
+
+        // 13
+        f.bit_width
+          ? std::format(
+              "\n    static constexpr unsigned bit_width() noexcept"
+              " {{ return {}; }}",
+              *f.bit_width)
+          : std::string{});
     };
 
   const std::string fields = d.public_fields.empty()

@@ -797,6 +797,8 @@ limits the declarations it can represent.
   metadata is formed](extras/tests/tool/regressions/deprecated_public_field.cpp),
   before `is_deprecated()` can filter them.
 - Anonymous unions are not reflected correctly.
+- Template-dependent bitfield widths are not exposed in metadata. These
+  width queries are disabled with a warning.
 - Bitfields and misaligned packed scalar fields do not expose references.
   Compiler-packed misaligned raw arrays have no safe whole-field accessor;
   use an aligned representation such as `std::array` for whole-field access.
