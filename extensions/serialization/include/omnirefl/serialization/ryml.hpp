@@ -248,21 +248,21 @@ struct issue {
  * Keeps issue records and an owning tree or borrowed node view for rendering.
  * Issue node IDs and input string views refer into that tree.
  *
- * When Owning is false, keep the caller's tree alive and unchanged while using
+ * When OwnsTree is false, keep the caller's tree alive and unchanged while using
  * diagnostics. Moving or changing it can invalidate node and string views.
  * When true, move this object; copying does not rebind issue views to its copy.
  * The copy constructor is left implicit to keep initialization simple and avoid
  * explicit copy/move special-member declarations.
  */
-template <bool Owning>
+template <bool OwnsTree>
 struct diagnostics {
   // Snapshot for inspection; mapping receives its settings separately.
   omni::ryml::settings settings;
 
-  // Retain the tree or refer to the caller's subtree, depending on Owning.
+  // Retain the tree or refer to the caller's subtree, depending on OwnsTree.
   // External string storage referenced by a caller-supplied tree must remain
-  // alive and unchanged while using diagnostics, even when Owning is true.
-  compat::conditional_t<Owning, ::ryml::Tree, ::ryml::ConstNodeRef> tree;
+  // alive and unchanged while using diagnostics, even when OwnsTree is true.
+  compat::conditional_t<OwnsTree, ::ryml::Tree, ::ryml::ConstNodeRef> tree;
 
   // Validation and conversion issues in traversal order, including warnings.
   std::vector<issue> issues;
@@ -272,17 +272,12 @@ struct diagnostics {
 
   // True when an error or warning limit requires stopping.
   bool stopped() const {
-    return settings.error_policy.error_limit < static_cast<std::size_t>( //
-             std::count_if(
-               issues.begin(),
-               issues.end(),
-               [](const issue &e) { return !e.warning; }))
-      || std::any_of(
-        issues.begin(),
-        issues.end(),
-        [](const issue &e) {
-          return json::issue_code::warning_limit_exceeded == e.reason;
-        });
+    return settings.error_policy.error_limit
+        < static_cast<std::size_t>(std::count_if(issues.begin(),
+          issues.end(),
+          [](const issue &e) { return !e.warning; }))
+      || std::any_of(issues.begin(), issues.end(),
+        [](const issue &e) { return json::issue_code::warning_limit_exceeded == e.reason; });
   }
 };
 
@@ -481,8 +476,8 @@ OMNI_CPP14_CONSTEXPR const deserialize_t deserialize{};
 // A generic callable lets transform_diagnostics(render_diagnostics) work with
 // both ownership modes; an overloaded function name cannot deduce its type.
 struct render_diagnostics_t {
-  template <bool Owning>
-  std::string operator()(const diagnostics<Owning> &d) const;
+  template <bool OwnsTree>
+  std::string operator()(const diagnostics<OwnsTree> &d) const;
 };
 
 /**

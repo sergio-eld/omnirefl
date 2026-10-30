@@ -902,9 +902,9 @@ with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
 
 } // namespace core
 
-template <bool Owning>
+template <bool OwnsTree>
 std::string render_diagnostics_t::operator()(
-  const diagnostics<Owning> &d) const {
+  const diagnostics<OwnsTree> &d) const {
   std::string message;
   for (const auto &entry : d.issues) {
     if (!message.empty())
