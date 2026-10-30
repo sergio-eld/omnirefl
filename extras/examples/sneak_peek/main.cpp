@@ -9,13 +9,13 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <utility>
 
 // One .cpp; no declaration headers, metadata files, or reflection macros.
 
 /** This example intentionally uses C++23 syntax and library facilities to
  * reduce verbosity. The reflection APIs also support C++11. */
 
+void print_indented(std::string_view text);
 std::string format_annotation(std::string_view annotation, unsigned indent = 0);
 
 /** Selected metadata queries used by print_reachable_records below.
@@ -42,6 +42,54 @@ std::string format_qualifiers(omni::data_member_meta auto field) {
     format_bitfield(field));
 }
 
+std::string format_enum(omni::enum_meta auto e) {
+  using namespace std::string_view_literals;
+
+  constexpr auto enumerator_name = [](auto enumerator) {
+    const auto &[value, name] = enumerator;
+    // Enumerator names are string literals with static storage.
+    return std::string_view{name};
+  };
+
+  return std::format("[{}]",
+    e.enumerators()
+      | std::views::transform(enumerator_name)
+      | std::views::join_with(", "sv)
+      | std::ranges::to<std::string>());
+}
+
+// Non-empty documentation includes its separating line break.
+std::string format_documentation(auto meta) {
+  const std::string_view text = meta.documentation();
+  return text.empty() ? "" : std::format("{}\n", format_annotation(text));
+}
+
+template <typename ValueMeta>
+  requires (omni::data_member_meta<ValueMeta>
+    || omni::function_param_meta<ValueMeta>
+    || omni::function_return_meta<ValueMeta>)
+std::string format_type_name(ValueMeta meta) {
+  if constexpr (omni::is_reflected<typename ValueMeta::type>::value)
+    return std::format("{} (resolves to {})",
+      meta.spelled_type_name(),
+      // qualified_type_name() also includes enclosing namespaces.
+      omni::meta_for<typename ValueMeta::type>::type_name());
+  else
+    /** Fall back to the data member's or function parameter's source spelling
+     * when its type is not reflected. */
+    return meta.spelled_type_name();
+}
+
+std::string format_function_param(omni::function_param_meta auto param) {
+  const std::string_view name = param.name();
+  const std::string_view documentation = param.documentation();
+
+  return std::format("{}{}{}",
+    format_type_name(param),
+    name.empty() ? "" : std::format(" {}", name),
+    documentation.empty() ? "" : std::format(" [{}]", documentation));
+}
+
 /** Render an available default value.
  * ```cpp
  * int make_value();
@@ -57,140 +105,30 @@ std::string format_default_value(Field field) {
   return std::format("{}", field.default_value());
 }
 
-template <typename ValueMeta>
-  requires (omni::data_member_meta<ValueMeta>
-    || omni::function_param_meta<ValueMeta>
-    || omni::function_return_meta<ValueMeta>)
-std::string format_type_name(ValueMeta meta) {
-  if constexpr (omni::is_reflected<typename ValueMeta::type>::value)
-    return std::format("{} (resolves to {})",
-      meta.spelled_type_name(),
-      omni::meta_for<typename ValueMeta::type>::type_name());
-  else
-    // Fall back to source spelling when the type is not reflected.
-    return meta.spelled_type_name();
-}
-
-std::string format_enum(omni::enum_meta auto e) {
-  using namespace std::string_view_literals;
-
-  constexpr auto enumerator_name = [](auto enumerator) {
-    const auto &[value, name] = enumerator;
-    return std::string_view{name};
-  };
-
-  return std::format("[{}]",
-    e.enumerators()
-      | std::views::transform(enumerator_name)
-      | std::views::join_with(", "sv)
-      | std::ranges::to<std::string>());
-}
-
+// Defined below the model to keep formatting glue out of the query examples.
 template <omni::data_member_meta Field>
-std::string format_field(Field field) {
-  constexpr auto format_type = [](Field field) {
-    if constexpr (std::is_enum_v<typename Field::type>)
-      return format_enum(omni::reflected(omni::type<typename Field::type>));
-    else
-      return format_type_name(field);
-  };
+std::string format_field(Field field);
 
-  const std::string annotation = format_annotation(field.documentation());
-  const auto description = std::format("{}{}{}{}: {}",
-    annotation,
-    annotation.empty() ? "" : "\n",
-    format_qualifiers(field),
-    field.name(),
-    format_type(field));
+// Defined below the model to keep formatting glue out of the query examples.
+std::string format_function(omni::function_meta auto func);
 
-  if constexpr (!std::is_enum_v<typename Field::type>
-    && field.has_default_value_access())
-    return std::format("{} = {}", description, format_default_value(field));
-  else
-    return description;
-}
-
-std::string format_function(omni::function_meta auto func) {
-  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
-
-  constexpr auto format_param = [](omni::function_param_meta auto m) {
-    std::string description = std::format("{}{}",
-      format_type_name(m),
-      std::string_view{m.name()}.empty()
-        ? std::string{}
-        : std::format(" {}", m.name()));
-
-    return std::string_view{m.documentation()}.empty()
-      ? std::move(description)
-      : std::format("{} [{}]", description, m.documentation());
-  };
-
-  constexpr auto join_params = [](std::string before, std::string_view param) {
-    before += before.empty() ? "" : ", ";
-    before += param;
-    return before;
-  };
-
-  const std::string params = func.parameters()
-    | fn::map(format_param)
-    | fn::foldl(join_params, std::string{});
-
-  const std::string annotation = format_annotation(func.documentation());
-
-  return std::format("{}{}{}({}) -> {};",
-    annotation,
-    annotation.empty() ? "" : "\n",
-    func.name(),
-    params,
-    format_type_name(func.returns()));
-}
-
-std::string format_record(omni::record_meta auto record) {
+void print_members(omni::record_meta auto record) {
   namespace fn = omni::fn;
 
-  constexpr auto format_member = [](omni::data_member_meta auto field) {
-    /** Special case: `omni::function_t` allows reflecting free functions
-     * "bound" as data members. */
-    if constexpr (field.has_callable_metadata())
-      return format_function(field.callable_metadata());
-    else
-      return format_field(field);
-  };
+  record.accessible_data_members()
+    | fn::each([](omni::data_member_meta auto field) {
+        /** Special case: `omni::function_t` allows reflecting free functions
+         * "bound" as data members. */
+        if constexpr (field.has_callable_metadata())
+          print_indented(format_function(field.callable_metadata()));
+        else
+          print_indented(format_field(field));
+      });
 
-  constexpr auto format_method = [](omni::function_meta auto func) {
-    return format_function(func);
-  };
-
-  constexpr auto join = [](std::string before, std::string_view text) {
-    before += text;
-    before += "\n";
-    return before;
-  };
-
-  constexpr auto indent_line = [](auto line) {
-    return std::format("  {}\n", std::string_view{line});
-  };
-
-  const std::string fields = record.accessible_data_members()
-    | fn::map(format_member)
-    | fn::foldl(join, std::string{});
-
-  const std::string methods = record.accessible_member_functions()
-    | fn::map(format_method)
-    | fn::foldl(join, std::string{});
-
-  const std::string annotation = format_annotation(record.documentation());
-
-  return std::format("{}{}{} {{\n{}}}",
-    annotation,
-    annotation.empty() ? "" : "\n",
-    record.qualified_type_name(),
-    (fields + methods)
-      | std::views::split('\n')
-      | std::views::filter([](auto line) { return !line.empty(); })
-      | std::views::transform(indent_line)
-      | std::views::join
-      | std::ranges::to<std::string>());
+  record.accessible_member_functions()
+    | fn::each([](omni::function_meta auto func) {
+        print_indented(format_function(func));
+      });
 }
 
 } // namespace reflected_scope
@@ -209,11 +147,6 @@ void print_reflection() {
    * The visitor can also be a generic lambda with an explicit return type. */
   omni::reflected_call(print_reachable_records{}, omni::type<T>);
 }
-
-/** Mutating example; its implementation showcases several reflected arguments
- * in one `reflected_call`. */
-template <typename... Records>
-void update_fields(Records *...values);
 
 /** Omnirefl reflects globally accessible, named records (structs, classes, or
  * unions) and enums on demand. */
@@ -255,9 +188,7 @@ struct vessel { //< Discovered as the `mapped_type` of `fleet<T>::vessels`.
 /** Measure a distance.
  * @param scale Multiplier.
  * @return The scaled distance. */
-double distance(vessel, double scale) {
-  return scale;
-}
+double distance(vessel, double scale) { return scale; }
 
 // Primary templates are supported; names appear without template arguments.
 template <typename T>
@@ -286,42 +217,107 @@ struct telemetry { //< Discovered as a value argument to `reflected_call`.
 
 } // namespace oceanic
 
-std::string format_annotation(std::string_view annotation,
-  unsigned indent) {
+std::string format_annotation(std::string_view annotation, unsigned indent) {
   return annotation
     | std::views::split('\n')
     | std::views::transform([indent](auto line) {
-        return std::format("{:>{}}// {}", "", indent,
-          std::string_view{line});
+        return std::format("{:>{}}// {}", "", indent, std::string_view{line});
       })
     | std::views::join_with('\n')
     | std::ranges::to<std::string>();
 }
+
+void print_indented(std::string_view text) {
+  for (auto line : text
+      | std::views::split('\n')
+      | std::views::filter([](auto line) { return !line.empty(); }))
+    std::println("  {}", std::string_view{line});
+}
+
+namespace reflected_scope {
+
+template <omni::data_member_meta Field>
+std::string format_field(Field field) {
+  constexpr auto format_type = [](Field field) {
+    if constexpr (std::is_enum_v<typename Field::type>)
+      return format_enum(omni::reflected(omni::type<typename Field::type>));
+    else
+      return format_type_name(field);
+  };
+
+  const auto description = std::format("{}{}{}: {}",
+    format_documentation(field),
+    format_qualifiers(field),
+    field.name(),
+    format_type(field));
+
+  if constexpr (!std::is_enum_v<typename Field::type>
+    && field.has_default_value_access())
+    return std::format("{} = {}", description, format_default_value(field));
+  else
+    return description;
+}
+
+std::string format_function(omni::function_meta auto func) {
+  namespace fn = omni::fn; //< Functional QoL for tuple-like values.
+
+  constexpr auto format_param = [](omni::function_param_meta auto param) {
+    return format_function_param(param);
+  };
+
+  constexpr auto join_params = [](std::string before, std::string_view param) {
+    before += before.empty() ? "" : ", ";
+    before += param;
+    return before;
+  };
+
+  const std::string params = func.parameters()
+    | fn::map(format_param)
+    | fn::foldl(join_params, std::string{});
+
+  return std::format("{}{}({}) -> {};",
+    format_documentation(func),
+    func.name(),
+    params,
+    format_type_name(func.returns()));
+}
+
+void print_record(omni::record_meta auto record) {
+  std::println("{}{} {{",
+    format_documentation(record),
+    record.qualified_type_name());
+
+  print_members(record);
+  std::println("}}");
+}
+
+} // namespace reflected_scope
 
 template <omni::record_meta Root>
 void print_reachable_records::operator()(Root) const {
   namespace fn = omni::fn;
 
   // Follow reflected data members and `mapped_type` dependencies depth-first.
-  const auto dfs =
-    []<typename T>(const auto &self, omni::type_t<T>) -> void {
-      if constexpr (omni::is_reflected<T>::value && !std::is_enum_v<T>) {
-        const auto metadata = omni::reflected(omni::type<T>);
-        std::println("{}", reflected_scope::format_record(metadata));
-        metadata.accessible_data_members()
-          | fn::filter<fn::non_static>()
-          | fn::each([&self]<typename Member>(Member) {
-              if constexpr (omni::data_member_meta<Member>)
-                self(self, omni::type<typename Member::type>);
-            });
-      } else if constexpr (requires { typename T::mapped_type; }) {
-        self(self, omni::type<typename T::mapped_type>);
-      }
-    };
+  const auto dfs = []<typename T>(const auto &self, omni::type_t<T>) -> void {
+    if constexpr (omni::is_reflected<T>::value && !std::is_enum_v<T>) {
+      const auto metadata = omni::reflected(omni::type<T>);
+      reflected_scope::print_record(metadata);
+      metadata.accessible_data_members()
+        | fn::filter<fn::non_static>()
+        | fn::each([&self]<typename Member>(Member) {
+            if constexpr (omni::data_member_meta<Member>)
+              self(self, omni::type<typename Member::type>);
+          });
+    } else if constexpr (requires { typename T::mapped_type; }) {
+      self(self, omni::type<typename T::mapped_type>);
+    }
+  };
 
   dfs(dfs, omni::type<typename Root::reflected_type>);
 }
 
+/** Mutating example; its implementation showcases several reflected arguments
+ * in one `reflected_call`. */
 template <typename... Records>
 void update_fields(Records *...values) {
   namespace fn = omni::fn;
