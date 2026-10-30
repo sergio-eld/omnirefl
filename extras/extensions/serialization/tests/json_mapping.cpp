@@ -124,6 +124,10 @@ struct pair_record {
   int second;
 };
 
+struct nested_pair {
+  pair_record nested;
+};
+
 struct default_record {
   int value = 17;
 };
@@ -306,6 +310,39 @@ const auto duplicates = std::make_tuple(
     R"({"value": 7, "value": 42})")
     >> expect(models::integer_value{42}, {}),
 
+  // [nested_pair][reject / allow / last]; select whole objects, never merge.
+  D(duplicate_policy::reject,
+    R"({"nested": {"first": 7, "second": 8},
+        "nested": {"first": 9, "second": 10}})")
+    >> expect<models::nested_pair>(none,
+      {dsl::error(omni::json::issue_code::duplicate_field, "/nested")}),
+  D(duplicate_policy::allow,
+    R"({"nested": {"first": 7, "second": 8}, "nested": {"second": 10}})")
+    >> expect(models::nested_pair{{7, 8}}, {}),
+  D(duplicate_policy::last,
+    R"({"nested": {"first": 7, "second": 8}, "nested": {"second": 10}})")
+    >> expect<models::nested_pair>(none,
+      {dsl::error(omni::json::issue_code::missing_field, "/nested/first")}),
+  D(duplicate_policy::last,
+    R"({"nested": {"second": 8}, "nested": {"first": 9, "second": 10}})")
+    >> expect(models::nested_pair{{9, 10}}, {}),
+  D(duplicate_policy::last | duplicate_policy::warn,
+    R"({"nested": {"first": 7, "first": 9, "second": 8}})")
+    >> expect(models::nested_pair{{9, 8}},
+      {dsl::warning(omni::json::issue_code::duplicate_field, "/nested/first")}),
+
+  // [sequence_record][reject / allow / last]; do not append occurrences.
+  D(duplicate_policy::reject,
+    R"({"items": [{"value": 7}], "items": [{"value": 9}, {"value": 10}]})")
+    >> expect<models::sequence_record>(none,
+      {dsl::error(omni::json::issue_code::duplicate_field, "/items")}),
+  D(duplicate_policy::allow,
+    R"({"items": [{"value": 7}], "items": [{"value": 9}, {"value": 10}]})")
+    >> expect(models::sequence_record{{{7}}}, {}),
+  D(duplicate_policy::last,
+    R"({"items": [{"value": 7}], "items": [{"value": 9}, {"value": 10}]})")
+    >> expect(models::sequence_record{{{9}, {10}}}, {}),
+
   // [models::text_value][reject]
   D(duplicate_policy::reject, R"({"value": "first", "value": "last"})")
     >> expect<models::text_value>(none, {Edup}),
@@ -440,7 +477,22 @@ const auto cases = std::make_tuple(
   // [integer_value][2]
   L(2, R"({"value": 7, "other": 1, "another": 2})")
     >> expect(models::integer_value{7},
-      {warn_unknown_field("/other"), warn_unknown_field("/another")}));
+      {warn_unknown_field("/other"), warn_unknown_field("/another")}),
+
+  // [nested_records][1 / 2]; the warning budget spans nested objects.
+  L(1,
+    R"({"nested": {"value": 7, "other": 1},
+        "items": [{"value": 8, "other": 2}]})")
+    >> expect<models::nested_records>(none,
+      {warn_unknown_field("/nested/other"),
+        warn_unknown_field("/items/0/other"),
+        dsl::error(issue_code::warning_limit_exceeded, "/items/0/other")}),
+  L(2,
+    R"({"nested": {"value": 7, "other": 1},
+        "items": [{"value": 8, "other": 2}]})")
+    >> expect(models::nested_records{{7}, {{8}}},
+      {warn_unknown_field("/nested/other"),
+        warn_unknown_field("/items/0/other")}));
 
 } // namespace warning_limits
 
@@ -513,7 +565,40 @@ const auto cases = std::make_tuple(
   E(2, R"({"other": 1})") >> expect<models::pair_record>(none,
     {err_unknown_field("/other"),
       dsl::error(issue_code::missing_field, "/first"),
-      dsl::error(issue_code::missing_field, "/second")}));
+      dsl::error(issue_code::missing_field, "/second")}),
+
+  // [nested_records][1 / 2]; child records share the error budget.
+  E(1,
+    R"({"nested": {"value": "bad"},
+        "items": [{"value": "bad"}, {"value": "bad"}]})")
+    >> expect<models::nested_records>(none,
+      {dsl::error(issue_code::invalid_scalar,
+        "/nested/value",
+        value_kind::integer),
+        dsl::error(issue_code::invalid_scalar,
+          "/items/0/value",
+          value_kind::integer)}),
+  E(2,
+    R"({"nested": {"value": "bad"},
+        "items": [{"value": "bad"}, {"value": "bad"}]})")
+    >> expect<models::nested_records>(none,
+      {dsl::error(issue_code::invalid_scalar,
+        "/nested/value",
+        value_kind::integer),
+        dsl::error(issue_code::invalid_scalar,
+          "/items/0/value",
+          value_kind::integer),
+        dsl::error(issue_code::invalid_scalar,
+          "/items/1/value",
+          value_kind::integer)}),
+
+  // [integer_value][wrong root kind]; valid JSON, but not a record.
+  E(0, "null") >> expect<models::integer_value>(none,
+    {dsl::error(issue_code::unexpected_kind, "", value_kind::mapping)}),
+  E(0, "[]") >> expect<models::integer_value>(none,
+    {dsl::error(issue_code::unexpected_kind, "", value_kind::mapping)}),
+  E(0, "7") >> expect<models::integer_value>(none,
+    {dsl::error(issue_code::unexpected_kind, "", value_kind::mapping)}));
 
 } // namespace error_limits
 
@@ -612,7 +697,29 @@ const auto cases = std::make_tuple(
       {}),
   R(none, R"({"nested": {}, "items": [{}]})")
     >> expect<models::nested_defaults>(none,
-      {dsl::error(issue_code::missing_field, "/nested/value")}));
+      {dsl::error(issue_code::missing_field, "/nested/value")}),
+
+  // [nested_defaults][default_initializable]; missing and empty differ.
+  R(recovery_policy::default_initializable, R"({"items": []})")
+    >> expect(models::nested_defaults{models::default_record{}, {}}, {}),
+  R(recovery_policy::default_initializable,
+    R"({"nested": {}, "items": []})")
+    >> expect(models::nested_defaults{
+                models::with_value<models::default_record>(0), {}}, {}),
+  R(recovery_policy::default_initializable, R"({"nested": {"value": 9}})")
+    >> expect(models::nested_defaults{
+                models::with_value<models::default_record>(9), {}}, {}),
+
+  // [nested_defaults][none]; empty containers are present, not missing.
+  R(none, R"({"nested": {"value": 9}, "items": []})")
+    >> expect(models::nested_defaults{
+                models::with_value<models::default_record>(9), {}}, {}),
+  R(none, R"({"nested": {"value": 9}})")
+    >> expect<models::nested_defaults>(none,
+      {dsl::error(issue_code::missing_field, "/items")}),
+  R(none, R"({"items": []})")
+    >> expect<models::nested_defaults>(none,
+      {dsl::error(issue_code::missing_field, "/nested")}));
 
 } // namespace missing_field_recovery
 
