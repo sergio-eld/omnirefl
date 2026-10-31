@@ -12,15 +12,18 @@
  * Basics
  *   basics.reflected_scope - introduce reflected_call with a generic visitor
  *   basics.reflected_scope_cpp11 - C++11 equivalent with a named visitor
+ *   basics.reflected_scope_cpp17 - explicit metadata type for IDE completion
  *   basics.reflected_scope_indirection - metadata through a called function
  *   basics.enum_metadata - enumerator names, values, and declaration order
  *   basics.enum_declarations - enum class and plain enum support requirements
  *   basics.record_queries - read record names and documentation
  *   basics.accessing_members - accessible own and inherited members as tuples
  *   basics.data_member_queries - inspect qualifiers, bitfields, and deprecation
+ *   basics.member_function_queries - names, parameters, returns, and comments
  *   basics.reflected_call_args - metadata versus object bindings
  *   basics.reading_data_members - read member values through object bindings
  *   basics.writing_data_members - update the original object's members
+ *   basics.calling_member_functions - invoke through function bindings
  *   basics.discovering_dependencies - follow supported type discovery routes
  *
  * Advanced
@@ -30,19 +33,22 @@
  *   advanced.data_member_value_read - metadata and binding value accessors
  *   advanced.data_member_value_write - assignment and reference accessors
  *   advanced.const_and_mutable_access - filter writable members by binding
+ *   advanced.function_tags - metadata for free functions bound as data members
  *   advanced.custom_queries - select members by reference access
  *   advanced.bitfield_access - inspect bit widths and assign without references
+ *   advanced.default_member_values - initializer presence versus value access
+ *   advanced.union_metadata - inspect members without reading inactive values
  *   advanced.data_member_type_names - type spelling and documentation
  *   advanced.enum_value_name - find the name of a bound enum value
  *   advanced.primary_record_templates - primary-template metadata
  *   advanced.reflected_value_query - query metadata from an existing value
+ *   advanced.metadata_skips - skip metadata, preserve discovery protocols
  *   advanced.nested_enum_metadata - enclosing names and documentation
  *   advanced.non_dependent_queries - guard early concrete-type queries
  *
  * Examples
  *   example.primary_template_from_map
  *   example.annotated_dependencies
- *   example.cpp14_cpp17_binding_name
  *   example.convert_moves_same_named_fields
  *   example.filter_fields_before_set_value
  *   example.accessible_data_members_follow_member_visibility
@@ -103,7 +109,12 @@ enum class status {
  *
  * An explicit visitor return type keeps its body from being instantiated during
  * instrumentation, before generated metadata exists. Use a trailing return
- * type even for a visitor returning void: -> void. */
+ * type even for a visitor returning void: -> void.
+ *
+ * NOTE: `constexpr auto result = reflected_call(...)` is unsupported because
+ * it forces visitor instantiation before generated metadata exists. The visitor
+ * itself and its internal calculations can still be constexpr.
+ */
 TEST(basics, reflected_scope) {
   const auto name = omni::reflected_call(
     [](omni::record_meta auto record) -> std::string_view {
@@ -117,35 +128,50 @@ TEST(basics, reflected_scope) {
 }
 
 // C++11 has no generic lambdas; use a named template callable instead.
+// Generic lambda parameters (auto) become available in C++14.
 struct cpp11_lambda_type_name {
   // _M is internal and required for this template declaration.
-  // In C++20, the corresponding concept is omni::record_meta.
   template <typename _M>
   std::string operator()(omni::record_meta_t<_M> record) const {
     return record.type_name();
   }
-
-  template <typename _M>
-  std::string operator()(omni::enum_meta_t<_M> e) const {
-    return e.type_name();
-  }
-
-  template <typename T>
-  std::string operator()(omni::record_binding_t<T> binding) const {
-    return binding.type_name();
-  }
 };
 
+/** C++20 concepts and their wrapper templates (omni:: omitted):
+ *   meta                   -> meta_t<_M>
+ *   record_meta            -> record_meta_t<_M>
+ *   enum_meta              -> enum_meta_t<_M>
+ *   data_member_meta       -> data_member_meta_t<_M>
+ *   function_meta          -> function_meta_t<_M>
+ *   function_param_meta    -> function_param_meta_t<_M>
+ *   function_return_meta   -> function_return_meta_t<_M>
+ *   binding                -> binding_t<T>
+ *   record_binding         -> record_binding_t<T>
+ *   enum_binding           -> enum_binding_t<T>
+ *   data_member_binding    -> data_member_binding_t<Record, _M>
+ *   function_binding       -> function_binding_t<Record, _M>
+ *
+ * Metadata concepts also accept the corresponding binding wrappers.
+ * Binding forms are introduced below; T preserves the value's cv/ref type.
+ */
 TEST(basics, reflected_scope_cpp11) {
   const std::string name = omni::reflected_call(
     cpp11_lambda_type_name{}, omni::type_t<account>{});
 
   EXPECT_EQ("account", name);
+}
 
-  const account object{};
-  EXPECT_EQ("account", omni::reflected_call(cpp11_lambda_type_name{}, object));
-  EXPECT_EQ("status",
-    omni::reflected_call(cpp11_lambda_type_name{}, omni::type_t<status>{}));
+// NOTE: C++17 CTAD gives the auto parameter an explicit metadata type to help
+// IDE completion expose the metadata interface.
+TEST(basics, reflected_scope_cpp17) {
+  const auto name = omni::reflected_call(
+    [](auto value) -> std::string {
+      const omni::meta_t meta = value;
+      return meta.type_name();
+    },
+    omni::type<account>);
+
+  EXPECT_EQ("account", name);
 }
 
 // NOTE: Keeping reflection helpers in a dedicated namespace makes their scope
@@ -189,6 +215,8 @@ TEST(basics, enum_metadata) {
     [](omni::enum_meta auto e)
       -> std::vector<std::pair<status, std::string_view>> {
       const auto entries = e.enumerators();
+      // Names refer to generated string literals with static storage.
+      // Destroying the local entries array does not invalidate these views.
       return {entries.begin(), entries.end()};
     },
     omni::type<status>);
@@ -211,8 +239,8 @@ TEST(basics, enum_metadata) {
 }
 
 // NOTE: enum class works with or without an explicit underlying type.
-// A plain enum needs an explicit underlying type, such as `: int`, so generated
-// metadata can forward-declare it.
+// A plain enum at global or namespace scope needs an explicit underlying type,
+// such as `: int`, so generated metadata can forward-declare it.
 // Local and unnamed enums are unsupported as reflected_call inputs.
 namespace enum_declarations {
 
@@ -222,7 +250,8 @@ enum unscoped_unsupported { first, last };
 
 } // namespace enum_declarations
 
-// A plain enum needs an explicit underlying type; enum class does not.
+// At namespace scope, a plain enum needs an explicit underlying type;
+// enum class does not.
 TEST(basics, enum_declarations) {
   using namespace enum_declarations;
 
@@ -342,7 +371,7 @@ TEST(basics, data_member_queries) {
     [](omni::record_meta auto record) -> std::vector<std::string> {
       return std::apply(
         [](auto... description) {
-          return std::vector{std::move(description)...};
+          return std::vector<std::string>{std::move(description)...};
         },
         record.accessible_data_members() | omni::fn::map(format_member));
     },
@@ -368,6 +397,80 @@ TEST(basics, data_member_queries) {
 #  pragma GCC diagnostic pop
 #endif
 
+namespace member_functions {
+
+struct counter {
+  int value;
+
+  /** Increase the counter.
+   * @param delta Amount to add.
+   * @return Updated value. */
+  int add(int delta) { return value += delta; }
+};
+
+} // namespace member_functions
+
+/** Member functions have their own metadata: names, arity, parameter metadata,
+ * return metadata, and documentation. Parameter and return documentation comes
+ * from @param and @return commands attached to the function declaration.
+ * NOTE: Overloaded member functions are currently skipped with warnings.
+ * Free functions have limited support through function_t data members;
+ * see `advanced.function_tags`.
+ */
+TEST(basics, member_function_queries) {
+  struct description {
+    std::string_view name;
+    std::string_view documentation;
+    std::size_t arity;
+    std::vector<std::string_view> parameters;
+    std::vector<std::string_view> parameter_documentation;
+    std::string_view return_type;
+    std::string_view return_documentation;
+  };
+
+  const auto functions = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::vector<description> {
+      const auto describe = [](omni::function_meta auto func) {
+        return func.parameters()
+          | omni::fn::foldl(
+            [](description result, omni::function_param_meta auto param) {
+              result.parameters.push_back(param.name());
+              result.parameter_documentation.push_back(param.documentation());
+              return result;
+            },
+            description{
+              .name = func.name(),
+              .documentation = func.documentation(),
+              .arity = func.arity(),
+              .parameters = {},
+              .parameter_documentation = {},
+              .return_type = func.returns().spelled_type_name(),
+              .return_documentation = func.returns().documentation(),
+            });
+      };
+
+      return std::apply(
+        [](auto... descriptions) {
+          return std::vector<description>{std::move(descriptions)...};
+        },
+        record.accessible_member_functions() | omni::fn::map(describe));
+    },
+    omni::type<member_functions::counter>);
+
+  EXPECT_EQ(1U, functions.size());
+  for (const auto &func : functions) {
+    EXPECT_EQ("add", func.name);
+    EXPECT_EQ("Increase the counter.", func.documentation);
+    EXPECT_EQ(1U, func.arity);
+    const std::vector<std::string_view> parameters{"delta"};
+    const std::vector<std::string_view> documentation{"Amount to add."};
+    EXPECT_EQ(parameters, func.parameters);
+    EXPECT_EQ(documentation, func.parameter_documentation);
+    EXPECT_EQ("int", func.return_type);
+    EXPECT_EQ("Updated value.", func.return_documentation);
+  }
+}
+
 namespace data_member_bindings {
 
 struct position {
@@ -375,14 +478,20 @@ struct position {
   int y;
 };
 
+struct empty_record {};
+
 } // namespace data_member_bindings
 
 /** reflected_call wraps each argument in the corresponding metadata or binding
  * before passing it to the visitor. See `advanced.reflected_call_args` for the
  * detailed argument-conversion and value-category rules.
+ * Metadata and non-owning bindings are trivial to copy. An owning binding
+ * follows its stored object's copy semantics and may be non-copyable.
  *
- * NOTE: Non-reflectable types are errors as direct arguments. When discovered
- * as dependencies, unsupported types are skipped with warnings instead.
+ * NOTE: Non-reflectable types are errors as direct arguments. Unsupported
+ * record/enum dependencies are skipped with warnings. Fundamental types and
+ * standard-library records receive no metadata; their omission alone does not
+ * produce a warning.
  * The caller is responsible for unwrapping compound types such as tuples,
  * vectors, variants, and raw arrays before passing their records or enums to
  * reflected_call. Other data can be captured by the visitor instead of passed
@@ -416,27 +525,34 @@ TEST(basics, reflected_call_args) {
 // Read data-member values from an existing record.
 TEST(basics, reading_data_members) {
   data_member_bindings::position point{3, 7};
-  const auto values = omni::reflected_call(
-    [](omni::record_binding auto record) -> std::vector<int> {
-      return std::apply(
-        [](omni::data_member_binding auto... member) {
-          // value() reads the member from its bound record.
-          return std::vector{member.value()...};
-        },
-        // A record binding returns data-member bindings here.
-        record.accessible_data_members());
-    },
-    point);
+  const auto read = [](omni::record_binding auto record) -> std::vector<int> {
+    return std::apply(
+      [](omni::data_member_binding auto... member) {
+        // value() reads the member from its bound record.
+        return std::vector<int>{member.value()...};
+      },
+      // A record binding returns data-member bindings here.
+      // Member bindings are trivial to copy; they never own the object
+      // or extend its lifetime.
+      record.accessible_data_members());
+  };
 
+  const auto values = omni::reflected_call(read, point);
   const std::vector<int> expected{3, 7};
   EXPECT_EQ(expected, values);
+
+  data_member_bindings::empty_record empty;
+  EXPECT_TRUE(omni::reflected_call(read, empty).empty());
 }
 
 // A data-member binding's set_value() writes to the original object.
 TEST(basics, writing_data_members) {
   data_member_bindings::position point{3, 7};
   omni::reflected_call(
-    [](omni::record_binding auto record) -> void {
+    // This optional constraint signals mutation of the caller's object through a
+    // reference, rather than mutation of an owned copy.
+    []<omni::record_binding Record>(Record record)
+      -> std::enable_if_t<!Record::owning::value> {
       record.accessible_data_members()
         | omni::fn::each([](omni::data_member_binding auto member) {
             member.set_value(member.value() + 10);
@@ -446,6 +562,30 @@ TEST(basics, writing_data_members) {
 
   EXPECT_EQ(13, point.x);
   EXPECT_EQ(17, point.y);
+}
+
+// A record binding returns function bindings that invoke through that record.
+TEST(basics, calling_member_functions) {
+  member_functions::counter counter{7};
+  // This optional constraint signals mutation of the caller's object through a
+  // reference, rather than mutation of an owned copy.
+  const auto call = []<omni::record_binding Record>(Record record)
+    -> std::enable_if_t<!Record::owning::value, std::vector<int>> {
+    return std::apply(
+      [](auto... values) { return std::vector<int>{values...}; },
+      record.accessible_member_functions()
+        | omni::fn::map([](omni::function_binding auto func) {
+            return func(5);
+          }));
+  };
+
+  const auto results = omni::reflected_call(call, counter);
+  const std::vector<int> expected{12};
+  EXPECT_EQ(expected, results);
+  EXPECT_EQ(12, counter.value);
+
+  data_member_bindings::position no_functions{3, 7};
+  EXPECT_TRUE(omni::reflected_call(call, no_functions).empty());
 }
 
 namespace discovering_dependencies {
@@ -559,14 +699,11 @@ enum class mode { read, write };
  *   const T&       -> record_binding_t<const T&>
  *   T&&            -> record_binding_t<T&&>
  *
- * NOTE: `constexpr auto result = reflected_call(...)` is unsupported because
- * it forces visitor instantiation before generated metadata exists. The visitor
- * itself and its internal calculations can still be constexpr.
- *
- * NOTE: Types the tool cannot reflect are rejected as direct arguments with
- * hard instrumentation errors. As discovered dependencies, such types are
- * skipped with warnings instead. Arbitrary compound class templates cannot
- * always be distinguished from ordinary records; detection is best effort.
+ * NOTE: Unsupported direct arguments produce hard instrumentation errors.
+ * Unsupported record/enum dependencies are skipped with warnings. Omitting
+ * fundamental types and standard-library records does not itself warn.
+ * Arbitrary compound class templates cannot always be distinguished from
+ * ordinary records; detection is best effort.
  * For variants, pass the active alternative with std::visit or mpark::visit;
  * see `example.visit_compound_variant_inputs`. */
 TEST(advanced, reflected_call_args) {
@@ -609,8 +746,10 @@ TEST(advanced, reflected_call_args) {
   EXPECT_EQ(9, const_value);
   EXPECT_EQ(9, *constant.value);
 
-  const auto move_value = [](omni::record_binding auto binding) -> payload && {
-    static_assert(!decltype(binding)::owning::value);
+  // This optional constraint signals mutation of the caller's object through a
+  // reference, rather than mutation of an owned copy.
+  const auto move_value = []<omni::record_binding Record>(Record binding)
+    -> std::enable_if_t<!Record::owning::value, payload &&> {
     return std::move(binding).value();
   };
 
@@ -780,7 +919,10 @@ TEST(advanced, data_member_value_read) {
 TEST(advanced, data_member_value_write) {
   member_value_access::record input{"north", "south"};
   omni::reflected_call(
-    [](omni::record_binding auto record) -> void {
+    // This optional constraint signals mutation of the caller's object through a
+    // reference, rather than mutation of an owned copy.
+    []<omni::record_binding Record>(Record record)
+      -> std::enable_if_t<!Record::owning::value> {
       record.accessible_data_members()
         | omni::fn::each([&record](omni::data_member_binding auto member) {
             using Meta = typename decltype(member)::meta;
@@ -819,8 +961,10 @@ struct writable: std::bool_constant<requires(Member member) {
  * Filter by assignment availability on the binding before writing its value.
  */
 TEST(advanced, const_and_mutable_access) {
-  const auto write = [](omni::record_binding auto record)
-    -> std::vector<std::string_view> {
+  // This optional constraint signals mutation of the caller's object through a
+  // reference, rather than mutation of an owned copy.
+  const auto write = []<omni::record_binding Record>(Record record)
+    -> std::enable_if_t<!Record::owning::value, std::vector<std::string_view>> {
     const auto writable = record.accessible_data_members()
       | omni::fn::filter<qualified_access::writable>();
 
@@ -830,7 +974,7 @@ TEST(advanced, const_and_mutable_access) {
 
     return std::apply(
       [](omni::data_member_binding auto... member) {
-        return std::vector{std::string_view(member.name())...};
+        return std::vector<std::string_view>{member.name()...};
       },
       writable);
   };
@@ -850,6 +994,50 @@ TEST(advanced, const_and_mutable_access) {
   EXPECT_EQ(3, const_object.regular);
   EXPECT_EQ(7, const_object.fixed);
   EXPECT_EQ(42, const_object.cache);
+}
+
+namespace function_tags {
+
+int double_value(int value) { return 2 * value; }
+
+struct commands {
+  omni::function_t<double_value> twice;
+  int ignored;
+};
+
+} // namespace function_tags
+
+/** omni::function_t binds a free function as a data member. That member still
+ * has data-member metadata; has_callable_metadata() identifies the special case
+ * and callable_metadata() exposes the associated function metadata.
+ * OMNI_FUNCTION(double_value) provides a tag spelling across language versions.
+ */
+TEST(advanced, function_tags) {
+  const auto invoke = [](omni::record_meta auto record) -> std::vector<int> {
+    const auto callable = record.accessible_data_members()
+      | omni::fn::filter([]<typename Member>() {
+          using Meta = omni::compat::remove_cvref_t<Member>;
+          return Meta::has_callable_metadata();
+        });
+
+    return std::apply(
+      [](auto... values) { return std::vector<int>{values...}; },
+      callable | omni::fn::map([](omni::data_member_meta auto member) {
+        const auto func = member.callable_metadata();
+        return std::invoke(func.pointer(), 21);
+      }));
+  };
+
+  const auto results = omni::reflected_call(
+    invoke, omni::type<function_tags::commands>);
+
+  const std::vector<int> expected{42};
+  EXPECT_EQ(expected, results);
+
+  const auto no_functions = omni::reflected_call(
+    invoke, omni::type<basics::data_member_bindings::position>);
+
+  EXPECT_TRUE(no_functions.empty());
 }
 
 namespace custom_queries {
@@ -878,7 +1066,7 @@ TEST(advanced, custom_queries) {
     [](omni::record_binding auto record) -> std::vector<std::string_view> {
       return std::apply(
         [](omni::data_member_binding auto... member) {
-          return std::vector{std::string_view(member.name())...};
+          return std::vector<std::string_view>{member.name()...};
         },
         record.accessible_data_members()
           | omni::fn::filter<custom_queries::reference_accessible>());
@@ -902,11 +1090,18 @@ struct record {
 /** Bitfields expose value access and assignment, but cannot provide references.
  * Query the declared width with bit_width(), available for supported bitfields.
  * Member names are also constexpr and can select operations at compile time.
+ * NOTE: Width expressions that depend on template parameters are not supported
+ * yet. Omnirefl omits bit_width() with a warning for those members. In generic
+ * code, requires { member.bit_width(); } checks whether the query is available;
+ * is_bitfield() alone does not guarantee width access.
  */
 TEST(advanced, bitfield_access) {
   bitfield_access::record input{1, 2, 3};
   omni::reflected_call(
-    [](omni::record_binding auto record) -> void {
+    // This optional constraint signals mutation of the caller's object through a
+    // reference, rather than mutation of an owned copy.
+    []<omni::record_binding Record>(Record record)
+      -> std::enable_if_t<!Record::owning::value> {
       record.accessible_data_members()
         | omni::fn::each([](omni::data_member_binding auto member) {
             if constexpr (member.is_bitfield()) {
@@ -924,6 +1119,94 @@ TEST(advanced, bitfield_access) {
   EXPECT_EQ(8, input.foo_count);
   EXPECT_EQ(15U, input.bar_count);
   EXPECT_EQ(3, input.untouched_count);
+}
+
+namespace default_member_values {
+
+int computed_value() { return 42; }
+
+struct record {
+  int literal = 7;
+  int computed = computed_value();
+  int required;
+};
+
+} // namespace default_member_values
+
+/** An initializer's presence does not guarantee default_value() access.
+ * Omnirefl can reproduce supported literal initializers; an initializer calling
+ * a function still belongs to the original declaration but is not replayed.
+ * default_value() currently returns a cached value at runtime.
+ */
+TEST(advanced, default_member_values) {
+  struct description {
+    std::string_view name;
+    bool initialized;
+    bool value_access;
+  };
+
+  const auto descriptions = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::vector<description> {
+      return std::apply(
+        [](auto... member) {
+          return std::vector<description>{description{member.name(),
+            member.has_default_member_initializer(),
+            member.has_default_value_access()}...};
+        },
+        record.accessible_data_members());
+    },
+    omni::type<default_member_values::record>);
+
+  for (const auto &member : descriptions) {
+    EXPECT_EQ("required" != member.name, member.initialized);
+    EXPECT_EQ("literal" == member.name, member.value_access);
+  }
+
+  const auto defaults = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::vector<int> {
+      return std::apply(
+        [](auto... member) {
+          return std::vector<int>{member.default_value()...};
+        },
+        record.accessible_data_members()
+          | omni::fn::filter([]<typename Member>() {
+              using Meta = omni::compat::remove_cvref_t<Member>;
+              return Meta::has_default_value_access();
+            }));
+    },
+    omni::type<default_member_values::record>);
+
+  const std::vector<int> expected{7};
+  EXPECT_EQ(expected, defaults);
+}
+
+namespace union_metadata {
+
+union number {
+  int integer;
+  double real;
+};
+
+} // namespace union_metadata
+
+/** Union metadata lists the declared members without reading their values.
+ * NOTE: Reflection does not identify a union's active member. The caller must
+ * know which member is active before reading through a binding.
+ */
+TEST(advanced, union_metadata) {
+  const auto names = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::vector<std::string_view> {
+      static_assert(record.is_union());
+      return std::apply(
+        [](auto... member) {
+          return std::vector<std::string_view>{member.name()...};
+        },
+        record.accessible_data_members());
+    },
+    omni::type<union_metadata::number>);
+
+  const std::vector<std::string_view> expected{"integer", "real"};
+  EXPECT_EQ(expected, names);
 }
 
 namespace member_type_names {
@@ -1034,38 +1317,24 @@ TEST(advanced, primary_record_templates) {
   };
 
   const auto read_fields =
-    [](omni::record_binding auto b) -> std::vector<rendered_field> {
-    static_assert(b.is_template());
-    std::vector<rendered_field> out;
-
-    omni::compat::apply(
-      [&out](omni::data_member_binding auto... field) {
-        const auto render = [&out](omni::data_member_binding auto field) {
-          constexpr std::string_view field_name = field.name();
-
-          if constexpr ("title"sv == field_name) {
-            out.push_back({
-              .name = field.name(),
-              .annotation = field.documentation(),
-              .value = field.value(),
-            });
-          }
-
-          if constexpr ("revisions"sv == field_name) {
-            out.push_back({
-              .name = field.name(),
-              .annotation = field.documentation(),
-              .value = std::to_string(field.value()),
-            });
-          }
+    [](omni::record_binding auto record) -> std::vector<rendered_field> {
+      static_assert(record.is_template());
+      const auto render = [](omni::data_member_binding auto member) {
+        std::ostringstream text;
+        text << member.value();
+        return rendered_field{
+          .name = member.name(),
+          .annotation = member.documentation(),
+          .value = text.str(),
         };
+      };
 
-        (render(field), ...);
-      },
-      b.accessible_data_members());
-
-    return out;
-  };
+      return std::apply(
+        [](auto... fields) {
+          return std::vector<rendered_field>{std::move(fields)...};
+        },
+        record.accessible_data_members() | omni::fn::map(render));
+    };
 
   const std::vector<rendered_field> k_expected{
     {
@@ -1096,6 +1365,54 @@ TEST(advanced, reflected_value_query) {
   EXPECT_EQ("position"sv,
     omni::reflected_call(query_value,
       basics::data_member_bindings::position{}));
+}
+
+namespace metadata_tweaks {
+
+struct element { int value; };
+
+template <typename T>
+struct view {
+  using value_type = T;
+  T *data;
+};
+
+struct record {
+  view<element> values;
+};
+
+} // namespace metadata_tweaks
+
+/** skip_metadata requests omit metadata generation for selected types, rather
+ * than merely silencing their warnings. Supported discovery protocols still
+ * expose their dependencies. See the guarded request at the end of this file.
+ *
+ * NOTE: Requests are experimental and apply throughout the translation unit,
+ * regardless of scope or position. A specialization selects its primary
+ * template, so the request applies to its other specializations as well.
+ * Keep requests together or in a dedicated header included under OMNI_TOOL_RUN;
+ * avoid conditional template usage. Skipped types cannot be direct arguments.
+ */
+TEST(advanced, metadata_skips) {
+  struct observations {
+    bool view_reflected;
+    bool element_reflected;
+  };
+
+  const auto result = omni::reflected_call(
+    [](omni::record_meta auto record) -> observations {
+      using Record = typename decltype(record)::reflected_type;
+      using View = decltype(Record::values);
+      return {
+        .view_reflected = omni::is_reflected<View>::value,
+        .element_reflected =
+          omni::is_reflected<typename View::value_type>::value,
+      };
+    },
+    omni::type<metadata_tweaks::record>);
+
+  EXPECT_FALSE(result.view_reflected);
+  EXPECT_TRUE(result.element_reflected);
 }
 
 namespace nested_declarations {
@@ -1158,24 +1475,6 @@ TEST(advanced, non_dependent_queries) {
 }
 
 /// Examples ----------------------------------------------------------
-
-namespace {
-
-namespace meta {
-
-template <typename T>
-concept range_like = requires(T value) {
-  typename T::value_type;
-  value.begin();
-  value.end();
-};
-
-template <typename T>
-concept map_like = range_like<T> && requires { typename T::mapped_type; };
-
-} // namespace meta
-
-} // namespace
 
 namespace primary_template {
 
@@ -1541,52 +1840,41 @@ TEST(example, annotated_dependencies) {
         });
       }
 
-      omni::compat::apply(
-        [&out, render_type](omni::data_member_meta auto... field) {
-          const auto render = //
-            [&out, render_type]<omni::data_member_meta Field>(Field field) {
-              out.public_fields.push_back({
-                .name = field.name(),
-                .type_name = field.spelled_type_name(),
-                .annotation = field.documentation(),
-              });
+      record.accessible_data_members()
+        | omni::fn::each(
+          [&out, render_type]<omni::data_member_meta Member>(Member member) {
+            out.public_fields.push_back({
+              .name = member.name(),
+              .type_name = member.spelled_type_name(),
+              .annotation = member.documentation(),
+            });
 
-              if constexpr (omni::traits::is<std::tuple,
-                              typename Field::type>()) {
-                std::invoke(
-                  [&out, render_type]<typename... T>(
-                    omni::type_t<std::tuple<T...>>) {
-                    (out.from_tuple.push_back(
-                       render_type(
-                         omni::reflected(omni::type_t<T>{}))),
-                      ...);
-                  },
-                  omni::type_t<typename Field::type>{});
-              }
+            if constexpr (omni::traits::is<std::tuple,
+                            typename Member::type>()) {
+              [&out, render_type]<typename... T>(
+                omni::type_t<std::tuple<T...>>) {
+                (out.from_tuple.push_back(
+                   render_type(omni::reflected(omni::type_t<T>{}))),
+                  ...);
+              }(omni::type_t<typename Member::type>{});
+            }
 
-              if constexpr (omni::traits::is<std::variant,
-                              typename Field::type>()) {
-                std::invoke(
-                  [&out, render_type]<typename... T>(
-                    omni::type_t<std::variant<T...>>) {
-                    (out.from_variant.push_back(
-                       render_type(
-                         omni::reflected(omni::type_t<T>{}))),
-                      ...);
-                  },
-                  omni::type_t<typename Field::type>{});
-              }
+            if constexpr (omni::traits::is<std::variant,
+                            typename Member::type>()) {
+              [&out, render_type]<typename... T>(
+                omni::type_t<std::variant<T...>>) {
+                (out.from_variant.push_back(
+                   render_type(omni::reflected(omni::type_t<T>{}))),
+                  ...);
+              }(omni::type_t<typename Member::type>{});
+            }
 
-              if constexpr (omni::traits::is<std::vector,
-                              typename Field::type>()) {
-                out.from_vector.push_back(render_type(omni::reflected(
-                  omni::type_t<typename Field::type::value_type>{})));
-              }
-            };
-
-          (render(field), ...);
-        },
-        record.accessible_data_members());
+            if constexpr (omni::traits::is<std::vector,
+                            typename Member::type>()) {
+              out.from_vector.push_back(render_type(omni::reflected(
+                omni::type_t<typename Member::type::value_type>{})));
+            }
+          });
 
       return out;
     },
@@ -1743,71 +2031,44 @@ TEST(example, annotated_dependencies) {
   EXPECT_EQ(k_expected_from_vector, rendered.from_vector);
 }
 
-/// Compatibility
-/// ---------------------------------------------------------------
-
-TEST(example, cpp14_cpp17_binding_name) {
-  using namespace std::string_view_literals;
-
-  const auto read_name = [](const auto _binding) -> std::string_view {
-    // Generic `auto` lambda arguments are available since C++14.
-    //
-    // `const omni::binding_t binding = _binding;` uses omitted class-template
-    // specialization, which is available since C++17. It gives the binding a
-    // concrete interface type without spelling the reflected type.
-    const omni::binding_t binding = _binding;
-    return binding.type_name();
-  };
-
-  EXPECT_EQ("position"sv,
-    omni::reflected_call(read_name, basics::data_member_bindings::position{}));
-}
-
 namespace record_conversion {
 
 template <typename From, typename To>
 To convert(From &&from, omni::type_t<To> target_type) {
-  const auto visit = //
-    [](omni::record_binding auto source, omni::record_meta auto target) -> To {
-    [[maybe_unused]] static auto assign_matching_field = //
-      [](omni::data_member_binding auto from,
-        omni::data_member_binding auto... to) -> void {
-      constexpr bool found = //
-        ((std::string_view(to.name()) == std::string_view(from.name())) || ...);
+  // This optional constraint signals mutation of the caller's object through a
+  // reference, rather than mutation of an owned copy.
+  const auto visit =
+    []<omni::record_binding Source>(Source source,
+      omni::record_meta auto target)
+      -> std::enable_if_t<!Source::owning::value, To> {
+      To result{};
 
-      static_assert(found, "destination has no same-named field");
-      (std::invoke(
-         [&from](omni::data_member_binding auto to) -> void {
-           if constexpr (std::string_view(to.name())
-             == std::string_view(from.name())) {
-             static_assert(requires { to.ref() = std::move(from).value(); });
-             // Like optional/expected value access, moving the field binding
-             // moves from the field. `std::move(from.ref())` is the explicit
-             // equivalent for referenceable fields.
-             to.ref() = std::move(from).value();
-           }
-         },
-         to),
-        ...);
+      // Bind the existing destination without moving its storage.
+      auto destination = target.bind(result);
+      source.accessible_data_members()
+        | omni::fn::each([&destination](omni::data_member_binding auto from) {
+            const auto matching = destination.accessible_data_members()
+              | omni::fn::filter([]<typename Member>() {
+                  using Target = omni::compat::remove_cvref_t<Member>;
+                  return std::string_view(decltype(from)::name())
+                    == std::string_view(Target::name());
+                });
+
+            static_assert(0 != std::tuple_size<decltype(matching)>::value,
+              "destination has no same-named field");
+            matching
+              | omni::fn::each([&from](omni::data_member_binding auto to) {
+                  static_assert(requires {
+                    to.ref() = std::move(from).value();
+                  });
+                  // Moving the binding selects move access to its member.
+                  // std::move(from.ref()) is equivalent here.
+                  to.ref() = std::move(from).value();
+                });
+          });
+
+      return result;
     };
-
-    To result{};
-    // Bind the existing destination non-owningly so conversion does not move
-    // the complete object into and back out of binding storage.
-    omni::record_binding auto destination = target.bind(result);
-    std::apply(
-      [&destination](omni::data_member_binding auto... f) -> void {
-        std::apply(
-          [&f...](omni::data_member_binding auto... to_field) -> void {
-            (std::invoke(assign_matching_field, std::move(f), to_field...),
-              ...);
-          },
-          destination.accessible_data_members());
-      },
-      source.accessible_data_members());
-
-    return result;
-  };
 
   return omni::reflected_call(visit, std::forward<From>(from), target_type);
 }
@@ -1874,32 +2135,32 @@ TEST(example, filter_fields_before_set_value) {
   };
 
   omni::reflected_call(
-    [](omni::record_binding auto binding) -> void {
-      std::apply(
-        [](omni::data_member_binding auto... field) -> void {
-          const auto set_if_assignable = //
-            []<omni::data_member_binding Field>(Field field) -> void {
-            constexpr std::string_view field_name = field.name();
-            constexpr auto replacement = std::array{42, 43};
+    // This optional constraint signals mutation of the caller's object through a
+    // reference, rather than mutation of an owned copy.
+    []<omni::record_binding Record>(Record binding)
+      -> std::enable_if_t<!Record::owning::value> {
+      // Scalar assignment includes bitfields but excludes const, array, and
+      // nonassignable members before the write operation is instantiated.
+      binding.accessible_data_members()
+        | omni::fn::filter([]<typename Member>() {
+            using Field = omni::compat::remove_cvref_t<Member>;
+            return std::is_assignable_v<typename Field::type &, int>;
+          })
+        | omni::fn::each([](omni::data_member_binding auto member) {
+            member.set_value(42);
+          });
 
-            // std::array supports whole-value assignment. Misaligned packed
-            // raw arrays currently have no whole-field accessor.
-            if constexpr ("values" == field_name) {
-              if constexpr (std::is_assignable_v<typename Field::type &,
-                              decltype(replacement)>) {
-                field.set_value(replacement);
-              }
-            } else if constexpr (std::is_assignable_v<typename Field::type &,
-                                   int>) {
-              // set_value also supports bitfields, whose address cannot be
-              // taken.
-              field.set_value(42);
-            }
-          };
-
-          (set_if_assignable(field), ...);
-        },
-        binding.accessible_data_members());
+      // std::array supports whole-value assignment; raw arrays do not.
+      static constexpr auto replacement = std::array{42, 43};
+      binding.accessible_data_members()
+        | omni::fn::filter([]<typename Member>() {
+            using Field = omni::compat::remove_cvref_t<Member>;
+            return std::is_assignable_v<typename Field::type &,
+              decltype(replacement)>;
+          })
+        | omni::fn::each([](omni::data_member_binding auto member) {
+            member.set_value(replacement);
+          });
     },
     input);
 
@@ -2103,6 +2364,16 @@ TEST(example, visit_compound_variant_inputs) {
 
 namespace schema {
 
+template <typename T>
+concept range_like = requires(T value) {
+  typename T::value_type;
+  value.begin();
+  value.end();
+};
+
+template <typename T>
+concept map_like = range_like<T> && requires { typename T::mapped_type; };
+
 /// user profile
 struct profile {
   /// account tier enum
@@ -2171,22 +2442,17 @@ void render_schema(std::ostringstream &out,
     out << indent << "documentation: " << schema.documentation() << '\n';
     out << indent << "properties:\n";
 
-    omni::compat::apply(
-      [&out, indent](omni::data_member_meta auto... field) {
-        const auto render_field = //
-          [&out, indent]<omni::data_member_meta Field>(Field field) {
-            out << indent << "  - name: " << field.name() << '\n';
-            out << indent << "    documentation: " << field.documentation()
-                << '\n';
-            out << indent << "    schema:\n";
-            render_schema(out,
-              omni::type<typename Field::type>,
-              std::string{indent} + "      ");
-          };
-
-        (render_field(field), ...);
-      },
-      schema.accessible_data_members());
+    schema.accessible_data_members()
+      | omni::fn::each([&out, indent]<omni::data_member_meta Member>(
+                          Member member) {
+          out << indent << "  - name: " << member.name() << '\n';
+          out << indent << "    documentation: " << member.documentation()
+              << '\n';
+          out << indent << "    schema:\n";
+          render_schema(out,
+            omni::type<typename Member::type>,
+            std::string{indent} + "      ");
+        });
   } else {
     static_assert(omni::reflected_entity::enumeration == schema.entity());
 
@@ -2215,13 +2481,13 @@ void render_schema(std::ostringstream &out,
     out << indent << "type: integer\n";
   } else if constexpr (std::is_floating_point_v<T>) {
     out << indent << "type: number\n";
-  } else if constexpr (meta::map_like<T>) {
+  } else if constexpr (map_like<T>) {
     out << indent << "type: object\n";
     out << indent << "additionalProperties:\n";
     render_schema(out,
       omni::type<typename T::mapped_type>,
       std::string{indent} + "  ");
-  } else if constexpr (meta::range_like<T>) {
+  } else if constexpr (range_like<T>) {
     out << indent << "type: array\n";
     out << indent << "items:\n";
     render_schema(out,
@@ -2353,3 +2619,9 @@ TEST(example, annotated_schema_small_record) {
 
 // TODO: [high] Extend the nested-enum example with nested records, explaining
 // their supported discovery routes and declaration restrictions.
+
+// TU-wide request; the guard keeps it out of ordinary compilation. The macro
+// instantiates tweaks::skip_metadata without creating a namespace-scope object.
+#if defined(OMNI_TOOL_RUN)
+OMNI_SKIP_METADATA(metadata_tweaks::view<metadata_tweaks::element>);
+#endif
