@@ -38,7 +38,7 @@ if(BUILD_EXAMPLES)
         add_subdirectory(extensions/serialization/guide
             "${CMAKE_BINARY_DIR}/extensions/serialization/guide")
     else()
-        message(STATUS "omnirefl: skipping json_serialization: extensions disabled")
+        message(STATUS "omnirefl: skipping guide.json: extensions disabled")
     endif()
 
     omnirefl_check_cxx20_language(_examples_has_guide_features)

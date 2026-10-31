@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
-project(json_serialization LANGUAGES CXX)
+project(guide.json LANGUAGES CXX)
 
 # The serialization extension supports C++11; preserve newer compiler defaults.
 if(NOT DEFINED CMAKE_CXX_STANDARD
@@ -33,10 +33,10 @@ if(NOT TARGET gtest_main)
         PROPERTY EXCLUDE_FROM_ALL TRUE)
 endif()
 
-add_executable(json_serialization main.cpp)
-target_link_libraries(json_serialization PRIVATE omni::serialization gtest_main)
-omni_reflected_target(json_serialization)
+add_executable(guide.json main.cpp)
+target_link_libraries(guide.json PRIVATE omni::serialization gtest_main)
+omni_reflected_target(guide.json)
 
 if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
-    add_test(NAME example.json_serialization COMMAND json_serialization)
+    add_test(NAME guide.json COMMAND guide.json)
 endif()

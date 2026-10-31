@@ -31,13 +31,13 @@
  *   mappings.nested_records - discover nested record types
  *   mappings.sequences - vectors of records and nested vectors
  *   mappings.optional_fields - missing, null, present, and invalid values
- *   TODO: Optional serialization and associative mappings are shown disabled.
+ *   mappings.serialize_optional_fields - empty optionals become null
+ *   mappings.optional_sequence_elements - omit empty optional elements
+ *   TODO: Associative mappings are shown disabled.
  *
  * Advanced
  *   advanced.borrowed_and_owned_input - tree and diagnostic lifetimes
  */
-
-#include "../tests/json_match.hpp"
 
 #include <gtest/gtest.h>
 
@@ -51,6 +51,10 @@
 #include <vector>
 
 namespace {
+
+// Defined at the end to keep document-comparison glue out of the examples.
+testing::AssertionResult same_document(std::string expected,
+  std::string actual);
 
 namespace basic_mapping {
 
@@ -69,8 +73,8 @@ struct service {
 
 /** The RapidYAML-backed interface accepts JSON and YAML input. deserialize is
  * a callable with default settings already bound: pass the requested type and
- * input text to map it into a C++ value. See `basics.transform_settings` for local
- * customization and `settings.core_functions` for explicit settings.
+ * input text to map it into a C++ value. See `basics.transform_settings` for
+ * local customization and `settings.core_functions` for explicit settings.
  *
  * The result contains an optional value and retained diagnostics; a value is
  * available only on success. Diagnostic messages are rendered on demand; see
@@ -122,10 +126,10 @@ tags:
   - "https"
 )";
 
-  // Compare parsed documents, ignoring formatting and object-key order.
-  EXPECT_TRUE(serialization_test::matches_json(
+  // Normalize formatting before comparing the expected and emitted documents.
+  EXPECT_TRUE(same_document(
     expected_json, omni::ryml::as_json(source)));
-  EXPECT_TRUE(serialization_test::matches_json(
+  EXPECT_TRUE(same_document(
     expected_yaml, omni::ryml::as_yaml(source)));
 }
 
@@ -139,9 +143,9 @@ TEST(basics, scalar_and_sequence_roots) {
   }
 
   const std::vector<int> values{7, 42};
-  EXPECT_TRUE(serialization_test::matches_json(
+  EXPECT_TRUE(same_document(
     "[7, 42]", omni::ryml::as_json(values)));
-  EXPECT_TRUE(serialization_test::matches_json(
+  EXPECT_TRUE(same_document(
     "- 7\n- 42\n", omni::ryml::as_yaml(values)));
   const auto sequence = omni::ryml::deserialize(
     omni::type_t<std::vector<int>>{}, "[7, 42]");
@@ -532,25 +536,42 @@ TEST(mappings, optional_fields) {
   EXPECT_FALSE(invalid.value);
 }
 
-// TODO: [high] Implement optional serialization; decide whether an absent field
-// is omitted or written as null before enabling the corresponding examples.
-// TEST(mappings, serialize_optional_fields) {
-//   const optional_mapping::measurement source{7};
-//   EXPECT_TRUE(serialization_test::matches_json(
-//     R"({"value": 7})", omni::ryml::as_json(source)));
-// }
+// Empty optional fields emit null; populated fields emit their value.
+TEST(mappings, serialize_optional_fields) {
+  const optional_mapping::measurement empty{omni::compat::nullopt};
+  EXPECT_TRUE(same_document(
+    R"({"value": null})", omni::ryml::as_json(empty)));
+  EXPECT_TRUE(same_document(
+    "value: null", omni::ryml::as_yaml(empty)));
+
+  const optional_mapping::measurement present{7};
+  EXPECT_TRUE(same_document(
+    R"({"value": 7})", omni::ryml::as_json(present)));
+}
+
+// Empty optional sequence elements are omitted. Remaining elements keep their
+// order, so their output indices can differ from their original indices.
+TEST(mappings, optional_sequence_elements) {
+  const std::vector<omni::compat::optional<int>> values{
+    7, omni::compat::nullopt, 0, omni::compat::nullopt};
+
+  EXPECT_TRUE(same_document(
+    "[7, 0]", omni::ryml::as_json(values)));
+  EXPECT_TRUE(same_document(
+    "- 7\n- 0", omni::ryml::as_yaml(values)));
+}
 
 // TODO: [high] Implement associative-container mapping. Define representations
 // for non-string keys and how duplicate/colliding mapped keys are handled.
 // Infer key uniqueness/equivalence and ordering from container semantics, and
 // investigate which constraints can be expressed by JSON Schema. uniqueItems
-// compares whole entries, not just keys; an ordered container can sort on insert
+// compares whole entries, not just keys. Ordered containers may sort on insert
 // without requiring already-sorted input.
 // This example will also need <map> when enabled.
 // TEST(mappings, associative_containers) {
 //   const std::map<std::string, int> source{{"first", 7}, {"second", 42}};
 //   const std::string json = R"({"first": 7, "second": 42})";
-//   EXPECT_TRUE(serialization_test::matches_json(
+//   EXPECT_TRUE(same_document(
 //     json, omni::ryml::as_json(source)));
 //   const auto result = omni::ryml::deserialize(
 //     omni::type_t<std::map<std::string, int>>{}, json);
@@ -592,6 +613,38 @@ TEST(advanced, borrowed_and_owned_input) {
     EXPECT_EQ("/value: \"bad\" is not an integer",
       omni::ryml::render_diagnostics(owned.diagnostics));
   }
+}
+
+// Normalize either format to JSON text; report parse failures as test failures.
+testing::AssertionResult same_document(std::string expected,
+  std::string actual) {
+  auto expected_tree = omni::ryml::parse(std::move(expected));
+  if (!expected_tree)
+    return testing::AssertionFailure() << "Invalid expected document: "
+      << expected_tree.error();
+
+  auto actual_tree = omni::ryml::parse(std::move(actual));
+  if (!actual_tree)
+    return testing::AssertionFailure() << "Invalid output: "
+      << actual_tree.error();
+
+  // Parsed JSON retains multi-line flow layout; normalize it before emission.
+  for (auto *tree : {&*expected_tree, &*actual_tree}) {
+    tree->rootref().set_style_conditionally(
+      /*type_mask=*/::ryml::FLOW_ML,
+      /*rem_style_flags=*/::ryml::FLOW_ML,
+      /*add_style_flags=*/::ryml::FLOW_SL,
+      /*recurse=*/true);
+  }
+
+  const std::string expected_json =
+    ::ryml::emitrs_json<std::string>(*expected_tree);
+  const std::string actual_json =
+    ::ryml::emitrs_json<std::string>(*actual_tree);
+  return expected_json == actual_json
+    ? testing::AssertionSuccess()
+    : testing::AssertionFailure() << "Expected: " << expected_json
+                                  << "\nActual: " << actual_json;
 }
 
 } // namespace
