@@ -251,7 +251,7 @@ struct map_node_to_optional {
     detail::mapping_context *context) const {
     assert(optional && context);
 
-    if (node.has_val() && node.val_is_null()) {
+    if (!node.invalid() && node.has_val() && node.val_is_null()) {
       optional->reset();
       return;
     }
@@ -655,6 +655,24 @@ namespace reflected_scope {
 template <typename Value>
 void write_value(const Value &value, ::ryml::NodeRef *node);
 
+template <typename Value>
+bool is_null(const Value &) { return false; }
+
+template <typename Value>
+bool is_null(const compat::optional<Value> &v) { return !v || is_null(*v); }
+
+struct write_optional {
+  template <typename Value>
+  void operator()(const compat::optional<Value> &value,
+    ::ryml::NodeRef *node) const {
+    assert(node);
+    if (value)
+      write_value(*value, node);
+    else
+      node->set_val("null");
+  }
+};
+
 struct write_sequence {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
@@ -665,8 +683,10 @@ struct write_sequence {
     std::for_each(value.begin(),
       value.end(),
       [node](const typename Value::value_type &element) {
-        auto child = node->append_child();
-        write_value(element, &child);
+        if (!is_null(element)) {
+          auto child = node->append_child();
+          write_value(element, &child);
+        }
       });
   }
 };
@@ -721,6 +741,8 @@ void write_value(const Value &value, ::ryml::NodeRef *node) {
     omni::traits::case_<std::is_integral<Value>::value, detail::write_integer>,
     omni::traits::case_<detail::is_string_source<Value>::value,
       detail::write_string>,
+    omni::traits::case_<omni::traits::is<compat::optional, Value>(),
+      write_optional>,
     omni::traits::case_<omni::traits::is<std::vector, Value>(), write_sequence>,
     write_reflected>::type{};
 
@@ -736,8 +758,8 @@ template <typename Value>
 }
 
 // reflected_call accepts record/enum roots, not containers or scalar values.
-// Peel vectors only for reflection discovery; mapping and writing retain the
-// complete document shape, including nested or empty sequences.
+// Peel vectors/optionals for reflection discovery. Mapping and writing retain
+// the complete document shape, including nested or empty sequences.
 template <typename Value>
 struct reflection_root {
   using type = Value;
@@ -748,6 +770,9 @@ struct reflection_root {
 template <typename Value, typename Allocator>
 struct reflection_root<std::vector<Value, Allocator>>:
     reflection_root<Value> {};
+
+template <typename Value>
+struct reflection_root<compat::optional<Value>>: reflection_root<Value> {};
 
 // Discover record elements once, including for an empty sequence. Mapping each
 // element then uses that reflected scope and one diagnostic context.

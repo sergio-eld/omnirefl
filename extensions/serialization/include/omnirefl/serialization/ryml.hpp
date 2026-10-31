@@ -493,6 +493,9 @@ constexpr render_diagnostics_t render_diagnostics{};
  * Vectors may contain nested vectors or reflected records, including at the
  * root. String sources include char-based basic_string and c4 views, plus
  * basic_string_view when the standard library provides it.
+ * Empty optionals emit null at the root or as record fields. Empty optional
+ * sequence elements are omitted; remaining elements keep their relative order.
+ * Populated optionals serialize their contained value.
  * Strings are quoted; field values are copied into the tree's arena.
  * TODO: Define the document representation of reflected enumerations.
  */
@@ -502,6 +505,10 @@ struct serialize_t {
 
   template <typename Value>
   std::string operator()(const Value &value) const;
+
+  // TODO: [high] Consider omni::ryml::as_tree to expose tree construction,
+  // and transform_tree to customize the tree before emission, e.g. omit null
+  // object properties without another policy.
 };
 
 /**

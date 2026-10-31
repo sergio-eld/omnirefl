@@ -55,4 +55,25 @@ TEST(deserialization_sequence_roots, reads_empty_record_array) {
   EXPECT_TRUE(result.diagnostics.issues.empty());
 }
 
+// This type is discovered only through optional roots, not a direct record call.
+struct optional_payload { int value; };
+
+TEST(serialization_sequence_roots, discovers_record_elements_inside_optionals) {
+  const std::vector<omni::compat::optional<optional_payload>> values{
+    omni::compat::nullopt, optional_payload{7}, omni::compat::nullopt};
+
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([{"value": 7}])", omni::ryml::as_json(values)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([{"value": 7}])", omni::ryml::as_yaml(values)));
+}
+
+TEST(serialization_optional_roots, discovers_an_optional_record) {
+  const omni::compat::optional<optional_payload> value{optional_payload{42}};
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"value": 42})", omni::ryml::as_json(value)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    "null", omni::ryml::as_yaml(omni::compat::optional<optional_payload>{})));
+}
+
 } // namespace

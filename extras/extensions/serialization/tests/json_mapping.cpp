@@ -776,17 +776,15 @@ const auto cases = std::make_tuple(
       {warn_unknown_field("/other"),
         dsl::error(issue_code::warning_limit_exceeded, "/other")}),
 
-  // FIXME: [high] Re-enable these cases when as_json supports optional fields;
-  // the GTest value printer currently fails to compile for optional_record.
-  // C(none, R"({"nested": {"value": 7, "other": 5}})")
-  //   >> expect(models::optional_record{models::integer_value{7}},
-  //     {warn_unknown_field("/nested/other")}),
-  // C(none, "{}") >> expect(models::optional_record{none}, {}),
-  // C(none, R"({"nested": {"value": "bad"}})")
-  //   >> expect<models::optional_record>(none,
-  //     {dsl::error(issue_code::invalid_scalar,
-  //       "/nested/value",
-  //       value_kind::integer)}),
+  C(none, R"({"nested": {"value": 7, "other": 5}})")
+    >> expect(models::optional_record{models::integer_value{7}},
+      {warn_unknown_field("/nested/other")}),
+  C(none, "{}") >> expect(models::optional_record{none}, {}),
+  C(none, R"({"nested": {"value": "bad"}})")
+    >> expect<models::optional_record>(none,
+      {dsl::error(issue_code::invalid_scalar,
+        "/nested/value",
+        value_kind::integer)}),
 
   C(none, R"({"items": [{"value": 7}, {"value": "bad"}]})")
     >> expect<models::sequence_record>(none,

@@ -344,12 +344,6 @@ TEST(serialization_formats, emits_json_without_configuration) {
   }
 }
 
-// FIXME: [high] Optional writing fails to compile; enable this test when
-// supported. A DISABLED_ test still compiles, so exclude the reproducer at
-// preprocessing time. Before implementation, decide whether empty optional
-// fields emit null or are omitted by default, and whether a
-// runtime/compile-time strategy selects this.
-#if 0
 struct optional_write_record {
   std::string name;
   omni::compat::optional<std::string> parent;
@@ -363,6 +357,26 @@ TEST(serialization_formats, emits_present_optional_field) {
     R"({"name": "child", "parent": "root"})", omni::ryml::as_json(value)));
 }
 
+TEST(serialization_formats, emits_null_for_empty_optional_field) {
+  const optional_write_record source{"child", omni::compat::nullopt};
+  const std::string expected = R"({"name": "child", "parent": null})";
+  EXPECT_TRUE(serialization_test::matches_json(
+    expected, omni::ryml::as_json(source)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    expected, omni::ryml::as_yaml(source)));
+}
+
+TEST(serialization_formats, keeps_records_with_null_fields_in_sequences) {
+  const std::vector<optional_write_record> source{
+    {"child", omni::compat::nullopt}};
+
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([{"name": "child", "parent": null}])", omni::ryml::as_json(source)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"([{"name": "child", "parent": null}])", omni::ryml::as_yaml(source)));
+}
+
+#if 0
 // TODO: [high] Implement enum-field serialization and deserialization for JSON
 // and YAML. Decide string versus integer output, acceptance of integer input,
 // unknown-value schema errors, and canonical/deprecated alias handling.
