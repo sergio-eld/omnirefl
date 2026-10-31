@@ -165,8 +165,8 @@ TEST(basics, reflected_scope_cpp11) {
 // IDE completion expose the metadata interface.
 TEST(basics, reflected_scope_cpp17) {
   const auto name = omni::reflected_call(
-    [](auto value) -> std::string {
-      const omni::meta_t meta = value;
+    [](auto _meta) -> std::string {
+      const omni::meta_t meta = _meta;
       return meta.type_name();
     },
     omni::type<account>);
@@ -370,9 +370,7 @@ TEST(basics, data_member_queries) {
   const auto descriptions = omni::reflected_call(
     [](omni::record_meta auto record) -> std::vector<std::string> {
       return std::apply(
-        [](auto... description) {
-          return std::vector<std::string>{std::move(description)...};
-        },
+        [](auto... d) { return std::vector<std::string>{std::move(d)...}; },
         record.accessible_data_members() | omni::fn::map(format_member));
     },
     omni::type<accessible_members::derived>);
@@ -450,9 +448,7 @@ TEST(basics, member_function_queries) {
       };
 
       return std::apply(
-        [](auto... descriptions) {
-          return std::vector<description>{std::move(descriptions)...};
-        },
+        [](auto... d) { return std::vector<description>{std::move(d)...}; },
         record.accessible_member_functions() | omni::fn::map(describe));
     },
     omni::type<member_functions::counter>);
@@ -527,9 +523,9 @@ TEST(basics, reading_data_members) {
   data_member_bindings::position point{3, 7};
   const auto read = [](omni::record_binding auto record) -> std::vector<int> {
     return std::apply(
-      [](omni::data_member_binding auto... member) {
-        // value() reads the member from its bound record.
-        return std::vector<int>{member.value()...};
+      [](omni::data_member_binding auto... m) {
+        // value() reads the m from its bound record.
+        return std::vector<int>{m.value()...};
       },
       // A record binding returns data-member bindings here.
       // Member bindings are trivial to copy; they never own the object
@@ -549,8 +545,8 @@ TEST(basics, reading_data_members) {
 TEST(basics, writing_data_members) {
   data_member_bindings::position point{3, 7};
   omni::reflected_call(
-    // This optional constraint signals mutation of the caller's object through a
-    // reference, rather than mutation of an owned copy.
+    // This optional constraint signals mutation through a reference to the
+    // caller's object, rather than an owned copy.
     []<omni::record_binding Record>(Record record)
       -> std::enable_if_t<!Record::owning::value> {
       record.accessible_data_members()
@@ -567,12 +563,12 @@ TEST(basics, writing_data_members) {
 // A record binding returns function bindings that invoke through that record.
 TEST(basics, calling_member_functions) {
   member_functions::counter counter{7};
-  // This optional constraint signals mutation of the caller's object through a
-  // reference, rather than mutation of an owned copy.
+  // This optional constraint signals mutation through a reference to the
+  // caller's object, rather than an owned copy.
   const auto call = []<omni::record_binding Record>(Record record)
     -> std::enable_if_t<!Record::owning::value, std::vector<int>> {
     return std::apply(
-      [](auto... values) { return std::vector<int>{values...}; },
+      [](auto... v) { return std::vector<int>{v...}; },
       record.accessible_member_functions()
         | omni::fn::map([](omni::function_binding auto func) {
             return func(5);
@@ -746,8 +742,8 @@ TEST(advanced, reflected_call_args) {
   EXPECT_EQ(9, const_value);
   EXPECT_EQ(9, *constant.value);
 
-  // This optional constraint signals mutation of the caller's object through a
-  // reference, rather than mutation of an owned copy.
+  // This optional constraint signals mutation through a reference to the
+  // caller's object, rather than an owned copy.
   const auto move_value = []<omni::record_binding Record>(Record binding)
     -> std::enable_if_t<!Record::owning::value, payload &&> {
     return std::move(binding).value();
@@ -919,8 +915,8 @@ TEST(advanced, data_member_value_read) {
 TEST(advanced, data_member_value_write) {
   member_value_access::record input{"north", "south"};
   omni::reflected_call(
-    // This optional constraint signals mutation of the caller's object through a
-    // reference, rather than mutation of an owned copy.
+    // This optional constraint signals mutation through a reference to the
+    // caller's object, rather than an owned copy.
     []<omni::record_binding Record>(Record record)
       -> std::enable_if_t<!Record::owning::value> {
       record.accessible_data_members()
@@ -961,8 +957,8 @@ struct writable: std::bool_constant<requires(Member member) {
  * Filter by assignment availability on the binding before writing its value.
  */
 TEST(advanced, const_and_mutable_access) {
-  // This optional constraint signals mutation of the caller's object through a
-  // reference, rather than mutation of an owned copy.
+  // This optional constraint signals mutation through a reference to the
+  // caller's object, rather than an owned copy.
   const auto write = []<omni::record_binding Record>(Record record)
     -> std::enable_if_t<!Record::owning::value, std::vector<std::string_view>> {
     const auto writable = record.accessible_data_members()
@@ -973,8 +969,8 @@ TEST(advanced, const_and_mutable_access) {
     });
 
     return std::apply(
-      [](omni::data_member_binding auto... member) {
-        return std::vector<std::string_view>{member.name()...};
+      [](omni::data_member_binding auto... m) {
+        return std::vector<std::string_view>{m.name()...};
       },
       writable);
   };
@@ -1015,13 +1011,13 @@ struct commands {
 TEST(advanced, function_tags) {
   const auto invoke = [](omni::record_meta auto record) -> std::vector<int> {
     const auto callable = record.accessible_data_members()
-      | omni::fn::filter([]<typename Member>() {
+      | omni::fn::filter([]<omni::data_member_meta Member>() {
           using Meta = omni::compat::remove_cvref_t<Member>;
           return Meta::has_callable_metadata();
         });
 
     return std::apply(
-      [](auto... values) { return std::vector<int>{values...}; },
+      [](auto... v) { return std::vector<int>{v...}; },
       callable | omni::fn::map([](omni::data_member_meta auto member) {
         const auto func = member.callable_metadata();
         return std::invoke(func.pointer(), 21);
@@ -1065,8 +1061,8 @@ TEST(advanced, custom_queries) {
   const auto names = omni::reflected_call(
     [](omni::record_binding auto record) -> std::vector<std::string_view> {
       return std::apply(
-        [](omni::data_member_binding auto... member) {
-          return std::vector<std::string_view>{member.name()...};
+        [](omni::data_member_binding auto... m) {
+          return std::vector<std::string_view>{m.name()...};
         },
         record.accessible_data_members()
           | omni::fn::filter<custom_queries::reference_accessible>());
@@ -1098,8 +1094,8 @@ struct record {
 TEST(advanced, bitfield_access) {
   bitfield_access::record input{1, 2, 3};
   omni::reflected_call(
-    // This optional constraint signals mutation of the caller's object through a
-    // reference, rather than mutation of an owned copy.
+    // This optional constraint signals mutation through a reference to the
+    // caller's object, rather than an owned copy.
     []<omni::record_binding Record>(Record record)
       -> std::enable_if_t<!Record::owning::value> {
       record.accessible_data_members()
@@ -1126,50 +1122,60 @@ namespace default_member_values {
 int computed_value() { return 42; }
 
 struct record {
-  int literal = 7;
-  int computed = computed_value();
-  int required;
+  int literal = 7;                 // default_value() supported: literal.
+  int computed = computed_value(); // default_value() unsupported: call.
+  int required;                    // No initializer or default_value() access.
 };
+
+// C++11 equivalent of the C++20 predicate below:
+// template <typename Member>
+// struct has_default_value_access: std::integral_constant<bool,
+//   Member::has_default_value_access()> {};
 
 } // namespace default_member_values
 
-/** An initializer's presence does not guarantee default_value() access.
- * Omnirefl can reproduce supported literal initializers; an initializer calling
- * a function still belongs to the original declaration but is not replayed.
- * default_value() currently returns a cached value at runtime.
- */
+// Distinguish initializer presence from access to its default value.
+// default_value() currently returns a cached value at runtime.
 TEST(advanced, default_member_values) {
   struct description {
     std::string_view name;
     bool initialized;
     bool value_access;
+
+    bool operator==(const description &) const = default;
   };
 
   const auto descriptions = omni::reflected_call(
     [](omni::record_meta auto record) -> std::vector<description> {
       return std::apply(
-        [](auto... member) {
-          return std::vector<description>{description{member.name(),
-            member.has_default_member_initializer(),
-            member.has_default_value_access()}...};
+        [](omni::data_member_meta auto... m) {
+          return std::vector<description>{description{m.name(),
+            m.has_default_member_initializer(),
+            m.has_default_value_access()}...};
         },
         record.accessible_data_members());
     },
     omni::type<default_member_values::record>);
 
-  for (const auto &member : descriptions) {
-    EXPECT_EQ("required" != member.name, member.initialized);
-    EXPECT_EQ("literal" == member.name, member.value_access);
-  }
+  const std::vector<description> expected_descriptions{
+    {"literal", true, true},
+    {"computed", true, false},
+    {"required", false, false},
+  };
+
+  EXPECT_EQ(expected_descriptions, descriptions);
 
   const auto defaults = omni::reflected_call(
     [](omni::record_meta auto record) -> std::vector<int> {
       return std::apply(
-        [](auto... member) {
-          return std::vector<int>{member.default_value()...};
+        [](omni::data_member_meta auto... m) {
+          return std::vector<int>{m.default_value()...};
         },
         record.accessible_data_members()
-          | omni::fn::filter([]<typename Member>() {
+          // Before C++20, use the named trait shown above:
+          // | omni::fn::filter<
+          //     default_member_values::has_default_value_access>()
+          | omni::fn::filter([]<omni::data_member_meta Member>() {
               using Meta = omni::compat::remove_cvref_t<Member>;
               return Meta::has_default_value_access();
             }));
@@ -1198,8 +1204,8 @@ TEST(advanced, union_metadata) {
     [](omni::record_meta auto record) -> std::vector<std::string_view> {
       static_assert(record.is_union());
       return std::apply(
-        [](auto... member) {
-          return std::vector<std::string_view>{member.name()...};
+        [](omni::data_member_meta auto... m) {
+          return std::vector<std::string_view>{m.name()...};
         },
         record.accessible_data_members());
     },
@@ -1330,9 +1336,7 @@ TEST(advanced, primary_record_templates) {
       };
 
       return std::apply(
-        [](auto... fields) {
-          return std::vector<rendered_field>{std::move(fields)...};
-        },
+        [](auto... f) { return std::vector<rendered_field>{std::move(f)...}; },
         record.accessible_data_members() | omni::fn::map(render));
     };
 
@@ -2035,8 +2039,8 @@ namespace record_conversion {
 
 template <typename From, typename To>
 To convert(From &&from, omni::type_t<To> target_type) {
-  // This optional constraint signals mutation of the caller's object through a
-  // reference, rather than mutation of an owned copy.
+  // This optional constraint signals mutation through a reference to the
+  // caller's object, rather than an owned copy.
   const auto visit =
     []<omni::record_binding Source>(Source source,
       omni::record_meta auto target)
@@ -2048,7 +2052,7 @@ To convert(From &&from, omni::type_t<To> target_type) {
       source.accessible_data_members()
         | omni::fn::each([&destination](omni::data_member_binding auto from) {
             const auto matching = destination.accessible_data_members()
-              | omni::fn::filter([]<typename Member>() {
+              | omni::fn::filter([]<omni::data_member_binding Member>() {
                   using Target = omni::compat::remove_cvref_t<Member>;
                   return std::string_view(decltype(from)::name())
                     == std::string_view(Target::name());
@@ -2135,14 +2139,14 @@ TEST(example, filter_fields_before_set_value) {
   };
 
   omni::reflected_call(
-    // This optional constraint signals mutation of the caller's object through a
-    // reference, rather than mutation of an owned copy.
+    // This optional constraint signals mutation through a reference to the
+    // caller's object, rather than an owned copy.
     []<omni::record_binding Record>(Record binding)
       -> std::enable_if_t<!Record::owning::value> {
       // Scalar assignment includes bitfields but excludes const, array, and
       // nonassignable members before the write operation is instantiated.
       binding.accessible_data_members()
-        | omni::fn::filter([]<typename Member>() {
+        | omni::fn::filter([]<omni::data_member_binding Member>() {
             using Field = omni::compat::remove_cvref_t<Member>;
             return std::is_assignable_v<typename Field::type &, int>;
           })
@@ -2153,7 +2157,7 @@ TEST(example, filter_fields_before_set_value) {
       // std::array supports whole-value assignment; raw arrays do not.
       static constexpr auto replacement = std::array{42, 43};
       binding.accessible_data_members()
-        | omni::fn::filter([]<typename Member>() {
+        | omni::fn::filter([]<omni::data_member_binding Member>() {
             using Field = omni::compat::remove_cvref_t<Member>;
             return std::is_assignable_v<typename Field::type &,
               decltype(replacement)>;
@@ -2229,9 +2233,9 @@ TEST(example, accessible_data_members_follow_member_visibility) {
       [](omni::record_binding auto binding)
         -> std::vector<std::pair<std::string_view, int>> {
         return std::apply(
-          [](omni::data_member_binding auto... field)
+          [](omni::data_member_binding auto... m)
             -> std::vector<std::pair<std::string_view, int>> {
-            return {{field.name(), field.value()}...};
+            return {{m.name(), m.value()}...};
           },
           binding.accessible_data_members());
       },
@@ -2258,9 +2262,9 @@ TEST(example, accessible_data_members_omit_ambiguous_base_members) {
       [](omni::record_binding auto binding)
         -> std::vector<std::pair<std::string_view, int>> {
         return std::apply(
-          [](omni::data_member_binding auto... field)
+          [](omni::data_member_binding auto... m)
             -> std::vector<std::pair<std::string_view, int>> {
-            return {{field.name(), field.value()}...};
+            return {{m.name(), m.value()}...};
           },
           binding.accessible_data_members());
       },
