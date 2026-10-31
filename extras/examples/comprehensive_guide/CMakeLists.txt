@@ -35,7 +35,7 @@ foreach(_dependency googletest mpark_variant)
         PROPERTY EXCLUDE_FROM_ALL TRUE)
 endforeach()
 
-add_executable(comprehensive_guide comprehensive_guide.cpp)
+add_executable(comprehensive_guide main.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(comprehensive_guide PRIVATE
