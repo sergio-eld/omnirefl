@@ -310,7 +310,7 @@ after:  depth=815 sensor=108 name=oceanic
 This example is available in the extras archive; see
 [Examples, Tests and Benchmarks](#examples-tests-and-benchmarks).
 
-The [comprehensive guide](extras/examples/comprehensive_guide/comprehensive_guide.cpp)
+The [comprehensive guide](extras/examples/comprehensive_guide/main.cpp)
 covers the remaining interface and compatibility features.
 <!-- pages:sneak-peek:end -->
 

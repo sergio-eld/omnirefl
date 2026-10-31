@@ -7118,10 +7118,37 @@ std::string reflectable_body(const meta::record_data &d) {
             : std::string{});
       });
 
+      const std::string type_alias = std::format(
+        "\n    using type ="
+        "\n      decltype(_reflected::type::{});",
+        declaration.name);
+
+      // Ad hoc: inspecting a deprecated member's type instantiates a reference
+      // that warns even when the user only reads metadata.
+      // TODO: [medium] Keep generated metadata inspection warning-neutral
+      // without suppressing diagnostics for actual deprecated-member access.
+      const std::string field_type = f.is_deprecated
+        ? std::format(
+            "\n    // Internal type inspection of an intentionally deprecated member."
+            "\n#if defined(_MSC_VER)"
+            "\n#  pragma warning(push)"
+            "\n#  pragma warning(disable: 4996)"
+            "\n#elif defined(__GNUC__) || defined(__clang__)"
+            "\n#  pragma GCC diagnostic push"
+            "\n#  pragma GCC diagnostic ignored \"-Wdeprecated-declarations\""
+            "\n#endif"
+            "{}"
+            "\n#if defined(_MSC_VER)"
+            "\n#  pragma warning(pop)"
+            "\n#elif defined(__GNUC__) || defined(__clang__)"
+            "\n#  pragma GCC diagnostic pop"
+            "\n#endif",
+            type_alias)
+        : type_alias;
+
       return std::format(
         "  struct {0}_t {{"
-        "\n    using type ="
-        "\n      decltype(_reflected::type::{0});"
+        "{14}"
         "\n"
         "\n    static constexpr auto name() noexcept"
         "\n      -> const char(&)[sizeof(\"{0}\")] {{"
@@ -7202,7 +7229,10 @@ std::string reflectable_body(const meta::record_data &d) {
               "\n    static constexpr unsigned bit_width() noexcept"
               " {{ return {}; }}",
               *f.bit_width)
-          : std::string{});
+          : std::string{},
+
+        // 14
+        field_type);
     };
 
   const std::string fields = d.public_fields.empty()

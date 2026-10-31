@@ -35,7 +35,7 @@ foreach(_dependency googletest mpark_variant)
         PROPERTY EXCLUDE_FROM_ALL TRUE)
 endforeach()
 
-add_executable(comprehensive_guide comprehensive_guide.cpp)
+add_executable(comprehensive_guide main.cpp)
 set_property(TARGET comprehensive_guide PROPERTY CXX_STANDARD 20)
 
 target_link_libraries(comprehensive_guide PRIVATE
@@ -43,7 +43,6 @@ target_link_libraries(comprehensive_guide PRIVATE
     gtest_main
     mpark_variant)
 
-# Index mode is experimental and not expected to be stable across compilers.
 omni_reflected_target(comprehensive_guide)
 
 add_test(NAME "comprehensive_guide.run_omni"

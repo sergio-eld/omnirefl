@@ -1527,6 +1527,9 @@ concept record_binding = binding<T> && record_meta<T>;
 /** Whether `T` binds a reflected enum value. */
 template <typename T>
 concept enum_binding = binding<T> && enum_meta<T>;
+
+// TODO: [high] Add a non-owning record-binding concept for visitors that modify
+// an existing object, avoiding silent modification of a copied, owned object.
 #endif
 
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
