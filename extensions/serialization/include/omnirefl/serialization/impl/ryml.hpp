@@ -175,7 +175,7 @@ struct map_node_to_fundamental {
       : std::is_integral<Value>::value ? json::value_kind::integer
                                        : json::value_kind::number;
 
-    if (!node.has_val() || node.is_container()) {
+    if (node.invalid() || !node.has_val() || node.is_container()) {
       context->report(make_issue(json::issue_code::unexpected_kind,
         expected,
         node,
@@ -221,7 +221,7 @@ struct map_node_to_string {
     mapping_context *context) const {
     assert(value && context);
 
-    if (!node.has_val() || node.is_container()) {
+    if (node.invalid() || !node.has_val() || node.is_container()) {
       context->report(make_issue(json::issue_code::unexpected_kind,
         json::value_kind::string,
         node,
@@ -274,7 +274,7 @@ struct map_node_to_sequence {
     detail::mapping_context *context) const {
     assert(sequence && context);
 
-    if (!node.is_seq()) {
+    if (node.invalid() || !node.is_seq()) {
       context->report(detail::make_issue(json::issue_code::unexpected_kind,
         json::value_kind::sequence,
         node,
@@ -365,15 +365,15 @@ struct cpp11_lambda_require_field {
   }
 };
 
-template <typename Record>
+template <typename Value>
 struct cpp11_lambda_map_node {
   ::ryml::ConstNodeRef node;
-  Record *record;
+  Value *value;
   detail::mapping_context *context;
 
   template <typename _M>
   void operator()(omni::record_meta_t<_M>) const {
-    map_node(node, record, context);
+    map_node(node, value, context);
   }
 };
 
@@ -542,6 +542,21 @@ struct map_node_to_record {
   }
 };
 
+// Query metadata only after scalar and container mappings have been ruled out.
+// Their root overloads also run during instrumentation, before metadata exists.
+struct map_node_to_reflected {
+  template <typename Value>
+  void operator()(::ryml::ConstNodeRef node,
+    Value *value,
+    detail::mapping_context *context) const {
+    constexpr auto map = typename omni::traits::select<
+      omni::traits::case_<omni::is_reflected<Value>::value, map_node_to_record>,
+      unsupported_deserialization>::type{};
+
+    map(node, value, context);
+  }
+};
+
 template <typename Value>
 void map_node(::ryml::ConstNodeRef node,
   Value *value,
@@ -561,8 +576,7 @@ void map_node(::ryml::ConstNodeRef node,
       map_node_to_optional>,
     omni::traits::case_<omni::traits::is<std::vector, Value>(),
       map_node_to_sequence>,
-    omni::traits::case_<omni::is_reflected<Value>::value, map_node_to_record>,
-    unsupported_deserialization>::type{};
+    map_node_to_reflected>::type{};
 
   map(node, value, context);
 }
@@ -722,30 +736,50 @@ template <typename Value>
 }
 
 // reflected_call accepts record/enum roots, not containers or scalar values.
-// Peel vectors only for reflection discovery; write_tree keeps the full value.
+// Peel vectors only for reflection discovery; mapping and writing retain the
+// complete document shape, including nested or empty sequences.
 template <typename Value>
-struct serialization_root {
+struct reflection_root {
   using type = Value;
   static constexpr bool needs_reflection = !std::is_fundamental<Value>::value
     && !detail::is_string_source<Value>::value;
 };
 
 template <typename Value, typename Allocator>
-struct serialization_root<std::vector<Value, Allocator>>:
-    serialization_root<Value> {};
+struct reflection_root<std::vector<Value, Allocator>>:
+    reflection_root<Value> {};
+
+// Discover record elements once, including for an empty sequence. Mapping each
+// element then uses that reflected scope and one diagnostic context.
+template <typename Value>
+auto map_root_node(::ryml::ConstNodeRef node,
+  Value *value,
+  detail::mapping_context *context)
+  -> typename std::enable_if<reflection_root<Value>::needs_reflection>::type {
+  omni::reflected_call(cpp11_lambda_map_node<Value>{node, value, context},
+    omni::type_t<typename reflection_root<Value>::type>{});
+}
+
+template <typename Value>
+auto map_root_node(::ryml::ConstNodeRef node,
+  Value *value,
+  detail::mapping_context *context)
+  -> typename std::enable_if<!reflection_root<Value>::needs_reflection>::type {
+  map_node(node, value, context);
+}
 
 // Exclude the unused path from instrumentation: reflected_call rejects scalar
 // roots, while record writing requires generated metadata.
 template <typename Value>
-typename std::enable_if<serialization_root<Value>::needs_reflection,
+typename std::enable_if<reflection_root<Value>::needs_reflection,
   ::ryml::Tree>::type
   to_ryml_tree(const Value &value) {
   return omni::reflected_call(cpp11_lambda_write_tree<Value>{value},
-    omni::type_t<typename serialization_root<Value>::type>{});
+    omni::type_t<typename reflection_root<Value>::type>{});
 }
 
 template <typename Value>
-typename std::enable_if<!serialization_root<Value>::needs_reflection,
+typename std::enable_if<!reflection_root<Value>::needs_reflection,
   ::ryml::Tree>::type
   to_ryml_tree(const Value &value) {
   return write_tree(value);
@@ -836,7 +870,7 @@ with_diagnostics<Record, diagnostics<true>> map_tree(const settings &options,
 
 template <typename Record>
 with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
-  omni::type_t<Record> record_type,
+  omni::type_t<Record>,
   ::ryml::ConstNodeRef node) {
   // FIXME: [external] GCC 15 warns about an uninitialized union when moving
   // Record{} with an empty tl::optional member; construct in optional storage.
@@ -857,12 +891,7 @@ with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
     /*warning_count=*/0,
   };
 
-  omni::reflected_call(reflected_scope::cpp11_lambda_map_node<Record>{
-                         /*node=*/node,
-                         /*record=*/&*value,
-                         /*context=*/&context,
-                       },
-    record_type);
+  reflected_scope::map_root_node(node, &*value, &context);
 
   return {
     /*value=*/0 == context.error_count ? std::move(value) : compat::nullopt,

@@ -406,6 +406,7 @@ with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
 } // namespace core
 
 /// Maps an owning tree or borrowed subtree with the bound settings.
+/// Supports reflected records, scalars, and vectors of supported values.
 struct map_tree_t {
   omni::ryml::settings settings;
 
@@ -438,7 +439,8 @@ struct map_tree_t {
 };
 
 /**
- * Parses and maps input, returning a valid value with warnings or errors alone.
+ * Parse JSON or YAML into a record, scalar, or vector.
+ * Returns a valid value with any warnings, or diagnostics alone on failure.
  *
 ```cpp
 const auto load = deserialize.transform_settings([limit](ryml::settings s) {
