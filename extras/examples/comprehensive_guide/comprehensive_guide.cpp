@@ -12,10 +12,18 @@
  *   basics.enum_declarations - enum class and plain enum support requirements
  *   basics.accessing_members - accessible own and inherited members as tuples
  *   basics.data_member_queries - inspect qualifiers, bitfields, and deprecation
+ *   basics.reflected_call_args - metadata versus object bindings
+ *   basics.reading_data_members - read member values through object bindings
+ *   basics.writing_data_members - update the original object's members
  *   basics.discovering_dependencies - follow supported type discovery routes
  *
  * Advanced
  *   advanced.reflected_call_args - argument conversion and value categories
+ *   advanced.binding_ownership - inspect ownership and constrain callables
+ *   advanced.data_member_value_read - metadata and binding value accessors
+ *   advanced.data_member_value_write - assignment and reference accessors
+ *   advanced.custom_queries - select members by reference access
+ *   advanced.const_and_mutable_access - filter writable members by binding
  *
  * Previous examples
  *   exposition.reflected_scope_overview
@@ -304,6 +312,84 @@ TEST(basics, data_member_queries) {
 #  pragma GCC diagnostic pop
 #endif
 
+namespace data_member_bindings {
+
+struct position {
+  int x;
+  int y;
+};
+
+} // namespace data_member_bindings
+
+/** reflected_call wraps each argument in the corresponding metadata or binding
+ * before passing it to the visitor. See `advanced.reflected_call_args` for the
+ * detailed argument-conversion and value-category rules.
+ *
+ * NOTE: Non-reflectable types are errors as direct arguments. When discovered
+ * as dependencies, unsupported types are skipped with warnings instead.
+ * The caller is responsible for unwrapping compound types such as tuples,
+ * vectors, and variants before passing their records or enums to reflected_call.
+ */
+TEST(basics, reflected_call_args) {
+  // Uncomment either line to get an instrumentation error.
+  // omni::reflected_call([](auto...) -> void {}, 815);
+  // omni::reflected_call([](auto...) -> void {}, std::string{"text"});
+
+  // A type tag provides metadata without constructing an object.
+  const auto type_name = omni::reflected_call(
+    [](omni::record_meta auto record) -> std::string_view {
+      return record.type_name();
+    },
+    omni::type<data_member_bindings::position>);
+
+  // An existing object provides a binding: metadata plus access to that object.
+  data_member_bindings::position point{3, 7};
+  const auto bound_type_name = omni::reflected_call(
+    [](omni::record_binding auto record) -> std::string_view {
+      // Bindings inherit the corresponding metadata interface.
+      return record.type_name();
+    },
+    point);
+
+  EXPECT_EQ("position", type_name);
+  EXPECT_EQ(type_name, bound_type_name);
+}
+
+// Read data-member values from an existing record.
+TEST(basics, reading_data_members) {
+  data_member_bindings::position point{3, 7};
+  const auto values = omni::reflected_call(
+    [](omni::record_binding auto record) -> std::vector<int> {
+      return std::apply(
+        [](omni::data_member_binding auto... member) {
+          // value() reads the member from its bound record.
+          return std::vector{member.value()...};
+        },
+        // A record binding returns data-member bindings here.
+        record.accessible_data_members());
+    },
+    point);
+
+  const std::vector<int> expected{3, 7};
+  EXPECT_EQ(expected, values);
+}
+
+// A data-member binding's set_value() writes to the original object.
+TEST(basics, writing_data_members) {
+  data_member_bindings::position point{3, 7};
+  omni::reflected_call(
+    [](omni::record_binding auto record) -> void {
+      record.accessible_data_members()
+        | omni::fn::each([](omni::data_member_binding auto member) {
+            member.set_value(member.value() + 10);
+          });
+    },
+    point);
+
+  EXPECT_EQ(13, point.x);
+  EXPECT_EQ(17, point.y);
+}
+
 namespace discovering_dependencies {
 
 struct base { int id; };
@@ -404,10 +490,10 @@ enum class mode { read, write };
  * signature must accept that number and those kinds of arguments.
  *
  * omni::type_t<Record> becomes record metadata; omni::type_t<Enum> becomes
- * enum metadata. Objects become bindings that refer to the original objects,
- * including rvalue arguments. The call itself does not move their values.
- * Owning bindings are created separately with meta.bind(...), as demonstrated
- * in example.meta_bind_and_field_metadata.
+ * enum metadata. Object arguments become non-owning bindings, including
+ * rvalues; the call itself does not move their values.
+ * If needed, one can create an owning binding with meta.bind(...).
+ * See `advanced.binding_ownership` for ownership checks and constraints.
  *
  * NOTE: Types the tool cannot reflect are rejected as direct arguments with
  * hard instrumentation errors. As discovered dependencies, such types are
@@ -458,6 +544,237 @@ TEST(advanced, reflected_call_args) {
     move_value, payload{std::make_unique<int>(15)});
 
   EXPECT_EQ(15, *temporary.value);
+}
+
+namespace binding_ownership {
+
+struct record {
+  int value = 7;
+};
+
+// C++20: accept only owning record bindings.
+template <omni::record_binding Binding>
+  requires Binding::owning::value
+int read_owned(const Binding &binding) {
+  return binding.value().value;
+}
+
+// C++11: the ownership check can also participate in SFINAE.
+template <typename Binding,
+  typename std::enable_if<Binding::owning::value, int>::type = 0>
+int read_owned_cpp11(const Binding &binding) {
+  return binding.value().value;
+}
+
+} // namespace binding_ownership
+
+/** owning::value reports whether a binding stores its own object or refers to
+ * another object. If needed, one can create an owning binding with meta.bind():
+ * no argument default-constructs an owned object, an rvalue is stored by value,
+ * and an lvalue remains referenced. Ownership can constrain template overloads.
+ */
+TEST(advanced, binding_ownership) {
+  struct observations {
+    bool argument_owns;
+    bool default_owns;
+    bool rvalue_owns;
+    int constrained_value;
+    int sfinae_value;
+  };
+
+  binding_ownership::record input{13};
+  const auto result = omni::reflected_call(
+    [](omni::record_binding auto borrowed) -> observations {
+      const auto meta = borrowed.as_meta();
+      auto owned = meta.bind();
+      auto rvalue_owned = meta.bind(binding_ownership::record{29});
+
+      // Neither overload participates for a non-owning binding.
+      static_assert(!requires { binding_ownership::read_owned(borrowed); });
+      static_assert(
+        !requires { binding_ownership::read_owned_cpp11(borrowed); });
+
+      return {
+        .argument_owns = decltype(borrowed)::owning::value,
+        .default_owns = decltype(owned)::owning::value,
+        .rvalue_owns = decltype(rvalue_owned)::owning::value,
+        .constrained_value = binding_ownership::read_owned(owned),
+        .sfinae_value = binding_ownership::read_owned_cpp11(rvalue_owned),
+      };
+    },
+    input);
+
+  EXPECT_FALSE(result.argument_owns);
+  EXPECT_TRUE(result.default_owns);
+  EXPECT_TRUE(result.rvalue_owns);
+  EXPECT_EQ(7, result.constrained_value);
+  EXPECT_EQ(29, result.sfinae_value);
+  EXPECT_EQ(13, input.value);
+}
+
+namespace member_value_access {
+
+struct record {
+  std::string first;
+  std::string second;
+};
+
+} // namespace member_value_access
+
+/** Unbound metadata takes the record as an explicit argument. A data-member
+ * binding already refers to its record, so its accessors need no argument.
+ * ref(), operator*, and operator-> require has_reference_access(); bitfields
+ * and misaligned packed members cannot expose references. */
+TEST(advanced, data_member_value_read) {
+  struct access_paths {
+    std::vector<std::string> metadata;
+    std::vector<std::string> binding;
+    std::vector<std::string> reference;
+    std::vector<std::string> dereferenced;
+    std::vector<std::string> arrow;
+  };
+
+  member_value_access::record input{"north", "south"};
+  const auto values = omni::reflected_call(
+    [](omni::record_binding auto record) -> access_paths {
+      return record.accessible_data_members()
+        | omni::fn::foldl(
+          [&record](access_paths values,
+            omni::data_member_binding auto member) {
+            using Meta = typename decltype(member)::meta;
+            values.metadata.push_back(Meta::value(record.ref()));
+            values.binding.push_back(member.value());
+            values.reference.push_back(member.ref());
+            values.dereferenced.push_back(*member);
+            values.arrow.push_back(member->substr());
+            return values;
+          },
+          access_paths{});
+    },
+    input);
+
+  const std::vector<std::string> expected{"north", "south"};
+  EXPECT_EQ(expected, values.metadata);
+  EXPECT_EQ(expected, values.binding);
+  EXPECT_EQ(expected, values.reference);
+  EXPECT_EQ(expected, values.dereferenced);
+  EXPECT_EQ(expected, values.arrow);
+}
+
+/** set_value() supports writable members even when references are unavailable.
+ * For referenceable members, ref(), operator*, and operator-> expose direct
+ * access to the member. See `advanced.const_and_mutable_access` for const and
+ * mutable members. */
+TEST(advanced, data_member_value_write) {
+  member_value_access::record input{"north", "south"};
+  omni::reflected_call(
+    [](omni::record_binding auto record) -> void {
+      record.accessible_data_members()
+        | omni::fn::each([&record](omni::data_member_binding auto member) {
+            using Meta = typename decltype(member)::meta;
+            Meta::set_value(record.ref(), member.value() + " meta");
+            member.set_value(member.value() + " value");
+            member.ref() += " ref";
+            *member += " *";
+            member->append(" ->");
+          });
+    },
+    input);
+
+  EXPECT_EQ("north meta value ref * ->", input.first);
+  EXPECT_EQ("south meta value ref * ->", input.second);
+}
+
+namespace custom_queries {
+
+struct record {
+  int value;
+  const int fixed = 1;
+  unsigned bits : 3;
+};
+
+// An application-defined predicate can test whether an accessor is available.
+template <typename Member>
+struct reference_accessible: std::bool_constant<requires(Member member) {
+  member.ref();
+}> {};
+
+} // namespace custom_queries
+
+/** Custom predicates can select members for an operation before invoking it.
+ * Reference access and writability are different: a const member can expose a
+ * reference, whereas a bitfield cannot. This query checks ref() availability.
+ */
+TEST(advanced, custom_queries) {
+  custom_queries::record input{7, 11, 3};
+  const auto names = omni::reflected_call(
+    [](omni::record_binding auto record) -> std::vector<std::string_view> {
+      return std::apply(
+        [](omni::data_member_binding auto... member) {
+          return std::vector{std::string_view(member.name())...};
+        },
+        record.accessible_data_members()
+          | omni::fn::filter<custom_queries::reference_accessible>());
+    },
+    input);
+
+  const std::vector<std::string_view> expected{"value", "fixed"};
+  EXPECT_EQ(expected, names);
+}
+
+namespace qualified_access {
+
+struct record {
+  int regular;
+  const int fixed;
+  mutable int cache;
+};
+
+// Check assignment for the actual binding, including its record's constness.
+template <typename Member>
+struct writable: std::bool_constant<requires(Member member) {
+  member.set_value(typename Member::type{});
+}> {};
+
+} // namespace qualified_access
+
+/** is_const() describes the declared member type, not the bound record's
+ * constness. A const record prevents writing ordinary members but still allows
+ * writing mutable members. Declared const members remain read-only.
+ * Filter by assignment availability on the binding before writing its value.
+ */
+TEST(advanced, const_and_mutable_access) {
+  const auto write = [](omni::record_binding auto record)
+    -> std::vector<std::string_view> {
+    const auto writable = record.accessible_data_members()
+      | omni::fn::filter<qualified_access::writable>();
+
+    writable | omni::fn::each([](omni::data_member_binding auto member) {
+      member.set_value(42);
+    });
+
+    return std::apply(
+      [](omni::data_member_binding auto... member) {
+        return std::vector{std::string_view(member.name())...};
+      },
+      writable);
+  };
+
+  qualified_access::record object{3, 7, 11};
+  const auto writable = omni::reflected_call(write, object);
+  const std::vector<std::string_view> expected{"regular", "cache"};
+  EXPECT_EQ(expected, writable);
+  EXPECT_EQ(42, object.regular);
+  EXPECT_EQ(7, object.fixed);
+  EXPECT_EQ(42, object.cache);
+
+  const qualified_access::record const_object{3, 7, 11};
+  const auto const_writable = omni::reflected_call(write, const_object);
+  const std::vector<std::string_view> expected_const{"cache"};
+  EXPECT_EQ(expected_const, const_writable);
+  EXPECT_EQ(3, const_object.regular);
+  EXPECT_EQ(7, const_object.fixed);
+  EXPECT_EQ(42, const_object.cache);
 }
 
 /// Previous examples ----------------------------------------------------------
