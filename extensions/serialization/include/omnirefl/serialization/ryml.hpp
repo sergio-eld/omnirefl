@@ -24,191 +24,165 @@
 auto result = omni::ryml::deserialize(omni::type<person>, source) //
   .transform_error(omni::ryml::render_diagnostics);
 
-if (result) {
-  const auto json = omni::ryml::as_json(*result);
-  const auto yaml = omni::ryml::as_yaml(*result);
+if (result.value) {
+  const auto json = omni::ryml::as_json(*result.value);
+  const auto yaml = omni::ryml::as_yaml(*result.value);
 }
-// On failure, result.error() contains the rendered diagnostics.
+// result.diagnostics contains the rendered diagnostics.
 ```
- */
-
-/**
- * TODO: [high] Configure partial deserialization beyond a single bool.
- *
- * As of now, optional fields and containers default to warnings when
- * strategy.partial is true. Supported types are compat::optional (std or tl)
- * and std::vector, including issues within their nested values. Warnings are
- * retained and rendered, but do not spend tolerance or stop traversal.
- * With partial=false, invalid supplied values remain errors.
- *
- * Missing optional fields keep their initialized defaults without an issue;
- * explicit null clears them. Invalid optional values and wrong-kind containers
- * keep their initialized defaults. Sequences retain source indices, with
- * failed entries holding default values. Scalar and required-record issues
- * outside these fields remain errors; partial still permits their defaults
- * to be returned. Syntax errors always prevent returning a value.
- *
- * Consider runtime strategy settings for recovery and severity by field or
- * category: reject, omit, retain an initialized fallback, or default a value.
- * Decide whether failed sequence/mapping entries are skipped or retain their
- * positions, and whether optional values become empty or retain a fallback.
- * Consider finer recovery within optional records and containers rather than
- * rejecting an optional value whenever its contents report an issue.
- *
- * Default constructibility alone does not establish a valid fallback; consider
- * metadata for intended defaults and required fields. Keep severity, traversal
- * tolerance, value retention, and any warning collection limit independent.
- * Allow strict request handling and lenient config loading through runtime
- * configuration. Preserve C++11 support and lazy message rendering; defer
- * user-defined recovery and severity customization until these rules are clear.
  */
 
 #include <omnirefl/reflected_scope.hpp>
 
 #include <omnirefl/extensions/compat.hpp>
-#include <omnirefl/functional.hpp>
 
 #include <ryml.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+// FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
+// owning strings and vectors; provide an alternative representation.
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
-// TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
-#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
-#  if __has_include(<string_view>)
-#    include <string_view>
-#  endif
-#endif
-
 namespace omni {
-namespace ryml {
+// Only backend-independent JSON/YAML mapping contracts belong here.
+// TODO: Move to a shared header if another JSON parser is adopted.
+namespace json {
+
+/// JSON/YAML parsing and mapping failures, independent of the parser backend.
+/// Field presence and diagnostic limits refer to the requested mapping contract.
+enum class issue_code : std::uint8_t {
+  unexpected_kind,
+  invalid_scalar,
+  out_of_range, // Value lies outside the range accepted by the mapping.
+  missing_field,
+  unknown_field,
+  duplicate_field,
+  parse_error,
+  warning_limit_exceeded
+};
+
+/// Value categories used in mapping expectations and observed input.
+/// These describe values, not destination-language storage types.
+enum class value_kind : std::uint8_t {
+  unknown, // No category is known or applicable.
+  scalar, // A non-collection value whose category has not been resolved.
+  mapping,
+  sequence,
+  string,
+  boolean,
+  integer, // An integral number.
+  unsigned_integer, // A non-negative integral number.
+  number,
+  null
+};
+
+/// Controls duplicate fields without merging occurrences.
+/// Last implies allow; warn is ignored when duplicates are rejected.
+enum duplicate_policy : std::uint8_t {
+  reject = 0,
+  allow = 1 << 0, // Keep the first occurrence, without a warning.
+  last = 1 << 1, // Keep the last occurrence.
+  warn = 1 << 2 // Warn about repeated field names when duplicates are allowed.
+};
+
+OMNI_ENABLE_BIT_FLAGS(duplicate_policy)
+
+/// Controls input fields absent from the struct. Warn is ignored without allow.
+enum class unknown_policy : std::uint8_t {
+  reject = 0,
+  allow = 1 << 0, // Ignore unknown fields without a warning.
+  warn = 1 << 1 // Warn about unknown fields only when allow is set.
+};
+
+OMNI_ENABLE_BIT_FLAGS(unknown_policy)
 
 /**
- * Controls error collection, partial values, and acceptance of extra fields.
- * The partial setting's type selects the result type, not just its behavior.
+ * Controls mapping errors independently of the JSON or YAML parsing algorithm.
  *
- * C++20 designated initialization with class template argument deduction:
+ * @details
+ * Mapping returns with_diagnostics: a valid
+ * value may accompany warnings, whereas expected<T, Diagnostics> holds either
+ * the value or diagnostics. Error limits allow collecting more diagnostics;
+ * they do not permit returning an invalid value.
  *
-```cpp
-const strategy strict{
-  .tolerance = 4,
-  .partial = std::false_type{},
-  .extra = false,
-}; // expected: value or diagnostics.
-const strategy runtime{
-  .tolerance = 4,
-  .partial = false,
-  .extra = false,
-}; // Product: optional value and diagnostics together.
-```
- *
- * C++11 compatibility builders preserve the same partial types:
- *
-```cpp
-const auto strict = default_strategy() //
-  .use_tolerance(4) //
-  .allow_partial(std::false_type{}); // expected: value or diagnostics.
-const auto runtime = default_strategy() //
-  .use_tolerance(4) //
-  .allow_partial(false); // Product: optional value and diagnostics together.
-```
+ * A partially initialized object is an implementation detail, not a result.
+ * Exposing it would constrain implementations that construct the result in
+ * one expression from mapped fields. Field types can represent recoverable
+ * invalid input explicitly. A future invalid-value recovery mechanism may
+ * define what it exposes during mapping without promising a partial result.
  */
-template <typename Partial = std::false_type>
-struct strategy {
-  static_assert(std::is_same<bool, Partial>::value
-      || omni::traits::is<std::integral_constant, Partial>(),
-    "Partial must be bool or std::integral_constant");
+struct error_policy {
+  // Number of mapping errors processing may pass before stopping on the next.
+  // Warnings do not count. Zero stops at the first error.
+  std::uint16_t error_limit = 0;
 
-  // Number of errors traversal may pass before stopping on the next one.
-  // Warnings do not count. Zero stops at the first error; negatives mean zero.
-  // Increase this to collect more field errors even with partial=false.
-  int tolerance = 0;
+  // Maximum permitted warnings; unset means unlimited. The next warning
+  // exceeds the limit, produces an error, and prevents returning a value.
+  // Zero fails on the first warning.
+  compat::optional<std::uint16_t> warning_limit = compat::nullopt;
 
-  // Permit returning a value despite errors; optional/container issues become
-  // warnings. Failed, missing, and unvisited fields keep initialized defaults.
-  // std::false_type gives expected; bool and std::true_type give
-  // with_diagnostics. See deserialization_result for the full result types.
-  Partial partial = {};
+  // Reject duplicates unless allow or last is set; warn alone does not allow.
+  duplicate_policy duplicates = duplicate_policy::reject;
 
-  // Ignore fields absent from the model at every nesting level.
-  // Duplicates of model fields remain issues.
-  bool extra = false;
+  // Reject input fields absent from the struct by default.
+  unknown_policy unknown_fields = unknown_policy::reject;
 
-  /**
-   * Return a strategy with the new tolerance and other settings unchanged.
-   *
-   * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
-   *
-  ```cpp
-  const strategy configured{
-    .tolerance = 15,
-  };
-  ```
-   */
-  OMNI_CPP14_CONSTEXPR strategy use_tolerance(int t) const {
-    auto result = *this;
-    result.tolerance = t;
-    return result;
-  }
+  // TODO: Consider warning thresholds per policy.
+};
 
-  /**
-   * Return a strategy with the partial type deduced from p and others
-   * unchanged. Passing bool keeps the product result even when p is false;
-   * passing std::false_type selects expected. See deserialization_result.
-   *
-   * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
-   *
-  ```cpp
-  const strategy configured{
-    .partial = true,
-  };
-  ```
-   */
-  template <typename P>
-  OMNI_CPP14_CONSTEXPR strategy<P> allow_partial(P p) const {
-    strategy<P> result{};
-    result.tolerance = tolerance;
-    result.partial = p;
-    result.extra = extra;
-    return result;
-  }
+/**
+ * Select recovery methods for missing fields where applicable.
+ * Invalid values and explicit null are not recovered by these flags.
+ *
+ * Flags may be combined. An exposed field default takes precedence over
+ * default construction when both methods are enabled.
+ * Successful recovery does not itself produce a warning.
+ */
+enum class recovery_policy : std::uint8_t {
+  // Use field defaults where Omnirefl can expose them.
+  field_defaults = 1 << 0,
+  // Use value initialization (T{}) where supported, without a reflected
+  // default.
+  default_initializable = 1 << 1,
 
-  /**
-   * Return a strategy with the new extra setting and others unchanged.
-   *
-   * Pre-C++20 convenience. Prefer direct designated initialization in C++20:
-   *
-  ```cpp
-  const strategy configured{
-    .extra = true,
-  };
-  ```
-   */
-  OMNI_CPP14_CONSTEXPR strategy allow_extra(bool e) const {
-    auto result = *this;
-    result.extra = e;
-    return result;
-  }
+  // TODO: Define when default initialization is valid recovery for the
+  // containing type; e.g. recovered map keys may collide and lose entries.
+  // TODO: Consider reporting defaulted fields separately from warnings.
+};
 
-  // TODO: [high] Add a configurable input-size limit to strategy and reject
+OMNI_ENABLE_BIT_FLAGS(recovery_policy)
+
+} // namespace json
+
+namespace ryml {
+
+/// Configures mapping diagnostics and recovery of missing fields.
+struct settings {
+  json::error_policy error_policy;
+
+  // No missing-field recovery unless explicitly configured.
+  compat::optional<json::recovery_policy> recovery = compat::nullopt;
+
+  // TODO: [high] Add a configurable input-size limit to settings and reject
   // oversized source text before parsing or allocating a tree. A std::string
   // argument is already buffered; callers must also bound request-body reads
   // to prevent oversized REST requests from consuming memory before this call.
 
-  // TODO: Make strategy select SAX-style validation and field assignment as
+  // TODO: Make settings select SAX-style validation and field assignment as
   // rapidyaml emits events, or the current parse-whole-tree -> map pipeline.
   // Event-based mapping could reject invalid input before parsing and retaining
-  // a huge remaining subtree. Preserve tolerance, partial/extra policies, and
+  // a huge remaining subtree. Preserve error and recovery policies, and
   // diagnostics; check missing fields when their object closes. Resolve YAML
   // aliases and diagnostic-view ownership before enabling the SAX path.
 
   // TODO: [high] Detect at compile time whether a model permits unbounded
   // nesting (e.g. a vector of itself); consider a traversal-depth limit in
-  // strategy to prevent stack exhaustion from deeply nested or malicious input.
+  // settings to prevent stack exhaustion from deeply nested or malicious input.
 
   // TODO: [high] Define a union deserialization policy before mapping
   // std::variant. JSON Schema commonly represents alternatives with oneOf;
@@ -218,56 +192,17 @@ struct strategy {
   // discriminator lives, and whether untagged matching is ever allowed.
 
   // TODO: Consider storing ryml::ParserOptions if rapidyaml's defaults prove
-  // insufficient. Direct storage would make strategy non-constexpr; do not
+  // insufficient. Direct storage would make settings non-constexpr; do not
   // mirror ParserOptions' private flags in another type.
-
-  // TODO: [low] Consider a C++11-only constexpr constructor and reconstructing
-  // values in the builders. Before C++14, member defaults prevent aggregate
-  // initialization and constexpr functions cannot assign to a copied value.
 };
 
-/**
- * Return the default configuration: zero tolerance, partial values disabled,
- * and extra fields rejected.
- *
- * Pre-C++20 convenience for starting a member-builder chain. Prefer direct
- * aggregate initialization in C++20:
- *
-```cpp
-const strategy configured{};
-```
- */
-constexpr strategy<> default_strategy() {
-  return {};
-}
+// TODO: Consider global-default customization without requiring users to name
+// settings before this header has declared it; settings has no separate header.
 
 /**
  * Describes an input issue without rendering a message or deciding failure.
  */
 struct issue {
-  enum class code : std::uint8_t {
-    unexpected_kind,
-    invalid_scalar,
-    out_of_range,
-    missing_field,
-    unknown_field,
-    duplicate_field,
-    parse_error
-  };
-
-  enum class kind : std::uint8_t {
-    unknown,
-    scalar,
-    mapping,
-    sequence,
-    string,
-    boolean,
-    integer,
-    unsigned_integer,
-    number,
-    null
-  };
-
   struct path_segment {
     // Field name borrowed from metadata or the retained tree.
     c4::csubstr field;
@@ -278,15 +213,15 @@ struct issue {
 
   // Group byte-sized kinds and the warning flag before rendering data.
   // Validation or conversion that failed.
-  code reason;
+  json::issue_code reason;
 
   // Input kind required by the destination field.
-  kind expected;
+  json::value_kind expected;
 
   // Input kind encountered at the failing node.
-  kind actual;
+  json::value_kind actual;
 
-  // True for recoverable optional/container issues under strategy.partial.
+  // True for accepted input conditions reported by the selected policy.
   bool warning = false;
 
   // Borrow the decoded scalar from the retained tree; render only on request.
@@ -313,31 +248,21 @@ struct issue {
  * Keeps issue records and an owning tree or borrowed node view for rendering.
  * Issue node IDs and input string views refer into that tree.
  *
- * When Owning is false, keep the caller's tree alive and unchanged while using
+ * When OwnsTree is false, keep the caller's tree alive and unchanged while using
  * diagnostics. Moving or changing it can invalidate node and string views.
  * When true, move this object; copying does not rebind issue views to its copy.
  * The copy constructor is left implicit to keep initialization simple and avoid
  * explicit copy/move special-member declarations.
  */
-template <bool Owning>
+template <bool OwnsTree>
 struct diagnostics {
-  // Preserves the call's settings.
-  struct {
-    // Number of errors traversal may pass before stopping on the next one.
-    // Warnings do not count; negative call values are stored as zero.
-    std::size_t tolerance;
+  // Snapshot for inspection; mapping receives its settings separately.
+  omni::ryml::settings settings;
 
-    // Allows returning a value despite field errors, keeping their defaults.
-    bool partial;
-
-    // Ignores fields that are absent from the model.
-    bool extra;
-  } policy;
-
-  // Retain the tree or refer to the caller's subtree, depending on Owning.
+  // Retain the tree or refer to the caller's subtree, depending on OwnsTree.
   // External string storage referenced by a caller-supplied tree must remain
-  // alive and unchanged while using diagnostics, even when Owning is true.
-  compat::conditional_t<Owning, ::ryml::Tree, ::ryml::ConstNodeRef> tree;
+  // alive and unchanged while using diagnostics, even when OwnsTree is true.
+  compat::conditional_t<OwnsTree, ::ryml::Tree, ::ryml::ConstNodeRef> tree;
 
   // Validation and conversion issues in traversal order, including warnings.
   std::vector<issue> issues;
@@ -345,12 +270,14 @@ struct diagnostics {
   // Owns the parser's text for a parse_error issue; mapping leaves it empty.
   std::string parse_message;
 
-  // True when mapping's error budget requires stopping.
+  // True when an error or warning limit requires stopping.
   bool stopped() const {
-    return policy.tolerance < static_cast<std::size_t>( //
-      std::count_if(issues.begin(),
-        issues.end(),
-        [](const issue &e) { return !e.warning; }));
+    return settings.error_policy.error_limit
+        < static_cast<std::size_t>(std::count_if(issues.begin(),
+          issues.end(),
+          [](const issue &e) { return !e.warning; }))
+      || std::any_of(issues.begin(), issues.end(),
+        [](const issue &e) { return json::issue_code::warning_limit_exceeded == e.reason; });
   }
 };
 
@@ -359,10 +286,9 @@ struct diagnostics {
  * Diagnostics can hold issue records or a rendered message.
  */
 template <typename T,
-  typename Diagnostics = omni::ryml::diagnostics</*owning=*/ true>>
+  typename Diagnostics = omni::ryml::diagnostics</*owning=*/true>>
 struct with_diagnostics {
-  // The deserialized value, if available. strategy.partial controls
-  // whether it can be returned despite field errors.
+  // Available only when mapping succeeds, including permitted recovery.
   compat::optional<T> value;
 
   // Retained issue records, or the result of transforming them for display.
@@ -374,13 +300,13 @@ struct with_diagnostics {
    * Consumes an rvalue result; f must return a value, not void.
    */
   template <typename F>
-  auto map_value(F &&f) && -> with_diagnostics<
-    compat::decay_t<compat::invoke_result_t<F &&, T &&>>, Diagnostics> {
+  auto map_value(F &&f)
+    && -> with_diagnostics<compat::decay_t<compat::invoke_result_t<F &&, T &&>>,
+      Diagnostics> {
     return {
-      /*value=*/value
-        ? compat::make_optional(
-          compat::invoke(std::forward<F>(f), std::move(*value)))
-        : compat::nullopt,
+      /*value=*/value ? compat::make_optional(
+                          compat::invoke(std::forward<F>(f), std::move(*value)))
+                      : compat::nullopt,
       /*diagnostics=*/std::move(diagnostics),
     };
   }
@@ -388,25 +314,26 @@ struct with_diagnostics {
   /**
    * Consume this result, keeping the optional value and applying f to
    * diagnostics. Calls f whether or not a value is available, preserving
-   * partial values. The returned diagnostics have the type returned by f.
+   * the value. The returned diagnostics have the type returned by f.
    */
   template <typename F>
-  auto map_diagnostics(F &&f) && -> with_diagnostics<T,
+  auto transform_diagnostics(F &&f) && -> with_diagnostics<T,
     compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &&>>> {
     return {
       /*value=*/std::move(value),
-      /*diagnostics=*/compat::invoke(std::forward<F>(f), std::move(diagnostics)),
+      /*diagnostics=*/
+      compat::invoke(std::forward<F>(f), std::move(diagnostics)),
     };
   }
 
   /**
-   * Alias for map_diagnostics: transform diagnostics even alongside a value.
+   * Alias for transform_diagnostics, including when a value is available.
    */
   template <typename F>
-  auto map_error(F &&f) && -> decltype(std::move(*this).map_diagnostics(
+  auto map_error(F &&f) && -> decltype(std::move(*this).transform_diagnostics(
     std::forward<F>(f))) {
     return std::move(*this) //
-      .map_diagnostics(std::forward<F>(f));
+      .transform_diagnostics(std::forward<F>(f));
   }
 
   /**
@@ -423,32 +350,7 @@ struct with_diagnostics {
    * Alias for map_error, keeping any value while transforming diagnostics.
    * Unlike expected, calls f even when a value is available.
    *
-   * C++20 designated initialization with class template argument deduction:
-   *
-  ```cpp
-  const deserialize_t load{
-    .strategy = strategy{
-      .tolerance = 4,
-      .partial = true,
-      .extra = false,
-    },
-  };
-
-  auto result = load(omni::type<person>, source);
-  auto rendered = std::move(result) //
-    .transform_error(render_diagnostics);
-  // rendered.value keeps the partial person; rendered.diagnostics is text.
-  ```
-   *
-   * In C++11, initialize load with the compatibility builder and use
-   * omni::type_t<person>{} for the type argument:
-   *
-  ```cpp
-  const auto load = fn::ctad<deserialize_t>(
-    default_strategy() //
-      .use_tolerance(4) //
-      .allow_partial(true));
-  ```
+   * Retains warnings alongside a valid value and errors when no value exists.
    */
   template <typename F>
   auto transform_error(
@@ -457,49 +359,12 @@ struct with_diagnostics {
       .map_error(std::forward<F>(f));
   }
 
+  // TODO: Collect defaulted fields separately from warnings and errors.
   // TODO: Add and_then for generic expected-style sequencing; specify how to
   // retain diagnostics from both the input and the returned result.
   // TODO: Add or_else for generic expected-style recovery; specify how to
   // retain diagnostics when a value and issues are both present.
 };
-
-// True when deserialization returned a value with field issues.
-template <typename T, bool Owning>
-bool is_partial(const with_diagnostics<T, diagnostics<Owning>> &r) {
-  return r.value && !r.diagnostics.issues.empty();
-}
-
-namespace detail {
-
-template <typename Strategy>
-struct returns_expected;
-
-template <>
-struct returns_expected<strategy<bool>>: std::false_type {};
-
-template <typename T, T Value>
-struct returns_expected<strategy<std::integral_constant<T, Value>>>:
-  std::integral_constant<bool, !static_cast<bool>(Value)> {};
-
-} // namespace detail
-
-/**
- * Result of deserializing T using Strategy and owning or borrowed diagnostics.
- *
- * strategy<std::false_type> gives expected<T, diagnostics<Owning>>:
- * a value on success or diagnostics on failure. Other std::integral_constant
- * types whose value is false give the same result type.
- *
- * strategy<bool> and strategy<std::true_type> give with_diagnostics<T,
- * diagnostics<Owning>>: an optional value and diagnostics together.
- * For strategy<bool>, the result type stays the same whether partial is true
- * or false at runtime.
- */
-template <typename T, typename Strategy, bool Owning>
-using deserialization_result = compat::conditional_t< //
-  detail::returns_expected<Strategy>::value,
-  compat::expected<T, diagnostics<Owning>>,
-  with_diagnostics<T, diagnostics<Owning>>>;
 
 /**
  * Parse text into an owning tree, returning syntax errors without throwing.
@@ -510,113 +375,111 @@ using deserialization_result = compat::conditional_t< //
 ```cpp
 // Supply a reflected person and an owning std::string source.
 auto result = parse(std::move(source)) //
-  .and_then([](::ryml::Tree tree) {
+  .transform([](::ryml::Tree tree) {
     return map_tree(omni::type<person>, std::move(tree)) //
       .transform_error(render_diagnostics);
   });
-// expected<person, std::string>: syntax and field errors are rendered text.
+// Syntax errors use expected; mapping retains optional person and diagnostics.
 ```
  */
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
-/**
- * Map an owning tree or borrowed node view using the stored strategy.
- */
-template <typename Strategy>
+namespace core {
+
+// Unbound mapping operations receive all settings explicitly.
+template <typename Record>
+with_diagnostics<Record, diagnostics<true>> map_tree(const settings &options,
+  omni::type_t<Record> record_type,
+  ::ryml::Tree tree);
+
+template <typename Record>
+with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
+  omni::type_t<Record> record_type,
+  ::ryml::ConstNodeRef node);
+
+template <typename Record>
+with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
+  omni::type_t<Record> record_type,
+  std::string source);
+
+} // namespace core
+
+/// Maps an owning tree or borrowed subtree with the bound settings.
+/// Supports reflected records, scalars, and vectors of supported values.
 struct map_tree_t {
-  static_assert(omni::traits::is<omni::ryml::strategy, Strategy>(),
-    "Strategy must be an omni::ryml::strategy specialization");
+  omni::ryml::settings settings;
 
-  // Settings applied to every tree or subtree mapped by this callable.
-  Strategy strategy;
+  /// Returns a new binding with transformed settings; preserves this binding.
+  template <typename F>
+  OMNI_CPP14_CONSTEXPR auto transform_settings(F &&f) const ->
+    typename std::enable_if<
+      compat::is_invocable<F &&, omni::ryml::settings>::value
+        && std::is_same<omni::ryml::settings,
+          compat::invoke_result_t<F &&, omni::ryml::settings>>::value,
+      map_tree_t>::type {
+    return {compat::invoke(std::forward<F>(f), omni::ryml::settings{settings})};
+  }
 
-  /**
-   * Own a copy for an lvalue tree, or transfer a moved tree after traversal.
-   * Returns expected when partial has type std::false_type; bool and
-   * std::true_type return with_diagnostics. See deserialization_result.
-   */
+  // Own the tree; move it after mapping so diagnostic views remain valid.
   template <typename Record>
-  deserialization_result<Record, Strategy, /*owning=*/ true>
-    operator()(omni::type_t<Record> record_type, ::ryml::Tree tree) const;
+  with_diagnostics<Record, diagnostics<true>>
+    operator()(omni::type_t<Record> record_type, ::ryml::Tree tree) const {
+    return core::map_tree(settings, record_type, std::move(tree));
+  }
 
-  /**
-   * Borrow the subtree. Keep the caller's tree alive and unchanged while using
-   * the returned diagnostics. Returns expected when partial has type
-   * std::false_type; bool and std::true_type return with_diagnostics.
-   * See deserialization_result.
-   */
+  // Keep the caller's tree alive and unchanged while using borrowed
+  // diagnostics.
   template <typename Record>
-  deserialization_result<Record, Strategy, /*owning=*/ false>
-    operator()(omni::type_t<Record> record_type,
-      ::ryml::ConstNodeRef node) const;
-};
-
-#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-template <typename Strategy>
-map_tree_t(Strategy) -> map_tree_t<Strategy>;
-#endif
-
-/**
- * Map with zero tolerance, partial values disabled, and extra fields rejected.
- * Returns expected with owning diagnostics for trees, borrowed for node views.
- *
-```cpp
-auto borrowed = map_tree(omni::type<person>, borrowed_tree.crootref());
-// Keep borrowed_tree and its strings alive and unchanged while using errors.
-auto owned = map_tree(omni::type<person>, std::move(owning_tree));
-// Errors retain the moved tree; external backing strings still need an owner.
-```
- */
-constexpr auto map_tree = fn::ctad<map_tree_t>(
-  /*strategy=*/default_strategy());
-
-/**
- * Compose parsing and tree mapping, retaining all issues in diagnostics.
- * Parse errors always return no value; strategy.partial applies to mapping.
- * Returns expected when partial has type std::false_type; bool and
- * std::true_type return with_diagnostics. See deserialization_result.
- */
-template <typename Strategy>
-struct deserialize_t {
-  static_assert(omni::traits::is<omni::ryml::strategy, Strategy>(),
-    "Strategy must be an omni::ryml::strategy specialization");
-
-  // Settings applied to every deserialization performed by this callable.
-  Strategy strategy;
-
-  template <typename Record>
-  deserialization_result<Record, Strategy, /*owning=*/ true> operator()(
+  with_diagnostics<Record, diagnostics<false>> operator()(
     omni::type_t<Record> record_type,
-    std::string source) const;
+    ::ryml::ConstNodeRef node) const {
+    return core::map_tree(settings, record_type, node);
+  }
 };
 
-#if defined(__cpp_deduction_guides) && 201703L <= __cpp_deduction_guides
-template <typename Strategy>
-deserialize_t(Strategy) -> deserialize_t<Strategy>;
-#endif
-
 /**
- * Parse and map with zero tolerance, no partial values, and no extra fields.
- * Returns expected: the deserialized value or diagnostics that own the parsed
- * tree.
- *
- * Increase tolerance to collect more field errors while keeping partial=false.
+ * Parse JSON or YAML into a record, scalar, or vector.
+ * Returns a valid value with any warnings, or diagnostics alone on failure.
  *
 ```cpp
-auto result = deserialize(omni::type<person>, source) //
-  .transform_error(render_diagnostics);
-// expected<person, std::string>: rendering happens only on failure.
+const auto load = deserialize.transform_settings([limit](ryml::settings s) {
+  s.error_policy.error_limit = limit;
+  s.error_policy.unknown_fields = json::unknown_policy::allow;
+  return s;
+});
+auto result = load(omni::type_t<person>{}, source);
 ```
  */
-constexpr auto deserialize = fn::ctad<deserialize_t>(
-  /*strategy=*/default_strategy());
+struct deserialize_t {
+  omni::ryml::settings settings;
 
-// A generic callable keeps map_diagnostics(render_diagnostics) valid for both
-// ownership modes; an overloaded function name cannot deduce its callable type.
+  /// Returns a new binding with transformed settings; preserves this binding.
+  template <typename F>
+  OMNI_CPP14_CONSTEXPR auto transform_settings(F &&f) const ->
+    typename std::enable_if<
+      compat::is_invocable<F &&, omni::ryml::settings>::value
+        && std::is_same<omni::ryml::settings,
+          compat::invoke_result_t<F &&, omni::ryml::settings>>::value,
+      deserialize_t>::type {
+    return {compat::invoke(std::forward<F>(f), omni::ryml::settings{settings})};
+  }
+
+  template <typename Record>
+  with_diagnostics<Record, diagnostics<true>>
+    operator()(omni::type_t<Record> record_type, std::string source) const {
+    return core::deserialize(settings, record_type, std::move(source));
+  }
+};
+
+OMNI_CPP14_CONSTEXPR const map_tree_t map_tree{};
+OMNI_CPP14_CONSTEXPR const deserialize_t deserialize{};
+
+// A generic callable lets transform_diagnostics(render_diagnostics) work with
+// both ownership modes; an overloaded function name cannot deduce its type.
 struct render_diagnostics_t {
-  template <bool Owning>
-  std::string operator()(const diagnostics<Owning> &d) const;
+  template <bool OwnsTree>
+  std::string operator()(const diagnostics<OwnsTree> &d) const;
 };
 
 /**
@@ -627,9 +490,12 @@ constexpr render_diagnostics_t render_diagnostics{};
 
 /**
  * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
- * Vectors may contain nested vectors or reflected records, including at the root.
- * String sources include char-based basic_string and c4 views, plus
+ * Vectors may contain nested vectors or reflected records, including at the
+ * root. String sources include char-based basic_string and c4 views, plus
  * basic_string_view when the standard library provides it.
+ * Empty optionals emit null at the root or as record fields. Empty optional
+ * sequence elements are omitted; remaining elements keep their relative order.
+ * Populated optionals serialize their contained value.
  * Strings are quoted; field values are copied into the tree's arena.
  * TODO: Define the document representation of reflected enumerations.
  */
@@ -639,6 +505,10 @@ struct serialize_t {
 
   template <typename Value>
   std::string operator()(const Value &value) const;
+
+  // TODO: [high] Consider omni::ryml::as_tree to expose tree construction,
+  // and transform_tree to customize the tree before emission, e.g. omit null
+  // object properties without another policy.
 };
 
 /**

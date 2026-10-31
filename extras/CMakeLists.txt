@@ -35,13 +35,10 @@ if(BUILD_EXAMPLES)
     endif()
 
     if(NOT DEFINED BUILD_EXTENSIONS OR BUILD_EXTENSIONS)
-        add_subdirectory(extensions/serialization/examples/ryml
-            "${CMAKE_BINARY_DIR}/extensions/serialization/examples/ryml")
-        if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
-            add_test(NAME example.json_serialization COMMAND json_serialization)
-        endif()
+        add_subdirectory(extensions/serialization/guide
+            "${CMAKE_BINARY_DIR}/extensions/serialization/guide")
     else()
-        message(STATUS "omnirefl: skipping json_serialization: extensions disabled")
+        message(STATUS "omnirefl: skipping guide.json: extensions disabled")
     endif()
 
     omnirefl_check_cxx20_language(_examples_has_guide_features)

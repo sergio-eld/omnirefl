@@ -6,6 +6,8 @@
 
 #include <functional>
 #include <memory>
+// FIXME: [low] Freestanding: separate the owning-string/to_string helpers and
+// this hosted dependency from the common compatibility header.
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -25,6 +27,28 @@
 #else
 #  define OMNI_CPP14_CONSTEXPR
 #endif
+
+// Invoke beside the enum so argument-dependent lookup finds these operators.
+#define OMNI_ENABLE_BIT_FLAGS(Enum)                                        \
+  constexpr Enum operator|(Enum left, Enum right) noexcept {               \
+    return static_cast<Enum>(                                              \
+      static_cast<typename std::underlying_type<Enum>::type>(left)         \
+      | static_cast<typename std::underlying_type<Enum>::type>(right));    \
+  }                                                                        \
+  constexpr Enum operator&(Enum left, Enum right) noexcept {               \
+    return static_cast<Enum>(                                              \
+      static_cast<typename std::underlying_type<Enum>::type>(left)         \
+      & static_cast<typename std::underlying_type<Enum>::type>(right));    \
+  }                                                                        \
+  constexpr Enum operator^(Enum left, Enum right) noexcept {               \
+    return static_cast<Enum>(                                              \
+      static_cast<typename std::underlying_type<Enum>::type>(left)         \
+      ^ static_cast<typename std::underlying_type<Enum>::type>(right));    \
+  }                                                                        \
+  constexpr Enum operator~(Enum value) noexcept {                          \
+    return static_cast<Enum>(                                              \
+      ~static_cast<typename std::underlying_type<Enum>::type>(value));     \
+  }
 
 namespace omni {
 namespace compat {
@@ -476,6 +500,8 @@ constexpr auto bind_front(Function &&function, Bound &&...bound) //
 #endif
 
 // make_unique
+// FIXME: [low] Freestanding: keep allocating helpers separate; make_unique is
+// not part of the guaranteed freestanding <memory> subset.
 #if OMNI_CPLUSPLUS >= 201402L
 using std::make_unique;
 #else

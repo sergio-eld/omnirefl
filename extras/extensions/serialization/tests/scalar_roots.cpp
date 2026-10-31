@@ -70,4 +70,170 @@ TEST(serialization_scalar_roots, writes_standard_string_view_array) {
 }
 #endif
 
+TEST(deserialization_scalar_roots, reads_scalars_without_record_metadata) {
+  const auto integer = omni::ryml::deserialize(omni::type_t<int>{}, "42");
+  EXPECT_TRUE(integer.value);
+  if (integer.value) {
+    EXPECT_EQ(42, *integer.value);
+  }
+  EXPECT_TRUE(integer.diagnostics.issues.empty());
+
+  const auto boolean = omni::ryml::deserialize(omni::type_t<bool>{}, "true");
+  EXPECT_TRUE(boolean.value);
+  if (boolean.value) {
+    EXPECT_TRUE(*boolean.value);
+  }
+
+  const auto real = omni::ryml::deserialize(omni::type_t<double>{}, "1.5");
+  EXPECT_TRUE(real.value);
+  if (real.value) {
+    EXPECT_EQ(1.5, *real.value);
+  }
+
+  const auto text = omni::ryml::deserialize(
+    omni::type_t<std::string>{}, R"("text")");
+
+  EXPECT_TRUE(text.value);
+  if (text.value) {
+    EXPECT_EQ("text", *text.value);
+  }
+}
+
+TEST(deserialization_scalar_roots, reports_invalid_root_values) {
+  const auto result = omni::ryml::deserialize(omni::type_t<int>{}, R"("bad")");
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  for (const auto &issue : result.diagnostics.issues) {
+    EXPECT_EQ(omni::json::issue_code::invalid_scalar, issue.reason);
+    EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
+    EXPECT_TRUE(issue.path.empty());
+  }
+}
+
+TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
+  const auto numbers = omni::ryml::deserialize(
+    omni::type_t<std::vector<int>>{}, "[7, 42]");
+
+  const std::vector<int> expected_numbers{7, 42};
+  EXPECT_TRUE(numbers.value);
+  if (numbers.value) {
+    EXPECT_EQ(expected_numbers, *numbers.value);
+  }
+
+  const auto booleans = omni::ryml::deserialize(
+    omni::type_t<std::vector<bool>>{}, "[true, false]");
+
+  const std::vector<bool> expected_booleans{true, false};
+  EXPECT_TRUE(booleans.value);
+  if (booleans.value) {
+    EXPECT_EQ(expected_booleans, *booleans.value);
+  }
+
+  const auto nested = omni::ryml::deserialize(
+    omni::type_t<std::vector<std::vector<int>>>{}, "[[7], [], [42]]");
+
+  const std::vector<std::vector<int>> expected_nested{{7}, {}, {42}};
+  EXPECT_TRUE(nested.value);
+  if (nested.value) {
+    EXPECT_EQ(expected_nested, *nested.value);
+  }
+}
+
+TEST(deserialization_scalar_roots, reports_empty_tree_roots) {
+  const auto scalar = omni::ryml::map_tree(omni::type_t<int>{}, ::ryml::Tree{});
+  EXPECT_FALSE(scalar.value);
+  EXPECT_EQ(1U, scalar.diagnostics.issues.size());
+  for (const auto &issue : scalar.diagnostics.issues) {
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
+    EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
+  }
+
+  const auto sequence = omni::ryml::map_tree(
+    omni::type_t<std::vector<int>>{}, ::ryml::Tree{});
+
+  EXPECT_FALSE(sequence.value);
+  EXPECT_EQ(1U, sequence.diagnostics.issues.size());
+  for (const auto &issue : sequence.diagnostics.issues) {
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
+    EXPECT_EQ(omni::json::value_kind::sequence, issue.expected);
+  }
+}
+
+TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
+  const auto load = omni::ryml::deserialize.transform_settings(
+    [](omni::ryml::settings s) {
+      s.error_policy.error_limit = 1;
+      return s;
+    });
+
+  const auto result = load(
+    omni::type_t<std::vector<int>>{}, R"(["bad", "also bad", 42])");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(2U, result.diagnostics.issues.size());
+  EXPECT_EQ("/0: \"bad\" is not an integer\n/1: \"also bad\" is not an integer",
+    omni::ryml::render_diagnostics(result.diagnostics));
+}
+
+class optional_serialization:
+    public testing::TestWithParam<::ryml::EmitType_e> {};
+
+TEST_P(optional_serialization, writes_present_and_empty_scalar_roots) {
+  const omni::ryml::serialize_t emit{GetParam()};
+  EXPECT_TRUE(serialization_test::matches_json(
+    "null", emit(omni::compat::optional<int>{})));
+  EXPECT_TRUE(serialization_test::matches_json(
+    "0", emit(omni::compat::optional<int>{0})));
+  EXPECT_TRUE(serialization_test::matches_json(
+    "false", emit(omni::compat::optional<bool>{false})));
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"("null")", emit(omni::compat::optional<std::string>{"null"})));
+}
+
+TEST_P(optional_serialization, preserves_present_false_values) {
+  const omni::ryml::serialize_t emit{GetParam()};
+  const std::vector<omni::compat::optional<int>> integers{
+    omni::compat::nullopt, 0, 7, omni::compat::nullopt};
+
+  const std::vector<omni::compat::optional<bool>> booleans{
+    false, omni::compat::nullopt, true};
+
+  const std::vector<omni::compat::optional<std::string>> strings{
+    std::string{}, omni::compat::nullopt, std::string{"null"}};
+
+  EXPECT_TRUE(serialization_test::matches_json("[0, 7]", emit(integers)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    "[false, true]", emit(booleans)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"(["", "null"])", emit(strings)));
+}
+
+TEST_P(optional_serialization, writes_empty_sequence_for_empty_elements) {
+  const std::vector<omni::compat::optional<int>> values{
+    omni::compat::nullopt, omni::compat::nullopt};
+
+  EXPECT_TRUE(serialization_test::matches_json(
+    "[]", omni::ryml::serialize_t{GetParam()}(values)));
+}
+
+TEST_P(optional_serialization, handles_nested_optionals_and_sequences) {
+  const omni::ryml::serialize_t emit{GetParam()};
+  const auto empty = omni::compat::make_optional<omni::compat::optional<int>>(
+    omni::compat::nullopt);
+
+  const std::vector<omni::compat::optional<omni::compat::optional<int>>> nested{
+    empty, omni::compat::make_optional<omni::compat::optional<int>>(7)};
+
+  const std::vector<omni::compat::optional<std::vector<int>>> sequences{
+    omni::compat::nullopt, std::vector<int>{}, std::vector<int>{7}};
+
+  EXPECT_TRUE(serialization_test::matches_json("null", emit(empty)));
+  EXPECT_TRUE(serialization_test::matches_json("[7]", emit(nested)));
+  EXPECT_TRUE(serialization_test::matches_json("[[], [7]]", emit(sequences)));
+}
+
+INSTANTIATE_TEST_SUITE_P(formats,
+  optional_serialization,
+  testing::Values(::ryml::EMIT_JSON, ::ryml::EMIT_YAML));
+
 } // namespace
