@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
 project(omnirefl 
     LANGUAGES CXX C 
-    VERSION 0.0.6)
+    VERSION 0.0.7)
 
 include(GNUInstallDirs)
 
