@@ -15,6 +15,27 @@
 
 namespace {
 
+// Forward elements into storage: initializer_list would copy const elements.
+template <typename Value = void, typename First, typename... Args>
+auto make_vector(First &&first, Args &&...args)
+  -> std::vector<omni::compat::conditional_t<std::is_void<Value>::value,
+    omni::compat::decay_t<First>,
+    Value>> {
+  using element_type = omni::compat::conditional_t<std::is_void<Value>::value,
+    omni::compat::decay_t<First>,
+    Value>;
+
+  std::vector<element_type> values;
+  values.reserve(1 + sizeof...(Args));
+  values.emplace_back(std::forward<First>(first));
+
+  // C++11 pack expansion; list initialization preserves insertion order.
+  const int inserted[]{0,
+    (values.emplace_back(std::forward<Args>(args)), 0)...};
+  (void)inserted;
+  return values;
+}
+
 // Keep this translation unit free of reflected records: these roots must not
 // depend on metadata discovered through unrelated record serialization calls.
 TEST(serialization_scalar_roots, writes_scalar_values_without_record_metadata) {
@@ -226,8 +247,8 @@ TEST_P(optional_serialization, handles_nested_optionals_and_sequences) {
   const std::vector<omni::compat::optional<omni::compat::optional<int>>> nested{
     empty, omni::compat::make_optional<omni::compat::optional<int>>(7)};
 
-  const std::vector<omni::compat::optional<std::vector<int>>> sequences{
-    omni::compat::nullopt, std::vector<int>{}, std::vector<int>{7}};
+  const auto sequences = make_vector<omni::compat::optional<std::vector<int>>>(
+    omni::compat::nullopt, std::vector<int>{}, std::vector<int>{7});
 
   EXPECT_TRUE(serialization_test::matches_json("null", emit(empty)));
   EXPECT_TRUE(serialization_test::matches_json("[7]", emit(nested)));
