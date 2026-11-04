@@ -433,7 +433,7 @@ Before `find_package`, acquire Omnirefl with:
 include(FetchContent)
 FetchContent_Declare(omnirefl
     GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
-    GIT_TAG v0.0.6
+    GIT_TAG v0.0.7
     SOURCE_SUBDIR cmake/integration)
 FetchContent_MakeAvailable(omnirefl)
 ```
@@ -453,7 +453,7 @@ In your consumer's `conanfile.txt`:
 
 ```ini
 [requires]
-omnirefl/0.0.5
+omnirefl/0.0.6
 
 [generators]
 CMakeDeps

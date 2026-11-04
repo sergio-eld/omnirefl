@@ -64,6 +64,26 @@ jobs:
             exit 1
           fi
 
+          notes="docs/releases/$project_version.md"
+          if [ ! -f "$notes" ] || ! grep -q '[^[:space:]]' "$notes"; then
+            echo "missing or empty release notes: $notes" >&2
+            exit 1
+          fi
+
+          python3 - "$project_version" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = tuple(map(int, sys.argv[1].split('.')))
+          for notes in sorted(Path('docs/releases').glob('*.md')):
+              if not re.fullmatch(r'\d+\.\d+\.\d+', notes.stem):
+                  continue
+              if version < tuple(map(int, notes.stem.split('.'))):
+                  print(f'::warning file={notes}::Release notes for newer version '
+                        f'{notes.stem} exist; preparing {sys.argv[1]}.')
+          PY
+
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release already exists for $GITHUB_REF_NAME" >&2
             exit 1
@@ -337,6 +357,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
       - name: Download Release Artifacts
         # Ad hoc: download-artifact currently fails for some artifacts uploaded
         # by Ubuntu runners. The REST download remains valid.
@@ -473,7 +496,7 @@ jobs:
             --draft \
             --prerelease \
             --verify-tag \
-            --generate-notes \
+            --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md" \
             --title "Omnirefl ${GITHUB_REF_NAME#v}"
 
       - name: Upload Release Assets
