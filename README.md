@@ -597,7 +597,7 @@ Extension examples, tests, and benchmarks are grouped under `extras/extensions`.
 ## Extensions
 
 - **Serialization:** RapidYAML-backed JSON/YAML serialization, compatible with
-  C++11. See the [standalone example](extras/extensions/serialization/examples/ryml/main.cpp).
+  C++11. See the [guide](extras/extensions/serialization/guide/main.cpp).
 - Further extensions under consideration include RPC mapping, schema generation,
   and command-line interfaces.
 <!-- pages:extensions:end -->

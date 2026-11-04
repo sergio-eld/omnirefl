@@ -27,10 +27,12 @@ namespace compat {
 #if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
 using std::optional;
 using std::nullopt;
+using std::nullopt_t;
 using std::make_optional;
 #else
 using tl::optional;
 using tl::nullopt;
+using tl::nullopt_t;
 using tl::make_optional;
 #endif
 
