@@ -36,6 +36,7 @@
  *   TODO: Associative mappings are shown disabled.
  *
  * Advanced
+ *   advanced.tree_ownership - choose owning or borrowed string storage
  *   advanced.borrowed_and_owned_input - tree and diagnostic lifetimes
  */
 
@@ -581,6 +582,34 @@ TEST(mappings, optional_sequence_elements) {
 //   }
 // }
 
+namespace tree_ownership {
+
+struct reading {
+  std::string label;
+  omni::compat::optional<int> value;
+};
+
+} // namespace tree_ownership
+
+/** core::as_ref_tree borrows existing strings; keep their storage alive and
+ * unchanged while using the tree. core::as_owning_tree copies strings into
+ * its arena so the tree can outlive the source. Both trees own their nodes
+ * and generated scalar text. The returned trees can be edited before emission.
+ */
+TEST(advanced, tree_ownership) {
+  const tree_ownership::reading source{"sensor", omni::compat::nullopt};
+  const auto borrowed = omni::ryml::core::as_ref_tree(source);
+  EXPECT_TRUE(same_document(R"({"label": "sensor", "value": null})",
+    ::ryml::emitrs_json<std::string>(borrowed)));
+
+  auto owning = omni::ryml::core::as_owning_tree(source);
+  owning.rootref().remove_child("value");
+  EXPECT_TRUE(same_document(R"({"label": "sensor"})",
+    ::ryml::emitrs_json<std::string>(owning)));
+  EXPECT_TRUE(same_document(R"({"label": "sensor"})",
+    ::ryml::emitrs_yaml<std::string>(owning)));
+}
+
 /** map_tree accepts a borrowed node or an owning tree. Borrowed diagnostics
  * require the caller's tree and any external scalar storage to stay alive and
  * unchanged. Moving the tree into map_tree lets diagnostics retain that tree.
@@ -588,7 +617,7 @@ TEST(mappings, optional_sequence_elements) {
  * issue views to the copied tree. deserialize owns its parsed input tree.
  */
 TEST(advanced, borrowed_and_owned_input) {
-  auto parsed = omni::ryml::parse(R"({"entry": {"value": "bad"}})");
+  auto parsed = omni::ryml::core::parse(R"({"entry": {"value": "bad"}})");
   EXPECT_TRUE(parsed);
   if (parsed) {
     const auto borrowed = omni::ryml::map_tree(
@@ -602,7 +631,7 @@ TEST(advanced, borrowed_and_owned_input) {
       omni::ryml::render_diagnostics(borrowed.diagnostics));
   }
 
-  auto owned_input = omni::ryml::parse(R"({"value": "bad"})");
+  auto owned_input = omni::ryml::core::parse(R"({"value": "bad"})");
   EXPECT_TRUE(owned_input);
   if (owned_input) {
     const auto owned = omni::ryml::map_tree(
@@ -618,22 +647,22 @@ TEST(advanced, borrowed_and_owned_input) {
 // Normalize either format to JSON text; report parse failures as test failures.
 testing::AssertionResult same_document(std::string expected,
   std::string actual) {
-  auto expected_tree = omni::ryml::parse(std::move(expected));
+  auto expected_tree = omni::ryml::core::parse(std::move(expected));
   if (!expected_tree)
     return testing::AssertionFailure() << "Invalid expected document: "
       << expected_tree.error();
 
-  auto actual_tree = omni::ryml::parse(std::move(actual));
+  auto actual_tree = omni::ryml::core::parse(std::move(actual));
   if (!actual_tree)
     return testing::AssertionFailure() << "Invalid output: "
       << actual_tree.error();
 
-  // Parsed JSON retains multi-line flow layout; normalize it before emission.
+  // Normalize container layout while preserving scalar quoting.
   for (auto *tree : {&*expected_tree, &*actual_tree}) {
     tree->rootref().set_style_conditionally(
-      /*type_mask=*/::ryml::FLOW_ML,
-      /*rem_style_flags=*/::ryml::FLOW_ML,
-      /*add_style_flags=*/::ryml::FLOW_SL,
+      /*type_mask=*/::ryml::NOTYPE,
+      /*rem_style_flags=*/::ryml::CONTAINER_STYLE,
+      /*add_style_flags=*/::ryml::NOTYPE,
       /*recurse=*/true);
   }
 

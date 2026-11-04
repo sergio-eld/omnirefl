@@ -70,26 +70,44 @@ inline std::string render_path(const std::vector<issue::path_segment> &segments)
   return path;
 }
 
-inline std::string kind_name(json::value_kind k) {
+inline const std::string &kind_name(json::value_kind k) {
   switch (k) {
-  case json::value_kind::mapping:
-    return "object";
-  case json::value_kind::sequence:
-    return "array";
-  case json::value_kind::string:
-    return "string";
-  case json::value_kind::boolean:
-    return "boolean";
-  case json::value_kind::integer:
-    return "integer";
-  case json::value_kind::unsigned_integer:
-    return "unsigned integer";
-  case json::value_kind::number:
-    return "real number";
-  case json::value_kind::null:
-    return "null";
-  default:
-    return "scalar";
+  case json::value_kind::mapping: {
+    static const std::string name{"object"};
+    return name;
+  }
+  case json::value_kind::sequence: {
+    static const std::string name{"array"};
+    return name;
+  }
+  case json::value_kind::string: {
+    static const std::string name{"string"};
+    return name;
+  }
+  case json::value_kind::boolean: {
+    static const std::string name{"boolean"};
+    return name;
+  }
+  case json::value_kind::integer: {
+    static const std::string name{"integer"};
+    return name;
+  }
+  case json::value_kind::unsigned_integer: {
+    static const std::string name{"unsigned integer"};
+    return name;
+  }
+  case json::value_kind::number: {
+    static const std::string name{"real number"};
+    return name;
+  }
+  case json::value_kind::null: {
+    static const std::string name{"null"};
+    return name;
+  }
+  default: {
+    static const std::string name{"scalar"};
+    return name;
+  }
   }
 }
 
@@ -315,7 +333,7 @@ struct unsupported_deserialization {
   }
 };
 
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 ::ryml::Tree write_tree(const Value &value);
 
 // C++11 substitutes for generic lambdas and lambdas with captures.
@@ -379,13 +397,13 @@ struct cpp11_lambda_map_node {
 
 // The metadata argument establishes reflection even for empty containers.
 // Retain the original source to write its complete root shape.
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 struct cpp11_lambda_write_tree {
   const Value &value;
 
   template <typename _M>
   ::ryml::Tree operator()(omni::record_meta_t<_M>) const {
-    return write_tree(value);
+    return write_tree<OwnsStrings>(value);
   }
 };
 
@@ -632,6 +650,7 @@ struct is_string_source:
       > {
 };
 
+template <bool OwnsStrings>
 struct write_string {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
@@ -640,9 +659,11 @@ struct write_string {
                     compat::remove_cvref_t<typename Value::value_type>>::value,
       "serialization requires char-based strings");
 
-    // Copy views into the arena so the returned text never borrows their
-    // storage.
-    node->set_val_serialized(c4::csubstr{value.data(), value.size()});
+    const c4::csubstr text{value.data(), value.size()};
+    if (OwnsStrings)
+      node->set_val_serialized(text);
+    else
+      node->set_val(text);
     // Strings such as "true", "12", and "null" must remain strings.
     *node |= ::ryml::VAL_DQUO;
   }
@@ -652,7 +673,7 @@ struct write_string {
 
 namespace reflected_scope {
 
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 void write_value(const Value &value, ::ryml::NodeRef *node);
 
 template <typename Value>
@@ -661,18 +682,20 @@ bool is_null(const Value &) { return false; }
 template <typename Value>
 bool is_null(const compat::optional<Value> &v) { return !v || is_null(*v); }
 
+template <bool OwnsStrings>
 struct write_optional {
   template <typename Value>
   void operator()(const compat::optional<Value> &value,
     ::ryml::NodeRef *node) const {
     assert(node);
     if (value)
-      write_value(*value, node);
+      write_value<OwnsStrings>(*value, node);
     else
       node->set_val("null");
   }
 };
 
+template <bool OwnsStrings>
 struct write_sequence {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
@@ -685,12 +708,13 @@ struct write_sequence {
       [node](const typename Value::value_type &element) {
         if (!is_null(element)) {
           auto child = node->append_child();
-          write_value(element, &child);
+          write_value<OwnsStrings>(element, &child);
         }
       });
   }
 };
 
+template <bool OwnsStrings>
 struct write_field {
   ::ryml::NodeRef *node;
 
@@ -698,12 +722,16 @@ struct write_field {
   void operator()(Field field) const {
     assert(node);
     auto child = node->append_child();
-    child.set_key_serialized(field.name());
-    write_value(field.value(), &child);
+    if (OwnsStrings)
+      child.set_key_serialized(field.name());
+    else
+      child.set_key(c4::to_csubstr(field.name()));
+    write_value<OwnsStrings>(field.value(), &child);
   }
 };
 
 // TODO: Consider an opt-in strategy for serializing and mapping static members.
+template <bool OwnsStrings>
 struct write_record {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
@@ -713,25 +741,27 @@ struct write_record {
     // traversal.
     const auto binding = omni::meta_for<Value>::bind(value);
     binding.accessible_data_members() | fn::filter<fn::non_static>()
-      | fn::each(write_field{/*node=*/node});
+      | fn::each(write_field<OwnsStrings>{/*node=*/node});
   }
 };
 
 // Scalar/container roots are parsed outside reflected_call during
 // instrumentation, when is_reflected is incomplete. Query it only after those
 // writers are ruled out.
+template <bool OwnsStrings>
 struct write_reflected {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     constexpr auto write = typename omni::traits::select<
-      omni::traits::case_<omni::is_reflected<Value>::value, write_record>,
+      omni::traits::case_<omni::is_reflected<Value>::value,
+        write_record<OwnsStrings>>,
       detail::unsupported_serialization>::type{};
 
     write(value, node);
   }
 };
 
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 void write_value(const Value &value, ::ryml::NodeRef *node) {
   constexpr auto write = typename omni::traits::select<
     omni::traits::case_<std::is_same<bool, Value>::value,
@@ -740,20 +770,21 @@ void write_value(const Value &value, ::ryml::NodeRef *node) {
       detail::write_real>,
     omni::traits::case_<std::is_integral<Value>::value, detail::write_integer>,
     omni::traits::case_<detail::is_string_source<Value>::value,
-      detail::write_string>,
+      detail::write_string<OwnsStrings>>,
     omni::traits::case_<omni::traits::is<compat::optional, Value>(),
-      write_optional>,
-    omni::traits::case_<omni::traits::is<std::vector, Value>(), write_sequence>,
-    write_reflected>::type{};
+      write_optional<OwnsStrings>>,
+    omni::traits::case_<omni::traits::is<std::vector, Value>(),
+      write_sequence<OwnsStrings>>,
+    write_reflected<OwnsStrings>>::type{};
 
   write(value, node);
 }
 
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 ::ryml::Tree write_tree(const Value &value) {
   ::ryml::Tree tree;
   auto root = tree.rootref();
-  write_value(value, &root);
+  write_value<OwnsStrings>(value, &root);
   return tree;
 }
 
@@ -795,22 +826,25 @@ auto map_root_node(::ryml::ConstNodeRef node,
 
 // Exclude the unused path from instrumentation: reflected_call rejects scalar
 // roots, while record writing requires generated metadata.
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 typename std::enable_if<reflection_root<Value>::needs_reflection,
   ::ryml::Tree>::type
   to_ryml_tree(const Value &value) {
-  return omni::reflected_call(cpp11_lambda_write_tree<Value>{value},
+  return omni::reflected_call(
+    cpp11_lambda_write_tree<OwnsStrings, Value>{value},
     omni::type_t<typename reflection_root<Value>::type>{});
 }
 
-template <typename Value>
+template <bool OwnsStrings, typename Value>
 typename std::enable_if<!reflection_root<Value>::needs_reflection,
   ::ryml::Tree>::type
   to_ryml_tree(const Value &value) {
-  return write_tree(value);
+  return write_tree<OwnsStrings>(value);
 }
 
 } // namespace reflected_scope
+
+namespace core {
 
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options) {
@@ -854,7 +888,6 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   // that must not return, rather than a result. Keep setjmp in this lambda
   // so longjmp cannot make the modified outer tree/parser/error indeterminate
   // or skip their destructors.
-  // TODO: Replace this boundary if ryml provides a result-returning parse API.
   return compat::invoke( //
     [&error, &tree, &parser, &source]()
       -> compat::expected<::ryml::Tree, std::string> {
@@ -873,7 +906,15 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
     });
 }
 
-namespace core {
+template <typename Value>
+::ryml::Tree as_owning_tree(const Value &v) {
+  return reflected_scope::to_ryml_tree</*OwnsStrings=*/true>(v);
+}
+
+template <typename Value>
+::ryml::Tree as_ref_tree(Value &v) {
+  return reflected_scope::to_ryml_tree</*OwnsStrings=*/false>(v);
+}
 
 template <typename Record>
 with_diagnostics<Record, diagnostics<true>> map_tree(const settings &options,
@@ -1014,10 +1055,10 @@ std::string render_diagnostics_t::operator()(
 
 template <typename Value>
 std::string serialize_t::operator()(const Value &value) const {
-  const auto tree = reflected_scope::to_ryml_tree(value);
+  const auto tree = core::as_ref_tree(value);
 
-  // Avoid a sizing traversal; YAML needs more room for indentation than JSON.
-  // Escaping or deeper indentation can still require a resize and retry.
+  // Reserve an initial estimate without a sizing traversal. Borrowed strings,
+  // escaping, or deeper YAML indentation may require an emitter resize/retry.
   std::string text;
   text.reserve(
     tree.arena_size() + (::ryml::EMIT_JSON == format ? 8 : 16) * tree.size());

@@ -73,7 +73,7 @@ TEST(serialization_composition,
 
 TEST(serialization_composition, parses_then_maps_a_record) {
   const auto result =
-    omni::ryml::parse(R"({"name": "Ada", "code": 815})") //
+    omni::ryml::core::parse(R"({"name": "Ada", "code": 815})") //
       .transform([](::ryml::Tree tree) {
         return omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
           std::move(tree)) //
@@ -92,7 +92,7 @@ TEST(serialization_composition, parses_then_maps_a_record) {
 
 TEST(serialization_composition, renders_mapping_errors_after_successful_parse) {
   const auto result =
-    omni::ryml::parse(R"({"name": "Ada", "code": "bad"})") //
+    omni::ryml::core::parse(R"({"name": "Ada", "code": "bad"})") //
       .transform([](::ryml::Tree tree) {
         return omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
           std::move(tree)) //
@@ -620,7 +620,7 @@ TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
       return s;
     });
   EXPECT_EQ(2, map.settings.error_policy.error_limit);
-  const auto result = omni::ryml::parse(R"({"name": "ok", "code": "bad"})") //
+  const auto result = omni::ryml::core::parse(R"({"name": "ok", "code": "bad"})") //
                         .transform(omni::fn::partial(map,
                           omni::type_t<serialization_data::payload>{}));
 
@@ -1913,7 +1913,7 @@ INSTANTIATE_TEST_SUITE_P(malformed_documents,
   });
 
 TEST_P(parser_recovery, renders_parse_errors_with_the_standalone_parse_format) {
-  const auto expected = omni::ryml::parse(GetParam().source);
+  const auto expected = omni::ryml::core::parse(GetParam().source);
   EXPECT_FALSE(expected);
   if (expected)
     return;
@@ -2044,7 +2044,7 @@ TEST(deserialization_diagnostics,
 #endif
 
 TEST(parsing, owns_text_and_decodes_scalars_after_source_destruction) {
-  const auto result = omni::ryml::parse(std::string{R"(name: "a\nb"
+  const auto result = omni::ryml::core::parse(std::string{R"(name: "a\nb"
 code: 7
 )"});
 
@@ -2060,9 +2060,9 @@ TEST(parsing, forwards_rapidyaml_options) {
   const std::string source = R"([one,
  two]
 )";
-  const auto detected = omni::ryml::parse(source);
+  const auto detected = omni::ryml::core::parse(source);
   const auto disabled =
-    omni::ryml::parse(source, ::ryml::ParserOptions{}.detect_flow_ml(false));
+    omni::ryml::core::parse(source, ::ryml::ParserOptions{}.detect_flow_ml(false));
 
   EXPECT_TRUE(detected);
   EXPECT_TRUE(disabled);
@@ -2079,7 +2079,7 @@ TEST_P(parser_recovery, public_parse_retains_error_and_skips_transformation) {
   std::string retained;
   bool mapped = false;
   {
-    auto result = omni::ryml::parse(GetParam().source) //
+    auto result = omni::ryml::core::parse(GetParam().source) //
                     .transform([&mapped](::ryml::Tree) {
                       mapped = true;
                       return 7;
@@ -2094,7 +2094,7 @@ TEST_P(parser_recovery, public_parse_retains_error_and_skips_transformation) {
 
   EXPECT_FALSE(mapped);
   EXPECT_FALSE(retained.empty());
-  const auto recovered = omni::ryml::parse("code: 7\n");
+  const auto recovered = omni::ryml::core::parse("code: 7\n");
   EXPECT_TRUE(recovered);
   if (recovered) {
     EXPECT_TRUE(serialization_test::matches_node(R"({"code": 7})",
@@ -2407,7 +2407,7 @@ TEST(tree_mapping, supports_designated_configuration) {
 #endif
 
 TEST(parsing, unresolved_tag_returns_an_owned_error) {
-  const auto result = omni::ryml::parse("!missing!kind value",
+  const auto result = omni::ryml::core::parse("!missing!kind value",
     ::ryml::ParserOptions{}.resolve_tags(true));
 
   EXPECT_FALSE(result);
@@ -2415,7 +2415,7 @@ TEST(parsing, unresolved_tag_returns_an_owned_error) {
     EXPECT_FALSE(result.error().empty());
   }
 
-  const auto recovered = omni::ryml::parse("code: 7");
+  const auto recovered = omni::ryml::core::parse("code: 7");
   EXPECT_TRUE(recovered);
   if (recovered) {
     EXPECT_TRUE(serialization_test::matches_node(R"({"code": 7})",
@@ -3138,7 +3138,7 @@ TEST(serialization_json, round_trips_all_ascii_control_characters) {
     output.end(),
     /*is_control_byte=*/[](unsigned char c) { return 0x20 > c; }));
 
-  const auto parsed = omni::ryml::parse(output);
+  const auto parsed = omni::ryml::core::parse(output);
   EXPECT_TRUE(parsed);
   if (!parsed)
     return;

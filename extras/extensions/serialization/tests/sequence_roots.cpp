@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <vector>
 
 namespace {
@@ -74,6 +75,38 @@ TEST(serialization_optional_roots, discovers_an_optional_record) {
     R"({"value": 42})", omni::ryml::as_json(value)));
   EXPECT_TRUE(serialization_test::matches_json(
     "null", omni::ryml::as_yaml(omni::compat::optional<optional_payload>{})));
+}
+
+// Discover this record exclusively through the new tree-construction API.
+struct tree_payload { std::string label; };
+
+TEST(serialization_trees, discovers_records_inside_optional_sequences) {
+  const std::vector<omni::compat::optional<tree_payload>> source{
+    omni::compat::nullopt, tree_payload{"west"}};
+
+  auto tree = omni::ryml::core::as_owning_tree(source);
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"([{"label": "west"}])", tree.crootref()));
+
+  tree.rootref()[0].remove_child("label");
+  EXPECT_TRUE(serialization_test::matches_node("[{}]", tree.crootref()));
+
+  // TODO: [medium] Mutate or destroy the nested source strings before checking
+  // the owning tree, proving ownership through vector -> optional -> record.
+  // TODO: [medium] Guard child access/removal after nonfatal shape checks so
+  // malformed output reports a test failure instead of aborting the suite.
+}
+
+TEST(serialization_trees, borrows_record_string_members) {
+  const tree_payload source{"west"};
+  const auto tree = omni::ryml::core::as_ref_tree(source);
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"({"label": "west"})", tree.crootref()));
+  EXPECT_EQ(static_cast<const void *>(source.label.data()),
+    static_cast<const void *>(tree.crootref()["label"].val().str));
+
+  // TODO: [medium] Guard child access after the nonfatal shape check so
+  // malformed output reports a test failure instead of aborting the suite.
 }
 
 } // namespace

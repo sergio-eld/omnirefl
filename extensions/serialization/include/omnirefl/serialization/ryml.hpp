@@ -366,26 +366,28 @@ struct with_diagnostics {
   // retain diagnostics when a value and issues are both present.
 };
 
+namespace core {
+
 /**
- * Parse text into an owning tree, returning syntax errors without throwing.
- *
+ * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
+ * owning tree and returns syntax errors through expected.
  * ParserOptions are passed directly to ryml. Location tracking, if enabled,
  * ends with this call; the returned tree does not retain the parser.
  *
+ * TODO: Remove this adapter when RapidYAML provides native non-throwing parsing
+ * with a result-based error interface.
+ *
 ```cpp
-// Supply a reflected person and an owning std::string source.
-auto result = parse(std::move(source)) //
-  .transform([](::ryml::Tree tree) {
-    return map_tree(omni::type<person>, std::move(tree)) //
-      .transform_error(render_diagnostics);
+// Supply a reflected person, settings, and an owning std::string source.
+auto result = core::parse(std::move(source))
+  .transform([options](::ryml::Tree tree) {
+    return core::map_tree(options, omni::type_t<person>{}, std::move(tree));
   });
 // Syntax errors use expected; mapping retains optional person and diagnostics.
 ```
  */
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
-
-namespace core {
 
 // Unbound mapping operations receive all settings explicitly.
 template <typename Record>
@@ -402,6 +404,28 @@ template <typename Record>
 with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
   omni::type_t<Record> record_type,
   std::string source);
+
+/** Build an owning RapidYAML tree from reflected records, supported scalars,
+ * vectors, and optionals. Empty optionals produce null nodes; empty optional
+ * sequence elements are omitted.
+ * String data is copied into the tree's arena, so the tree can outlive the
+ * source value. The returned tree can be modified or passed to RapidYAML's
+ * emitters.
+ */
+template <typename Value>
+::ryml::Tree as_owning_tree(const Value &v);
+
+/** Build a RapidYAML tree borrowing the input's existing string storage.
+ * The tree owns its nodes and generated scalar text. Borrowed storage must
+ * remain alive and unchanged while the tree is used. Accepts const or mutable
+ * lvalues; temporaries are rejected to prevent dangling views.
+ */
+template <typename Value>
+::ryml::Tree as_ref_tree(Value &v);
+
+// Also reject const temporaries, which could otherwise bind through Value&.
+template <typename Value>
+::ryml::Tree as_ref_tree(const Value &&) = delete;
 
 } // namespace core
 
@@ -496,7 +520,7 @@ constexpr render_diagnostics_t render_diagnostics{};
  * Empty optionals emit null at the root or as record fields. Empty optional
  * sequence elements are omitted; remaining elements keep their relative order.
  * Populated optionals serialize their contained value.
- * Strings are quoted; field values are copied into the tree's arena.
+ * Strings are quoted and borrowed from the input until emission completes.
  * TODO: Define the document representation of reflected enumerations.
  */
 struct serialize_t {
@@ -506,13 +530,15 @@ struct serialize_t {
   template <typename Value>
   std::string operator()(const Value &value) const;
 
-  // TODO: [high] Consider omni::ryml::as_tree to expose tree construction,
-  // and transform_tree to customize the tree before emission, e.g. omit null
-  // object properties without another policy.
+  // TODO: [high] Consider transform_tree to customize the built tree before
+  // emission, e.g. omit null object properties without another policy.
 };
 
 /**
  * Serialize reflected records, supported scalars, or vectors to YAML text.
+ * Reads the value and its referenced storage through const references. Keep
+ * them alive and unchanged until the call returns. Concurrent reads are safe;
+ * synchronize any concurrent mutation or destruction of the input storage.
  *
 ```cpp
 const auto yaml = as_yaml(value);
@@ -524,6 +550,9 @@ constexpr serialize_t as_yaml{
 
 /**
  * Serialize reflected records, supported scalars, or vectors to JSON text.
+ * Reads the value and its referenced storage through const references. Keep
+ * them alive and unchanged until the call returns. Concurrent reads are safe;
+ * synchronize any concurrent mutation or destruction of the input storage.
  *
 ```cpp
 const auto json = as_json(value);
