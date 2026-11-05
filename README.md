@@ -453,7 +453,7 @@ In your consumer's `conanfile.txt`:
 
 ```ini
 [requires]
-omnirefl/0.0.6
+omnirefl/0.0.7
 
 [generators]
 CMakeDeps

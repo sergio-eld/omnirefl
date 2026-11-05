@@ -1,5 +1,4 @@
 sources:
-  # TODO: Update the recipe version, archive URL and SHA-256 to 0.0.7 after publication.
-  "0.0.6":
-    url: "https://github.com/sergio-eld/omnirefl/releases/download/v0.0.6/omnirefl-cosmo-universal-0.0.6-fd91d1c9b829.tar.gz"
-    sha256: "6a19dc25397f397c9ee8dedff72d73be7d15f8023b6402545fc7e5f66d794cb3"
+  "0.0.7":
+    url: "https://github.com/sergio-eld/omnirefl/releases/download/v0.0.7/omnirefl-cosmo-universal-0.0.7-493fc6520887.tar.gz"
+    sha256: "c377cae3b73f129e6232418d0e578d91688f515dac20965b7ff275cecac265e0"
