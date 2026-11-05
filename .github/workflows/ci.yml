@@ -265,9 +265,9 @@ jobs:
 
           build_sources=false
           while IFS= read -r file; do
-            # README sections and the banner are inputs to the generated site.
+            # Site inputs and Conan recipes do not change the release packages.
             case "$file" in
-              README.md | omnirefl-banner.png | site/*) ;;
+              README.md | omnirefl-banner.png | site/* | conan/*) ;;
               *)
                 build_sources=true
                 break

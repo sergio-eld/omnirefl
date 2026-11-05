@@ -13,7 +13,7 @@ from conan.tools.scm import Git
 
 class OmnireflConan(ConanFile):
     name = "omnirefl"
-    version = "0.0.6"
+    version = "0.0.7"
     license = "MIT"
     homepage = "https://omnirefl.io"
     url = "https://github.com/sergio-eld/omnirefl"
