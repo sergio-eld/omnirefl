@@ -45,18 +45,18 @@ void tree_mapping_invalid_elements(benchmark::State &state) {
   const auto count = static_cast<std::size_t>(state.range(0));
   ::ryml::Tree tree;
   auto root = tree.rootref();
-  root |= ::ryml::MAP;
+  root.set_map();
   auto values = root.append_child();
   values.set_key_serialized(std::string{"values"});
-  values |= ::ryml::SEQ;
+  values.set_seq();
   for (std::size_t i = 0; i < count; ++i) {
     auto value = values.append_child();
-    value.set_val_serialized(std::string{"invalid"});
-    value |= ::ryml::VAL_DQUO;
+    value.set_serialized(std::string{"invalid"});
+    value.set_val_style(::ryml::VAL_DQUO);
   }
 
   const auto map =
-    omni::ryml::map_tree.transform_settings([count](omni::ryml::settings s) {
+    omni::ryml::map_tree.transform_config([count](omni::ryml::config s) {
       s.error_policy.error_limit = static_cast<std::uint16_t>(count);
       return s;
     });

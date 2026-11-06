@@ -897,7 +897,7 @@ struct action_timer {
         const std::chrono::time_point start = std::chrono::steady_clock::now();
         auto result = std::invoke(f, std::forward<decltype(args)>(args)...);
 
-        _timing_by_action.emplace(action,
+        this->_timing_by_action.emplace(action,
           std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start));
 

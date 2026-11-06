@@ -22,7 +22,7 @@
  *
 ```cpp
 auto result = omni::ryml::deserialize(omni::type<person>, source) //
-  .transform_error(omni::ryml::render_diagnostics);
+  .transform_diagnostics(omni::ryml::render_diagnostics);
 
 if (result.value) {
   const auto json = omni::ryml::as_json(*result.value);
@@ -33,6 +33,7 @@ if (result.value) {
  */
 
 #include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/functional.hpp>
 
 #include <omnirefl/extensions/compat.hpp>
 
@@ -41,6 +42,7 @@ if (result.value) {
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 #include <string>
@@ -161,19 +163,25 @@ OMNI_ENABLE_BIT_FLAGS(recovery_policy)
 
 namespace ryml {
 
-/// Configures mapping diagnostics and recovery of missing fields.
-struct settings {
+/** Configures input transformation, mapping diagnostics, and missing-field
+ * recovery. */
+struct config {
   json::error_policy error_policy;
 
   // No missing-field recovery unless explicitly configured.
   compat::optional<json::recovery_policy> recovery = compat::nullopt;
 
-  // TODO: [high] Add a configurable input-size limit to settings and reject
+  // Tree -> Tree, applied after successful parsing and before mapping.
+  // An empty callback leaves the tree unchanged. The parsed tree owns its
+  // text; the transformed tree is retained by the returned diagnostics.
+  std::function<::ryml::Tree(::ryml::Tree)> transform_tree{};
+
+  // TODO: [high] Add a configurable input-size limit to config and reject
   // oversized source text before parsing or allocating a tree. A std::string
   // argument is already buffered; callers must also bound request-body reads
   // to prevent oversized REST requests from consuming memory before this call.
 
-  // TODO: Make settings select SAX-style validation and field assignment as
+  // TODO: Make config select SAX-style validation and field assignment as
   // rapidyaml emits events, or the current parse-whole-tree -> map pipeline.
   // Event-based mapping could reject invalid input before parsing and retaining
   // a huge remaining subtree. Preserve error and recovery policies, and
@@ -182,7 +190,7 @@ struct settings {
 
   // TODO: [high] Detect at compile time whether a model permits unbounded
   // nesting (e.g. a vector of itself); consider a traversal-depth limit in
-  // settings to prevent stack exhaustion from deeply nested or malicious input.
+  // config to prevent stack exhaustion from deeply nested or malicious input.
 
   // TODO: [high] Define a union deserialization policy before mapping
   // std::variant. JSON Schema commonly represents alternatives with oneOf;
@@ -192,12 +200,11 @@ struct settings {
   // discriminator lives, and whether untagged matching is ever allowed.
 
   // TODO: Consider storing ryml::ParserOptions if rapidyaml's defaults prove
-  // insufficient. Direct storage would make settings non-constexpr; do not
-  // mirror ParserOptions' private flags in another type.
+  // insufficient; do not mirror ParserOptions' private flags in another type.
 };
 
 // TODO: Consider global-default customization without requiring users to name
-// settings before this header has declared it; settings has no separate header.
+// config before this header has declared it; config has no separate header.
 
 /**
  * Describes an input issue without rendering a message or deciding failure.
@@ -256,8 +263,8 @@ struct issue {
  */
 template <bool OwnsTree>
 struct diagnostics {
-  // Snapshot for inspection; mapping receives its settings separately.
-  omni::ryml::settings settings;
+  // Snapshot for inspection; mapping receives its config separately.
+  omni::ryml::config config;
 
   // Retain the tree or refer to the caller's subtree, depending on OwnsTree.
   // External string storage referenced by a caller-supplied tree must remain
@@ -272,7 +279,7 @@ struct diagnostics {
 
   // True when an error or warning limit requires stopping.
   bool stopped() const {
-    return settings.error_policy.error_limit
+    return config.error_policy.error_limit
         < static_cast<std::size_t>(std::count_if(issues.begin(),
           issues.end(),
           [](const issue &e) { return !e.warning; }))
@@ -300,13 +307,14 @@ struct with_diagnostics {
    * Consumes an rvalue result; f must return a value, not void.
    */
   template <typename F>
-  auto map_value(F &&f)
-    && -> with_diagnostics<compat::decay_t<compat::invoke_result_t<F &&, T &&>>,
+  auto transform_value(F &&f) &&
+    -> with_diagnostics<compat::decay_t<compat::invoke_result_t<F &&, T &&>>,
       Diagnostics> {
     return {
-      /*value=*/value ? compat::make_optional(
-                          compat::invoke(std::forward<F>(f), std::move(*value)))
-                      : compat::nullopt,
+      /*value=*/value
+        ? compat::make_optional(
+            compat::invoke(std::forward<F>(f), std::move(*value)))
+        : compat::nullopt,
       /*diagnostics=*/std::move(diagnostics),
     };
   }
@@ -317,46 +325,14 @@ struct with_diagnostics {
    * the value. The returned diagnostics have the type returned by f.
    */
   template <typename F>
-  auto transform_diagnostics(F &&f) && -> with_diagnostics<T,
-    compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &&>>> {
+  auto transform_diagnostics(F &&f) &&
+    -> with_diagnostics<T,
+      compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &&>>> {
     return {
       /*value=*/std::move(value),
       /*diagnostics=*/
       compat::invoke(std::forward<F>(f), std::move(diagnostics)),
     };
-  }
-
-  /**
-   * Alias for transform_diagnostics, including when a value is available.
-   */
-  template <typename F>
-  auto map_error(F &&f) && -> decltype(std::move(*this).transform_diagnostics(
-    std::forward<F>(f))) {
-    return std::move(*this) //
-      .transform_diagnostics(std::forward<F>(f));
-  }
-
-  /**
-   * Alias for map_value, matching expected's value transformation interface.
-   */
-  template <typename F>
-  auto transform(
-    F &&f) && -> decltype(std::move(*this).map_value(std::forward<F>(f))) {
-    return std::move(*this) //
-      .map_value(std::forward<F>(f));
-  }
-
-  /**
-   * Alias for map_error, keeping any value while transforming diagnostics.
-   * Unlike expected, calls f even when a value is available.
-   *
-   * Retains warnings alongside a valid value and errors when no value exists.
-   */
-  template <typename F>
-  auto transform_error(
-    F &&f) && -> decltype(std::move(*this).map_error(std::forward<F>(f))) {
-    return std::move(*this) //
-      .map_error(std::forward<F>(f));
   }
 
   // TODO: Collect defaulted fields separately from warnings and errors.
@@ -378,7 +354,7 @@ namespace core {
  * with a result-based error interface.
  *
 ```cpp
-// Supply a reflected person, settings, and an owning std::string source.
+// Supply a reflected person, config, and an owning std::string source.
 auto result = core::parse(std::move(source))
   .transform([options](::ryml::Tree tree) {
     return core::map_tree(options, omni::type_t<person>{}, std::move(tree));
@@ -389,19 +365,33 @@ auto result = core::parse(std::move(source))
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
-// Unbound mapping operations receive all settings explicitly.
+/** Map tree nodes into the requested type using explicit config.
+ * Nested values are mapped depth-first after each record's structural checks.
+ * Diagnostics take ownership of the supplied tree, retaining it for inspection
+ * and lazy message rendering. Pass std::move(tree) to transfer an existing
+ * tree.
+ */
 template <typename Record>
-with_diagnostics<Record, diagnostics<true>> map_tree(const settings &options,
+with_diagnostics<Record, diagnostics<true>> map_tree(const config &options,
   omni::type_t<Record> record_type,
   ::ryml::Tree tree);
 
+/** Map tree nodes into the requested type using explicit config.
+ * Nested values are mapped depth-first after each record's structural checks.
+ * Diagnostics borrow the source tree rather than taking ownership.
+ * Keep the source tree and its borrowed string storage alive and unchanged
+ * while inspecting the retained diagnostics or rendering their messages.
+ */
 template <typename Record>
-with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
+with_diagnostics<Record, diagnostics<false>> map_tree(const config &options,
   omni::type_t<Record> record_type,
   ::ryml::ConstNodeRef node);
 
+/** Parse the source, apply its configured tree transformation, then map nodes.
+ * The transformation is invoked only after successful parsing.
+ */
 template <typename Record>
-with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
+with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
   omni::type_t<Record> record_type,
   std::string source);
 
@@ -429,27 +419,29 @@ template <typename Value>
 
 } // namespace core
 
-/// Maps an owning tree or borrowed subtree with the bound settings.
+/// Maps an owning tree or borrowed subtree with the bound config.
 /// Supports reflected records, scalars, and vectors of supported values.
 struct map_tree_t {
-  omni::ryml::settings settings;
+  omni::ryml::config config;
 
-  /// Returns a new binding with transformed settings; preserves this binding.
+  /// Returns a new binding with transformed config; preserves this binding.
   template <typename F>
-  OMNI_CPP14_CONSTEXPR auto transform_settings(F &&f) const ->
-    typename std::enable_if<
-      compat::is_invocable<F &&, omni::ryml::settings>::value
-        && std::is_same<omni::ryml::settings,
-          compat::invoke_result_t<F &&, omni::ryml::settings>>::value,
-      map_tree_t>::type {
-    return {compat::invoke(std::forward<F>(f), omni::ryml::settings{settings})};
+  auto transform_config(F &&f) const
+    -> compat::enable_if_t<
+      compat::is_invocable<F &&, omni::ryml::config>::value
+        && std::is_same<omni::ryml::config,
+          compat::invoke_result_t<F &&, omni::ryml::config>>::value,
+      map_tree_t> {
+    return {
+      compat::invoke(std::forward<F>(f), omni::ryml::config{this->config}),
+    };
   }
 
   // Own the tree; move it after mapping so diagnostic views remain valid.
   template <typename Record>
   with_diagnostics<Record, diagnostics<true>>
     operator()(omni::type_t<Record> record_type, ::ryml::Tree tree) const {
-    return core::map_tree(settings, record_type, std::move(tree));
+    return core::map_tree(this->config, record_type, std::move(tree));
   }
 
   // Keep the caller's tree alive and unchanged while using borrowed
@@ -458,16 +450,87 @@ struct map_tree_t {
   with_diagnostics<Record, diagnostics<false>> operator()(
     omni::type_t<Record> record_type,
     ::ryml::ConstNodeRef node) const {
-    return core::map_tree(settings, record_type, node);
+    return core::map_tree(this->config, record_type, node);
   }
 };
+
+// Previous selects (Tree, previous) -> Tree instead of Tree -> Tree.
+template <typename F, bool Previous = false, typename = void>
+struct is_tree_transform: std::false_type {};
+
+// SFINAE keeps unsupported invocation signatures queryable as false.
+template <typename F>
+struct is_tree_transform<F,
+  false,
+  compat::void_t<compat::invoke_result_t<F &, ::ryml::Tree>>>:
+    compat::conjunction<std::is_trivially_copyable<F>,
+      std::is_copy_constructible<F>,
+      std::is_same<::ryml::Tree,
+        compat::remove_cvref_t<compat::invoke_result_t<F &, ::ryml::Tree>>>> {};
+
+template <typename F>
+struct is_tree_transform<F,
+  true,
+  compat::void_t<compat::invoke_result_t<F &,
+    ::ryml::Tree,
+    const std::function<::ryml::Tree(::ryml::Tree)> &>>>:
+    compat::conjunction<std::is_trivially_copyable<F>,
+      std::is_copy_constructible<F>,
+      std::is_same<::ryml::Tree,
+        compat::remove_cvref_t<compat::invoke_result_t<F &,
+          ::ryml::Tree,
+          const std::function<::ryml::Tree(::ryml::Tree)> &>>>> {};
+
+/** Return a config transformation that replaces the parsed-tree callback.
+ * f must be trivially copyable and return ryml::Tree (cv/ref-qualified is OK).
+ * A null function pointer resets the callback to identity. Applying this
+ * transformation preserves the other config fields.
+ */
+template <typename F,
+  compat::enable_if_t<!is_tree_transform<F, /*Previous=*/true>::value
+      && is_tree_transform<F>::value,
+    int> = 0>
+OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
+  OMNI_CPP11_TRAILING_RETURN(std::function<config(config)>) {
+  return [f](config c) {
+    c.transform_tree = f;
+    return c;
+  };
+}
+
+/** Return a config transformation that decorates the parsed-tree callback.
+ * f receives (tree, previous); previous is identity when no callback was bound.
+ * f may invoke or discard previous, whose reference is valid during the call.
+ * Copy previous if retaining it. f must be trivially copyable and return a
+ * tree (cv/ref-qualified is OK). A null function pointer resets to identity.
+ * This form takes precedence when f also accepts a single tree argument.
+ */
+template <typename F,
+  compat::enable_if_t<is_tree_transform<F, /*Previous=*/true>::value, int> = 0>
+OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
+  OMNI_CPP11_TRAILING_RETURN(std::function<config(config)>) {
+  return [f](config c) {
+    const bool reset = fn::is_null_function(f);
+    const auto previous = !reset && c.transform_tree
+      ? c.transform_tree
+      : fn::identity{};
+
+    c.transform_tree = reset
+      ? previous
+      : [f, previous](::ryml::Tree tree) mutable {
+          return compat::invoke(f, std::move(tree), previous);
+        };
+
+    return c;
+  };
+}
 
 /**
  * Parse JSON or YAML into a record, scalar, or vector.
  * Returns a valid value with any warnings, or diagnostics alone on failure.
  *
 ```cpp
-const auto load = deserialize.transform_settings([limit](ryml::settings s) {
+const auto load = deserialize.transform_config([limit](ryml::config s) {
   s.error_policy.error_limit = limit;
   s.error_policy.unknown_fields = json::unknown_policy::allow;
   return s;
@@ -476,28 +539,31 @@ auto result = load(omni::type_t<person>{}, source);
 ```
  */
 struct deserialize_t {
-  omni::ryml::settings settings;
+  omni::ryml::config config;
 
-  /// Returns a new binding with transformed settings; preserves this binding.
+  /// Returns a new binding with transformed config; preserves this binding.
   template <typename F>
-  OMNI_CPP14_CONSTEXPR auto transform_settings(F &&f) const ->
-    typename std::enable_if<
-      compat::is_invocable<F &&, omni::ryml::settings>::value
-        && std::is_same<omni::ryml::settings,
-          compat::invoke_result_t<F &&, omni::ryml::settings>>::value,
-      deserialize_t>::type {
-    return {compat::invoke(std::forward<F>(f), omni::ryml::settings{settings})};
+  auto transform_config(F &&f) const
+    -> compat::enable_if_t<
+      compat::is_invocable<F &&, omni::ryml::config>::value
+        && std::is_same<omni::ryml::config,
+          compat::invoke_result_t<F &&, omni::ryml::config>>::value,
+      deserialize_t> {
+    return {
+      /*config=*/
+      compat::invoke(std::forward<F>(f), omni::ryml::config{this->config}),
+    };
   }
 
   template <typename Record>
   with_diagnostics<Record, diagnostics<true>>
     operator()(omni::type_t<Record> record_type, std::string source) const {
-    return core::deserialize(settings, record_type, std::move(source));
+    return core::deserialize(this->config, record_type, std::move(source));
   }
 };
 
-OMNI_CPP14_CONSTEXPR const map_tree_t map_tree{};
-OMNI_CPP14_CONSTEXPR const deserialize_t deserialize{};
+const map_tree_t map_tree{};
+const deserialize_t deserialize{};
 
 // A generic callable lets transform_diagnostics(render_diagnostics) work with
 // both ownership modes; an overloaded function name cannot deduce its type.

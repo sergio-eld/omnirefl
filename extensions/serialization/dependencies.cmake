@@ -55,15 +55,15 @@ if(NOT TARGET ryml::ryml)
         if(NOT _serialization_has_cxx20_span)
             set(_serialization_ryml_patch
                 PATCH_COMMAND "${CMAKE_COMMAND}"
-                    "-DSOURCE_DIR=<SOURCE_DIR>/ext/c4core"
+                    "-DSOURCE_DIR=<SOURCE_DIR>/ext/c4core.src"
                     -P "${CMAKE_CURRENT_LIST_DIR}/patch_c4core_span.cmake")
         endif()
     endif()
 
     FetchContent_Declare(rapidyaml
-        # The source release includes c4core and its CMake helpers.
-        URL https://github.com/biojppm/rapidyaml/releases/download/v0.14.0/rapidyaml-0.14.0-src.tgz
-        URL_HASH SHA256=6e6e67e6b766c5a1c5fcb8b80292c7e7c15a3033c01730b41f4a91eb8a31767c
+        # The source release includes vendored c4core and CMake helpers.
+        URL https://github.com/biojppm/rapidyaml/releases/download/v0.16.0/rapidyaml.v0.16.0.src.tgz
+        URL_HASH SHA256=a0ce80a8f4211580c8703e57acb813a28ca6ec80908f6eb926be94be8e98d39d
         ${_serialization_ryml_patch})
     list(APPEND _serialization_dependencies rapidyaml)
 endif()

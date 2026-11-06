@@ -183,8 +183,8 @@ TEST(deserialization_scalar_roots, reports_empty_tree_roots) {
 }
 
 TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
-  const auto load = omni::ryml::deserialize.transform_settings(
-    [](omni::ryml::settings s) {
+  const auto load = omni::ryml::deserialize.transform_config(
+    [](omni::ryml::config s) {
       s.error_policy.error_limit = 1;
       return s;
     });
