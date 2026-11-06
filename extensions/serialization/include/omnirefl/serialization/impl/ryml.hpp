@@ -615,7 +615,7 @@ struct write_integer {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
-    node->set_val_serialized(value);
+    node->set_serialized(value);
   }
 };
 
@@ -623,7 +623,7 @@ struct write_boolean {
   void operator()(bool value, ::ryml::NodeRef *node) const {
     assert(node);
     // c4's plain bool conversion emits 0/1, rather than document booleans.
-    node->set_val_serialized(c4::fmt::boolalpha(value));
+    node->set_serialized(c4::fmt::boolalpha(value));
   }
 };
 
@@ -632,7 +632,7 @@ struct write_real {
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
     // Preserve enough significant digits to recover the original value.
-    node->set_val_serialized(c4::fmt::real(value,
+    node->set_serialized(c4::fmt::real(value,
       std::numeric_limits<Value>::max_digits10,
       c4::FTOA_FLEX));
   }
@@ -661,11 +661,11 @@ struct write_string {
 
     const c4::csubstr text{value.data(), value.size()};
     if (OwnsStrings)
-      node->set_val_serialized(text);
+      node->set_serialized(text);
     else
       node->set_val(text);
     // Strings such as "true", "12", and "null" must remain strings.
-    *node |= ::ryml::VAL_DQUO;
+    node->set_val_style(::ryml::VAL_DQUO);
   }
 };
 
@@ -700,7 +700,7 @@ struct write_sequence {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
-    *node |= ::ryml::SEQ;
+    node->set_seq();
 
     // Bind the value type so vector<bool> proxies convert to bool.
     std::for_each(value.begin(),
@@ -736,7 +736,7 @@ struct write_record {
   template <typename Value>
   void operator()(const Value &value, ::ryml::NodeRef *node) const {
     assert(node);
-    *node |= ::ryml::MAP;
+    node->set_map();
     // accessible_data_members() requires a binding that outlives field
     // traversal.
     const auto binding = omni::meta_for<Value>::bind(value);

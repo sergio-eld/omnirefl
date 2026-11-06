@@ -2069,7 +2069,7 @@ TEST(parsing, forwards_rapidyaml_options) {
   if (!detected || !disabled)
     return;
 
-  EXPECT_TRUE(detected->crootref().is_flow_ml());
+  EXPECT_TRUE(detected->crootref().is_flow_ml1());
   EXPECT_TRUE(disabled->crootref().is_flow_sl());
   EXPECT_TRUE(
     serialization_test::matches_node("[one, two]", disabled->crootref()));

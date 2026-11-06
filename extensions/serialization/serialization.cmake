@@ -6,7 +6,7 @@ endif()
 # Dependencies may already have been provided through FetchContent.
 # Quiet lookup lets OPTIONAL_COMPONENTS leave the base package usable.
 if(NOT TARGET ryml::ryml)
-    find_package(ryml 0.14 CONFIG QUIET)
+    find_package(ryml 0.16 CONFIG QUIET)
 endif()
 if(NOT TARGET tl::expected)
     find_package(tl-expected CONFIG QUIET)
