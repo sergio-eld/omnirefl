@@ -463,8 +463,7 @@ template <typename F>
 struct is_tree_transform<F,
   false,
   compat::void_t<compat::invoke_result_t<F &, ::ryml::Tree>>>:
-    compat::conjunction<std::is_trivially_copyable<F>,
-      std::is_copy_constructible<F>,
+    compat::conjunction<std::is_copy_constructible<F>,
       std::is_same<::ryml::Tree,
         compat::remove_cvref_t<compat::invoke_result_t<F &, ::ryml::Tree>>>> {};
 
@@ -474,15 +473,14 @@ struct is_tree_transform<F,
   compat::void_t<compat::invoke_result_t<F &,
     ::ryml::Tree,
     const std::function<::ryml::Tree(::ryml::Tree)> &>>>:
-    compat::conjunction<std::is_trivially_copyable<F>,
-      std::is_copy_constructible<F>,
+    compat::conjunction<std::is_copy_constructible<F>,
       std::is_same<::ryml::Tree,
         compat::remove_cvref_t<compat::invoke_result_t<F &,
           ::ryml::Tree,
           const std::function<::ryml::Tree(::ryml::Tree)> &>>>> {};
 
 /** Return a config transformation that replaces the parsed-tree callback.
- * f must be trivially copyable and return ryml::Tree (cv/ref-qualified is OK).
+ * f must be copy constructible and return ryml::Tree (cv/ref-qualified is OK).
  * A null function pointer resets the callback to identity. Applying this
  * transformation preserves the other config fields.
  */
@@ -501,7 +499,7 @@ OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
 /** Return a config transformation that decorates the parsed-tree callback.
  * f receives (tree, previous); previous is identity when no callback was bound.
  * f may invoke or discard previous, whose reference is valid during the call.
- * Copy previous if retaining it. f must be trivially copyable and return a
+ * Copy previous if retaining it. f must be copy constructible and return a
  * tree (cv/ref-qualified is OK). A null function pointer resets to identity.
  * This form takes precedence when f also accepts a single tree argument.
  */

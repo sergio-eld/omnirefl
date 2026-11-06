@@ -138,6 +138,44 @@ TEST(deserialization_tree_transform, accepts_a_forwarding_identity) {
     load(omni::type_t<int>{}, "7").value);
 }
 
+class owning_tree_transform: public testing::TestWithParam<bool> {};
+
+TEST_P(owning_tree_transform, retains_captured_state) {
+  auto value = std::make_shared<const int>(42);
+  const std::weak_ptr<const int> lifetime{value};
+  {
+    const auto load = /*decorator_signature=*/GetParam()
+      ? omni::ryml::deserialize.transform_config(
+          omni::ryml::with_transform_tree([value](::ryml::Tree tree,
+            const std::function<::ryml::Tree(::ryml::Tree)> &previous) {
+            tree = previous(std::move(tree));
+            tree.rootref().set_serialized(*value);
+            return tree;
+          }))
+      : omni::ryml::deserialize.transform_config(
+          omni::ryml::with_transform_tree([value](::ryml::Tree tree) {
+            tree.rootref().set_serialized(*value);
+            return tree;
+          }));
+
+    value.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto result = load(omni::type_t<int>{}, "7");
+
+    EXPECT_EQ(omni::compat::make_optional(42), result.value);
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+  }
+
+  EXPECT_TRUE(lifetime.expired());
+}
+
+INSTANTIATE_TEST_SUITE_P(signatures,
+  owning_tree_transform,
+  testing::Bool(),
+  [](const testing::TestParamInfo<bool> &p) {
+    return p.param ? "decorator" : "unary";
+  });
+
 TEST(deserialization_tree_transform, defers_execution_and_preserves_source) {
   int calls = 0;
   const auto load = omni::ryml::deserialize.transform_config(

@@ -81,7 +81,7 @@ configuration callable remains a runtime operation.
 Null function pointers reset the transformation to identity in either form.
 The decorator form takes precedence for callables supporting both signatures.
 
-Callbacks must be trivially copyable and return a tree (including cv/ref-qualified
+Callbacks must be copy constructible and return a tree (including cv/ref-qualified
 results).
 Run only after successful parsing; mapping and retained diagnostics use the
 transformed tree.
