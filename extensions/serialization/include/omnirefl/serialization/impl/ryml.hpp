@@ -112,7 +112,7 @@ inline const std::string &kind_name(json::value_kind k) {
 }
 
 struct mapping_context {
-  const settings &options;
+  const config &options;
   omni::ryml::diagnostics</*owning=*/false> *diagnostics;
   std::vector<issue::path_segment> path;
 
@@ -167,18 +167,18 @@ template <typename Value>
 struct map_node_to_fundamental {
   // Overflow checking applies to integers, excluding bool.
   template <typename ScalarValue>
-  static auto from_chars(c4::csubstr scalar, ScalarValue *value) ->
-    typename std::enable_if<std::is_integral<ScalarValue>::value
+  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
+    -> compat::enable_if_t<std::is_integral<ScalarValue>::value
         && !std::is_same<bool, ScalarValue>::value,
-      bool>::type {
+      bool> {
     return c4::from_chars(scalar, c4::fmt::overflow_checked(*value));
   }
 
   template <typename ScalarValue>
-  static auto from_chars(c4::csubstr scalar, ScalarValue *value) ->
-    typename std::enable_if<!std::is_integral<ScalarValue>::value
+  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
+    -> compat::enable_if_t<!std::is_integral<ScalarValue>::value
         || std::is_same<bool, ScalarValue>::value,
-      bool>::type {
+      bool> {
     return c4::from_chars(scalar, value);
   }
 
@@ -409,14 +409,16 @@ struct cpp11_lambda_write_tree {
 
 // SFINAE avoids instantiating T{} for fields without a default constructor.
 template <typename Field>
-auto initialize_missing_field(Field field) -> typename std::enable_if<
-  std::is_default_constructible<typename Field::type>::value>::type {
+auto initialize_missing_field(Field field)
+  -> compat::enable_if_t<
+    std::is_default_constructible<typename Field::type>::value> {
   field.set_value(typename Field::type{});
 }
 
 template <typename Field>
-auto initialize_missing_field(Field) -> typename std::enable_if<
-  !std::is_default_constructible<typename Field::type>::value>::type {}
+auto initialize_missing_field(Field)
+  -> compat::enable_if_t<
+    !std::is_default_constructible<typename Field::type>::value> {}
 
 // Bound fields keep the result in place and reuse diagnostic path storage.
 struct map_node_to_field {
@@ -811,7 +813,7 @@ template <typename Value>
 auto map_root_node(::ryml::ConstNodeRef node,
   Value *value,
   detail::mapping_context *context)
-  -> typename std::enable_if<reflection_root<Value>::needs_reflection>::type {
+  -> compat::enable_if_t<reflection_root<Value>::needs_reflection> {
   omni::reflected_call(cpp11_lambda_map_node<Value>{node, value, context},
     omni::type_t<typename reflection_root<Value>::type>{});
 }
@@ -820,25 +822,25 @@ template <typename Value>
 auto map_root_node(::ryml::ConstNodeRef node,
   Value *value,
   detail::mapping_context *context)
-  -> typename std::enable_if<!reflection_root<Value>::needs_reflection>::type {
+  -> compat::enable_if_t<!reflection_root<Value>::needs_reflection> {
   map_node(node, value, context);
 }
 
 // Exclude the unused path from instrumentation: reflected_call rejects scalar
 // roots, while record writing requires generated metadata.
 template <bool OwnsStrings, typename Value>
-typename std::enable_if<reflection_root<Value>::needs_reflection,
-  ::ryml::Tree>::type
-  to_ryml_tree(const Value &value) {
+auto to_ryml_tree(const Value &value)
+  -> compat::enable_if_t<reflection_root<Value>::needs_reflection,
+    ::ryml::Tree> {
   return omni::reflected_call(
     cpp11_lambda_write_tree<OwnsStrings, Value>{value},
     omni::type_t<typename reflection_root<Value>::type>{});
 }
 
 template <bool OwnsStrings, typename Value>
-typename std::enable_if<!reflection_root<Value>::needs_reflection,
-  ::ryml::Tree>::type
-  to_ryml_tree(const Value &value) {
+auto to_ryml_tree(const Value &value)
+  -> compat::enable_if_t<!reflection_root<Value>::needs_reflection,
+    ::ryml::Tree> {
   return write_tree<OwnsStrings>(value);
 }
 
@@ -917,16 +919,16 @@ template <typename Value>
 }
 
 template <typename Record>
-with_diagnostics<Record, diagnostics<true>> map_tree(const settings &options,
+with_diagnostics<Record, diagnostics<true>> map_tree(const config &options,
   omni::type_t<Record> record_type,
   ::ryml::Tree tree) {
   // Node references point at the tree object; move it after traversal.
   return map_tree(options,
     record_type,
     tree.empty() ? ::ryml::ConstNodeRef{} : tree.crootref())
-    .transform_error([&tree](diagnostics<false> d) -> diagnostics<true> {
+    .transform_diagnostics([&tree](diagnostics<false> d) -> diagnostics<true> {
       return {
-        /*settings=*/std::move(d.settings),
+        /*config=*/std::move(d.config),
         /*tree=*/std::move(tree),
         /*issues=*/std::move(d.issues),
         /*parse_message=*/std::move(d.parse_message),
@@ -935,7 +937,7 @@ with_diagnostics<Record, diagnostics<true>> map_tree(const settings &options,
 }
 
 template <typename Record>
-with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
+with_diagnostics<Record, diagnostics<false>> map_tree(const config &options,
   omni::type_t<Record>,
   ::ryml::ConstNodeRef node) {
   // FIXME: [external] GCC 15 warns about an uninitialized union when moving
@@ -943,7 +945,7 @@ with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
   // TL's emplace() calls its throwing value() accessor; use the factory.
   auto value = compat::make_optional<Record>();
   diagnostics<false> report{
-    /*settings=*/options,
+    /*config=*/options,
     /*tree=*/node,
     /*issues=*/{},
     /*parse_message=*/{},
@@ -966,17 +968,21 @@ with_diagnostics<Record, diagnostics<false>> map_tree(const settings &options,
 }
 
 template <typename Record>
-with_diagnostics<Record, diagnostics<true>> deserialize(const settings &options,
+with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
   omni::type_t<Record> record_type,
   std::string source) {
   if (auto parsed = parse(std::move(source))) {
-    return map_tree(options, record_type, std::move(*parsed));
+    return map_tree(options,
+      record_type,
+      options.transform_tree
+        ? options.transform_tree(std::move(*parsed))
+        : std::move(*parsed));
   } else {
     return {
       /*value=*/compat::nullopt,
       /*diagnostics=*/
       {
-        /*settings=*/options,
+        /*config=*/options,
         /*tree=*/
         ::ryml::Tree{
           /*node_capacity=*/0,

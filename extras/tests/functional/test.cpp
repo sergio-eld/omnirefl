@@ -696,6 +696,52 @@ TEST(fn_composition, returns_stringified_reflected_field_values) {
   EXPECT_EQ((std::vector<std::string>{"3", "ignored", "2.5"}), values);
 }
 
+TEST(fn_identity, preserves_reference_qualification) {
+  int value = 42;
+  const int &constant = value;
+
+  auto &&lvalue = omni::fn::identity{}(value);
+  auto &&read_only = omni::fn::identity{}(constant);
+  auto &&rvalue = omni::fn::identity{}(std::move(value));
+
+  static_assert(std::is_same<int &, decltype(lvalue)>::value,
+    "identity must preserve lvalue references");
+  static_assert(std::is_same<const int &, decltype(read_only)>::value,
+    "identity must preserve const qualification");
+  static_assert(std::is_same<int &&, decltype(rvalue)>::value,
+    "identity must preserve rvalue references");
+  EXPECT_EQ(&value, &lvalue);
+  EXPECT_EQ(&value, &read_only);
+  EXPECT_EQ(&value, &rvalue);
+}
+
+TEST(fn_identity, forwards_move_only_values) {
+  auto value = omni::compat::make_unique<int>(42);
+  const auto moved = omni::fn::identity{}(std::move(value));
+
+  EXPECT_FALSE(value);
+  EXPECT_TRUE(moved);
+  if (moved) {
+    EXPECT_EQ(42, *moved);
+  }
+}
+
+TEST(compat_conjunction, accepts_an_empty_pack) {
+  EXPECT_TRUE(omni::compat::conjunction<>::value);
+}
+
+TEST(compat_conjunction, stops_before_an_incomplete_operand) {
+  struct incomplete;
+
+  EXPECT_FALSE((omni::compat::conjunction<std::false_type, incomplete>::value));
+}
+
+TEST(compat_conjunction, preserves_the_last_operand_value) {
+  EXPECT_EQ(7,
+    (omni::compat::conjunction<std::true_type,
+      std::integral_constant<int, 7>>::value));
+}
+
 TEST(compat_invoke, invokes_members_through_supported_object_forms) {
   invoke_record object{40};
   derived_invoke_record derived{40};

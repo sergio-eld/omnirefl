@@ -2,7 +2,7 @@
 // reflection in reusable test descriptions and registration.
 
 // Engine-independent mapping conformance cases.
-// Each engine must produce the same result for a given struct, settings and
+// Each engine must produce the same result for a given struct, config and
 // JSON. Preserve repeated field names in the source text; do not normalize the
 // input. Case groups are heterogeneous tuples, bound to an engine before
 // registration.
@@ -30,21 +30,21 @@
 namespace {
 
 /*
-D/U/L/E/R/C(settings inputs, JSON) >> expect(struct value or none, ordered
+D/U/L/E/R/C(config inputs, JSON) >> expect(struct value or none, ordered
 issues) none = no returned value; an empty issue list means no diagnostics.
 error_limit = 0; warning_limit = nullopt (unlimited); recovery = nullopt.
-Each engine starts with explicit defaults; case transforms select the settings
+Each engine starts with explicit defaults; case transforms select the config
 under test. The expectation binds the struct type, independently of the engine.
 All JSON is well-formed; these cases specify mapping, not parser syntax errors.
 */
 
 namespace dsl {
 
-template <typename TransformSettings>
+template <typename TransformConfig>
 struct input {
-  /// Callable `Settings(Settings)`: changes one or more settings for this case
-  /// in a copy of the engine's settings.
-  TransformSettings transform_settings;
+  /// Callable `Config(Config)`: changes one or more config for this case
+  /// in a copy of the engine's config.
+  TransformConfig transform_config;
 
   std::string json;
 };
@@ -74,15 +74,15 @@ expected_issue err_unknown_field(std::string path) {
   return error(omni::json::issue_code::unknown_field, std::move(path));
 }
 
-template <typename Model, typename TransformSettings>
+template <typename Model, typename TransformConfig>
 struct mapping_case {
-  input<TransformSettings> from;
+  input<TransformConfig> from;
   omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected;
 
   template <typename Engine>
   omni::ryml::with_diagnostics<Model> operator()(Engine engine) const {
-    return engine.transform_settings(
-      from.transform_settings)(omni::type_t<Model>{}, from.json);
+    return engine.transform_config(
+      from.transform_config)(omni::type_t<Model>{}, from.json);
   }
 };
 
@@ -99,8 +99,8 @@ omni::ryml::with_diagnostics<Model, std::vector<expected_issue>>
 }
 
 // Bind the model from the expectation; the engine is supplied on invocation.
-template <typename TransformSettings, typename Model>
-mapping_case<Model, TransformSettings> operator>>(input<TransformSettings> from,
+template <typename TransformConfig, typename Model>
+mapping_case<Model, TransformConfig> operator>>(input<TransformConfig> from,
   omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected) {
   return {std::move(from), std::move(expected)};
 }
@@ -188,25 +188,25 @@ using dsl::none;
  * Overrides the duplicate policy and, when supplied, the error limit.
  *
  * C++11 equivalent of a generic capturing lambda: these fields are its inputs,
- * and the settings type is deduced from the engine.
+ * and the config type is deduced from the engine.
  */
-struct override_settings {
+struct override_config {
   omni::json::duplicate_policy duplicate_policy;
 
   // Preserve the engine's limit unless the case explicitly overrides it.
   omni::compat::optional<std::uint16_t> error_limit;
 
-  template <typename Settings>
-  OMNI_CPP14_CONSTEXPR Settings operator()(Settings settings) const {
-    settings.error_policy.duplicates = duplicate_policy;
+  template <typename Config>
+  OMNI_CPP14_CONSTEXPR Config operator()(Config config) const {
+    config.error_policy.duplicates = duplicate_policy;
     if (error_limit)
-      settings.error_policy.error_limit = *error_limit;
+      config.error_policy.error_limit = *error_limit;
 
-    return settings;
+    return config;
   }
 };
 
-dsl::input<override_settings> D(omni::json::duplicate_policy duplicate_policy,
+dsl::input<override_config> D(omni::json::duplicate_policy duplicate_policy,
   std::string json,
   omni::compat::optional<std::uint16_t> error_limit = omni::compat::nullopt) {
   return {{duplicate_policy, error_limit}, std::move(json)};
@@ -366,18 +366,18 @@ using dsl::warn_unknown_field;
 using omni::json::issue_code;
 using omni::json::unknown_policy;
 
-// C++11 compat for a generic capturing settings transformation.
-struct override_settings {
+// C++11 compat for a generic capturing config transformation.
+struct override_config {
   unknown_policy unknown_fields;
 
-  template <typename Settings>
-  Settings operator()(Settings settings) const {
-    settings.error_policy.unknown_fields = unknown_fields;
-    return settings;
+  template <typename Config>
+  Config operator()(Config config) const {
+    config.error_policy.unknown_fields = unknown_fields;
+    return config;
   }
 };
 
-dsl::input<override_settings> U(unknown_policy policy, std::string json) {
+dsl::input<override_config> U(unknown_policy policy, std::string json) {
   return {{policy}, std::move(json)};
 }
 
@@ -439,19 +439,19 @@ using omni::json::unknown_policy;
 
 // C++11 compat: this group allows unknown fields with warnings and overrides
 // the warning limit, including an explicit nullopt for unlimited warnings.
-struct override_settings {
+struct override_config {
   omni::compat::optional<std::uint16_t> warning_limit;
 
-  template <typename Settings>
-  Settings operator()(Settings settings) const {
-    settings.error_policy.unknown_fields =
+  template <typename Config>
+  Config operator()(Config config) const {
+    config.error_policy.unknown_fields =
       unknown_policy::allow | unknown_policy::warn;
-    settings.error_policy.warning_limit = warning_limit;
-    return settings;
+    config.error_policy.warning_limit = warning_limit;
+    return config;
   }
 };
 
-dsl::input<override_settings> L(omni::compat::optional<std::uint16_t> limit,
+dsl::input<override_config> L(omni::compat::optional<std::uint16_t> limit,
   std::string json) {
   return {{limit}, std::move(json)};
 }
@@ -507,19 +507,19 @@ using omni::json::unknown_policy;
 using omni::json::value_kind;
 
 // C++11 compat: error limit and unknown-field policy are this group's inputs.
-struct override_settings {
+struct override_config {
   std::uint16_t error_limit;
   unknown_policy unknown_fields;
 
-  template <typename Settings>
-  Settings operator()(Settings settings) const {
-    settings.error_policy.error_limit = error_limit;
-    settings.error_policy.unknown_fields = unknown_fields;
-    return settings;
+  template <typename Config>
+  Config operator()(Config config) const {
+    config.error_policy.error_limit = error_limit;
+    config.error_policy.unknown_fields = unknown_fields;
+    return config;
   }
 };
 
-dsl::input<override_settings> E(std::uint16_t limit,
+dsl::input<override_config> E(std::uint16_t limit,
   std::string json,
   unknown_policy unknown = unknown_policy::reject) {
   return {{limit, unknown}, std::move(json)};
@@ -611,19 +611,19 @@ using omni::json::recovery_policy;
 using omni::json::value_kind;
 
 // C++11 compat: select missing-field recovery and the warning limit.
-struct override_settings {
+struct override_config {
   omni::compat::optional<recovery_policy> recovery;
   omni::compat::optional<std::uint16_t> warning_limit;
 
-  template <typename Settings>
-  Settings operator()(Settings settings) const {
-    settings.recovery = recovery;
-    settings.error_policy.warning_limit = warning_limit;
-    return settings;
+  template <typename Config>
+  Config operator()(Config config) const {
+    config.recovery = recovery;
+    config.error_policy.warning_limit = warning_limit;
+    return config;
   }
 };
 
-dsl::input<override_settings> R(
+dsl::input<override_config> R(
   omni::compat::optional<recovery_policy> recovery,
   std::string json,
   omni::compat::optional<std::uint16_t> warning_limit = none) {
@@ -736,23 +736,23 @@ using omni::json::value_kind;
 
 // C++11 compat: combine the two warning-producing policies with
 // limits/recovery.
-struct override_settings {
+struct override_config {
   omni::compat::optional<std::uint16_t> warning_limit;
   omni::compat::optional<recovery_policy> recovery;
 
-  template <typename Settings>
-  Settings operator()(Settings settings) const {
-    settings.error_policy.duplicates =
+  template <typename Config>
+  Config operator()(Config config) const {
+    config.error_policy.duplicates =
       duplicate_policy::allow | duplicate_policy::warn;
-    settings.error_policy.unknown_fields =
+    config.error_policy.unknown_fields =
       unknown_policy::allow | unknown_policy::warn;
-    settings.error_policy.warning_limit = warning_limit;
-    settings.recovery = recovery;
-    return settings;
+    config.error_policy.warning_limit = warning_limit;
+    config.recovery = recovery;
+    return config;
   }
 };
 
-dsl::input<override_settings> C(omni::compat::optional<std::uint16_t> limit,
+dsl::input<override_config> C(omni::compat::optional<std::uint16_t> limit,
   std::string json,
   omni::compat::optional<recovery_policy> recovery = none) {
   return {{limit, recovery}, std::move(json)};
@@ -917,8 +917,8 @@ struct scenario {
 template <typename Engine, typename Case>
 scenario bind_engine(Engine engine, Case c) {
   return {c.from.json,
-    [engine, c] { return c(engine).map_value(erase_value{}); },
-    std::move(c.expected).map_value(erase_value{})};
+    [engine, c] { return c(engine).transform_value(erase_value{}); },
+    std::move(c.expected).transform_value(erase_value{})};
 }
 
 // C++11 compat for a generic capturing lambda, binding each case before
@@ -986,42 +986,42 @@ INSTANTIATE_TEST_SUITE_P(ryml_duplicates,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+      omni::ryml::deserialize_t{omni::ryml::config{}}},
     duplicate_fields::duplicates)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_unknown_fields,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+      omni::ryml::deserialize_t{omni::ryml::config{}}},
     unknown_fields::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_warning_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+      omni::ryml::deserialize_t{omni::ryml::config{}}},
     warning_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_error_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+      omni::ryml::deserialize_t{omni::ryml::config{}}},
     error_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_missing_field_recovery,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+      omni::ryml::deserialize_t{omni::ryml::config{}}},
     missing_field_recovery::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::settings{}}},
+      omni::ryml::deserialize_t{omni::ryml::config{}}},
     policy_interactions::cases)));
 
 } // namespace registration

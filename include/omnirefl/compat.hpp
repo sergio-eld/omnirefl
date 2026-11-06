@@ -28,6 +28,22 @@
 #  define OMNI_CPP14_CONSTEXPR
 #endif
 
+// C++17 constexpr support includes literal lambda closure types.
+#if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
+#  define OMNI_CPP17_CONSTEXPR constexpr
+#else
+#  define OMNI_CPP17_CONSTEXPR
+#endif
+
+// Supply a fallback return type when C++14 return-type deduction is unavailable.
+// Variadic arguments also accept types containing template-argument commas.
+#if !defined(__cpp_return_type_deduction) \
+  || 201304L > __cpp_return_type_deduction
+#  define OMNI_CPP11_TRAILING_RETURN(...) -> __VA_ARGS__
+#else
+#  define OMNI_CPP11_TRAILING_RETURN(...)
+#endif
+
 // Invoke beside the enum so argument-dependent lookup finds these operators.
 #define OMNI_ENABLE_BIT_FLAGS(Enum)                                        \
   constexpr Enum operator|(Enum left, Enum right) noexcept {               \
@@ -315,6 +331,15 @@ template <typename Function, typename... Argument>
 concept invocable = is_invocable<Function, Argument...>::value;
 #endif
 
+// enable_if_t
+#if defined(__cpp_lib_transformation_trait_aliases) \
+  && 201304L <= __cpp_lib_transformation_trait_aliases
+using std::enable_if_t;
+#else
+template <bool Condition, typename T = void>
+using enable_if_t = typename std::enable_if<Condition, T>::type;
+#endif
+
 // conditional_t
 #if OMNI_CPLUSPLUS >= 201402L
 using std::conditional_t;
@@ -522,6 +547,21 @@ typename std::enable_if<std::is_array<T>::value && 0 == std::extent<T>::value,
 template <typename T, typename... Argument>
 typename std::enable_if<0 != std::extent<T>::value>::type make_unique(
   Argument &&...) = delete;
+#endif
+
+// conjunction
+#if defined(__cpp_lib_logical_traits) && 201510L <= __cpp_lib_logical_traits
+using std::conjunction;
+#else
+template <typename...>
+struct conjunction: std::true_type {};
+
+template <typename First>
+struct conjunction<First>: First {};
+
+template <typename First, typename... Rest>
+struct conjunction<First, Rest...>:
+    conditional_t<bool(First::value), conjunction<Rest...>, First> {};
 #endif
 
 // disjunction

@@ -36,6 +36,29 @@ struct type_t {
 #endif
 
 namespace fn {
+
+/// Forward a value unchanged, preserving its value category.
+struct identity {
+  template <typename Value>
+  constexpr Value &&operator()(Value &&value) const noexcept {
+    return std::forward<Value>(value);
+  }
+};
+
+/// Return whether a function pointer is null.
+template <typename F>
+constexpr auto is_null_function(const F &f) noexcept
+  -> compat::enable_if_t<std::is_pointer<F>::value, bool> {
+  return nullptr == f;
+}
+
+/// Return false for callable objects, which need not compare with nullptr.
+template <typename F>
+constexpr auto is_null_function(const F &) noexcept
+  -> compat::enable_if_t<!std::is_pointer<F>::value, bool> {
+  return false;
+}
+
 namespace detail {
 
 template <typename WhenTrue, typename WhenFalse>
