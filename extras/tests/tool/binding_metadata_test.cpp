@@ -34,6 +34,64 @@ union union_template { T value; };
 
 enum class status { ready, done };
 
+struct unreflected_record {};
+enum class unreflected_enum { value };
+struct incomplete_record;
+
+struct type_classification {
+  std::pair<bool, bool> plain;
+  std::pair<bool, bool> qualified;
+  std::pair<bool, bool> rvalue;
+  std::vector<std::pair<bool, bool>> unavailable;
+};
+
+// Template arguments keep unavailable-type queries dependent during parsing.
+template <typename... Unreflected>
+struct cpp11_lambda_classify_types {
+  template <typename _M, omni::reflected_entity Entity>
+  type_classification operator()(omni::meta_t<_M, Entity>) const {
+    using type = typename omni::meta_t<_M, Entity>::reflected_type;
+    return {
+      {omni::is_reflected_record<type>::value,
+        omni::is_reflected_enum<type>::value},
+      {omni::is_reflected_record<const volatile type &>::value,
+        omni::is_reflected_enum<const volatile type &>::value},
+      {omni::is_reflected_record<type &&>::value,
+        omni::is_reflected_enum<type &&>::value},
+      {{omni::is_reflected_record<Unreflected>::value,
+        omni::is_reflected_enum<Unreflected>::value}...},
+    };
+  }
+};
+
+template <typename T>
+class reflected_type_traits: public testing::Test {};
+
+using classified_types = testing::Types<record, alternatives,
+  record_template<int>, status>;
+TYPED_TEST_SUITE(reflected_type_traits, classified_types);
+
+TYPED_TEST(reflected_type_traits, classifies_metadata_and_ignores_cvref) {
+  const auto result = omni::reflected_call(
+    cpp11_lambda_classify_types<unreflected_record, unreflected_enum,
+      incomplete_record, int, std::string>{},
+    omni::type_t<TypeParam>{});
+
+  // Each pair reports (is_reflected_record, is_reflected_enum).
+  const auto expected = std::make_pair(!std::is_enum<TypeParam>::value,
+    std::is_enum<TypeParam>::value);
+  EXPECT_EQ(expected, result.plain);
+  EXPECT_EQ(expected, result.qualified);
+  EXPECT_EQ(expected, result.rvalue);
+  EXPECT_EQ((std::vector<std::pair<bool, bool>>{
+    {false, false}, // Unreflected record.
+    {false, false}, // Unreflected enum.
+    {false, false}, // Incomplete record.
+    {false, false}, // Fundamental type.
+    {false, false}, // Standard-library record.
+  }), result.unavailable);
+}
+
 struct static_record {
   static const int shared = 37;
 

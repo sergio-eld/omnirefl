@@ -31,6 +31,11 @@ Properties to identify and infer through traits, reflection, or protocols:
 
 Observable capabilities do not determine intended representation or policy.
 
+Consider `json_scalar`, `json_array`, and `json_mapping` as optional building
+blocks providing default node-shape checks, rather than mandatory customization
+interfaces. For example, a scalar building block could check that the input node
+is scalar. This remains a design option, not part of the current prototype.
+
 Keep type-based selection in mind: an entry keyed by the type or a unary
 template callable, with custom mapping preferred over built-in mapping at each
 recursive step. Derive the customization contract from the mapping algorithm's
