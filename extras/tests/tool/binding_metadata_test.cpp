@@ -38,28 +38,34 @@ struct unreflected_record {};
 enum class unreflected_enum { value };
 struct incomplete_record;
 
-struct type_classification {
-  std::pair<bool, bool> plain;
-  std::pair<bool, bool> qualified;
-  std::pair<bool, bool> rvalue;
-  std::vector<std::pair<bool, bool>> unavailable;
+struct type_query_results {
+  bool unqualified;
+  bool const_volatile_lvalue;
+  bool rvalue_reference;
 };
 
-// Template arguments keep unavailable-type queries dependent during parsing.
-template <typename... Unreflected>
-struct cpp11_lambda_classify_types {
+struct record_enum_query_results {
+  type_query_results is_record;
+  type_query_results is_enum;
+};
+
+struct cpp11_lambda_query_type_traits {
   template <typename _M, omni::reflected_entity Entity>
-  type_classification operator()(omni::meta_t<_M, Entity>) const {
+  record_enum_query_results operator()(omni::meta_t<_M, Entity>) const {
     using type = typename omni::meta_t<_M, Entity>::reflected_type;
     return {
-      {omni::is_reflected_record<type>::value,
-        omni::is_reflected_enum<type>::value},
-      {omni::is_reflected_record<const volatile type &>::value,
-        omni::is_reflected_enum<const volatile type &>::value},
-      {omni::is_reflected_record<type &&>::value,
-        omni::is_reflected_enum<type &&>::value},
-      {{omni::is_reflected_record<Unreflected>::value,
-        omni::is_reflected_enum<Unreflected>::value}...},
+      /*is_record=*/{
+        /*unqualified=*/omni::is_reflected_record<type>::value,
+        /*const_volatile_lvalue=*/
+        omni::is_reflected_record<const volatile type &>::value,
+        /*rvalue_reference=*/omni::is_reflected_record<type &&>::value,
+      },
+      /*is_enum=*/{
+        /*unqualified=*/omni::is_reflected_enum<type>::value,
+        /*const_volatile_lvalue=*/
+        omni::is_reflected_enum<const volatile type &>::value,
+        /*rvalue_reference=*/omni::is_reflected_enum<type &&>::value,
+      },
     };
   }
 };
@@ -67,29 +73,59 @@ struct cpp11_lambda_classify_types {
 template <typename T>
 class reflected_type_traits: public testing::Test {};
 
-using classified_types = testing::Types<record, alternatives,
+using queried_types = testing::Types<record, alternatives,
   record_template<int>, status>;
-TYPED_TEST_SUITE(reflected_type_traits, classified_types);
+TYPED_TEST_SUITE(reflected_type_traits, queried_types);
 
-TYPED_TEST(reflected_type_traits, classifies_metadata_and_ignores_cvref) {
+TYPED_TEST(reflected_type_traits, record_and_enum_queries_ignore_cvref) {
   const auto result = omni::reflected_call(
-    cpp11_lambda_classify_types<unreflected_record, unreflected_enum,
-      incomplete_record, int, std::string>{},
+    cpp11_lambda_query_type_traits{},
     omni::type_t<TypeParam>{});
 
-  // Each pair reports (is_reflected_record, is_reflected_enum).
-  const auto expected = std::make_pair(!std::is_enum<TypeParam>::value,
-    std::is_enum<TypeParam>::value);
-  EXPECT_EQ(expected, result.plain);
-  EXPECT_EQ(expected, result.qualified);
-  EXPECT_EQ(expected, result.rvalue);
-  EXPECT_EQ((std::vector<std::pair<bool, bool>>{
-    {false, false}, // Unreflected record.
-    {false, false}, // Unreflected enum.
-    {false, false}, // Incomplete record.
-    {false, false}, // Fundamental type.
-    {false, false}, // Standard-library record.
-  }), result.unavailable);
+  const bool expected_record = !std::is_enum<TypeParam>::value;
+  const bool expected_enum = std::is_enum<TypeParam>::value;
+  EXPECT_EQ(expected_record, result.is_record.unqualified);
+  EXPECT_EQ(expected_record, result.is_record.const_volatile_lvalue);
+  EXPECT_EQ(expected_record, result.is_record.rvalue_reference);
+  EXPECT_EQ(expected_enum, result.is_enum.unqualified);
+  EXPECT_EQ(expected_enum, result.is_enum.const_volatile_lvalue);
+  EXPECT_EQ(expected_enum, result.is_enum.rvalue_reference);
+}
+
+template <typename T>
+struct cpp11_lambda_is_reflected_record {
+  template <typename _M, omni::reflected_entity Entity>
+  bool operator()(omni::meta_t<_M, Entity>) const {
+    return omni::is_reflected_record<T>::value;
+  }
+};
+
+template <typename T>
+struct cpp11_lambda_is_reflected_enum {
+  template <typename _M, omni::reflected_entity Entity>
+  bool operator()(omni::meta_t<_M, Entity>) const {
+    return omni::is_reflected_enum<T>::value;
+  }
+};
+
+template <typename T>
+class types_without_metadata: public testing::Test {};
+
+// GTest's type-name reporting requires complete types. Tags let
+// incomplete_record participate without requiring its definition.
+using unreflected_types = testing::Types<omni::type_t<unreflected_record>,
+  omni::type_t<unreflected_enum>, omni::type_t<incomplete_record>,
+  omni::type_t<int>, omni::type_t<std::string>>;
+TYPED_TEST_SUITE(types_without_metadata, unreflected_types);
+
+// Establish the reflected scope with record; passing the queried type instead
+// would request its metadata.
+TYPED_TEST(types_without_metadata, record_and_enum_queries_are_false) {
+  using type = typename TypeParam::type;
+  EXPECT_FALSE(omni::reflected_call(
+    cpp11_lambda_is_reflected_record<type>{}, omni::type_t<record>{}));
+  EXPECT_FALSE(omni::reflected_call(
+    cpp11_lambda_is_reflected_enum<type>{}, omni::type_t<record>{}));
 }
 
 struct static_record {
