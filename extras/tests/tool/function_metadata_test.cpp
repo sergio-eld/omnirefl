@@ -282,14 +282,18 @@ struct callable_type_queries {
 struct inspect_callable_type {
   template <typename _M>
   callable_type_queries operator()(omni::record_meta_t<_M> record) const {
-    const auto field = std::get</*callable_field=*/0>(record.accessible_data_members());
+    return omni::compat::apply(*this, record.accessible_data_members());
+  }
+
+  template <typename Field, typename... Other>
+  callable_type_queries operator()(Field field, Other...) const {
     const auto callable = field.callable_metadata();
 #if defined(__cpp_concepts)
     static_assert(omni::function_meta<decltype(callable)>);
 #endif
     return {
       /*preserves_field_type=*/
-      std::is_same<create_function, typename decltype(field)::type>::value,
+      std::is_same<create_function, typename Field::type>::value,
       /*invoked_result=*/
       omni::compat::invoke(callable.pointer(), request{815}, false, nullptr).id,
     };

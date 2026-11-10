@@ -1208,9 +1208,11 @@ struct qualifier_queries {
 struct inspect {
   template <typename _M>
   qualifier_queries operator()(omni::record_meta_t<_M> meta) const {
-    const auto member =
-      std::get</*value=*/0>(meta.accessible_data_members());
+    return omni::compat::apply(*this, meta.accessible_data_members());
+  }
 
+  template <typename _F>
+  qualifier_queries operator()(omni::data_member_meta_t<_F> member) const {
     return {
       /*is_const=*/member.is_const(),
       /*is_volatile=*/member.is_volatile(),
