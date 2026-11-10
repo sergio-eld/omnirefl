@@ -162,25 +162,28 @@ inline issue make_issue(json::issue_code reason,
   return result;
 }
 
-struct scalar_conversion {
-  // Overflow checking applies to integers, excluding bool.
-  template <typename ScalarValue>
-  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
-    -> compat::enable_if_t<std::is_integral<ScalarValue>::value
-        && !std::is_same<bool, ScalarValue>::value,
-      bool> {
-    return c4::from_chars(scalar, c4::fmt::overflow_checked(*value));
-  }
+// Format validation precedes conversion; failure here means out of range.
+template <typename T,
+  compat::enable_if_t<std::is_integral<T>::value, int> = 0>
+compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
+  T value{};
+  // C4 accepts a pointer to either the checked wrapper or the original value.
+  compat::conditional_t<std::is_same<bool, T>::value,
+    T &,
+    c4::fmt::overflow_checked_<T>> target{value};
+  if (!c4::from_chars(scalar, &target))
+    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
+  return value;
+}
 
-  template <typename ScalarValue>
-  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
-    -> compat::enable_if_t<!std::is_integral<ScalarValue>::value
-        || std::is_same<bool, ScalarValue>::value,
-      bool> {
-    return c4::from_chars(scalar, value);
-  }
-
-};
+template <typename T,
+  compat::enable_if_t<!std::is_integral<T>::value, int> = 0>
+compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
+  T value{};
+  if (!c4::from_chars(scalar, &value))
+    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
+  return value;
+}
 
 struct write_integer {
   template <typename Value>
@@ -586,17 +589,17 @@ auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
     return false;
   }
 
-  T converted{};
-  if (!omni::ryml::detail::scalar_conversion::from_chars(scalar, &converted)) {
+  const auto converted = omni::ryml::detail::from_chars<T>(scalar);
+  if (!converted) {
     diagnostics.report(omni::ryml::detail::make_issue(
-      json::issue_code::out_of_range,
+      converted.error(),
       expected,
       node,
       diagnostics.path));
     return false;
   }
 
-  *into = converted;
+  *into = *converted;
   return true;
 }
 
