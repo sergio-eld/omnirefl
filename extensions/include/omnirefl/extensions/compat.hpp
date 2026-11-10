@@ -6,6 +6,15 @@
 #  if __has_include(<version>)
 #    include <version>
 #  endif
+#  if 201703L <= OMNI_CPLUSPLUS && __has_include(<string_view>)
+#    include <string_view>
+#  endif
+#endif
+
+#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+#  include <string_view>
+#else
+#  include <nonstd/string_view.hpp>
 #endif
 
 #if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
@@ -23,6 +32,14 @@
 
 namespace omni {
 namespace compat {
+
+#if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
+using std::basic_string_view;
+using std::string_view;
+#else
+using nonstd::basic_string_view;
+using nonstd::string_view;
+#endif
 
 #if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
 using std::optional;

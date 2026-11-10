@@ -1184,7 +1184,7 @@ struct binding_t<T, reflected_entity::record>:
   constexpr meta as_meta() const noexcept { return *this; }
 
   /** Whether the binding stores its own record instead of a reference. */
-  using owning = std::integral_constant<bool, !std::is_reference<T>::value>;
+  using owning = compat::negation<std::is_reference<T>>;
 
   /** Stored record type for owning and non-owning bindings. */
   using storage_t = compat::conditional_t<owning::value,
@@ -1387,7 +1387,7 @@ struct binding_t<T, reflected_entity::enumeration>:
   constexpr meta as_meta() const noexcept { return *this; }
 
   /** Whether the binding stores its own enum value instead of a reference. */
-  using owning = std::integral_constant<bool, !std::is_reference<T>::value>;
+  using owning = compat::negation<std::is_reference<T>>;
 
   /** Stored enum type for owning and non-owning bindings. */
   using storage_t = compat::conditional_t<owning::value,

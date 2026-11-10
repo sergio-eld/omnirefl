@@ -40,7 +40,7 @@ if (result.value) {
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/functional.hpp>
 
-#include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/extensions/traits.hpp>
 
 #include <ryml.hpp>
 
@@ -61,6 +61,27 @@ if (result.value) {
 #endif
 
 namespace omni {
+namespace traits {
+namespace cp {
+
+// c4 views use the same operation specialization points as user-defined strings.
+template <>
+struct as_string<c4::csubstr> {
+  constexpr compat::string_view operator()(c4::csubstr value) const {
+    return {value.str, value.len};
+  }
+};
+
+template <>
+struct assign_string<c4::csubstr> {
+  void operator()(c4::csubstr *into, compat::string_view text) const {
+    *into = {text.data(), text.size()};
+  }
+};
+
+} // namespace cp
+} // namespace traits
+
 // Only backend-independent JSON/YAML mapping contracts belong here.
 // TODO: Move to a shared header if another JSON parser is adopted.
 namespace json {
@@ -350,69 +371,6 @@ namespace detail {
 struct mapping_context;
 } // namespace detail
 
-namespace cp {
-
-/** Read a view of a string's existing characters. The view must remain valid
- * while the source is alive and unchanged. Specialize for custom string APIs. */
-template <typename String, typename = void>
-struct read_string {};
-
-template <typename String>
-struct read_string<String,
-  compat::void_t<decltype(c4::csubstr{std::declval<const String &>().data(),
-    std::declval<const String &>().size()})>> {
-  c4::csubstr operator()(const String &value) const {
-    return {value.data(), value.size()};
-  }
-};
-
-/** Assign scalar text to a string. Owning strings copy; view types may borrow
- * the supplied storage. Specialize for custom string APIs. */
-template <typename String, typename = void>
-struct assign_string {};
-
-template <typename String>
-struct assign_string<String,
-  compat::void_t<decltype(std::declval<String &>() = String{
-    std::declval<c4::csubstr>().str, std::declval<c4::csubstr>().len})>> {
-  void operator()(String *into, c4::csubstr text) const {
-    // Empty views may contain null data; supply a valid empty character range.
-    *into = String{text.empty() ? "" : text.str, text.len};
-  }
-};
-
-} // namespace cp
-
-/** Whether both string operations are available, with read_string returning
- * a c4::csubstr view. Customize the operations rather than this trait. */
-template <typename T, typename = void>
-struct is_string_like: std::false_type {};
-
-template <typename T>
-struct is_string_like<T,
-  compat::void_t<decltype(cp::read_string<T>{}(std::declval<const T &>())),
-    decltype(cp::assign_string<T>{}(std::declval<T *>(),
-      std::declval<c4::csubstr>()))>>:
-    std::is_same<c4::csubstr,
-      compat::remove_cvref_t<decltype(
-        cp::read_string<T>{}(std::declval<const T &>()))>> {};
-
-// Opt in standard-like optional wrappers. Mapping uses value_type, bool
-// conversion, dereference, reset(), and emplace(value). Empty optional sequence
-// elements are omitted. Raw and smart pointers are not optional-like.
-template <typename>
-struct is_optional_like: std::false_type {};
-
-#if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
-template <typename T>
-struct is_optional_like<std::optional<T>>: std::true_type {};
-#endif
-
-#if defined(TL_OPTIONAL_HPP)
-template <typename T>
-struct is_optional_like<tl::optional<T>>: std::true_type {};
-#endif
-
 template <typename T, typename = void>
 struct is_container: std::false_type {};
 
@@ -421,7 +379,7 @@ struct is_container<T,
   compat::void_t<typename T::value_type,
     decltype(std::declval<const T &>().begin()),
     decltype(std::declval<const T &>().end())>>:
-    std::integral_constant<bool, !is_string_like<T>::value> {};
+    compat::negation<traits::is_string<T>> {};
 
 namespace cp {
 
@@ -435,11 +393,10 @@ namespace cp {
  */
 template <typename T>
 struct reflect_as_root:
-    std::integral_constant<bool,
-      !compat::disjunction<std::is_arithmetic<T>,
-        is_string_like<T>,
-        is_container<T>,
-        is_optional_like<T>>::value> {};
+    compat::negation<compat::disjunction<std::is_arithmetic<T>,
+      traits::is_string<T>,
+      is_container<T>,
+      traits::is_optional<T>>> {};
 
 /** Container insertion customization, independent of representation mapping. */
 template <typename Container, typename Enable = void>
@@ -487,7 +444,7 @@ template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int> = 0>
 bool map_tree(::ryml::ConstNodeRef node, T *into,
   omni::ryml::detail::mapping_context &diagnostics);
@@ -498,7 +455,7 @@ template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && !compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int> = 0>
 bool map_tree(::ryml::ConstNodeRef node, T *into,
   omni::ryml::detail::mapping_context &diagnostics);
@@ -574,7 +531,7 @@ template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_owning_tree(const T &value);
 
@@ -582,7 +539,7 @@ template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && !compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_owning_tree(const T &value);
 
@@ -600,7 +557,7 @@ template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_ref_tree(T &value);
 
@@ -608,7 +565,7 @@ template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && !compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_ref_tree(T &value);
 
@@ -762,7 +719,7 @@ namespace mapping {
 /** Write a char-based string as a quoted scalar. */
 struct from_string_like {
   template <typename T>
-  static constexpr bool supports() { return is_string_like<T>::value; }
+  static constexpr bool supports() { return traits::is_string<T>::value; }
 
   template <typename T>
   auto operator()(const T &value,
@@ -774,13 +731,19 @@ struct from_string_like {
 /** Read scalar text into a string-like type; views borrow tree storage. */
 struct to_string_like {
   template <typename T>
-  static constexpr bool supports() { return is_string_like<T>::value; }
+  static constexpr bool supports() { return traits::is_string<T>::value; }
 
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     omni::ryml::detail::mapping_context &diagnostics) const
     -> compat::enable_if_t<supports<T>(), bool>;
+
+  // FIXME: [high] Define encoding conversion for non-char strings through
+  // the shared operation specialization points, including standard strings.
+  // Classify them as strings; do not fall through to container mapping.
+  // Keep unsupported-type diagnostics focused on the conversion requirement.
+  // See the disabled wide-string case in tests/string_mapping.cpp.
 };
 
 /** Write booleans, integers, and floating-point values as plain scalars. */
@@ -810,25 +773,25 @@ struct to_arithmetic {
 /** Write a present optional value or a null scalar. */
 struct from_optional_like {
   template <typename T>
-  static constexpr bool supports() { return is_optional_like<T>::value; }
+  static constexpr bool supports() { return traits::is_optional<T>::value; }
 
   template <typename T>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
     omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>()>;
+    -> compat::enable_if_t<traits::is_optional<T>::value>;
 };
 
 /** Reset on null; otherwise convert and emplace the contained value. */
 struct to_optional_like {
   template <typename T>
-  static constexpr bool supports() { return is_optional_like<T>::value; }
+  static constexpr bool supports() { return traits::is_optional<T>::value; }
 
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>(), bool>;
+    -> compat::enable_if_t<traits::is_optional<T>::value, bool>;
 };
 
 /** Write iterable elements as a sequence, omitting empty optionals.
@@ -898,7 +861,10 @@ struct from_record {
   auto operator()(const T &value,
     ::ryml::NodeRef node,
     omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>()>;
+    -> compat::enable_if_t<omni::is_reflected_record<T>::value>;
+
+  // Use the trait directly: older GCC versions can mismatch member-call
+  // constraints between this declaration and its out-of-class definition.
 };
 
 /** Read accessible non-static data members from matching mapping entries. */
@@ -978,6 +944,13 @@ struct to_type<T,
   compat::enable_if_t<mapping::reflected_scope::to_enum::supports<T>()>>:
     mapping::reflected_scope::to_enum {};
 
+// TODO: [high] Document and demonstrate the reflected-scope contract for
+// from_type/to_type customizations. Metadata queries must depend on template
+// arguments so instantiation is delayed until the reflected scope. A concrete
+// `[](const Tree &) -> expected<my_type, error> { ... }` body is checked eagerly;
+// metadata queries there can occur outside the reflected scope. Cover the
+// dependent callable form in the guide before advertising callable CPs.
+
 // TODO: [medium] Consider callable variable-template customization in C++14:
 // `template <> const auto from_type<T> = [](const T &, ...) { ... };`
 // Keep a C++11 struct alternative named from_type_t (and likewise to_type_t).
@@ -1001,12 +974,12 @@ struct to_type<T,
 #include <omnirefl/serialization/impl/ryml.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
-static_assert(omni::ryml::is_string_like<std::string>::value,
+static_assert(omni::traits::is_string<std::string>::value,
   "std::string must provide the string mapping operations");
-static_assert(omni::ryml::is_string_like<c4::csubstr>::value,
+static_assert(omni::traits::is_string<c4::csubstr>::value,
   "c4::csubstr must provide the string mapping operations");
 #if defined(__cpp_lib_string_view)
-static_assert(omni::ryml::is_string_like<std::string_view>::value,
+static_assert(omni::traits::is_string<std::string_view>::value,
   "std::string_view must provide the string mapping operations");
 #endif
 

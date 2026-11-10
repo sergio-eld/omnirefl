@@ -119,6 +119,16 @@ Prefer readable `static_assert` diagnostics at the public call or registration
 boundary, before instantiating implementation details. Avoid eager constraints
 or return-type expressions failing deep inside `detail` before that validation.
 
+### Variable-template operation hooks
+
+Consider a C++14 callable variable template alongside the struct hook. Use a
+constexpr unavailable sentinel and diagnose conflicting explicit hooks. With
+neither user hook, try the member-based default before diagnosing absence.
+Require the selected adapter to be trivially copyable and keep the access point
+constexpr; consider returning the adapter by value instead of function-local
+static storage. Keep availability probes usable without firing missing-hook
+assertions during traits detection.
+
 ### Tree normalization
 
 Tree callbacks do not belong in deserialization config or its QoL binding.

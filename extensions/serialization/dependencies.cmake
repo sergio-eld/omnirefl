@@ -1,4 +1,5 @@
 include(FetchContent)
+include("${CMAKE_CURRENT_LIST_DIR}/../dependencies.cmake")
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
@@ -23,27 +24,6 @@ function(_serialization_check_cxx20_span result)
 endfunction()
 
 set(_serialization_dependencies)
-
-if(NOT TARGET tl::expected)
-    set(EXPECTED_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
-    set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(tl_expected
-        URL https://github.com/TartanLlama/expected/archive/refs/tags/v1.3.1.tar.gz
-        URL_HASH SHA256=9a04f4f472fbb5c30bf60402f1ca626c4a76987f867978d0b8a35d7ab3fb8fe7)
-    list(APPEND _serialization_dependencies tl_expected)
-endif()
-
-if(NOT TARGET tl::optional)
-    set(OPTIONAL_BUILD_PACKAGE OFF CACHE BOOL "" FORCE)
-    set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(tl_optional
-        URL https://github.com/TartanLlama/optional/archive/refs/tags/v1.1.0.tar.gz
-        URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118
-        # value()'s explicit throw prevents emplace() under -fno-exceptions.
-        PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
-            -P "${CMAKE_CURRENT_LIST_DIR}/patch_tl_optional.cmake")
-    list(APPEND _serialization_dependencies tl_optional)
-endif()
 
 if(NOT TARGET ryml::ryml)
     set(RYML_INSTALL OFF CACHE BOOL "" FORCE)

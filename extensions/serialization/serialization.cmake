@@ -14,15 +14,20 @@ endif()
 if(NOT TARGET tl::optional)
     find_package(tl-optional CONFIG QUIET)
 endif()
+if(NOT TARGET nonstd::string-view-lite)
+    find_package(string-view-lite CONFIG QUIET)
+endif()
 
 if(omnirefl_FIND_REQUIRED_serialization
     AND (NOT TARGET ryml::ryml
         OR NOT TARGET tl::expected
-        OR NOT TARGET tl::optional))
+        OR NOT TARGET tl::optional
+        OR NOT TARGET nonstd::string-view-lite))
     include("${CMAKE_CURRENT_LIST_DIR}/serialization/dependencies.cmake")
 endif()
 
-foreach(_dependency IN ITEMS ryml::ryml tl::expected tl::optional)
+foreach(_dependency IN ITEMS
+    ryml::ryml tl::expected tl::optional nonstd::string-view-lite)
     if(NOT TARGET "${_dependency}")
         set(omnirefl_serialization_FOUND FALSE)
         set(omnirefl_serialization_NOT_FOUND_MESSAGE
@@ -37,5 +42,5 @@ add_library(omni::serialization INTERFACE IMPORTED)
 set_target_properties(omni::serialization PROPERTIES
     INTERFACE_COMPILE_FEATURES cxx_std_11
     INTERFACE_INCLUDE_DIRECTORIES "${omnirefl_INCLUDE_DIR}"
-    INTERFACE_LINK_LIBRARIES "omni::refl;ryml::ryml;tl::expected;tl::optional")
+    INTERFACE_LINK_LIBRARIES "omni::refl;ryml::ryml;tl::expected;tl::optional;nonstd::string-view-lite")
 set(omnirefl_serialization_FOUND TRUE)

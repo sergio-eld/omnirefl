@@ -17,18 +17,20 @@ struct basic_text {
   std::basic_string<Char, Traits> contents;
 };
 
+struct converted_text { std::string contents; };
+
 } // namespace string_mapping
 } // namespace
 
 namespace omni {
-namespace ryml {
+namespace traits {
 namespace cp {
 
-// Partial specializations cover the char-based template family, not one type.
+// Partial specializations cover the template family, not one concrete type.
 template <typename Char, typename Traits>
-struct read_string<string_mapping::basic_text<Char, Traits>,
+struct as_string<string_mapping::basic_text<Char, Traits>,
   compat::enable_if_t<std::is_same<char, Char>::value>> {
-  c4::csubstr operator()(
+  compat::basic_string_view<Char, Traits> operator()(
     const string_mapping::basic_text<Char, Traits> &value) const {
     return {value.contents.data(), value.contents.size()};
   }
@@ -38,26 +40,41 @@ template <typename Char, typename Traits>
 struct assign_string<string_mapping::basic_text<Char, Traits>,
   compat::enable_if_t<std::is_same<char, Char>::value>> {
   void operator()(string_mapping::basic_text<Char, Traits> *into,
-    c4::csubstr text) const {
-    into->contents.assign(text.empty() ? "" : text.str, text.len);
+    compat::basic_string_view<Char, Traits> text) const {
+    into->contents.assign(text.empty() ? "" : text.data(), text.size());
+  }
+};
+
+template <>
+struct as_string<string_mapping::converted_text> {
+  std::string operator()(const string_mapping::converted_text &value) const {
+    return value.contents;
+  }
+};
+
+template <>
+struct assign_string<string_mapping::converted_text> {
+  void operator()(string_mapping::converted_text *into,
+    compat::string_view text) const {
+    into->contents.assign(text.empty() ? "" : text.data(), text.size());
   }
 };
 
 } // namespace cp
-} // namespace ryml
+} // namespace traits
 } // namespace omni
 
 namespace {
 
 TEST(string_mapping, requires_both_operations) {
-  EXPECT_TRUE(omni::ryml::is_string_like<
+  EXPECT_TRUE(omni::traits::is_string<
     string_mapping::basic_text<char>>::value);
   // Reading const strings is valid; assigning to them is not.
-  EXPECT_FALSE(omni::ryml::is_string_like<const std::string>::value);
-  EXPECT_FALSE(omni::ryml::is_string_like<std::vector<char>>::value);
-  EXPECT_FALSE(omni::ryml::is_string_like<int>::value);
-  EXPECT_FALSE(omni::ryml::is_string_like<int *>::value);
-  EXPECT_FALSE(omni::ryml::is_string_like<
+  EXPECT_FALSE(omni::traits::is_string<const std::string>::value);
+  EXPECT_FALSE(omni::traits::is_string<std::vector<char>>::value);
+  EXPECT_FALSE(omni::traits::is_string<int>::value);
+  EXPECT_FALSE(omni::traits::is_string<int *>::value);
+  EXPECT_FALSE(omni::traits::is_string<
     string_mapping::basic_text<wchar_t>>::value);
 }
 
@@ -106,5 +123,43 @@ TYPED_TEST(custom_string_mapping, owning_tree_retains_a_copy) {
   source.contents[0] = 'x';
   EXPECT_EQ(c4::csubstr{"hello"}, tree.crootref().val());
 }
+
+TEST(string_mapping, retains_owning_conversion_in_reference_tree) {
+  string_mapping::converted_text source{"converted text"};
+  const auto tree = omni::ryml::core::as_ref_tree(source);
+  source.contents.clear();
+
+  EXPECT_TRUE(tree.in_arena(tree.crootref().val()));
+  EXPECT_EQ(c4::csubstr{"converted text"}, tree.crootref().val());
+}
+
+TEST(string_mapping, deserializes_through_owning_conversion_adapter) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<string_mapping::converted_text>{}, R"("converted text")");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ("converted text", result.value->contents);
+  }
+}
+
+#if 0
+// FIXME: [high] Wide strings are strings, but Ryml needs char text. This case
+// cannot compile until encoding conversion can be supplied in both directions
+// through operation specializations. Unsupported conversions need a focused
+// diagnostic rather than constructor errors from the backend.
+TEST(string_mapping, converts_wide_text) {
+  const std::wstring source{L"hello"};
+  EXPECT_EQ(R"("hello")", omni::ryml::as_json(source));
+
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<std::wstring>{}, R"("hello")");
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(source, *result.value);
+  }
+}
+#endif
 
 } // namespace

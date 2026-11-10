@@ -1062,7 +1062,7 @@ struct is_static
 
 /// Select non-static data-member or function metadata and bindings in `filter`.
 template <typename Member>
-struct non_static : std::integral_constant<bool, !is_static<Member>::value> {};
+struct non_static: compat::negation<is_static<Member>> {};
 
 /** QoL key projection for comparing reflected fields by name. */
 // TODO: Constrain Field to reflected field metadata or field bindings.
