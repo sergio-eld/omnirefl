@@ -382,7 +382,7 @@ template <typename T,
   typename Discovery,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int>>
 bool map_tree(::ryml::ConstNodeRef node,
   T *into,
@@ -394,7 +394,7 @@ template <typename T,
   typename Discovery,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && !compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int>>
 bool map_tree(::ryml::ConstNodeRef node,
   T *into,
@@ -483,7 +483,7 @@ template <typename T,
   typename Discovery,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int>>
 ::ryml::Tree as_owning_tree(const T &value) {
   return as_owning_tree<T, typename Discovery::value_type>(value);
@@ -493,7 +493,7 @@ template <typename T,
   typename Discovery,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && !compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int>>
 ::ryml::Tree as_owning_tree(const T &value) {
   ::ryml::Tree tree;
@@ -523,7 +523,7 @@ template <typename T,
   typename Discovery,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int>>
 ::ryml::Tree as_ref_tree(T &value) {
   return as_ref_tree<T, typename Discovery::value_type>(value);
@@ -533,7 +533,7 @@ template <typename T,
   typename Discovery,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
       && !compat::disjunction<is_container<Discovery>,
-        is_optional_like<Discovery>>::value,
+        traits::is_optional<Discovery>>::value,
     int>>
 ::ryml::Tree as_ref_tree(T &value) {
   ::ryml::Tree tree;
@@ -558,14 +558,14 @@ namespace detail {
 
 template <typename T>
 auto is_null(const T &)
-  -> compat::enable_if_t<!is_optional_like<T>::value, bool> {
+  -> compat::enable_if_t<!traits::is_optional<T>::value, bool> {
   return false;
 }
 
 template <typename T>
 auto is_null(const T &value)
-  -> compat::enable_if_t<is_optional_like<T>::value, bool> {
-  return !value || is_null(*value);
+  -> compat::enable_if_t<traits::is_optional<T>::value, bool> {
+  return !adapt::has_value(value) || is_null(adapt::get_value(value));
 }
 
 } // namespace detail
@@ -575,11 +575,22 @@ auto from_string_like::operator()(const T &value,
   ::ryml::NodeRef node,
   omni::ryml::detail::mapping_context &diagnostics) const
   -> compat::enable_if_t<supports<T>()> {
-  const auto text = cp::read_string<T>{}(value);
-  if (diagnostics.borrow_strings)
-    node.set_val(text);
+  const auto &text = adapt::as_string(value);
+  using storage_type = decltype(adapt::as_string(value));
+  using text_type = compat::remove_cvref_t<storage_type>;
+  static_assert(std::is_same<char, typename text_type::value_type>::value,
+    "Ryml string mapping requires char text; provide as_string and "
+    "assign_string conversions for non-char strings.");
+  using view_type = compat::basic_string_view<typename text_type::value_type,
+    typename text_type::traits_type>;
+  // Owning conversions are temporary: copy them even in a reference tree.
+  constexpr bool borrows_source = std::is_lvalue_reference<storage_type>::value
+    || std::is_same<text_type, view_type>::value;
+  const c4::csubstr scalar{text.data(), text.size()};
+  if (diagnostics.borrow_strings && borrows_source)
+    node.set_val(scalar);
   else
-    node.set_serialized(text);
+    node.set_serialized(scalar);
   node.set_val_style(::ryml::VAL_DQUO);
 }
 
@@ -597,7 +608,15 @@ auto to_string_like::operator()(::ryml::ConstNodeRef node,
     return false;
   }
 
-  cp::assign_string<T>{}(into, node.val());
+  const auto scalar = node.val();
+  using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
+    std::declval<const T &>()))>;
+  static_assert(std::is_same<char, typename storage_type::value_type>::value,
+    "Ryml string mapping requires char text; provide as_string and "
+    "assign_string conversions for non-char strings.");
+  using view_type = compat::basic_string_view<typename storage_type::value_type,
+    typename storage_type::traits_type>;
+  adapt::assign_string(into, view_type{scalar.str, scalar.len});
   return true;
 }
 
@@ -680,9 +699,9 @@ template <typename T>
 auto from_optional_like::operator()(const T &value,
   ::ryml::NodeRef node,
   omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>()> {
-  if (value) {
-    core::write_node(*value, node, diagnostics);
+  -> compat::enable_if_t<traits::is_optional<T>::value> {
+  if (adapt::has_value(value)) {
+    core::write_node(adapt::get_value(value), node, diagnostics);
   } else {
     node.set_val("null");
     node.set_val_style(::ryml::VAL_PLAIN);
@@ -693,11 +712,11 @@ template <typename T>
 auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   T *into,
   omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>(), bool> {
+  -> compat::enable_if_t<traits::is_optional<T>::value, bool> {
   if (!node.is_container() && node.val_is_null()
     && (!node.has_val_tag()
       || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {
-    into->reset();
+    adapt::reset(into);
     return true;
   }
 
@@ -705,10 +724,7 @@ auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   if (!core::read_node(node, &value, diagnostics))
     return false;
 
-  // FIXME: [high] [external] Remove tl_optional-emplace.patch after an upstream
-  // fix. Unpatched tl::optional 1.1.0 calls value(), whose explicit throw fails
-  // under -fno-exceptions even for non-throwing T; fetched copies are patched.
-  into->emplace(std::move(value));
+  adapt::emplace(into, std::move(value));
   return true;
 }
 
@@ -827,12 +843,12 @@ struct cpp11_require_member {
       && field.has_default_value_access())
       return;
 
-    if ((is_optional_like<typename omni::data_member_meta_t<_F>::type>::value
+    using member_type = typename omni::data_member_meta_t<_F>::type;
+    if ((traits::is_optional<member_type>::value
           || (recovery
             && (*recovery & json::recovery_policy::default_initializable)
               == json::recovery_policy::default_initializable))
-      && std::is_default_constructible<
-        typename omni::data_member_meta_t<_F>::type>::value) {
+      && std::is_default_constructible<member_type>::value) {
       initialize_missing(field);
       return;
     }
@@ -976,7 +992,7 @@ template <typename T>
 auto from_record::operator()(const T &value,
   ::ryml::NodeRef node,
   omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>()> {
+  -> compat::enable_if_t<omni::is_reflected_record<T>::value> {
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()

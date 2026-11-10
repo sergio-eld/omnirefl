@@ -181,6 +181,52 @@ using std::apply;
 using detail::apply;
 #endif
 
+// conditional_t
+#if OMNI_CPLUSPLUS >= 201402L
+using std::conditional_t;
+#else
+template <bool B, class T, class F>
+using conditional_t = typename std::conditional<B, T, F>::type;
+#endif
+
+// conjunction
+#if defined(__cpp_lib_logical_traits) && 201510L <= __cpp_lib_logical_traits
+using std::conjunction;
+#else
+template <typename...>
+struct conjunction: std::true_type {};
+
+template <typename First>
+struct conjunction<First>: First {};
+
+template <typename First, typename... Rest>
+struct conjunction<First, Rest...>:
+    conditional_t<bool(First::value), conjunction<Rest...>, First> {};
+#endif
+
+// disjunction
+#if OMNI_CPLUSPLUS >= 201703L
+using std::disjunction;
+#else
+template <class...>
+struct disjunction: std::false_type {};
+
+template <class B1>
+struct disjunction<B1>: B1 {};
+
+template <class B1, class... Bn>
+struct disjunction<B1, Bn...>:
+    conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
+#endif
+
+// negation
+#if OMNI_CPLUSPLUS >= 201703L
+using std::negation;
+#else
+template <typename Trait>
+struct negation: std::integral_constant<bool, !bool(Trait::value)> {};
+#endif
+
 // invoke
 #if defined(__cpp_lib_constexpr_functional) \
   && 201907L <= __cpp_lib_constexpr_functional
@@ -196,9 +242,8 @@ struct is_reference_wrapper<std::reference_wrapper<T>>: std::true_type {};
 
 template <typename Class, typename Object>
 struct is_member_owner:
-    std::integral_constant<bool,
-      std::is_same<Class, decay_t<Object>>::value
-        || std::is_base_of<Class, decay_t<Object>>::value> {};
+    disjunction<std::is_same<Class, decay_t<Object>>,
+      std::is_base_of<Class, decay_t<Object>>> {};
 
 } // namespace detail
 
@@ -338,14 +383,6 @@ using std::enable_if_t;
 #else
 template <bool Condition, typename T = void>
 using enable_if_t = typename std::enable_if<Condition, T>::type;
-#endif
-
-// conditional_t
-#if OMNI_CPLUSPLUS >= 201402L
-using std::conditional_t;
-#else
-template <bool B, class T, class F>
-using conditional_t = typename std::conditional<B, T, F>::type;
 #endif
 
 // bind_front
@@ -547,36 +584,6 @@ typename std::enable_if<std::is_array<T>::value && 0 == std::extent<T>::value,
 template <typename T, typename... Argument>
 typename std::enable_if<0 != std::extent<T>::value>::type make_unique(
   Argument &&...) = delete;
-#endif
-
-// conjunction
-#if defined(__cpp_lib_logical_traits) && 201510L <= __cpp_lib_logical_traits
-using std::conjunction;
-#else
-template <typename...>
-struct conjunction: std::true_type {};
-
-template <typename First>
-struct conjunction<First>: First {};
-
-template <typename First, typename... Rest>
-struct conjunction<First, Rest...>:
-    conditional_t<bool(First::value), conjunction<Rest...>, First> {};
-#endif
-
-// disjunction
-#if OMNI_CPLUSPLUS >= 201703L
-using std::disjunction;
-#else
-template <class...>
-struct disjunction: std::false_type {};
-
-template <class B1>
-struct disjunction<B1>: B1 {};
-
-template <class B1, class... Bn>
-struct disjunction<B1, Bn...>:
-    conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
 #endif
 
 // remove_cvref / remove_cvref_t

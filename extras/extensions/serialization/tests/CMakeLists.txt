@@ -20,7 +20,7 @@ foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.extensions.serialization")
     add_executable(${_test_target} test.cpp scalar_roots.cpp sequence_roots.cpp
         json_mapping.cpp alias_mapping.cpp string_mapping.cpp
-        container_discovery.cpp)
+        container_discovery.cpp optional_mapping.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES

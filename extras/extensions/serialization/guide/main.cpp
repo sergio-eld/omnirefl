@@ -57,7 +57,7 @@
  *   customization_mapping_limits.collects_default_and_custom_conversion_errors
  *     report conversion failures and apply core error limits
  *   customization_optional_mapping.maps_nullable_values - null and conversion
- *   customization_mapping.user_optional_trait_reuses_mapping_adapters
+ *   customization_mapping.user_optional_operations_reuse_mapping_adapters
  *     opt in a custom wrapper through its standard-like interface
  *   customization_mapping.omits_empty_optional_sequence_elements
  *     skip empty wrappers without dropping present zero values
@@ -737,7 +737,7 @@ struct integer {
   int value;
 };
 
-// A custom optional template opts in through is_optional_like.
+// Adapt the engagement check without changing the optional type.
 template <typename T>
 struct optional_value {
   using value_type = T;
@@ -788,11 +788,21 @@ struct extended_values: std::vector<int> {
 } // namespace customization_mapping
 
 namespace omni {
-namespace ryml {
-template <typename T>
-struct is_optional_like<customization_mapping::optional_value<T>>:
-    std::true_type {};
+namespace traits {
+namespace cp {
 
+// Adapt engagement; other operations use their member-based defaults.
+template <typename T>
+struct has_value<customization_mapping::optional_value<T>> {
+  bool operator()(const customization_mapping::optional_value<T> &value) const {
+    return static_cast<bool>(value);
+  }
+};
+
+} // namespace cp
+} // namespace traits
+
+namespace ryml {
 namespace cp {
 
 template <typename T, typename Compare, typename Allocator>
@@ -1204,7 +1214,7 @@ INSTANTIATE_TEST_SUITE_P(nullable,
     return info.param.name;
   });
 
-TEST(customization_mapping, user_optional_trait_reuses_mapping_adapters) {
+TEST(customization_mapping, user_optional_operations_reuse_mapping_adapters) {
   const auto result = omni::ryml::deserialize(
     omni::type_t<customization_mapping::optional_value<int>>{}, "7");
   EXPECT_TRUE(result.value);
