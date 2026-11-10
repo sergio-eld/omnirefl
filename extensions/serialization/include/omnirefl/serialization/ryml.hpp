@@ -1,5 +1,10 @@
 #pragma once
 
+// TODO: [high] Document that users must not modify source strings or string
+// containers during serialization calls. Borrowed character storage must stay
+// valid and unchanged until emission completes, including mutable members and
+// storage exposed by custom iterators; a const reference cannot guarantee this.
+
 #if !defined(OMNI_TOOL_RUN) \
   && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
 #  error \
@@ -826,7 +831,9 @@ struct to_optional_like {
     -> compat::enable_if_t<supports<T>(), bool>;
 };
 
-/** Write iterable elements as a sequence, omitting empty optionals. */
+/** Write iterable elements as a sequence, omitting empty optionals.
+ * Non-scalar C++ elements must be exposed as lvalue references to value_type;
+ * default mapping rejects temporary-producing iterators in both tree modes. */
 struct from_container {
   template <typename T>
   static constexpr bool supports() { return is_container<T>::value; }

@@ -717,15 +717,30 @@ auto from_container::operator()(const T &value,
   ::ryml::NodeRef node,
   omni::ryml::detail::mapping_context &diagnostics) const
   -> compat::enable_if_t<supports<T>()> {
+  using element_type = typename T::value_type;
+  using element_reference = decltype(*value.begin());
+
+  // Materialized non-scalar elements may own strings borrowed by the tree.
+  static_assert(compat::disjunction<std::is_scalar<element_type>,
+    compat::conjunction<std::is_lvalue_reference<element_reference>,
+      std::is_same<element_type,
+        compat::remove_cvref_t<element_reference>>>>::value,
+    "Default container serialization requires lvalue references to value_type "
+    "for non-scalar C++ elements; specialize cp::from_type for value-producing "
+    "or converting-proxy iterators.");
+
   node.set_seq();
   // Use value_type so packed containers' proxy references map as their values.
-  for (const typename T::value_type &element : value) {
+  for (const element_type &element : value) {
     if (diagnostics.stopped())
       break;
 
     if (!detail::is_null(element))
       core::write_node(element, node.append_child(), diagnostics);
   }
+
+  // TODO: [medium] Consider supporting generators and temporary-producing
+  // iterators by copying materialized elements' strings into tree storage.
 }
 
 template <typename T>
