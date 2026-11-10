@@ -219,58 +219,78 @@ struct has_callable_accessor<Field,
   omni::compat::void_t<decltype(Field::callable_metadata())>>:
     std::true_type {};
 
+struct callable_field_queries {
+  std::vector<std::pair<std::string, bool>> has_callable_metadata;
+  std::vector<std::pair<std::string, bool>> callable_accessor_available;
+};
+
 struct inspect_field_metadata {
-  template <typename... _M>
-  std::vector<std::pair<bool, bool>> operator()(
-    omni::data_member_meta_t<_M>... field) const {
+  template <typename... _F>
+  callable_field_queries operator()(
+    omni::data_member_meta_t<_F>... field) const {
 #if defined(__cpp_concepts)
     static_assert((omni::data_member_meta<decltype(field)> && ...));
 #endif
-    return {{field.has_callable_metadata(),
-      has_callable_accessor<decltype(field)>::value}...};
+    return {
+      /*has_callable_metadata=*/{
+        {field.name(), field.has_callable_metadata()}...,
+      },
+      /*callable_accessor_available=*/{
+        {field.name(), has_callable_accessor<decltype(field)>::value}...,
+      },
+    };
   }
 };
 
 struct inspect_field_bindings {
-  template <typename Record, typename... _M>
-  std::vector<std::pair<bool, bool>> operator()(
-    omni::data_member_binding_t<Record, _M>... field) const {
+  template <typename Record, typename... _F>
+  callable_field_queries operator()(
+    omni::data_member_binding_t<Record, _F>... field) const {
 #if defined(__cpp_concepts)
     static_assert((omni::data_member_binding<decltype(field)> && ...));
 #endif
-    return {{field.has_callable_metadata(),
-      has_callable_accessor<decltype(field)>::value}...};
+    return {
+      /*has_callable_metadata=*/{
+        {field.name(), field.has_callable_metadata()}...,
+      },
+      /*callable_accessor_available=*/{
+        {field.name(), has_callable_accessor<decltype(field)>::value}...,
+      },
+    };
   }
 };
 
-struct inspect_metadata_contract {
+struct inspect_field_contract {
   template <typename _M>
-  std::vector<std::pair<bool, bool>> operator()(
-    omni::record_meta_t<_M> record) const {
+  callable_field_queries operator()(omni::record_meta_t<_M> record) const {
     return omni::compat::apply(inspect_field_metadata{},
       record.accessible_data_members());
   }
-};
 
-struct inspect_binding_contract {
   template <typename T>
-  std::vector<std::pair<bool, bool>> operator()(
-    omni::record_binding_t<T> record) const {
+  callable_field_queries operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(inspect_field_bindings{},
       record.accessible_data_members());
   }
 };
 
+struct callable_type_queries {
+  bool preserves_field_type;
+  int invoked_result;
+};
+
 struct inspect_callable_type {
   template <typename _M>
-  std::pair<bool, int> operator()(omni::record_meta_t<_M> record) const {
+  callable_type_queries operator()(omni::record_meta_t<_M> record) const {
     const auto field = std::get</*callable_field=*/0>(record.accessible_data_members());
     const auto callable = field.callable_metadata();
 #if defined(__cpp_concepts)
     static_assert(omni::function_meta<decltype(callable)>);
 #endif
     return {
+      /*preserves_field_type=*/
       std::is_same<create_function, typename decltype(field)::type>::value,
+      /*invoked_result=*/
       omni::compat::invoke(callable.pointer(), request{815}, false, nullptr).id,
     };
   }
@@ -565,25 +585,28 @@ struct inspect_field_count {
 
 } // namespace function_metadata_test
 
-TEST(function_metadata, callable_tags_remain_fields) {
+template <typename T>
+class callable_field_contract: public testing::Test {};
+
+using callable_field_routes = testing::Types<
+  omni::type_t<function_metadata_test::mixed_fields>,
+  function_metadata_test::mixed_fields,
+  omni::type_t<function_metadata_test::inherited_fields>,
+  function_metadata_test::inherited_fields>;
+TYPED_TEST_SUITE(callable_field_contract, callable_field_routes);
+
+TYPED_TEST(callable_field_contract, callable_tags_remain_fields) {
   namespace fm = function_metadata_test;
+  const auto result = omni::reflected_call(fm::inspect_field_contract{},
+    TypeParam{});
+  const std::vector<std::pair<std::string, bool>> expected{
+    {"operation", true},
+    {"value", false},
+    {"functor", false},
+  };
 
-  // Each entry checks the capability query and SFINAE accessor availability.
-  const std::vector<std::pair<bool, bool>> expected{{true, true},
-    {false, false},
-    {false, false}};
-
-  EXPECT_EQ(expected,
-    omni::reflected_call(fm::inspect_metadata_contract{},
-      omni::type_t<fm::mixed_fields>{}));
-  EXPECT_EQ(expected,
-    omni::reflected_call(fm::inspect_binding_contract{}, fm::mixed_fields{}));
-  EXPECT_EQ(expected,
-    omni::reflected_call(fm::inspect_metadata_contract{},
-      omni::type_t<fm::inherited_fields>{}));
-  EXPECT_EQ(expected,
-    omni::reflected_call(fm::inspect_binding_contract{},
-      fm::inherited_fields{}));
+  EXPECT_EQ(expected, result.has_callable_metadata);
+  EXPECT_EQ(expected, result.callable_accessor_available);
 }
 
 TEST(function_metadata, callable_field_preserves_type_and_function_access) {
@@ -592,8 +615,8 @@ TEST(function_metadata, callable_field_preserves_type_and_function_access) {
   const auto result = omni::reflected_call(fm::inspect_callable_type{},
     omni::type_t<fm::mixed_fields>{});
 
-  EXPECT_TRUE(result.first);
-  EXPECT_EQ(815, result.second);
+  EXPECT_TRUE(result.preserves_field_type);
+  EXPECT_EQ(815, result.invoked_result);
 }
 
 TEST(function_metadata, binds_accessible_non_overloaded_member_functions) {

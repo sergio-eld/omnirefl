@@ -2,6 +2,7 @@
 #include <omnirefl/reflected_scope.hpp>
 
 #include <cstdint>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -127,15 +128,17 @@ struct inherited_bitfields: bitfield_record {};
 
 struct bitfield_flags {
   template <typename... Field>
-  std::vector<bool> operator()(Field...) const {
+  std::vector<std::pair<std::string, bool>> operator()(Field... field) const {
     // Require a constant expression, including in C++11.
-    return {std::integral_constant<bool, Field::is_bitfield()>::value...};
+    return {{field.name(),
+      std::integral_constant<bool, Field::is_bitfield()>::value}...};
   }
 };
 
 struct inspect_bitfield_metadata {
   template <typename _M>
-  std::vector<bool> operator()(omni::record_meta_t<_M> record) const {
+  std::vector<std::pair<std::string, bool>> operator()(
+    omni::record_meta_t<_M> record) const {
     return omni::compat::apply(bitfield_flags{},
       record.accessible_data_members());
   }
@@ -143,7 +146,8 @@ struct inspect_bitfield_metadata {
 
 struct inspect_bitfield_bindings {
   template <typename T>
-  std::vector<bool> operator()(omni::record_binding_t<T> record) const {
+  std::vector<std::pair<std::string, bool>> operator()(
+    omni::record_binding_t<T> record) const {
     return omni::compat::apply(bitfield_flags{},
       record.accessible_data_members());
   }
@@ -184,8 +188,8 @@ struct bitfield_widths {
 
 struct width_availability {
   template <typename... Field>
-  std::vector<bool> operator()(Field...) const {
-    return {can_bit_width<Field>::value...};
+  std::vector<std::pair<std::string, bool>> operator()(Field... field) const {
+    return {{field.name(), can_bit_width<Field>::value}...};
   }
 };
 
@@ -199,7 +203,8 @@ struct inspect_widths {
 
 struct inspect_width_availability {
   template <typename _M>
-  std::vector<bool> operator()(omni::record_meta_t<_M> record) const {
+  std::vector<std::pair<std::string, bool>> operator()(
+    omni::record_meta_t<_M> record) const {
     return omni::compat::apply(width_availability{},
       record.accessible_data_members());
   }
@@ -229,7 +234,14 @@ TEST(fields, packed_reference_field_preserves_referent) {
 }
 
 TEST(fields, bitfield_query_identifies_declarations_and_inherited_members) {
-  const std::vector<bool> expected{true, true, true, false, false, false};
+  const std::vector<std::pair<std::string, bool>> expected{
+    {"signed_value", true},
+    {"count", true},
+    {"flag", true},
+    {"ordinary", false},
+    {"reference", false},
+    {"shared", false},
+  };
 
   EXPECT_EQ(expected,
     omni::reflected_call(packed_field_test::inspect_bitfield_metadata{},
@@ -242,14 +254,29 @@ TEST(fields, bitfield_query_identifies_declarations_and_inherited_members) {
 TEST(fields, bitfield_query_is_inherited_by_bindings) {
   int value = 7;
   packed_field_test::bitfield_record input{3, 5, 1, 11, value};
+  const std::vector<std::pair<std::string, bool>> expected{
+    {"signed_value", true},
+    {"count", true},
+    {"flag", true},
+    {"ordinary", false},
+    {"reference", false},
+    {"shared", false},
+  };
 
-  EXPECT_EQ((std::vector<bool>{true, true, true, false, false, false}),
+  EXPECT_EQ(expected,
     omni::reflected_call(packed_field_test::inspect_bitfield_bindings{},
       input));
 }
 
 TEST(fields, packed_members_are_not_bitfields) {
-  EXPECT_EQ((std::vector<bool>{false, false, false, false}),
+  const std::vector<std::pair<std::string, bool>> expected{
+    {"marker", false},
+    {"value", false},
+    {"values", false},
+    {"matrix", false},
+  };
+
+  EXPECT_EQ(expected,
     omni::reflected_call(packed_field_test::inspect_bitfield_metadata{},
       omni::type_t<packed_field_test::record>{}));
 }
@@ -273,16 +300,33 @@ TEST(fields, bitfield_width_is_inherited_by_bindings) {
 }
 
 TEST(fields, bitfield_width_is_unavailable_for_other_member_declarations) {
-  EXPECT_EQ((std::vector<bool>{true, true, true, false, false, false}),
+  const std::vector<std::pair<std::string, bool>> bitfield_width_access{
+    {"signed_value", true},
+    {"count", true},
+    {"flag", true},
+    {"ordinary", false},
+    {"reference", false},
+    {"shared", false},
+  };
+  const std::vector<std::pair<std::string, bool>> packed_width_access{
+    {"marker", false},
+    {"value", false},
+    {"values", false},
+    {"matrix", false},
+  };
+
+  EXPECT_EQ(bitfield_width_access,
     omni::reflected_call(packed_field_test::inspect_width_availability{},
       omni::type_t<packed_field_test::bitfield_record>{}));
-  EXPECT_EQ((std::vector<bool>{false, false, false, false}),
+  EXPECT_EQ(packed_width_access,
     omni::reflected_call(packed_field_test::inspect_width_availability{},
       omni::type_t<packed_field_test::record>{}));
 }
 
 TEST(fields, bitfield_width_is_unavailable_for_dependent_expressions) {
-  const std::vector<bool> expected{true, false};
+  const std::vector<std::pair<std::string, bool>> expected{
+    {"fixed", true}, {"variable", false},
+  };
 
   EXPECT_EQ(expected,
     omni::reflected_call(packed_field_test::inspect_width_availability{},

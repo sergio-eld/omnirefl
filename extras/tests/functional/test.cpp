@@ -1992,13 +1992,9 @@ TEST(fn_foldl, folds_move_only_values) {
   auto result = omni::fn::foldl(add_owned{},
     omni::compat::make_unique<int>(0),
     std::move(tuple));
-  std::vector<bool> source_empty;
-  omni::fn::each(
-    [&source_empty](
-      const std::unique_ptr<int> &source) { source_empty.push_back(!source); },
-    tuple);
-
-  EXPECT_EQ((std::vector<bool>{true, true, true}), source_empty);
+  EXPECT_FALSE(std::get<0>(tuple));
+  EXPECT_FALSE(std::get<1>(tuple));
+  EXPECT_FALSE(std::get<2>(tuple));
   EXPECT_EQ(42, result ? *result : 0);
 }
 
@@ -2163,13 +2159,9 @@ TEST(fn_foldr, moves_a_stable_accumulator) {
   auto result = omni::fn::foldr(add_owned{},
     omni::compat::make_unique<int>(0),
     std::move(tuple));
-  std::vector<bool> source_empty;
-  omni::fn::each(
-    [&source_empty](
-      const std::unique_ptr<int> &source) { source_empty.push_back(!source); },
-    tuple);
-
-  EXPECT_EQ((std::vector<bool>{true, true, true}), source_empty);
+  EXPECT_FALSE(std::get<0>(tuple));
+  EXPECT_FALSE(std::get<1>(tuple));
+  EXPECT_FALSE(std::get<2>(tuple));
   EXPECT_EQ(42, result ? *result : 0);
 }
 

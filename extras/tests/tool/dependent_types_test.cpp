@@ -1200,13 +1200,21 @@ struct record {
   T value;
 };
 
+struct qualifier_queries {
+  bool is_const;
+  bool is_volatile;
+};
+
 struct inspect {
   template <typename _M>
-  std::pair<bool, bool> operator()(omni::record_meta_t<_M> meta) const {
+  qualifier_queries operator()(omni::record_meta_t<_M> meta) const {
     const auto member =
       std::get</*value=*/0>(meta.accessible_data_members());
 
-    return {member.is_const(), member.is_volatile()};
+    return {
+      /*is_const=*/member.is_const(),
+      /*is_volatile=*/member.is_volatile(),
+    };
   }
 };
 
@@ -1220,57 +1228,68 @@ struct static_record {
 TEST(dependent_types, qualifiers_follow_each_primary_template_specialization) {
   namespace fields = dependent_field_qualifiers;
 
-  EXPECT_EQ(std::make_pair(false, false),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<int>>{}));
+  const auto unqualified = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<int>>{});
+  EXPECT_FALSE(unqualified.is_const);
+  EXPECT_FALSE(unqualified.is_volatile);
 
-  EXPECT_EQ(std::make_pair(true, false),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<const int>>{}));
+  const auto const_member = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<const int>>{});
+  EXPECT_TRUE(const_member.is_const);
+  EXPECT_FALSE(const_member.is_volatile);
 
-  EXPECT_EQ(std::make_pair(false, true),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<volatile int>>{}));
+  const auto volatile_member = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<volatile int>>{});
+  EXPECT_FALSE(volatile_member.is_const);
+  EXPECT_TRUE(volatile_member.is_volatile);
 
-  EXPECT_EQ(std::make_pair(true, true),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<const volatile int>>{}));
+  const auto cv_member = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<const volatile int>>{});
+  EXPECT_TRUE(cv_member.is_const);
+  EXPECT_TRUE(cv_member.is_volatile);
 }
 
 TEST(dependent_types, qualifiers_describe_declared_types) {
   namespace fields = dependent_field_qualifiers;
 
-  EXPECT_EQ(std::make_pair(false, false),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<const fields::record<int>>{}));
+  const auto const_record = omni::reflected_call(fields::inspect{},
+    omni::type_t<const fields::record<int>>{});
+  EXPECT_FALSE(const_record.is_const);
+  EXPECT_FALSE(const_record.is_volatile);
 
-  EXPECT_EQ(std::make_pair(false, false),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<const volatile int *>>{}));
+  const auto pointer_to_cv = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<const volatile int *>>{});
+  EXPECT_FALSE(pointer_to_cv.is_const);
+  EXPECT_FALSE(pointer_to_cv.is_volatile);
 
-  EXPECT_EQ(std::make_pair(true, true),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<int *const volatile>>{}));
+  const auto cv_pointer = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<int *const volatile>>{});
+  EXPECT_TRUE(cv_pointer.is_const);
+  EXPECT_TRUE(cv_pointer.is_volatile);
 
-  EXPECT_EQ(std::make_pair(false, false),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<const volatile int &>>{}));
+  const auto reference_to_cv = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<const volatile int &>>{});
+  EXPECT_FALSE(reference_to_cv.is_const);
+  EXPECT_FALSE(reference_to_cv.is_volatile);
 
-  EXPECT_EQ(std::make_pair(true, true),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::record<const volatile int[2]>>{}));
+  const auto cv_array = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::record<const volatile int[2]>>{});
+  EXPECT_TRUE(cv_array.is_const);
+  EXPECT_TRUE(cv_array.is_volatile);
 }
 
 TEST(dependent_types, static_member_qualifiers_follow_each_specialization) {
   namespace fields = dependent_field_qualifiers;
 
-  EXPECT_EQ(std::make_pair(false, false),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::static_record<int>>{}));
+  const auto unqualified = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::static_record<int>>{});
+  EXPECT_FALSE(unqualified.is_const);
+  EXPECT_FALSE(unqualified.is_volatile);
 
-  EXPECT_EQ(std::make_pair(true, true),
-    omni::reflected_call(fields::inspect{},
-      omni::type_t<fields::static_record<const volatile int>>{}));
+  const auto cv_member = omni::reflected_call(fields::inspect{},
+    omni::type_t<fields::static_record<const volatile int>>{});
+  EXPECT_TRUE(cv_member.is_const);
+  EXPECT_TRUE(cv_member.is_volatile);
 }
 
 } // namespace

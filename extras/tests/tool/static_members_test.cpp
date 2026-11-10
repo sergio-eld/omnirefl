@@ -277,18 +277,28 @@ struct update_static {
   }
 };
 
+struct initializer_queries {
+  std::vector<std::pair<std::string, bool>> has_default_member_initializer;
+  std::vector<std::pair<std::string, bool>> has_default_value_access;
+};
+
 struct initializer_properties {
   template <typename... Field>
-  std::vector<std::pair<bool, bool>> operator()(Field... field) const {
-    return {{field.has_default_member_initializer(),
-      field.has_default_value_access()}...};
+  initializer_queries operator()(Field... field) const {
+    return {
+      /*has_default_member_initializer=*/{
+        {field.name(), field.has_default_member_initializer()}...,
+      },
+      /*has_default_value_access=*/{
+        {field.name(), field.has_default_value_access()}...,
+      },
+    };
   }
 };
 
 struct inspect_initializers {
   template <typename _M>
-  std::vector<std::pair<bool, bool>> operator()(
-    omni::record_meta_t<_M> record) const {
+  initializer_queries operator()(omni::record_meta_t<_M> record) const {
     return omni::compat::apply(initializer_properties{},
       record.accessible_data_members());
   }
@@ -348,17 +358,26 @@ struct inspect_static_dependency {
   }
 };
 
+struct tag_queries {
+  std::vector<std::pair<std::string, bool>> data_member_is_static;
+  std::vector<std::pair<std::string, bool>> callable_is_static;
+};
+
 struct inspect_tag_properties {
   template <typename... Field>
-  std::vector<std::pair<bool, bool>> operator()(Field... field) const {
-    return {{field.is_static(), field.callable_metadata().is_static()}...};
+  tag_queries operator()(Field... field) const {
+    return {
+      /*data_member_is_static=*/{{field.name(), field.is_static()}...},
+      /*callable_is_static=*/{
+        {field.name(), field.callable_metadata().is_static()}...,
+      },
+    };
   }
 };
 
 struct inspect_tags {
   template <typename _M>
-  std::vector<std::pair<bool, bool>> operator()(
-    omni::record_meta_t<_M> record) const {
+  tag_queries operator()(omni::record_meta_t<_M> record) const {
     return omni::compat::apply(inspect_tag_properties{},
       record.accessible_data_members());
   }
@@ -434,12 +453,14 @@ TEST(static_members, writes_shared_state_through_a_const_record) {
 }
 
 TEST(static_members, static_initializers_are_not_default_member_initializers) {
-  const std::vector<std::pair<bool, bool>> expected{{true, true},
-    {false, false}};
+  const auto result = omni::reflected_call(inspect_initializers{},
+    omni::type_t<defaulted_record>{});
+  const std::vector<std::pair<std::string, bool>> expected{
+    {"local", true}, {"shared", false},
+  };
 
-  EXPECT_EQ(expected,
-    omni::reflected_call(inspect_initializers{},
-      omni::type_t<defaulted_record>{}));
+  EXPECT_EQ(expected, result.has_default_member_initializer);
+  EXPECT_EQ(expected, result.has_default_value_access);
 }
 
 TEST(static_members, ignores_statics_when_constructing_an_aggregate) {
@@ -471,11 +492,13 @@ TEST(static_members, discovers_static_function_signature_types) {
 }
 
 TEST(static_members, distinguishes_a_tag_field_from_its_callable) {
-  const std::vector<std::pair<bool, bool>> expected{
-    {false, true}, {true, true}};
+  const auto result = omni::reflected_call(inspect_tags{},
+    omni::type_t<tagged_functions>{});
 
-  EXPECT_EQ(expected,
-    omni::reflected_call(inspect_tags{}, omni::type_t<tagged_functions>{}));
+  EXPECT_EQ((std::vector<std::pair<std::string, bool>>{
+    {"local", false}, {"shared", true}}), result.data_member_is_static);
+  EXPECT_EQ((std::vector<std::pair<std::string, bool>>{
+    {"local", true}, {"shared", true}}), result.callable_is_static);
 }
 
 TEST(static_members, discovers_static_data_member_types) {

@@ -2,7 +2,6 @@
 #include <omnirefl/reflected_scope.hpp>
 
 #include <tuple>
-#include <utility>
 
 namespace diagnostic_local_return {
 
@@ -20,14 +19,21 @@ struct record {
   }
 };
 
+struct dependency_queries {
+  bool parameter_is_reflected;
+  bool return_type_is_reflected;
+};
+
 struct inspect_function {
   template <typename Function>
-  std::pair<bool, bool> operator()(Function) const {
+  dependency_queries operator()(Function) const {
     using parameter = typename std::tuple_element</*parameter=*/0,
       typename Function::parameters_t>::type;
 
     return {
+      /*parameter_is_reflected=*/
       omni::is_reflected<typename parameter::type>::value,
+      /*return_type_is_reflected=*/
       omni::is_reflected<typename Function::return_type>::value,
     };
   }
@@ -35,7 +41,7 @@ struct inspect_function {
 
 struct inspect {
   template <typename _M>
-  std::pair<bool, bool> operator()(omni::record_meta_t<_M> meta) const {
+  dependency_queries operator()(omni::record_meta_t<_M> meta) const {
     return omni::compat::apply(inspect_function{},
       meta.accessible_member_functions());
   }
@@ -49,6 +55,6 @@ TEST(diagnostic, local_member_return_preserves_parameter_dependencies) {
   const auto reflected = omni::reflected_call(example::inspect{},
     omni::type_t<example::record>{});
 
-  EXPECT_TRUE(reflected.first); // Parameter record receives metadata.
-  EXPECT_FALSE(reflected.second); // Function-local return record does not.
+  EXPECT_TRUE(reflected.parameter_is_reflected);
+  EXPECT_FALSE(reflected.return_type_is_reflected);
 }
