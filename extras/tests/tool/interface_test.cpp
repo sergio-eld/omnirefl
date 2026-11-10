@@ -348,15 +348,20 @@ struct binding_type_name {
   }
 };
 
+struct enum_ownership_queries {
+  bool lvalue_owns_value;
+  bool rvalue_owns_value;
+};
+
 struct enum_rebinding_ownership {
   template <typename T>
-  std::pair<bool, bool> operator()(omni::enum_binding_t<T> enumeration) const {
+  enum_ownership_queries operator()(omni::enum_binding_t<T> enumeration) const {
     const auto referenced = omni::reflected(enumeration.value());
     const auto owned = omni::reflected(std::move(enumeration).value());
 
     return {
-      decltype(referenced)::owning::value,
-      decltype(owned)::owning::value,
+      /*lvalue_owns_value=*/decltype(referenced)::owning::value,
+      /*rvalue_owns_value=*/decltype(owned)::owning::value,
     };
   }
 };
@@ -753,8 +758,8 @@ TEST(bindings, reflected_enum_value_preserves_ownership_semantics) {
   const auto ownership = omni::reflected_call(
     interface_test::metadata_contract::enum_rebinding_ownership{}, value);
 
-  EXPECT_FALSE(ownership.first);
-  EXPECT_TRUE(ownership.second);
+  EXPECT_FALSE(ownership.lvalue_owns_value);
+  EXPECT_TRUE(ownership.rvalue_owns_value);
 }
 
 TEST(bindings, exception_specification_matches_stored_value_construction) {

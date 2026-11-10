@@ -1268,7 +1268,7 @@ TEST(fn_as, owns_a_move_only_lazy_conversion) {
 }
 
 TEST(fn_concat, concatenates_eager_lazy_and_piped_tuples) {
-  const std::tuple<int, std::string> left{42, "value"};
+  const auto left = std::make_tuple(42, std::string{"value"});
   const std::pair<double, long> right{2.5, 815};
   const auto append = omni::fn::concat(right);
 
@@ -1276,20 +1276,14 @@ TEST(fn_concat, concatenates_eager_lazy_and_piped_tuples) {
   const auto called = append(left);
   const auto piped = left | append;
 
-  EXPECT_EQ( //
-    (std::tuple<int, std::string, double, long>{42, "value", 2.5, 815}),
-    eager);
+  EXPECT_EQ(std::make_tuple(42, std::string{"value"}, 2.5, 815L), eager);
   EXPECT_EQ(eager, called);
   EXPECT_EQ(eager, piped);
 }
 
 TEST(fn_concat, moves_elements_from_rvalue_tuples) {
-  std::tuple<std::unique_ptr<int>> left{
-    omni::compat::make_unique<int>(20),
-  };
-  std::tuple<std::unique_ptr<int>> right{
-    omni::compat::make_unique<int>(22),
-  };
+  auto left = std::make_tuple(omni::compat::make_unique<int>(20));
+  auto right = std::make_tuple(omni::compat::make_unique<int>(22));
 
   auto result = omni::fn::concat(std::move(left), std::move(right));
   std::unique_ptr<int> first;
@@ -1325,7 +1319,7 @@ TEST(fn_concat, moves_an_owned_tuple_from_a_lazy_closure) {
 }
 
 TEST(fn_any_of, evaluates_eager_lazy_and_piped_predicates) {
-  const std::tuple<int, int, int> tuple{1, 3, 4};
+  const auto tuple = std::make_tuple(1, 3, 4);
   const auto equals_three = omni::fn::any_of(equals{3});
   std::size_t calls{};
 
@@ -1345,7 +1339,7 @@ TEST(fn_any_of, moves_an_owned_predicate_from_a_lazy_closure) {
 }
 
 TEST(fn_none_of, evaluates_eager_lazy_and_piped_predicates) {
-  const std::tuple<int, int, int> tuple{1, 3, 5};
+  const auto tuple = std::make_tuple(1, 3, 5);
   const auto even = omni::fn::none_of(is_even{});
 
   EXPECT_TRUE(omni::fn::none_of(is_even{}, tuple));
@@ -1363,7 +1357,7 @@ TEST(fn_none_of, moves_an_owned_predicate_from_a_lazy_closure) {
 
 TEST(fn_not, negates_eager_lazy_and_type_predicates) {
   const auto not_three = omni::fn::not_(equals{3});
-  const std::tuple<int, std::string, double> tuple{42, "value", 2.5};
+  const auto tuple = std::make_tuple(42, std::string{"value"}, 2.5);
 
   const auto non_integral =
     tuple | omni::fn::filter(omni::fn::not_(select_integral{}));
@@ -1371,7 +1365,7 @@ TEST(fn_not, negates_eager_lazy_and_type_predicates) {
   EXPECT_TRUE(omni::fn::not_(is_even{}, 3));
   EXPECT_TRUE(not_three(4));
   EXPECT_TRUE(4 | not_three);
-  EXPECT_EQ((std::tuple<std::string, double>{"value", 2.5}), non_integral);
+  EXPECT_EQ(std::make_tuple(std::string{"value"}, 2.5), non_integral);
 }
 
 TEST(fn_not, moves_an_owned_predicate_from_a_lazy_closure) {
@@ -1382,30 +1376,24 @@ TEST(fn_not, moves_an_owned_predicate_from_a_lazy_closure) {
 }
 
 TEST(fn_diff_by, selects_unmatched_types_eager_lazy_and_piped) {
-  const std::tuple<int, std::string, double, long> left{
-    42,
-    "value",
-    2.5,
-    815,
-  };
-  const std::tuple<std::string, long> right{"ignored", 108};
+  const auto left = std::make_tuple(42, std::string{"value"}, 2.5, 815L);
+  const auto right = std::make_tuple(std::string{"ignored"}, 108L);
   const auto without_right_types = omni::fn::diff_by(element_type{}, right);
 
   const auto eager = omni::fn::diff_by(element_type{}, left, right);
   const auto called = without_right_types(left);
   const auto piped = left | without_right_types;
 
-  EXPECT_EQ((std::tuple<int, double>{42, 2.5}), eager);
+  EXPECT_EQ(std::make_tuple(42, 2.5), eager);
   EXPECT_EQ(eager, called);
   EXPECT_EQ(eager, piped);
 }
 
 TEST(fn_diff_by, moves_selected_values_only) {
-  std::tuple<std::unique_ptr<int>, std::string> left{
+  auto left = std::make_tuple(
     omni::compat::make_unique<int>(42),
-    "retained",
-  };
-  const std::tuple<std::string> right{"matched"};
+    std::string{"retained"});
+  const auto right = std::make_tuple(std::string{"matched"});
 
   auto result = std::move(left) | omni::fn::diff_by(element_type{}, right);
   std::unique_ptr<int> selected;
@@ -1434,10 +1422,11 @@ TEST(fn_diff_by, moves_an_owned_right_tuple_from_a_lazy_closure) {
 }
 
 TEST(fn_diff_by, projects_forwarded_tuple_access_categories) {
+  // Keep const element types; make_tuple would decay them.
   std::tuple<const int, int> lvalue{20, 22};
-  std::tuple<int> lvalue_exclusion{0};
+  auto lvalue_exclusion = std::make_tuple(0);
   std::tuple<const int, int> rvalue{20, 22};
-  std::tuple<int> rvalue_exclusion{0};
+  auto rvalue_exclusion = std::make_tuple(0);
 
   const auto from_lvalue =
     omni::fn::diff_by(element_reference_category{}, lvalue, lvalue_exclusion);
@@ -1452,20 +1441,20 @@ TEST(fn_diff_by, projects_forwarded_tuple_access_categories) {
 TEST(fn_filter, accepts_a_standard_unary_type_trait) {
   namespace fn = omni::fn;
 
-  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
+  const auto tuple = std::make_tuple(20, std::string{"ignored"}, 22L);
 
   const auto called = fn::filter<std::is_integral>(tuple);
   const auto piped = tuple | fn::filter<std::is_integral>();
 
-  EXPECT_EQ((std::tuple<int, long>{20, 22}), called);
-  EXPECT_EQ((std::tuple<int, long>{20, 22}), piped);
+  EXPECT_EQ(std::make_tuple(20, 22L), called);
+  EXPECT_EQ(std::make_tuple(20, 22L), piped);
 }
 
 #if OMNI_FN_HAS_NTTP_UNARY
 TEST(fn_filter, lifts_a_structural_predicate_value) {
   namespace fn = omni::fn;
 
-  const std::tuple<char, int, std::array<char, 16>> tuple{'a', 815, {}};
+  const auto tuple = std::make_tuple('a', 815, std::array<char, 16>{});
   constexpr auto below_eight = fn::filter(fn::nttp_unary<select_below{8}>());
 
   const auto filtered = tuple | below_eight;
@@ -1476,20 +1465,20 @@ TEST(fn_filter, lifts_a_structural_predicate_value) {
 TEST(fn_filter, lifts_a_templated_lambda_predicate) {
   namespace fn = omni::fn;
 
-  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
+  const auto tuple = std::make_tuple(20, std::string{"ignored"}, 22L);
 
   const auto filtered =
     tuple | fn::filter(fn::nttp_unary<[]<typename Element>() {
       return std::is_integral_v<std::remove_cvref_t<Element>>;
     }>());
 
-  EXPECT_EQ((std::tuple<int, long>{20, 22}), filtered);
+  EXPECT_EQ(std::make_tuple(20, 22L), filtered);
 }
 
 TEST(fn_filter, accepts_a_structural_predicate_directly) {
   namespace fn = omni::fn;
 
-  const std::tuple<int, std::string, long> tuple{20, "ignored", 22};
+  const auto tuple = std::make_tuple(20, std::string{"ignored"}, 22L);
 
   const auto called = fn::filter<[]<typename Element>() {
     return std::is_integral_v<std::remove_cvref_t<Element>>;
@@ -1498,13 +1487,13 @@ TEST(fn_filter, accepts_a_structural_predicate_directly) {
     return std::is_integral_v<std::remove_cvref_t<Element>>;
   }>();
 
-  EXPECT_EQ((std::tuple<int, long>{20, 22}), called);
-  EXPECT_EQ((std::tuple<int, long>{20, 22}), piped);
+  EXPECT_EQ(std::make_tuple(20, 22L), called);
+  EXPECT_EQ(std::make_tuple(20, 22L), piped);
 }
 #endif
 
 TEST(fn_filter, defers_call_and_pipe_application) {
-  const std::tuple<int, std::string, double> tuple{1, "ignored", 2.5};
+  const auto tuple = std::make_tuple(1, std::string{"ignored"}, 2.5);
   const auto integral = omni::fn::filter(select_integral{});
 
   const auto called = integral(tuple);
@@ -1515,10 +1504,10 @@ TEST(fn_filter, defers_call_and_pipe_application) {
 }
 
 TEST(fn_filter, preserves_tuple_access_categories) {
-  std::tuple<int, double> mutable_lvalue_input{1, 1.5};
-  const std::tuple<int, double> const_lvalue_input{2, 2.5};
-  std::tuple<int, double> mutable_rvalue_input{3, 3.5};
-  const std::tuple<int, double> const_rvalue_input{4, 4.5};
+  auto mutable_lvalue_input = std::make_tuple(1, 1.5);
+  const auto const_lvalue_input = std::make_tuple(2, 2.5);
+  auto mutable_rvalue_input = std::make_tuple(3, 3.5);
+  const auto const_rvalue_input = std::make_tuple(4, 4.5);
 
   const auto mutable_lvalue = omni::fn::filter(
     select_reference_category<reference_category::mutable_lvalue>{},
@@ -1533,10 +1522,10 @@ TEST(fn_filter, preserves_tuple_access_categories) {
     select_reference_category<reference_category::const_rvalue>{},
     std::move(const_rvalue_input));
 
-  EXPECT_EQ((std::tuple<int, double>{1, 1.5}), mutable_lvalue);
-  EXPECT_EQ((std::tuple<int, double>{2, 2.5}), const_lvalue);
-  EXPECT_EQ((std::tuple<int, double>{3, 3.5}), mutable_rvalue);
-  EXPECT_EQ((std::tuple<int, double>{4, 4.5}), const_rvalue);
+  EXPECT_EQ(std::make_tuple(1, 1.5), mutable_lvalue);
+  EXPECT_EQ(std::make_tuple(2, 2.5), const_lvalue);
+  EXPECT_EQ(std::make_tuple(3, 3.5), mutable_rvalue);
+  EXPECT_EQ(std::make_tuple(4, 4.5), const_rvalue);
 }
 
 TEST(fn_filter, supports_standard_tuple_like_types) {
@@ -1547,12 +1536,12 @@ TEST(fn_filter, supports_standard_tuple_like_types) {
   const auto filtered_array = omni::fn::filter(select_integral{}, array);
 
   EXPECT_EQ(std::make_tuple(42), filtered_pair);
-  EXPECT_EQ((std::tuple<int, int, int>{1, 2, 3}), filtered_array);
+  EXPECT_EQ(std::make_tuple(1, 2, 3), filtered_array);
 }
 
 TEST(fn_filter, accepts_empty_and_fully_rejected_tuples) {
   const std::tuple<> empty;
-  const std::tuple<std::string, double> rejected{"ignored", 2.5};
+  const auto rejected = std::make_tuple(std::string{"ignored"}, 2.5);
 
   const auto filtered_empty = omni::fn::filter(select_integral{}, empty);
   const auto filtered_rejected = omni::fn::filter(select_integral{}, rejected);
@@ -1566,10 +1555,9 @@ TEST(fn_filter, accepts_empty_and_fully_rejected_tuples) {
 }
 
 TEST(fn_filter, moves_selected_values_from_an_rvalue_tuple) {
-  std::tuple<std::unique_ptr<int>, std::string> tuple{
+  auto tuple = std::make_tuple(
     omni::compat::make_unique<int>(42),
-    "ignored",
-  };
+    std::string{"ignored"});
 
   auto filtered = omni::fn::filter(select_unique_ptr{}, std::move(tuple));
   std::unique_ptr<int> value;
@@ -1586,7 +1574,7 @@ TEST(fn_filter, moves_selected_values_from_an_rvalue_tuple) {
 }
 
 TEST(fn_filter, invokes_a_named_move_only_closure) {
-  const std::tuple<int, std::string> tuple{42, "ignored"};
+  const auto tuple = std::make_tuple(42, std::string{"ignored"});
   auto integral = omni::fn::filter(move_only_filter{});
 
   const auto filtered = std::move(integral)(tuple);
@@ -1595,7 +1583,7 @@ TEST(fn_filter, invokes_a_named_move_only_closure) {
 }
 
 TEST(fn_each, visits_tuple_elements_in_order) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   std::vector<int> visited;
 
   omni::fn::each([&visited](int value) { visited.push_back(value); }, tuple);
@@ -1604,7 +1592,7 @@ TEST(fn_each, visits_tuple_elements_in_order) {
 }
 
 TEST(fn_each, defers_call_and_pipe_application) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   std::vector<int> called;
   std::vector<int> piped;
   const auto call =
@@ -1629,11 +1617,11 @@ TEST(fn_each, accepts_standard_tuple_like_types) {
 }
 
 TEST(fn_each, invokes_member_function_pointers) {
-  std::tuple<std::string, std::string> tuple{"first", "second"};
+  auto tuple = std::make_tuple(std::string{"first"}, std::string{"second"});
 
   omni::fn::each(&std::string::clear, tuple);
 
-  EXPECT_EQ((std::tuple<std::string, std::string>{"", ""}), tuple);
+  EXPECT_EQ(std::make_tuple(std::string{""}, std::string{""}), tuple);
 }
 
 TEST(fn_each, accepts_an_empty_tuple) {
@@ -1646,27 +1634,20 @@ TEST(fn_each, accepts_an_empty_tuple) {
 }
 
 TEST(fn_each, preserves_rvalue_elements) {
-  std::tuple<std::unique_ptr<int>> tuple{
-    omni::compat::make_unique<int>(42),
-  };
+  auto tuple = std::make_tuple(omni::compat::make_unique<int>(42));
   std::vector<std::unique_ptr<int>> consumed;
 
   omni::fn::each(consume{consumed}, std::move(tuple));
 
-  bool source_empty = false;
-  omni::fn::each(
-    [&source_empty](
-      const std::unique_ptr<int> &value) { source_empty = !value; },
-    tuple);
-
-  EXPECT_TRUE(source_empty);
+  omni::compat::apply(
+    [](const std::unique_ptr<int> &source) { EXPECT_FALSE(source); }, tuple);
   EXPECT_EQ(std::size_t{1}, consumed.size());
   EXPECT_EQ(42, consumed.empty() || !consumed.front() ? 0 : *consumed.front());
 }
 
 TEST(fn_each, preserves_tuple_value_categories) {
-  std::tuple<int> mutable_tuple{1};
-  const std::tuple<int> const_tuple{2};
+  auto mutable_tuple = std::make_tuple(1);
+  const auto const_tuple = std::make_tuple(2);
   std::vector<reference_category> categories;
 
   omni::fn::each(collect_reference_category{categories}, mutable_tuple);
@@ -1686,7 +1667,7 @@ TEST(fn_each, preserves_tuple_value_categories) {
 }
 
 TEST(fn_each, copies_an_lvalue_visitor) {
-  const std::tuple<int, int> tuple{1, 2};
+  const auto tuple = std::make_tuple(1, 2);
   std::vector<int> visited;
   count_visits visit{visited, 0};
 
@@ -1697,7 +1678,7 @@ TEST(fn_each, copies_an_lvalue_visitor) {
 }
 
 TEST(fn_each, moves_a_noncopyable_rvalue_visitor) {
-  const std::tuple<int, int> tuple{1, 2};
+  const auto tuple = std::make_tuple(1, 2);
   std::vector<int> visited;
 
   omni::fn::each(move_only_each{visited}, tuple);
@@ -1706,7 +1687,7 @@ TEST(fn_each, moves_a_noncopyable_rvalue_visitor) {
 }
 
 TEST(fn_each, invokes_and_pipes_a_noncopyable_visitor) {
-  const std::tuple<int, int> tuple{1, 2};
+  const auto tuple = std::make_tuple(1, 2);
   std::vector<int> called;
   std::vector<int> piped;
   auto call = omni::fn::each(move_only_each{called});
@@ -1719,36 +1700,36 @@ TEST(fn_each, invokes_and_pipes_a_noncopyable_visitor) {
 }
 
 TEST(fn_each, owns_mutable_state_in_a_lazy_visitor) {
-  std::tuple<int, int, int> tuple{1, 2, 3};
+  auto tuple = std::make_tuple(1, 2, 3);
   auto add =
     omni::fn::each(add_next_owned_value{omni::compat::make_unique<int>(10)});
 
   std::move(add)(tuple);
 
-  EXPECT_EQ((std::tuple<int, int, int>{11, 13, 15}), tuple);
+  EXPECT_EQ(std::make_tuple(11, 13, 15), tuple);
 }
 
 TEST(fn_map, transforms_elements_into_a_tuple) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
 
   const auto mapped = omni::fn::map([](int value) { return value * 2; }, tuple);
 
-  EXPECT_EQ((std::tuple<int, int, int>{2, 4, 6}), mapped);
+  EXPECT_EQ(std::make_tuple(2, 4, 6), mapped);
 }
 
 TEST(fn_map, defers_call_and_pipe_application) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   const auto double_value = omni::fn::map([](int value) { return value * 2; });
 
   const auto called = double_value(tuple);
   const auto piped = tuple | double_value;
 
-  EXPECT_EQ((std::tuple<int, int, int>{2, 4, 6}), called);
-  EXPECT_EQ((std::tuple<int, int, int>{2, 4, 6}), piped);
+  EXPECT_EQ(std::make_tuple(2, 4, 6), called);
+  EXPECT_EQ(std::make_tuple(2, 4, 6), piped);
 }
 
 TEST(fn_map, composes_with_fold_in_a_pipeline) {
-  const std::tuple<int, double, quantity> tuple{1, 2.5, {3}};
+  const auto tuple = std::make_tuple(1, 2.5, quantity{3});
 
   const auto result = tuple | omni::fn::map(to_double{})
     | omni::fn::foldl(
@@ -1759,7 +1740,7 @@ TEST(fn_map, composes_with_fold_in_a_pipeline) {
 }
 
 TEST(fn_map, transforms_heterogeneous_elements) {
-  const std::tuple<int, std::string> tuple{3, "four"};
+  const auto tuple = std::make_tuple(3, std::string{"four"});
 
   auto mapped = omni::fn::map(transform{}, tuple);
 
@@ -1793,7 +1774,7 @@ TEST(fn_map, supports_standard_tuple_like_types) {
 }
 
 TEST(fn_map, invokes_member_data_pointers) {
-  const std::tuple<invoke_record, invoke_record> tuple{{1}, {2}};
+  const auto tuple = std::make_tuple(invoke_record{1}, invoke_record{2});
 
   auto mapped = omni::fn::map(&invoke_record::value, tuple);
   int first{};
@@ -1814,8 +1795,8 @@ TEST(fn_map, maps_an_empty_tuple) {
 }
 
 TEST(fn_map, preserves_tuple_value_categories) {
-  std::tuple<int> mutable_tuple{1};
-  const std::tuple<int> const_tuple{2};
+  auto mutable_tuple = std::make_tuple(1);
+  const auto const_tuple = std::make_tuple(2);
 
   auto mutable_lvalue = omni::fn::map(map_reference_category{}, mutable_tuple);
   auto const_lvalue = omni::fn::map(map_reference_category{}, const_tuple);
@@ -1833,7 +1814,7 @@ TEST(fn_map, preserves_tuple_value_categories) {
 }
 
 TEST(fn_map, forwards_temporary_elements_as_rvalues) {
-  auto mapped = std::tuple<int>{42} | omni::fn::map(map_reference_category{});
+  auto mapped = std::make_tuple(42) | omni::fn::map(map_reference_category{});
   reference_category category{};
   std::tie(category) = mapped;
 
@@ -1841,27 +1822,18 @@ TEST(fn_map, forwards_temporary_elements_as_rvalues) {
 }
 
 TEST(fn_map, moves_from_rvalue_elements) {
-  std::tuple<std::unique_ptr<int>> tuple{
-    omni::compat::make_unique<int>(42),
-  };
+  auto tuple = std::make_tuple(omni::compat::make_unique<int>(42));
 
   auto mapped = omni::fn::map(move_only{}, std::move(tuple));
   std::unique_ptr<int> value;
   std::tie(value) = std::move(mapped);
-  bool source_empty = false;
-  omni::fn::each(
-    [&source_empty](
-      const std::unique_ptr<int> &source) { source_empty = !source; },
-    tuple);
-
-  EXPECT_TRUE(source_empty);
+  omni::compat::apply(
+    [](const std::unique_ptr<int> &source) { EXPECT_FALSE(source); }, tuple);
   EXPECT_EQ(42, value ? *value : 0);
 }
 
 TEST(fn_map, forwards_xvalue_elements_through_a_pipe) {
-  std::tuple<std::unique_ptr<int>> tuple{
-    omni::compat::make_unique<int>(42),
-  };
+  auto tuple = std::make_tuple(omni::compat::make_unique<int>(42));
 
   auto mapped = std::move(tuple) | omni::fn::map(move_only{});
   std::unique_ptr<int> value;
@@ -1871,9 +1843,7 @@ TEST(fn_map, forwards_xvalue_elements_through_a_pipe) {
 }
 
 TEST(fn_map, invokes_a_named_move_only_closure) {
-  std::tuple<std::unique_ptr<int>> tuple{
-    omni::compat::make_unique<int>(42),
-  };
+  auto tuple = std::make_tuple(omni::compat::make_unique<int>(42));
   auto transform_value = omni::fn::map(move_only{});
 
   auto mapped = std::move(transform_value)(std::move(tuple));
@@ -1884,16 +1854,16 @@ TEST(fn_map, invokes_a_named_move_only_closure) {
 }
 
 TEST(fn_map, owns_read_only_state_in_a_lazy_visitor) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   auto add = omni::fn::map(add_owned_value{omni::compat::make_unique<int>(10)});
 
   const auto mapped = std::move(add)(tuple);
 
-  EXPECT_EQ((std::tuple<int, int, int>{11, 12, 13}), mapped);
+  EXPECT_EQ(std::make_tuple(11, 12, 13), mapped);
 }
 
 TEST(fn_map, copies_an_lvalue_visitor) {
-  const std::tuple<int, int> tuple{1, 2};
+  const auto tuple = std::make_tuple(1, 2);
   count_map_calls visit;
 
   auto mapped = omni::fn::map(visit, tuple);
@@ -1907,7 +1877,7 @@ TEST(fn_map, copies_an_lvalue_visitor) {
 }
 
 TEST(fn_foldl, sums_tuple_elements) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
 
   const auto result =
     omni::fn::foldl([](int sum, int value) { return sum + value; }, 0, tuple);
@@ -1916,7 +1886,7 @@ TEST(fn_foldl, sums_tuple_elements) {
 }
 
 TEST(fn_foldl, defers_call_and_pipe_application) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   const auto sum = omni::fn::foldl(
     [](int accumulated, int value) { return accumulated + value; },
     0);
@@ -1929,7 +1899,7 @@ TEST(fn_foldl, defers_call_and_pipe_application) {
 }
 
 TEST(fn_foldl, applies_visit_left_to_right) {
-  const std::tuple<short, long> tuple{short{3}, long{2}};
+  const auto tuple = std::make_tuple(short{3}, long{2});
 
   const auto result = omni::fn::foldl(subtract{}, 10, tuple);
 
@@ -1948,7 +1918,7 @@ TEST(fn_foldl, supports_standard_tuple_like_types) {
 }
 
 TEST(fn_foldl, invokes_member_function_pointers) {
-  const std::tuple<int, int> tuple{3, 2};
+  const auto tuple = std::make_tuple(3, 2);
 
   const auto result =
     omni::fn::foldl(&invoke_record::add, invoke_record{10}, tuple);
@@ -1957,8 +1927,8 @@ TEST(fn_foldl, invokes_member_function_pointers) {
 }
 
 TEST(fn_foldl, preserves_tuple_value_categories) {
-  std::tuple<int> mutable_tuple{1};
-  const std::tuple<int> const_tuple{2};
+  auto mutable_tuple = std::make_tuple(1);
+  const auto const_tuple = std::make_tuple(2);
   std::vector<reference_category_pair> categories;
 
   omni::fn::foldl(fold_reference_category{categories}, 0, mutable_tuple);
@@ -1982,28 +1952,28 @@ TEST(fn_foldl, preserves_tuple_value_categories) {
 }
 
 TEST(fn_foldl, folds_move_only_values) {
-  std::tuple<std::unique_ptr<int>, std::unique_ptr<int>, std::unique_ptr<int>>
-    tuple{
-      omni::compat::make_unique<int>(10),
-      omni::compat::make_unique<int>(12),
-      omni::compat::make_unique<int>(20),
-    };
+  auto tuple = std::make_tuple(
+    omni::compat::make_unique<int>(10),
+    omni::compat::make_unique<int>(12),
+    omni::compat::make_unique<int>(20));
 
   auto result = omni::fn::foldl(add_owned{},
     omni::compat::make_unique<int>(0),
     std::move(tuple));
-  std::vector<bool> source_empty;
-  omni::fn::each(
-    [&source_empty](
-      const std::unique_ptr<int> &source) { source_empty.push_back(!source); },
+  omni::compat::apply(
+    [](const std::unique_ptr<int> &first,
+      const std::unique_ptr<int> &second,
+      const std::unique_ptr<int> &third) {
+      EXPECT_FALSE(first);
+      EXPECT_FALSE(second);
+      EXPECT_FALSE(third);
+    },
     tuple);
-
-  EXPECT_EQ((std::vector<bool>{true, true, true}), source_empty);
   EXPECT_EQ(42, result ? *result : 0);
 }
 
 TEST(fn_foldl, forwards_the_accumulator_as_an_rvalue) {
-  std::tuple<int, int> tuple{2, 3};
+  auto tuple = std::make_tuple(2, 3);
   std::vector<reference_category_pair> categories;
 
   const auto result =
@@ -2042,10 +2012,9 @@ TEST(fn_foldl, moves_a_lazy_accumulator) {
 }
 
 TEST(fn_foldl, folds_move_only_values_from_a_lazy_closure) {
-  std::tuple<std::unique_ptr<int>, std::unique_ptr<int>> tuple{
+  auto tuple = std::make_tuple(
     omni::compat::make_unique<int>(10),
-    omni::compat::make_unique<int>(12),
-  };
+    omni::compat::make_unique<int>(12));
   auto fold = omni::fn::foldl(add_owned{}, omni::compat::make_unique<int>(20));
 
   auto result = std::move(fold)(std::move(tuple));
@@ -2054,7 +2023,7 @@ TEST(fn_foldl, folds_move_only_values_from_a_lazy_closure) {
 }
 
 TEST(fn_foldl, moves_a_noncopyable_lazy_visitor) {
-  const std::tuple<int, int, int> tuple{10, 12, 20};
+  const auto tuple = std::make_tuple(10, 12, 20);
   auto fold = omni::fn::foldl(move_only_fold{}, 0);
 
   const auto result = std::move(fold)(tuple);
@@ -2063,7 +2032,7 @@ TEST(fn_foldl, moves_a_noncopyable_lazy_visitor) {
 }
 
 TEST(fn_foldl, copies_an_lvalue_visitor) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   count_fold_calls visit;
 
   const auto result = omni::fn::foldl(visit, 0, tuple);
@@ -2073,11 +2042,10 @@ TEST(fn_foldl, copies_an_lvalue_visitor) {
 }
 
 TEST(fn_foldr, reduces_from_right_to_left) {
-  const std::tuple<std::string, std::string, std::string> tuple{
-    "a",
-    "b",
-    "c",
-  };
+  const auto tuple = std::make_tuple(
+    std::string{"a"},
+    std::string{"b"},
+    std::string{"c"});
 
   const auto result = omni::fn::foldr(
     [](const std::string &value, std::string nested) {
@@ -2090,7 +2058,7 @@ TEST(fn_foldr, reduces_from_right_to_left) {
 }
 
 TEST(fn_foldr, defers_call_and_pipe_application) {
-  const std::tuple<int, int> tuple{10, 3};
+  const auto tuple = std::make_tuple(10, 3);
   const auto subtract_values = omni::fn::foldr(subtract{}, 2);
 
   const auto called = subtract_values(tuple);
@@ -2101,7 +2069,7 @@ TEST(fn_foldr, defers_call_and_pipe_application) {
 }
 
 TEST(fn_foldr, applies_visit_right_to_left) {
-  const std::tuple<int, short> tuple{10, short{3}};
+  const auto tuple = std::make_tuple(10, short{3});
 
   const auto result = omni::fn::foldr(subtract{}, long{2}, tuple);
 
@@ -2120,7 +2088,7 @@ TEST(fn_foldr, supports_standard_tuple_like_types) {
 }
 
 TEST(fn_foldr, invokes_member_function_pointers) {
-  const std::tuple<invoke_record> tuple{{40}};
+  const auto tuple = std::make_tuple(invoke_record{40});
 
   const auto result = omni::fn::foldr(&invoke_record::sum, 2, tuple);
 
@@ -2128,8 +2096,8 @@ TEST(fn_foldr, invokes_member_function_pointers) {
 }
 
 TEST(fn_foldr, preserves_tuple_value_categories) {
-  std::tuple<int> mutable_tuple{1};
-  const std::tuple<int> const_tuple{2};
+  auto mutable_tuple = std::make_tuple(1);
+  const auto const_tuple = std::make_tuple(2);
   std::vector<reference_category_pair> categories;
 
   omni::fn::foldr(fold_reference_category{categories}, 0, mutable_tuple);
@@ -2153,23 +2121,23 @@ TEST(fn_foldr, preserves_tuple_value_categories) {
 }
 
 TEST(fn_foldr, moves_a_stable_accumulator) {
-  std::tuple<std::unique_ptr<int>, std::unique_ptr<int>, std::unique_ptr<int>>
-    tuple{
-      omni::compat::make_unique<int>(10),
-      omni::compat::make_unique<int>(12),
-      omni::compat::make_unique<int>(20),
-    };
+  auto tuple = std::make_tuple(
+    omni::compat::make_unique<int>(10),
+    omni::compat::make_unique<int>(12),
+    omni::compat::make_unique<int>(20));
 
   auto result = omni::fn::foldr(add_owned{},
     omni::compat::make_unique<int>(0),
     std::move(tuple));
-  std::vector<bool> source_empty;
-  omni::fn::each(
-    [&source_empty](
-      const std::unique_ptr<int> &source) { source_empty.push_back(!source); },
+  omni::compat::apply(
+    [](const std::unique_ptr<int> &first,
+      const std::unique_ptr<int> &second,
+      const std::unique_ptr<int> &third) {
+      EXPECT_FALSE(first);
+      EXPECT_FALSE(second);
+      EXPECT_FALSE(third);
+    },
     tuple);
-
-  EXPECT_EQ((std::vector<bool>{true, true, true}), source_empty);
   EXPECT_EQ(42, result ? *result : 0);
 }
 
@@ -2198,10 +2166,9 @@ TEST(fn_foldr, moves_a_lazy_accumulator) {
 }
 
 TEST(fn_foldr, folds_move_only_values_from_a_lazy_closure) {
-  std::tuple<std::unique_ptr<int>, std::unique_ptr<int>> tuple{
+  auto tuple = std::make_tuple(
     omni::compat::make_unique<int>(10),
-    omni::compat::make_unique<int>(12),
-  };
+    omni::compat::make_unique<int>(12));
   auto fold = omni::fn::foldr(add_owned{}, omni::compat::make_unique<int>(20));
 
   auto result = std::move(fold)(std::move(tuple));
@@ -2210,7 +2177,7 @@ TEST(fn_foldr, folds_move_only_values_from_a_lazy_closure) {
 }
 
 TEST(fn_foldr, moves_a_noncopyable_lazy_visitor) {
-  const std::tuple<int, int, int> tuple{10, 12, 20};
+  const auto tuple = std::make_tuple(10, 12, 20);
   auto fold = omni::fn::foldr(move_only_fold{}, 0);
 
   const auto result = std::move(fold)(tuple);
@@ -2219,7 +2186,7 @@ TEST(fn_foldr, moves_a_noncopyable_lazy_visitor) {
 }
 
 TEST(fn_foldr, copies_an_lvalue_visitor) {
-  const std::tuple<int, int, int> tuple{1, 2, 3};
+  const auto tuple = std::make_tuple(1, 2, 3);
   count_fold_calls visit;
 
   const auto result = omni::fn::foldr(visit, 0, tuple);

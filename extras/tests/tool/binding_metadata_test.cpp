@@ -438,88 +438,139 @@ INSTANTIATE_TEST_SUITE_P(declarations,
   });
 
 #if defined(__cpp_concepts)
-struct select_metadata {
+struct uses_generic_binding_overload {
   template <omni::meta T>
-  constexpr int operator()(T) const { return 1; }
+  constexpr bool operator()(T) const { return false; }
 
   template <omni::binding T>
-  constexpr int operator()(T) const { return 2; }
+  constexpr bool operator()(T) const { return true; }
 };
 
-struct select_record {
+struct uses_record_binding_overload {
   template <omni::record_meta T>
-  constexpr int operator()(T) const { return 1; }
+  constexpr bool operator()(T) const { return false; }
 
   template <omni::record_binding T>
-  constexpr int operator()(T) const { return 2; }
+  constexpr bool operator()(T) const { return true; }
 };
 
-struct select_enum {
+struct uses_enum_binding_overload {
   template <omni::enum_meta T>
-  constexpr int operator()(T) const { return 1; }
+  constexpr bool operator()(T) const { return false; }
 
   template <omni::enum_binding T>
-  constexpr int operator()(T) const { return 2; }
+  constexpr bool operator()(T) const { return true; }
 };
 
-struct select_member {
+struct uses_member_binding_overload {
   template <omni::data_member_meta T>
-  constexpr int operator()(T) const { return 1; }
+  constexpr bool operator()(T) const { return false; }
 
   template <omni::data_member_binding T>
-  constexpr int operator()(T) const { return 2; }
+  constexpr bool operator()(T) const { return true; }
 
   template <omni::function_meta T>
-  constexpr int operator()(T) const { return 1; }
+  constexpr bool operator()(T) const { return false; }
 
   template <omni::function_binding T>
-  constexpr int operator()(T) const { return 2; }
+  constexpr bool operator()(T) const { return true; }
 };
 
-struct select_members {
+struct member_overload_queries {
+  std::vector<std::pair<std::string, bool>> metadata_uses_binding;
+  std::vector<std::pair<std::string, bool>> binding_uses_binding;
+};
+
+struct inspect_member_overloads {
   template <typename... Member>
-  std::vector<std::pair<int, int>> operator()(Member... m) const {
-    return {{select_member{}(static_cast<typename Member::meta>(m)),
-      select_member{}(m)}...};
+  member_overload_queries operator()(Member... m) const {
+    return {
+      /*metadata_uses_binding=*/{
+        {m.name(), uses_member_binding_overload{}(
+          static_cast<typename Member::meta>(m))}...,
+      },
+      /*binding_uses_binding=*/{
+        {m.name(), uses_member_binding_overload{}(m)}...,
+      },
+    };
   }
+};
+
+struct overload_queries {
+  bool generic_metadata_uses_binding;
+  bool generic_binding_uses_binding;
+  bool entity_metadata_uses_binding;
+  bool entity_binding_uses_binding;
+};
+
+struct record_overload_queries {
+  overload_queries record;
+  member_overload_queries data_members;
+  member_overload_queries member_functions;
 };
 
 struct inspect_record_overloads {
   template <omni::record_binding T>
-  std::tuple<int, int, int, int,
-    std::vector<std::pair<int, int>>, std::vector<std::pair<int, int>>>
-  operator()(T r) const {
+  record_overload_queries operator()(T r) const {
     static_assert(omni::record_meta<T>, "bindings must satisfy record_meta");
     const auto m = static_cast<typename T::meta>(r);
-    return {select_metadata{}(m), select_metadata{}(r),
-      select_record{}(m), select_record{}(r),
-      omni::compat::apply(select_members{}, r.accessible_data_members()),
-      omni::compat::apply(select_members{}, r.accessible_member_functions())};
+    return {
+      /*record=*/{
+        /*generic_metadata_uses_binding=*/uses_generic_binding_overload{}(m),
+        /*generic_binding_uses_binding=*/uses_generic_binding_overload{}(r),
+        /*entity_metadata_uses_binding=*/uses_record_binding_overload{}(m),
+        /*entity_binding_uses_binding=*/uses_record_binding_overload{}(r),
+      },
+      /*data_members=*/omni::compat::apply(inspect_member_overloads{},
+        r.accessible_data_members()),
+      /*member_functions=*/omni::compat::apply(inspect_member_overloads{},
+        r.accessible_member_functions()),
+    };
   }
 };
 
 struct inspect_enum_overloads {
   template <omni::enum_binding T>
-  std::tuple<int, int, int, int> operator()(T e) const {
+  overload_queries operator()(T e) const {
     static_assert(omni::enum_meta<T>, "bindings must satisfy enum_meta");
     const auto m = static_cast<typename T::meta>(e);
-    return {select_metadata{}(m), select_metadata{}(e),
-      select_enum{}(m), select_enum{}(e)};
+    return {
+      /*generic_metadata_uses_binding=*/uses_generic_binding_overload{}(m),
+      /*generic_binding_uses_binding=*/uses_generic_binding_overload{}(e),
+      /*entity_metadata_uses_binding=*/uses_enum_binding_overload{}(m),
+      /*entity_binding_uses_binding=*/uses_enum_binding_overload{}(e),
+    };
   }
 };
 
 TEST(binding_metadata, prefers_binding_overloads_for_records_and_members) {
-  const auto expected = std::make_tuple(1, 2, 1, 2,
-    std::vector<std::pair<int, int>>{{1, 2}, {1, 2}},
-    std::vector<std::pair<int, int>>{{1, 2}});
+  const auto result = omni::reflected_call(inspect_record_overloads{},
+    record{7, 0});
 
-  EXPECT_EQ(expected,
-    omni::reflected_call(inspect_record_overloads{}, record{7, 0}));
+  EXPECT_FALSE(result.record.generic_metadata_uses_binding);
+  EXPECT_TRUE(result.record.generic_binding_uses_binding);
+  EXPECT_FALSE(result.record.entity_metadata_uses_binding);
+  EXPECT_TRUE(result.record.entity_binding_uses_binding);
+  EXPECT_EQ((std::vector<std::pair<std::string, bool>>{
+    {"value", false}, {"cached", false}}),
+    result.data_members.metadata_uses_binding);
+  EXPECT_EQ((std::vector<std::pair<std::string, bool>>{
+    {"value", true}, {"cached", true}}),
+    result.data_members.binding_uses_binding);
+  EXPECT_EQ((std::vector<std::pair<std::string, bool>>{{"read", false}}),
+    result.member_functions.metadata_uses_binding);
+  EXPECT_EQ((std::vector<std::pair<std::string, bool>>{{"read", true}}),
+    result.member_functions.binding_uses_binding);
 }
 
 TEST(binding_metadata, prefers_binding_overloads_for_enums) {
-  EXPECT_EQ(std::make_tuple(1, 2, 1, 2),
-    omni::reflected_call(inspect_enum_overloads{}, status::ready));
+  const auto result = omni::reflected_call(inspect_enum_overloads{},
+    status::ready);
+
+  EXPECT_FALSE(result.generic_metadata_uses_binding);
+  EXPECT_TRUE(result.generic_binding_uses_binding);
+  EXPECT_FALSE(result.entity_metadata_uses_binding);
+  EXPECT_TRUE(result.entity_binding_uses_binding);
 }
 #endif
 
