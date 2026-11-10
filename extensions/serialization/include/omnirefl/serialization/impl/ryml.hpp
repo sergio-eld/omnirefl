@@ -209,25 +209,6 @@ struct write_real {
   }
 };
 
-template <bool OwnsStrings>
-struct write_string {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    static_assert(std::is_same<char,
-                    compat::remove_cvref_t<typename Value::value_type>>::value,
-      "serialization requires char-based strings");
-
-    const c4::csubstr text{value.data(), value.size()};
-    if (OwnsStrings)
-      node->set_serialized(text);
-    else
-      node->set_val(text);
-    // Strings such as "true", "12", and "null" must remain strings.
-    node->set_val_style(::ryml::VAL_DQUO);
-  }
-};
-
 } // namespace detail
 
 namespace cp {
@@ -518,10 +499,12 @@ auto from_string_like::operator()(const T &value,
   ::ryml::NodeRef node,
   omni::ryml::detail::mapping_context &diagnostics) const
   -> compat::enable_if_t<supports<T>()> {
+  const auto text = cp::read_string<T>{}(value);
   if (diagnostics.borrow_strings)
-    omni::ryml::detail::write_string<false>{}(value, &node);
+    node.set_val(text);
   else
-    omni::ryml::detail::write_string<true>{}(value, &node);
+    node.set_serialized(text);
+  node.set_val_style(::ryml::VAL_DQUO);
 }
 
 template <typename T>
@@ -529,8 +512,6 @@ auto to_string_like::operator()(::ryml::ConstNodeRef node,
   T *into,
   omni::ryml::detail::mapping_context &diagnostics) const
   -> compat::enable_if_t<supports<T>(), bool> {
-  static_assert(std::is_same<char, typename T::value_type>::value,
-    "Prototype string mapping requires char-based strings");
   if (node.is_container()) {
     diagnostics.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
@@ -540,9 +521,7 @@ auto to_string_like::operator()(::ryml::ConstNodeRef node,
     return false;
   }
 
-  // Avoid constructing a string from a possibly null pointer when empty.
-  const auto text = node.val();
-  *into = text.empty() ? T{} : T{text.str, text.len};
+  cp::assign_string<T>{}(into, node.val());
   return true;
 }
 

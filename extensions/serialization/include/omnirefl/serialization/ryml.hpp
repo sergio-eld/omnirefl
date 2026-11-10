@@ -345,24 +345,52 @@ namespace detail {
 struct mapping_context;
 } // namespace detail
 
-/** Mapping protocols may be specialized for user-defined types. */
+namespace cp {
 
-// Specialize for custom strings exposing value_type, data(), size(), and a
-// (data, size) constructor. String-view destinations borrow the input tree.
-template <typename>
+/** Read a view of a string's existing characters. The view must remain valid
+ * while the source is alive and unchanged. Specialize for custom string APIs. */
+template <typename String, typename = void>
+struct read_string {};
+
+template <typename String>
+struct read_string<String,
+  compat::void_t<decltype(c4::csubstr{std::declval<const String &>().data(),
+    std::declval<const String &>().size()})>> {
+  c4::csubstr operator()(const String &value) const {
+    return {value.data(), value.size()};
+  }
+};
+
+/** Assign scalar text to a string. Owning strings copy; view types may borrow
+ * the supplied storage. Specialize for custom string APIs. */
+template <typename String, typename = void>
+struct assign_string {};
+
+template <typename String>
+struct assign_string<String,
+  compat::void_t<decltype(std::declval<String &>() = String{
+    std::declval<c4::csubstr>().str, std::declval<c4::csubstr>().len})>> {
+  void operator()(String *into, c4::csubstr text) const {
+    // Empty views may contain null data; supply a valid empty character range.
+    *into = String{text.empty() ? "" : text.str, text.len};
+  }
+};
+
+} // namespace cp
+
+/** Whether both string operations are available, with read_string returning
+ * a c4::csubstr view. Customize the operations rather than this trait. */
+template <typename T, typename = void>
 struct is_string_like: std::false_type {};
 
-template <typename Char, typename Traits, typename Allocator>
-struct is_string_like<std::basic_string<Char, Traits, Allocator>>:
-    std::true_type {};
-
-template <typename Char>
-struct is_string_like<c4::basic_substring<Char>>: std::true_type {};
-
-#if defined(__cpp_lib_string_view)
-template <typename Char, typename Traits>
-struct is_string_like<std::basic_string_view<Char, Traits>>: std::true_type {};
-#endif
+template <typename T>
+struct is_string_like<T,
+  compat::void_t<decltype(cp::read_string<T>{}(std::declval<const T &>())),
+    decltype(cp::assign_string<T>{}(std::declval<T *>(),
+      std::declval<c4::csubstr>()))>>:
+    std::is_same<c4::csubstr,
+      compat::remove_cvref_t<decltype(
+        cp::read_string<T>{}(std::declval<const T &>()))>> {};
 
 // Opt in standard-like optional wrappers. Mapping uses value_type, bool
 // conversion, dereference, reset(), and emplace(value). Empty optional sequence
@@ -891,3 +919,13 @@ struct to_type<T,
 // Inline and template definitions depend on the complete public interface
 // above. Including them here keeps the detail header private to this header.
 #include <omnirefl/serialization/impl/ryml.hpp>
+
+// Built-in string operations must satisfy the same contract as custom strings.
+static_assert(omni::ryml::is_string_like<std::string>::value,
+  "std::string must provide the string mapping operations");
+static_assert(omni::ryml::is_string_like<c4::csubstr>::value,
+  "c4::csubstr must provide the string mapping operations");
+#if defined(__cpp_lib_string_view)
+static_assert(omni::ryml::is_string_like<std::string_view>::value,
+  "std::string_view must provide the string mapping operations");
+#endif
