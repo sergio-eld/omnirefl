@@ -12,7 +12,6 @@
 #include <csetjmp>
 #include <iterator>
 #include <limits>
-#include <set>
 #include <type_traits>
 
 // TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
@@ -249,24 +248,6 @@ bool read_node(::ryml::ConstNodeRef node,
 
 namespace detail {
 
-// FIXME: [high] Generalize container discovery without concrete-container
-// routing or inferring reflection requirements from adapter inheritance.
-template <typename T>
-struct reflection_root {
-  using type = T;
-  static constexpr bool needs_reflection =
-    !compat::disjunction<std::is_arithmetic<T>, is_string_like<T>>::value;
-};
-
-template <typename T, typename Allocator>
-struct reflection_root<std::vector<T, Allocator>>: reflection_root<T> {};
-
-template <typename T>
-struct reflection_root<compat::optional<T>>: reflection_root<T> {};
-
-template <typename T, typename Compare, typename Allocator>
-struct reflection_root<std::set<T, Compare, Allocator>>: reflection_root<T> {};
-
 template <bool BorrowStrings, typename T>
 struct cpp11_lambda_write {
   const T &value;
@@ -276,7 +257,12 @@ struct cpp11_lambda_write {
     ::ryml::Tree tree;
     diagnostics<false> report{};
     omni::ryml::detail::mapping_context context{
-      report.config, &report, {}, 0, 0, BorrowStrings,
+      /*options=*/report.config,
+      /*diagnostics=*/&report,
+      /*path=*/{},
+      /*error_count=*/0,
+      /*warning_count=*/0,
+      /*borrow_strings=*/BorrowStrings,
     };
     core::write_node(this->value, tree.rootref(), context);
     return tree;
@@ -359,21 +345,42 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
     });
 }
 
-template <typename T>
-auto map_tree(::ryml::ConstNodeRef node,
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
+bool map_tree(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics)
-  -> compat::enable_if_t<detail::reflection_root<T>::needs_reflection, bool> {
+  omni::ryml::detail::mapping_context &diagnostics) {
   return omni::reflected_call(
-    detail::cpp11_lambda_read<T>{node, *into, diagnostics},
-    omni::type_t<typename detail::reflection_root<T>::type>{});
+    detail::cpp11_lambda_read<T>{
+      /*node=*/node,
+      /*into=*/ *into,
+      /*diagnostics=*/diagnostics,
+    },
+    omni::type_t<Discovery>{});
 }
 
-template <typename T>
-auto map_tree(::ryml::ConstNodeRef node,
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+bool map_tree(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics)
-  -> compat::enable_if_t<!detail::reflection_root<T>::needs_reflection, bool> {
+  omni::ryml::detail::mapping_context &diagnostics) {
+  return map_tree<T, typename Discovery::value_type>(node, into, diagnostics);
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+bool map_tree(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) {
   return read_node(node, into, diagnostics);
 }
 
@@ -382,14 +389,25 @@ with_diagnostics<T, diagnostics<false>> map_tree(const config &options,
   omni::type_t<T>,
   ::ryml::ConstNodeRef node) {
   auto value = compat::make_optional<T>();
-  diagnostics<false> report{options, node, {}, {}};
-  omni::ryml::detail::mapping_context context{
-    options, &report, {}, 0, 0, false,
+  diagnostics<false> report{
+    /*config=*/options,
+    /*tree=*/node,
+    /*issues=*/{},
+    /*parse_message=*/{},
   };
-  // FIXME: [high] Validate invalid/empty inputs at this public boundary before
-  // dispatching to adapters, whose contract requires a valid node.
+  omni::ryml::detail::mapping_context context{
+    /*options=*/options,
+    /*diagnostics=*/&report,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/false,
+  };
   const bool mapped = map_tree(node, &*value, context);
-  return {mapped ? std::move(value) : compat::nullopt, std::move(report)};
+  return {
+    /*value=*/mapped ? std::move(value) : compat::nullopt,
+    /*diagnostics=*/std::move(report),
+  };
 }
 
 template <typename T>
@@ -401,10 +419,10 @@ with_diagnostics<T, diagnostics<true>> map_tree(const config &options,
     .transform_diagnostics(
       [&tree](diagnostics<false> report) -> diagnostics<true> {
         return {
-          std::move(report.config),
-          std::move(tree),
-          std::move(report.issues),
-          std::move(report.parse_message),
+          /*config=*/std::move(report.config),
+          /*tree=*/std::move(tree),
+          /*issues=*/std::move(report.issues),
+          /*parse_message=*/std::move(report.parse_message),
         };
       });
 }
@@ -416,15 +434,17 @@ with_diagnostics<T, diagnostics<true>> deserialize(const config &options,
   auto parsed = omni::ryml::core::parse(std::move(source));
   if (!parsed) {
     return {
-      compat::nullopt,
-      {
-        options,
-        ::ryml::Tree{/*node_capacity=*/0, /*arena_capacity=*/0},
-        {omni::ryml::detail::make_issue(json::issue_code::parse_error,
-          json::value_kind::unknown,
-          ::ryml::ConstNodeRef{},
-          {})},
-        std::move(parsed.error()),
+      /*value=*/compat::nullopt,
+      /*diagnostics=*/{
+        /*config=*/options,
+        /*tree=*/::ryml::Tree{/*node_capacity=*/0, /*arena_capacity=*/0},
+        /*issues=*/{
+          omni::ryml::detail::make_issue(json::issue_code::parse_error,
+            json::value_kind::unknown,
+            ::ryml::ConstNodeRef{},
+            /*path=*/{}),
+        },
+        /*parse_message=*/std::move(parsed.error()),
       },
     };
   }
@@ -432,46 +452,81 @@ with_diagnostics<T, diagnostics<true>> deserialize(const config &options,
   return map_tree(options, type, std::move(*parsed));
 }
 
-template <typename T>
-auto as_owning_tree(const T &value)
-  -> compat::enable_if_t<detail::reflection_root<T>::needs_reflection,
-    ::ryml::Tree> {
-  return omni::reflected_call(detail::cpp11_lambda_write<false, T>{value},
-    omni::type_t<typename detail::reflection_root<T>::type>{});
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
+::ryml::Tree as_owning_tree(const T &value) {
+  return omni::reflected_call(
+    detail::cpp11_lambda_write</*BorrowStrings=*/false, T>{/*value=*/value},
+    omni::type_t<Discovery>{});
 }
 
-template <typename T>
-auto as_owning_tree(const T &value)
-  -> compat::enable_if_t<!detail::reflection_root<T>::needs_reflection,
-    ::ryml::Tree> {
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_owning_tree(const T &value) {
+  return as_owning_tree<T, typename Discovery::value_type>(value);
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_owning_tree(const T &value) {
   ::ryml::Tree tree;
   diagnostics<false> report{};
   omni::ryml::detail::mapping_context context{
-    report.config, &report, {}, 0, 0, false,
+    /*options=*/report.config,
+    /*diagnostics=*/&report,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/false,
   };
   write_node(value, tree.rootref(), context);
   return tree;
 }
 
-template <typename T>
-auto as_ref_tree(T &value)
-  -> compat::enable_if_t<
-    detail::reflection_root<compat::remove_cvref_t<T>>::needs_reflection,
-    ::ryml::Tree> {
-  return omni::reflected_call(detail::cpp11_lambda_write<true, T>{value},
-    omni::type_t<
-      typename detail::reflection_root<compat::remove_cvref_t<T>>::type>{});
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
+::ryml::Tree as_ref_tree(T &value) {
+  return omni::reflected_call(
+    detail::cpp11_lambda_write</*BorrowStrings=*/true, T>{/*value=*/value},
+    omni::type_t<Discovery>{});
 }
 
-template <typename T>
-auto as_ref_tree(T &value)
-  -> compat::enable_if_t<
-    !detail::reflection_root<compat::remove_cvref_t<T>>::needs_reflection,
-    ::ryml::Tree> {
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_ref_tree(T &value) {
+  return as_ref_tree<T, typename Discovery::value_type>(value);
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_ref_tree(T &value) {
   ::ryml::Tree tree;
   diagnostics<false> report{};
   omni::ryml::detail::mapping_context context{
-    report.config, &report, {}, 0, 0, true,
+    /*options=*/report.config,
+    /*diagnostics=*/&report,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/true,
   };
   write_node(value, tree.rootref(), context);
   return tree;
@@ -675,7 +730,10 @@ auto to_container::operator()(::ryml::ConstNodeRef node,
     if (diagnostics.stopped())
       return false;
 
-    diagnostics.path.push_back({{}, index++});
+    diagnostics.path.push_back({
+      /*field=*/{},
+      /*index=*/index++,
+    });
     typename T::value_type element{};
     const bool mapped = core::read_node(child, &element, diagnostics);
     // TODO: Detect and report rejected duplicates in unique associative
@@ -723,7 +781,10 @@ struct cpp11_read_member {
       return false;
 
     const auto name = c4::to_csubstr(field.name());
-    this->diagnostics.path.push_back({name, compat::nullopt});
+    this->diagnostics.path.push_back({
+      /*field=*/name,
+      /*index=*/compat::nullopt,
+    });
     const auto child = this->node.find_child(name);
     if (child.invalid()) {
       this->diagnostics.report(
@@ -817,7 +878,10 @@ auto from_record::operator()(const T &value,
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
     | fn::filter<fn::non_static>()
-    | fn::each(detail::cpp11_write_member{node, diagnostics});
+    | fn::each(detail::cpp11_write_member{
+      /*node=*/node,
+      /*diagnostics=*/diagnostics,
+    });
 }
 
 // FIXME: [high] Restore duplicate/unknown-field policies and missing-field
@@ -839,7 +903,10 @@ auto to_record::operator()(::ryml::ConstNodeRef node,
   const auto binding = omni::meta_for<T>::bind(*into);
   return binding.accessible_data_members()
     | fn::filter<fn::non_static>()
-    | fn::foldl(detail::cpp11_read_member{node, diagnostics}, true);
+    | fn::foldl(detail::cpp11_read_member{
+      /*node=*/node,
+      /*diagnostics=*/diagnostics,
+    }, /*initial=*/true);
 }
 
 } // namespace reflected_scope
@@ -962,14 +1029,3 @@ std::string serialize_t::operator()(const Value &value) const {
 
 } // namespace ryml
 } // namespace omni
-
-#if defined(OMNI_TOOL_RUN)
-// TU-wide: c4 views use string writers; compatibility wrappers expose their
-// contents through value_type/error_type without needing wrapper metadata.
-// Ad hoc: skip requests accept types, so int fills the required template
-// arguments. Matching selects the primary templates, so every specialization
-// is skipped.
-OMNI_SKIP_METADATA(c4::csubstr,
-  omni::compat::optional<int>,
-  omni::compat::expected<int, int>);
-#endif

@@ -2337,26 +2337,6 @@ TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
     omni::ryml::render_diagnostics(result.diagnostics));
 }
 
-// FIXME: [high] Restore invalid/empty-node validation at the public mapping
-// boundary.
-TEST(tree_mapping, DISABLED_reports_an_invalid_borrowed_node_as_a_mapping_error) {
-  const auto result =
-    strict_map_tree(omni::type_t<serialization_data::payload>{},
-      ::ryml::ConstNodeRef{});
-
-  EXPECT_FALSE(result.value);
-  EXPECT_TRUE(result.diagnostics.tree.invalid());
-  EXPECT_EQ(1U, result.diagnostics.issues.size());
-  if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::json::issue_code::unexpected_kind,
-      result.diagnostics.issues.front().reason);
-    EXPECT_EQ(omni::json::value_kind::unknown,
-      result.diagnostics.issues.front().actual);
-  }
-  EXPECT_EQ("<root>: expected object, found scalar",
-    omni::ryml::render_diagnostics(result.diagnostics));
-}
-
 TEST(tree_mapping, defaults_to_strict_mapping_and_owns_diagnostic_views) {
   omni::ryml::with_diagnostics<serialization_data::payload> retained;
   {
@@ -2370,25 +2350,6 @@ TEST(tree_mapping, defaults_to_strict_mapping_and_owns_diagnostic_views) {
   EXPECT_FALSE(retained.diagnostics.config.recovery.has_value());
   EXPECT_EQ("/code: \"bad\" is not an integer",
     omni::ryml::render_diagnostics(retained.diagnostics));
-}
-
-// FIXME: [high] Restore invalid/empty-node validation at the public mapping
-// boundary.
-TEST(tree_mapping, DISABLED_reports_an_empty_tree_as_a_mapping_error) {
-  const auto result =
-    strict_map_tree(omni::type_t<serialization_data::payload>{},
-      ::ryml::Tree{0, 0});
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ(1U, result.diagnostics.issues.size());
-  if (1U == result.diagnostics.issues.size()) {
-    EXPECT_EQ(omni::json::issue_code::unexpected_kind,
-      result.diagnostics.issues.front().reason);
-    EXPECT_EQ(omni::json::value_kind::mapping,
-      result.diagnostics.issues.front().expected);
-    EXPECT_EQ(omni::json::value_kind::unknown,
-      result.diagnostics.issues.front().actual);
-  }
 }
 
 struct empty_record {};

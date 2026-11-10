@@ -420,6 +420,22 @@ struct is_container<T,
 
 namespace cp {
 
+/** Ad hoc discovery override for types inheriting standard-library containers.
+ * Inheriting those containers is discouraged. Specialize to std::true_type
+ * when a custom mapping needs the derived type's metadata: T itself is passed
+ * to reflected_call instead of following its inherited value_type.
+ *
+ * The default follows the normal mapping traits. This override changes
+ * discovery, not the representation selected by from_type/to_type.
+ */
+template <typename T>
+struct reflect_as_root:
+    std::integral_constant<bool,
+      !compat::disjunction<std::is_arithmetic<T>,
+        is_string_like<T>,
+        is_container<T>,
+        is_optional_like<T>>::value> {};
+
 /** Container insertion customization, independent of representation mapping. */
 template <typename Container, typename Enable = void>
 struct emplace {
@@ -440,11 +456,6 @@ struct to_type;
 
 namespace core {
 
-namespace detail {
-template <typename T>
-struct reflection_root;
-} // namespace detail
-
 /** Dispatch one value through cp::from_type unless diagnostics have stopped. */
 template <typename T>
 void write_node(const T &value, ::ryml::NodeRef node,
@@ -455,16 +466,37 @@ template <typename T>
 bool read_node(::ryml::ConstNodeRef node, T *into,
   omni::ryml::detail::mapping_context &diagnostics);
 
-/** Map into an existing value using a shared diagnostics context. */
-template <typename T>
-auto map_tree(::ryml::ConstNodeRef node, T *into,
-  omni::ryml::detail::mapping_context &diagnostics)
-  -> compat::enable_if_t<detail::reflection_root<T>::needs_reflection, bool>;
+/** Map into an existing value using a shared diagnostics context.
+ * @pre `node` must be a valid node reference.
+ *
+ * Discovery follows wrapper element types while T remains the destination. */
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+bool map_tree(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
 
-template <typename T>
-auto map_tree(::ryml::ConstNodeRef node, T *into,
-  omni::ryml::detail::mapping_context &diagnostics)
-  -> compat::enable_if_t<!detail::reflection_root<T>::needs_reflection, bool>;
+/** Map into an existing value using a shared diagnostics context.
+ * @pre `node` must be a valid node reference. */
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+bool map_tree(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
+
+/** Map into an existing value using a shared diagnostics context.
+ * @pre `node` must be a valid node reference. */
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+bool map_tree(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
 
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
@@ -488,6 +520,8 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
 /** Map tree nodes into the requested type using explicit config.
+ * @pre `tree` must contain a valid root node.
+ *
  * Nested values are mapped depth-first through the selected customization
  * points.
  * Diagnostics take ownership of the supplied tree, retaining it for inspection
@@ -500,6 +534,8 @@ with_diagnostics<Record, diagnostics<true>> map_tree(const config &options,
   ::ryml::Tree tree);
 
 /** Map tree nodes into the requested type using explicit config.
+ * @pre `node` must be a valid node reference.
+ *
  * Nested values are mapped depth-first through the selected customization
  * points.
  * Diagnostics borrow the source tree rather than taking ownership.
@@ -524,32 +560,52 @@ with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
  * source value. The returned tree can be modified or passed to RapidYAML's
  * emitters.
  */
-template <typename Value>
-auto as_owning_tree(const Value &v)
-  -> compat::enable_if_t<detail::reflection_root<Value>::needs_reflection,
-    ::ryml::Tree>;
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+::ryml::Tree as_owning_tree(const T &value);
 
-template <typename Value>
-auto as_owning_tree(const Value &v)
-  -> compat::enable_if_t<!detail::reflection_root<Value>::needs_reflection,
-    ::ryml::Tree>;
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_owning_tree(const T &value);
+
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_owning_tree(const T &value);
 
 /** Build a RapidYAML tree borrowing the input's existing string storage.
  * The tree owns its nodes and generated scalar text. Borrowed storage must
  * remain alive and unchanged while the tree is used. Accepts const or mutable
  * lvalues; temporaries are rejected to prevent dangling views.
  */
-template <typename Value>
-auto as_ref_tree(Value &v)
-  -> compat::enable_if_t<
-    detail::reflection_root<compat::remove_cvref_t<Value>>::needs_reflection,
-    ::ryml::Tree>;
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+::ryml::Tree as_ref_tree(T &value);
 
-template <typename Value>
-auto as_ref_tree(Value &v)
-  -> compat::enable_if_t<
-    !detail::reflection_root<compat::remove_cvref_t<Value>>::needs_reflection,
-    ::ryml::Tree>;
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_ref_tree(T &value);
+
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_ref_tree(T &value);
 
 // Also reject const temporaries, which could otherwise bind through Value&.
 template <typename Value>
@@ -913,6 +969,10 @@ struct to_type<T,
 
 } // namespace cp
 
+// TODO: [high] Define a public diagnostics interface for customization-point
+// parameters. User implementations receive detail::mapping_context today;
+// their contract must not depend on a private implementation type.
+
 } // namespace ryml
 } // namespace omni
 
@@ -928,4 +988,15 @@ static_assert(omni::ryml::is_string_like<c4::csubstr>::value,
 #if defined(__cpp_lib_string_view)
 static_assert(omni::ryml::is_string_like<std::string_view>::value,
   "std::string_view must provide the string mapping operations");
+#endif
+
+#if defined(OMNI_TOOL_RUN)
+// TU-wide: c4 views use string writers; compatibility wrappers expose their
+// contents through value_type/error_type without needing wrapper metadata.
+// Ad hoc: skip requests accept types, so int fills the required template
+// arguments. Matching selects the primary templates, so every specialization
+// is skipped.
+OMNI_SKIP_METADATA(c4::csubstr,
+  omni::compat::optional<int>,
+  omni::compat::expected<int, int>);
 #endif

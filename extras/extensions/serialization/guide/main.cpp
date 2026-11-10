@@ -68,6 +68,16 @@
  *     validate enum input kind and name membership
  */
 
+// TODO: [high] Add cases for records with ryml::Tree data members, retaining
+// subtrees whose value types are not known at compile time.
+// Probably use OMNI_SKIP_METADATA(::ryml::Tree), guarded by OMNI_TOOL_RUN,
+// to avoid reflecting the backend implementation.
+// TODO: [high] Add an extensible-record case with three differently typed data
+// members (e.g. string, int, bool) and an additional_properties map. Map known
+// object keys to their members and collect the remaining entries in
+// std::map<std::string, ryml::Tree> additional_properties. Also cover a
+// string-valued map when all additional values are strings.
+
 #include <gtest/gtest.h>
 
 #include <omnirefl/functional.hpp>
@@ -811,6 +821,12 @@ template <>
 struct to_type<customization_mapping::record>:
     mapping::reflected_scope::to_record {};
 
+// Ad hoc: inheriting standard containers is discouraged. This custom mapping
+// needs the derived record's metadata as well as container iteration.
+template <>
+struct reflect_as_root<customization_mapping::extended_values>:
+    std::true_type {};
+
 // Record metadata describes the added fields; container adapters handle the
 // flat representation. The fields occupy its final two positions.
 template <>
@@ -839,7 +855,10 @@ struct from_type<customization_mapping::extended_values> {
     mapping::from_container{}(value, node, diagnostics);
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
-      | fn::each(cpp11_append_member{node, diagnostics});
+      | fn::each(cpp11_append_member{
+        /*node=*/node,
+        /*diagnostics=*/diagnostics,
+      });
   }
 };
 
@@ -1031,12 +1050,12 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   omni::ryml::diagnostics<false> issues{};
   issues.tree = parsed->crootref();
   omni::ryml::detail::mapping_context diagnostics{
-    issues.config,
-    &issues,
-    {},
-    0,
-    0,
-    false,
+    /*options=*/issues.config,
+    /*diagnostics=*/&issues,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/false,
   };
   auto into = c.initial;
   const bool mapped = omni::ryml::core::map_tree(
@@ -1143,12 +1162,12 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   omni::ryml::diagnostics<false> issues{};
   issues.tree = parsed->crootref();
   omni::ryml::detail::mapping_context diagnostics{
-    issues.config,
-    &issues,
-    {},
-    0,
-    0,
-    false,
+    /*options=*/issues.config,
+    /*diagnostics=*/&issues,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/false,
   };
   auto into = c.initial;
   const bool mapped = omni::ryml::core::map_tree(
