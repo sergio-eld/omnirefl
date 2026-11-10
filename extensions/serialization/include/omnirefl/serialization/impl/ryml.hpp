@@ -116,7 +116,10 @@ struct mapping_context {
   std::size_t error_count;
   std::size_t warning_count;
 
-  // Reference-tree builders borrow source strings; owning builders copy them.
+  // FIXME: [high] Ad hoc: builders erase their compile-time string-ownership
+  // policy into this runtime flag because context stores diagnostics<false>.
+  // Decouple reporting from diagnostics storage through a non-template report
+  // interface and preserve the builder's policy in string writing.
   bool borrow_strings;
 
   void report(issue entry) {
