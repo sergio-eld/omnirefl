@@ -54,14 +54,10 @@ TEST(serialization_scalar_roots, writes_string_array_without_record_metadata) {
     omni::ryml::as_json(std::vector<std::string>{"first", "second"})));
 }
 
-// FIXME: [high] Restore vector<bool> proxy serialization and insertion in
-// the new container adapters.
-#if 0
 TEST(serialization_scalar_roots, writes_boolean_array_without_record_metadata) {
   EXPECT_TRUE(serialization_test::matches_json(
     R"([true, false])", omni::ryml::as_json(std::vector<bool>{true, false})));
 }
-#endif
 
 TEST(serialization_scalar_roots, writes_empty_array_without_record_metadata) {
   EXPECT_TRUE(serialization_test::matches_json(
@@ -207,9 +203,6 @@ TEST(deserialization_scalar_roots, reports_invalid_root_values) {
   }
 }
 
-// FIXME: [high] Restore vector<bool> proxy serialization and insertion in
-// the new container adapters.
-#if 0
 TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
   const auto numbers = omni::ryml::deserialize(
     omni::type_t<std::vector<int>>{}, "[7, 42]");
@@ -238,7 +231,6 @@ TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
     EXPECT_EQ(expected_nested, *nested.value);
   }
 }
-#endif
 
 struct invalid_input_case {
   std::string name;

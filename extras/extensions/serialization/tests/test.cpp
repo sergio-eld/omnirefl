@@ -858,9 +858,7 @@ TEST(deserialization, rejects_quoted_boolean_values) {
   EXPECT_EQ("/enabled: \"true\" is not a boolean", result.diagnostics);
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST(deserialization, DISABLED_rejects_unknown_input_fields_by_default) {
+TEST(deserialization, rejects_unknown_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::unknown_field_json}) //
@@ -870,9 +868,7 @@ TEST(deserialization, DISABLED_rejects_unknown_input_fields_by_default) {
   EXPECT_EQ("/extra: unknown field", result.diagnostics);
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST(deserialization, DISABLED_rejects_duplicate_input_fields_by_default) {
+TEST(deserialization, rejects_duplicate_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       std::string{serialization_data::duplicate_field_json}) //
@@ -907,9 +903,7 @@ struct mapping_case {
 class configured_deserialization:
     public testing::TestWithParam<mapping_case> {};
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(configured_deserialization, DISABLED_maps_or_reports_invalid_input) {
+TEST_P(configured_deserialization, maps_or_reports_invalid_input) {
   const auto deserialize =
     omni::ryml::deserialize.transform_config([](omni::ryml::config s) {
       s.recovery = omni::compat::nullopt;
@@ -931,10 +925,8 @@ TEST_P(configured_deserialization, DISABLED_maps_or_reports_invalid_input) {
 
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
 TEST_P(configured_deserialization,
-  DISABLED_maps_with_designated_constant_configuration) {
+  maps_with_designated_constant_configuration) {
   const auto result =
     configured_deserialize(omni::type_t<serialization_data::payload>{},
       GetParam().source) //
@@ -949,9 +941,7 @@ TEST_P(configured_deserialization,
   }
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(configured_deserialization, DISABLED_maps_with_designated_runtime_configuration) {
+TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
   const std::uint16_t error_limit = 0;
   const omni::ryml::deserialize_t deserialize{
     .config =
@@ -1012,9 +1002,7 @@ struct extra_fields_case {
 class extra_fields_policy:
     public testing::TestWithParam<std::tuple<extra_fields_case, bool, bool>> {};
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(extra_fields_policy, DISABLED_applies_extra_independently_of_recovery) {
+TEST_P(extra_fields_policy, applies_extra_independently_of_recovery) {
   omni::compat::apply(
     [](const extra_fields_case &c, bool extra, bool recover_missing) {
       const auto result = omni::ryml::deserialize.transform_config(
@@ -1102,9 +1090,7 @@ data:
 
 class allowed_extra_fields: public testing::TestWithParam<mapping_case> {};
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(allowed_extra_fields, DISABLED_validates_model_fields) {
+TEST_P(allowed_extra_fields, validates_model_fields) {
   const auto result =
     omni::ryml::deserialize
       .transform_config([](omni::ryml::config s) {
@@ -1351,10 +1337,8 @@ struct diagnostics_case {
 class deserialization_diagnostics:
     public testing::TestWithParam<diagnostics_case> {};
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
 TEST_P(deserialization_diagnostics,
-  DISABLED_retains_diagnostics_and_applies_independent_policies) {
+  retains_diagnostics_and_applies_independent_policies) {
   const auto deserialize =
     omni::ryml::deserialize.transform_config([](omni::ryml::config s) {
       s.error_policy.error_limit = GetParam().error_limit;
@@ -1395,10 +1379,8 @@ TEST_P(deserialization_diagnostics, retains_config_for_inspection) {
     result.diagnostics.config.recovery.has_value());
 }
 
-// FIXME: [high] Restore missing-field recovery and policy handling in the
-// new record adapter.
 TEST_P(deserialization_diagnostics,
-  DISABLED_transforms_diagnostics_and_preserves_optional_value) {
+  transforms_diagnostics_and_preserves_optional_value) {
   const auto result =
     omni::ryml::deserialize
       .transform_config([](omni::ryml::config s) {
@@ -1609,9 +1591,7 @@ TEST(deserialization_diagnostics, nested_container_errors_share_the_budget) {
   EXPECT_EQ((omni::compat::optional<std::size_t>{1U}), index.index);
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST(deserialization_diagnostics, DISABLED_retained_diagnostics_own_views_after_moves) {
+TEST(deserialization_diagnostics, retained_diagnostics_own_views_after_moves) {
   omni::ryml::diagnostics</*OwnsTree=*/true> retained;
   {
     auto result =
@@ -1725,9 +1705,7 @@ struct rendering_case {
 
 class diagnostic_rendering: public testing::TestWithParam<rendering_case> {};
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(diagnostic_rendering, DISABLED_renders_paths_and_messages_on_error) {
+TEST_P(diagnostic_rendering, renders_paths_and_messages_on_error) {
   auto result =
     omni::ryml::deserialize.transform_config([](omni::ryml::config s) {
       s.error_policy.error_limit = 4;
@@ -2009,9 +1987,7 @@ struct initialized_payload {
   int code = 42;
 };
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST(deserialization_diagnostics, DISABLED_recovery_does_not_hide_failed_fields) {
+TEST(deserialization_diagnostics, recovery_does_not_hide_failed_fields) {
   const auto result =
     omni::ryml::deserialize.transform_config([](omni::ryml::config s) {
       s.error_policy.error_limit = 2;
@@ -2125,9 +2101,7 @@ TEST_P(parser_recovery, public_parse_retains_error_and_skips_transformation) {
   }
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(configured_deserialization, DISABLED_public_mapper_accepts_an_independent_tree) {
+TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
   const auto map = omni::fn::partial(
     omni::ryml::map_tree.transform_config([](omni::ryml::config s) {
       s.recovery = omni::compat::nullopt;
@@ -2148,9 +2122,7 @@ TEST_P(configured_deserialization, DISABLED_public_mapper_accepts_an_independent
   }
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(deserialization_diagnostics, DISABLED_public_mapper_applies_the_same_policies) {
+TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
   const auto map =
     omni::ryml::map_tree.transform_config([](omni::ryml::config s) {
       s.error_policy.error_limit = GetParam().error_limit;
@@ -2179,9 +2151,7 @@ TEST_P(deserialization_diagnostics, DISABLED_public_mapper_applies_the_same_poli
   }
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(deserialization_diagnostics, DISABLED_borrowed_mapper_applies_the_same_policies) {
+TEST_P(deserialization_diagnostics, borrowed_mapper_applies_the_same_policies) {
   const auto map = omni::fn::partial( //
     omni::ryml::map_tree.transform_config([](omni::ryml::config s) {
       s.error_policy.error_limit = GetParam().error_limit;
@@ -2214,9 +2184,7 @@ TEST_P(deserialization_diagnostics, DISABLED_borrowed_mapper_applies_the_same_po
   }
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(configured_deserialization, DISABLED_borrows_mutable_node_refs_and_renders) {
+TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
   auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
   omni::ryml::with_diagnostics<serialization_data::payload,
@@ -2447,9 +2415,7 @@ struct optional_case {
 class optional_recovery:
     public testing::TestWithParam<std::tuple<optional_case, bool>> {};
 
-// FIXME: [high] Restore missing-field recovery and policy handling in the
-// new record adapter.
-TEST_P(optional_recovery, DISABLED_invalid_values_remain_errors_with_recovery) {
+TEST_P(optional_recovery, invalid_values_remain_errors_with_recovery) {
   omni::compat::apply(
     [](const optional_case &c, bool recover_missing) {
       const auto result = omni::ryml::deserialize.transform_config(
@@ -2545,9 +2511,7 @@ struct container_failure_case {
 class container_recovery:
     public testing::TestWithParam<std::tuple<container_failure_case, bool>> {};
 
-// FIXME: [high] Restore missing-field recovery and policy handling in the
-// new record adapter.
-TEST_P(container_recovery, DISABLED_retains_defaults_and_classifies_the_issue) {
+TEST_P(container_recovery, retains_defaults_and_classifies_the_issue) {
   omni::compat::apply(
     [](const container_failure_case &c, bool recover_missing) {
       const auto result = omni::ryml::deserialize.transform_config(
@@ -2603,9 +2567,7 @@ struct optional_record_config {
   int following = 42;
 };
 
-// FIXME: [high] Restore missing-field recovery and policy handling in the
-// new record adapter.
-TEST(deserialization, DISABLED_default_keeps_an_empty_optional_record) {
+TEST(deserialization, default_keeps_an_empty_optional_record) {
   const auto result =
     omni::ryml::deserialize(omni::type_t<optional_record_config>{},
       R"({"following": 7})");
@@ -2634,9 +2596,7 @@ TEST(deserialization, default_rejects_invalid_optional_records_as_errors) {
     omni::ryml::render_diagnostics(result.diagnostics));
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST(deserialization_warnings, DISABLED_duplicate_containers_warn_and_keep_first_value) {
+TEST(deserialization_warnings, duplicate_containers_warn_and_keep_first_value) {
   const auto result =
     omni::ryml::deserialize.transform_config([](omni::ryml::config s) {
       s.recovery = omni::json::recovery_policy::default_initializable;
@@ -2834,9 +2794,7 @@ TEST_P(serialization, omits_static_data_members) {
     }(record_with_shared_state{7})));
 }
 
-// FIXME: [high] Restore structural field policies and their diagnostics in
-// the new record adapter.
-TEST_P(serialization, DISABLED_does_not_require_or_write_static_data_members) {
+TEST_P(serialization, does_not_require_or_write_static_data_members) {
   const auto result =
     strict_deserialize(omni::type_t<record_with_shared_state>{},
       R"({"value": 7})");
@@ -2920,9 +2878,6 @@ struct boolean_values {
   std::vector<bool> flags;
 };
 
-// FIXME: [high] Restore vector<bool> proxy serialization and insertion in
-// the new container adapters.
-#if 0
 TEST_P(serialization, writes_booleans_and_boolean_sequences_as_words) {
   EXPECT_TRUE(serialization_test::matches_json(
     R"({"enabled": false, "flags": [true, false]})",
@@ -2930,7 +2885,6 @@ TEST_P(serialization, writes_booleans_and_boolean_sequences_as_words) {
       /*format=*/GetParam(),
     }(boolean_values{false, {true, false}})));
 }
-#endif
 
 TEST_P(serialization, reads_bitfields_without_mutating_the_source) {
   const serialization_data::bitfield_values value{815, true};

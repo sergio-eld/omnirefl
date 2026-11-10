@@ -12,6 +12,7 @@
 #include <csetjmp>
 #include <iterator>
 #include <limits>
+#include <numeric>
 #include <type_traits>
 
 // TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
@@ -211,6 +212,20 @@ struct write_real {
   }
 };
 
+// Preserve emplace_back support; packed containers may offer only push_back.
+// The int overload takes priority when both operations are available.
+template <typename Container>
+auto append(Container *into, typename Container::value_type &&value, int)
+  -> decltype(into->emplace_back(std::move(value)), void()) {
+  into->emplace_back(std::move(value));
+}
+
+template <typename Container>
+auto append(Container *into, typename Container::value_type &&value, long)
+  -> decltype(into->push_back(std::move(value)), void()) {
+  into->push_back(std::move(value));
+}
+
 } // namespace detail
 
 namespace cp {
@@ -218,7 +233,7 @@ namespace cp {
 template <typename Container, typename Enable>
 void emplace<Container, Enable>::operator()(Container *into,
   typename Container::value_type &&value) const {
-  into->emplace_back(std::move(value));
+  detail::append(into, std::move(value), /*priority=*/0);
 }
 
 } // namespace cp
@@ -700,7 +715,8 @@ auto from_container::operator()(const T &value,
   omni::ryml::detail::mapping_context &diagnostics) const
   -> compat::enable_if_t<supports<T>()> {
   node.set_seq();
-  for (const auto &element : value) {
+  // Use value_type so packed containers' proxy references map as their values.
+  for (const typename T::value_type &element : value) {
     if (diagnostics.stopped())
       break;
 
@@ -751,6 +767,71 @@ namespace reflected_scope {
 
 namespace detail {
 
+struct cpp11_member_named {
+  c4::csubstr name;
+
+  template <typename _F>
+  bool operator()(omni::data_member_meta_t<_F> field) const {
+    return this->name == c4::to_csubstr(field.name());
+  }
+};
+
+// SFINAE keeps T{} out of instantiations for non-default-constructible fields.
+template <typename Record, typename _F>
+auto initialize_missing(omni::data_member_binding_t<Record, _F> field)
+  -> compat::enable_if_t<std::is_default_constructible<
+    typename omni::data_member_meta_t<_F>::type>::value> {
+  field.set_value(typename omni::data_member_meta_t<_F>::type{});
+}
+
+template <typename Record, typename _F>
+auto initialize_missing(omni::data_member_binding_t<Record, _F>)
+  -> compat::enable_if_t<!std::is_default_constructible<
+    typename omni::data_member_meta_t<_F>::type>::value> {}
+
+struct cpp11_require_member {
+  const ::ryml::ConstNodeRef &node;
+  omni::ryml::detail::mapping_context &diagnostics;
+
+  template <typename Record, typename _F>
+  void operator()(omni::data_member_binding_t<Record, _F> field) const {
+    if (this->diagnostics.stopped())
+      return;
+
+    const auto name = c4::to_csubstr(field.name());
+    if (!this->node.find_child(name).invalid())
+      return;
+
+    const auto recovery = this->diagnostics.options.recovery;
+    if (recovery
+      && (*recovery & json::recovery_policy::field_defaults)
+        == json::recovery_policy::field_defaults
+      && field.has_default_value_access())
+      return;
+
+    if ((is_optional_like<typename omni::data_member_meta_t<_F>::type>::value
+          || (recovery
+            && (*recovery & json::recovery_policy::default_initializable)
+              == json::recovery_policy::default_initializable))
+      && std::is_default_constructible<
+        typename omni::data_member_meta_t<_F>::type>::value) {
+      initialize_missing(field);
+      return;
+    }
+
+    this->diagnostics.path.push_back({
+      /*field=*/name,
+      /*index=*/compat::nullopt,
+    });
+    this->diagnostics.report(
+      omni::ryml::detail::make_issue(json::issue_code::missing_field,
+        json::value_kind::unknown,
+        ::ryml::ConstNodeRef{},
+        this->diagnostics.path));
+    this->diagnostics.path.pop_back();
+  }
+};
+
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
   omni::ryml::detail::mapping_context &diagnostics;
@@ -781,21 +862,25 @@ struct cpp11_read_member {
       return false;
 
     const auto name = c4::to_csubstr(field.name());
+    const auto children = this->node.children();
+    const auto child =
+      (this->diagnostics.options.error_policy.duplicates
+        & json::duplicate_policy::last) == json::duplicate_policy::last
+      ? std::accumulate(children.begin(),
+          children.end(),
+          ::ryml::ConstNodeRef{},
+          [name](::ryml::ConstNodeRef selected, ::ryml::ConstNodeRef entry) {
+            return name == entry.key() ? entry : selected;
+          })
+      : this->node.find_child(name);
+    // The preceding presence pass already recovered or reported missing fields.
+    if (child.invalid())
+      return success;
+
     this->diagnostics.path.push_back({
       /*field=*/name,
       /*index=*/compat::nullopt,
     });
-    const auto child = this->node.find_child(name);
-    if (child.invalid()) {
-      this->diagnostics.report(
-        omni::ryml::detail::make_issue(json::issue_code::missing_field,
-          json::value_kind::unknown,
-          child,
-          this->diagnostics.path));
-      this->diagnostics.path.pop_back();
-      return false;
-    }
-
     // A temporary also supports bitfields, which cannot expose references.
     typename omni::data_member_meta_t<_F>::type value = field.value();
     const bool mapped = core::read_node(child, &value, this->diagnostics);
@@ -884,8 +969,6 @@ auto from_record::operator()(const T &value,
     });
 }
 
-// FIXME: [high] Restore duplicate/unknown-field policies and missing-field
-// recovery through the new customization interface.
 template <typename T>
 auto to_record::operator()(::ryml::ConstNodeRef node,
   T *into,
@@ -900,13 +983,64 @@ auto to_record::operator()(::ryml::ConstNodeRef node,
     return false;
   }
 
+  const auto errors = diagnostics.error_count;
+  const auto fields = omni::meta_for<T>::accessible_data_members()
+    | fn::filter<fn::non_static>();
+
+  // Structural issues precede missing fields and value mapping, preserving
+  // diagnostic order regardless of the document's member order.
+  for (const auto child : node.children()) {
+    if (diagnostics.stopped())
+      break;
+
+    const auto name = child.key();
+    const bool known = fn::any_of(
+      detail::cpp11_member_named{/*name=*/name}, fields);
+    const bool duplicate = known && node.find_child(name).id() != child.id();
+    if (known && !duplicate)
+      continue;
+
+    const auto duplicates = diagnostics.options.error_policy.duplicates;
+    const auto unknown = diagnostics.options.error_policy.unknown_fields;
+    const bool allowed = duplicate
+      ? (duplicates
+          & (json::duplicate_policy::allow | json::duplicate_policy::last))
+        != json::duplicate_policy::reject
+      : (unknown & json::unknown_policy::allow) == json::unknown_policy::allow;
+    const bool warn = duplicate
+      ? (duplicates & json::duplicate_policy::warn)
+        == json::duplicate_policy::warn
+      : (unknown & json::unknown_policy::warn) == json::unknown_policy::warn;
+    if (allowed && !warn)
+      continue;
+
+    diagnostics.path.push_back({
+      /*field=*/name,
+      /*index=*/compat::nullopt,
+    });
+    diagnostics.report(omni::ryml::detail::make_issue(
+      duplicate ? json::issue_code::duplicate_field
+                : json::issue_code::unknown_field,
+      json::value_kind::unknown,
+      child,
+      diagnostics.path,
+      /*warning=*/allowed));
+    diagnostics.path.pop_back();
+  }
+
   const auto binding = omni::meta_for<T>::bind(*into);
-  return binding.accessible_data_members()
-    | fn::filter<fn::non_static>()
+  const auto members = binding.accessible_data_members()
+    | fn::filter<fn::non_static>();
+  members | fn::each(detail::cpp11_require_member{
+    /*node=*/node,
+    /*diagnostics=*/diagnostics,
+  });
+  const bool mapped = members
     | fn::foldl(detail::cpp11_read_member{
       /*node=*/node,
       /*diagnostics=*/diagnostics,
     }, /*initial=*/true);
+  return mapped && errors == diagnostics.error_count;
 }
 
 } // namespace reflected_scope

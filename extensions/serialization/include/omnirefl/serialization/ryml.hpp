@@ -967,6 +967,15 @@ struct to_type<T,
   compat::enable_if_t<mapping::reflected_scope::to_enum::supports<T>()>>:
     mapping::reflected_scope::to_enum {};
 
+// TODO: [medium] Consider callable variable-template customization in C++14:
+// `template <> const auto from_type<T> = [](const T &, ...) { ... };`
+// Keep a C++11 struct alternative named from_type_t (and likewise to_type_t).
+// Both customization forms should default to an unavailable sentinel; the
+// variable sentinel can be constexpr. Move built-in selection, including the
+// reflected-record fallback, behind a selector so defaults do not count as
+// user customizations. Reject simultaneous customizations with static_assert;
+// return the stored const callable rather than default-constructing its type.
+
 } // namespace cp
 
 // TODO: [high] Define a public diagnostics interface for customization-point

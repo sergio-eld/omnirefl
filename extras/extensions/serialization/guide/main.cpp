@@ -17,25 +17,25 @@
  *
  * Config and policies
  *   config.core_functions - pass config and input explicitly
- *   config.DISABLED_unknown_fields
+ *   config.unknown_fields
  *     reject, ignore, or warn about unknown fields
- *   config.DISABLED_duplicate_fields - choose a repeated field occurrence
+ *   config.duplicate_fields - choose a repeated field occurrence
  *   config.error_limit - collect errors before stopping
- *   config.DISABLED_warning_limit - fail when the warning limit is exceeded
- *   config.DISABLED_missing_fields - recover missing fields where applicable
+ *   config.warning_limit - fail when the warning limit is exceeded
+ *   config.missing_fields - recover missing fields where applicable
  *   config.invalid_fields - invalid input is not a missing field
  *
  * Diagnostics
  *   diagnostics.inspect_diagnostics - issue codes, values, and paths
  *   diagnostics.render_diagnostics - render retained issues on demand
  *   diagnostics.transform_diagnostics - adapt diagnostics, preserve the value
- *   diagnostics.DISABLED_valid_values_with_warnings
+ *   diagnostics.valid_values_with_warnings
  *     success can retain warnings
  *
  * Supported mappings
  *   mappings.nested_records - discover nested record types
  *   mappings.sequences - vectors of records and nested vectors
- *   mappings.DISABLED_optional_fields
+ *   mappings.optional_fields
  *     missing, null, present, and invalid values
  *   mappings.serialize_optional_fields - empty optionals become null
  *   mappings.optional_sequence_elements - omit empty optional elements
@@ -281,9 +281,7 @@ TEST(config, core_functions) {
 /** Unknown fields are rejected by default. allow ignores them; allow | warn
  * retains a warning. warn alone does not allow an unknown field.
  */
-// FIXME: [high] Restore unknown-field policy handling in the new record
-// adapter.
-TEST(config, DISABLED_unknown_fields) {
+TEST(config, unknown_fields) {
   using omni::json::unknown_policy;
   const auto load = omni::ryml::deserialize.transform_config(
     [](omni::ryml::config s) {
@@ -311,9 +309,7 @@ TEST(config, DISABLED_unknown_fields) {
  * when accepted. Discarded occurrences are not mapped; an invalid selected
  * occurrence does not fall back to a different occurrence.
  */
-// FIXME: [high] Restore duplicate-field policy handling in the new record
-// adapter.
-TEST(config, DISABLED_duplicate_fields) {
+TEST(config, duplicate_fields) {
   using omni::json::duplicate_policy;
   const auto load = omni::ryml::deserialize.transform_config(
     [](omni::ryml::config s) {
@@ -358,8 +354,7 @@ TEST(config, error_limit) {
 /** warning_limit is optional: unset means unlimited, zero fails on the first
  * warning. Exceeding it adds an error and prevents returning a value.
  */
-// FIXME: [high] Restore policy warnings before demonstrating warning limits.
-TEST(config, DISABLED_warning_limit) {
+TEST(config, warning_limit) {
   const auto load = omni::ryml::deserialize.transform_config(
     [](omni::ryml::config s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow
@@ -386,8 +381,7 @@ TEST(config, DISABLED_warning_limit) {
  * supported. When combined, an exposed field default takes precedence.
  * Successful recovery does not itself add a warning.
  */
-// FIXME: [high] Restore missing-field recovery in the new record adapter.
-TEST(config, DISABLED_missing_fields) {
+TEST(config, missing_fields) {
   const auto load = omni::ryml::deserialize.transform_config(
     [](omni::ryml::config s) {
       s.recovery = omni::json::recovery_policy::field_defaults
@@ -486,8 +480,7 @@ TEST(diagnostics, transform_diagnostics) {
 }
 
 // Accepted input conditions can produce warnings alongside a valid value.
-// FIXME: [high] Restore unknown-field warnings in the new record adapter.
-TEST(diagnostics, DISABLED_valid_values_with_warnings) {
+TEST(diagnostics, valid_values_with_warnings) {
   const auto load = omni::ryml::deserialize.transform_config(
     [](omni::ryml::config s) {
       s.error_policy.duplicates = omni::json::duplicate_policy::allow
@@ -563,9 +556,7 @@ struct measurement {
 /** An optional field accepts a missing field or explicit null as no value.
  * A supplied invalid value remains an error; optional does not hide it.
  */
-// FIXME: [high] Restore missing-optional-field handling in the new record
-// adapter.
-TEST(mappings, DISABLED_optional_fields) {
+TEST(mappings, optional_fields) {
   const std::vector<std::string> absent{"{}", R"({"value": null})"};
   for (const auto &document : absent) {
     SCOPED_TRACE(document);

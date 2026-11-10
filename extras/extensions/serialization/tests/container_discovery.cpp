@@ -109,6 +109,27 @@ TEST(container_discovery, deserializes_three_nested_integer_vectors) {
   }
 }
 
+// No push_back: default insertion must retain the emplace_back protocol.
+struct emplace_only {
+  using value_type = int;
+  std::vector<int> values;
+
+  decltype(values)::const_iterator begin() const { return values.begin(); }
+  decltype(values)::const_iterator end() const { return values.end(); }
+  void clear() { values.clear(); }
+  void emplace_back(int value) { values.emplace_back(value); }
+};
+
+TEST(container_discovery, inserts_into_an_emplace_only_container) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<emplace_only>{}, "[7, 42]");
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ((std::vector<int>{7, 42}), result.value->values);
+  }
+}
+
 TEST(container_discovery, deserializes_three_nested_custom_scalar_vectors) {
   const std::string document = "[[[7, 42], []], [], [[0]]]";
   const auto result = omni::ryml::deserialize(

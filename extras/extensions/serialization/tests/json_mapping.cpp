@@ -964,9 +964,7 @@ void PrintTo(const omni::ryml::with_diagnostics<erased_value,
 
 class mapping_conformance: public ::testing::TestWithParam<scenario> {};
 
-// FIXME: [high] Restore duplicate/unknown-field, recovery, and warning
-// policies before enabling legacy conformance cases.
-TEST_P(mapping_conformance, DISABLED_conforms_to_expected_mapping) {
+TEST_P(mapping_conformance, conforms_to_expected_mapping) {
   SCOPED_TRACE(GetParam().json);
   const auto actual = GetParam().run().transform_diagnostics(
     [](omni::ryml::diagnostics<true> diagnostics) {
