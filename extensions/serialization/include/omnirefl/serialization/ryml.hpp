@@ -683,6 +683,10 @@ struct deserialize_t {
     operator()(omni::type_t<Record> record_type, std::string source) const {
     return core::deserialize(this->config, record_type, std::move(source));
   }
+
+  // TODO: Add T *into overloads here and in core::deserialize to map into an
+  // existing object. Define mutation on failure and the result contract;
+  // do not require constructing and assigning a replacement object.
 };
 
 const map_tree_t map_tree{};
