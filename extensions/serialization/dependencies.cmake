@@ -38,7 +38,10 @@ if(NOT TARGET tl::optional)
     set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(tl_optional
         URL https://github.com/TartanLlama/optional/archive/refs/tags/v1.1.0.tar.gz
-        URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118)
+        URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118
+        # value()'s explicit throw prevents emplace() under -fno-exceptions.
+        PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/patch_tl_optional.cmake")
     list(APPEND _serialization_dependencies tl_optional)
 endif()
 

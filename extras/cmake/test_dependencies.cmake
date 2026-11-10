@@ -25,9 +25,19 @@ FetchContent_Declare(tl_expected
     URL_HASH SHA256=9a04f4f472fbb5c30bf60402f1ca626c4a76987f867978d0b8a35d7ab3fb8fe7)
 
 set(OPTIONAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+if(DEFINED omnirefl_DIR)
+    set(_dependencies_optional_patch
+        "${omnirefl_DIR}/components/serialization/patch_tl_optional.cmake")
+else()
+    set(_dependencies_optional_patch
+        "${CMAKE_CURRENT_LIST_DIR}/../../extensions/serialization/patch_tl_optional.cmake")
+endif()
 FetchContent_Declare(tl_optional
     URL https://github.com/TartanLlama/optional/archive/refs/tags/v1.1.0.tar.gz
-    URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118)
+    URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118
+    # Avoid instantiating value()'s throw after successful emplacement.
+    PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+        -P "${_dependencies_optional_patch}")
 
 set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
 FetchContent_Declare(mpark_variant

@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -122,6 +124,74 @@ TEST(deserialization_scalar_roots, reads_scalars_without_record_metadata) {
   }
 }
 
+TEST(deserialization_scalar_roots, keeps_a_valid_false_value) {
+  const auto result = omni::ryml::deserialize(omni::type_t<bool>{}, "false");
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_FALSE(*result.value);
+  }
+}
+
+struct integer_range_case {
+  std::string name;
+  std::string source;
+  omni::compat::expected<std::int8_t, omni::json::issue_code> expected;
+};
+
+class scalar_integer_ranges:
+    public testing::TestWithParam<integer_range_case> {};
+
+TEST_P(scalar_integer_ranges, returns_a_value_or_a_range_error) {
+  const auto &c = GetParam();
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<std::int8_t>{}, c.source);
+  EXPECT_EQ(bool(c.expected), bool(result.value));
+  if (c.expected && result.value) {
+    EXPECT_EQ(*c.expected, *result.value);
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+  }
+  if (!c.expected) {
+    EXPECT_EQ(1U, result.diagnostics.issues.size());
+    if (1U == result.diagnostics.issues.size()) {
+      EXPECT_EQ(c.expected.error(), result.diagnostics.issues.front().reason);
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(boundaries,
+  scalar_integer_ranges,
+  testing::ValuesIn(std::vector<integer_range_case>{
+    {"zero", "0", std::int8_t{0}},
+    {
+      "minimum",
+      std::to_string(std::numeric_limits<std::int8_t>::min()),
+      std::numeric_limits<std::int8_t>::min(),
+    },
+    {
+      "maximum",
+      std::to_string(std::numeric_limits<std::int8_t>::max()),
+      std::numeric_limits<std::int8_t>::max(),
+    },
+    {
+      "below_minimum",
+      std::to_string(std::numeric_limits<std::int8_t>::min() - 1),
+      omni::compat::unexpected<omni::json::issue_code>{
+        omni::json::issue_code::out_of_range,
+      },
+    },
+    {
+      "above_maximum",
+      std::to_string(std::numeric_limits<std::int8_t>::max() + 1),
+      omni::compat::unexpected<omni::json::issue_code>{
+        omni::json::issue_code::out_of_range,
+      },
+    },
+  }),
+  [](const testing::TestParamInfo<integer_range_case> &c) {
+    return c.param.name;
+  });
+
 TEST(deserialization_scalar_roots, reports_invalid_root_values) {
   const auto result = omni::ryml::deserialize(omni::type_t<int>{}, R"("bad")");
   EXPECT_FALSE(result.value);
@@ -162,25 +232,39 @@ TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
   }
 }
 
-TEST(deserialization_scalar_roots, reports_empty_tree_roots) {
-  const auto scalar = omni::ryml::map_tree(omni::type_t<int>{}, ::ryml::Tree{});
-  EXPECT_FALSE(scalar.value);
-  EXPECT_EQ(1U, scalar.diagnostics.issues.size());
-  for (const auto &issue : scalar.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
-    EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
-  }
+struct invalid_input_case {
+  std::string name;
+  std::string source;
+};
 
-  const auto sequence = omni::ryml::map_tree(
-    omni::type_t<std::vector<int>>{}, ::ryml::Tree{});
+class invalid_deserialization_input:
+    public testing::TestWithParam<invalid_input_case> {};
 
-  EXPECT_FALSE(sequence.value);
-  EXPECT_EQ(1U, sequence.diagnostics.issues.size());
-  for (const auto &issue : sequence.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
-    EXPECT_EQ(omni::json::value_kind::sequence, issue.expected);
+TEST_P(invalid_deserialization_input, reports_failure_with_diagnostics) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<int>{}, GetParam().source);
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (1U == result.diagnostics.issues.size()) {
+    EXPECT_FALSE(result.diagnostics.issues.front().warning);
+    EXPECT_TRUE(result.diagnostics.issues.front().path.empty());
   }
+  EXPECT_FALSE(omni::ryml::render_diagnostics(result.diagnostics).empty());
 }
+
+INSTANTIATE_TEST_SUITE_P(documents,
+  invalid_deserialization_input,
+  testing::ValuesIn(std::vector<invalid_input_case>{
+    {/*name=*/"empty", /*source=*/""},
+    {/*name=*/"whitespace", /*source=*/" \n\t"},
+    {/*name=*/"unterminated_json", /*source=*/"["},
+    {/*name=*/"unterminated_yaml", /*source=*/"value: ["},
+    {/*name=*/"wrong_value_kind", /*source=*/"[]"},
+    {/*name=*/"null_scalar", /*source=*/"null"},
+  }),
+  [](const testing::TestParamInfo<invalid_input_case> &c) {
+    return c.param.name;
+  });
 
 TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
   const auto load = omni::ryml::deserialize.transform_config(

@@ -27,10 +27,6 @@ namespace ryml {
 
 namespace detail {
 
-// Delay the unsupported-type assertion until the selected operation is invoked.
-template <typename>
-struct dependent_false: std::false_type {};
-
 inline std::string to_string(c4::csubstr s) {
   // Empty views may have null data; C++11's string constructor forbids it.
   return s.empty() ? std::string{} : std::string{s.data(), s.size()};
@@ -113,12 +109,18 @@ inline const std::string &kind_name(json::value_kind k) {
 
 struct mapping_context {
   const config &options;
-  omni::ryml::diagnostics</*owning=*/false> *diagnostics;
+  omni::ryml::diagnostics</*OwnsTree=*/false> *diagnostics;
   std::vector<issue::path_segment> path;
 
   // Keep stop checks constant-time; counters can exceed the 16-bit limits.
   std::size_t error_count;
   std::size_t warning_count;
+
+  // FIXME: [high] Ad hoc: builders erase their compile-time string-ownership
+  // policy into this runtime flag because context stores diagnostics<false>.
+  // Decouple reporting from diagnostics storage through a non-template report
+  // interface and preserve the builder's policy in string writing.
+  bool borrow_strings;
 
   void report(issue entry) {
     error_count += !entry.warning;
@@ -163,455 +165,28 @@ inline issue make_issue(json::issue_code reason,
   return result;
 }
 
-template <typename Value>
-struct map_node_to_fundamental {
-  // Overflow checking applies to integers, excluding bool.
-  template <typename ScalarValue>
-  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
-    -> compat::enable_if_t<std::is_integral<ScalarValue>::value
-        && !std::is_same<bool, ScalarValue>::value,
-      bool> {
-    return c4::from_chars(scalar, c4::fmt::overflow_checked(*value));
-  }
-
-  template <typename ScalarValue>
-  static auto from_chars(c4::csubstr scalar, ScalarValue *value)
-    -> compat::enable_if_t<!std::is_integral<ScalarValue>::value
-        || std::is_same<bool, ScalarValue>::value,
-      bool> {
-    return c4::from_chars(scalar, value);
-  }
-
-  void operator()(::ryml::ConstNodeRef node,
-    Value *value,
-    mapping_context *context) const {
-    assert(value && context);
-
-    constexpr auto expected = std::is_same<bool, Value>::value
-      ? json::value_kind::boolean
-      : std::is_unsigned<Value>::value ? json::value_kind::unsigned_integer
-      : std::is_integral<Value>::value ? json::value_kind::integer
-                                       : json::value_kind::number;
-
-    if (node.invalid() || !node.has_val() || node.is_container()) {
-      context->report(make_issue(json::issue_code::unexpected_kind,
-        expected,
-        node,
-        context->path));
-
-      return;
-    }
-
-    const auto scalar = node.val();
-    const bool valid = std::is_same<bool, Value>::value ? !node.is_val_quoted()
-        && ("true" == scalar || "false" == scalar || "True" == scalar
-          || "False" == scalar || "TRUE" == scalar || "FALSE" == scalar)
-      : std::is_unsigned<Value>::value ? scalar.is_unsigned_integer()
-      : std::is_integral<Value>::value ? scalar.is_integer()
-                                       : scalar.is_real();
-
-    if (!valid) {
-      context->report(make_issue(json::issue_code::invalid_scalar,
-        expected,
-        node,
-        context->path));
-
-      return;
-    }
-
-    Value converted{};
-    if (!from_chars(scalar, &converted)) {
-      context->report(make_issue(json::issue_code::out_of_range,
-        expected,
-        node,
-        context->path));
-
-      return;
-    }
-
-    *value = converted;
-  }
-};
-
-struct map_node_to_string {
-  void operator()(::ryml::ConstNodeRef node,
-    std::string *value,
-    mapping_context *context) const {
-    assert(value && context);
-
-    if (node.invalid() || !node.has_val() || node.is_container()) {
-      context->report(make_issue(json::issue_code::unexpected_kind,
-        json::value_kind::string,
-        node,
-        context->path));
-
-      return;
-    }
-
-    *value = to_string(node.val());
-  }
-};
-
-} // namespace detail
-
-// These templates use metadata supplied by the enclosing reflected_call.
-namespace reflected_scope {
-
-template <typename Value>
-void map_node(::ryml::ConstNodeRef node,
-  Value *value,
-  detail::mapping_context *context);
-
-struct map_node_to_optional {
-  template <typename Optional>
-  void operator()(::ryml::ConstNodeRef node,
-    Optional *optional,
-    detail::mapping_context *context) const {
-    assert(optional && context);
-
-    if (!node.invalid() && node.has_val() && node.val_is_null()) {
-      optional->reset();
-      return;
-    }
-
-    // Keep an initialized fallback if any part of the supplied value fails.
-    typename Optional::value_type value =
-      *optional ? **optional : typename Optional::value_type{};
-
-    const auto errors_before = context->error_count;
-    map_node(node, &value, context);
-    if (errors_before == context->error_count)
-      *optional = std::move(value);
-  }
-};
-
-struct map_node_to_sequence {
-  template <typename Sequence>
-  void operator()(::ryml::ConstNodeRef node,
-    Sequence *sequence,
-    detail::mapping_context *context) const {
-    assert(sequence && context);
-
-    if (node.invalid() || !node.is_seq()) {
-      context->report(detail::make_issue(json::issue_code::unexpected_kind,
-        json::value_kind::sequence,
-        node,
-        context->path));
-
-      return;
-    }
-
-    // Allocate once; failed mappings never expose this sequence.
-    sequence->clear();
-    sequence->resize(node.num_children());
-
-    std::size_t index = 0;
-    for (const auto child : node.children()) {
-      if (context->stopped())
-        break;
-
-      context->path.push_back({
-        /*field=*/{},
-        /*index=*/index,
-      });
-
-      // A value temporary also supports vector<bool>'s proxy elements.
-      typename Sequence::value_type value{};
-      map_node(child, &value, context);
-      (*sequence)[index++] = std::move(value);
-      context->path.pop_back();
-    }
-  }
-};
-
-struct unsupported_deserialization {
-  template <typename Value>
-  void
-    operator()(::ryml::ConstNodeRef, Value *, detail::mapping_context *) const {
-    static_assert(detail::dependent_false<Value>::value,
-      "unsupported deserialization destination type");
-  }
-};
-
-template <bool OwnsStrings, typename Value>
-::ryml::Tree write_tree(const Value &value);
-
-// C++11 substitutes for generic lambdas and lambdas with captures.
-struct cpp11_lambda_field_named {
-  c4::csubstr name;
-
-  template <typename Field>
-  bool operator()(Field field) const {
-    return name == c4::to_csubstr(field.name());
-  }
-};
-
-struct cpp11_lambda_require_field {
-  ::ryml::ConstNodeRef node;
-  detail::mapping_context *context;
-
-  template <typename Field>
-  void operator()(Field field) const {
-    assert(context && context->diagnostics);
-    if (context->stopped())
-      return;
-
-    const auto recovery = context->options.recovery;
-    if (omni::traits::is<compat::optional, typename Field::type>()
-      || (recovery
-        && (((*recovery & json::recovery_policy::field_defaults)
-                == json::recovery_policy::field_defaults
-              && Field::has_default_value_access())
-          || ((*recovery & json::recovery_policy::default_initializable)
-              == json::recovery_policy::default_initializable
-            && std::is_default_constructible<typename Field::type>::value))))
-      return;
-
-    const auto name = c4::to_csubstr(field.name());
-    if (!node.find_child(name).invalid())
-      return;
-
-    context->path.push_back({
-      /*field=*/name,
-      /*index=*/compat::nullopt,
-    });
-    context->report(detail::make_issue(json::issue_code::missing_field,
-      json::value_kind::unknown,
-      ::ryml::ConstNodeRef{},
-      context->path));
-    context->path.pop_back();
-  }
-};
-
-template <typename Value>
-struct cpp11_lambda_map_node {
-  ::ryml::ConstNodeRef node;
-  Value *value;
-  detail::mapping_context *context;
-
-  template <typename _M>
-  void operator()(omni::record_meta_t<_M>) const {
-    map_node(node, value, context);
-  }
-};
-
-// The metadata argument establishes reflection even for empty containers.
-// Retain the original source to write its complete root shape.
-template <bool OwnsStrings, typename Value>
-struct cpp11_lambda_write_tree {
-  const Value &value;
-
-  template <typename _M>
-  ::ryml::Tree operator()(omni::record_meta_t<_M>) const {
-    return write_tree<OwnsStrings>(value);
-  }
-};
-
-// SFINAE avoids instantiating T{} for fields without a default constructor.
-template <typename Field>
-auto initialize_missing_field(Field field)
-  -> compat::enable_if_t<
-    std::is_default_constructible<typename Field::type>::value> {
-  field.set_value(typename Field::type{});
+// Format validation precedes conversion; failure here means out of range.
+template <typename T,
+  compat::enable_if_t<std::is_integral<T>::value, int> = 0>
+compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
+  T value{};
+  // C4 accepts a pointer to either the checked wrapper or the original value.
+  compat::conditional_t<std::is_same<bool, T>::value,
+    T &,
+    c4::fmt::overflow_checked_<T>> target{value};
+  if (!c4::from_chars(scalar, &target))
+    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
+  return value;
 }
 
-template <typename Field>
-auto initialize_missing_field(Field)
-  -> compat::enable_if_t<
-    !std::is_default_constructible<typename Field::type>::value> {}
-
-// Bound fields keep the result in place and reuse diagnostic path storage.
-struct map_node_to_field {
-  ::ryml::ConstNodeRef node;
-  detail::mapping_context *context;
-
-  template <typename Field>
-  void operator()(Field field) const {
-    assert(context && context->diagnostics);
-    if (context->stopped())
-      return;
-
-    const auto name = c4::to_csubstr(field.name());
-    const auto children = node.children();
-    const auto field_node =
-      (context->options.error_policy.duplicates & json::duplicate_policy::last)
-        == json::duplicate_policy::last
-      ? std::accumulate(children.begin(),
-          children.end(),
-          ::ryml::ConstNodeRef{},
-          [name](::ryml::ConstNodeRef selected, ::ryml::ConstNodeRef child) {
-            return name == child.key() ? child : selected;
-          })
-      : node.find_child(name);
-
-    if (field_node.invalid()) {
-      // Record{} already applied the member initializer; retain it only when
-      // field-default recovery is enabled and reflection exposes that default.
-      if (context->options.recovery
-        && ((*context->options.recovery & json::recovery_policy::field_defaults)
-          == json::recovery_policy::field_defaults)
-        && Field::has_default_value_access())
-        return;
-
-      if (omni::traits::is<compat::optional, typename Field::type>()
-        || (context->options.recovery
-          && (*context->options.recovery
-               & json::recovery_policy::default_initializable)
-            == json::recovery_policy::default_initializable))
-        initialize_missing_field(field);
-      return;
-    }
-
-    context->path.push_back({
-      /*field=*/name,
-      /*index=*/compat::nullopt,
-    });
-    // A value temporary also supports bit-fields without reference access.
-    typename Field::type value = field.value();
-    map_node(field_node, &value, context);
-    field.set_value(std::move(value));
-    context->path.pop_back();
-  }
-};
-
-struct map_node_to_record {
-  template <typename Record>
-  void operator()(::ryml::ConstNodeRef node,
-    Record *record,
-    detail::mapping_context *context) const {
-    assert(record && context && context->diagnostics);
-
-    if (node.invalid() || !node.is_map()) {
-      context->report(detail::make_issue(json::issue_code::unexpected_kind,
-        json::value_kind::mapping,
-        node,
-        context->path));
-
-      return;
-    }
-
-    // FIXME: [medium] C++11 does not require tuple element-taking constructors
-    // to be constexpr. Investigate default-constructing the filtered metadata
-    // tuple type instead, since these metadata objects carry no state.
-    OMNI_CPP14_CONSTEXPR const auto fields =
-      omni::reflected(omni::type_t<Record>{}).accessible_data_members()
-      | omni::fn::filter<omni::fn::non_static>();
-
-    // Structural validation precedes field mapping, preserving strict error
-    // order.
-    for (const auto child : node.children()) {
-      if (context->stopped())
-        break;
-
-      const auto name = child.key();
-      const bool known =
-        omni::fn::any_of(cpp11_lambda_field_named{/*name=*/name}, fields);
-
-      const auto unknown = context->options.error_policy.unknown_fields;
-      const bool allow_unknown =
-        (unknown & json::unknown_policy::allow) == json::unknown_policy::allow;
-      const auto duplicates = context->options.error_policy.duplicates;
-      const bool allow_duplicate =
-        (duplicates
-          & (json::duplicate_policy::allow | json::duplicate_policy::last))
-        != json::duplicate_policy::reject;
-      // Unknown fields are handled by their own policy, including repeats.
-      const bool duplicate = known && node.find_child(name).id() != child.id();
-      if (known && !duplicate)
-        continue;
-
-      const bool allowed = duplicate ? allow_duplicate : allow_unknown;
-      const bool warn = duplicate
-        ? (duplicates & json::duplicate_policy::warn)
-          == json::duplicate_policy::warn
-        : (unknown & json::unknown_policy::warn) == json::unknown_policy::warn;
-      if (allowed && !warn)
-        continue;
-
-      context->path.push_back({
-        /*field=*/name,
-        /*index=*/compat::nullopt,
-      });
-      context->report(detail::make_issue(
-        duplicate ? json::issue_code::duplicate_field
-                  : json::issue_code::unknown_field,
-        json::value_kind::unknown,
-        child,
-        context->path,
-        allowed));
-
-      context->path.pop_back();
-    }
-
-    fields
-      | omni::fn::each(cpp11_lambda_require_field{
-        /*node=*/node,
-        /*context=*/context,
-      });
-
-    // TODO: Expose these type/category rules through a schema-from-type
-    // extension.
-    // accessible_data_members() requires a binding that outlives field
-    // traversal.
-    const auto binding = omni::meta_for<Record>::bind(*record);
-    binding.accessible_data_members() | omni::fn::filter<omni::fn::non_static>()
-      | omni::fn::each(map_node_to_field{
-        /*node=*/node,
-        /*context=*/context,
-      });
-  }
-};
-
-// Query metadata only after scalar and container mappings have been ruled out.
-// Their root overloads also run during instrumentation, before metadata exists.
-struct map_node_to_reflected {
-  template <typename Value>
-  void operator()(::ryml::ConstNodeRef node,
-    Value *value,
-    detail::mapping_context *context) const {
-    constexpr auto map = typename omni::traits::select<
-      omni::traits::case_<omni::is_reflected<Value>::value, map_node_to_record>,
-      unsupported_deserialization>::type{};
-
-    map(node, value, context);
-  }
-};
-
-template <typename Value>
-void map_node(::ryml::ConstNodeRef node,
-  Value *value,
-  detail::mapping_context *context) {
-  assert(value && context && context->diagnostics);
-
-  // TODO: [high] Handle reflected enums separately from reflected records.
-  // Map a scalar against reflected enumerator names and represent the schema
-  // with JSON Schema's enum constraint. Decide how aliases, numeric input,
-  // unknown values, and their diagnostics behave.
-  constexpr auto map = typename omni::traits::select<
-    omni::traits::case_<std::is_fundamental<Value>::value,
-      detail::map_node_to_fundamental<Value>>,
-    omni::traits::case_<std::is_same<std::string, Value>::value,
-      detail::map_node_to_string>,
-    omni::traits::case_<omni::traits::is<compat::optional, Value>(),
-      map_node_to_optional>,
-    omni::traits::case_<omni::traits::is<std::vector, Value>(),
-      map_node_to_sequence>,
-    map_node_to_reflected>::type{};
-
-  map(node, value, context);
+template <typename T,
+  compat::enable_if_t<!std::is_integral<T>::value, int> = 0>
+compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
+  T value{};
+  if (!c4::from_chars(scalar, &value))
+    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
+  return value;
 }
-
-} // namespace reflected_scope
-
-namespace detail {
-
-struct unsupported_serialization {
-  template <typename Value>
-  void operator()(const Value &, ::ryml::NodeRef *) const {
-    static_assert(detail::dependent_false<Value>::value,
-      "unsupported serialization source type");
-  }
-};
 
 struct write_integer {
   template <typename Value>
@@ -640,213 +215,93 @@ struct write_real {
   }
 };
 
-template <typename Value>
-struct is_string_source:
-    std::integral_constant<bool,
-      omni::traits::is<std::basic_string, Value>()
-        || omni::traits::is<c4::basic_substring, Value>()
-#if defined(__cpp_lib_string_view)
-        // GCC 7 reports 201603; macro presence suffices for basic_string_view.
-        || omni::traits::is<std::basic_string_view, Value>()
-#endif
-      > {
+// Preserve emplace_back support; packed containers may offer only push_back.
+// The int overload takes priority when both operations are available.
+template <typename Container>
+auto append(Container *into, typename Container::value_type &&value, int)
+  -> decltype(into->emplace_back(std::move(value)), void()) {
+  into->emplace_back(std::move(value));
+}
+
+template <typename Container>
+auto append(Container *into, typename Container::value_type &&value, long)
+  -> decltype(into->push_back(std::move(value)), void()) {
+  into->push_back(std::move(value));
+}
+
+} // namespace detail
+
+namespace cp {
+
+template <typename Container, typename Enable>
+void emplace<Container, Enable>::operator()(Container *into,
+  typename Container::value_type &&value) const {
+  detail::append(into, std::move(value), /*priority=*/0);
+}
+
+} // namespace cp
+
+namespace core {
+
+// Core algorithm
+
+template <typename T>
+void write_node(const T &value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &diagnostics) {
+  if (!diagnostics.stopped())
+    cp::from_type<T>{}(value, node, diagnostics);
+}
+
+template <typename T>
+bool read_node(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) {
+  if (diagnostics.stopped())
+    return false;
+
+  const bool success = cp::to_type<T>{}(node, into, diagnostics);
+  return success && !diagnostics.stopped();
+}
+
+namespace detail {
+
+template <bool BorrowStrings, typename T>
+struct cpp11_lambda_write {
+  const T &value;
+
+  template <typename _M, omni::reflected_entity Entity>
+  ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
+    ::ryml::Tree tree;
+    diagnostics<false> report{};
+    omni::ryml::detail::mapping_context context{
+      /*options=*/report.config,
+      /*diagnostics=*/&report,
+      /*path=*/{},
+      /*error_count=*/0,
+      /*warning_count=*/0,
+      /*borrow_strings=*/BorrowStrings,
+    };
+    core::write_node(this->value, tree.rootref(), context);
+    return tree;
+  }
 };
 
-template <bool OwnsStrings>
-struct write_string {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    static_assert(std::is_same<char,
-                    compat::remove_cvref_t<typename Value::value_type>>::value,
-      "serialization requires char-based strings");
+template <typename T>
+struct cpp11_lambda_read {
+  const ::ryml::ConstNodeRef &node;
+  T &into;
+  omni::ryml::detail::mapping_context &diagnostics;
 
-    const c4::csubstr text{value.data(), value.size()};
-    if (OwnsStrings)
-      node->set_serialized(text);
-    else
-      node->set_val(text);
-    // Strings such as "true", "12", and "null" must remain strings.
-    node->set_val_style(::ryml::VAL_DQUO);
+  template <typename _M, omni::reflected_entity Entity>
+  bool operator()(omni::meta_t<_M, Entity>) const {
+    return core::read_node(this->node,
+      &this->into,
+      this->diagnostics);
   }
 };
 
 } // namespace detail
-
-namespace reflected_scope {
-
-template <bool OwnsStrings, typename Value>
-void write_value(const Value &value, ::ryml::NodeRef *node);
-
-template <typename Value>
-bool is_null(const Value &) { return false; }
-
-template <typename Value>
-bool is_null(const compat::optional<Value> &v) { return !v || is_null(*v); }
-
-template <bool OwnsStrings>
-struct write_optional {
-  template <typename Value>
-  void operator()(const compat::optional<Value> &value,
-    ::ryml::NodeRef *node) const {
-    assert(node);
-    if (value)
-      write_value<OwnsStrings>(*value, node);
-    else
-      node->set_val("null");
-  }
-};
-
-template <bool OwnsStrings>
-struct write_sequence {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    node->set_seq();
-
-    // Bind the value type so vector<bool> proxies convert to bool.
-    std::for_each(value.begin(),
-      value.end(),
-      [node](const typename Value::value_type &element) {
-        if (!is_null(element)) {
-          auto child = node->append_child();
-          write_value<OwnsStrings>(element, &child);
-        }
-      });
-  }
-};
-
-template <bool OwnsStrings>
-struct write_field {
-  ::ryml::NodeRef *node;
-
-  template <typename Field>
-  void operator()(Field field) const {
-    assert(node);
-    auto child = node->append_child();
-    if (OwnsStrings)
-      child.set_key_serialized(field.name());
-    else
-      child.set_key(c4::to_csubstr(field.name()));
-    write_value<OwnsStrings>(field.value(), &child);
-  }
-};
-
-// TODO: Consider an opt-in strategy for serializing and mapping static members.
-template <bool OwnsStrings>
-struct write_record {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    node->set_map();
-    // accessible_data_members() requires a binding that outlives field
-    // traversal.
-    const auto binding = omni::meta_for<Value>::bind(value);
-    binding.accessible_data_members() | fn::filter<fn::non_static>()
-      | fn::each(write_field<OwnsStrings>{/*node=*/node});
-  }
-};
-
-// Scalar/container roots are parsed outside reflected_call during
-// instrumentation, when is_reflected is incomplete. Query it only after those
-// writers are ruled out.
-template <bool OwnsStrings>
-struct write_reflected {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    constexpr auto write = typename omni::traits::select<
-      omni::traits::case_<omni::is_reflected<Value>::value,
-        write_record<OwnsStrings>>,
-      detail::unsupported_serialization>::type{};
-
-    write(value, node);
-  }
-};
-
-template <bool OwnsStrings, typename Value>
-void write_value(const Value &value, ::ryml::NodeRef *node) {
-  constexpr auto write = typename omni::traits::select<
-    omni::traits::case_<std::is_same<bool, Value>::value,
-      detail::write_boolean>,
-    omni::traits::case_<std::is_floating_point<Value>::value,
-      detail::write_real>,
-    omni::traits::case_<std::is_integral<Value>::value, detail::write_integer>,
-    omni::traits::case_<detail::is_string_source<Value>::value,
-      detail::write_string<OwnsStrings>>,
-    omni::traits::case_<omni::traits::is<compat::optional, Value>(),
-      write_optional<OwnsStrings>>,
-    omni::traits::case_<omni::traits::is<std::vector, Value>(),
-      write_sequence<OwnsStrings>>,
-    write_reflected<OwnsStrings>>::type{};
-
-  write(value, node);
-}
-
-template <bool OwnsStrings, typename Value>
-::ryml::Tree write_tree(const Value &value) {
-  ::ryml::Tree tree;
-  auto root = tree.rootref();
-  write_value<OwnsStrings>(value, &root);
-  return tree;
-}
-
-// reflected_call accepts record/enum roots, not containers or scalar values.
-// Peel vectors/optionals for reflection discovery. Mapping and writing retain
-// the complete document shape, including nested or empty sequences.
-template <typename Value>
-struct reflection_root {
-  using type = Value;
-  static constexpr bool needs_reflection = !std::is_fundamental<Value>::value
-    && !detail::is_string_source<Value>::value;
-};
-
-template <typename Value, typename Allocator>
-struct reflection_root<std::vector<Value, Allocator>>:
-    reflection_root<Value> {};
-
-template <typename Value>
-struct reflection_root<compat::optional<Value>>: reflection_root<Value> {};
-
-// Discover record elements once, including for an empty sequence. Mapping each
-// element then uses that reflected scope and one diagnostic context.
-template <typename Value>
-auto map_root_node(::ryml::ConstNodeRef node,
-  Value *value,
-  detail::mapping_context *context)
-  -> compat::enable_if_t<reflection_root<Value>::needs_reflection> {
-  omni::reflected_call(cpp11_lambda_map_node<Value>{node, value, context},
-    omni::type_t<typename reflection_root<Value>::type>{});
-}
-
-template <typename Value>
-auto map_root_node(::ryml::ConstNodeRef node,
-  Value *value,
-  detail::mapping_context *context)
-  -> compat::enable_if_t<!reflection_root<Value>::needs_reflection> {
-  map_node(node, value, context);
-}
-
-// Exclude the unused path from instrumentation: reflected_call rejects scalar
-// roots, while record writing requires generated metadata.
-template <bool OwnsStrings, typename Value>
-auto to_ryml_tree(const Value &value)
-  -> compat::enable_if_t<reflection_root<Value>::needs_reflection,
-    ::ryml::Tree> {
-  return omni::reflected_call(
-    cpp11_lambda_write_tree<OwnsStrings, Value>{value},
-    omni::type_t<typename reflection_root<Value>::type>{});
-}
-
-template <bool OwnsStrings, typename Value>
-auto to_ryml_tree(const Value &value)
-  -> compat::enable_if_t<!reflection_root<Value>::needs_reflection,
-    ::ryml::Tree> {
-  return write_tree<OwnsStrings>(value);
-}
-
-} // namespace reflected_scope
-
-namespace core {
 
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options) {
@@ -908,100 +363,707 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
     });
 }
 
-template <typename Value>
-::ryml::Tree as_owning_tree(const Value &v) {
-  return reflected_scope::to_ryml_tree</*OwnsStrings=*/true>(v);
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
+bool map_tree(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) {
+  return omni::reflected_call(
+    detail::cpp11_lambda_read<T>{
+      /*node=*/node,
+      /*into=*/ *into,
+      /*diagnostics=*/diagnostics,
+    },
+    omni::type_t<Discovery>{});
 }
 
-template <typename Value>
-::ryml::Tree as_ref_tree(Value &v) {
-  return reflected_scope::to_ryml_tree</*OwnsStrings=*/false>(v);
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+bool map_tree(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) {
+  return map_tree<T, typename Discovery::value_type>(node, into, diagnostics);
 }
 
-template <typename Record>
-with_diagnostics<Record, diagnostics<true>> map_tree(const config &options,
-  omni::type_t<Record> record_type,
-  ::ryml::Tree tree) {
-  // Node references point at the tree object; move it after traversal.
-  return map_tree(options,
-    record_type,
-    tree.empty() ? ::ryml::ConstNodeRef{} : tree.crootref())
-    .transform_diagnostics([&tree](diagnostics<false> d) -> diagnostics<true> {
-      return {
-        /*config=*/std::move(d.config),
-        /*tree=*/std::move(tree),
-        /*issues=*/std::move(d.issues),
-        /*parse_message=*/std::move(d.parse_message),
-      };
-    });
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+bool map_tree(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) {
+  return read_node(node, into, diagnostics);
 }
 
-template <typename Record>
-with_diagnostics<Record, diagnostics<false>> map_tree(const config &options,
-  omni::type_t<Record>,
+template <typename T>
+with_diagnostics<T, diagnostics<false>> map_tree(const config &options,
+  omni::type_t<T>,
   ::ryml::ConstNodeRef node) {
-  // FIXME: [external] GCC 15 warns about an uninitialized union when moving
-  // Record{} with an empty tl::optional member; construct in optional storage.
-  // TL's emplace() calls its throwing value() accessor; use the factory.
-  auto value = compat::make_optional<Record>();
+  auto value = compat::make_optional<T>();
   diagnostics<false> report{
     /*config=*/options,
     /*tree=*/node,
     /*issues=*/{},
     /*parse_message=*/{},
   };
-
-  detail::mapping_context context{
+  omni::ryml::detail::mapping_context context{
     /*options=*/options,
     /*diagnostics=*/&report,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
+    /*borrow_strings=*/false,
   };
-
-  reflected_scope::map_root_node(node, &*value, &context);
-
+  const bool mapped = map_tree(node, &*value, context);
   return {
-    /*value=*/0 == context.error_count ? std::move(value) : compat::nullopt,
+    /*value=*/mapped ? std::move(value) : compat::nullopt,
     /*diagnostics=*/std::move(report),
   };
 }
 
-template <typename Record>
-with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
-  omni::type_t<Record> record_type,
+template <typename T>
+with_diagnostics<T, diagnostics<true>> map_tree(const config &options,
+  omni::type_t<T> type,
+  ::ryml::Tree tree) {
+  // Move the owner only after mapping; NodeRefs refer to the tree object.
+  return map_tree(options, type, tree.crootref())
+    .transform_diagnostics(
+      [&tree](diagnostics<false> report) -> diagnostics<true> {
+        return {
+          /*config=*/std::move(report.config),
+          /*tree=*/std::move(tree),
+          /*issues=*/std::move(report.issues),
+          /*parse_message=*/std::move(report.parse_message),
+        };
+      });
+}
+
+template <typename T>
+with_diagnostics<T, diagnostics<true>> deserialize(const config &options,
+  omni::type_t<T> type,
   std::string source) {
-  if (auto parsed = parse(std::move(source))) {
-    return map_tree(options,
-      record_type,
-      options.transform_tree
-        ? options.transform_tree(std::move(*parsed))
-        : std::move(*parsed));
-  } else {
+  auto parsed = omni::ryml::core::parse(std::move(source));
+  if (!parsed) {
     return {
       /*value=*/compat::nullopt,
-      /*diagnostics=*/
-      {
+      /*diagnostics=*/{
         /*config=*/options,
-        /*tree=*/
-        ::ryml::Tree{
-          /*node_capacity=*/0,
-          /*arena_capacity=*/0,
-        },
-        /*issues=*/
-        {
-          detail::make_issue(json::issue_code::parse_error,
+        /*tree=*/::ryml::Tree{/*node_capacity=*/0, /*arena_capacity=*/0},
+        /*issues=*/{
+          omni::ryml::detail::make_issue(json::issue_code::parse_error,
             json::value_kind::unknown,
             ::ryml::ConstNodeRef{},
-            {}),
+            /*path=*/{}),
         },
         /*parse_message=*/std::move(parsed.error()),
       },
     };
   }
+
+  return map_tree(options, type, std::move(*parsed));
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
+::ryml::Tree as_owning_tree(const T &value) {
+  return omni::reflected_call(
+    detail::cpp11_lambda_write</*BorrowStrings=*/false, T>{/*value=*/value},
+    omni::type_t<Discovery>{});
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_owning_tree(const T &value) {
+  return as_owning_tree<T, typename Discovery::value_type>(value);
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_owning_tree(const T &value) {
+  ::ryml::Tree tree;
+  diagnostics<false> report{};
+  omni::ryml::detail::mapping_context context{
+    /*options=*/report.config,
+    /*diagnostics=*/&report,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/false,
+  };
+  write_node(value, tree.rootref(), context);
+  return tree;
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
+::ryml::Tree as_ref_tree(T &value) {
+  return omni::reflected_call(
+    detail::cpp11_lambda_write</*BorrowStrings=*/true, T>{/*value=*/value},
+    omni::type_t<Discovery>{});
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_ref_tree(T &value) {
+  return as_ref_tree<T, typename Discovery::value_type>(value);
+}
+
+template <typename T,
+  typename Discovery,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int>>
+::ryml::Tree as_ref_tree(T &value) {
+  ::ryml::Tree tree;
+  diagnostics<false> report{};
+  omni::ryml::detail::mapping_context context{
+    /*options=*/report.config,
+    /*diagnostics=*/&report,
+    /*path=*/{},
+    /*error_count=*/0,
+    /*warning_count=*/0,
+    /*borrow_strings=*/true,
+  };
+  write_node(value, tree.rootref(), context);
+  return tree;
 }
 
 } // namespace core
+
+namespace mapping {
+
+namespace detail {
+
+template <typename T>
+auto is_null(const T &)
+  -> compat::enable_if_t<!is_optional_like<T>::value, bool> {
+  return false;
+}
+
+template <typename T>
+auto is_null(const T &value)
+  -> compat::enable_if_t<is_optional_like<T>::value, bool> {
+  return !value || is_null(*value);
+}
+
+} // namespace detail
+
+template <typename T>
+auto from_string_like::operator()(const T &value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>()> {
+  const auto text = cp::read_string<T>{}(value);
+  if (diagnostics.borrow_strings)
+    node.set_val(text);
+  else
+    node.set_serialized(text);
+  node.set_val_style(::ryml::VAL_DQUO);
+}
+
+template <typename T>
+auto to_string_like::operator()(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>(), bool> {
+  if (node.is_container()) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::unexpected_kind,
+      json::value_kind::string,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  cp::assign_string<T>{}(into, node.val());
+  return true;
+}
+
+template <typename T>
+auto from_arithmetic::operator()(const T &value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &) const
+  -> compat::enable_if_t<supports<T>()> {
+  const auto write = typename traits::select<
+    traits::case_<std::is_same<bool, T>::value,
+      omni::ryml::detail::write_boolean>,
+    traits::case_<std::is_floating_point<T>::value,
+      omni::ryml::detail::write_real>,
+    omni::ryml::detail::write_integer>::type{};
+
+  write(value, &node);
+}
+
+template <typename T>
+auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>(), bool> {
+  const auto expected = std::is_same<bool, T>::value
+    ? json::value_kind::boolean
+    : std::is_unsigned<T>::value
+      ? json::value_kind::unsigned_integer
+      : std::is_integral<T>::value
+        ? json::value_kind::integer
+        : json::value_kind::number;
+
+  if (node.is_container()) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::unexpected_kind,
+      expected,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  const auto scalar = node.val();
+  const bool valid = std::is_same<bool, T>::value
+    ? !node.is_val_quoted()
+      && ("true" == scalar
+        || "false" == scalar
+        || "True" == scalar
+        || "False" == scalar
+        || "TRUE" == scalar
+        || "FALSE" == scalar)
+    : std::is_unsigned<T>::value
+      ? scalar.is_unsigned_integer()
+      : std::is_integral<T>::value
+        ? scalar.is_integer()
+        : scalar.is_real();
+
+  if (!valid) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::invalid_scalar,
+      expected,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  const auto converted = omni::ryml::detail::from_chars<T>(scalar);
+  if (!converted) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      converted.error(),
+      expected,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  *into = *converted;
+  return true;
+}
+
+template <typename T>
+auto from_optional_like::operator()(const T &value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>()> {
+  if (value) {
+    core::write_node(*value, node, diagnostics);
+  } else {
+    node.set_val("null");
+    node.set_val_style(::ryml::VAL_PLAIN);
+  }
+}
+
+template <typename T>
+auto to_optional_like::operator()(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>(), bool> {
+  if (!node.is_container() && node.val_is_null()
+    && (!node.has_val_tag()
+      || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {
+    into->reset();
+    return true;
+  }
+
+  typename T::value_type value{};
+  if (!core::read_node(node, &value, diagnostics))
+    return false;
+
+  // FIXME: [high] [external] Remove tl_optional-emplace.patch after an upstream
+  // fix. Unpatched tl::optional 1.1.0 calls value(), whose explicit throw fails
+  // under -fno-exceptions even for non-throwing T; fetched copies are patched.
+  into->emplace(std::move(value));
+  return true;
+}
+
+template <typename T>
+auto from_container::operator()(const T &value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>()> {
+  using element_type = typename T::value_type;
+  using element_reference = decltype(*value.begin());
+
+  // Materialized non-scalar elements may own strings borrowed by the tree.
+  static_assert(compat::disjunction<std::is_scalar<element_type>,
+    compat::conjunction<std::is_lvalue_reference<element_reference>,
+      std::is_same<element_type,
+        compat::remove_cvref_t<element_reference>>>>::value,
+    "Default container serialization requires lvalue references to value_type "
+    "for non-scalar C++ elements; specialize cp::from_type for value-producing "
+    "or converting-proxy iterators.");
+
+  node.set_seq();
+  // Use value_type so packed containers' proxy references map as their values.
+  for (const element_type &element : value) {
+    if (diagnostics.stopped())
+      break;
+
+    if (!detail::is_null(element))
+      core::write_node(element, node.append_child(), diagnostics);
+  }
+
+  // TODO: [medium] Consider supporting generators and temporary-producing
+  // iterators by copying materialized elements' strings into tree storage.
+}
+
+template <typename T>
+auto to_container::operator()(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>(), bool> {
+  if (!node.is_seq()) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::unexpected_kind,
+      json::value_kind::sequence,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  into->clear();
+  bool success = true;
+  std::size_t index = 0;
+  for (const auto child : node.children()) {
+    if (diagnostics.stopped())
+      return false;
+
+    diagnostics.path.push_back({
+      /*field=*/{},
+      /*index=*/index++,
+    });
+    typename T::value_type element{};
+    const bool mapped = core::read_node(child, &element, diagnostics);
+    // TODO: Detect and report rejected duplicates in unique associative
+    // containers instead of silently discarding them during emplacement.
+    if (mapped)
+      cp::emplace<T>{}(into, std::move(element));
+    success = mapped && success;
+    diagnostics.path.pop_back();
+  }
+
+  return success;
+}
+
+namespace reflected_scope {
+
+namespace detail {
+
+struct cpp11_member_named {
+  c4::csubstr name;
+
+  template <typename _F>
+  bool operator()(omni::data_member_meta_t<_F> field) const {
+    return this->name == c4::to_csubstr(field.name());
+  }
+};
+
+// SFINAE keeps T{} out of instantiations for non-default-constructible fields.
+template <typename Record, typename _F>
+auto initialize_missing(omni::data_member_binding_t<Record, _F> field)
+  -> compat::enable_if_t<std::is_default_constructible<
+    typename omni::data_member_meta_t<_F>::type>::value> {
+  field.set_value(typename omni::data_member_meta_t<_F>::type{});
+}
+
+template <typename Record, typename _F>
+auto initialize_missing(omni::data_member_binding_t<Record, _F>)
+  -> compat::enable_if_t<!std::is_default_constructible<
+    typename omni::data_member_meta_t<_F>::type>::value> {}
+
+struct cpp11_require_member {
+  const ::ryml::ConstNodeRef &node;
+  omni::ryml::detail::mapping_context &diagnostics;
+
+  template <typename Record, typename _F>
+  void operator()(omni::data_member_binding_t<Record, _F> field) const {
+    if (this->diagnostics.stopped())
+      return;
+
+    const auto name = c4::to_csubstr(field.name());
+    if (!this->node.find_child(name).invalid())
+      return;
+
+    const auto recovery = this->diagnostics.options.recovery;
+    if (recovery
+      && (*recovery & json::recovery_policy::field_defaults)
+        == json::recovery_policy::field_defaults
+      && field.has_default_value_access())
+      return;
+
+    if ((is_optional_like<typename omni::data_member_meta_t<_F>::type>::value
+          || (recovery
+            && (*recovery & json::recovery_policy::default_initializable)
+              == json::recovery_policy::default_initializable))
+      && std::is_default_constructible<
+        typename omni::data_member_meta_t<_F>::type>::value) {
+      initialize_missing(field);
+      return;
+    }
+
+    this->diagnostics.path.push_back({
+      /*field=*/name,
+      /*index=*/compat::nullopt,
+    });
+    this->diagnostics.report(
+      omni::ryml::detail::make_issue(json::issue_code::missing_field,
+        json::value_kind::unknown,
+        ::ryml::ConstNodeRef{},
+        this->diagnostics.path));
+    this->diagnostics.path.pop_back();
+  }
+};
+
+struct cpp11_write_member {
+  ::ryml::NodeRef &node;
+  omni::ryml::detail::mapping_context &diagnostics;
+
+  template <typename Record, typename _F>
+  void operator()(omni::data_member_binding_t<Record, _F> field) const {
+    // Ad hoc: fn::each cannot short-circuit member traversal.
+    // TODO: Let core traversal check stopping before invoking adapters.
+    if (this->diagnostics.stopped())
+      return;
+
+    auto child = this->node.append_child();
+    child.set_key_serialized(field.name());
+    core::write_node(field.value(), child, this->diagnostics);
+  }
+};
+
+struct cpp11_read_member {
+  const ::ryml::ConstNodeRef &node;
+  omni::ryml::detail::mapping_context &diagnostics;
+
+  template <typename Record, typename _F>
+  bool operator()(bool success,
+    omni::data_member_binding_t<Record, _F> field) const {
+    // Ad hoc: fn::foldl cannot short-circuit member traversal.
+    // TODO: Let core traversal check stopping before invoking adapters.
+    if (this->diagnostics.stopped())
+      return false;
+
+    const auto name = c4::to_csubstr(field.name());
+    const auto children = this->node.children();
+    const auto child =
+      (this->diagnostics.options.error_policy.duplicates
+        & json::duplicate_policy::last) == json::duplicate_policy::last
+      ? std::accumulate(children.begin(),
+          children.end(),
+          ::ryml::ConstNodeRef{},
+          [name](::ryml::ConstNodeRef selected, ::ryml::ConstNodeRef entry) {
+            return name == entry.key() ? entry : selected;
+          })
+      : this->node.find_child(name);
+    // The preceding presence pass already recovered or reported missing fields.
+    if (child.invalid())
+      return success;
+
+    this->diagnostics.path.push_back({
+      /*field=*/name,
+      /*index=*/compat::nullopt,
+    });
+    // A temporary also supports bitfields, which cannot expose references.
+    typename omni::data_member_meta_t<_F>::type value = field.value();
+    const bool mapped = core::read_node(child, &value, this->diagnostics);
+    if (mapped)
+      field.set_value(std::move(value));
+    this->diagnostics.path.pop_back();
+    return mapped && success;
+  }
+};
+
+} // namespace detail
+
+template <typename T>
+auto from_enum::operator()(T value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &) const
+  -> compat::enable_if_t<supports<T>()> {
+  const auto enumerators = omni::meta_for<T>::enumerators();
+  const auto found = std::find_if(enumerators.begin(),
+    enumerators.end(),
+    [value](const typename decltype(enumerators)::value_type &enumerator) {
+      return value == enumerator.first;
+    });
+  if (found != enumerators.end()) {
+    node.set_serialized(c4::to_csubstr(found->second));
+    node.set_val_style(::ryml::VAL_DQUO);
+  }
+}
+
+template <typename T>
+auto to_enum::operator()(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>(), bool> {
+  // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
+  // plain null, numeric, and boolean forms before looking up the name.
+  bool boolean{};
+  const bool wrong_kind = node.is_container()
+    || (node.has_val_tag()
+      ? ::ryml::TAG_STR != ::ryml::to_tag(node.val_tag())
+      : !node.is_val_quoted()
+        && (node.val_is_null()
+          || node.val().is_number()
+          || c4::from_chars(node.val(), &boolean)));
+  if (wrong_kind) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::unexpected_kind,
+      json::value_kind::string,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  const auto name = node.val();
+  const auto enumerators = omni::meta_for<T>::enumerators();
+  const auto found = std::find_if(enumerators.begin(),
+    enumerators.end(),
+    [name](const typename decltype(enumerators)::value_type &enumerator) {
+      return name == c4::to_csubstr(enumerator.second);
+    });
+  if (found == enumerators.end()) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::invalid_scalar,
+      json::value_kind::string,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  *into = found->first;
+  return true;
+}
+
+template <typename T>
+auto from_record::operator()(const T &value,
+  ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>()> {
+  node.set_map();
+  const auto binding = omni::meta_for<T>::bind(value);
+  binding.accessible_data_members()
+    | fn::filter<fn::non_static>()
+    | fn::each(detail::cpp11_write_member{
+      /*node=*/node,
+      /*diagnostics=*/diagnostics,
+    });
+}
+
+template <typename T>
+auto to_record::operator()(::ryml::ConstNodeRef node,
+  T *into,
+  omni::ryml::detail::mapping_context &diagnostics) const
+  -> compat::enable_if_t<supports<T>(), bool> {
+  if (!node.is_map()) {
+    diagnostics.report(omni::ryml::detail::make_issue(
+      json::issue_code::unexpected_kind,
+      json::value_kind::mapping,
+      node,
+      diagnostics.path));
+    return false;
+  }
+
+  const auto errors = diagnostics.error_count;
+  const auto fields = omni::meta_for<T>::accessible_data_members()
+    | fn::filter<fn::non_static>();
+
+  // Structural issues precede missing fields and value mapping, preserving
+  // diagnostic order regardless of the document's member order.
+  for (const auto child : node.children()) {
+    if (diagnostics.stopped())
+      break;
+
+    const auto name = child.key();
+    const bool known = fn::any_of(
+      detail::cpp11_member_named{/*name=*/name}, fields);
+    const bool duplicate = known && node.find_child(name).id() != child.id();
+    if (known && !duplicate)
+      continue;
+
+    const auto duplicates = diagnostics.options.error_policy.duplicates;
+    const auto unknown = diagnostics.options.error_policy.unknown_fields;
+    const bool allowed = duplicate
+      ? (duplicates
+          & (json::duplicate_policy::allow | json::duplicate_policy::last))
+        != json::duplicate_policy::reject
+      : (unknown & json::unknown_policy::allow) == json::unknown_policy::allow;
+    const bool warn = duplicate
+      ? (duplicates & json::duplicate_policy::warn)
+        == json::duplicate_policy::warn
+      : (unknown & json::unknown_policy::warn) == json::unknown_policy::warn;
+    if (allowed && !warn)
+      continue;
+
+    diagnostics.path.push_back({
+      /*field=*/name,
+      /*index=*/compat::nullopt,
+    });
+    diagnostics.report(omni::ryml::detail::make_issue(
+      duplicate ? json::issue_code::duplicate_field
+                : json::issue_code::unknown_field,
+      json::value_kind::unknown,
+      child,
+      diagnostics.path,
+      /*warning=*/allowed));
+    diagnostics.path.pop_back();
+  }
+
+  const auto binding = omni::meta_for<T>::bind(*into);
+  const auto members = binding.accessible_data_members()
+    | fn::filter<fn::non_static>();
+  members | fn::each(detail::cpp11_require_member{
+    /*node=*/node,
+    /*diagnostics=*/diagnostics,
+  });
+  const bool mapped = members
+    | fn::foldl(detail::cpp11_read_member{
+      /*node=*/node,
+      /*diagnostics=*/diagnostics,
+    }, /*initial=*/true);
+  return mapped && errors == diagnostics.error_count;
+}
+
+} // namespace reflected_scope
+
+} // namespace mapping
 
 template <bool OwnsTree>
 std::string render_diagnostics_t::operator()(
@@ -1119,14 +1181,3 @@ std::string serialize_t::operator()(const Value &value) const {
 
 } // namespace ryml
 } // namespace omni
-
-#if defined(OMNI_TOOL_RUN)
-// TU-wide: c4 views use string writers; compatibility wrappers expose their
-// contents through value_type/error_type without needing wrapper metadata.
-// Ad hoc: skip requests accept types, so int fills the required template
-// arguments. Matching selects the primary templates, so every specialization
-// is skipped.
-OMNI_SKIP_METADATA(c4::csubstr,
-  omni::compat::optional<int>,
-  omni::compat::expected<int, int>);
-#endif

@@ -1,5 +1,10 @@
 #pragma once
 
+// TODO: [high] Document that users must not modify source strings or string
+// containers during serialization calls. Borrowed character storage must stay
+// valid and unchanged until emission completes, including mutable members and
+// storage exposed by custom iterators; a const reference cannot guarantee this.
+
 #if !defined(OMNI_TOOL_RUN) \
   && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
 #  error \
@@ -42,13 +47,18 @@ if (result.value) {
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
+#  if __has_include(<string_view>)
+#    include <string_view>
+#  endif
+#endif
 
 namespace omni {
 // Only backend-independent JSON/YAML mapping contracts belong here.
@@ -163,18 +173,12 @@ OMNI_ENABLE_BIT_FLAGS(recovery_policy)
 
 namespace ryml {
 
-/** Configures input transformation, mapping diagnostics, and missing-field
- * recovery. */
+/** Configures mapping diagnostics and missing-field recovery. */
 struct config {
   json::error_policy error_policy;
 
   // No missing-field recovery unless explicitly configured.
   compat::optional<json::recovery_policy> recovery = compat::nullopt;
-
-  // Tree -> Tree, applied after successful parsing and before mapping.
-  // An empty callback leaves the tree unchanged. The parsed tree owns its
-  // text; the transformed tree is retained by the returned diagnostics.
-  std::function<::ryml::Tree(::ryml::Tree)> transform_tree{};
 
   // TODO: [high] Add a configurable input-size limit to config and reject
   // oversized source text before parsing or allocating a tree. A std::string
@@ -293,7 +297,7 @@ struct diagnostics {
  * Diagnostics can hold issue records or a rendered message.
  */
 template <typename T,
-  typename Diagnostics = omni::ryml::diagnostics</*owning=*/true>>
+  typename Diagnostics = omni::ryml::diagnostics</*OwnsTree=*/true>>
 struct with_diagnostics {
   // Available only when mapping succeeds, including permitted recovery.
   compat::optional<T> value;
@@ -342,7 +346,162 @@ struct with_diagnostics {
   // retain diagnostics when a value and issues are both present.
 };
 
+namespace detail {
+struct mapping_context;
+} // namespace detail
+
+namespace cp {
+
+/** Read a view of a string's existing characters. The view must remain valid
+ * while the source is alive and unchanged. Specialize for custom string APIs. */
+template <typename String, typename = void>
+struct read_string {};
+
+template <typename String>
+struct read_string<String,
+  compat::void_t<decltype(c4::csubstr{std::declval<const String &>().data(),
+    std::declval<const String &>().size()})>> {
+  c4::csubstr operator()(const String &value) const {
+    return {value.data(), value.size()};
+  }
+};
+
+/** Assign scalar text to a string. Owning strings copy; view types may borrow
+ * the supplied storage. Specialize for custom string APIs. */
+template <typename String, typename = void>
+struct assign_string {};
+
+template <typename String>
+struct assign_string<String,
+  compat::void_t<decltype(std::declval<String &>() = String{
+    std::declval<c4::csubstr>().str, std::declval<c4::csubstr>().len})>> {
+  void operator()(String *into, c4::csubstr text) const {
+    // Empty views may contain null data; supply a valid empty character range.
+    *into = String{text.empty() ? "" : text.str, text.len};
+  }
+};
+
+} // namespace cp
+
+/** Whether both string operations are available, with read_string returning
+ * a c4::csubstr view. Customize the operations rather than this trait. */
+template <typename T, typename = void>
+struct is_string_like: std::false_type {};
+
+template <typename T>
+struct is_string_like<T,
+  compat::void_t<decltype(cp::read_string<T>{}(std::declval<const T &>())),
+    decltype(cp::assign_string<T>{}(std::declval<T *>(),
+      std::declval<c4::csubstr>()))>>:
+    std::is_same<c4::csubstr,
+      compat::remove_cvref_t<decltype(
+        cp::read_string<T>{}(std::declval<const T &>()))>> {};
+
+// Opt in standard-like optional wrappers. Mapping uses value_type, bool
+// conversion, dereference, reset(), and emplace(value). Empty optional sequence
+// elements are omitted. Raw and smart pointers are not optional-like.
+template <typename>
+struct is_optional_like: std::false_type {};
+
+#if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
+template <typename T>
+struct is_optional_like<std::optional<T>>: std::true_type {};
+#endif
+
+#if defined(TL_OPTIONAL_HPP)
+template <typename T>
+struct is_optional_like<tl::optional<T>>: std::true_type {};
+#endif
+
+template <typename T, typename = void>
+struct is_container: std::false_type {};
+
+template <typename T>
+struct is_container<T,
+  compat::void_t<typename T::value_type,
+    decltype(std::declval<const T &>().begin()),
+    decltype(std::declval<const T &>().end())>>:
+    std::integral_constant<bool, !is_string_like<T>::value> {};
+
+namespace cp {
+
+/** Ad hoc discovery override for types inheriting standard-library containers.
+ * Inheriting those containers is discouraged. Specialize to std::true_type
+ * when a custom mapping needs the derived type's metadata: T itself is passed
+ * to reflected_call instead of following its inherited value_type.
+ *
+ * The default follows the normal mapping traits. This override changes
+ * discovery, not the representation selected by from_type/to_type.
+ */
+template <typename T>
+struct reflect_as_root:
+    std::integral_constant<bool,
+      !compat::disjunction<std::is_arithmetic<T>,
+        is_string_like<T>,
+        is_container<T>,
+        is_optional_like<T>>::value> {};
+
+/** Container insertion customization, independent of representation mapping. */
+template <typename Container, typename Enable = void>
+struct emplace {
+  void operator()(Container *into,
+    typename Container::value_type &&value) const;
+  // TODO: Support standard-container insertion, preferably through traits.
+};
+
+/** Select a C++-to-node adapter; the default maps reflected records. */
+template <typename T, typename Enable = void>
+struct from_type;
+
+/** Select a node-to-C++ adapter; return true on successful conversion. */
+template <typename T, typename Enable = void>
+struct to_type;
+
+} // namespace cp
+
 namespace core {
+
+/** Dispatch one value through cp::from_type unless diagnostics have stopped. */
+template <typename T>
+void write_node(const T &value, ::ryml::NodeRef node,
+  omni::ryml::detail::mapping_context &diagnostics);
+
+/** Dispatch one node through cp::to_type and return mapping success. */
+template <typename T>
+bool read_node(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
+
+/** Map into an existing value using a shared diagnostics context.
+ * @pre `node` must be a valid node reference.
+ *
+ * Discovery follows wrapper element types while T remains the destination. */
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+bool map_tree(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
+
+/** Map into an existing value using a shared diagnostics context.
+ * @pre `node` must be a valid node reference. */
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+bool map_tree(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
+
+/** Map into an existing value using a shared diagnostics context.
+ * @pre `node` must be a valid node reference. */
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+bool map_tree(::ryml::ConstNodeRef node, T *into,
+  omni::ryml::detail::mapping_context &diagnostics);
 
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
@@ -366,7 +525,10 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
 /** Map tree nodes into the requested type using explicit config.
- * Nested values are mapped depth-first after each record's structural checks.
+ * @pre `tree` must contain a valid root node.
+ *
+ * Nested values are mapped depth-first through the selected customization
+ * points.
  * Diagnostics take ownership of the supplied tree, retaining it for inspection
  * and lazy message rendering. Pass std::move(tree) to transfer an existing
  * tree.
@@ -377,7 +539,10 @@ with_diagnostics<Record, diagnostics<true>> map_tree(const config &options,
   ::ryml::Tree tree);
 
 /** Map tree nodes into the requested type using explicit config.
- * Nested values are mapped depth-first after each record's structural checks.
+ * @pre `node` must be a valid node reference.
+ *
+ * Nested values are mapped depth-first through the selected customization
+ * points.
  * Diagnostics borrow the source tree rather than taking ownership.
  * Keep the source tree and its borrowed string storage alive and unchanged
  * while inspecting the retained diagnostics or rendering their messages.
@@ -387,9 +552,7 @@ with_diagnostics<Record, diagnostics<false>> map_tree(const config &options,
   omni::type_t<Record> record_type,
   ::ryml::ConstNodeRef node);
 
-/** Parse the source, apply its configured tree transformation, then map nodes.
- * The transformation is invoked only after successful parsing.
- */
+/** Parse the source into an owning tree, then map its nodes. */
 template <typename Record>
 with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
   omni::type_t<Record> record_type,
@@ -402,16 +565,52 @@ with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
  * source value. The returned tree can be modified or passed to RapidYAML's
  * emitters.
  */
-template <typename Value>
-::ryml::Tree as_owning_tree(const Value &v);
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+::ryml::Tree as_owning_tree(const T &value);
+
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_owning_tree(const T &value);
+
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_owning_tree(const T &value);
 
 /** Build a RapidYAML tree borrowing the input's existing string storage.
  * The tree owns its nodes and generated scalar text. Borrowed storage must
  * remain alive and unchanged while the tree is used. Accepts const or mutable
  * lvalues; temporaries are rejected to prevent dangling views.
  */
-template <typename Value>
-::ryml::Tree as_ref_tree(Value &v);
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+::ryml::Tree as_ref_tree(T &value);
+
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_ref_tree(T &value);
+
+template <typename T,
+  typename Discovery = compat::remove_cvref_t<T>,
+  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
+      && !compat::disjunction<is_container<Discovery>,
+        is_optional_like<Discovery>>::value,
+    int> = 0>
+::ryml::Tree as_ref_tree(T &value);
 
 // Also reject const temporaries, which could otherwise bind through Value&.
 template <typename Value>
@@ -454,77 +653,6 @@ struct map_tree_t {
   }
 };
 
-// Previous selects (Tree, previous) -> Tree instead of Tree -> Tree.
-template <typename F, bool Previous = false, typename = void>
-struct is_tree_transform: std::false_type {};
-
-// SFINAE keeps unsupported invocation signatures queryable as false.
-template <typename F>
-struct is_tree_transform<F,
-  false,
-  compat::void_t<compat::invoke_result_t<F &, ::ryml::Tree>>>:
-    compat::conjunction<std::is_trivially_copyable<F>,
-      std::is_copy_constructible<F>,
-      std::is_same<::ryml::Tree,
-        compat::remove_cvref_t<compat::invoke_result_t<F &, ::ryml::Tree>>>> {};
-
-template <typename F>
-struct is_tree_transform<F,
-  true,
-  compat::void_t<compat::invoke_result_t<F &,
-    ::ryml::Tree,
-    const std::function<::ryml::Tree(::ryml::Tree)> &>>>:
-    compat::conjunction<std::is_trivially_copyable<F>,
-      std::is_copy_constructible<F>,
-      std::is_same<::ryml::Tree,
-        compat::remove_cvref_t<compat::invoke_result_t<F &,
-          ::ryml::Tree,
-          const std::function<::ryml::Tree(::ryml::Tree)> &>>>> {};
-
-/** Return a config transformation that replaces the parsed-tree callback.
- * f must be trivially copyable and return ryml::Tree (cv/ref-qualified is OK).
- * A null function pointer resets the callback to identity. Applying this
- * transformation preserves the other config fields.
- */
-template <typename F,
-  compat::enable_if_t<!is_tree_transform<F, /*Previous=*/true>::value
-      && is_tree_transform<F>::value,
-    int> = 0>
-OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
-  OMNI_CPP11_TRAILING_RETURN(std::function<config(config)>) {
-  return [f](config c) {
-    c.transform_tree = f;
-    return c;
-  };
-}
-
-/** Return a config transformation that decorates the parsed-tree callback.
- * f receives (tree, previous); previous is identity when no callback was bound.
- * f may invoke or discard previous, whose reference is valid during the call.
- * Copy previous if retaining it. f must be trivially copyable and return a
- * tree (cv/ref-qualified is OK). A null function pointer resets to identity.
- * This form takes precedence when f also accepts a single tree argument.
- */
-template <typename F,
-  compat::enable_if_t<is_tree_transform<F, /*Previous=*/true>::value, int> = 0>
-OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
-  OMNI_CPP11_TRAILING_RETURN(std::function<config(config)>) {
-  return [f](config c) {
-    const bool reset = fn::is_null_function(f);
-    const auto previous = !reset && c.transform_tree
-      ? c.transform_tree
-      : fn::identity{};
-
-    c.transform_tree = reset
-      ? previous
-      : [f, previous](::ryml::Tree tree) mutable {
-          return compat::invoke(f, std::move(tree), previous);
-        };
-
-    return c;
-  };
-}
-
 /**
  * Parse JSON or YAML into a record, scalar, or vector.
  * Returns a valid value with any warnings, or diagnostics alone on failure.
@@ -560,6 +688,10 @@ struct deserialize_t {
     operator()(omni::type_t<Record> record_type, std::string source) const {
     return core::deserialize(this->config, record_type, std::move(source));
   }
+
+  // TODO: Add T *into overloads here and in core::deserialize to map into an
+  // existing object. Define mutation on failure and the result contract;
+  // do not require constructing and assigning a replacement object.
 };
 
 const map_tree_t map_tree{};
@@ -587,7 +719,7 @@ constexpr render_diagnostics_t render_diagnostics{};
  * sequence elements are omitted; remaining elements keep their relative order.
  * Populated optionals serialize their contained value.
  * Strings are quoted and borrowed from the input until emission completes.
- * TODO: Define the document representation of reflected enumerations.
+ * Reflected enums serialize as their declared names.
  */
 struct serialize_t {
   // Output format; use as_yaml or as_json for the predefined configurations.
@@ -595,9 +727,6 @@ struct serialize_t {
 
   template <typename Value>
   std::string operator()(const Value &value) const;
-
-  // TODO: [high] Consider transform_tree to customize the built tree before
-  // emission, e.g. omit null object properties without another policy.
 };
 
 /**
@@ -628,9 +757,266 @@ constexpr serialize_t as_json{
   /*format=*/::ryml::EMIT_JSON,
 };
 
+namespace mapping {
+
+/** Write a char-based string as a quoted scalar. */
+struct from_string_like {
+  template <typename T>
+  static constexpr bool supports() { return is_string_like<T>::value; }
+
+  template <typename T>
+  auto operator()(const T &value,
+    ::ryml::NodeRef node,
+    omni::ryml::detail::mapping_context &) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
+/** Read scalar text into a string-like type; views borrow tree storage. */
+struct to_string_like {
+  template <typename T>
+  static constexpr bool supports() { return is_string_like<T>::value; }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>(), bool>;
+};
+
+/** Write booleans, integers, and floating-point values as plain scalars. */
+struct from_arithmetic {
+  template <typename T>
+  static constexpr bool supports() { return std::is_arithmetic<T>::value; }
+
+  template <typename T>
+  auto operator()(const T &value,
+    ::ryml::NodeRef node,
+    omni::ryml::detail::mapping_context &) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
+/** Validate scalar format and range before assigning an arithmetic value. */
+struct to_arithmetic {
+  template <typename T>
+  static constexpr bool supports() { return std::is_arithmetic<T>::value; }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>(), bool>;
+};
+
+/** Write a present optional value or a null scalar. */
+struct from_optional_like {
+  template <typename T>
+  static constexpr bool supports() { return is_optional_like<T>::value; }
+
+  template <typename T>
+  auto operator()(const T &value,
+    ::ryml::NodeRef node,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
+/** Reset on null; otherwise convert and emplace the contained value. */
+struct to_optional_like {
+  template <typename T>
+  static constexpr bool supports() { return is_optional_like<T>::value; }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>(), bool>;
+};
+
+/** Write iterable elements as a sequence, omitting empty optionals.
+ * Non-scalar C++ elements must be exposed as lvalue references to value_type;
+ * default mapping rejects temporary-producing iterators in both tree modes. */
+struct from_container {
+  template <typename T>
+  static constexpr bool supports() { return is_container<T>::value; }
+
+  template <typename T>
+  auto operator()(const T &value,
+    ::ryml::NodeRef node,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
+/** Read sequence elements and insert successful values through cp::emplace. */
+struct to_container {
+  template <typename T>
+  static constexpr bool supports() { return is_container<T>::value; }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>(), bool>;
+};
+
+namespace reflected_scope {
+
+/** Write a declared enumerator name as a quoted scalar. */
+struct from_enum {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_enum<T>::value;
+  }
+
+  template <typename T>
+  auto operator()(T value,
+    ::ryml::NodeRef node,
+    omni::ryml::detail::mapping_context &) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
+/** Accept a string matching a declared enumerator name. */
+struct to_enum {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_enum<T>::value;
+  }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>(), bool>;
+};
+
+/** Write accessible non-static data members as mapping entries. */
+struct from_record {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_record<T>::value;
+  }
+
+  template <typename T>
+  auto operator()(const T &value,
+    ::ryml::NodeRef node,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
+/** Read accessible non-static data members from matching mapping entries. */
+struct to_record {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_record<T>::value;
+  }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    omni::ryml::detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<supports<T>(), bool>;
+};
+
+} // namespace reflected_scope
+
+} // namespace mapping
+
+namespace cp {
+
+// Record mapping is the fallback; matching specializations replace it.
+template <typename T, typename Enable>
+struct from_type: mapping::reflected_scope::from_record {};
+
+template <typename T, typename Enable>
+struct to_type: mapping::reflected_scope::to_record {};
+
+template <typename T>
+struct from_type<T,
+  compat::enable_if_t<mapping::from_string_like::supports<T>()>>:
+    mapping::from_string_like {};
+
+template <typename T>
+struct to_type<T,
+  compat::enable_if_t<mapping::to_string_like::supports<T>()>>:
+    mapping::to_string_like {};
+
+template <typename T>
+struct from_type<T,
+  compat::enable_if_t<mapping::from_arithmetic::supports<T>()>>:
+    mapping::from_arithmetic {};
+
+template <typename T>
+struct to_type<T,
+  compat::enable_if_t<mapping::to_arithmetic::supports<T>()>>:
+    mapping::to_arithmetic {};
+
+template <typename T>
+struct from_type<T,
+  compat::enable_if_t<mapping::from_optional_like::supports<T>()>>:
+    mapping::from_optional_like {};
+
+template <typename T>
+struct to_type<T,
+  compat::enable_if_t<mapping::to_optional_like::supports<T>()>>:
+    mapping::to_optional_like {};
+
+template <typename T>
+struct from_type<T,
+  compat::enable_if_t<mapping::from_container::supports<T>()>>:
+    mapping::from_container {};
+
+template <typename T>
+struct to_type<T,
+  compat::enable_if_t<mapping::to_container::supports<T>()>>:
+    mapping::to_container {};
+
+template <typename T>
+struct from_type<T,
+  compat::enable_if_t<mapping::reflected_scope::from_enum::supports<T>()>>:
+    mapping::reflected_scope::from_enum {};
+
+template <typename T>
+struct to_type<T,
+  compat::enable_if_t<mapping::reflected_scope::to_enum::supports<T>()>>:
+    mapping::reflected_scope::to_enum {};
+
+// TODO: [medium] Consider callable variable-template customization in C++14:
+// `template <> const auto from_type<T> = [](const T &, ...) { ... };`
+// Keep a C++11 struct alternative named from_type_t (and likewise to_type_t).
+// Both customization forms should default to an unavailable sentinel; the
+// variable sentinel can be constexpr. Move built-in selection, including the
+// reflected-record fallback, behind a selector so defaults do not count as
+// user customizations. Reject simultaneous customizations with static_assert;
+// return the stored const callable rather than default-constructing its type.
+
+} // namespace cp
+
+// TODO: [high] Define a public diagnostics interface for customization-point
+// parameters. User implementations receive detail::mapping_context today;
+// their contract must not depend on a private implementation type.
+
 } // namespace ryml
 } // namespace omni
 
 // Inline and template definitions depend on the complete public interface
 // above. Including them here keeps the detail header private to this header.
 #include <omnirefl/serialization/impl/ryml.hpp>
+
+// Built-in string operations must satisfy the same contract as custom strings.
+static_assert(omni::ryml::is_string_like<std::string>::value,
+  "std::string must provide the string mapping operations");
+static_assert(omni::ryml::is_string_like<c4::csubstr>::value,
+  "c4::csubstr must provide the string mapping operations");
+#if defined(__cpp_lib_string_view)
+static_assert(omni::ryml::is_string_like<std::string_view>::value,
+  "std::string_view must provide the string mapping operations");
+#endif
+
+#if defined(OMNI_TOOL_RUN)
+// TU-wide: c4 views use string writers; compatibility wrappers expose their
+// contents through value_type/error_type without needing wrapper metadata.
+// Ad hoc: skip requests accept types, so int fills the required template
+// arguments. Matching selects the primary templates, so every specialization
+// is skipped.
+OMNI_SKIP_METADATA(c4::csubstr,
+  omni::compat::optional<int>,
+  omni::compat::expected<int, int>);
+#endif
