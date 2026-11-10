@@ -1,0 +1,35 @@
+Subject: [PATCH] Avoid checked value access after successful emplacement
+
+Both emplace overloads call value() after constructing the contained object.
+This instantiates value()'s explicit throw even though the optional is known
+to be engaged, making otherwise non-throwing emplacement fail to compile
+with -fno-exceptions.
+
+Return the contained object through operator* instead. Construction and
+exception propagation are unchanged; no assignment requirement is added.
+This also avoids a redundant engagement check when exceptions are enabled.
+---
+ include/tl/optional.hpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/tl/optional.hpp b/include/tl/optional.hpp
+--- a/include/tl/optional.hpp
++++ b/include/tl/optional.hpp
+@@ -1219,7 +1219,7 @@
+ 
+     *this = nullopt;
+     this->construct(std::forward<Args>(args)...);
+-    return value();
++    return **this;
+   }
+ 
+   template <class U, class... Args>
+@@ -1229,7 +1229,7 @@
+   emplace(std::initializer_list<U> il, Args &&... args) {
+     *this = nullopt;
+     this->construct(il, std::forward<Args>(args)...);
+-    return value();    
++    return **this;
+   }
+ 
+   /// Swaps this optional with the other.

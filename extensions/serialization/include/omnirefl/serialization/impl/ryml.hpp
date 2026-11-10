@@ -687,9 +687,9 @@ auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   if (!core::read_node(node, &value, diagnostics))
     return false;
 
-  // FIXME: [high] [external] tl::optional 1.1.0 emplace() calls value(), whose
-  // explicit throw fails under -fno-exceptions even for non-throwing T. Recheck
-  // with an upstream fix; std::optional::emplace does not have this issue.
+  // FIXME: [high] [external] Remove tl_optional-emplace.patch after an upstream
+  // fix. Unpatched tl::optional 1.1.0 calls value(), whose explicit throw fails
+  // under -fno-exceptions even for non-throwing T; fetched copies are patched.
   into->emplace(std::move(value));
   return true;
 }
