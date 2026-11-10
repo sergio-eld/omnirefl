@@ -13,7 +13,6 @@
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
  *   basics.transform_config - customize config for an individual call
- *   basics.with_transform_tree - reshape parsed input before mapping
  *   basics.diagnostics - value availability, errors, and warnings
  *
  * Config and policies
@@ -233,43 +232,6 @@ TEST(basics, transform_config) {
   EXPECT_EQ(0, omni::ryml::deserialize.config.error_policy.error_limit);
   EXPECT_EQ(omni::json::unknown_policy::reject,
     omni::ryml::deserialize.config.error_policy.unknown_fields);
-}
-
-namespace tree_transform_example {
-
-struct my_integer { int value; };
-
-struct measurement { my_integer reading; };
-
-} // namespace tree_transform_example
-
-/** with_transform_tree is a higher-order function: it takes a Tree -> Tree
- * callback and returns a config -> config transformation accepted by
- * transform_config. The tree callback runs after parsing.
- *
- * This example reshapes a scalar field into the object expected by my_integer.
- * The original deserializer binding retains its behavior.
- */
-TEST(basics, with_transform_tree) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    omni::ryml::with_transform_tree([](::ryml::Tree tree) {
-      auto reading = tree.rootref()["reading"];
-      // Copy the text: writing below may grow the arena and invalidate views.
-      const std::string scalar{reading.val().str, reading.val().len};
-      reading.change_type(::ryml::MAP);
-      reading["value"].set_serialized(scalar);
-      return tree;
-    }));
-
-  const auto result = load(omni::type_t<tree_transform_example::measurement>{},
-    R"({"reading": 7})");
-
-  EXPECT_TRUE(result.value);
-  EXPECT_TRUE(result.diagnostics.issues.empty());
-  if (result.value) {
-    EXPECT_TRUE(same_document(R"({"reading": {"value": 7}})",
-      omni::ryml::as_json(*result.value)));
-  }
 }
 
 /** An error prevents returning a value; warnings can accompany a valid value.

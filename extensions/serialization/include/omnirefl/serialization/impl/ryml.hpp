@@ -109,7 +109,7 @@ inline const std::string &kind_name(json::value_kind k) {
 
 struct mapping_context {
   const config &options;
-  omni::ryml::diagnostics</*owning=*/false> *diagnostics;
+  omni::ryml::diagnostics</*OwnsTree=*/false> *diagnostics;
   std::vector<issue::path_segment> path;
 
   // Keep stop checks constant-time; counters can exceed the 16-bit limits.
@@ -445,11 +445,7 @@ with_diagnostics<T, diagnostics<true>> deserialize(const config &options,
     };
   }
 
-  return map_tree(options,
-    type,
-    options.transform_tree
-      ? options.transform_tree(std::move(*parsed))
-      : std::move(*parsed));
+  return map_tree(options, type, std::move(*parsed));
 }
 
 template <typename T>

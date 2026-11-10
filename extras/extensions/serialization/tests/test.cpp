@@ -43,7 +43,7 @@ TEST(deserialization, default_retains_diagnostics_and_transforms_the_value) {
       R"({"name": "Ada", "code": 815})");
   static_assert(std::is_same<decltype(result),
                   omni::ryml::with_diagnostics<serialization_data::payload,
-                    omni::ryml::diagnostics</*owning=*/true>>>::value,
+                    omni::ryml::diagnostics</*OwnsTree=*/true>>>::value,
     "the default deserializer must retain a value and diagnostics");
 
   const auto code =
@@ -192,7 +192,7 @@ TEST(tree_mapping, default_returns_borrowed_diagnostics) {
       tree.crootref());
   static_assert(std::is_same<typename std::decay<decltype(result)>::type,
                   omni::ryml::with_diagnostics<serialization_data::payload,
-                    omni::ryml::diagnostics</*owning=*/false>>>::value,
+                    omni::ryml::diagnostics</*OwnsTree=*/false>>>::value,
     "mapping a node must return borrowed diagnostics");
 
   EXPECT_FALSE(result.value);
@@ -206,7 +206,7 @@ TEST(tree_mapping, default_returns_borrowed_diagnostics) {
 
 TEST(tree_mapping, default_owns_diagnostic_views) {
   omni::ryml::with_diagnostics<serialization_data::payload,
-    omni::ryml::diagnostics</*owning=*/true>>
+    omni::ryml::diagnostics</*OwnsTree=*/true>>
     retained;
   {
     auto tree = ::ryml::parse_in_arena(R"({"name": "Ada", "code": "bad"})");
@@ -310,7 +310,7 @@ TEST(deserialization_config, designated_configuration_retains_diagnostics) {
     R"({"name": "Ada", "code": 815, "extra": null})");
   static_assert(std::is_same<decltype(result),
                   omni::ryml::with_diagnostics<serialization_data::payload,
-                    omni::ryml::diagnostics</*owning=*/true>>>::value,
+                    omni::ryml::diagnostics</*OwnsTree=*/true>>>::value,
     "designated configuration must retain a value and diagnostics");
 
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -1612,7 +1612,7 @@ TEST(deserialization_diagnostics, nested_container_errors_share_the_budget) {
 // FIXME: [high] Restore structural field policies and their diagnostics in
 // the new record adapter.
 TEST(deserialization_diagnostics, DISABLED_retained_diagnostics_own_views_after_moves) {
-  omni::ryml::diagnostics</*owning=*/true> retained;
+  omni::ryml::diagnostics</*OwnsTree=*/true> retained;
   {
     auto result =
       strict_deserialize(omni::type_t<serialization_data::payload>{},
@@ -2195,7 +2195,7 @@ TEST_P(deserialization_diagnostics, DISABLED_borrowed_mapper_applies_the_same_po
   const auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
   const omni::ryml::with_diagnostics<serialization_data::payload,
-    omni::ryml::diagnostics</*owning=*/false>>
+    omni::ryml::diagnostics</*OwnsTree=*/false>>
     result = map(tree.crootref());
 
   EXPECT_EQ(GetParam().has_value, bool(result.value));
@@ -2220,7 +2220,7 @@ TEST_P(configured_deserialization, DISABLED_borrows_mutable_node_refs_and_render
   auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
   omni::ryml::with_diagnostics<serialization_data::payload,
-    omni::ryml::diagnostics</*owning=*/false>>
+    omni::ryml::diagnostics</*OwnsTree=*/false>>
     mapped = strict_map_tree(omni::type_t<serialization_data::payload>{},
       tree.rootref());
   const auto result = //

@@ -42,7 +42,6 @@ if (result.value) {
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 #include <string>
@@ -169,18 +168,12 @@ OMNI_ENABLE_BIT_FLAGS(recovery_policy)
 
 namespace ryml {
 
-/** Configures input transformation, mapping diagnostics, and missing-field
- * recovery. */
+/** Configures mapping diagnostics and missing-field recovery. */
 struct config {
   json::error_policy error_policy;
 
   // No missing-field recovery unless explicitly configured.
   compat::optional<json::recovery_policy> recovery = compat::nullopt;
-
-  // Tree -> Tree, applied after successful parsing and before mapping.
-  // An empty callback leaves the tree unchanged. The parsed tree owns its
-  // text; the transformed tree is retained by the returned diagnostics.
-  std::function<::ryml::Tree(::ryml::Tree)> transform_tree{};
 
   // TODO: [high] Add a configurable input-size limit to config and reject
   // oversized source text before parsing or allocating a tree. A std::string
@@ -299,7 +292,7 @@ struct diagnostics {
  * Diagnostics can hold issue records or a rendered message.
  */
 template <typename T,
-  typename Diagnostics = omni::ryml::diagnostics</*owning=*/true>>
+  typename Diagnostics = omni::ryml::diagnostics</*OwnsTree=*/true>>
 struct with_diagnostics {
   // Available only when mapping succeeds, including permitted recovery.
   compat::optional<T> value;
@@ -490,9 +483,7 @@ with_diagnostics<Record, diagnostics<false>> map_tree(const config &options,
   omni::type_t<Record> record_type,
   ::ryml::ConstNodeRef node);
 
-/** Parse the source, apply its configured tree transformation, then map nodes.
- * The transformation is invoked only after successful parsing.
- */
+/** Parse the source into an owning tree, then map its nodes. */
 template <typename Record>
 with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
   omni::type_t<Record> record_type,
@@ -573,75 +564,6 @@ struct map_tree_t {
   }
 };
 
-// Previous selects (Tree, previous) -> Tree instead of Tree -> Tree.
-template <typename F, bool Previous = false, typename = void>
-struct is_tree_transform: std::false_type {};
-
-// SFINAE keeps unsupported invocation signatures queryable as false.
-template <typename F>
-struct is_tree_transform<F,
-  false,
-  compat::void_t<compat::invoke_result_t<F &, ::ryml::Tree>>>:
-    compat::conjunction<std::is_copy_constructible<F>,
-      std::is_same<::ryml::Tree,
-        compat::remove_cvref_t<compat::invoke_result_t<F &, ::ryml::Tree>>>> {};
-
-template <typename F>
-struct is_tree_transform<F,
-  true,
-  compat::void_t<compat::invoke_result_t<F &,
-    ::ryml::Tree,
-    const std::function<::ryml::Tree(::ryml::Tree)> &>>>:
-    compat::conjunction<std::is_copy_constructible<F>,
-      std::is_same<::ryml::Tree,
-        compat::remove_cvref_t<compat::invoke_result_t<F &,
-          ::ryml::Tree,
-          const std::function<::ryml::Tree(::ryml::Tree)> &>>>> {};
-
-/** Return a config transformation that replaces the parsed-tree callback.
- * f must be copy constructible and return ryml::Tree (cv/ref-qualified is OK).
- * A null function pointer resets the callback to identity. Applying this
- * transformation preserves the other config fields.
- */
-template <typename F,
-  compat::enable_if_t<!is_tree_transform<F, /*Previous=*/true>::value
-      && is_tree_transform<F>::value,
-    int> = 0>
-OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
-  OMNI_CPP11_TRAILING_RETURN(std::function<config(config)>) {
-  return [f](config c) {
-    c.transform_tree = f;
-    return c;
-  };
-}
-
-/** Return a config transformation that decorates the parsed-tree callback.
- * f receives (tree, previous); previous is identity when no callback was bound.
- * f may invoke or discard previous, whose reference is valid during the call.
- * Copy previous if retaining it. f must be copy constructible and return a
- * tree (cv/ref-qualified is OK). A null function pointer resets to identity.
- * This form takes precedence when f also accepts a single tree argument.
- */
-template <typename F,
-  compat::enable_if_t<is_tree_transform<F, /*Previous=*/true>::value, int> = 0>
-OMNI_CPP17_CONSTEXPR auto with_transform_tree(F f)
-  OMNI_CPP11_TRAILING_RETURN(std::function<config(config)>) {
-  return [f](config c) {
-    const bool reset = fn::is_null_function(f);
-    const auto previous = !reset && c.transform_tree
-      ? c.transform_tree
-      : fn::identity{};
-
-    c.transform_tree = reset
-      ? previous
-      : [f, previous](::ryml::Tree tree) mutable {
-          return compat::invoke(f, std::move(tree), previous);
-        };
-
-    return c;
-  };
-}
-
 /**
  * Parse JSON or YAML into a record, scalar, or vector.
  * Returns a valid value with any warnings, or diagnostics alone on failure.
@@ -712,9 +634,6 @@ struct serialize_t {
 
   template <typename Value>
   std::string operator()(const Value &value) const;
-
-  // TODO: [high] Consider transform_tree to customize the built tree before
-  // emission, e.g. omit null object properties without another policy.
 };
 
 /**

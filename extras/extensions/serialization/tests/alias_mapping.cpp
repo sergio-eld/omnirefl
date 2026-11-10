@@ -12,9 +12,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <functional>
 #include <map>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -170,14 +168,6 @@ auto make_alias_lookup(std::vector<alias_rule> rules)
   return lookup;
 }
 
-/** Construct a lookup from programmer-supplied rules, asserting on errors.
- * Invalid rules produce an empty lookup when assertions are disabled. */
-alias_lookup make_alias_lookup_or_assert(std::vector<alias_rule> rules) {
-  auto lookup = make_alias_lookup(std::move(rules));
-  assert(lookup && "invalid alias mapping rules");
-  return std::move(lookup).value_or(alias_lookup{});
-}
-
 /// Normalize a tree using prepared paths and inverse value lookups.
 ::ryml::Tree map_aliases(const alias_lookup &lookup, ::ryml::Tree tree) {
   if (!tree.empty()) {
@@ -186,19 +176,6 @@ alias_lookup make_alias_lookup_or_assert(std::vector<alias_rule> rules) {
       detail::apply_rule(rule, &root, /*step=*/0);
   }
   return tree;
-}
-
-/// Return a config update normalizing aliases after the previous tree callback.
-auto with_alias_mapping(alias_lookup lookup)
-  OMNI_CPP11_TRAILING_RETURN(
-    std::function<omni::ryml::config(omni::ryml::config)>) {
-  const auto shared_lookup =
-    std::make_shared<const alias_lookup>(std::move(lookup));
-  return omni::ryml::with_transform_tree(
-    [shared_lookup](::ryml::Tree tree,
-      const std::function<::ryml::Tree(::ryml::Tree)> &previous) {
-      return map_aliases(*shared_lookup, previous(std::move(tree)));
-    });
 }
 
 } // namespace alias_mapping
@@ -602,22 +579,6 @@ TEST_P(alias_normalization, maps_to_expected_tree) {
     return;
 
   const auto normalized = alias_mapping::map_aliases(*lookup, std::move(*tree));
-
-  EXPECT_TRUE(serialization_test::matches_node(
-    c.expected, normalized.crootref()));
-}
-
-TEST_P(alias_normalization, maps_through_config_callback) {
-  const auto &c = GetParam();
-  auto tree = omni::ryml::core::parse(c.source);
-  EXPECT_TRUE(tree) << (tree ? std::string{} : tree.error());
-  if (!tree)
-    return;
-
-  const auto config = alias_mapping::with_alias_mapping(
-    alias_mapping::make_alias_lookup_or_assert(c.rules))(
-    omni::ryml::config{});
-  const auto normalized = config.transform_tree(std::move(*tree));
 
   EXPECT_TRUE(serialization_test::matches_node(
     c.expected, normalized.crootref()));
