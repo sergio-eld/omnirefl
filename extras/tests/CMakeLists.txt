@@ -20,4 +20,6 @@ if(NOT DEFINED BUILD_EXTENSIONS OR BUILD_EXTENSIONS)
     endif()
     add_subdirectory("${omnirefl_PROJECTS_DIR}/extensions/serialization/tests"
         extensions/serialization)
+    add_subdirectory("${omnirefl_PROJECTS_DIR}/extensions/serialization/prototyping"
+        extensions/serialization/prototyping)
 endif()
