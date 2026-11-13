@@ -11,6 +11,7 @@
 
 namespace omni {
 namespace ryml {
+namespace reflected_scope {
 
 /** Read accessible non-static data members from a mapping.
  * Canonical keys take precedence over alias resolution. Keys resolving to the
@@ -27,6 +28,8 @@ struct to_record {
     return omni::is_reflected_record<T>::value;
   }
 
+  // TODO: [high] Define a public mapping context interface/type for
+  // customization points instead of exposing detail::mapping_context.
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
@@ -45,10 +48,8 @@ struct to_record {
       "alias_by_name :: compat::string_view -> optional<compat::string_view>");
     return {/*alias_by_name=*/std::move_if_noexcept(f)};
   }
-
-  // TODO: [high] Define a public mapping context interface/type for
-  // customization points instead of exposing detail::mapping_context.
 };
 
+} // namespace reflected_scope
 } // namespace ryml
 } // namespace omni

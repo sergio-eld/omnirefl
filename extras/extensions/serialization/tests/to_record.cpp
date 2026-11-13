@@ -252,14 +252,15 @@ TEST(alias_lookup, prepares_and_queries_a_persistent_constexpr_dictionary) {
 #endif
 
 TEST(to_record_aliases, default_has_no_alias_mapping) {
-  const omni::ryml::to_record<> compositor{};
+  const omni::ryml::reflected_scope::to_record<> compositor{};
 
   EXPECT_FALSE(compositor.alias_by_name("hostname"));
 }
 
 TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
-  const auto original = omni::ryml::to_record<>{}.with_alias_by_name(
-    omni::ryml::alias_dict(std::make_tuple("host", "hostname")));
+  const auto original =
+    omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
+      omni::ryml::alias_dict(std::make_tuple("host", "hostname")));
   const auto replacement = original.with_alias_by_name(
     omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
 
@@ -278,10 +279,12 @@ TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
 }
 
 TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
-  const auto legacy = omni::ryml::to_record<>{}.with_alias_by_name(
-    examples::runtime_aliases{/*legacy=*/true});
-  const auto current = omni::ryml::to_record<>{}.with_alias_by_name(
-    examples::runtime_aliases{/*legacy=*/false});
+  const auto legacy =
+    omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
+      examples::runtime_aliases{/*legacy=*/true});
+  const auto current =
+    omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
+      examples::runtime_aliases{/*legacy=*/false});
 
   const auto hostname = legacy.alias_by_name("hostname");
   EXPECT_TRUE(hostname);
@@ -293,7 +296,7 @@ TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
 
 // C++11 lambda equivalent: apply this compositor inside the reflected scope.
 struct cpp11_map_with_aliases {
-  omni::ryml::to_record<examples::runtime_aliases> compositor;
+  omni::ryml::reflected_scope::to_record<examples::runtime_aliases> compositor;
   ::ryml::ConstNodeRef node;
   omni::ryml::detail::mapping_context &diagnostics;
 
@@ -308,8 +311,9 @@ class runtime_record_aliases: public testing::TestWithParam<bool> {};
 TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
   // The same resolver type accepts the alias only in legacy mode.
   const bool legacy = GetParam();
-  const auto compositor = omni::ryml::to_record<>{}.with_alias_by_name(
-    examples::runtime_aliases{/*legacy=*/legacy});
+  const auto compositor =
+    omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
+      examples::runtime_aliases{/*legacy=*/legacy});
 
   for (const std::string document : {R"({"hostname": "localhost"})",
          "hostname: localhost\n"}) {
@@ -358,7 +362,7 @@ INSTANTIATE_TEST_SUITE_P(configuration,
 TEST(to_record_aliases, accepts_a_callable_with_a_deleted_move_constructor) {
   const examples::copy_only_alias_by_name resolver{};
   const auto compositor =
-    omni::ryml::to_record<>{}.with_alias_by_name(resolver);
+    omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(resolver);
 
   const auto hostname = compositor.alias_by_name("hostname");
   EXPECT_TRUE(hostname);
@@ -368,12 +372,13 @@ TEST(to_record_aliases, accepts_a_callable_with_a_deleted_move_constructor) {
 }
 
 TEST(to_record_aliases, checks_the_callable_when_configured) {
-  const auto compositor = omni::ryml::to_record<>{}.with_alias_by_name(
-    [](string_view alias) -> omni::compat::optional<string_view> {
-      return alias == "hostname"
-        ? omni::compat::optional<string_view>{"host"}
-        : omni::compat::nullopt;
-    });
+  const auto compositor =
+    omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
+      [](string_view alias) -> omni::compat::optional<string_view> {
+        return alias == "hostname"
+          ? omni::compat::optional<string_view>{"host"}
+          : omni::compat::nullopt;
+      });
 
   const auto hostname = compositor.alias_by_name("hostname");
   EXPECT_TRUE(hostname);
@@ -383,14 +388,14 @@ TEST(to_record_aliases, checks_the_callable_when_configured) {
 
   // Enable independently to inspect an invalid argument or return type.
 #if 0
-  (void)omni::ryml::to_record<>{}.with_alias_by_name(
+  (void)omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
     [](int) -> omni::compat::optional<string_view> {
       return omni::compat::nullopt;
     });
 #endif
 
 #if 0
-  (void)omni::ryml::to_record<>{}.with_alias_by_name(
+  (void)omni::ryml::reflected_scope::to_record<>{}.with_alias_by_name(
     [](string_view) -> string_view { return "host"; });
 #endif
 }
@@ -428,15 +433,15 @@ namespace cp {
 
 template <>
 struct to_type<alias_models::endpoint>:
-    omni::ryml::to_record<alias_models::endpoint_names> {};
+    omni::ryml::reflected_scope::to_record<alias_models::endpoint_names> {};
 
 template <>
 struct to_type<alias_models::optional_endpoint>:
-    omni::ryml::to_record<alias_models::endpoint_names> {};
+    omni::ryml::reflected_scope::to_record<alias_models::endpoint_names> {};
 
 template <>
 struct to_type<alias_models::default_endpoint>:
-    omni::ryml::to_record<alias_models::endpoint_names> {};
+    omni::ryml::reflected_scope::to_record<alias_models::endpoint_names> {};
 
 } // namespace cp
 } // namespace ryml

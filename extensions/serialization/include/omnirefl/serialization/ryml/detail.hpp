@@ -181,8 +181,9 @@ struct is_alias_by_name<F,
  * collisions are not validated. Canonical names are not implicitly added as
  * aliases. Returned views borrow the supplied strings, whose storage must
  * outlive use of the resolver.
- * Full constexpr factory evaluation requires C++14 tuple helpers; the sorting
- * implementation itself supports constant evaluation in C++11.
+ * Full constexpr factory evaluation requires C++14: std::make_tuple,
+ * std::tuple_cat, and std::get are not guaranteed constexpr in C++11.
+ * The sorting implementation itself supports C++11 constant evaluation.
  */
 template <typename... Groups>
 OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)

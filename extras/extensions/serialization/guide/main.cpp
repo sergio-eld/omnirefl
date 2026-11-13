@@ -816,11 +816,11 @@ struct emplace<std::set<T, Compare, Allocator>> {
 // Generic operators defer metadata access until the reflected scope.
 template <>
 struct from_type<customization_mapping::record>:
-    mapping::reflected_scope::from_record {};
+    reflected_scope::from_record {};
 
 template <>
 struct to_type<customization_mapping::record>:
-    omni::ryml::to_record<> {};
+    reflected_scope::to_record<> {};
 
 // Ad hoc: inheriting standard containers is discouraged. This custom mapping
 // needs the derived record's metadata as well as container iteration.

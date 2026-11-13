@@ -936,7 +936,6 @@ struct cpp11_read_member {
 
 } // namespace detail
 
-namespace mapping {
 namespace reflected_scope {
 
 template <typename T>
@@ -1014,9 +1013,6 @@ auto from_record::operator()(const T &value,
       /*diagnostics=*/diagnostics,
     });
 }
-
-} // namespace reflected_scope
-} // namespace mapping
 
 template <typename AliasByName>
 template <typename T>
@@ -1111,6 +1107,8 @@ auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
     }, /*initial=*/true);
   return mapped && errors == diagnostics.error_count;
 }
+
+} // namespace reflected_scope
 
 template <bool OwnsTree>
 std::string render_diagnostics_t::operator()(

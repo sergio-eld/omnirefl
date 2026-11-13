@@ -821,6 +821,8 @@ struct to_container {
     -> compat::enable_if_t<supports<T>(), bool>;
 };
 
+} // namespace mapping
+
 namespace reflected_scope {
 
 /** Write a declared enumerator name as a quoted scalar. */
@@ -870,16 +872,14 @@ struct from_record {
 
 } // namespace reflected_scope
 
-} // namespace mapping
-
 namespace cp {
 
 // Record mapping is the fallback; matching specializations replace it.
 template <typename T, typename Enable>
-struct from_type: mapping::reflected_scope::from_record {};
+struct from_type: reflected_scope::from_record {};
 
 template <typename T, typename Enable>
-struct to_type: omni::ryml::to_record<> {};
+struct to_type: reflected_scope::to_record<> {};
 
 template <typename T>
 struct from_type<T,
@@ -923,13 +923,13 @@ struct to_type<T,
 
 template <typename T>
 struct from_type<T,
-  compat::enable_if_t<mapping::reflected_scope::from_enum::supports<T>()>>:
-    mapping::reflected_scope::from_enum {};
+  compat::enable_if_t<reflected_scope::from_enum::supports<T>()>>:
+    reflected_scope::from_enum {};
 
 template <typename T>
 struct to_type<T,
-  compat::enable_if_t<mapping::reflected_scope::to_enum::supports<T>()>>:
-    mapping::reflected_scope::to_enum {};
+  compat::enable_if_t<reflected_scope::to_enum::supports<T>()>>:
+    reflected_scope::to_enum {};
 
 // TODO: [high] Document and demonstrate the reflected-scope contract for
 // from_type/to_type customizations. Metadata queries must depend on template
