@@ -139,12 +139,12 @@ struct cpp11_read_member {
 
 namespace reflected_scope {
 
-template <typename AliasByName>
 template <typename T>
-auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
+auto to_record_t::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<omni::is_reflected_record<T>::value, node_result> {
+  -> compat::enable_if_t<omni::is_reflected_record<T>::value,
+    with_diagnostics<compat::monostate, diagnostics<false>>> {
   auto result = detail::make_node_accumulator(context, node);
   if (!node.is_map()) {
     result.report(omni::ryml::detail::make_issue(
@@ -181,12 +181,14 @@ auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
       });
 
     if (entry == pending.end()) {
-      if (const auto canonical = this->alias_by_name(input_name)) {
-        entry = std::find_if(pending.begin(),
-          pending.end(),
-          [canonical](const detail::record_entry &entry) {
-            return *canonical == entry.name;
-          });
+      if (this->alias_by_name) {
+        if (const auto canonical = this->alias_by_name(input_name)) {
+          entry = std::find_if(pending.begin(),
+            pending.end(),
+            [canonical](const detail::record_entry &entry) {
+              return *canonical == entry.name;
+            });
+        }
       }
       if (entry != pending.end() && entry->has_canonical)
         continue;

@@ -115,7 +115,7 @@ struct mapping_context {
 // Child contexts are immutable snapshots; no diagnostics escape through them.
 struct node_accumulator {
   const mapping_context &context;
-  node_result result;
+  with_diagnostics<compat::monostate, diagnostics<false>> result;
   std::size_t error_count;
   std::size_t warning_count;
 
@@ -146,7 +146,7 @@ struct node_accumulator {
     }
   }
 
-  void append(node_result child) {
+  void append(with_diagnostics<compat::monostate, diagnostics<false>> child) {
     if (!child.value)
       this->result.value.reset();
 
@@ -190,7 +190,9 @@ struct node_accumulator {
     return child;
   }
 
-  node_result finish() && { return std::move(this->result); }
+  auto finish() && -> with_diagnostics<compat::monostate, diagnostics<false>> {
+    return std::move(this->result);
+  }
 };
 
 inline node_accumulator make_node_accumulator(const mapping_context &context,
@@ -324,9 +326,10 @@ void write_node(const T &value,
 }
 
 template <typename T>
-node_result read_node(::ryml::ConstNodeRef node,
+auto read_node(::ryml::ConstNodeRef node,
   T *into,
-  const omni::ryml::detail::mapping_context &context) {
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>> {
   auto result = omni::ryml::detail::make_node_accumulator(context, node);
   if (context.stopped()) {
     result.result.value.reset();
@@ -366,7 +369,8 @@ struct cpp11_lambda_read {
   const omni::ryml::detail::mapping_context &context;
 
   template <typename _M, omni::reflected_entity Entity>
-  node_result operator()(omni::meta_t<_M, Entity>) const {
+  auto operator()(omni::meta_t<_M, Entity>) const
+    -> with_diagnostics<compat::monostate, diagnostics<false>> {
     return core::read_node(this->node,
       &this->into,
       this->context);
@@ -438,9 +442,10 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 template <typename T,
   typename Discovery,
   compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
-node_result map_tree(::ryml::ConstNodeRef node,
+auto map_tree(::ryml::ConstNodeRef node,
   T *into,
-  const omni::ryml::detail::mapping_context &context) {
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>> {
   return omni::reflected_call(
     detail::cpp11_lambda_read<T>{
       /*node=*/node,
@@ -456,9 +461,10 @@ template <typename T,
       && compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int>>
-node_result map_tree(::ryml::ConstNodeRef node,
+auto map_tree(::ryml::ConstNodeRef node,
   T *into,
-  const omni::ryml::detail::mapping_context &context) {
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>> {
   return map_tree<T, typename Discovery::value_type>(node, into, context);
 }
 
@@ -468,9 +474,10 @@ template <typename T,
       && !compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int>>
-node_result map_tree(::ryml::ConstNodeRef node,
+auto map_tree(::ryml::ConstNodeRef node,
   T *into,
-  const omni::ryml::detail::mapping_context &context) {
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>> {
   return read_node(node, into, context);
 }
 
@@ -668,7 +675,8 @@ template <typename T>
 auto to_string_like::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<supports<T>(), node_result> {
+  -> compat::enable_if_t<supports<T>(),
+    with_diagnostics<compat::monostate, diagnostics<false>>> {
   auto result = omni::ryml::detail::make_node_accumulator(context, node);
   if (node.is_container()) {
     result.report(omni::ryml::detail::make_issue(
@@ -714,7 +722,8 @@ template <typename T>
 auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<supports<T>(), node_result> {
+  -> compat::enable_if_t<supports<T>(),
+    with_diagnostics<compat::monostate, diagnostics<false>>> {
   auto result = omni::ryml::detail::make_node_accumulator(context, node);
   const auto expected = std::is_same<bool, T>::value
     ? json::value_kind::boolean
@@ -791,7 +800,8 @@ template <typename T>
 auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<traits::is_optional<T>::value, node_result> {
+  -> compat::enable_if_t<traits::is_optional<T>::value,
+    with_diagnostics<compat::monostate, diagnostics<false>>> {
   if (!node.is_container() && node.val_is_null()
     && (!node.has_val_tag()
       || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {
@@ -839,7 +849,8 @@ template <typename T>
 auto to_container::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<supports<T>(), node_result> {
+  -> compat::enable_if_t<supports<T>(),
+    with_diagnostics<compat::monostate, diagnostics<false>>> {
   auto result = omni::ryml::detail::make_node_accumulator(context, node);
   if (!node.is_seq()) {
     result.report(omni::ryml::detail::make_issue(
@@ -916,7 +927,8 @@ template <typename T>
 auto to_enum::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<supports<T>(), node_result> {
+  -> compat::enable_if_t<supports<T>(),
+    with_diagnostics<compat::monostate, diagnostics<false>>> {
   auto result = omni::ryml::detail::make_node_accumulator(context, node);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
   // plain null, numeric, and boolean forms before looking up the name.

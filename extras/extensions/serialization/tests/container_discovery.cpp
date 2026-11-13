@@ -8,6 +8,12 @@
 #include <string>
 #include <vector>
 
+#if defined(__GNUC__) && !defined(__clang__)
+// GCC warns about GTest's internal conditionals in unbraced assertion guards.
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdangling-else"
+#endif
+
 namespace {
 
 // Each route uses its own model so another call cannot supply its metadata.
@@ -36,8 +42,9 @@ struct from_type<my_int> {
 
 template <>
 struct to_type<my_int> {
-  node_result operator()(::ryml::ConstNodeRef node, my_int *into,
-    const detail::mapping_context &context) const {
+  auto operator()(::ryml::ConstNodeRef node, my_int *into,
+    const detail::mapping_context &context) const
+    -> with_diagnostics<compat::monostate, diagnostics<false>> {
     return core::read_node(node, &into->value, context);
   }
 };
@@ -46,21 +53,22 @@ struct to_type<my_int> {
 // Return both warnings directly; the core applies traversal limits.
 template <>
 struct to_type<compatible_integer> {
-  node_result operator()(::ryml::ConstNodeRef node,
+  auto operator()(::ryml::ConstNodeRef node,
     compatible_integer *into,
-    const detail::mapping_context &context) const {
+    const detail::mapping_context &context) const
+    -> with_diagnostics<compat::monostate, diagnostics<false>> {
     auto result = core::read_node(node, &into->value, context);
     if (!result.value)
       return result;
 
-    if (node.is_val_quoted()) {
+    if (node.is_val_quoted())
       result.diagnostics.issues.push_back(detail::make_issue(
         json::issue_code::unexpected_kind,
         json::value_kind::integer,
         node,
         context.path,
         /*warning=*/true));
-    }
+
     if (into->value < 0) {
       into->value = 0;
       result.diagnostics.issues.push_back(detail::make_issue(
@@ -70,6 +78,7 @@ struct to_type<compatible_integer> {
         context.path,
         /*warning=*/true));
     }
+
     return result;
   }
 };
@@ -206,9 +215,9 @@ TEST(node_mapping, returns_a_value_with_multiple_custom_warnings) {
     omni::type_t<compatible_integer>{}, R"("-7")");
 
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(0, result.value->value);
-  }
+
   EXPECT_EQ(2U, result.diagnostics.issues.size());
   if (2U == result.diagnostics.issues.size()) {
     EXPECT_EQ(omni::json::issue_code::unexpected_kind,
@@ -217,6 +226,7 @@ TEST(node_mapping, returns_a_value_with_multiple_custom_warnings) {
     EXPECT_EQ(omni::json::issue_code::out_of_range,
       result.diagnostics.issues.back().reason);
   }
+
   for (const auto &issue : result.diagnostics.issues) {
     EXPECT_TRUE(issue.warning);
     EXPECT_TRUE(issue.path.empty());
@@ -265,3 +275,7 @@ TEST(node_mapping, preserves_one_limit_error_through_nested_mapping) {
 }
 
 } // namespace
+
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif

@@ -424,7 +424,8 @@ struct emplace {
 template <typename T, typename Enable = void>
 struct from_type;
 
-/** Select a node-to-C++ adapter returning node_result with its diagnostics. */
+/** Select a node-to-C++ adapter returning an in-place mapping result
+ * with diagnostics. */
 template <typename T, typename Enable = void>
 struct to_type;
 
@@ -439,8 +440,9 @@ void write_node(const T &value, ::ryml::NodeRef node,
 
 /** Dispatch one node through cp::to_type, returning success and diagnostics. */
 template <typename T>
-node_result read_node(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context);
+auto read_node(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>>;
 
 /** Map into an existing value, returning diagnostics without changing context.
  * @pre `node` must be a valid node reference.
@@ -449,8 +451,9 @@ node_result read_node(::ryml::ConstNodeRef node, T *into,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
-node_result map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context);
+auto map_tree(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>>;
 
 /** Map into an existing value, returning diagnostics without changing context.
  * @pre `node` must be a valid node reference. */
@@ -460,8 +463,9 @@ template <typename T,
       && compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
-node_result map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context);
+auto map_tree(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>>;
 
 /** Map into an existing value, returning diagnostics without changing context.
  * @pre `node` must be a valid node reference. */
@@ -471,8 +475,9 @@ template <typename T,
       && !compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
-node_result map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context);
+auto map_tree(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context)
+  -> with_diagnostics<compat::monostate, diagnostics<false>>;
 
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
@@ -751,7 +756,8 @@ struct to_string_like {
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>(), node_result>;
+    -> compat::enable_if_t<supports<T>(),
+      with_diagnostics<compat::monostate, diagnostics<false>>>;
 
   // FIXME: [high] Define encoding conversion for non-char strings through
   // the shared operation specialization points, including standard strings.
@@ -781,7 +787,8 @@ struct to_arithmetic {
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>(), node_result>;
+    -> compat::enable_if_t<supports<T>(),
+      with_diagnostics<compat::monostate, diagnostics<false>>>;
 };
 
 /** Write a present optional value or a null scalar. */
@@ -805,7 +812,8 @@ struct to_optional_like {
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<traits::is_optional<T>::value, node_result>;
+    -> compat::enable_if_t<traits::is_optional<T>::value,
+      with_diagnostics<compat::monostate, diagnostics<false>>>;
 };
 
 /** Write iterable elements as a sequence, omitting empty optionals.
@@ -831,7 +839,8 @@ struct to_container {
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>(), node_result>;
+    -> compat::enable_if_t<supports<T>(),
+      with_diagnostics<compat::monostate, diagnostics<false>>>;
 };
 
 } // namespace mapping
@@ -863,7 +872,8 @@ struct to_enum {
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>(), node_result>;
+    -> compat::enable_if_t<supports<T>(),
+      with_diagnostics<compat::monostate, diagnostics<false>>>;
 };
 
 /** Write accessible non-static data members as mapping entries. */
@@ -892,7 +902,7 @@ template <typename T, typename Enable>
 struct from_type: reflected_scope::from_record {};
 
 template <typename T, typename Enable>
-struct to_type: reflected_scope::to_record<> {};
+struct to_type: reflected_scope::to_record_t {};
 
 template <typename T>
 struct from_type<T,

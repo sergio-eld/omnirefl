@@ -772,11 +772,14 @@ TEST(compat_input_range, recognizes_arrays_and_standard_containers) {
 #if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
   static_assert(omni::compat::detail::is_input_range<int[3]>::value
     == std::ranges::input_range<int[3]>);
+
   static_assert(omni::compat::detail::is_input_range<std::vector<int>>::value
     == std::ranges::input_range<std::vector<int>>);
+
   static_assert(
     omni::compat::detail::is_input_range<const std::vector<int> &>::value
     == std::ranges::input_range<const std::vector<int> &>);
+
   static_assert(std::is_same<
     omni::compat::detail::range_reference_t<const std::vector<int>>,
     std::ranges::range_reference_t<const std::vector<int>>>::value);
@@ -805,6 +808,7 @@ TEST(compat_input_range, accepts_a_single_pass_adl_range) {
 TEST(compat_input_range, rejects_output_ranges_and_non_ranges) {
   using output_range = input_ranges::iterator_range<
     std::back_insert_iterator<std::vector<int>>>;
+
   struct incomplete;
 
   EXPECT_FALSE(omni::compat::is_input_range<output_range>::value);
@@ -815,8 +819,10 @@ TEST(compat_input_range, rejects_output_ranges_and_non_ranges) {
 #if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
   static_assert(omni::compat::detail::is_input_range<output_range>::value
     == std::ranges::input_range<output_range>);
+
   static_assert(omni::compat::detail::is_input_range<int>::value
     == std::ranges::input_range<int>);
+
   static_assert(omni::compat::detail::is_input_range<incomplete>::value
     == std::ranges::input_range<incomplete>);
 #endif

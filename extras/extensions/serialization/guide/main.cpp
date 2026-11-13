@@ -94,6 +94,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(__GNUC__) && !defined(__clang__)
+// GCC warns about GTest's internal conditionals in unbraced assertion guards.
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdangling-else"
+#endif
+
 namespace {
 
 // Defined at the end to keep document-comparison glue out of the examples.
@@ -820,7 +826,7 @@ struct from_type<customization_mapping::record>:
 
 template <>
 struct to_type<customization_mapping::record>:
-    reflected_scope::to_record<> {};
+    reflected_scope::to_record_t {};
 
 // Ad hoc: inheriting standard containers is discouraged. This custom mapping
 // needs the derived record's metadata as well as container iteration.
@@ -849,6 +855,7 @@ struct from_type<customization_mapping::extended_values> {
     ::ryml::NodeRef node,
     const detail::mapping_context &context) const {
     mapping::from_container{}(value, node, context);
+
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
       | fn::each(cpp11_append_member{
@@ -871,9 +878,10 @@ struct to_type<customization_mapping::extended_values> {
   };
 
   template <typename T>
-  node_result operator()(::ryml::ConstNodeRef node,
+  auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const detail::mapping_context &context) const {
+    const detail::mapping_context &context) const
+    -> with_diagnostics<compat::monostate, diagnostics<false>> {
     T values;
     auto result = mapping::to_container{}(node, &values, context);
     if (!result.value)
@@ -911,9 +919,10 @@ struct from_type<customization_mapping::integer> {
 
 template <>
 struct to_type<customization_mapping::integer> {
-  node_result operator()(::ryml::ConstNodeRef node,
+  auto operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
-    const detail::mapping_context &context) const {
+    const detail::mapping_context &context) const
+    -> with_diagnostics<compat::monostate, diagnostics<false>> {
     int converted{};
     auto result = core::read_node(node, &converted, context);
     if (!result.value)
@@ -1059,6 +1068,7 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
     /*warning_count=*/0,
     /*borrow_strings=*/false,
   };
+
   auto into = c.initial;
   const auto mapped = omni::ryml::core::map_tree(
     parsed->crootref(), &into, context);
@@ -1169,6 +1179,7 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
     /*warning_count=*/0,
     /*borrow_strings=*/false,
   };
+
   auto into = c.initial;
   const auto mapped = omni::ryml::core::map_tree(
     parsed->crootref(), &into, context);
@@ -1183,9 +1194,8 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   } else {
     EXPECT_EQ(c.initial, into);
     EXPECT_EQ(1U, mapped.diagnostics.issues.size());
-    if (1U == mapped.diagnostics.issues.size()) {
+    if (1U == mapped.diagnostics.issues.size())
       EXPECT_EQ(c.expected.error(), mapped.diagnostics.issues.front().reason);
-    }
   }
 }
 
@@ -1350,3 +1360,7 @@ INSTANTIATE_TEST_SUITE_P(strings,
   });
 
 } // namespace
+
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif

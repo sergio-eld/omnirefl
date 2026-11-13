@@ -17,10 +17,6 @@ struct diagnostics;
 template <typename T, typename Diagnostics>
 struct with_diagnostics;
 
-/** Normalized in-place node mapping result. Success holds monostate;
- * diagnostics borrow the mapped tree, which must remain alive and unchanged. */
-using node_result = with_diagnostics<compat::monostate, diagnostics<false>>;
-
 namespace detail {
 
 struct mapping_context;
@@ -165,24 +161,15 @@ struct cpp11_sorted_aliases {
   }
 };
 
-template <typename Result>
-struct default_value {
-  static_assert(std::is_default_constructible<Result>::value,
-    "default_value requires a default-constructible result");
-
-  template <typename... Args>
-  constexpr Result operator()(const Args &...) const { return {}; }
-};
-
 template <typename F, typename = void>
 struct is_alias_by_name: std::false_type {};
 
 template <typename F>
 struct is_alias_by_name<F,
-  compat::void_t<compat::invoke_result_t<const F &,
+  compat::void_t<compat::invoke_result_t<F &,
     compat::string_view>>>:
     std::is_same<compat::optional<compat::string_view>,
-      compat::invoke_result_t<const F &, compat::string_view>> {};
+      compat::invoke_result_t<F &, compat::string_view>> {};
 
 } // namespace detail
 
