@@ -87,6 +87,19 @@ struct assign_string<c4::csubstr> {
 // TODO: Move to a shared header if another JSON parser is adopted.
 namespace json {
 
+/** Member-name mapping contract.
+ * Each mapped member has a canonical name and may accept aliases. The sets
+ * consisting of each member's canonical name and aliases must be disjoint
+ * across members. The caller must ensure this; collisions are not validated,
+ * and mapping results are unspecified when this precondition is violated.
+ *
+ * If any canonical occurrence exists, its aliases are ignored regardless of
+ * value validity. Otherwise aliases identify the member. Duplicate policies
+ * select among canonical occurrences or, only when absent, among aliases.
+ * Only the selected occurrence is decoded; invalid canonical input never
+ * falls back to an alias. Present but invalid input is not a missing member.
+ */
+
 /// JSON/YAML parsing and mapping failures, independent of the parser backend.
 /// Field presence and diagnostic limits refer to the requested mapping contract.
 enum class issue_code : std::uint8_t {

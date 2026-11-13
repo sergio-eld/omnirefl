@@ -12,7 +12,6 @@
 #include <csetjmp>
 #include <iterator>
 #include <limits>
-#include <numeric>
 #include <type_traits>
 
 // TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
@@ -801,20 +800,28 @@ auto to_container::operator()(::ryml::ConstNodeRef node,
 
 namespace detail {
 
-struct cpp11_member_named {
-  compat::string_view name;
-
-  template <typename _F>
-  bool operator()(omni::data_member_meta_t<_F> field) const {
-    return this->name == field.name();
-  }
-};
-
-// Resolve each input key once, retaining its node for diagnostics and policy
-// selection. Aliases and canonical names can refer to the same record member.
+// Pending members retain their selected input node. Canonical presence is
+// known before classification, so aliases can be ignored regardless of order.
 struct record_entry {
   compat::string_view name;
   ::ryml::ConstNodeRef node;
+  bool has_canonical;
+};
+
+// C++11 lambda equivalent: prepare each member's canonical candidate.
+struct cpp11_collect_members {
+  const ::ryml::ConstNodeRef &node;
+  std::vector<record_entry> &pending;
+
+  template <typename _F>
+  void operator()(omni::data_member_meta_t<_F> field) const {
+    const auto canonical = this->node.find_child(c4::to_csubstr(field.name()));
+    this->pending.push_back({
+      /*name=*/field.name(),
+      /*node=*/canonical,
+      /*has_canonical=*/!canonical.invalid(),
+    });
+  }
 };
 
 // SFINAE keeps T{} out of instantiations for non-default-constructible fields.
@@ -831,7 +838,7 @@ auto initialize_missing(omni::data_member_binding_t<Record, _F>)
     typename omni::data_member_meta_t<_F>::type>::value> {}
 
 struct cpp11_require_member {
-  const std::vector<record_entry> &entries;
+  const std::vector<record_entry> &pending;
   omni::ryml::detail::mapping_context &diagnostics;
 
   template <typename Record, typename _F>
@@ -840,10 +847,11 @@ struct cpp11_require_member {
       return;
 
     const auto name = c4::to_csubstr(field.name());
-    if (std::any_of(this->entries.begin(),
-          this->entries.end(),
+    if (std::any_of(this->pending.begin(),
+          this->pending.end(),
           [name](const record_entry &entry) {
-            return compat::string_view{name.str, name.len} == entry.name;
+            return compat::string_view{name.str, name.len} == entry.name
+              && !entry.node.invalid();
           }))
       return;
 
@@ -895,7 +903,7 @@ struct cpp11_write_member {
 };
 
 struct cpp11_read_member {
-  const std::vector<record_entry> &entries;
+  std::vector<record_entry> &pending;
   omni::ryml::detail::mapping_context &diagnostics;
 
   template <typename Record, typename _F>
@@ -907,19 +915,14 @@ struct cpp11_read_member {
       return false;
 
     const compat::string_view name{field.name()};
-    const auto child = std::accumulate(this->entries.begin(),
-      this->entries.end(),
-      ::ryml::ConstNodeRef{},
-      [this, name](::ryml::ConstNodeRef selected, const record_entry &entry) {
-        const bool last = (this->diagnostics.options.error_policy.duplicates
-          & json::duplicate_policy::last) == json::duplicate_policy::last;
-        return name == entry.name && (selected.invalid() || last)
-          ? entry.node : selected;
-      });
+    const auto entry = std::find_if(this->pending.begin(),
+      this->pending.end(),
+      [name](const record_entry &entry) { return name == entry.name; });
     // The preceding presence pass already recovered or reported missing fields.
-    if (child.invalid())
+    if (entry == this->pending.end() || entry->node.invalid())
       return success;
 
+    const auto child = entry->node;
     this->diagnostics.path.push_back({
       /*field=*/child.key(),
       /*index=*/compat::nullopt,
@@ -929,6 +932,8 @@ struct cpp11_read_member {
     const bool mapped = core::read_node(child, &value, this->diagnostics);
     if (mapped)
       field.set_value(std::move(value));
+    // Presence does not depend on decoding success; consume invalid input too.
+    this->pending.erase(entry);
     this->diagnostics.path.pop_back();
     return mapped && success;
   }
@@ -1033,8 +1038,12 @@ auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
   const auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter<fn::non_static>();
 
-  std::vector<detail::record_entry> entries;
-  entries.reserve(node.num_children());
+  std::vector<detail::record_entry> pending;
+  pending.reserve(std::tuple_size<decltype(fields)>::value);
+  fields | fn::each(detail::cpp11_collect_members{
+    /*node=*/node,
+    /*pending=*/pending,
+  });
 
   // Structural issues precede missing fields and value mapping, preserving
   // diagnostic order regardless of the document's member order.
@@ -1043,29 +1052,39 @@ auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
       break;
 
     const auto name = child.key();
-    compat::string_view canonical{name.str, name.len};
-    bool known = fn::any_of(
-      detail::cpp11_member_named{/*name=*/canonical}, fields);
-    if (!known) {
-      const auto resolved = compat::invoke(this->alias_by_name, canonical);
-      if (resolved) {
-        canonical = *resolved;
-        known = fn::any_of(
-          detail::cpp11_member_named{/*name=*/canonical}, fields);
+    const compat::string_view input_name{name.str, name.len};
+    auto entry = std::find_if(pending.begin(),
+      pending.end(),
+      [input_name](const detail::record_entry &entry) {
+        return input_name == entry.name;
+      });
+    if (entry == pending.end()) {
+      const auto canonical = compat::invoke(this->alias_by_name, input_name);
+      if (canonical) {
+        entry = std::find_if(pending.begin(),
+          pending.end(),
+          [canonical](const detail::record_entry &entry) {
+            return *canonical == entry.name;
+          });
       }
+      if (entry != pending.end() && entry->has_canonical)
+        continue;
     }
 
-    const bool duplicate = known && std::any_of(entries.begin(),
-      entries.end(),
-      [canonical](const detail::record_entry &entry) {
-        return canonical == entry.name;
-      });
-    if (known)
-      entries.push_back({/*name=*/canonical, /*node=*/child});
-    if (known && !duplicate)
+    const bool known = entry != pending.end();
+    const bool duplicate = known && !entry->node.invalid()
+      && entry->node.id() != child.id();
+    if (known && !duplicate) {
+      entry->node = child;
       continue;
+    }
 
     const auto duplicates = diagnostics.options.error_policy.duplicates;
+    if (duplicate
+      && (duplicates & json::duplicate_policy::last)
+        == json::duplicate_policy::last)
+      entry->node = child;
+
     const auto unknown = diagnostics.options.error_policy.unknown_fields;
     const bool allowed = duplicate
       ? (duplicates
@@ -1097,12 +1116,12 @@ auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
   const auto members = binding.accessible_data_members()
     | fn::filter<fn::non_static>();
   members | fn::each(detail::cpp11_require_member{
-    /*entries=*/entries,
+    /*pending=*/pending,
     /*diagnostics=*/diagnostics,
   });
   const bool mapped = members
     | fn::foldl(detail::cpp11_read_member{
-      /*entries=*/entries,
+      /*pending=*/pending,
       /*diagnostics=*/diagnostics,
     }, /*initial=*/true);
   return mapped && errors == diagnostics.error_count;

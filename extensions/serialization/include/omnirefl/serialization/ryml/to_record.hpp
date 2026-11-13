@@ -14,9 +14,10 @@ namespace ryml {
 namespace reflected_scope {
 
 /** Read accessible non-static data members from a mapping.
- * Canonical keys take precedence over alias resolution. Keys resolving to the
- * same member follow config's duplicate policy in document order. Diagnostics
- * retain the original document keys. with_alias_by_name replaces the resolver;
+ * Canonical presence suppresses aliases even when the canonical value is
+ * invalid. Duplicate policies select among canonical occurrences or, only
+ * when absent, among aliases. Diagnostics retain the original document keys.
+ * with_alias_by_name replaces the resolver;
  * it accepts string_view -> optional<string_view>, where an empty result means
  * no alias. Resolved names must remain valid throughout this mapping call.
  */

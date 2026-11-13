@@ -407,6 +407,10 @@ namespace {
 namespace alias_models {
 
 struct endpoint { int port; };
+struct endpoint_with_retries {
+  int port;
+  int retries;
+};
 struct optional_endpoint { omni::compat::optional<int> port; };
 struct default_endpoint { int port = 42; };
 struct cluster {
@@ -418,8 +422,7 @@ struct endpoint_names {
   omni::compat::optional<string_view> operator()(string_view alias) const {
     static const auto names = omni::ryml::alias_dict(
       std::make_tuple("port", "service_port", "listen_port", "legacy/port"),
-      std::make_tuple("absent", "not_a_member"),
-      std::make_tuple("absent", "port"));
+      std::make_tuple("absent", "not_a_member"));
     return names(alias);
   }
 };
@@ -433,6 +436,10 @@ namespace cp {
 
 template <>
 struct to_type<alias_models::endpoint>:
+    omni::ryml::reflected_scope::to_record<alias_models::endpoint_names> {};
+
+template <>
+struct to_type<alias_models::endpoint_with_retries>:
     omni::ryml::reflected_scope::to_record<alias_models::endpoint_names> {};
 
 template <>
@@ -518,23 +525,21 @@ const alias_case alias_cases[]{
     {{issue_code::invalid_scalar, "/legacy~1port", false}}},
   {"missing_member", "{}", duplicate_policy::reject, unknown_policy::reject,
     omni::compat::nullopt, {{issue_code::missing_field, "/port", false}}},
-  // With an invalid canonical candidate, ordinary first/last selection applies.
+  // Canonical presence suppresses aliases even when its value is invalid.
   {"invalid_canonical_selected_first", R"({"port": "bad", "service_port": 8})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
     {{issue_code::invalid_scalar, "/port", false}}},
-  {"invalid_canonical_loses_to_last", R"({"port": "bad", "service_port": 8})",
-    duplicate_policy::last, unknown_policy::reject, 8, {}},
-  {"invalid_canonical_loses_to_first", R"({"service_port": 7, "port": "bad"})",
-    duplicate_policy::allow, unknown_policy::reject, 7, {}},
+  {"invalid_canonical_over_last_alias", R"({"port": "bad", "service_port": 8})",
+    duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
+  {"invalid_canonical_over_first", R"({"service_port": 7, "port": "bad"})",
+    duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
   {"invalid_canonical_selected_last", R"({"service_port": 7, "port": "bad"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
     {{issue_code::invalid_scalar, "/port", false}}},
 };
 
-// TODO: [high] Implement validity-aware canonical precedence. Decode the
-// canonical candidate once and retain its result. Settle which diagnostics
-// survive when an invalid canonical candidate loses to an alias, and how
-// repeated canonical keys interact with this precedence.
 const alias_case canonical_priority_cases[]{
   {"canonical_before_alias", R"({"port": 7, "service_port": 8})",
     duplicate_policy::reject, unknown_policy::reject, 7, {}},
@@ -553,6 +558,47 @@ const alias_case canonical_priority_cases[]{
     duplicate_policy::last, unknown_policy::reject, 7, {}},
   {"canonical_after_invalid_alias", R"({"service_port": "bad", "port": 8})",
     duplicate_policy::allow, unknown_policy::reject, 8, {}},
+  {"invalid_canonical_with_reject", R"({"port":"bad","service_port":8})",
+    duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
+  {"repeated_canonical_rejected", R"({"port":7,"service_port":99,"port":8})",
+    duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::duplicate_field, "/port", false}}},
+  {"repeated_canonical_first", R"({"port":7,"service_port":99,"port":8})",
+    duplicate_policy::allow, unknown_policy::reject, 7, {}},
+  {"repeated_canonical_last", R"({"port":7,"service_port":99,"port":8})",
+    duplicate_policy::last, unknown_policy::reject, 8, {}},
+  {"repeated_canonical_warn", R"({"port":7,"service_port":99,"port":8})",
+    duplicate_policy::last | duplicate_policy::warn, unknown_policy::reject,
+    8, {{issue_code::duplicate_field, "/port", true}}},
+  {"repeated_canonical_invalid_first",
+    R"({"port":"bad","service_port":99,"port":8})",
+    duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
+  {"repeated_canonical_valid_last",
+    R"({"port":"bad","service_port":99,"port":8})",
+    duplicate_policy::last, unknown_policy::reject, 8, {}},
+  {"repeated_canonical_valid_first",
+    R"({"port":7,"service_port":99,"port":"bad"})",
+    duplicate_policy::allow, unknown_policy::reject, 7, {}},
+  {"repeated_canonical_invalid_last",
+    R"({"port":7,"service_port":99,"port":"bad"})",
+    duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
+  {"repeated_canonical_all_invalid",
+    R"({"port":"bad","service_port":99,"port":"wrong"})",
+    duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
+  {"yaml_canonical_after_alias", "service_port: 7\nport: 8\n",
+    duplicate_policy::reject, unknown_policy::reject, 8, {}},
+  {"yaml_canonical_before_alias", "port: 7\nservice_port: 8\n",
+    duplicate_policy::last, unknown_policy::reject, 7, {}},
+  {"yaml_invalid_canonical", "service_port: 7\nport: bad\n",
+    duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
+    {{issue_code::invalid_scalar, "/port", false}}},
+  {"yaml_repeated_canonical", "port: 7\nservice_port: 99\nport: 8\n",
+    duplicate_policy::last | duplicate_policy::warn, unknown_policy::reject,
+    8, {{issue_code::duplicate_field, "/port", true}}},
 
 };
 
@@ -591,7 +637,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
     return info.param.name;
   });
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_canonical_priority,
+INSTANTIATE_TEST_SUITE_P(canonical_priority,
   record_aliases,
   testing::ValuesIn(canonical_priority_cases),
   [](const testing::TestParamInfo<alias_case> &info) {
@@ -738,6 +784,78 @@ TEST(record_aliases, continues_reporting_up_to_the_configured_error_limit) {
     EXPECT_EQ("/other",
       omni::ryml::detail::render_path(result.diagnostics.issues.back().path));
   }
+}
+
+class interleaved_aliases: public testing::TestWithParam<duplicate_policy> {};
+
+TEST_P(interleaved_aliases, selects_each_member_and_preserves_issue_order) {
+  const auto policy = GetParam();
+  const bool last = (policy & duplicate_policy::last) == duplicate_policy::last;
+  const bool warn = (policy & duplicate_policy::warn) == duplicate_policy::warn;
+  const auto load = omni::ryml::deserialize.transform_config(
+    [policy](omni::ryml::config options) {
+      options.error_policy.duplicates = policy;
+      return options;
+    });
+
+  for (const std::string document : {
+         R"({"service_port":7,"retries":3,"listen_port":8,)"
+         R"("retries":4,"legacy/port":9})",
+         "service_port: 7\nretries: 3\nlisten_port: 8\n"
+         "retries: 4\nlegacy/port: 9\n",
+       }) {
+    SCOPED_TRACE(document);
+    const auto result = load(
+      omni::type_t<alias_models::endpoint_with_retries>{}, document);
+
+    EXPECT_TRUE(result.value);
+    if (result.value) {
+      EXPECT_EQ(last ? 9 : 7, result.value->port);
+      EXPECT_EQ(last ? 4 : 3, result.value->retries);
+    }
+    std::vector<std::string> paths;
+    for (const auto &issue : result.diagnostics.issues) {
+      EXPECT_EQ(issue_code::duplicate_field, issue.reason);
+      EXPECT_TRUE(issue.warning);
+      paths.push_back(omni::ryml::detail::render_path(issue.path));
+    }
+    const std::vector<std::string> expected = warn
+      ? std::vector<std::string>{"/listen_port", "/retries", "/legacy~1port"}
+      : std::vector<std::string>{};
+    EXPECT_EQ(expected, paths);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(policies,
+  interleaved_aliases,
+  testing::Values(duplicate_policy::allow,
+    duplicate_policy::last,
+    duplicate_policy::allow | duplicate_policy::warn,
+    duplicate_policy::last | duplicate_policy::warn),
+  [](const testing::TestParamInfo<duplicate_policy> &info) {
+    const bool last = (info.param & duplicate_policy::last)
+      == duplicate_policy::last;
+    const bool warn = (info.param & duplicate_policy::warn)
+      == duplicate_policy::warn;
+    return std::string{last ? "last" : "first"} + (warn ? "_warn" : "");
+  });
+
+TEST(record_aliases, ignored_aliases_do_not_exhaust_warning_limit) {
+  const auto load = omni::ryml::deserialize.transform_config(
+    [](omni::ryml::config options) {
+      options.error_policy.duplicates =
+        duplicate_policy::allow | duplicate_policy::warn;
+      options.error_policy.warning_limit = 0;
+      return options;
+    });
+  const auto result = load(omni::type_t<alias_models::endpoint>{},
+    R"({"service_port":"bad","port":8,"listen_port":9})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(8, result.value->port);
+  }
+  EXPECT_TRUE(result.diagnostics.issues.empty());
 }
 
 } // namespace

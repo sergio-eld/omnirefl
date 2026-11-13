@@ -177,8 +177,9 @@ struct is_alias_by_name<F,
 
 /** Build an alias-to-name resolver from tuple-like string-view groups.
  * Each group starts with the canonical name; remaining entries are aliases.
- * The caller must ensure aliases do not collide across canonical names;
- * collisions are not validated. Canonical names are not implicitly added as
+ * The caller must ensure aliases do not match another member's canonical
+ * name or aliases; collisions are not validated. Mapping results are
+ * unspecified for collisions. Canonical names are not implicitly added as
  * aliases. Returned views borrow the supplied strings, whose storage must
  * outlive use of the resolver.
  * Full constexpr factory evaluation requires C++14: std::make_tuple,
@@ -195,8 +196,8 @@ OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
       detail::cpp11_invert_alias_group{}, groups)...));
 }
 
-// TODO: [medium] Add QoL helpers for alias-collision validation, possibly
-// usable inline when constructing a dictionary.
+// TODO: [medium] Add QoL validation against other aliases and reflected
+// canonical names, possibly usable inline when constructing a dictionary.
 
 } // namespace ryml
 } // namespace omni
