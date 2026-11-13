@@ -31,7 +31,10 @@ if(NOT TARGET nonstd::string-view-lite)
     set(STRING_VIEW_LITE_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(string_view_lite
         URL https://github.com/nonstd-lite/string-view-lite/archive/refs/tags/v1.8.1.tar.gz
-        URL_HASH SHA256=97b812275f07d02592efb092bd70366d310b2294f677644ea07828e6138b091d)
+        URL_HASH SHA256=97b812275f07d02592efb092bd70366d310b2294f677644ea07828e6138b091d
+        # Keep fallback char ordering consistent with unsigned-byte memcmp.
+        PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/patch_string_view_lite.cmake")
     list(APPEND _extensions_dependencies string_view_lite)
 endif()
 

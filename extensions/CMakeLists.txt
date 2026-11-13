@@ -16,7 +16,8 @@ add_subdirectory(serialization)
 if(ENABLE_PACKAGE)
     install(DIRECTORY include/omnirefl/
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/omnirefl")
-    install(FILES dependencies.cmake
+    install(FILES dependencies.cmake patch_string_view_lite.cmake
+        string_view_lite-compare.patch
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components")
 endif()
 

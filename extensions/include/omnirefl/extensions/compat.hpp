@@ -61,5 +61,9 @@ using tl::expected;
 using tl::unexpected;
 #endif
 
+// FIXME: [high] [external] Remove string_view_lite-compare.patch after upstream
+// fixes signed-char ordering in its comparison fallback. Fetched copies are
+// patched so UTF-8/high-byte strings use the same ordering as std::string_view.
+
 } // namespace compat
 } // namespace omni
