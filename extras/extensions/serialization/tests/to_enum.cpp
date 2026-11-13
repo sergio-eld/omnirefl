@@ -44,7 +44,7 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type<enum_alias_models::state>:
+struct to_type_t<enum_alias_models::state>:
     reflected_scope::to_enum_t<enum_alias_models::state_names> {};
 
 } // namespace cp
@@ -256,7 +256,7 @@ TEST(enum_aliases, retains_the_original_value_and_nested_path_on_failure) {
     const auto &issue = result.diagnostics.issues.front();
     EXPECT_EQ(issue_code::invalid_scalar, issue.reason);
     EXPECT_EQ("/mode", omni::ryml::detail::render_path(issue.path));
-    EXPECT_EQ("obsolete", omni::ryml::detail::to_string(issue.value));
+    EXPECT_EQ("obsolete", omni::ryml::detail::to_string_view(issue.value));
   }
 }
 

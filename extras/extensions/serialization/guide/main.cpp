@@ -817,7 +817,7 @@ struct from_type<customization_mapping::record>:
     reflected_scope::from_record {};
 
 template <>
-struct to_type<customization_mapping::record>:
+struct to_type_t<customization_mapping::record>:
     reflected_scope::to_record_t<> {};
 
 /** Ad hoc: inheriting standard containers is discouraged. This custom mapping
@@ -858,7 +858,7 @@ struct from_type<customization_mapping::extended_values> {
 };
 
 template <>
-struct to_type<customization_mapping::extended_values> {
+struct to_type_t<customization_mapping::extended_values> {
   struct cpp11_restore_member {
     template <typename Record, typename _F>
     typename Record::const_iterator operator()(
@@ -910,7 +910,7 @@ struct from_type<customization_mapping::integer> {
 };
 
 template <>
-struct to_type<customization_mapping::integer> {
+struct to_type_t<customization_mapping::integer> {
   auto operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
     const detail::mapping_context &context) const

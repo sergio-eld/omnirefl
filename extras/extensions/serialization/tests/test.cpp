@@ -1521,8 +1521,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
     return p.param.name;
   });
 
-TEST(deserialization_diagnostics,
-  records_nested_path_without_parser_source_positions) {
+TEST(deserialization_diagnostics, records_nested_input_path) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
       R"(ratio: 2.5
@@ -1543,14 +1542,11 @@ data:
   EXPECT_EQ(2U, d.path.size());
   if (2U != d.path.size())
     return;
-  EXPECT_EQ("data", omni::ryml::detail::to_string(d.path[0].field));
-  EXPECT_EQ("code", omni::ryml::detail::to_string(d.path[1].field));
+  EXPECT_EQ("data", omni::ryml::detail::to_string_view(d.path[0].field));
+  EXPECT_EQ("code", omni::ryml::detail::to_string_view(d.path[1].field));
   EXPECT_EQ(omni::compat::nullopt, d.path[1].index);
-  EXPECT_EQ(std::string::npos, d.offset);
-  EXPECT_EQ(std::string::npos, d.line);
-  EXPECT_EQ(std::string::npos, d.column);
   EXPECT_EQ("bad",
-    omni::ryml::detail::to_string(result.diagnostics.tree.val(d.node_id)));
+    omni::ryml::detail::to_string_view(result.diagnostics.tree.val(d.node_id)));
 }
 
 TEST(deserialization_diagnostics, nested_container_errors_share_the_budget) {
@@ -1613,7 +1609,7 @@ TEST(deserialization_diagnostics, retained_diagnostics_own_views_after_moves) {
     return;
 
   EXPECT_EQ("some/unknown~field",
-    omni::ryml::detail::to_string(retained.issues.front().path.front().field));
+    omni::ryml::detail::to_string_view(retained.issues.front().path.front().field));
 }
 
 TEST(deserialization_diagnostics,
@@ -2439,7 +2435,7 @@ TEST_P(optional_recovery, invalid_values_remain_errors_with_recovery) {
         EXPECT_EQ(1U, result.diagnostics.issues.front().path.size());
         if (1U == result.diagnostics.issues.front().path.size()) {
           EXPECT_EQ("limit",
-            omni::ryml::detail::to_string(
+            omni::ryml::detail::to_string_view(
               result.diagnostics.issues.front().path.front().field));
         }
       }

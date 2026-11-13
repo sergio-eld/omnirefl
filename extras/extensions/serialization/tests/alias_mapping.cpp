@@ -82,8 +82,9 @@ void apply_rule(const prepared_rule &rule,
   assert(node);
   if (rule.path.size() == step) {
     if (node->has_val() && !rule.value_aliases.empty()) {
+      const auto text = omni::ryml::detail::to_string_view(node->val());
       const auto value = rule.value_aliases.find(
-        omni::ryml::detail::to_string(node->val()));
+        std::string{text.data(), text.size()});
       if (rule.value_aliases.end() != value) {
         node->set_serialized(value->second);
         // Canonical value aliases remain strings, including "true" or "7".

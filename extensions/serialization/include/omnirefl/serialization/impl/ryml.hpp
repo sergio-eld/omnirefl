@@ -26,9 +26,9 @@ namespace ryml {
 
 namespace detail {
 
-inline std::string to_string(c4::csubstr s) {
-  // Empty views may have null data; C++11's string constructor forbids it.
-  return s.empty() ? std::string{} : std::string{s.data(), s.size()};
+constexpr compat::string_view to_string_view(c4::csubstr s) {
+  // Keep empty views safe to append through C++11 string's pointer/size API.
+  return {s.len ? s.str : "", s.len};
 }
 
 inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
@@ -310,7 +310,7 @@ auto read_node(::ryml::ConstNodeRef node,
   if (context.stopped()) {
     result.result.value.reset();
   } else {
-    result.append(cp::to_type<T>{}(node, into, context));
+    result.append(omni::ryml::to_type(omni::type_t<T>{})(node, into, context));
   }
   return std::move(result).finish();
 }
@@ -987,8 +987,11 @@ std::string render_diagnostics_t::operator()(
       break;
     }
 
-    default:
-      message += '"' + detail::to_string(entry.value) + "\" ";
+    default: {
+      const auto value = detail::to_string_view(entry.value);
+      message += '"';
+      message.append(value.data(), value.size());
+      message += "\" ";
       if (json::issue_code::out_of_range == entry.reason) {
         message += "could not be converted to the destination scalar";
       } else {
@@ -1002,6 +1005,7 @@ std::string render_diagnostics_t::operator()(
       }
 
       break;
+    }
     }
   }
 

@@ -21,15 +21,21 @@ inline testing::AssertionResult match_json_nodes(::ryml::ConstNodeRef expected,
   if (expected.is_map() || expected.is_seq()) {
     std::size_t index = 0;
     for (const auto child : expected.children()) {
-      const auto segment = expected.is_map()
-        ? omni::ryml::detail::to_string(child.key()) : std::to_string(index);
+      std::string child_path = path + "/";
+      if (expected.is_map()) {
+        const auto key = omni::ryml::detail::to_string_view(child.key());
+        child_path.append(key.data(), key.size());
+      } else {
+        child_path += std::to_string(index);
+      }
+
       if (expected.is_map() && !actual.has_child(child.key()))
-        return testing::AssertionFailure() << path << "/" << segment
-          << ": missing field";
+        return testing::AssertionFailure() << child_path << ": missing field";
 
       const auto result = match_json_nodes(child,
         expected.is_map() ? actual[child.key()] : actual[index],
-        path + "/" + segment);
+        child_path);
+
       if (!result)
         return result;
       ++index;
@@ -41,9 +47,9 @@ inline testing::AssertionResult match_json_nodes(::ryml::ConstNodeRef expected,
     || expected.is_val_quoted() != actual.is_val_quoted())) {
     return testing::AssertionFailure() << path << ": expected "
       << (expected.is_val_quoted() ? "quoted " : "unquoted ")
-      << omni::ryml::detail::to_string(expected.val()) << ", got "
+      << omni::ryml::detail::to_string_view(expected.val()) << ", got "
       << (actual.is_val_quoted() ? "quoted " : "unquoted ")
-      << omni::ryml::detail::to_string(actual.val());
+      << omni::ryml::detail::to_string_view(actual.val());
   }
   return testing::AssertionSuccess();
 }

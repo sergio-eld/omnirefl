@@ -73,6 +73,16 @@ struct to_record_t {
 
     return {/*name_by_alias=*/std::forward<F>(f)};
   }
+
+  // TODO: [medium] Add with_validate_fields for configurable per-field
+  // validation, following the alias compositor's functional update pattern.
+  // Explore T -> expected<T, error> and T -> with_diagnostics<T> for decoded
+  // values, such as email strings or numeric ranges, before field assignment.
+  // Retain the source node's diagnostic path and apply normal error policies.
+  // This should not require exception-based invariant-enforcing constructors
+  // or make mapping aware of arbitrary factories with multiple parameters.
+  // Define the responsibility boundary with cp::to_type, which already returns
+  // mapping diagnostics, before considering a separate cp::validate for types.
 };
 
 /** Default record deserializer without aliases. */

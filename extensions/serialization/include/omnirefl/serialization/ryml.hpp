@@ -1,5 +1,17 @@
 #pragma once
 
+// TODO: [high] Rework deserialize/with_diagnostics to remove the diagnostics
+// ownership template parameter. map_tree borrows its tree and returns
+// with_diagnostics<T, diagnostics>; the caller retains the tree while using
+// borrowed results. Add deserialize.with_transform_diagnostics(f), where
+// f :: const Tree& -> diagnostics -> Result, applied while deserialize's tree
+// is alive, yielding with_diagnostics<T, Result>. The default transformation
+// can render diagnostics without requiring a separate call on the result.
+// Remove issue::value: renderers can read the exact node through node_id;
+// paths also describe missing fields. Resolve ownership of path_segment::field
+// when transformed diagnostics escape deserialize. Account separately for
+// deserialized string views that still borrow the tree's character storage.
+
 // TODO: [high] Document that users must not modify source strings or string
 // containers during serialization calls. Borrowed character storage must stay
 // valid and unchanged until emission completes, including mutable members and
@@ -284,12 +296,8 @@ struct issue {
   // Missing fields may have no corresponding node.
   ::ryml::id_type node_id = ::ryml::NONE;
 
-  // Source positions are unavailable from a standalone ryml::Tree.
-  // TODO: Accept retained source-location metadata when mapping.
-  std::size_t offset = std::string::npos;
-  std::size_t line = std::string::npos;
-  std::size_t column = std::string::npos;
-
+  // TODO: Accept retained parser source-location metadata when mapping;
+  // standalone trees do not retain source positions.
   // TODO: Add constraint metadata and renderer customization when needed.
 };
 
@@ -409,10 +417,21 @@ struct reflect_as_root:
 template <typename T, typename Enable = void>
 struct from_type;
 
-/** Select a node-to-C++ adapter returning an in-place mapping result
- * with diagnostics. */
+/** Sentinel for an unregistered node-to-C++ customization. */
+struct unavailable {};
+
+/** Specialize for a node-to-C++ callable. Unregistered types use the default
+ * compositor. Register either this struct or the variable template. */
 template <typename T, typename Enable = void>
-struct to_type;
+struct to_type_t: unavailable {};
+
+// Callable variable-template registration is available starting with C++14.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+/** Specialize with a const callable, including a configured default compositor.
+ * The selected object is copied when mapping a node. */
+template <typename T, typename Enable = void>
+constexpr unavailable to_type{};
+#endif
 
 } // namespace cp
 
@@ -423,7 +442,7 @@ template <typename T>
 void write_node(const T &value, ::ryml::NodeRef node,
   const omni::ryml::detail::mapping_context &context);
 
-/** Dispatch one node through cp::to_type, returning success and diagnostics. */
+/** Dispatch one node through the selected to_type callable with diagnostics. */
 template <typename T>
 auto read_node(::ryml::ConstNodeRef node, T *into,
   const omni::ryml::detail::mapping_context &context)
@@ -864,18 +883,10 @@ namespace cp {
 template <typename T, typename Enable>
 struct from_type: reflected_scope::from_record {};
 
-template <typename T, typename Enable>
-struct to_type: reflected_scope::to_record_t<> {};
-
 template <typename T>
 struct from_type<T,
   compat::enable_if_t<mapping::from_string_like::supports<T>()>>:
     mapping::from_string_like {};
-
-template <typename T>
-struct to_type<T,
-  compat::enable_if_t<mapping::to_string_like::supports<T>()>>:
-    mapping::to_string_like {};
 
 template <typename T>
 struct from_type<T,
@@ -883,19 +894,9 @@ struct from_type<T,
     mapping::from_arithmetic {};
 
 template <typename T>
-struct to_type<T,
-  compat::enable_if_t<mapping::to_arithmetic::supports<T>()>>:
-    mapping::to_arithmetic {};
-
-template <typename T>
 struct from_type<T,
   compat::enable_if_t<mapping::from_optional_like::supports<T>()>>:
     mapping::from_optional_like {};
-
-template <typename T>
-struct to_type<T,
-  compat::enable_if_t<mapping::to_optional_like::supports<T>()>>:
-    mapping::to_optional_like {};
 
 template <typename T>
 struct from_type<T,
@@ -903,19 +904,9 @@ struct from_type<T,
     mapping::from_range_t {};
 
 template <typename T>
-struct to_type<T,
-  compat::enable_if_t<mapping::to_range_t::supports<T>()>>:
-    mapping::to_range_t {};
-
-template <typename T>
 struct from_type<T,
   compat::enable_if_t<reflected_scope::from_enum::supports<T>()>>:
     reflected_scope::from_enum {};
-
-template <typename T>
-struct to_type<T,
-  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>>:
-    reflected_scope::to_enum_t<> {};
 
 // TODO: [high] Document and demonstrate the reflected-scope contract for
 // from_type/to_type customizations. Metadata queries must depend on template
@@ -924,16 +915,105 @@ struct to_type<T,
 // metadata queries there can occur outside the reflected scope. Cover the
 // dependent callable form in the guide before advertising callable CPs.
 
-// TODO: [medium] Consider callable variable-template customization in C++14:
-// `template <> const auto from_type<T> = [](const T &, ...) { ... };`
-// Keep a C++11 struct alternative named from_type_t (and likewise to_type_t).
-// Both customization forms should default to an unavailable sentinel; the
-// variable sentinel can be constexpr. Move built-in selection, including the
-// reflected-record fallback, behind a selector so defaults do not count as
-// user customizations. Reject simultaneous customizations with static_assert;
-// return the stored const callable rather than default-constructing its type.
-
 } // namespace cp
+
+namespace detail {
+
+// Built-ins stay separate from registrations so a user override never competes
+// with a matching default partial specialization.
+template <typename T, typename = void>
+struct default_to_type:
+    std::conditional<omni::is_reflected_record<T>::value,
+      reflected_scope::to_record_t<>,
+      cp::unavailable>::type {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<mapping::to_string_like::supports<T>()>>:
+    mapping::to_string_like {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<mapping::to_arithmetic::supports<T>()>>:
+    mapping::to_arithmetic {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<mapping::to_optional_like::supports<T>()>>:
+    mapping::to_optional_like {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<mapping::to_range_t::supports<T>()>>:
+    mapping::to_range_t {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>>:
+    reflected_scope::to_enum_t<> {};
+
+template <typename T>
+struct to_type_registration {
+  static constexpr bool has_struct =
+    !std::is_base_of<cp::unavailable, cp::to_type_t<T>>::value;
+
+// C++11 registers structs; C++14 also allows callable variable templates.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+  static constexpr bool has_variable = !std::is_same<cp::unavailable,
+    compat::remove_cvref_t<decltype(cp::to_type<T>)>>::value;
+#else
+  static constexpr bool has_variable = false;
+#endif
+};
+
+template <typename T,
+  bool Struct = to_type_registration<T>::has_struct,
+  bool Variable = to_type_registration<T>::has_variable>
+struct to_type_selection {
+  using type = cp::to_type_t<T>;
+  static constexpr type get() { return {}; }
+};
+
+// Read the registered object itself so its configured state is preserved.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+template <typename T>
+struct to_type_selection<T, false, true> {
+  using type = compat::remove_cvref_t<decltype(cp::to_type<T>)>;
+  static constexpr type get() { return cp::to_type<T>; }
+};
+#endif
+
+template <typename T>
+struct to_type_selection<T, false, false> {
+  using type = default_to_type<T>;
+  static constexpr type get() { return {}; }
+};
+
+} // namespace detail
+
+/** Return the registered node-to-C++ callable by value, or the default
+ * compositor when neither customization is registered. Selected callables
+ * must be trivially copyable and copy-constructible. Registration conflicts
+ * and missing mappings are diagnosed here, before invoking the mapper. */
+template <typename T>
+constexpr auto to_type(omni::type_t<T>)
+  -> typename detail::to_type_selection<T>::type {
+  using mapper = typename detail::to_type_selection<T>::type;
+
+  static_assert(!(detail::to_type_registration<T>::has_struct
+      && detail::to_type_registration<T>::has_variable),
+    "Conflicting node mappings: specialize either cp::to_type_t or "
+    "cp::to_type, not both");
+
+  static_assert(!std::is_base_of<cp::unavailable, mapper>::value,
+    "No node mapping: specialize cp::to_type_t or cp::to_type");
+
+  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
+      std::is_copy_constructible<mapper>>::value,
+    "Node mapping callables must be trivially copyable and copy-constructible");
+
+  return detail::to_type_selection<T>::get();
+}
 
 } // namespace ryml
 } // namespace omni

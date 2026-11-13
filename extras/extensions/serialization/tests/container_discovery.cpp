@@ -41,7 +41,7 @@ struct from_type<my_int> {
 };
 
 template <>
-struct to_type<my_int> {
+struct to_type_t<my_int> {
   auto operator()(::ryml::ConstNodeRef node, my_int *into,
     const detail::mapping_context &context) const
     -> with_diagnostics<compat::monostate, diagnostics<false>> {
@@ -52,7 +52,7 @@ struct to_type<my_int> {
 // Compatibility mapping accepts quoted integers and clamps negatives to zero.
 // Return both warnings directly; the core applies traversal limits.
 template <>
-struct to_type<compatible_integer> {
+struct to_type_t<compatible_integer> {
   auto operator()(::ryml::ConstNodeRef node,
     compatible_integer *into,
     const detail::mapping_context &context) const

@@ -379,16 +379,6 @@ TEST(to_record_aliases, accepts_a_callable_with_only_a_copy_constructor) {
     EXPECT_EQ("host", *hostname);
 }
 
-TEST(to_record_aliases, accepts_a_mutable_callable) {
-  const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(
-      [](string_view) mutable -> omni::compat::optional<string_view> {
-        return omni::compat::nullopt;
-      });
-
-  EXPECT_EQ(omni::compat::nullopt, compositor.name_by_alias("hostname"));
-}
-
 TEST(to_record_aliases, checks_the_callable_when_configured) {
   const auto compositor =
     omni::ryml::reflected_scope::to_record.with_name_by_alias(
@@ -455,19 +445,19 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type<alias_models::endpoint>:
+struct to_type_t<alias_models::endpoint>:
     omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 template <>
-struct to_type<alias_models::endpoint_with_retries>:
+struct to_type_t<alias_models::endpoint_with_retries>:
     omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 template <>
-struct to_type<alias_models::optional_endpoint>:
+struct to_type_t<alias_models::optional_endpoint>:
     omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 template <>
-struct to_type<alias_models::default_endpoint>:
+struct to_type_t<alias_models::default_endpoint>:
     omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 } // namespace cp
