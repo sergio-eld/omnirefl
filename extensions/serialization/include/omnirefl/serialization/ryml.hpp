@@ -43,6 +43,7 @@ if (result.value) {
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/to_enum.hpp>
 #include <omnirefl/serialization/ryml/to_record.hpp>
+#include <omnirefl/serialization/ryml/to_range.hpp>
 
 #include <ryml.hpp>
 
@@ -111,7 +112,8 @@ enum class issue_code : std::uint8_t {
   unknown_field,
   duplicate_field,
   parse_error,
-  warning_limit_exceeded
+  warning_limit_exceeded,
+  duplicate_element // Repeated value in a unique-element destination.
 };
 
 /// Value categories used in mapping expectations and observed input.
@@ -129,7 +131,7 @@ enum class value_kind : std::uint8_t {
   null
 };
 
-/// Controls duplicate fields without merging occurrences.
+/// Controls repeated object names and elements of unique destinations.
 /// Last implies allow; warn is ignored when duplicates are rejected.
 enum duplicate_policy : std::uint8_t {
   reject = 0,
@@ -386,22 +388,12 @@ namespace detail {
 struct mapping_context;
 } // namespace detail
 
-template <typename T, typename = void>
-struct is_container: std::false_type {};
-
-template <typename T>
-struct is_container<T,
-  compat::void_t<typename T::value_type,
-    decltype(std::declval<const T &>().begin()),
-    decltype(std::declval<const T &>().end())>>:
-    compat::negation<traits::is_string<T>> {};
-
 namespace cp {
 
 /** Ad hoc discovery override for types inheriting standard-library containers.
  * Inheriting those containers is discouraged. Specialize to std::true_type
  * when a custom mapping needs the derived type's metadata: T itself is passed
- * to reflected_call instead of following its inherited value_type.
+ * to reflected_call instead of following its element or mapped type.
  *
  * The default follows the normal mapping traits. This override changes
  * discovery, not the representation selected by from_type/to_type.
@@ -410,16 +402,8 @@ template <typename T>
 struct reflect_as_root:
     compat::negation<compat::disjunction<std::is_arithmetic<T>,
       traits::is_string<T>,
-      is_container<T>,
+      detail::is_mapped_range<T>,
       traits::is_optional<T>>> {};
-
-/** Container insertion customization, independent of representation mapping. */
-template <typename Container, typename Enable = void>
-struct emplace {
-  void operator()(Container *into,
-    typename Container::value_type &&value) const;
-  // TODO: Support standard-container insertion, preferably through traits.
-};
 
 /** Select a C++-to-node adapter; the default maps reflected records. */
 template <typename T, typename Enable = void>
@@ -461,7 +445,7 @@ auto map_tree(::ryml::ConstNodeRef node, T *into,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<is_container<Discovery>,
+      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
 auto map_tree(::ryml::ConstNodeRef node, T *into,
@@ -473,7 +457,7 @@ auto map_tree(::ryml::ConstNodeRef node, T *into,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<is_container<Discovery>,
+      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
 auto map_tree(::ryml::ConstNodeRef node, T *into,
@@ -550,7 +534,7 @@ template <typename T,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<is_container<Discovery>,
+      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_owning_tree(const T &value);
@@ -558,7 +542,7 @@ template <typename T,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<is_container<Discovery>,
+      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_owning_tree(const T &value);
@@ -576,7 +560,7 @@ template <typename T,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<is_container<Discovery>,
+      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_ref_tree(T &value);
@@ -584,7 +568,7 @@ template <typename T,
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<is_container<Discovery>,
+      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
 ::ryml::Tree as_ref_tree(T &value);
@@ -817,12 +801,15 @@ struct to_optional_like {
       with_diagnostics<compat::monostate, diagnostics<false>>>;
 };
 
-/** Write iterable elements as a sequence, omitting empty optionals.
+/** Write key/value ranges as objects and element ranges as arrays.
+ * Empty optional array elements are omitted. Optional object values remain.
  * Non-scalar C++ elements must be exposed as lvalue references to value_type;
  * default mapping rejects temporary-producing iterators in both tree modes. */
-struct from_container {
+struct from_range_t {
   template <typename T>
-  static constexpr bool supports() { return is_container<T>::value; }
+  static constexpr bool supports() {
+    return detail::is_mapped_range<const T>::value;
+  }
 
   template <typename T>
   auto operator()(const T &value,
@@ -831,18 +818,8 @@ struct from_container {
     -> compat::enable_if_t<supports<T>()>;
 };
 
-/** Read sequence elements and insert successful values through cp::emplace. */
-struct to_container {
-  template <typename T>
-  static constexpr bool supports() { return is_container<T>::value; }
-
-  template <typename T>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>(),
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
-};
+/** Default range serializer. */
+constexpr from_range_t from_range{};
 
 } // namespace mapping
 
@@ -922,13 +899,13 @@ struct to_type<T,
 
 template <typename T>
 struct from_type<T,
-  compat::enable_if_t<mapping::from_container::supports<T>()>>:
-    mapping::from_container {};
+  compat::enable_if_t<mapping::from_range_t::supports<T>()>>:
+    mapping::from_range_t {};
 
 template <typename T>
 struct to_type<T,
-  compat::enable_if_t<mapping::to_container::supports<T>()>>:
-    mapping::to_container {};
+  compat::enable_if_t<mapping::to_range_t::supports<T>()>>:
+    mapping::to_range_t {};
 
 template <typename T>
 struct from_type<T,
@@ -966,6 +943,7 @@ struct to_type<T,
 #include <omnirefl/serialization/impl/ryml.hpp>
 #include <omnirefl/serialization/ryml/impl/to_enum.hpp>
 #include <omnirefl/serialization/ryml/impl/to_record.hpp>
+#include <omnirefl/serialization/ryml/impl/to_range.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
 static_assert(omni::traits::is_string<std::string>::value,

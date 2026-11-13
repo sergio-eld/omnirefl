@@ -39,7 +39,7 @@
  *     missing, null, present, and invalid values
  *   mappings.serialize_optional_fields - empty optionals become null
  *   mappings.optional_sequence_elements - omit empty optional elements
- *   TODO: Associative mappings are shown disabled.
+ *   mappings.key_value_ranges - map string-keyed objects
  *
  * Advanced
  *   advanced.tree_ownership - choose owning or borrowed string storage
@@ -48,8 +48,8 @@
  * Customization examples (experimental)
  *   customization_mapping.default_and_custom_adapters_round_trip
  *     select scalar, container, record, and custom mappings
- *   customization_mapping.custom_container_emplacement
- *     customize insertion without another mapping adapter
+ *   customization_mapping.standard_range_insertion
+ *     reuse insertion adapters without another mapping adapter
  *   extended_container_mapping.appends_members_and_restores_them
  *     combine an inherited container with appended record members
  *   invalid_extended_container_mapping.rejects_invalid_contents
@@ -88,6 +88,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <set>
 #include <string>
 #include <type_traits>
@@ -618,25 +619,25 @@ TEST(mappings, optional_sequence_elements) {
     "- 7\n- 0", omni::ryml::as_yaml(values)));
 }
 
-// TODO: [high] Implement associative-container mapping. Define representations
-// for non-string keys and how duplicate/colliding mapped keys are handled.
-// Infer key uniqueness/equivalence and ordering from container semantics, and
-// investigate which constraints can be expressed by JSON Schema. uniqueItems
-// compares whole entries, not just keys. Ordered containers may sort on insert
-// without requiring already-sorted input.
-// This example will also need <map> when enabled.
-// TEST(mappings, associative_containers) {
-//   const std::map<std::string, int> source{{"first", 7}, {"second", 42}};
-//   const std::string json = R"({"first": 7, "second": 42})";
-//   EXPECT_TRUE(same_document(
-//     json, omni::ryml::as_json(source)));
-//   const auto result = omni::ryml::deserialize(
-//     omni::type_t<std::map<std::string, int>>{}, json);
-//   EXPECT_TRUE(result.value);
-//   if (result.value) {
-//     EXPECT_EQ(source, *result.value);
-//   }
-// }
+// Key/value ranges map to objects. Unique keys follow duplicate policies;
+// non-unique ranges such as multimap retain every repeated name.
+TEST(mappings, key_value_ranges) {
+  const std::map<std::string, int> source{{"first", 7}, {"second", 42}};
+  const std::string json = R"({"first": 7, "second": 42})";
+  EXPECT_TRUE(same_document(json, omni::ryml::as_json(source)));
+  EXPECT_TRUE(same_document(json, omni::ryml::as_yaml(source)));
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<std::map<std::string, int>>{}, json);
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(source, *result.value);
+}
+
+// TODO: [high] Define representations for non-string keys and which range
+// constraints can be expressed by JSON Schema. uniqueItems compares whole
+// entries, not just keys. Ordered ranges can sort during insertion without
+// requiring sorted input.
 
 namespace tree_ownership {
 
@@ -811,13 +812,6 @@ struct has_value<customization_mapping::optional_value<T>> {
 namespace ryml {
 namespace cp {
 
-template <typename T, typename Compare, typename Allocator>
-struct emplace<std::set<T, Compare, Allocator>> {
-  void operator()(std::set<T, Compare, Allocator> *into, T &&value) const {
-    into->insert(std::move(value));
-  }
-};
-
 // Explicit specializations reuse record mapping without selecting themselves.
 // Generic operators defer metadata access until the reflected scope.
 template <>
@@ -854,7 +848,7 @@ struct from_type<customization_mapping::extended_values> {
   void operator()(const T &value,
     ::ryml::NodeRef node,
     const detail::mapping_context &context) const {
-    mapping::from_container{}(value, node, context);
+    mapping::from_range(value, node, context);
 
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
@@ -883,7 +877,7 @@ struct to_type<customization_mapping::extended_values> {
     const detail::mapping_context &context) const
     -> with_diagnostics<compat::monostate, diagnostics<false>> {
     T values;
-    auto result = mapping::to_container{}(node, &values, context);
+    auto result = mapping::to_range(node, &values, context);
     if (!result.value)
       return result;
 
@@ -989,7 +983,7 @@ TEST(customization_mapping, default_and_custom_adapters_round_trip) {
 }
 
 // Container mapping stays the same when insertion uses a different operation.
-TEST(customization_mapping, custom_container_emplacement) {
+TEST(customization_mapping, standard_range_insertion) {
   const auto result = omni::ryml::deserialize(
     omni::type_t<std::set<int>>{}, "[7, 4]");
   EXPECT_TRUE(result.value);

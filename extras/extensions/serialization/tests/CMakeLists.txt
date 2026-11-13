@@ -19,7 +19,7 @@ endif()
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.extensions.serialization")
     add_executable(${_test_target} test.cpp scalar_roots.cpp sequence_roots.cpp
-        json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp
+        json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp
         container_discovery.cpp optional_mapping.cpp)
     set_target_properties(${_test_target} PROPERTIES

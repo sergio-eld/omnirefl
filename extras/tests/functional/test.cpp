@@ -783,6 +783,10 @@ TEST(compat_input_range, recognizes_arrays_and_standard_containers) {
   static_assert(std::is_same<
     omni::compat::detail::range_reference_t<const std::vector<int>>,
     std::ranges::range_reference_t<const std::vector<int>>>::value);
+
+  static_assert(std::is_same<
+    omni::compat::detail::range_value_t<const std::vector<int>>,
+    std::ranges::range_value_t<const std::vector<int>>>::value);
 #endif
 }
 

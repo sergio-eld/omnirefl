@@ -1,6 +1,7 @@
 #pragma once
 
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/extensions/traits.hpp>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +21,29 @@ struct with_diagnostics;
 namespace detail {
 
 struct mapping_context;
+
+// Strings remain scalar mappings even though they also model input ranges.
+template <typename T>
+struct is_mapped_range:
+    compat::conjunction<compat::is_input_range<T>,
+      compat::negation<traits::is_string<compat::remove_cvref_t<T>>>> {};
+
+template <typename T,
+  bool Optional = traits::is_optional<T>::value,
+  bool KeyValue = traits::is_key_value<T>::value>
+struct discovered_range_type {
+  using type = compat::remove_cvref_t<compat::range_value_t<T>>;
+};
+
+template <typename T, bool KeyValue>
+struct discovered_range_type<T, true, KeyValue> {
+  using type = compat::remove_cvref_t<typename T::value_type>;
+};
+
+template <typename T>
+struct discovered_range_type<T, false, true> {
+  using type = compat::remove_cvref_t<typename T::mapped_type>;
+};
 
 struct alias_entry {
   compat::string_view alias;

@@ -195,6 +195,10 @@ using range_comparison_t = decltype(bool(begin(std::declval<Range &>())
 template <typename Range>
 using range_reference_t = decltype(*std::declval<range_iterator_t<Range> &>());
 
+template <typename Range>
+using range_value_t = typename std::iterator_traits<
+  range_iterator_t<Range>>::value_type;
+
 /** Detect input ranges using legacy iterator categories and operations.
  * Semantic iterator guarantees remain the range author's responsibility. */
 template <typename Range, typename = void>
@@ -220,9 +224,13 @@ template <typename Range>
 using range_reference_t = std::ranges::range_reference_t<Range>;
 
 template <typename Range>
+using range_value_t = std::ranges::range_value_t<Range>;
+
+template <typename Range>
 struct is_input_range: std::bool_constant<std::ranges::input_range<Range>> {};
 #else
 using detail::range_reference_t;
+using detail::range_value_t;
 using detail::is_input_range;
 #endif
 
