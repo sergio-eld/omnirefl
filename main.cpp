@@ -296,6 +296,19 @@ std::expected<options, app_error> parse(int argc,
 // todo: this is a candidate for reusability (in a separate header)
 namespace ast {
 
+// Completeness checks may need to follow nested template callers:
+//   template <typename T> void inner() { reflected_call(..., type<T>); }
+//   template <typename T> void outer() { inner<T>(); }
+//   struct model {}; // outer<model>() is valid after this definition.
+// inner's instantiation location can point into outer's earlier definition;
+// follow callers to check completeness at the outer instantiation site. Cache
+// caller lists by canonical function declaration for this fold, rather than
+// scanning the whole AST for each wrapper and type. Empty means unbuilt:
+// reflected_call guarantees a direct call. Clear before Sema materializes classes
+// or function bodies; the next query rebuilds the index from the updated AST.
+using caller_cache = std::map<const clang::FunctionDecl *,
+  std::vector<const clang::CallExpr *>>;
+
 template <typename Match, typename Node>
 struct pattern_t {
   std::type_identity<Node> node_type;
@@ -740,7 +753,8 @@ std::expected<reflected_type_info, std::string> resolve_reflected_type(
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types,
-  const std::set<type_id> &metadata_skips);
+  const std::set<type_id> &metadata_skips,
+  ast::caller_cache &callers);
 
 struct source_file_context {
   fs::path source;
@@ -793,6 +807,7 @@ source_file_context fold_out_of_scope_function_query(clang::ASTContext &ast,
 source_file_context fold_reflected_call(const diagnostics &log,
   clang::Sema &sema,
   clang::ASTContext &ast,
+  ast::caller_cache &callers,
   source_file_context a,
   const clang::CXXOperatorCallExpr &call);
 
@@ -1457,7 +1472,8 @@ std::optional<clang::QualType> type_t_arg_type(clang::QualType type) {
 std::expected<clang::QualType, std::string> instantiate_type_t_arg(
   clang::Sema &sema,
   clang::QualType type,
-  clang::SourceLocation point_of_instantiation) {
+  clang::SourceLocation point_of_instantiation,
+  ast::caller_cache &callers) {
   const clang::Type &canonical =
     *sema.Context.getCanonicalType(type.getUnqualifiedType()).getTypePtr();
 
@@ -1486,6 +1502,7 @@ std::expected<clang::QualType, std::string> instantiate_type_t_arg(
     return type;
   }
 
+  callers.clear();
   if (sema.InstantiateClassTemplateSpecialization(point_of_instantiation,
         specialization,
         clang::TSK_ImplicitInstantiation,
@@ -1555,9 +1572,27 @@ std::vector<std::string> callstack_from(clang::ASTContext &ast,
   return frames;
 }
 
+std::span<const clang::CallExpr *const> callers_of(clang::ASTContext &ast,
+  ast::caller_cache &cache,
+  const clang::FunctionDecl &function) {
+  if (cache.empty()) {
+    using namespace clang::ast_matchers;
+    const auto calls = match(callExpr(callee(functionDecl())).bind("caller"),
+      ast);
+
+    for (const auto &match : calls) {
+      const auto *call = match.getNodeAs<clang::CallExpr>("caller");
+      cache[call->getDirectCallee()->getCanonicalDecl()].push_back(call);
+    }
+  }
+
+  return cache[function.getCanonicalDecl()];
+}
+
 bool definition_follows_reflected_call(clang::ASTContext &ast,
   const clang::CXXOperatorCallExpr &call,
-  const clang::TagDecl &definition) {
+  const clang::TagDecl &definition,
+  ast::caller_cache &callers) {
   const clang::SourceManager &sm = ast.getSourceManager();
   const clang::SourceLocation definition_location =
     sm.getExpansionLoc(definition.getLocation());
@@ -1616,32 +1651,26 @@ bool definition_follows_reflected_call(clang::ASTContext &ast,
         break;
       }
 
-      using namespace clang::ast_matchers;
-      for (const auto *declaration : decl->redecls()) {
-        const auto callers =
-          match(callExpr(callee(functionDecl(equalsNode(declaration))))
-                  .bind("caller"),
-            ast);
-        for (const auto &match : callers) {
-          const auto *caller = match.getNodeAs<clang::CallExpr>("caller");
-          const clang::SourceLocation begin =
-            sm.getExpansionLoc(caller->getBeginLoc());
-          const clang::SourceLocation end =
-            sm.getExpansionLoc(caller->getEndLoc());
+      // Canonical keys cover all redeclarations in one translation-unit scan.
+      for (const auto *caller : callers_of(ast, callers, *decl)) {
+        const clang::SourceLocation begin =
+          sm.getExpansionLoc(caller->getBeginLoc());
+        const clang::SourceLocation end =
+          sm.getExpansionLoc(caller->getEndLoc());
 
-          if (begin.isInvalid() || end.isInvalid())
-            continue;
+        if (begin.isInvalid() || end.isInvalid())
+          continue;
 
-          // A later call cannot legitimize an earlier incomplete use. When
-          // specializations share this call site, every caller must be valid.
-          if (instantiation.isInvalid()
-            || (!sm.isBeforeInTranslationUnit(instantiation, begin)
-              && !sm.isBeforeInTranslationUnit(end, instantiation))) {
-            pending.push_back(clang::DynTypedNode::create(*caller));
-            resolved = true;
-          }
+        // A later call cannot legitimize an earlier incomplete use. When
+        // specializations share this call site, every caller must be valid.
+        if (instantiation.isInvalid()
+          || (!sm.isBeforeInTranslationUnit(instantiation, begin)
+            && !sm.isBeforeInTranslationUnit(end, instantiation))) {
+          pending.push_back(clang::DynTypedNode::create(*caller));
+          resolved = true;
         }
       }
+
       if (resolved)
         break;
     }
@@ -1765,6 +1794,7 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
     const clang::CXXOperatorCallExpr &call,
     const clang::Expr *arg_expr,
     const std::set<meta::type_id> &metadata_skips,
+    ast::caller_cache &callers,
     clang::QualType type) {
   assert(arg_expr);
 
@@ -1839,7 +1869,7 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
       "or pass a different reflectable type"));
   }
 
-  if (definition_follows_reflected_call(ast, call, *definition)) {
+  if (definition_follows_reflected_call(ast, call, *definition, callers)) {
     return std::unexpected(invalid_arg_error(
       /*reason*/ //
       "the reflected_call argument is incomplete at this call; "
@@ -1956,6 +1986,7 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
     clang::ASTContext &ast,
     const clang::CXXOperatorCallExpr &call,
     const std::set<meta::type_id> &metadata_skips,
+    ast::caller_cache &callers,
     const clang::Expr *arg_expr) {
   assert(arg_expr);
 
@@ -1963,14 +1994,18 @@ std::expected<reflected_call_arg, reflected_call_arg_error>
     std::ref(ast),
     std::cref(call),
     arg_expr,
-    std::cref(metadata_skips));
+    std::cref(metadata_skips),
+    std::ref(callers));
 
   const std::optional type_arg = type_t_arg_type(arg_expr->getType());
 
   if (!type_arg)
     return validate_arg(unreferenced_type(arg_expr->getType()));
 
-  return instantiate_type_t_arg(sema, *type_arg, arg_expr->getExprLoc())
+  return instantiate_type_t_arg(sema,
+    *type_arg,
+    arg_expr->getExprLoc(),
+    callers)
     .transform_error( //
       [&ast, &call, arg_expr, type = *type_arg](std::string reason) //
       -> reflected_call_arg_error {
@@ -2194,6 +2229,7 @@ meta::source_file_context meta::matches::fold_reflected_call(
   const diagnostics &log,
   clang::Sema &sema,
   clang::ASTContext &ast,
+  ast::caller_cache &callers,
   meta::source_file_context a,
   const clang::CXXOperatorCallExpr &call) {
   if (call.getNumArgs() <= 2)
@@ -2220,7 +2256,8 @@ meta::source_file_context meta::matches::fold_reflected_call(
           std::ref(sema),
           std::ref(ast),
           std::cref(call),
-          std::cref(a.metadata_skips)))) {
+          std::cref(a.metadata_skips),
+          std::ref(callers)))) {
     if (!arg) {
       std::visit(
         [&a]<typename Error>(Error error) {
@@ -2242,7 +2279,8 @@ meta::source_file_context meta::matches::fold_reflected_call(
       arg->reflected_call_expr->getExprLoc(),
       ast,
       a.resolved_concrete_types,
-      a.metadata_skips);
+      a.metadata_skips,
+      callers);
 
     if (!reflected) {
       a.errors.internal.emplace_back(std::move(reflected).error());
@@ -4158,6 +4196,7 @@ std::expected<pipeline::parsed_ast, app_error>
 std::expected<meta::source_file_context, app_error>
   pipeline::fold_matches(const diagnostics &log, parsed_ast parsed) {
   using namespace clang::ast_matchers;
+  ast::caller_cache callers;
 
   // While selecting a reflected_call visitor overload, Clang instantiates the
   // visitor signature but leaves its explicitly returned body deferred:
@@ -4241,7 +4280,8 @@ std::expected<meta::source_file_context, app_error>
         .fold = std::bind_front(meta::matches::fold_reflected_call,
           std::cref(log),
           std::ref(parsed.ast->getSema()),
-          std::ref(parsed.ast->getASTContext())),
+          std::ref(parsed.ast->getASTContext()),
+          std::ref(callers)),
       }));
 }
 
@@ -5667,7 +5707,8 @@ collected_dependencies recursively_collect_dependency_types(
   const clang::ASTContext &ast,
   const std::set<meta::type_id> &resolved_concrete_types,
   const std::set<meta::type_id> &metadata_skips,
-  clang::CXXRecordDecl &root) {
+  clang::CXXRecordDecl &root,
+  ast::caller_cache &callers) {
   // todo: monadic return.
   const auto template_specialization_types = //
     [](const util::viewable_range_of<clang::TemplateArgument> auto &args)
@@ -5846,6 +5887,7 @@ collected_dependencies recursively_collect_dependency_types(
       if (primary_definition
         && (!member_aliases_view(*primary_definition).empty()
           || 0 != primary_definition->getNumBases())) {
+        callers.clear();
         const bool failed = sema.InstantiateClassTemplateSpecialization(
           point_of_instantiation,
           specialization,
@@ -6045,13 +6087,20 @@ collected_dependencies recursively_collect_dependency_types(
       };
 
     const auto enqueue_signature =
-      [&enqueue_signature_type, &sema, &log, &ast, point_of_instantiation](
-        const clang::FunctionDecl *function) {
+      [&enqueue_signature_type,
+        &sema,
+        &log,
+        &ast,
+        &callers,
+        point_of_instantiation](const clang::FunctionDecl *function) {
         // Completing a class specialization leaves unused auto-return members
         // undeduced. Sema must instantiate the body before its result can be
         // discovered; its API updates the declaration in place.
         // Leave invalid-code diagnostics to the compiler; report the skipped
         // dependency here without adding a compilation error.
+        if (function->getReturnType()->isUndeducedType())
+          callers.clear();
+
         const bool deduction_failed =
           function->getReturnType()->isUndeducedType()
           && sema.DeduceReturnType(const_cast<clang::FunctionDecl *>(function),
@@ -6321,7 +6370,8 @@ auto meta::resolve_reflected_type(const diagnostics &log,
   clang::SourceLocation point_of_instantiation,
   const clang::ASTContext &ast,
   const std::set<type_id> &resolved_concrete_types,
-  const std::set<type_id> &metadata_skips)
+  const std::set<type_id> &metadata_skips,
+  ast::caller_cache &callers)
   -> std::expected<reflected_type_info, std::string> {
   const auto match_record_type = //
     [&ast, &log](const std::string &id, const clang::RecordType *t)
@@ -6427,7 +6477,8 @@ auto meta::resolve_reflected_type(const diagnostics &log,
       ast,
       resolved_concrete_types,
       metadata_skips,
-      *record_type->getAsCXXRecordDecl());
+      *record_type->getAsCXXRecordDecl(),
+      callers);
 
   return reflected_type_info{
     .type = match_record_type(id, record_type),
