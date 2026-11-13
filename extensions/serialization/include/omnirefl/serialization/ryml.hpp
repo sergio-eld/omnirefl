@@ -424,7 +424,7 @@ struct emplace {
 template <typename T, typename Enable = void>
 struct from_type;
 
-/** Select a node-to-C++ adapter; return true on successful conversion. */
+/** Select a node-to-C++ adapter returning node_result with its diagnostics. */
 template <typename T, typename Enable = void>
 struct to_type;
 
@@ -432,27 +432,27 @@ struct to_type;
 
 namespace core {
 
-/** Dispatch one value through cp::from_type unless diagnostics have stopped. */
+/** Dispatch one value through cp::from_type with read-only mapping context. */
 template <typename T>
 void write_node(const T &value, ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &diagnostics);
+  const omni::ryml::detail::mapping_context &context);
 
-/** Dispatch one node through cp::to_type and return mapping success. */
+/** Dispatch one node through cp::to_type, returning success and diagnostics. */
 template <typename T>
-bool read_node(::ryml::ConstNodeRef node, T *into,
-  omni::ryml::detail::mapping_context &diagnostics);
+node_result read_node(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context);
 
-/** Map into an existing value using a shared diagnostics context.
+/** Map into an existing value, returning diagnostics without changing context.
  * @pre `node` must be a valid node reference.
  *
  * Discovery follows wrapper element types while T remains the destination. */
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
   compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
-bool map_tree(::ryml::ConstNodeRef node, T *into,
-  omni::ryml::detail::mapping_context &diagnostics);
+node_result map_tree(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context);
 
-/** Map into an existing value using a shared diagnostics context.
+/** Map into an existing value, returning diagnostics without changing context.
  * @pre `node` must be a valid node reference. */
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
@@ -460,10 +460,10 @@ template <typename T,
       && compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
-bool map_tree(::ryml::ConstNodeRef node, T *into,
-  omni::ryml::detail::mapping_context &diagnostics);
+node_result map_tree(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context);
 
-/** Map into an existing value using a shared diagnostics context.
+/** Map into an existing value, returning diagnostics without changing context.
  * @pre `node` must be a valid node reference. */
 template <typename T,
   typename Discovery = compat::remove_cvref_t<T>,
@@ -471,8 +471,8 @@ template <typename T,
       && !compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int> = 0>
-bool map_tree(::ryml::ConstNodeRef node, T *into,
-  omni::ryml::detail::mapping_context &diagnostics);
+node_result map_tree(::ryml::ConstNodeRef node, T *into,
+  const omni::ryml::detail::mapping_context &context);
 
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
@@ -738,7 +738,7 @@ struct from_string_like {
   template <typename T>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::detail::mapping_context &) const
+    const omni::ryml::detail::mapping_context &) const
     -> compat::enable_if_t<supports<T>()>;
 };
 
@@ -750,8 +750,8 @@ struct to_string_like {
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>(), bool>;
+    const omni::ryml::detail::mapping_context &context) const
+    -> compat::enable_if_t<supports<T>(), node_result>;
 
   // FIXME: [high] Define encoding conversion for non-char strings through
   // the shared operation specialization points, including standard strings.
@@ -768,7 +768,7 @@ struct from_arithmetic {
   template <typename T>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::detail::mapping_context &) const
+    const omni::ryml::detail::mapping_context &) const
     -> compat::enable_if_t<supports<T>()>;
 };
 
@@ -780,8 +780,8 @@ struct to_arithmetic {
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>(), bool>;
+    const omni::ryml::detail::mapping_context &context) const
+    -> compat::enable_if_t<supports<T>(), node_result>;
 };
 
 /** Write a present optional value or a null scalar. */
@@ -792,7 +792,7 @@ struct from_optional_like {
   template <typename T>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::detail::mapping_context &diagnostics) const
+    const omni::ryml::detail::mapping_context &context) const
     -> compat::enable_if_t<traits::is_optional<T>::value>;
 };
 
@@ -804,8 +804,8 @@ struct to_optional_like {
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<traits::is_optional<T>::value, bool>;
+    const omni::ryml::detail::mapping_context &context) const
+    -> compat::enable_if_t<traits::is_optional<T>::value, node_result>;
 };
 
 /** Write iterable elements as a sequence, omitting empty optionals.
@@ -818,7 +818,7 @@ struct from_container {
   template <typename T>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::detail::mapping_context &diagnostics) const
+    const omni::ryml::detail::mapping_context &context) const
     -> compat::enable_if_t<supports<T>()>;
 };
 
@@ -830,8 +830,8 @@ struct to_container {
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>(), bool>;
+    const omni::ryml::detail::mapping_context &context) const
+    -> compat::enable_if_t<supports<T>(), node_result>;
 };
 
 } // namespace mapping
@@ -848,7 +848,7 @@ struct from_enum {
   template <typename T>
   auto operator()(T value,
     ::ryml::NodeRef node,
-    omni::ryml::detail::mapping_context &) const
+    const omni::ryml::detail::mapping_context &) const
     -> compat::enable_if_t<supports<T>()>;
 };
 
@@ -862,8 +862,8 @@ struct to_enum {
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>(), bool>;
+    const omni::ryml::detail::mapping_context &context) const
+    -> compat::enable_if_t<supports<T>(), node_result>;
 };
 
 /** Write accessible non-static data members as mapping entries. */
@@ -876,7 +876,7 @@ struct from_record {
   template <typename T>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::detail::mapping_context &diagnostics) const
+    const omni::ryml::detail::mapping_context &context) const
     -> compat::enable_if_t<omni::is_reflected_record<T>::value>;
 
   // Use the trait directly: older GCC versions can mismatch member-call
@@ -968,6 +968,7 @@ struct to_type<T,
 // Inline and template definitions depend on the complete public interface
 // above. Including them here keeps the detail header private to this header.
 #include <omnirefl/serialization/impl/ryml.hpp>
+#include <omnirefl/serialization/ryml/impl/to_record.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
 static_assert(omni::traits::is_string<std::string>::value,

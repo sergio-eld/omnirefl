@@ -34,12 +34,16 @@ inline std::string to_string(c4::csubstr s) {
 inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
   if (n.invalid())
     return json::value_kind::unknown;
+
   if (n.is_map())
     return json::value_kind::mapping;
+
   if (n.is_seq())
     return json::value_kind::sequence;
+
   if (n.has_val())
     return n.val_is_null() ? json::value_kind::null : json::value_kind::scalar;
+
   return json::value_kind::unknown;
 }
 
@@ -65,75 +69,40 @@ inline std::string render_path(const std::vector<issue::path_segment> &segments)
   return path;
 }
 
-inline const std::string &kind_name(json::value_kind k) {
+OMNI_CPP14_CONSTEXPR inline compat::string_view kind_name(json::value_kind k) {
   switch (k) {
-  case json::value_kind::mapping: {
-    static const std::string name{"object"};
-    return name;
-  }
-  case json::value_kind::sequence: {
-    static const std::string name{"array"};
-    return name;
-  }
-  case json::value_kind::string: {
-    static const std::string name{"string"};
-    return name;
-  }
-  case json::value_kind::boolean: {
-    static const std::string name{"boolean"};
-    return name;
-  }
-  case json::value_kind::integer: {
-    static const std::string name{"integer"};
-    return name;
-  }
-  case json::value_kind::unsigned_integer: {
-    static const std::string name{"unsigned integer"};
-    return name;
-  }
-  case json::value_kind::number: {
-    static const std::string name{"real number"};
-    return name;
-  }
-  case json::value_kind::null: {
-    static const std::string name{"null"};
-    return name;
-  }
-  default: {
-    static const std::string name{"scalar"};
-    return name;
-  }
+  case json::value_kind::mapping:
+    return "object";
+  case json::value_kind::sequence:
+    return "array";
+  case json::value_kind::string:
+    return "string";
+  case json::value_kind::boolean:
+    return "boolean";
+  case json::value_kind::integer:
+    return "integer";
+  case json::value_kind::unsigned_integer:
+    return "unsigned integer";
+  case json::value_kind::number:
+    return "real number";
+  case json::value_kind::null:
+    return "null";
+  default:
+    return "scalar";
   }
 }
 
 struct mapping_context {
   const config &options;
-  omni::ryml::diagnostics</*OwnsTree=*/false> *diagnostics;
   std::vector<issue::path_segment> path;
 
-  // Keep stop checks constant-time; counters can exceed the 16-bit limits.
+  // Diagnostics already returned by earlier steps in the enclosing traversal.
   std::size_t error_count;
   std::size_t warning_count;
 
-  // FIXME: [high] Ad hoc: builders erase their compile-time string-ownership
-  // policy into this runtime flag because context stores diagnostics<false>.
-  // Decouple reporting from diagnostics storage through a non-template report
-  // interface and preserve the builder's policy in string writing.
+  // FIXME: [high] Preserve the builder's compile-time string-ownership policy
+  // through the writing interface instead of erasing it into a runtime flag.
   bool borrow_strings;
-
-  void report(issue entry) {
-    error_count += !entry.warning;
-    warning_count += entry.warning;
-    diagnostics->issues.push_back(std::move(entry));
-    if (diagnostics->issues.back().warning && options.error_policy.warning_limit
-      && *options.error_policy.warning_limit < warning_count) {
-      auto exceeded = diagnostics->issues.back();
-      exceeded.reason = json::issue_code::warning_limit_exceeded;
-      exceeded.warning = false;
-      diagnostics->issues.push_back(std::move(exceeded));
-      ++error_count;
-    }
-  }
 
   bool stopped() const {
     return options.error_policy.error_limit < error_count
@@ -141,6 +110,106 @@ struct mapping_context {
         && *options.error_policy.warning_limit < warning_count);
   }
 };
+
+// Local traversal output owns the accumulated diagnostics and limit counters.
+// Child contexts are immutable snapshots; no diagnostics escape through them.
+struct node_accumulator {
+  const mapping_context &context;
+  node_result result;
+  std::size_t error_count;
+  std::size_t warning_count;
+
+  bool stopped() const {
+    return this->context.options.error_policy.error_limit < this->error_count
+      || (this->context.options.error_policy.warning_limit
+        && *this->context.options.error_policy.warning_limit
+          < this->warning_count);
+  }
+
+  void report(issue entry) {
+    this->error_count += !entry.warning;
+    this->warning_count += entry.warning;
+    if (!entry.warning)
+      this->result.value.reset();
+
+    this->result.diagnostics.issues.push_back(std::move(entry));
+    if (this->result.diagnostics.issues.back().warning
+      && this->context.options.error_policy.warning_limit
+      && this->warning_count
+        == std::size_t{1} + *this->context.options.error_policy.warning_limit) {
+      auto exceeded = this->result.diagnostics.issues.back();
+      exceeded.reason = json::issue_code::warning_limit_exceeded;
+      exceeded.warning = false;
+      this->result.diagnostics.issues.push_back(std::move(exceeded));
+      ++this->error_count;
+      this->result.value.reset();
+    }
+  }
+
+  void append(node_result child) {
+    if (!child.value)
+      this->result.value.reset();
+
+    // A child may already have emitted the limit error. Preserve that report
+    // without generating the same warning-limit error again at each parent.
+    const bool has_limit_error = std::any_of(child.diagnostics.issues.begin(),
+      child.diagnostics.issues.end(),
+      [](const issue &entry) {
+        return entry.reason == json::issue_code::warning_limit_exceeded;
+      });
+
+    for (auto &entry : child.diagnostics.issues) {
+      if (has_limit_error) {
+        this->error_count += !entry.warning;
+        this->warning_count += entry.warning;
+        if (!entry.warning)
+          this->result.value.reset();
+
+        this->result.diagnostics.issues.push_back(std::move(entry));
+      } else {
+        this->report(std::move(entry));
+      }
+    }
+    if (this->stopped())
+      this->result.value.reset();
+  }
+
+  mapping_context next_context() const {
+    return {
+      /*options=*/this->context.options,
+      /*path=*/this->context.path,
+      /*error_count=*/this->error_count,
+      /*warning_count=*/this->warning_count,
+      /*borrow_strings=*/this->context.borrow_strings,
+    };
+  }
+
+  mapping_context child_context(issue::path_segment segment) const {
+    auto child = this->next_context();
+    child.path.push_back(segment);
+    return child;
+  }
+
+  node_result finish() && { return std::move(this->result); }
+};
+
+inline node_accumulator make_node_accumulator(const mapping_context &context,
+  ::ryml::ConstNodeRef node) {
+  return {
+    /*context=*/context,
+    /*result=*/{
+      /*value=*/compat::monostate{},
+      /*diagnostics=*/{
+        /*config=*/context.options,
+        /*tree=*/node,
+        /*issues=*/{},
+        /*parse_message=*/{},
+      },
+    },
+    /*error_count=*/context.error_count,
+    /*warning_count=*/context.warning_count,
+  };
+}
 
 inline issue make_issue(json::issue_code reason,
   json::value_kind expected,
@@ -173,8 +242,10 @@ compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
   compat::conditional_t<std::is_same<bool, T>::value,
     T &,
     c4::fmt::overflow_checked_<T>> target{value};
+
   if (!c4::from_chars(scalar, &target))
     return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
+
   return value;
 }
 
@@ -184,6 +255,7 @@ compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
   T value{};
   if (!c4::from_chars(scalar, &value))
     return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
+
   return value;
 }
 
@@ -247,20 +319,21 @@ namespace core {
 template <typename T>
 void write_node(const T &value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &diagnostics) {
-  if (!diagnostics.stopped())
-    cp::from_type<T>{}(value, node, diagnostics);
+  const omni::ryml::detail::mapping_context &context) {
+  cp::from_type<T>{}(value, node, context);
 }
 
 template <typename T>
-bool read_node(::ryml::ConstNodeRef node,
+node_result read_node(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) {
-  if (diagnostics.stopped())
-    return false;
-
-  const bool success = cp::to_type<T>{}(node, into, diagnostics);
-  return success && !diagnostics.stopped();
+  const omni::ryml::detail::mapping_context &context) {
+  auto result = omni::ryml::detail::make_node_accumulator(context, node);
+  if (context.stopped()) {
+    result.result.value.reset();
+  } else {
+    result.append(cp::to_type<T>{}(node, into, context));
+  }
+  return std::move(result).finish();
 }
 
 namespace detail {
@@ -272,15 +345,15 @@ struct cpp11_lambda_write {
   template <typename _M, omni::reflected_entity Entity>
   ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
     ::ryml::Tree tree;
-    diagnostics<false> report{};
-    omni::ryml::detail::mapping_context context{
-      /*options=*/report.config,
-      /*diagnostics=*/&report,
+    const config options{};
+    const omni::ryml::detail::mapping_context context{
+      /*options=*/options,
       /*path=*/{},
       /*error_count=*/0,
       /*warning_count=*/0,
       /*borrow_strings=*/BorrowStrings,
     };
+
     core::write_node(this->value, tree.rootref(), context);
     return tree;
   }
@@ -290,13 +363,13 @@ template <typename T>
 struct cpp11_lambda_read {
   const ::ryml::ConstNodeRef &node;
   T &into;
-  omni::ryml::detail::mapping_context &diagnostics;
+  const omni::ryml::detail::mapping_context &context;
 
   template <typename _M, omni::reflected_entity Entity>
-  bool operator()(omni::meta_t<_M, Entity>) const {
+  node_result operator()(omni::meta_t<_M, Entity>) const {
     return core::read_node(this->node,
       &this->into,
-      this->diagnostics);
+      this->context);
   }
 };
 
@@ -365,14 +438,14 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 template <typename T,
   typename Discovery,
   compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int>>
-bool map_tree(::ryml::ConstNodeRef node,
+node_result map_tree(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) {
+  const omni::ryml::detail::mapping_context &context) {
   return omni::reflected_call(
     detail::cpp11_lambda_read<T>{
       /*node=*/node,
       /*into=*/ *into,
-      /*diagnostics=*/diagnostics,
+      /*context=*/context,
     },
     omni::type_t<Discovery>{});
 }
@@ -383,10 +456,10 @@ template <typename T,
       && compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int>>
-bool map_tree(::ryml::ConstNodeRef node,
+node_result map_tree(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) {
-  return map_tree<T, typename Discovery::value_type>(node, into, diagnostics);
+  const omni::ryml::detail::mapping_context &context) {
+  return map_tree<T, typename Discovery::value_type>(node, into, context);
 }
 
 template <typename T,
@@ -395,10 +468,10 @@ template <typename T,
       && !compat::disjunction<is_container<Discovery>,
         traits::is_optional<Discovery>>::value,
     int>>
-bool map_tree(::ryml::ConstNodeRef node,
+node_result map_tree(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) {
-  return read_node(node, into, diagnostics);
+  const omni::ryml::detail::mapping_context &context) {
+  return read_node(node, into, context);
 }
 
 template <typename T>
@@ -406,24 +479,18 @@ with_diagnostics<T, diagnostics<false>> map_tree(const config &options,
   omni::type_t<T>,
   ::ryml::ConstNodeRef node) {
   auto value = compat::make_optional<T>();
-  diagnostics<false> report{
-    /*config=*/options,
-    /*tree=*/node,
-    /*issues=*/{},
-    /*parse_message=*/{},
-  };
-  omni::ryml::detail::mapping_context context{
+  const omni::ryml::detail::mapping_context context{
     /*options=*/options,
-    /*diagnostics=*/&report,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
     /*borrow_strings=*/false,
   };
-  const bool mapped = map_tree(node, &*value, context);
+
+  auto mapped = map_tree(node, &*value, context);
   return {
-    /*value=*/mapped ? std::move(value) : compat::nullopt,
-    /*diagnostics=*/std::move(report),
+    /*value=*/mapped.value ? std::move(value) : compat::nullopt,
+    /*diagnostics=*/std::move(mapped.diagnostics),
   };
 }
 
@@ -496,15 +563,15 @@ template <typename T,
     int>>
 ::ryml::Tree as_owning_tree(const T &value) {
   ::ryml::Tree tree;
-  diagnostics<false> report{};
-  omni::ryml::detail::mapping_context context{
-    /*options=*/report.config,
-    /*diagnostics=*/&report,
+  const config options{};
+  const omni::ryml::detail::mapping_context context{
+    /*options=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
     /*borrow_strings=*/false,
   };
+
   write_node(value, tree.rootref(), context);
   return tree;
 }
@@ -536,15 +603,15 @@ template <typename T,
     int>>
 ::ryml::Tree as_ref_tree(T &value) {
   ::ryml::Tree tree;
-  diagnostics<false> report{};
-  omni::ryml::detail::mapping_context context{
-    /*options=*/report.config,
-    /*diagnostics=*/&report,
+  const config options{};
+  const omni::ryml::detail::mapping_context context{
+    /*options=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
     /*borrow_strings=*/true,
   };
+
   write_node(value, tree.rootref(), context);
   return tree;
 }
@@ -572,7 +639,7 @@ auto is_null(const T &value)
 template <typename T>
 auto from_string_like::operator()(const T &value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &diagnostics) const
+  const omni::ryml::detail::mapping_context &context) const
   -> compat::enable_if_t<supports<T>()> {
   const auto &text = adapt::as_string(value);
   using storage_type = decltype(adapt::as_string(value));
@@ -580,49 +647,58 @@ auto from_string_like::operator()(const T &value,
   static_assert(std::is_same<char, typename text_type::value_type>::value,
     "Ryml string mapping requires char text; provide as_string and "
     "assign_string conversions for non-char strings.");
+
   using view_type = compat::basic_string_view<typename text_type::value_type,
     typename text_type::traits_type>;
+
   // Owning conversions are temporary: copy them even in a reference tree.
   constexpr bool borrows_source = std::is_lvalue_reference<storage_type>::value
     || std::is_same<text_type, view_type>::value;
+
   const c4::csubstr scalar{text.data(), text.size()};
-  if (diagnostics.borrow_strings && borrows_source)
+  if (context.borrow_strings && borrows_source)
     node.set_val(scalar);
   else
     node.set_serialized(scalar);
+
   node.set_val_style(::ryml::VAL_DQUO);
 }
 
 template <typename T>
 auto to_string_like::operator()(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>(), bool> {
+  const omni::ryml::detail::mapping_context &context) const
+  -> compat::enable_if_t<supports<T>(), node_result> {
+  auto result = omni::ryml::detail::make_node_accumulator(context, node);
   if (node.is_container()) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
       json::value_kind::string,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   const auto scalar = node.val();
   using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
     std::declval<const T &>()))>;
+
   static_assert(std::is_same<char, typename storage_type::value_type>::value,
     "Ryml string mapping requires char text; provide as_string and "
     "assign_string conversions for non-char strings.");
+
   using view_type = compat::basic_string_view<typename storage_type::value_type,
     typename storage_type::traits_type>;
+
   adapt::assign_string(into, view_type{scalar.str, scalar.len});
-  return true;
+  return std::move(result).finish();
 }
 
 template <typename T>
 auto from_arithmetic::operator()(const T &value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &) const
+  const omni::ryml::detail::mapping_context &) const
   -> compat::enable_if_t<supports<T>()> {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, T>::value,
@@ -637,8 +713,9 @@ auto from_arithmetic::operator()(const T &value,
 template <typename T>
 auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>(), bool> {
+  const omni::ryml::detail::mapping_context &context) const
+  -> compat::enable_if_t<supports<T>(), node_result> {
+  auto result = omni::ryml::detail::make_node_accumulator(context, node);
   const auto expected = std::is_same<bool, T>::value
     ? json::value_kind::boolean
     : std::is_unsigned<T>::value
@@ -648,12 +725,13 @@ auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
         : json::value_kind::number;
 
   if (node.is_container()) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
       expected,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   const auto scalar = node.val();
@@ -672,35 +750,37 @@ auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
         : scalar.is_real();
 
   if (!valid) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       json::issue_code::invalid_scalar,
       expected,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   const auto converted = omni::ryml::detail::from_chars<T>(scalar);
   if (!converted) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       converted.error(),
       expected,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   *into = *converted;
-  return true;
+  return std::move(result).finish();
 }
 
 template <typename T>
 auto from_optional_like::operator()(const T &value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &diagnostics) const
+  const omni::ryml::detail::mapping_context &context) const
   -> compat::enable_if_t<traits::is_optional<T>::value> {
   if (adapt::has_value(value)) {
-    core::write_node(adapt::get_value(value), node, diagnostics);
+    core::write_node(adapt::get_value(value), node, context);
   } else {
     node.set_val("null");
     node.set_val_style(::ryml::VAL_PLAIN);
@@ -710,27 +790,27 @@ auto from_optional_like::operator()(const T &value,
 template <typename T>
 auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<traits::is_optional<T>::value, bool> {
+  const omni::ryml::detail::mapping_context &context) const
+  -> compat::enable_if_t<traits::is_optional<T>::value, node_result> {
   if (!node.is_container() && node.val_is_null()
     && (!node.has_val_tag()
       || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {
     adapt::reset(into);
-    return true;
+    return omni::ryml::detail::make_node_accumulator(context, node).finish();
   }
 
   typename T::value_type value{};
-  if (!core::read_node(node, &value, diagnostics))
-    return false;
+  auto result = core::read_node(node, &value, context);
+  if (result.value)
+    adapt::emplace(into, std::move(value));
 
-  adapt::emplace(into, std::move(value));
-  return true;
+  return result;
 }
 
 template <typename T>
 auto from_container::operator()(const T &value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &diagnostics) const
+  const omni::ryml::detail::mapping_context &context) const
   -> compat::enable_if_t<supports<T>()> {
   using element_type = typename T::value_type;
   using element_reference = decltype(*value.begin());
@@ -747,11 +827,8 @@ auto from_container::operator()(const T &value,
   node.set_seq();
   // Use value_type so packed containers' proxy references map as their values.
   for (const element_type &element : value) {
-    if (diagnostics.stopped())
-      break;
-
     if (!detail::is_null(element))
-      core::write_node(element, node.append_child(), diagnostics);
+      core::write_node(element, node.append_child(), context);
   }
 
   // TODO: [medium] Consider supporting generators and temporary-producing
@@ -761,181 +838,55 @@ auto from_container::operator()(const T &value,
 template <typename T>
 auto to_container::operator()(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>(), bool> {
+  const omni::ryml::detail::mapping_context &context) const
+  -> compat::enable_if_t<supports<T>(), node_result> {
+  auto result = omni::ryml::detail::make_node_accumulator(context, node);
   if (!node.is_seq()) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
       json::value_kind::sequence,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   into->clear();
-  bool success = true;
   std::size_t index = 0;
   for (const auto child : node.children()) {
-    if (diagnostics.stopped())
-      return false;
+    if (result.stopped())
+      break;
 
-    diagnostics.path.push_back({
+    const auto child_context = result.child_context({
       /*field=*/{},
       /*index=*/index++,
     });
+
     typename T::value_type element{};
-    const bool mapped = core::read_node(child, &element, diagnostics);
-    // TODO: Detect and report rejected duplicates in unique associative
-    // containers instead of silently discarding them during emplacement.
-    if (mapped)
+    auto mapped = core::read_node(child, &element, child_context);
+    // TODO: Detect rejected duplicates in unique associative containers.
+    if (mapped.value)
       cp::emplace<T>{}(into, std::move(element));
-    success = mapped && success;
-    diagnostics.path.pop_back();
+
+    result.append(std::move(mapped));
   }
 
-  return success;
+  return std::move(result).finish();
 }
 
 } // namespace mapping
 
 namespace detail {
 
-// Pending members retain their selected input node. Canonical presence is
-// known before classification, so aliases can be ignored regardless of order.
-struct record_entry {
-  compat::string_view name;
-  ::ryml::ConstNodeRef node;
-  bool has_canonical;
-};
-
-// C++11 lambda equivalent: prepare each member's canonical candidate.
-struct cpp11_collect_members {
-  const ::ryml::ConstNodeRef &node;
-  std::vector<record_entry> &pending;
-
-  template <typename _F>
-  void operator()(omni::data_member_meta_t<_F> field) const {
-    const auto canonical = this->node.find_child(c4::to_csubstr(field.name()));
-    this->pending.push_back({
-      /*name=*/field.name(),
-      /*node=*/canonical,
-      /*has_canonical=*/!canonical.invalid(),
-    });
-  }
-};
-
-// SFINAE keeps T{} out of instantiations for non-default-constructible fields.
-template <typename Record, typename _F>
-auto initialize_missing(omni::data_member_binding_t<Record, _F> field)
-  -> compat::enable_if_t<std::is_default_constructible<
-    typename omni::data_member_meta_t<_F>::type>::value> {
-  field.set_value(typename omni::data_member_meta_t<_F>::type{});
-}
-
-template <typename Record, typename _F>
-auto initialize_missing(omni::data_member_binding_t<Record, _F>)
-  -> compat::enable_if_t<!std::is_default_constructible<
-    typename omni::data_member_meta_t<_F>::type>::value> {}
-
-struct cpp11_require_member {
-  const std::vector<record_entry> &pending;
-  omni::ryml::detail::mapping_context &diagnostics;
-
-  template <typename Record, typename _F>
-  void operator()(omni::data_member_binding_t<Record, _F> field) const {
-    if (this->diagnostics.stopped())
-      return;
-
-    const auto name = c4::to_csubstr(field.name());
-    if (std::any_of(this->pending.begin(),
-          this->pending.end(),
-          [name](const record_entry &entry) {
-            return compat::string_view{name.str, name.len} == entry.name
-              && !entry.node.invalid();
-          }))
-      return;
-
-    const auto recovery = this->diagnostics.options.recovery;
-    if (recovery
-      && (*recovery & json::recovery_policy::field_defaults)
-        == json::recovery_policy::field_defaults
-      && field.has_default_value_access())
-      return;
-
-    using member_type = typename omni::data_member_meta_t<_F>::type;
-    if ((traits::is_optional<member_type>::value
-          || (recovery
-            && (*recovery & json::recovery_policy::default_initializable)
-              == json::recovery_policy::default_initializable))
-      && std::is_default_constructible<member_type>::value) {
-      initialize_missing(field);
-      return;
-    }
-
-    this->diagnostics.path.push_back({
-      /*field=*/name,
-      /*index=*/compat::nullopt,
-    });
-    this->diagnostics.report(
-      omni::ryml::detail::make_issue(json::issue_code::missing_field,
-        json::value_kind::unknown,
-        ::ryml::ConstNodeRef{},
-        this->diagnostics.path));
-    this->diagnostics.path.pop_back();
-  }
-};
-
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
-  omni::ryml::detail::mapping_context &diagnostics;
+  const omni::ryml::detail::mapping_context &context;
 
   template <typename Record, typename _F>
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
-    // Ad hoc: fn::each cannot short-circuit member traversal.
-    // TODO: Let core traversal check stopping before invoking adapters.
-    if (this->diagnostics.stopped())
-      return;
-
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    core::write_node(field.value(), child, this->diagnostics);
-  }
-};
-
-struct cpp11_read_member {
-  std::vector<record_entry> &pending;
-  omni::ryml::detail::mapping_context &diagnostics;
-
-  template <typename Record, typename _F>
-  bool operator()(bool success,
-    omni::data_member_binding_t<Record, _F> field) const {
-    // Ad hoc: fn::foldl cannot short-circuit member traversal.
-    // TODO: Let core traversal check stopping before invoking adapters.
-    if (this->diagnostics.stopped())
-      return false;
-
-    const compat::string_view name{field.name()};
-    const auto entry = std::find_if(this->pending.begin(),
-      this->pending.end(),
-      [name](const record_entry &entry) { return name == entry.name; });
-    // The preceding presence pass already recovered or reported missing fields.
-    if (entry == this->pending.end() || entry->node.invalid())
-      return success;
-
-    const auto child = entry->node;
-    this->diagnostics.path.push_back({
-      /*field=*/child.key(),
-      /*index=*/compat::nullopt,
-    });
-    // A temporary also supports bitfields, which cannot expose references.
-    typename omni::data_member_meta_t<_F>::type value = field.value();
-    const bool mapped = core::read_node(child, &value, this->diagnostics);
-    if (mapped)
-      field.set_value(std::move(value));
-    // Presence does not depend on decoding success; consume invalid input too.
-    this->pending.erase(entry);
-    this->diagnostics.path.pop_back();
-    return mapped && success;
+    core::write_node(field.value(), child, this->context);
   }
 };
 
@@ -946,7 +897,7 @@ namespace reflected_scope {
 template <typename T>
 auto from_enum::operator()(T value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &) const
+  const omni::ryml::detail::mapping_context &) const
   -> compat::enable_if_t<supports<T>()> {
   const auto enumerators = omni::meta_for<T>::enumerators();
   const auto found = std::find_if(enumerators.begin(),
@@ -954,6 +905,7 @@ auto from_enum::operator()(T value,
     [value](const typename decltype(enumerators)::value_type &enumerator) {
       return value == enumerator.first;
     });
+
   if (found != enumerators.end()) {
     node.set_serialized(c4::to_csubstr(found->second));
     node.set_val_style(::ryml::VAL_DQUO);
@@ -963,8 +915,9 @@ auto from_enum::operator()(T value,
 template <typename T>
 auto to_enum::operator()(::ryml::ConstNodeRef node,
   T *into,
-  omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>(), bool> {
+  const omni::ryml::detail::mapping_context &context) const
+  -> compat::enable_if_t<supports<T>(), node_result> {
+  auto result = omni::ryml::detail::make_node_accumulator(context, node);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
   // plain null, numeric, and boolean forms before looking up the name.
   bool boolean{};
@@ -975,13 +928,15 @@ auto to_enum::operator()(::ryml::ConstNodeRef node,
         && (node.val_is_null()
           || node.val().is_number()
           || c4::from_chars(node.val(), &boolean)));
+
   if (wrong_kind) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
       json::value_kind::string,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   const auto name = node.val();
@@ -991,23 +946,25 @@ auto to_enum::operator()(::ryml::ConstNodeRef node,
     [name](const typename decltype(enumerators)::value_type &enumerator) {
       return name == c4::to_csubstr(enumerator.second);
     });
+
   if (found == enumerators.end()) {
-    diagnostics.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::detail::make_issue(
       json::issue_code::invalid_scalar,
       json::value_kind::string,
       node,
-      diagnostics.path));
-    return false;
+      context.path));
+
+    return std::move(result).finish();
   }
 
   *into = found->first;
-  return true;
+  return std::move(result).finish();
 }
 
 template <typename T>
 auto from_record::operator()(const T &value,
   ::ryml::NodeRef node,
-  omni::ryml::detail::mapping_context &diagnostics) const
+  const omni::ryml::detail::mapping_context &context) const
   -> compat::enable_if_t<omni::is_reflected_record<T>::value> {
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
@@ -1015,116 +972,8 @@ auto from_record::operator()(const T &value,
     | fn::filter<fn::non_static>()
     | fn::each(omni::ryml::detail::cpp11_write_member{
       /*node=*/node,
-      /*diagnostics=*/diagnostics,
+      /*context=*/context,
     });
-}
-
-template <typename AliasByName>
-template <typename T>
-auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<omni::is_reflected_record<T>::value, bool> {
-  if (!node.is_map()) {
-    diagnostics.report(omni::ryml::detail::make_issue(
-      json::issue_code::unexpected_kind,
-      json::value_kind::mapping,
-      node,
-      diagnostics.path));
-    return false;
-  }
-
-  const auto errors = diagnostics.error_count;
-  const auto fields = omni::meta_for<T>::accessible_data_members()
-    | fn::filter<fn::non_static>();
-
-  std::vector<detail::record_entry> pending;
-  pending.reserve(std::tuple_size<decltype(fields)>::value);
-  fields | fn::each(detail::cpp11_collect_members{
-    /*node=*/node,
-    /*pending=*/pending,
-  });
-
-  // Structural issues precede missing fields and value mapping, preserving
-  // diagnostic order regardless of the document's member order.
-  for (const auto child : node.children()) {
-    if (diagnostics.stopped())
-      break;
-
-    const auto name = child.key();
-    const compat::string_view input_name{name.str, name.len};
-    auto entry = std::find_if(pending.begin(),
-      pending.end(),
-      [input_name](const detail::record_entry &entry) {
-        return input_name == entry.name;
-      });
-    if (entry == pending.end()) {
-      const auto canonical = compat::invoke(this->alias_by_name, input_name);
-      if (canonical) {
-        entry = std::find_if(pending.begin(),
-          pending.end(),
-          [canonical](const detail::record_entry &entry) {
-            return *canonical == entry.name;
-          });
-      }
-      if (entry != pending.end() && entry->has_canonical)
-        continue;
-    }
-
-    const bool known = entry != pending.end();
-    const bool duplicate = known && !entry->node.invalid()
-      && entry->node.id() != child.id();
-    if (known && !duplicate) {
-      entry->node = child;
-      continue;
-    }
-
-    const auto duplicates = diagnostics.options.error_policy.duplicates;
-    if (duplicate
-      && (duplicates & json::duplicate_policy::last)
-        == json::duplicate_policy::last)
-      entry->node = child;
-
-    const auto unknown = diagnostics.options.error_policy.unknown_fields;
-    const bool allowed = duplicate
-      ? (duplicates
-          & (json::duplicate_policy::allow | json::duplicate_policy::last))
-        != json::duplicate_policy::reject
-      : (unknown & json::unknown_policy::allow) == json::unknown_policy::allow;
-    const bool warn = duplicate
-      ? (duplicates & json::duplicate_policy::warn)
-        == json::duplicate_policy::warn
-      : (unknown & json::unknown_policy::warn) == json::unknown_policy::warn;
-    if (allowed && !warn)
-      continue;
-
-    diagnostics.path.push_back({
-      /*field=*/name,
-      /*index=*/compat::nullopt,
-    });
-    diagnostics.report(omni::ryml::detail::make_issue(
-      duplicate ? json::issue_code::duplicate_field
-                : json::issue_code::unknown_field,
-      json::value_kind::unknown,
-      child,
-      diagnostics.path,
-      /*warning=*/allowed));
-    diagnostics.path.pop_back();
-  }
-
-  const auto binding = omni::meta_for<T>::bind(*into);
-  const auto members = binding.accessible_data_members()
-    | fn::filter<fn::non_static>();
-  members | fn::each(detail::cpp11_require_member{
-    /*pending=*/pending,
-    /*diagnostics=*/diagnostics,
-  });
-  const bool mapped = members
-    | fn::foldl(detail::cpp11_read_member{
-      /*pending=*/pending,
-      /*diagnostics=*/diagnostics,
-    }, /*initial=*/true);
-  return mapped && errors == diagnostics.error_count;
 }
 
 } // namespace reflected_scope
@@ -1153,30 +1002,42 @@ std::string render_diagnostics_t::operator()(
     case json::issue_code::warning_limit_exceeded:
       message += "warning limit exceeded";
       break;
+
     case json::issue_code::missing_field:
       message += "missing field";
       break;
+
     case json::issue_code::unknown_field:
       message += "unknown field";
       break;
+
     case json::issue_code::duplicate_field:
       message += "duplicate field";
       break;
-    case json::issue_code::unexpected_kind:
-      message += "expected " + detail::kind_name(entry.expected) + ", found "
-        + detail::kind_name(entry.actual);
 
+    case json::issue_code::unexpected_kind: {
+      const auto expected = detail::kind_name(entry.expected);
+      const auto actual = detail::kind_name(entry.actual);
+      message += "expected ";
+      message.append(expected.data(), expected.size());
+      message += ", found ";
+      message.append(actual.data(), actual.size());
       break;
+    }
+
     default:
       message += '"' + detail::to_string(entry.value) + "\" ";
-      message += json::issue_code::out_of_range == entry.reason
-        ? "could not be converted to the destination scalar"
-        : std::string{"is not "}
-          + (json::value_kind::integer == entry.expected
-                || json::value_kind::unsigned_integer == entry.expected
-              ? "an "
-              : "a ")
-          + detail::kind_name(entry.expected);
+      if (json::issue_code::out_of_range == entry.reason) {
+        message += "could not be converted to the destination scalar";
+      } else {
+        message += "is not ";
+        message += json::value_kind::integer == entry.expected
+            || json::value_kind::unsigned_integer == entry.expected
+          ? "an " : "a ";
+
+        const auto expected = detail::kind_name(entry.expected);
+        message.append(expected.data(), expected.size());
+      }
 
       break;
     }

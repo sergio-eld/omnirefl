@@ -38,6 +38,14 @@ if(NOT TARGET nonstd::string-view-lite)
     list(APPEND _extensions_dependencies string_view_lite)
 endif()
 
+if(NOT TARGET mpark_variant)
+    set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
+    FetchContent_Declare(mpark_variant
+        URL https://github.com/mpark/variant/archive/refs/tags/v1.4.0.tar.gz
+        URL_HASH SHA256=8f6b28ab3640b5d76d5b6664dda7257a4405ce59179220431b8fd196c79b2ecb)
+    list(APPEND _extensions_dependencies mpark_variant)
+endif()
+
 if(_extensions_dependencies)
     # Keep dependency projects at the extensions' C++11 baseline.
     set(_extensions_parent_standard "${CMAKE_CXX_STANDARD}")

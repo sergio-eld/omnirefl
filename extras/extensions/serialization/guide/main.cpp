@@ -834,31 +834,26 @@ template <>
 struct from_type<customization_mapping::extended_values> {
   struct cpp11_append_member {
     ::ryml::NodeRef &node;
-    detail::mapping_context &diagnostics;
+    const detail::mapping_context &context;
 
     template <typename Record, typename _F>
     void operator()(omni::data_member_binding_t<Record, _F> field) const {
-      // Ad hoc: fn::each cannot stop traversal in the current traversal.
-      // TODO: Let core traversal check stopping before invoking adapters.
-      if (this->diagnostics.stopped())
-        return;
-
       core::write_node(field.value(),
         this->node.append_child(),
-        this->diagnostics);
+        this->context);
     }
   };
 
   template <typename T>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    detail::mapping_context &diagnostics) const {
-    mapping::from_container{}(value, node, diagnostics);
+    const detail::mapping_context &context) const {
+    mapping::from_container{}(value, node, context);
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
       | fn::each(cpp11_append_member{
         /*node=*/node,
-        /*diagnostics=*/diagnostics,
+        /*context=*/context,
       });
   }
 };
@@ -876,28 +871,32 @@ struct to_type<customization_mapping::extended_values> {
   };
 
   template <typename T>
-  bool operator()(::ryml::ConstNodeRef node,
+  node_result operator()(::ryml::ConstNodeRef node,
     T *into,
-    detail::mapping_context &diagnostics) const {
+    const detail::mapping_context &context) const {
     T values;
-    if (!mapping::to_container{}(node, &values, diagnostics))
-      return false;
+    auto result = mapping::to_container{}(node, &values, context);
+    if (!result.value)
+      return result;
 
     const auto binding = omni::meta_for<T>::bind(*into);
     const auto members = binding.accessible_data_members();
     const auto count = std::tuple_size<decltype(members)>::value;
     if (values.size() < count) {
-      diagnostics.report(detail::make_issue(json::issue_code::out_of_range,
+      auto failure = detail::make_node_accumulator(context, node);
+      failure.append(std::move(result));
+      failure.report(detail::make_issue(json::issue_code::out_of_range,
         json::value_kind::sequence,
         node,
-        diagnostics.path));
-      return false;
+        context.path));
+
+      return std::move(failure).finish();
     }
 
     const auto tail = std::next(values.cbegin(), values.size() - count);
     members | fn::foldl(cpp11_restore_member{}, tail);
     into->assign(values.cbegin(), tail);
-    return true;
+    return result;
   }
 };
 
@@ -905,30 +904,34 @@ template <>
 struct from_type<customization_mapping::integer> {
   void operator()(const customization_mapping::integer &value,
     ::ryml::NodeRef node,
-    detail::mapping_context &diagnostics) const {
-    core::write_node(value.value, node, diagnostics);
+    const detail::mapping_context &context) const {
+    core::write_node(value.value, node, context);
   }
 };
 
 template <>
 struct to_type<customization_mapping::integer> {
-  bool operator()(::ryml::ConstNodeRef node,
+  node_result operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
-    detail::mapping_context &diagnostics) const {
+    const detail::mapping_context &context) const {
     int converted{};
-    if (!core::read_node(node, &converted, diagnostics))
-      return false;
+    auto result = core::read_node(node, &converted, context);
+    if (!result.value)
+      return result;
 
     if (converted < 4 || 8 < converted) {
-      diagnostics.report(detail::make_issue(json::issue_code::out_of_range,
+      auto failure = detail::make_node_accumulator(context, node);
+      failure.append(std::move(result));
+      failure.report(detail::make_issue(json::issue_code::out_of_range,
         json::value_kind::integer,
         node,
-        diagnostics.path));
-      return false;
+        context.path));
+
+      return std::move(failure).finish();
     }
 
     into->value = converted;
-    return true;
+    return result;
   }
 };
 
@@ -1048,30 +1051,28 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   if (!parsed)
     return;
 
-  omni::ryml::diagnostics<false> issues{};
-  issues.tree = parsed->crootref();
-  omni::ryml::detail::mapping_context diagnostics{
-    /*options=*/issues.config,
-    /*diagnostics=*/&issues,
+  const omni::ryml::config options{};
+  const omni::ryml::detail::mapping_context context{
+    /*options=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
     /*borrow_strings=*/false,
   };
   auto into = c.initial;
-  const bool mapped = omni::ryml::core::map_tree(
-    parsed->crootref(), &into, diagnostics);
+  const auto mapped = omni::ryml::core::map_tree(
+    parsed->crootref(), &into, context);
 
-  EXPECT_FALSE(mapped);
+  EXPECT_FALSE(mapped.value);
   EXPECT_EQ(static_cast<const std::vector<int> &>(c.initial),
     static_cast<const std::vector<int> &>(into));
   EXPECT_EQ(c.initial.first, into.first);
   EXPECT_EQ(c.initial.second, into.second);
-  EXPECT_EQ(1U, issues.issues.size());
-  if (1U == issues.issues.size()) {
-    EXPECT_EQ(c.reason, issues.issues.front().reason);
+  EXPECT_EQ(1U, mapped.diagnostics.issues.size());
+  if (1U == mapped.diagnostics.issues.size()) {
+    EXPECT_EQ(c.reason, mapped.diagnostics.issues.front().reason);
     EXPECT_EQ(c.path,
-      omni::ryml::detail::render_path(issues.issues.front().path));
+      omni::ryml::detail::render_path(mapped.diagnostics.issues.front().path));
   }
 }
 
@@ -1160,32 +1161,30 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   if (!parsed)
     return;
 
-  omni::ryml::diagnostics<false> issues{};
-  issues.tree = parsed->crootref();
-  omni::ryml::detail::mapping_context diagnostics{
-    /*options=*/issues.config,
-    /*diagnostics=*/&issues,
+  const omni::ryml::config options{};
+  const omni::ryml::detail::mapping_context context{
+    /*options=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
     /*borrow_strings=*/false,
   };
   auto into = c.initial;
-  const bool mapped = omni::ryml::core::map_tree(
-    parsed->crootref(), &into, diagnostics);
+  const auto mapped = omni::ryml::core::map_tree(
+    parsed->crootref(), &into, context);
 
-  EXPECT_EQ(bool(c.expected), mapped);
+  EXPECT_EQ(bool(c.expected), bool(mapped.value));
   if (c.expected) {
     EXPECT_EQ(*c.expected, into);
-    EXPECT_TRUE(issues.issues.empty());
+    EXPECT_TRUE(mapped.diagnostics.issues.empty());
 
     EXPECT_TRUE(same_document(c.document,
       omni::ryml::as_json(into)));
   } else {
     EXPECT_EQ(c.initial, into);
-    EXPECT_EQ(1U, issues.issues.size());
-    if (1U == issues.issues.size()) {
-      EXPECT_EQ(c.expected.error(), issues.issues.front().reason);
+    EXPECT_EQ(1U, mapped.diagnostics.issues.size());
+    if (1U == mapped.diagnostics.issues.size()) {
+      EXPECT_EQ(c.expected.error(), mapped.diagnostics.issues.front().reason);
     }
   }
 }

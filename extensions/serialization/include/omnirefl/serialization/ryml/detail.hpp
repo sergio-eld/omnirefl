@@ -10,6 +10,17 @@
 
 namespace omni {
 namespace ryml {
+
+template <bool OwnsTree>
+struct diagnostics;
+
+template <typename T, typename Diagnostics>
+struct with_diagnostics;
+
+/** Normalized in-place node mapping result. Success holds monostate;
+ * diagnostics borrow the mapped tree, which must remain alive and unchanged. */
+using node_result = with_diagnostics<compat::monostate, diagnostics<false>>;
+
 namespace detail {
 
 struct mapping_context;

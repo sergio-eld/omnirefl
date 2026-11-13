@@ -34,8 +34,8 @@ struct to_record {
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<omni::is_reflected_record<T>::value, bool>;
+    const detail::mapping_context &context) const
+    -> compat::enable_if_t<omni::is_reflected_record<T>::value, node_result>;
 
   // Returned views must remain valid while the caller uses the resolved name.
   AliasByName alias_by_name;

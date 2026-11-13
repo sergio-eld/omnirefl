@@ -298,11 +298,11 @@ TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
 struct cpp11_map_with_aliases {
   omni::ryml::reflected_scope::to_record<examples::runtime_aliases> compositor;
   ::ryml::ConstNodeRef node;
-  omni::ryml::detail::mapping_context &diagnostics;
+  const omni::ryml::detail::mapping_context &context;
 
   template <typename Record>
-  bool operator()(omni::record_binding_t<Record> record) const {
-    return this->compositor(this->node, &record.value(), this->diagnostics);
+  omni::ryml::node_result operator()(omni::record_binding_t<Record> record) const {
+    return this->compositor(this->node, &record.value(), this->context);
   }
 };
 
@@ -323,28 +323,27 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
     if (!tree)
       continue;
 
-    omni::ryml::diagnostics</*OwnsTree=*/false> report{};
-    omni::ryml::detail::mapping_context context{
-      /*options=*/report.config,
-      /*diagnostics=*/&report,
+    const omni::ryml::config options{};
+    const omni::ryml::detail::mapping_context context{
+      /*options=*/options,
       /*path=*/{},
       /*error_count=*/0,
       /*warning_count=*/0,
       /*borrow_strings=*/false,
     };
     examples::runtime_endpoint into{/*host=*/"unchanged"};
-    const bool mapped = omni::reflected_call(
+    const auto mapped = omni::reflected_call(
       cpp11_map_with_aliases{
         /*compositor=*/compositor,
         /*node=*/tree->crootref(),
-        /*diagnostics=*/context,
+        /*context=*/context,
       },
       into);
 
-    EXPECT_EQ(legacy, mapped);
+    EXPECT_EQ(legacy, bool(mapped.value));
     EXPECT_EQ(legacy ? "localhost" : "unchanged", into.host);
-    EXPECT_EQ(legacy ? 0u : 1u, report.issues.size());
-    for (const auto &issue : report.issues) {
+    EXPECT_EQ(legacy ? 0u : 1u, mapped.diagnostics.issues.size());
+    for (const auto &issue : mapped.diagnostics.issues) {
       EXPECT_EQ(omni::json::issue_code::unknown_field, issue.reason);
       EXPECT_EQ("/hostname", omni::ryml::detail::render_path(issue.path));
       EXPECT_FALSE(issue.warning);
