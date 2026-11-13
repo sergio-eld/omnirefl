@@ -1,24 +1,32 @@
 #pragma once
 
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/detail.hpp>
 
 #include <ryml.hpp>
 
-#include <functional>
 #include <type_traits>
+#include <utility>
 
 namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-/** Accept declared enumerator names and configured string aliases.
- * Declared names take precedence over aliases. The resolver maps an input
- * alias to a declared name; an empty result means no alias. Diagnostics
- * retain the original document value. with_alias_by_name replaces the
- * resolver, whose returned views must remain valid throughout mapping.
+/** Deserialize a string-valued node into a reflected enum value.
+ * Declared enumerator names take precedence over aliases. Invalid node kinds
+ * and unknown names produce diagnostics containing the original node value.
+ *
+ * ValueByAlias maps alias text to an optional canonical value text.
+ * An empty result means the input is not a registered alias. The default
+ * resolver accepts no aliases.
+ * with_value_by_alias returns a new mapper storing the supplied callable's
+ * concrete type.
+ * Returned canonical-value views must remain valid throughout the mapping call.
  */
+template <typename ValueByAlias = fn::default_value<
+  compat::optional<compat::string_view>>>
 struct to_enum_t {
   template <typename T>
   static constexpr bool supports() {
@@ -27,36 +35,43 @@ struct to_enum_t {
 
   // TODO: [high] Define a public mapping context interface/type for
   // customization points instead of exposing detail::mapping_context.
-  template <typename T>
+  template <typename T,
+    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const detail::mapping_context &context) const
-    -> compat::enable_if_t<omni::is_reflected_enum<T>::value,
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
+    -> with_diagnostics<compat::monostate, diagnostics<false>>;
 
-  // An empty resolver means no aliases. Returned views must remain valid
-  // while the caller uses the resolved name.
-  std::function<compat::optional<compat::string_view>(compat::string_view)>
-    alias_by_name;
+  ValueByAlias value_by_alias;
 
+  /** QoL for overriding the alias resolver inline, in a single expression.
+   * Copy or move f into a new mapper specialized for its concrete type.
+   *
+   * Resolves alias text to an optional canonical value text:
+   * f :: compat::string_view -> compat::optional<compat::string_view>
+   *
+   * An empty result means the input is not a registered alias. Returned views
+   * must remain valid throughout the mapping call.
+   *
+   * The callable must be copy-constructible and invocable through a const
+   * reference, returning the same result for the same alias.
+   */
   template <typename F>
-  to_enum_t with_alias_by_name(F f) const {
-    static_assert(std::is_copy_constructible<F>::value,
-      "with_alias_by_name requires a copy-constructible callable");
+  constexpr auto with_value_by_alias(F &&f) const
+    -> to_enum_t<compat::decay_t<F>> {
+    static_assert(std::is_copy_constructible<compat::decay_t<F>>::value,
+      "with_value_by_alias requires a copy-constructible callable");
 
-    static_assert(std::is_move_constructible<F>::value,
-      "with_alias_by_name requires a move-constructible callable");
+    static_assert(detail::is_alias_resolver<const compat::decay_t<F>>::value,
+      "Invalid value_by_alias callable; expected: "
+      "value_by_alias :: compat::string_view -> optional<compat::string_view>");
 
-    static_assert(detail::is_alias_by_name<F>::value,
-      "Invalid alias_by_name callable; expected: "
-      "alias_by_name :: compat::string_view -> optional<compat::string_view>");
-
-    return {/*alias_by_name=*/f};
+    return {/*value_by_alias=*/std::forward<F>(f)};
   }
 };
 
-/** Default enum mapper; with_alias_by_name returns a configured copy. */
-const to_enum_t to_enum{};
+/** Default enum deserializer without aliases. */
+constexpr to_enum_t<> to_enum{};
 
 } // namespace reflected_scope
 } // namespace ryml

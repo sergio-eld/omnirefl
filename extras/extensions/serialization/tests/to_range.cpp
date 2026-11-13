@@ -26,19 +26,21 @@ struct wrapped_values {
   using value_type = T;
   Storage values;
 
-  friend auto begin(wrapped_values &r) -> decltype(r.values.begin()) {
+  friend auto begin(wrapped_values &r) -> typename decltype(values)::iterator {
     return r.values.begin();
   }
 
-  friend auto end(wrapped_values &r) -> decltype(r.values.end()) {
+  friend auto end(wrapped_values &r) -> typename decltype(values)::iterator {
     return r.values.end();
   }
 
-  friend auto begin(const wrapped_values &r) -> decltype(r.values.begin()) {
+  friend auto begin(const wrapped_values &r)
+    -> typename decltype(values)::const_iterator {
     return r.values.begin();
   }
 
-  friend auto end(const wrapped_values &r) -> decltype(r.values.end()) {
+  friend auto end(const wrapped_values &r)
+    -> typename decltype(values)::const_iterator {
     return r.values.end();
   }
 };
@@ -50,19 +52,21 @@ struct wrapped_map {
   std::map<Key, Value> entries;
   using value_type = typename decltype(entries)::value_type;
 
-  friend auto begin(wrapped_map &r) -> decltype(r.entries.begin()) {
+  friend auto begin(wrapped_map &r) -> typename decltype(entries)::iterator {
     return r.entries.begin();
   }
 
-  friend auto end(wrapped_map &r) -> decltype(r.entries.end()) {
+  friend auto end(wrapped_map &r) -> typename decltype(entries)::iterator {
     return r.entries.end();
   }
 
-  friend auto begin(const wrapped_map &r) -> decltype(r.entries.begin()) {
+  friend auto begin(const wrapped_map &r)
+    -> typename decltype(entries)::const_iterator {
     return r.entries.begin();
   }
 
-  friend auto end(const wrapped_map &r) -> decltype(r.entries.end()) {
+  friend auto end(const wrapped_map &r)
+    -> typename decltype(entries)::const_iterator {
     return r.entries.end();
   }
 };

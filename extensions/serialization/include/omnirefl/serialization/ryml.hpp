@@ -808,7 +808,7 @@ struct to_optional_like {
 struct from_range_t {
   template <typename T>
   static constexpr bool supports() {
-    return detail::is_mapped_range<const T>::value;
+    return omni::ryml::detail::is_mapped_range<const T>::value;
   }
 
   template <typename T>
@@ -865,7 +865,7 @@ template <typename T, typename Enable>
 struct from_type: reflected_scope::from_record {};
 
 template <typename T, typename Enable>
-struct to_type: reflected_scope::to_record_t {};
+struct to_type: reflected_scope::to_record_t<> {};
 
 template <typename T>
 struct from_type<T,
@@ -914,8 +914,8 @@ struct from_type<T,
 
 template <typename T>
 struct to_type<T,
-  compat::enable_if_t<reflected_scope::to_enum_t::supports<T>()>>:
-    reflected_scope::to_enum_t {};
+  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>>:
+    reflected_scope::to_enum_t<> {};
 
 // TODO: [high] Document and demonstrate the reflected-scope contract for
 // from_type/to_type customizations. Metadata queries must depend on template

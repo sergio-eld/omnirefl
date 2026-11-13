@@ -1,28 +1,37 @@
 #pragma once
 
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/detail.hpp>
 
 #include <ryml.hpp>
 
-#include <functional>
 #include <type_traits>
+#include <utility>
 
 namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-/** Read accessible non-static data members from a mapping.
- * Traversal follows the record schema over the document and implements the
- * JSON mapping policies in config.
- * Canonical presence suppresses aliases even when the canonical value is
- * invalid. Duplicate policies select among canonical occurrences or, only
- * when absent, among aliases. Diagnostics retain the original document keys.
- * with_alias_by_name replaces the resolver;
- * it accepts string_view -> optional<string_view>, where an empty result means
- * no alias. Resolved names must remain valid throughout this mapping call.
+/** Deserialize a node into a reflected record's accessible non-static data
+ * members.
+ * Traversal follows the record schema over the node, applying config's
+ * duplicate, unknown-member, recovery, and diagnostic-limit policies.
+ *
+ * A canonical name takes precedence over its aliases, even when its value is
+ * invalid. Duplicate policies select among canonical occurrences when present,
+ * otherwise among aliases. Diagnostics use the original node keys.
+ *
+ * NameByAlias maps alias text to an optional canonical name.
+ * An empty result means the input is not a registered alias. The default
+ * resolver accepts no aliases.
+ * with_name_by_alias returns a new mapper storing the supplied callable's
+ * concrete type.
+ * Returned canonical-name views must remain valid throughout the mapping call.
  */
+template <typename NameByAlias = fn::default_value<
+  compat::optional<compat::string_view>>>
 struct to_record_t {
   template <typename T>
   static constexpr bool supports() {
@@ -31,36 +40,43 @@ struct to_record_t {
 
   // TODO: [high] Define a public mapping context interface/type for
   // customization points instead of exposing detail::mapping_context.
-  template <typename T>
+  template <typename T,
+    compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const detail::mapping_context &context) const
-    -> compat::enable_if_t<omni::is_reflected_record<T>::value,
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
+    -> with_diagnostics<compat::monostate, diagnostics<false>>;
 
-  // An empty resolver means no aliases. Returned views must remain valid
-  // while the caller uses the resolved name.
-  std::function<compat::optional<compat::string_view>(compat::string_view)>
-    alias_by_name;
+  NameByAlias name_by_alias;
 
+  /** QoL for overriding the alias resolver inline, in a single expression.
+   * Copy or move f into a new mapper specialized for its concrete type.
+   *
+   * Resolves alias text to an optional canonical name:
+   * f :: compat::string_view -> compat::optional<compat::string_view>
+   *
+   * An empty result means the input is not a registered alias. Returned views
+   * must remain valid throughout the mapping call.
+   *
+   * The callable must be copy-constructible and invocable through a const
+   * reference, returning the same result for the same alias.
+   */
   template <typename F>
-  to_record_t with_alias_by_name(F f) const {
-    static_assert(std::is_copy_constructible<F>::value,
-      "with_alias_by_name requires a copy-constructible callable");
+  constexpr auto with_name_by_alias(F &&f) const
+    -> to_record_t<compat::decay_t<F>> {
+    static_assert(std::is_copy_constructible<compat::decay_t<F>>::value,
+      "with_name_by_alias requires a copy-constructible callable");
 
-    static_assert(std::is_move_constructible<F>::value,
-      "with_alias_by_name requires a move-constructible callable");
+    static_assert(detail::is_alias_resolver<const compat::decay_t<F>>::value,
+      "Invalid name_by_alias callable; expected: "
+      "name_by_alias :: compat::string_view -> optional<compat::string_view>");
 
-    static_assert(detail::is_alias_by_name<F>::value,
-      "Invalid alias_by_name callable; expected: "
-      "alias_by_name :: compat::string_view -> optional<compat::string_view>");
-
-    return {/*alias_by_name=*/f};
+    return {/*name_by_alias=*/std::forward<F>(f)};
   }
 };
 
-/** Default record mapper; with_alias_by_name returns a configured copy. */
-const to_record_t to_record{};
+/** Default record deserializer without aliases. */
+constexpr to_record_t<> to_record{};
 
 } // namespace reflected_scope
 } // namespace ryml

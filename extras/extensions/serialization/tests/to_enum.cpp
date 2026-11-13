@@ -23,6 +23,19 @@ struct service {
   std::vector<state> history;
 };
 
+// C++11 callable: prepare the default alias dictionary once.
+struct state_names {
+  omni::compat::optional<string_view> operator()(string_view alias) const {
+    static const auto names = omni::ryml::alias_dict(
+      std::make_tuple("idle", "available", ""),
+      std::make_tuple("active", "running", "working", "7", "true"),
+      std::make_tuple("null", "nil"),
+      std::make_tuple("absent", "obsolete"));
+
+    return names(alias);
+  }
+};
+
 } // namespace enum_alias_models
 } // namespace
 
@@ -31,16 +44,8 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type<enum_alias_models::state>: reflected_scope::to_enum_t {
-  to_type()
-    : to_enum_t{
-        /*alias_by_name=*/alias_dict(
-          std::make_tuple("idle", "available", ""),
-          std::make_tuple("active", "running", "working", "7", "true"),
-          std::make_tuple("null", "nil"),
-          std::make_tuple("absent", "obsolete")),
-      } {}
-};
+struct to_type<enum_alias_models::state>:
+    reflected_scope::to_enum_t<enum_alias_models::state_names> {};
 
 } // namespace cp
 } // namespace ryml
@@ -53,31 +58,32 @@ using omni::json::issue_code;
 
 TEST(to_enum_aliases, dictionary_replaces_the_previous_resolver) {
   const auto original =
-    omni::ryml::reflected_scope::to_enum.with_alias_by_name(
+    omni::ryml::reflected_scope::to_enum.with_value_by_alias(
       omni::ryml::alias_dict(std::make_tuple("idle", "available")));
 
-  const auto replacement = original.with_alias_by_name(
+  const auto replacement = original.with_value_by_alias(
     omni::ryml::alias_dict(std::make_tuple("active", "working")));
 
-  const auto idle = original.alias_by_name("available");
+  const auto idle = original.value_by_alias("available");
   EXPECT_TRUE(idle);
   if (idle)
     EXPECT_EQ("idle", *idle);
 
-  EXPECT_FALSE(original.alias_by_name("working"));
+  EXPECT_FALSE(original.value_by_alias("working"));
 
-  const auto active = replacement.alias_by_name("working");
+  const auto active = replacement.value_by_alias("working");
   EXPECT_TRUE(active);
   if (active)
     EXPECT_EQ("active", *active);
 
-  EXPECT_FALSE(replacement.alias_by_name("available"));
+  EXPECT_FALSE(replacement.value_by_alias("available"));
 }
 
 // C++11 lambda equivalent: apply a local mapper inside the reflected scope.
 // The explicit return type delays the body until metadata is generated.
+template <typename Compositor>
 struct cpp11_map_with_aliases {
-  omni::ryml::reflected_scope::to_enum_t compositor;
+  Compositor compositor;
   ::ryml::ConstNodeRef node;
   const omni::ryml::detail::mapping_context &context;
 
@@ -92,7 +98,7 @@ struct cpp11_map_with_aliases {
 TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   std::size_t calls = 0;
   const auto compositor =
-    omni::ryml::reflected_scope::to_enum.with_alias_by_name(
+    omni::ryml::reflected_scope::to_enum.with_value_by_alias(
       [&calls](string_view) -> omni::compat::optional<string_view> {
         ++calls;
         return omni::compat::nullopt;
@@ -112,7 +118,7 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
 
     state into = state::idle;
     const auto result = omni::reflected_call(
-      cpp11_map_with_aliases{
+      cpp11_map_with_aliases<decltype(compositor)>{
         /*compositor=*/compositor,
         /*node=*/tree->crootref(),
         /*context=*/context,

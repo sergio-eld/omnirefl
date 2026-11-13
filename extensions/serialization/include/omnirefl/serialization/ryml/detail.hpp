@@ -186,10 +186,10 @@ struct cpp11_sorted_aliases {
 };
 
 template <typename F, typename = void>
-struct is_alias_by_name: std::false_type {};
+struct is_alias_resolver: std::false_type {};
 
 template <typename F>
-struct is_alias_by_name<F,
+struct is_alias_resolver<F,
   compat::void_t<compat::invoke_result_t<F &,
     compat::string_view>>>:
     std::is_same<compat::optional<compat::string_view>,

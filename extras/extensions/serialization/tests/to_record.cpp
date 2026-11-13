@@ -31,9 +31,9 @@ struct runtime_aliases {
   }
 };
 
-struct copy_only_alias_by_name {
-  copy_only_alias_by_name() = default;
-  copy_only_alias_by_name(const copy_only_alias_by_name &) = default;
+struct copy_only_name_by_alias {
+  copy_only_name_by_alias() = default;
+  copy_only_name_by_alias(const copy_only_name_by_alias &) = default;
 
   omni::compat::optional<string_view> operator()(string_view) const {
     return string_view{"host"};
@@ -256,52 +256,52 @@ TEST(alias_lookup, prepares_and_queries_a_persistent_constexpr_dictionary) {
 TEST(to_record_aliases, default_has_no_alias_mapping) {
   const auto compositor = omni::ryml::reflected_scope::to_record;
 
-  EXPECT_FALSE(compositor.alias_by_name);
+  EXPECT_EQ(omni::compat::nullopt, compositor.name_by_alias("hostname"));
 }
 
 TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
   const auto original =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(
       omni::ryml::alias_dict(std::make_tuple("host", "hostname")));
 
-  const auto replacement = original.with_alias_by_name(
+  const auto replacement = original.with_name_by_alias(
     omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
 
-  const auto hostname = original.alias_by_name("hostname");
+  const auto hostname = original.name_by_alias("hostname");
   EXPECT_TRUE(hostname);
   if (hostname)
     EXPECT_EQ("host", *hostname);
 
-  EXPECT_FALSE(original.alias_by_name("service_port"));
-  const auto service_port = replacement.alias_by_name("service_port");
+  EXPECT_FALSE(original.name_by_alias("service_port"));
+  const auto service_port = replacement.name_by_alias("service_port");
   EXPECT_TRUE(service_port);
   if (service_port)
     EXPECT_EQ("port", *service_port);
 
-  EXPECT_FALSE(replacement.alias_by_name("hostname"));
+  EXPECT_FALSE(replacement.name_by_alias("hostname"));
 }
 
 TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
   const auto legacy =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(
       examples::runtime_aliases{/*legacy=*/true});
 
   const auto current =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(
       examples::runtime_aliases{/*legacy=*/false});
 
-  const auto hostname = legacy.alias_by_name("hostname");
+  const auto hostname = legacy.name_by_alias("hostname");
 
   EXPECT_TRUE(hostname);
   if (hostname)
     EXPECT_EQ("host", *hostname);
 
-  EXPECT_FALSE(current.alias_by_name("hostname"));
+  EXPECT_FALSE(current.name_by_alias("hostname"));
 }
 
 // C++11 lambda equivalent: apply this compositor inside the reflected scope.
 struct cpp11_map_with_aliases {
-  omni::ryml::reflected_scope::to_record_t compositor;
+  omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases> compositor;
   ::ryml::ConstNodeRef node;
   const omni::ryml::detail::mapping_context &context;
 
@@ -319,7 +319,7 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
   // The same resolver type accepts the alias only in legacy mode.
   const bool legacy = GetParam();
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(
       examples::runtime_aliases{/*legacy=*/legacy});
 
   for (const std::string document : {R"({"hostname": "localhost"})",
@@ -369,11 +369,11 @@ INSTANTIATE_TEST_SUITE_P(configuration,
   });
 
 TEST(to_record_aliases, accepts_a_callable_with_only_a_copy_constructor) {
-  const examples::copy_only_alias_by_name resolver{};
+  const examples::copy_only_name_by_alias resolver{};
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(resolver);
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(resolver);
 
-  const auto hostname = compositor.alias_by_name("hostname");
+  const auto hostname = compositor.name_by_alias("hostname");
   EXPECT_TRUE(hostname);
   if (hostname)
     EXPECT_EQ("host", *hostname);
@@ -381,24 +381,24 @@ TEST(to_record_aliases, accepts_a_callable_with_only_a_copy_constructor) {
 
 TEST(to_record_aliases, accepts_a_mutable_callable) {
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(
       [](string_view) mutable -> omni::compat::optional<string_view> {
         return omni::compat::nullopt;
       });
 
-  EXPECT_EQ(omni::compat::nullopt, compositor.alias_by_name("hostname"));
+  EXPECT_EQ(omni::compat::nullopt, compositor.name_by_alias("hostname"));
 }
 
 TEST(to_record_aliases, checks_the_callable_when_configured) {
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_alias_by_name(
+    omni::ryml::reflected_scope::to_record.with_name_by_alias(
       [](string_view alias) -> omni::compat::optional<string_view> {
         return alias == "hostname"
           ? omni::compat::optional<string_view>{"host"}
           : omni::compat::nullopt;
       });
 
-  const auto hostname = compositor.alias_by_name("hostname");
+  const auto hostname = compositor.name_by_alias("hostname");
 
   EXPECT_TRUE(hostname);
   if (hostname)
@@ -406,14 +406,14 @@ TEST(to_record_aliases, checks_the_callable_when_configured) {
 
   // Enable independently to inspect an invalid argument or return type.
 #if 0
-  (void)omni::ryml::reflected_scope::to_record.with_alias_by_name(
+  (void)omni::ryml::reflected_scope::to_record.with_name_by_alias(
     [](int) -> omni::compat::optional<string_view> {
       return omni::compat::nullopt;
     });
 #endif
 
 #if 0
-  (void)omni::ryml::reflected_scope::to_record.with_alias_by_name(
+  (void)omni::ryml::reflected_scope::to_record.with_name_by_alias(
     [](string_view) -> string_view { return "host"; });
 #endif
 }
@@ -456,27 +456,19 @@ namespace cp {
 
 template <>
 struct to_type<alias_models::endpoint>:
-    omni::ryml::reflected_scope::to_record_t {
-  to_type(): to_record_t{/*alias_by_name=*/alias_models::endpoint_names{}} {}
-};
+    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 template <>
 struct to_type<alias_models::endpoint_with_retries>:
-    omni::ryml::reflected_scope::to_record_t {
-  to_type(): to_record_t{/*alias_by_name=*/alias_models::endpoint_names{}} {}
-};
+    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 template <>
 struct to_type<alias_models::optional_endpoint>:
-    omni::ryml::reflected_scope::to_record_t {
-  to_type(): to_record_t{/*alias_by_name=*/alias_models::endpoint_names{}} {}
-};
+    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 template <>
 struct to_type<alias_models::default_endpoint>:
-    omni::ryml::reflected_scope::to_record_t {
-  to_type(): to_record_t{/*alias_by_name=*/alias_models::endpoint_names{}} {}
-};
+    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 } // namespace cp
 } // namespace ryml

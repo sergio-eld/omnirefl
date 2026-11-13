@@ -17,8 +17,7 @@
  *
  * Config and policies
  *   config.core_functions - pass config and input explicitly
- *   config.unknown_fields
- *     reject, ignore, or warn about unknown fields
+ *   config.unknown_fields - reject, ignore, or warn about unknown fields
  *   config.duplicate_fields - choose a repeated field occurrence
  *   config.error_limit - collect errors before stopping
  *   config.warning_limit - fail when the warning limit is exceeded
@@ -29,14 +28,12 @@
  *   diagnostics.inspect_diagnostics - issue codes, values, and paths
  *   diagnostics.render_diagnostics - render retained issues on demand
  *   diagnostics.transform_diagnostics - adapt diagnostics, preserve the value
- *   diagnostics.valid_values_with_warnings
- *     success can retain warnings
+ *   diagnostics.valid_values_with_warnings - success can retain warnings
  *
  * Supported mappings
  *   mappings.nested_records - discover nested record types
  *   mappings.sequences - vectors of records and nested vectors
- *   mappings.optional_fields
- *     missing, null, present, and invalid values
+ *   mappings.optional_fields - missing, null, present, and invalid values
  *   mappings.serialize_optional_fields - empty optionals become null
  *   mappings.optional_sequence_elements - omit empty optional elements
  *   mappings.key_value_ranges - map string-keyed objects
@@ -181,10 +178,8 @@ tags:
 )";
 
   // Normalize formatting before comparing the expected and emitted documents.
-  EXPECT_TRUE(same_document(
-    expected_json, omni::ryml::as_json(source)));
-  EXPECT_TRUE(same_document(
-    expected_yaml, omni::ryml::as_yaml(source)));
+  EXPECT_TRUE(same_document(expected_json, omni::ryml::as_json(source)));
+  EXPECT_TRUE(same_document(expected_yaml, omni::ryml::as_yaml(source)));
 }
 
 // Supported scalars and vectors can be complete documents, without a record.
@@ -192,22 +187,18 @@ TEST(basics, scalar_and_sequence_roots) {
   EXPECT_EQ("42", omni::ryml::as_json(42));
   const auto scalar = omni::ryml::deserialize(omni::type_t<int>{}, "42");
   EXPECT_TRUE(scalar.value);
-  if (scalar.value) {
+  if (scalar.value)
     EXPECT_EQ(42, *scalar.value);
-  }
 
   const std::vector<int> values{7, 42};
-  EXPECT_TRUE(same_document(
-    "[7, 42]", omni::ryml::as_json(values)));
-  EXPECT_TRUE(same_document(
-    "- 7\n- 42\n", omni::ryml::as_yaml(values)));
+  EXPECT_TRUE(same_document("[7, 42]", omni::ryml::as_json(values)));
+  EXPECT_TRUE(same_document("- 7\n- 42\n", omni::ryml::as_yaml(values)));
   const auto sequence = omni::ryml::deserialize(
     omni::type_t<std::vector<int>>{}, "[7, 42]");
 
   EXPECT_TRUE(sequence.value);
-  if (sequence.value) {
+  if (sequence.value)
     EXPECT_EQ(values, *sequence.value);
-  }
 }
 
 namespace policy_examples {
@@ -241,9 +232,9 @@ TEST(basics, transform_config) {
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(7, result.value->value);
-  }
+
   EXPECT_TRUE(result.diagnostics.issues.empty());
   EXPECT_EQ(2, load.config.error_policy.error_limit);
   EXPECT_EQ(0, omni::ryml::deserialize.config.error_policy.error_limit);
@@ -269,8 +260,8 @@ TEST(basics, diagnostics) {
   }
 }
 
-// The core operation takes configuration explicitly instead of using a bound
-// callable.
+/** The core operation takes configuration explicitly instead of using a bound
+ * callable. */
 TEST(config, core_functions) {
   omni::ryml::config options{};
   options.error_policy.unknown_fields = omni::json::unknown_policy::allow;
@@ -279,9 +270,9 @@ TEST(config, core_functions) {
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(7, result.value->value);
-  }
+
   EXPECT_TRUE(result.diagnostics.issues.empty());
 }
 
@@ -301,9 +292,9 @@ TEST(config, unknown_fields) {
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(7, result.value->value);
-  }
+
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
     EXPECT_EQ(omni::json::issue_code::unknown_field, issue.reason);
@@ -329,9 +320,9 @@ TEST(config, duplicate_fields) {
     R"({"value": 7, "value": 42})");
 
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(42, result.value->value);
-  }
+
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
     EXPECT_EQ(omni::json::issue_code::duplicate_field, issue.reason);
@@ -379,6 +370,7 @@ TEST(config, warning_limit) {
     EXPECT_TRUE(result.diagnostics.issues.front().warning);
     EXPECT_EQ(omni::json::issue_code::warning_limit_exceeded,
       result.diagnostics.issues.back().reason);
+
     EXPECT_FALSE(result.diagnostics.issues.back().warning);
   }
 }
@@ -398,9 +390,9 @@ TEST(config, missing_fields) {
 
   const auto result = load(omni::type_t<policy_examples::initialized>{}, "{}");
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(7, result.value->value);
-  }
+
   EXPECT_TRUE(result.diagnostics.issues.empty());
 
   const auto strict = omni::ryml::deserialize(
@@ -467,6 +459,7 @@ TEST(diagnostics, render_diagnostics) {
 
   const std::string message =
     omni::ryml::render_diagnostics(result.diagnostics);
+
   EXPECT_EQ("/value: \"bad\" is not an integer", message);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
 }
@@ -481,9 +474,8 @@ TEST(diagnostics, transform_diagnostics) {
 
   EXPECT_EQ("", result.diagnostics);
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(7, result.value->value);
-  }
 }
 
 // Accepted input conditions can produce warnings alongside a valid value.
@@ -499,12 +491,13 @@ TEST(diagnostics, valid_values_with_warnings) {
     R"({"value": 7, "value": 42})");
 
   EXPECT_TRUE(result.value);
-  if (result.value) {
+  if (result.value)
     EXPECT_EQ(7, result.value->value);
-  }
+
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues)
     EXPECT_TRUE(issue.warning);
+
   EXPECT_EQ("/value: warning: duplicate field",
     omni::ryml::render_diagnostics(result.diagnostics));
 }
@@ -545,6 +538,7 @@ TEST(mappings, sequences) {
     std::vector<int> values;
     for (const auto &reading : result.value->readings)
       values.push_back(reading.value);
+
     const std::vector<int> expected_values{7, 42};
     const std::vector<std::vector<int>> expected_groups{{1}, {}, {2, 3}};
     EXPECT_EQ(expected_values, values);
@@ -571,9 +565,8 @@ TEST(mappings, optional_fields) {
       omni::type_t<optional_mapping::measurement>{}, document);
 
     EXPECT_TRUE(result.value);
-    if (result.value) {
+    if (result.value)
       EXPECT_FALSE(result.value->value);
-    }
   }
 
   const auto present = omni::ryml::deserialize(
@@ -596,31 +589,26 @@ TEST(mappings, optional_fields) {
 // Empty optional fields emit null; populated fields emit their value.
 TEST(mappings, serialize_optional_fields) {
   const optional_mapping::measurement empty{omni::compat::nullopt};
-  EXPECT_TRUE(same_document(
-    R"({"value": null})", omni::ryml::as_json(empty)));
-  EXPECT_TRUE(same_document(
-    "value: null", omni::ryml::as_yaml(empty)));
+  EXPECT_TRUE(same_document(R"({"value": null})", omni::ryml::as_json(empty)));
+  EXPECT_TRUE(same_document("value: null", omni::ryml::as_yaml(empty)));
 
   const optional_mapping::measurement present{7};
-  EXPECT_TRUE(same_document(
-    R"({"value": 7})", omni::ryml::as_json(present)));
+  EXPECT_TRUE(same_document(R"({"value": 7})", omni::ryml::as_json(present)));
 }
 
-// Empty optional sequence elements are omitted. Remaining elements keep their
-// order, so their output indices can differ from their original indices.
+/** Empty optional sequence elements are omitted. Remaining elements keep their
+ * order, so their output indices can differ from their original indices. */
 TEST(mappings, optional_sequence_elements) {
   const std::vector<omni::compat::optional<int>> values{
     7, omni::compat::nullopt, 0, omni::compat::nullopt,
   };
 
-  EXPECT_TRUE(same_document(
-    "[7, 0]", omni::ryml::as_json(values)));
-  EXPECT_TRUE(same_document(
-    "- 7\n- 0", omni::ryml::as_yaml(values)));
+  EXPECT_TRUE(same_document("[7, 0]", omni::ryml::as_json(values)));
+  EXPECT_TRUE(same_document("- 7\n- 0", omni::ryml::as_yaml(values)));
 }
 
-// Key/value ranges map to objects. Unique keys follow duplicate policies;
-// non-unique ranges such as multimap retain every repeated name.
+/** Key/value ranges map to objects. Unique keys follow duplicate policies;
+ * non-unique ranges such as multimap retain every repeated name. */
 TEST(mappings, key_value_ranges) {
   const std::map<std::string, int> source{{"first", 7}, {"second", 42}};
   const std::string json = R"({"first": 7, "second": 42})";
@@ -663,6 +651,7 @@ TEST(advanced, tree_ownership) {
   owning.rootref().remove_child("value");
   EXPECT_TRUE(same_document(R"({"label": "sensor"})",
     ::ryml::emitrs_json<std::string>(owning)));
+
   EXPECT_TRUE(same_document(R"({"label": "sensor"})",
     ::ryml::emitrs_yaml<std::string>(owning)));
 }
@@ -682,7 +671,9 @@ TEST(advanced, borrowed_and_owned_input) {
       parsed->crootref()["entry"]);
 
     static_assert(std::is_same<decltype(borrowed.diagnostics),
-      omni::ryml::diagnostics</*OwnsTree=*/false>>::value, "borrowed tree");
+      omni::ryml::diagnostics</*OwnsTree=*/false>>::value,
+      "borrowed tree");
+
     EXPECT_EQ(&*parsed, borrowed.diagnostics.tree.tree());
     EXPECT_EQ("/value: \"bad\" is not an integer",
       omni::ryml::render_diagnostics(borrowed.diagnostics));
@@ -695,7 +686,9 @@ TEST(advanced, borrowed_and_owned_input) {
       omni::type_t<policy_examples::measurement>{}, std::move(*owned_input));
 
     static_assert(std::is_same<decltype(owned.diagnostics),
-      omni::ryml::diagnostics</*OwnsTree=*/true>>::value, "owned tree");
+      omni::ryml::diagnostics</*OwnsTree=*/true>>::value,
+      "owned tree");
+
     EXPECT_EQ("/value: \"bad\" is not an integer",
       omni::ryml::render_diagnostics(owned.diagnostics));
   }
@@ -725,12 +718,14 @@ testing::AssertionResult same_document(std::string expected,
 
   const std::string expected_json =
     ::ryml::emitrs_json<std::string>(*expected_tree);
+
   const std::string actual_json =
     ::ryml::emitrs_json<std::string>(*actual_tree);
+
   return expected_json == actual_json
     ? testing::AssertionSuccess()
     : testing::AssertionFailure() << "Expected: " << expected_json
-                                  << "\nActual: " << actual_json;
+      << "\nActual: " << actual_json;
 }
 
 } // namespace
@@ -766,7 +761,8 @@ struct entry {
   std::string name;
 };
 
-// Only optional_record discovers this type; earlier calls cannot supply metadata.
+/** Only optional_record discovers this type; earlier calls cannot supply
+ * metadata. */
 struct optional_payload {
   int value;
 };
@@ -788,8 +784,10 @@ struct extended_values: std::vector<int> {
   // C++11 classes with bases need a constructor for case-data initialization.
   extended_values(std::vector<int> elements = {},
     int first = 0,
-    int second = 0):
-      std::vector<int>(std::move(elements)), first(first), second(second) {}
+    int second = 0)
+      : std::vector<int>(std::move(elements))
+      , first(first)
+      , second(second) {}
 };
 
 } // namespace customization_mapping
@@ -812,24 +810,24 @@ struct has_value<customization_mapping::optional_value<T>> {
 namespace ryml {
 namespace cp {
 
-// Explicit specializations reuse record mapping without selecting themselves.
-// Generic operators defer metadata access until the reflected scope.
+/** Explicit specializations reuse record mapping without selecting themselves.
+ * Generic operators defer metadata access until the reflected scope. */
 template <>
 struct from_type<customization_mapping::record>:
     reflected_scope::from_record {};
 
 template <>
 struct to_type<customization_mapping::record>:
-    reflected_scope::to_record_t {};
+    reflected_scope::to_record_t<> {};
 
-// Ad hoc: inheriting standard containers is discouraged. This custom mapping
-// needs the derived record's metadata as well as container iteration.
+/** Ad hoc: inheriting standard containers is discouraged. This custom mapping
+ * needs the derived record's metadata as well as container iteration. */
 template <>
 struct reflect_as_root<customization_mapping::extended_values>:
     std::true_type {};
 
-// Record metadata describes the added fields; container adapters handle the
-// flat representation. The fields occupy its final two positions.
+/** Record metadata describes the added fields; container adapters handle the
+ * flat representation. The fields occupy its final two positions. */
 template <>
 struct from_type<customization_mapping::extended_values> {
   struct cpp11_append_member {
@@ -954,16 +952,20 @@ TEST(customization_mapping, default_and_custom_adapters_round_trip) {
     {{7, "first"}, {8, "second"}},
     {6},
   };
+
   const auto document = omni::ryml::as_json(source);
   EXPECT_TRUE(same_document(R"({
     "count": 2,
     "entries": [{"value": 7, "name": "first"},
                 {"value": 8, "name": "second"}],
     "reading": 6
-  })", document));
+  })",
+
+    document));
 
   const auto result = omni::ryml::deserialize(
     omni::type_t<customization_mapping::record>{}, document);
+
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (!result.value)
@@ -986,12 +988,12 @@ TEST(customization_mapping, default_and_custom_adapters_round_trip) {
 TEST(customization_mapping, standard_range_insertion) {
   const auto result = omni::ryml::deserialize(
     omni::type_t<std::set<int>>{}, "[7, 4]");
+
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {
     EXPECT_EQ((std::set<int>{4, 7}), *result.value);
-    EXPECT_TRUE(same_document("[4, 7]",
-      omni::ryml::as_json(*result.value)));
+    EXPECT_TRUE(same_document("[4, 7]", omni::ryml::as_json(*result.value)));
   }
 }
 
@@ -1010,11 +1012,11 @@ class extended_container_mapping:
  */
 TEST_P(extended_container_mapping, appends_members_and_restores_them) {
   const auto &c = GetParam();
-  EXPECT_TRUE(same_document(c.document,
-    omni::ryml::as_json(c.source)));
+  EXPECT_TRUE(same_document(c.document, omni::ryml::as_json(c.source)));
 
   const auto result = omni::ryml::deserialize(
     omni::type_t<customization_mapping::extended_values>{}, c.document);
+
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (!result.value)
@@ -1022,6 +1024,7 @@ TEST_P(extended_container_mapping, appends_members_and_restores_them) {
 
   EXPECT_EQ(static_cast<const std::vector<int> &>(c.source),
     static_cast<const std::vector<int> &>(*result.value));
+
   EXPECT_EQ(c.source.first, result.value->first);
   EXPECT_EQ(c.source.second, result.value->second);
 }
@@ -1032,6 +1035,7 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
     {"with_elements", {{1, 2}, 4, 8}, "[1, 2, 4, 8]"},
     {"empty_base", {{}, 4, 8}, "[4, 8]"},
   }),
+
   [](const testing::TestParamInfo<extended_container_case> &info) {
     return info.param.name;
   });
@@ -1070,6 +1074,7 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   EXPECT_FALSE(mapped.value);
   EXPECT_EQ(static_cast<const std::vector<int> &>(c.initial),
     static_cast<const std::vector<int> &>(into));
+
   EXPECT_EQ(c.initial.first, into.first);
   EXPECT_EQ(c.initial.second, into.second);
   EXPECT_EQ(1U, mapped.diagnostics.issues.size());
@@ -1105,6 +1110,7 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
       "/0",
     },
   }),
+
   [](const testing::TestParamInfo<invalid_extended_container_case> &info) {
     return info.param.name;
   });
@@ -1183,8 +1189,7 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
     EXPECT_EQ(*c.expected, into);
     EXPECT_TRUE(mapped.diagnostics.issues.empty());
 
-    EXPECT_TRUE(same_document(c.document,
-      omni::ryml::as_json(into)));
+    EXPECT_TRUE(same_document(c.document, omni::ryml::as_json(into)));
   } else {
     EXPECT_EQ(c.initial, into);
     EXPECT_EQ(1U, mapped.diagnostics.issues.size());
@@ -1213,6 +1218,7 @@ INSTANTIATE_TEST_SUITE_P(nullable,
       },
     },
   }),
+
   [](const testing::TestParamInfo<optional_mapping_case> &info) {
     return info.param.name;
   });
@@ -1220,6 +1226,7 @@ INSTANTIATE_TEST_SUITE_P(nullable,
 TEST(customization_mapping, user_optional_operations_reuse_mapping_adapters) {
   const auto result = omni::ryml::deserialize(
     omni::type_t<customization_mapping::optional_value<int>>{}, "7");
+
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {
@@ -1235,26 +1242,25 @@ TEST(customization_mapping, omits_empty_optional_sequence_elements) {
     {false, 0},
     {true, 0},
   };
-  EXPECT_TRUE(same_document("[7, 0]",
-    omni::ryml::as_json(values)));
+
+  EXPECT_TRUE(same_document("[7, 0]", omni::ryml::as_json(values)));
 }
 
 TEST(customization_mapping, optional_record_uses_discovered_value_type) {
   const std::string document = R"({"item": {"value": 7}})";
   const auto result = omni::ryml::deserialize(
     omni::type_t<customization_mapping::optional_record>{}, document);
+
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (!result.value)
     return;
 
   EXPECT_TRUE(result.value->item);
-  if (result.value->item) {
+  if (result.value->item)
     EXPECT_EQ(7, result.value->item->value);
-  }
 
-  EXPECT_TRUE(same_document(document,
-    omni::ryml::as_json(*result.value)));
+  EXPECT_TRUE(same_document(document, omni::ryml::as_json(*result.value)));
 }
 
 TEST(customization_mapping, emits_enumerator_names) {
@@ -1276,11 +1282,13 @@ TEST_P(customization_enum_mapping, accepts_only_declared_string_names) {
   const auto &c = GetParam();
   const auto result = omni::ryml::deserialize(
     omni::type_t<customization_mapping::status>{}, c.input);
+
   EXPECT_EQ(bool(c.expected), bool(result.value));
   if (c.expected) {
     if (result.value) {
       EXPECT_EQ(*c.expected, *result.value);
     }
+
     EXPECT_TRUE(result.diagnostics.issues.empty());
   } else {
     const auto &issues = result.diagnostics.issues;
@@ -1349,6 +1357,7 @@ INSTANTIATE_TEST_SUITE_P(strings,
       },
     },
   }),
+
   [](const testing::TestParamInfo<enum_mapping_case> &info) {
     return info.param.name;
   });

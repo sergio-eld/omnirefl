@@ -23,7 +23,9 @@ namespace mapping {
  */
 struct to_range_t {
   template <typename T>
-  static constexpr bool supports() { return detail::is_mapped_range<T>::value; }
+  static constexpr bool supports() {
+    return omni::ryml::detail::is_mapped_range<T>::value;
+  }
 
   // TODO: [high] Define a public mapping context interface/type for
   // customization points instead of exposing detail::mapping_context.
