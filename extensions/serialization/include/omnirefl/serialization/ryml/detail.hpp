@@ -175,7 +175,7 @@ struct is_alias_by_name<F,
 
 /** Build an alias-to-name resolver from tuple-like string-view groups.
  * Each group starts with the canonical name; remaining entries are aliases.
- * The caller must ensure aliases do not match another member's canonical
+ * The caller must ensure aliases do not match another group's canonical
  * name or aliases; collisions are not validated. Mapping results are
  * unspecified for collisions. Canonical names are not implicitly added as
  * aliases. Returned views borrow the supplied strings, whose storage must

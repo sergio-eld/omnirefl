@@ -41,6 +41,7 @@ if (result.value) {
 #include <omnirefl/functional.hpp>
 
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/serialization/ryml/to_enum.hpp>
 #include <omnirefl/serialization/ryml/to_record.hpp>
 
 #include <ryml.hpp>
@@ -861,21 +862,6 @@ struct from_enum {
     -> compat::enable_if_t<supports<T>()>;
 };
 
-/** Accept a string matching a declared enumerator name. */
-struct to_enum {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::is_reflected_enum<T>::value;
-  }
-
-  template <typename T>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>(),
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
-};
-
 /** Write accessible non-static data members as mapping entries. */
 struct from_record {
   template <typename T>
@@ -951,8 +937,8 @@ struct from_type<T,
 
 template <typename T>
 struct to_type<T,
-  compat::enable_if_t<reflected_scope::to_enum::supports<T>()>>:
-    reflected_scope::to_enum {};
+  compat::enable_if_t<reflected_scope::to_enum_t::supports<T>()>>:
+    reflected_scope::to_enum_t {};
 
 // TODO: [high] Document and demonstrate the reflected-scope contract for
 // from_type/to_type customizations. Metadata queries must depend on template
@@ -978,6 +964,7 @@ struct to_type<T,
 // Inline and template definitions depend on the complete public interface
 // above. Including them here keeps the detail header private to this header.
 #include <omnirefl/serialization/impl/ryml.hpp>
+#include <omnirefl/serialization/ryml/impl/to_enum.hpp>
 #include <omnirefl/serialization/ryml/impl/to_record.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
