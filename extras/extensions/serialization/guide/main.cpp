@@ -820,7 +820,7 @@ struct from_type<customization_mapping::record>:
 
 template <>
 struct to_type<customization_mapping::record>:
-    mapping::reflected_scope::to_record {};
+    omni::ryml::to_record<> {};
 
 // Ad hoc: inheriting standard containers is discouraged. This custom mapping
 // needs the derived record's metadata as well as container iteration.

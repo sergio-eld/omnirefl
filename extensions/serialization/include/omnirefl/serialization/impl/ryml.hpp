@@ -797,17 +797,24 @@ auto to_container::operator()(::ryml::ConstNodeRef node,
   return success;
 }
 
-namespace reflected_scope {
+} // namespace mapping
 
 namespace detail {
 
 struct cpp11_member_named {
-  c4::csubstr name;
+  compat::string_view name;
 
   template <typename _F>
   bool operator()(omni::data_member_meta_t<_F> field) const {
-    return this->name == c4::to_csubstr(field.name());
+    return this->name == field.name();
   }
+};
+
+// Resolve each input key once, retaining its node for diagnostics and policy
+// selection. Aliases and canonical names can refer to the same record member.
+struct record_entry {
+  compat::string_view name;
+  ::ryml::ConstNodeRef node;
 };
 
 // SFINAE keeps T{} out of instantiations for non-default-constructible fields.
@@ -824,7 +831,7 @@ auto initialize_missing(omni::data_member_binding_t<Record, _F>)
     typename omni::data_member_meta_t<_F>::type>::value> {}
 
 struct cpp11_require_member {
-  const ::ryml::ConstNodeRef &node;
+  const std::vector<record_entry> &entries;
   omni::ryml::detail::mapping_context &diagnostics;
 
   template <typename Record, typename _F>
@@ -833,7 +840,11 @@ struct cpp11_require_member {
       return;
 
     const auto name = c4::to_csubstr(field.name());
-    if (!this->node.find_child(name).invalid())
+    if (std::any_of(this->entries.begin(),
+          this->entries.end(),
+          [name](const record_entry &entry) {
+            return compat::string_view{name.str, name.len} == entry.name;
+          }))
       return;
 
     const auto recovery = this->diagnostics.options.recovery;
@@ -884,7 +895,7 @@ struct cpp11_write_member {
 };
 
 struct cpp11_read_member {
-  const ::ryml::ConstNodeRef &node;
+  const std::vector<record_entry> &entries;
   omni::ryml::detail::mapping_context &diagnostics;
 
   template <typename Record, typename _F>
@@ -895,24 +906,22 @@ struct cpp11_read_member {
     if (this->diagnostics.stopped())
       return false;
 
-    const auto name = c4::to_csubstr(field.name());
-    const auto children = this->node.children();
-    const auto child =
-      (this->diagnostics.options.error_policy.duplicates
-        & json::duplicate_policy::last) == json::duplicate_policy::last
-      ? std::accumulate(children.begin(),
-          children.end(),
-          ::ryml::ConstNodeRef{},
-          [name](::ryml::ConstNodeRef selected, ::ryml::ConstNodeRef entry) {
-            return name == entry.key() ? entry : selected;
-          })
-      : this->node.find_child(name);
+    const compat::string_view name{field.name()};
+    const auto child = std::accumulate(this->entries.begin(),
+      this->entries.end(),
+      ::ryml::ConstNodeRef{},
+      [this, name](::ryml::ConstNodeRef selected, const record_entry &entry) {
+        const bool last = (this->diagnostics.options.error_policy.duplicates
+          & json::duplicate_policy::last) == json::duplicate_policy::last;
+        return name == entry.name && (selected.invalid() || last)
+          ? entry.node : selected;
+      });
     // The preceding presence pass already recovered or reported missing fields.
     if (child.invalid())
       return success;
 
     this->diagnostics.path.push_back({
-      /*field=*/name,
+      /*field=*/child.key(),
       /*index=*/compat::nullopt,
     });
     // A temporary also supports bitfields, which cannot expose references.
@@ -926,6 +935,9 @@ struct cpp11_read_member {
 };
 
 } // namespace detail
+
+namespace mapping {
+namespace reflected_scope {
 
 template <typename T>
 auto from_enum::operator()(T value,
@@ -997,17 +1009,21 @@ auto from_record::operator()(const T &value,
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
     | fn::filter<fn::non_static>()
-    | fn::each(detail::cpp11_write_member{
+    | fn::each(omni::ryml::detail::cpp11_write_member{
       /*node=*/node,
       /*diagnostics=*/diagnostics,
     });
 }
 
+} // namespace reflected_scope
+} // namespace mapping
+
+template <typename AliasByName>
 template <typename T>
-auto to_record::operator()(::ryml::ConstNodeRef node,
+auto to_record<AliasByName>::operator()(::ryml::ConstNodeRef node,
   T *into,
   omni::ryml::detail::mapping_context &diagnostics) const
-  -> compat::enable_if_t<supports<T>(), bool> {
+  -> compat::enable_if_t<omni::is_reflected_record<T>::value, bool> {
   if (!node.is_map()) {
     diagnostics.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
@@ -1021,6 +1037,9 @@ auto to_record::operator()(::ryml::ConstNodeRef node,
   const auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter<fn::non_static>();
 
+  std::vector<detail::record_entry> entries;
+  entries.reserve(node.num_children());
+
   // Structural issues precede missing fields and value mapping, preserving
   // diagnostic order regardless of the document's member order.
   for (const auto child : node.children()) {
@@ -1028,9 +1047,25 @@ auto to_record::operator()(::ryml::ConstNodeRef node,
       break;
 
     const auto name = child.key();
-    const bool known = fn::any_of(
-      detail::cpp11_member_named{/*name=*/name}, fields);
-    const bool duplicate = known && node.find_child(name).id() != child.id();
+    compat::string_view canonical{name.str, name.len};
+    bool known = fn::any_of(
+      detail::cpp11_member_named{/*name=*/canonical}, fields);
+    if (!known) {
+      const auto resolved = compat::invoke(this->alias_by_name, canonical);
+      if (resolved) {
+        canonical = *resolved;
+        known = fn::any_of(
+          detail::cpp11_member_named{/*name=*/canonical}, fields);
+      }
+    }
+
+    const bool duplicate = known && std::any_of(entries.begin(),
+      entries.end(),
+      [canonical](const detail::record_entry &entry) {
+        return canonical == entry.name;
+      });
+    if (known)
+      entries.push_back({/*name=*/canonical, /*node=*/child});
     if (known && !duplicate)
       continue;
 
@@ -1066,20 +1101,16 @@ auto to_record::operator()(::ryml::ConstNodeRef node,
   const auto members = binding.accessible_data_members()
     | fn::filter<fn::non_static>();
   members | fn::each(detail::cpp11_require_member{
-    /*node=*/node,
+    /*entries=*/entries,
     /*diagnostics=*/diagnostics,
   });
   const bool mapped = members
     | fn::foldl(detail::cpp11_read_member{
-      /*node=*/node,
+      /*entries=*/entries,
       /*diagnostics=*/diagnostics,
     }, /*initial=*/true);
   return mapped && errors == diagnostics.error_count;
 }
-
-} // namespace reflected_scope
-
-} // namespace mapping
 
 template <bool OwnsTree>
 std::string render_diagnostics_t::operator()(

@@ -1,0 +1,54 @@
+#pragma once
+
+#include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/serialization/ryml/detail.hpp>
+
+#include <ryml.hpp>
+
+#include <type_traits>
+#include <utility>
+
+namespace omni {
+namespace ryml {
+
+/** Read accessible non-static data members from a mapping.
+ * Canonical keys take precedence over alias resolution. Keys resolving to the
+ * same member follow config's duplicate policy in document order. Diagnostics
+ * retain the original document keys. with_alias_by_name replaces the resolver;
+ * it accepts string_view -> optional<string_view>, where an empty result means
+ * no alias. Resolved names must remain valid throughout this mapping call.
+ */
+template <typename AliasByName = detail::default_value<
+  compat::optional<compat::string_view>>>
+struct to_record {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_record<T>::value;
+  }
+
+  template <typename T>
+  auto operator()(::ryml::ConstNodeRef node,
+    T *into,
+    detail::mapping_context &diagnostics) const
+    -> compat::enable_if_t<omni::is_reflected_record<T>::value, bool>;
+
+  // Returned views must remain valid while the caller uses the resolved name.
+  AliasByName alias_by_name;
+
+  template <typename F>
+  OMNI_CPP14_CONSTEXPR to_record<F> with_alias_by_name(F f) const {
+    static_assert(std::is_copy_constructible<F>::value,
+      "with_alias_by_name requires a copy-constructible callable");
+    static_assert(detail::is_alias_by_name<F>::value,
+      "Invalid alias_by_name callable; expected: "
+      "alias_by_name :: compat::string_view -> optional<compat::string_view>");
+    return {/*alias_by_name=*/std::move_if_noexcept(f)};
+  }
+
+  // TODO: [high] Define a public mapping context interface/type for
+  // customization points instead of exposing detail::mapping_context.
+};
+
+} // namespace ryml
+} // namespace omni

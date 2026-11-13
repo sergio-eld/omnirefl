@@ -41,6 +41,7 @@ if (result.value) {
 #include <omnirefl/functional.hpp>
 
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/serialization/ryml/to_record.hpp>
 
 #include <ryml.hpp>
 
@@ -867,20 +868,6 @@ struct from_record {
   // constraints between this declaration and its out-of-class definition.
 };
 
-/** Read accessible non-static data members from matching mapping entries. */
-struct to_record {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::is_reflected_record<T>::value;
-  }
-
-  template <typename T>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    omni::ryml::detail::mapping_context &diagnostics) const
-    -> compat::enable_if_t<supports<T>(), bool>;
-};
-
 } // namespace reflected_scope
 
 } // namespace mapping
@@ -892,7 +879,7 @@ template <typename T, typename Enable>
 struct from_type: mapping::reflected_scope::from_record {};
 
 template <typename T, typename Enable>
-struct to_type: mapping::reflected_scope::to_record {};
+struct to_type: omni::ryml::to_record<> {};
 
 template <typename T>
 struct from_type<T,
@@ -961,10 +948,6 @@ struct to_type<T,
 // return the stored const callable rather than default-constructing its type.
 
 } // namespace cp
-
-// TODO: [high] Define a public diagnostics interface for customization-point
-// parameters. User implementations receive detail::mapping_context today;
-// their contract must not depend on a private implementation type.
 
 } // namespace ryml
 } // namespace omni
