@@ -1,34 +1,17 @@
-/** Experimental to_record compositor: aliases_for customization only.
- * AliasesFor maps actual member metadata to an alias range. aliases_for(f)
- * returns a new specialization; f receives metadata and the previous callable.
- * Signature errors are exposed only when actual member metadata is supplied.
+/** Experimental to_record compositor: alias-to-canonical-name lookup only.
+ * with_alias_by_name(f) replaces the resolver and checks its invocation type.
+ * alias_dict takes tuple-like groups: canonical name, followed by its aliases.
+ * Configuration and lookup do not require a reflected scope.
  */
 
 #include <omnirefl/extensions/compat.hpp>
-#include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/functional.hpp>
-#include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/traits.hpp>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
-#include <map>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
-
-// C++20 permits vector storage and sorting within constant evaluation.
-#if defined(__cpp_lib_constexpr_vector) \
-  && 201907L <= __cpp_lib_constexpr_vector \
-  && defined(__cpp_lib_constexpr_algorithms) \
-  && 201806L <= __cpp_lib_constexpr_algorithms
-#  define CPP20_CONSTEXPR_VECTOR constexpr
-#else
-#  define CPP20_CONSTEXPR_VECTOR
-#endif
 
 namespace {
 
@@ -36,41 +19,164 @@ using string_view = omni::compat::string_view;
 
 namespace prototype {
 
-// Alias views borrow the character storage supplied to make_lookup.
-struct lookup {
-  CPP20_CONSTEXPR_VECTOR explicit lookup(
-    std::vector<std::pair<string_view, std::vector<string_view>>> entries)
-    : _entries(std::move(entries)) {
-    std::sort(this->_entries.begin(), this->_entries.end());
-  }
+namespace detail {
 
-  // Declaring copy operations suppresses implicit moves; rvalues copy too.
-  lookup(const lookup &) = default;
-  lookup &operator=(const lookup &) = default;
-
-  CPP20_CONSTEXPR_VECTOR std::vector<string_view> operator()(
-    string_view name) const {
-    const auto found = std::lower_bound(this->_entries.begin(),
-      this->_entries.end(),
-      name,
-      [](const decltype(_entries)::value_type &entry, string_view name) {
-        return entry.first < name;
-      });
-
-    return found != this->_entries.end() && found->first == name
-      ? found->second
-      : std::vector<string_view>{};
-  }
-
-private:
-  std::vector<std::pair<string_view, std::vector<string_view>>> _entries;
+struct alias_entry {
+  string_view alias;
+  string_view name;
 };
 
-CPP20_CONSTEXPR_VECTOR lookup make_lookup(
-  std::vector<std::pair<string_view, std::vector<string_view>>> entries) {
-  return lookup{std::move(entries)};
+// Compare bounded character buffers directly; view comparison operators
+// lack C++11 constant evaluation. Lengths also preserve embedded NULs.
+constexpr bool alias_less(const char *left,
+  std::size_t left_size,
+  const char *right,
+  std::size_t right_size,
+  std::size_t index = 0) {
+  return index == right_size ? false
+    : index == left_size ? true
+    : static_cast<unsigned char>(left[index])
+        == static_cast<unsigned char>(right[index])
+      ? alias_less(left, left_size, right, right_size, index + 1)
+      : static_cast<unsigned char>(left[index])
+        < static_cast<unsigned char>(right[index]);
 }
 
+constexpr bool alias_less(string_view left, string_view right) {
+  return alias_less(left.data(), left.size(), right.data(), right.size());
+}
+
+// Views borrow the strings supplied to alias_dict; keep their storage alive.
+template <std::size_t Size>
+struct name_by_alias_lookup {
+  // alias_dict sorts these entries; users must not modify them afterward.
+  std::array<alias_entry, Size> _entries;
+
+  omni::compat::optional<string_view> operator()(string_view alias) const {
+    const auto found = std::lower_bound(this->_entries.begin(),
+      this->_entries.end(),
+      alias,
+      [](const alias_entry &entry, string_view alias) {
+        return entry.alias < alias;
+      });
+
+    return found != this->_entries.end() && found->alias == alias
+      ? omni::compat::optional<string_view>{found->name}
+      : omni::compat::nullopt;
+  }
+};
+
+// C++11 lambda equivalent: unpack the canonical name and its aliases.
+struct cpp11_invert_alias_group {
+  template <typename... Aliases>
+  OMNI_CPP14_CONSTEXPR auto operator()(string_view name,
+    const Aliases &...aliases) const
+    -> decltype(std::make_tuple(alias_entry{string_view{aliases}, name}...)) {
+    return std::make_tuple(alias_entry{string_view{aliases}, name}...);
+  }
+};
+
+// C++11 cannot mutate arrays in constant evaluation. Build a new index order
+// at each insertion, then copy entries only when materializing the result.
+// Built-in arrays allow C++11 constexpr access; one slot handles Size=0.
+template <std::size_t Size>
+struct alias_buffer {
+  alias_entry values[Size ? Size : 1];
+};
+
+template <std::size_t Size>
+struct alias_order {
+  std::size_t values[Size ? Size : 1];
+};
+
+template <std::size_t... Index>
+constexpr alias_order<sizeof...(Index)> alias_indices(
+  omni::compat::index_sequence<Index...>) {
+  return {{Index...}};
+}
+
+template <std::size_t Size>
+constexpr std::size_t alias_position(const alias_buffer<Size> &entries,
+  const alias_order<Size> &order,
+  std::size_t next,
+  std::size_t position) {
+  return position == 0
+      || !alias_less(entries.values[next].alias,
+        entries.values[order.values[position - 1]].alias)
+    ? position
+    : alias_position(entries, order, next, position - 1);
+}
+
+template <std::size_t Size, std::size_t... Index>
+constexpr alias_order<Size> insert_alias_index(const alias_order<Size> &order,
+  std::size_t next,
+  std::size_t position,
+  omni::compat::index_sequence<Index...>) {
+  return {{(Index == position ? next
+    : Index > position && Index <= next ? order.values[Index - 1]
+    : order.values[Index])...}};
+}
+
+template <std::size_t Size>
+constexpr alias_order<Size> insertion_sort(const alias_buffer<Size> &entries,
+  const alias_order<Size> &order,
+  std::size_t next = 1) {
+  return next >= Size ? order
+    : insertion_sort(entries,
+        insert_alias_index(order,
+          next,
+          alias_position(entries, order, next, next),
+          omni::compat::make_index_sequence<Size>{}),
+        next + 1);
+}
+
+template <std::size_t Size, std::size_t... Index>
+constexpr std::array<alias_entry, Size> materialize_alias_array(
+  const alias_buffer<Size> &entries,
+  const alias_order<Size> &order,
+  omni::compat::index_sequence<Index...>) {
+  return {{entries.values[order.values[Index]]...}};
+}
+
+template <std::size_t Size>
+constexpr std::array<alias_entry, Size> sort_alias_entries(
+  const alias_buffer<Size> &entries) {
+  return materialize_alias_array(entries,
+    insertion_sort(entries,
+      alias_indices(omni::compat::make_index_sequence<Size>{})),
+    omni::compat::make_index_sequence<Size>{});
+}
+
+// C++11 lambda equivalent: materialize and sort the flattened fixed-size table.
+struct cpp11_sorted_aliases {
+  template <typename... Entries>
+  constexpr name_by_alias_lookup<sizeof...(Entries)> operator()(
+    const Entries &...entries) const {
+    return {
+      /*_entries=*/sort_alias_entries(
+        alias_buffer<sizeof...(Entries)>{{entries...}}),
+    };
+  }
+};
+
+} // namespace detail
+
+/** Build an alias-to-name resolver from tuple-like string-view groups.
+ * Each group starts with the canonical name; remaining entries are aliases.
+ * Canonical names are not implicitly added as aliases. Returned views borrow
+ * the supplied strings, whose storage must outlive use of the resolver.
+ * Full constexpr factory evaluation requires C++14 tuple helpers; the sorting
+ * implementation itself supports constant evaluation in C++11.
+ */
+template <typename... Groups>
+OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
+  -> decltype(omni::compat::apply(detail::cpp11_sorted_aliases{},
+    std::tuple_cat(omni::compat::apply(
+      detail::cpp11_invert_alias_group{}, groups)...))) {
+  return omni::compat::apply(detail::cpp11_sorted_aliases{},
+    std::tuple_cat(omni::compat::apply(
+      detail::cpp11_invert_alias_group{}, groups)...));
+}
 
 // Prototype of a generic fn::default_value compositor.
 template <typename Result>
@@ -84,454 +190,224 @@ struct default_value {
 
 namespace detail {
 
-// Bind the previous callable to a two-argument override.
-template <typename Previous, typename Override = Previous>
-struct alias_override {
-  static_assert(std::is_copy_constructible<Override>::value,
-    "alias_override requires a copy-constructible override");
-  static_assert(std::is_copy_constructible<Previous>::value,
-    "alias_override requires a copy-constructible previous callable");
+template <typename F, typename = void>
+struct is_alias_by_name: std::false_type {};
 
-  Override custom;
-  Previous previous;
-
-  // C++11 needs the trailing expression to deduce the composed return type.
-  template <typename _F>
-  constexpr auto operator()(omni::data_member_meta_t<_F> m) const
-    -> decltype(omni::compat::invoke(this->custom, m, this->previous)) {
-    return omni::compat::invoke(this->custom, m, this->previous);
-  }
-};
-
-// C++20 names the range requirement as a concept for constrained interfaces.
-#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-template <typename Range>
-concept alias_range = omni::compat::is_input_range<Range>::value
-  && omni::traits::is_string<omni::compat::remove_cvref_t<
-    omni::compat::range_reference_t<Range>>>::value;
-
-template <typename Range>
-using is_alias_range = std::bool_constant<alias_range<Range>>;
-#else
-template <typename Range, typename = void>
-struct is_alias_range: std::false_type {};
-
-template <typename Range>
-struct is_alias_range<Range,
-  omni::compat::enable_if_t<omni::compat::is_input_range<Range>::value>>:
-    omni::traits::is_string<omni::compat::remove_cvref_t<
-      omni::compat::range_reference_t<Range>>> {};
-#endif
-
-template <typename AliasesFor>
-struct alias_for_type_sig;
-
-template <typename Previous, typename Current>
-struct alias_for_type_sig<alias_override<Previous, Current>> {
-  // Supply the concrete metadata type when applying the compositor.
-  template <typename Member, typename = void>
-  struct validate: std::false_type {};
-
-  template <typename Member>
-  struct validate<Member,
-    omni::compat::void_t<omni::compat::invoke_result_t<const Current &,
-      Member,
-      const Previous &>>>:
-      is_alias_range<omni::compat::invoke_result_t<const Current &,
-        Member,
-        const Previous &>> {};
-};
-
-struct no_error: std::true_type {};
-
-template <typename Callable>
-struct invalid_aliases: std::false_type {};
-
-// Preserve an earlier failure without inspecting a later override's body.
-template <typename PreviousError,
-  typename Previous,
-  typename Current,
-  typename Member>
-struct alias_override_error: omni::compat::type_identity<PreviousError> {};
-
-template <typename Previous, typename Current, typename Member>
-struct alias_override_error<no_error, Previous, Current, Member> {
-  using type = omni::compat::conditional_t<alias_for_type_sig<
-    alias_override<Previous, Current>>::template validate<Member>::value,
-    no_error,
-    invalid_aliases<Current>>;
-};
-
-template <typename AliasesFor, typename Member>
-struct alias_chain_error;
-
-template <typename Previous, typename Current, typename Member>
-struct alias_chain_error<alias_override<Previous, Current>, Member>:
-    alias_override_error<typename alias_chain_error<Previous, Member>::type,
-      Previous,
-      Current,
-      Member> {};
-
-template <typename Current, typename Member>
-struct alias_chain_error<alias_override<Current, Current>, Member>:
-    alias_override_error<no_error, Current, Current, Member> {};
-
-template <typename AliasesFor, typename Members>
-struct first_alias_error;
-
-template <typename AliasesFor>
-struct first_alias_error<AliasesFor, std::tuple<>>:
-    omni::compat::type_identity<no_error> {};
-
-template <typename AliasesFor, typename Member, typename... Rest>
-struct first_alias_error<AliasesFor, std::tuple<Member, Rest...>>:
-    omni::compat::conditional_t<std::is_same<no_error,
-      typename alias_chain_error<AliasesFor, Member>::type>::value,
-      first_alias_error<AliasesFor, std::tuple<Rest...>>,
-      alias_chain_error<AliasesFor, Member>> {};
-
-// C++11 lambda equivalent: compute a compact result without asserting here.
-template <typename AliasesFor>
-struct cpp11_check_record {
-  template <typename _M>
-  constexpr auto operator()(omni::record_meta_t<_M>) const
-  // Metadata does not exist before generation. Defer checking while keeping
-  // reflected_call visible during instrumentation and IDE startup.
-#if defined(OMNI_TOOL_RUN) \
-  || !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
-    -> no_error
-#else
-    -> typename first_alias_error<AliasesFor,
-      decltype(std::declval<omni::record_meta_t<_M>>()
-        .accessible_data_members())>::type
-#endif
-  { return {}; }
-};
-
-// MSVC prints the computed error tag without expanding the override chain.
-#if defined(_MSC_VER) && !defined(__clang__)
-template <typename Result>
-struct assert_alias_result {
-  static_assert(Result::value,
-    "Invalid aliases_for override; expected: "
-    "aliases_for :: (data_member_meta, previous) "
-    "-> input_range<traits::is_string>");
-  using type = void;
-};
-// GCC names Callable explicitly when it is deduced by this error overload.
-#elif !defined(__clang__)
-OMNI_CPP14_CONSTEXPR inline void assert_valid_aliases(no_error) {}
-
-template <typename Callable>
-OMNI_CPP14_CONSTEXPR void assert_valid_aliases(invalid_aliases<Callable>) {
-  static_assert(invalid_aliases<Callable>::value,
-    "Invalid aliases_for override; expected: "
-    "aliases_for :: (data_member_meta, previous) "
-    "-> input_range<traits::is_string>");
-}
-#endif
+template <typename F>
+struct is_alias_by_name<F,
+  omni::compat::void_t<omni::compat::invoke_result_t<const F &, string_view>>>:
+    std::is_same<omni::compat::optional<string_view>,
+      omni::compat::invoke_result_t<const F &, string_view>> {};
 
 } // namespace detail
 
-template <typename AliasesFor = detail::alias_override<
-  default_value<std::array<string_view, 0>>>>
+template <typename AliasByName = default_value<
+  omni::compat::optional<string_view>>>
 struct to_record {
-  static_assert(omni::traits::is<detail::alias_override, AliasesFor>(),
-    "to_record stores aliases through alias_override");
+  // Returned views must remain valid while the caller uses the resolved name.
+  AliasByName alias_by_name;
 
-  AliasesFor _aliases_for;
-
-  // No callability check is made here without concrete member metadata.
-  template <typename Override>
-  constexpr auto aliases_for(Override f) const
-    -> to_record<detail::alias_override<AliasesFor, Override>> {
-    return {
-      /*_aliases_for=*/{
-        /*custom=*/std::move(f),
-        /*previous=*/this->_aliases_for,
-      },
-    };
+  template <typename F>
+  OMNI_CPP14_CONSTEXPR to_record<F> with_alias_by_name(F f) const {
+    static_assert(std::is_copy_constructible<F>::value,
+      "with_alias_by_name requires a copy-constructible callable");
+    static_assert(detail::is_alias_by_name<F>::value,
+      "Invalid alias_by_name callable; expected: "
+      "alias_by_name :: string_view -> optional<string_view>");
+    return {/*alias_by_name=*/std::move_if_noexcept(f)};
   }
 };
-
-/** Validate every alias-override layer for every accessible data member.
- * Establishes a reflected scope and reports invalid overrides by static_assert.
- * Stops at the first failing member and its earliest invalid override.
- * Call outside a reflected scope; nested reflected_call is unsupported.
- */
-// These standard C++ alternatives change diagnostic presentation, not checking.
-// MSVC's return-type assertion avoids its verbose function-body backtrace.
-#if defined(_MSC_VER) && !defined(__clang__)
-template <typename AliasesFor, typename Record>
-auto static_assert_alias_is_invocable(const to_record<AliasesFor> &,
-  omni::type_t<Record> type)
-  -> typename detail::assert_alias_result<decltype(omni::reflected_call(
-    detail::cpp11_check_record<AliasesFor>{}, type))>::type {}
-#else
-template <typename AliasesFor, typename Record>
-void static_assert_alias_is_invocable(const to_record<AliasesFor> &,
-  omni::type_t<Record> type) {
-  const auto result = omni::reflected_call(
-    detail::cpp11_check_record<AliasesFor>{}, type);
-  // Clang names the computed error tag in a direct assertion's diagnostic.
-#if defined(__clang__)
-  static_assert(decltype(result)::value,
-    "Invalid aliases_for override; expected: "
-    "aliases_for :: (data_member_meta, previous) "
-    "-> input_range<traits::is_string>");
-#else
-  detail::assert_valid_aliases(result);
-#endif
-}
-#endif
-
-// TODO: [medium] Document static_assert_alias_is_invocable diagnostics on GCC,
-// Clang, and MSVC: locate the signature assertion, identify the invalid
-// callable in its template context, and find the user call site.
 
 } // namespace prototype
 
 namespace examples {
 
-struct endpoint {
-  std::string host;
-  unsigned port;
-};
+struct runtime_aliases {
+  bool legacy;
 
-// Only static_assert_alias_is_invocable discovers this record.
-// Other examples use endpoint.
-struct validation_record {
-  std::string host;
-  unsigned port;
-};
-
-// C++11 lambda equivalents also serve the newer-standard examples.
-struct cpp11_host_aliases {
-  template <typename _F, typename Previous>
-  CPP20_CONSTEXPR_VECTOR std::vector<string_view> operator()(
-    omni::data_member_meta_t<_F> m,
-    const Previous &previous) const {
-    // C++20 constant evaluation needs transient storage; C++11 caches it.
-#if !defined(__cpp_lib_constexpr_vector) \
-  || 201907L > __cpp_lib_constexpr_vector \
-  || !defined(__cpp_lib_constexpr_algorithms) \
-  || 201806L > __cpp_lib_constexpr_algorithms
-    static
-#endif
-    const auto names = prototype::make_lookup({
-      {"host", {"hostname"}},
-    });
-    const auto selected = names(m.name());
-    const auto aliases = previous(m);
-    std::vector<string_view> result(aliases.begin(), aliases.end());
-    result.insert(result.end(), selected.begin(), selected.end());
-    return result;
+  omni::compat::optional<string_view> operator()(string_view alias) const {
+    return this->legacy && alias == "hostname"
+      ? omni::compat::optional<string_view>{"host"}
+      : omni::compat::nullopt;
   }
 };
 
-struct cpp11_extend_host_aliases {
-  template <typename _F, typename Previous>
-  CPP20_CONSTEXPR_VECTOR std::vector<string_view> operator()(
-    omni::data_member_meta_t<_F> m,
-    const Previous &previous) const {
-    const auto aliases = previous(m);
-    std::vector<string_view> result(aliases.begin(), aliases.end());
-    if (string_view{m.name()} == "host")
-      result.emplace_back("server");
-    return result;
+struct copy_only_alias_by_name {
+  copy_only_alias_by_name() = default;
+  copy_only_alias_by_name(const copy_only_alias_by_name &) = default;
+  copy_only_alias_by_name(copy_only_alias_by_name &&) = delete;
+
+  omni::compat::optional<string_view> operator()(string_view) const {
+    return string_view{"host"};
   }
-};
-
-constexpr cpp11_host_aliases host_aliases{};
-constexpr cpp11_extend_host_aliases extend_host_aliases{};
-
-struct invalid_signature {
-  std::vector<string_view> operator()(int) const { return {}; }
 };
 
 } // namespace examples
 
 namespace tests {
 
-TEST(alias_lookup, finds_aliases_from_unsorted_entries_and_a_copy) {
-  // C++20 can prepare and consume a temporary lookup in constant evaluation.
-#if defined(__cpp_lib_constexpr_vector) \
-  && 201907L <= __cpp_lib_constexpr_vector \
-  && defined(__cpp_lib_constexpr_algorithms) \
-  && 201806L <= __cpp_lib_constexpr_algorithms
-  static_assert(prototype::make_lookup({
-    {"port", {"service_port"}},
-    {"host", {"hostname"}},
-  })("host").front() == "hostname");
-#endif
-
-  const auto names = prototype::make_lookup({
-    {"port", {"service_port", "listen_port"}},
-    {"host", {"hostname"}},
-  });
+TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
+  const auto names = prototype::alias_dict(
+    std::make_tuple("port", "service_port", "listen_port"),
+    std::make_tuple("host", "hostname"));
   const auto copied = names;
 
-  EXPECT_EQ((std::vector<string_view>{"hostname"}), names("host"));
-  EXPECT_EQ((std::vector<string_view>{"service_port", "listen_port"}),
-    copied("port"));
-  EXPECT_EQ(std::vector<string_view>{}, copied("missing"));
+  EXPECT_EQ("host", names("hostname").value());
+  EXPECT_EQ("port", copied("service_port").value());
+  EXPECT_EQ("port", copied("listen_port").value());
+  EXPECT_FALSE(names("missing"));
+  EXPECT_FALSE(names("host"));
 }
 
-TEST(alias_lookup, returns_no_aliases_for_empty_entries_or_lookup) {
-  const auto empty = prototype::make_lookup({});
-  const auto names = prototype::make_lookup({
-    {"host", {}},
-  });
+TEST(alias_lookup, accepts_tuple_like_groups_and_canonical_only_groups) {
+  const std::array<string_view, 3> host{{"host", "hostname", "server"}};
+  const std::pair<string_view, string_view> port{"port", "service_port"};
+  const auto names = prototype::alias_dict(host, port, std::make_tuple("tls"));
 
-  EXPECT_EQ(std::vector<string_view>{}, empty("host"));
-  EXPECT_EQ(std::vector<string_view>{}, names("host"));
+  EXPECT_EQ("host", names("hostname").value());
+  EXPECT_EQ("host", names("server").value());
+  EXPECT_EQ("port", names("service_port").value());
+  EXPECT_FALSE(names("tls"));
 }
 
-// C++11 lambda equivalent: normalize the returned range for readable checks.
-template <typename Compositor>
-struct cpp11_collect_member {
-  const Compositor &compositor;
+TEST(alias_lookup, returns_no_name_for_an_empty_dictionary) {
+  const auto empty = prototype::alias_dict();
+  const auto canonical_only = prototype::alias_dict(std::make_tuple("host"));
 
-  template <typename _F>
-  std::map<string_view, std::vector<string_view>> operator()(
-    std::map<string_view, std::vector<string_view>> result,
-    omni::data_member_meta_t<_F> m) const {
-    static_assert(prototype::detail::alias_for_type_sig<
-      decltype(this->compositor._aliases_for)>::template validate<
-      omni::data_member_meta_t<_F>>::value,
-      "Invalid aliases_for override; expected: "
-      "aliases_for :: (data_member_meta, previous) "
-      "-> input_range<traits::is_string>");
+  EXPECT_FALSE(empty("hostname"));
+  EXPECT_FALSE(canonical_only("hostname"));
+}
 
-    const auto aliases = this->compositor._aliases_for(m);
-    result.emplace(m.name(),
-      std::vector<string_view>{aliases.begin(), aliases.end()});
-    return result;
-  }
-};
+TEST(alias_lookup, sorts_entries_in_constant_evaluation) {
+  constexpr auto sorted = prototype::detail::cpp11_sorted_aliases{}(
+    prototype::detail::alias_entry{"tls", "secure"},
+    prototype::detail::alias_entry{"host_name", "host"},
+    prototype::detail::alias_entry{"host", "host"},
+    prototype::detail::alias_entry{"hostname", "host"},
+    prototype::detail::alias_entry{"port", "port"});
 
-template <typename Compositor>
-struct inspect_aliases {
-  Compositor compositor;
+  EXPECT_EQ("secure", sorted("tls").value());
+  EXPECT_EQ("host", sorted("host_name").value());
+  EXPECT_EQ("host", sorted("host").value());
+  EXPECT_EQ("host", sorted("hostname").value());
+  EXPECT_EQ("port", sorted("port").value());
+}
 
-  // Explicit return type defers the visitor body until metadata is generated.
-  template <typename _M>
-  std::map<string_view, std::vector<string_view>> operator()(
-    omni::record_meta_t<_M> m) const {
-    return omni::fn::foldl(cpp11_collect_member<Compositor>{this->compositor},
-      std::map<string_view, std::vector<string_view>>{},
-      m.accessible_data_members());
-  }
-};
+TEST(alias_lookup, prepares_empty_and_single_entry_constexpr_tables) {
+  constexpr auto empty = prototype::detail::cpp11_sorted_aliases{}();
+  constexpr auto single = prototype::detail::cpp11_sorted_aliases{}(
+    prototype::detail::alias_entry{"hostname", "host"});
 
-TEST(to_record_aliases, default_has_no_aliases) {
-  static_assert(prototype::default_value<unsigned>{}("ignored") == 0,
-    "Default values remain usable in constant expressions");
+  EXPECT_FALSE(empty("hostname"));
+  EXPECT_EQ("host", single("hostname").value());
+}
 
-  static_assert(prototype::detail::is_alias_range<
-    std::vector<std::string>>::value,
-    "Alias ranges may own their strings");
+TEST(alias_lookup, orders_empty_prefix_and_non_ascii_keys) {
+  constexpr auto sorted = prototype::detail::cpp11_sorted_aliases{}(
+    prototype::detail::alias_entry{"\x80", "extended"},
+    prototype::detail::alias_entry{"host_", "suffix"},
+    prototype::detail::alias_entry{"", "empty"},
+    prototype::detail::alias_entry{"host", "plain"},
+    prototype::detail::alias_entry{"hostname", "long"});
 
+  EXPECT_EQ("extended", sorted("\x80").value());
+  EXPECT_EQ("suffix", sorted("host_").value());
+  EXPECT_EQ("empty", sorted("").value());
+  EXPECT_EQ("plain", sorted("host").value());
+  EXPECT_EQ("long", sorted("hostname").value());
+}
+
+// C++11 does not require make_tuple/tuple_cat to be constexpr. Sort preparation
+// is tested independently above; full factory evaluation starts with C++14.
+#if 201402L <= OMNI_CPLUSPLUS
+TEST(alias_lookup, prepares_an_inverse_dictionary_in_constant_evaluation) {
+  constexpr auto names = prototype::alias_dict(
+    std::make_tuple("port", "service_port", "port_number"),
+    std::make_tuple("host", "hostname", "server", "host_name"),
+    std::make_tuple("tls", "secure", "ssl"));
+
+  EXPECT_EQ("host", names("hostname").value());
+  EXPECT_EQ("host", names("host_name").value());
+  EXPECT_EQ("host", names("server").value());
+  EXPECT_EQ("port", names("port_number").value());
+  EXPECT_EQ("port", names("service_port").value());
+  EXPECT_EQ("tls", names("secure").value());
+  EXPECT_EQ("tls", names("ssl").value());
+}
+#endif
+
+// C++14 tuple helpers allow retaining the prepared table in a constexpr object.
+#if 201402L <= OMNI_CPLUSPLUS
+TEST(alias_lookup, prepares_and_queries_a_persistent_constexpr_dictionary) {
+  constexpr auto names = prototype::alias_dict(
+    std::make_tuple("port", "service_port"),
+    std::make_tuple("host", "hostname", "server"));
+
+  EXPECT_EQ("host", names("hostname").value());
+  EXPECT_EQ("host", names("server").value());
+  EXPECT_EQ("port", names("service_port").value());
+  EXPECT_FALSE(names("missing"));
+}
+#endif
+
+TEST(to_record_aliases, default_has_no_alias_mapping) {
   const prototype::to_record<> compositor{};
-  const auto result = omni::reflected_call(
-    inspect_aliases<decltype(compositor)>{compositor},
-    omni::type_t<examples::endpoint>{});
 
-  const std::map<string_view, std::vector<string_view>> expected{
-    {"host", {}},
-    {"port", {}},
-  };
-  EXPECT_EQ(expected, result);
+  EXPECT_FALSE(compositor.alias_by_name("hostname"));
 }
 
-TEST(to_record_aliases, override_selects_a_member_and_delegates_the_rest) {
-  const auto compositor =
-    prototype::to_record<>{}.aliases_for(examples::host_aliases);
-  const auto result = omni::reflected_call(
-    inspect_aliases<decltype(compositor)>{compositor},
-    omni::type_t<examples::endpoint>{});
+TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
+  const auto original = prototype::to_record<>{}.with_alias_by_name(
+    prototype::alias_dict(std::make_tuple("host", "hostname")));
+  const auto replacement = original.with_alias_by_name(
+    prototype::alias_dict(std::make_tuple("port", "service_port")));
 
-  const std::map<string_view, std::vector<string_view>> expected{
-    {"host", {"hostname"}},
-    {"port", {}},
-  };
-  EXPECT_EQ(expected, result);
+  EXPECT_EQ("host", original.alias_by_name("hostname").value());
+  EXPECT_FALSE(original.alias_by_name("service_port"));
+  EXPECT_EQ("port", replacement.alias_by_name("service_port").value());
+  EXPECT_FALSE(replacement.alias_by_name("hostname"));
 }
 
-TEST(to_record_aliases, override_composes_without_changing_the_previous_value) {
-  const auto original =
-    prototype::to_record<>{}.aliases_for(examples::host_aliases);
-  const auto extended = original.aliases_for(examples::extend_host_aliases);
-  const auto result = omni::reflected_call(
-    inspect_aliases<decltype(extended)>{extended},
-    omni::type_t<examples::endpoint>{});
+TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
+  const auto legacy = prototype::to_record<>{}.with_alias_by_name(
+    examples::runtime_aliases{/*legacy=*/true});
+  const auto current = prototype::to_record<>{}.with_alias_by_name(
+    examples::runtime_aliases{/*legacy=*/false});
 
-  const std::map<string_view, std::vector<string_view>> expected{
-    {"host", {"hostname", "server"}},
-    {"port", {}},
-  };
-  EXPECT_EQ(expected, result);
-
-  const auto unchanged = omni::reflected_call(
-    inspect_aliases<decltype(original)>{original},
-    omni::type_t<examples::endpoint>{});
-
-  const std::map<string_view, std::vector<string_view>> previous{
-    {"host", {"hostname"}},
-    {"port", {}},
-  };
-  EXPECT_EQ(previous, unchanged);
+  EXPECT_EQ("host", legacy.alias_by_name("hostname").value());
+  EXPECT_FALSE(current.alias_by_name("hostname"));
 }
 
-TEST(to_record_aliases, lookup_appends_to_previous_aliases) {
-  const auto compositor = prototype::to_record<>{}
-    .aliases_for(examples::extend_host_aliases)
-    .aliases_for(examples::host_aliases);
-  const auto result = omni::reflected_call(
-    inspect_aliases<decltype(compositor)>{compositor},
-    omni::type_t<examples::endpoint>{});
+TEST(to_record_aliases, accepts_a_callable_with_a_deleted_move_constructor) {
+  const examples::copy_only_alias_by_name resolver{};
+  const auto compositor = prototype::to_record<>{}.with_alias_by_name(resolver);
 
-  const std::map<string_view, std::vector<string_view>> expected{
-    {"host", {"server", "hostname"}},
-    {"port", {}},
-  };
-  EXPECT_EQ(expected, result);
+  EXPECT_EQ("host", compositor.alias_by_name("hostname").value());
 }
 
-TEST(to_record_aliases, validates_every_override_for_record_members) {
-  constexpr auto valid = prototype::to_record<>{}
-    .aliases_for(examples::host_aliases)
-    .aliases_for(examples::extend_host_aliases);
-  prototype::static_assert_alias_is_invocable(valid,
-    omni::type_t<examples::validation_record>{});
+TEST(to_record_aliases, checks_the_callable_when_configured) {
+  const auto compositor = prototype::to_record<>{}.with_alias_by_name(
+    [](string_view alias) -> omni::compat::optional<string_view> {
+      return alias == "hostname"
+        ? omni::compat::optional<string_view>{"host"}
+        : omni::compat::nullopt;
+    });
 
-  // Enable one block at a time to inspect its diagnostic independently.
-  // Invalid second override.
+  EXPECT_EQ("host", compositor.alias_by_name("hostname").value());
+
+  // Enable independently to inspect an invalid argument or return type.
 #if 0
-  prototype::static_assert_alias_is_invocable(prototype::to_record<>{}
-      .aliases_for(examples::host_aliases)
-      .aliases_for(examples::invalid_signature{}),
-    omni::type_t<examples::validation_record>{});
+  (void)prototype::to_record<>{}.with_alias_by_name(
+    [](int) -> omni::compat::optional<string_view> {
+      return omni::compat::nullopt;
+    });
 #endif
 
-  // Invalid first override; the valid replacement deliberately ignores it.
 #if 0
-  prototype::static_assert_alias_is_invocable(prototype::to_record<>{}
-      .aliases_for(examples::invalid_signature{})
-      .aliases_for(prototype::default_value<std::array<string_view, 0>>{}),
-    omni::type_t<examples::validation_record>{});
-#endif
-
-  // Both overrides are invalid.
-#if 0
-  prototype::static_assert_alias_is_invocable(prototype::to_record<>{}
-      .aliases_for(examples::invalid_signature{})
-      .aliases_for(examples::invalid_signature{}),
-    omni::type_t<examples::validation_record>{});
+  (void)prototype::to_record<>{}.with_alias_by_name(
+    [](string_view) -> string_view { return "host"; });
 #endif
 }
 
 } // namespace tests
 } // namespace
-
-#undef CPP20_CONSTEXPR_VECTOR
