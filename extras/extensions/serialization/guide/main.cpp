@@ -1058,6 +1058,20 @@ struct invalid_extended_container_case {
 class invalid_extended_container_mapping:
     public testing::TestWithParam<invalid_extended_container_case> {};
 
+// C++11 lambda equivalent: map into an existing record within reflected scope.
+struct cpp11_lambda_read_into {
+  ::ryml::ConstNodeRef node;
+  const omni::ryml::detail::mapping_context &context;
+
+  // The explicit return type delays the body until generated metadata exists.
+  template <typename Record>
+  auto operator()(omni::record_binding_t<Record> record) const
+    -> omni::ryml::with_diagnostics<omni::compat::monostate> {
+    return omni::ryml::core::read_node(
+      this->node, &record.value(), this->context);
+  }
+};
+
 TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   const auto &c = GetParam();
   auto parsed = omni::ryml::core::parse(c.document);
@@ -1076,10 +1090,9 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
 
   auto into = c.initial;
   const auto mapped = omni::reflected_call(
-    [&parsed, &context](omni::record_binding auto record)
-      -> omni::ryml::with_diagnostics<omni::compat::monostate> {
-      return omni::ryml::core::read_node(
-        parsed->crootref(), &record.value(), context);
+    cpp11_lambda_read_into{
+      /*node=*/parsed->crootref(),
+      /*context=*/context,
     },
     into);
 
