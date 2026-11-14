@@ -81,9 +81,9 @@ struct mapping_case {
 
   template <typename Engine>
   auto operator()(Engine engine) const
-    -> decltype(engine.transform_config(
+    -> decltype(engine.tdm_config(
       from.transform_config)(omni::type_t<Model>{}, from.json)) {
-    return engine.transform_config(
+    return engine.tdm_config(
       from.transform_config)(omni::type_t<Model>{}, from.json);
   }
 };
@@ -278,8 +278,12 @@ const auto duplicates = std::make_tuple(
 
   // [nested_pair][reject / allow / last]; select whole objects, never merge.
   D(duplicate_policy::reject,
-    R"({"nested": {"first": 7, "second": 8},
-        "nested": {"first": 9, "second": 10}})")
+    R"(
+{
+  "nested": {"first": 7, "second": 8},
+  "nested": {"first": 9, "second": 10}
+}
+)")
     >> expect<models::nested_pair>(none,
       {dsl::error(omni::json::issue_code::duplicate_field, "/nested")}),
   D(duplicate_policy::allow,
@@ -382,14 +386,22 @@ const auto cases = std::make_tuple(
 
   // [nested_records][allow | warn / reject]
   U(unknown_policy::allow | unknown_policy::warn,
-    R"({"nested": {"value": 7, "other": 1},
-        "items": [{"value": 8, "other": 2}]})")
+    R"(
+{
+  "nested": {"value": 7, "other": 1},
+  "items": [{"value": 8, "other": 2}]
+}
+)")
     >> expect(models::nested_records{{7}, {{8}}},
       {warn_unknown_field("/nested/other"),
         warn_unknown_field("/items/0/other")}),
   U(unknown_policy::reject,
-    R"({"nested": {"value": 7, "other": 1},
-        "items": [{"value": 8, "other": 2}]})")
+    R"(
+{
+  "nested": {"value": 7, "other": 1},
+  "items": [{"value": 8, "other": 2}]
+}
+)")
     >> expect<models::nested_records>(none,
       {err_unknown_field("/nested/other")}));
 
@@ -447,15 +459,23 @@ const auto cases = std::make_tuple(
 
   // [nested_records][1 / 2]; the warning budget spans nested objects.
   L(1,
-    R"({"nested": {"value": 7, "other": 1},
-        "items": [{"value": 8, "other": 2}]})")
+    R"(
+{
+  "nested": {"value": 7, "other": 1},
+  "items": [{"value": 8, "other": 2}]
+}
+)")
     >> expect<models::nested_records>(none,
       {warn_unknown_field("/nested/other"),
         warn_unknown_field("/items/0/other"),
         dsl::error(issue_code::warning_limit_exceeded, "/items/0/other")}),
   L(2,
-    R"({"nested": {"value": 7, "other": 1},
-        "items": [{"value": 8, "other": 2}]})")
+    R"(
+{
+  "nested": {"value": 7, "other": 1},
+  "items": [{"value": 8, "other": 2}]
+}
+)")
     >> expect(models::nested_records{{7}, {{8}}},
       {warn_unknown_field("/nested/other"),
         warn_unknown_field("/items/0/other")}));
@@ -535,8 +555,12 @@ const auto cases = std::make_tuple(
 
   // [nested_records][1 / 2]; child records share the error budget.
   E(1,
-    R"({"nested": {"value": "bad"},
-        "items": [{"value": "bad"}, {"value": "bad"}]})")
+    R"(
+{
+  "nested": {"value": "bad"},
+  "items": [{"value": "bad"}, {"value": "bad"}]
+}
+)")
     >> expect<models::nested_records>(none,
       {dsl::error(issue_code::invalid_scalar,
         "/nested/value",
@@ -545,8 +569,12 @@ const auto cases = std::make_tuple(
           "/items/0/value",
           value_kind::integer)}),
   E(2,
-    R"({"nested": {"value": "bad"},
-        "items": [{"value": "bad"}, {"value": "bad"}]})")
+    R"(
+{
+  "nested": {"value": "bad"},
+  "items": [{"value": "bad"}, {"value": "bad"}]
+}
+)")
     >> expect<models::nested_records>(none,
       {dsl::error(issue_code::invalid_scalar,
         "/nested/value",
@@ -734,8 +762,16 @@ struct erased_value {
 };
 
 struct erase_value {
-  template <typename Model>
-  erased_value operator()(Model model) const { return {std::move(model)}; }
+  template <typename Model, typename Diagnostics>
+  omni::ryml::with_diagnostics<erased_value, Diagnostics> operator()(
+    omni::ryml::with_diagnostics<Model, Diagnostics> result) const {
+    return {
+      /*value=*/result.value
+        ? omni::compat::make_optional(erased_value{std::move(*result.value)})
+        : omni::compat::nullopt,
+      /*diagnostics=*/std::move(result.diagnostics),
+    };
+  }
 };
 
 struct scenario {
@@ -748,9 +784,11 @@ struct scenario {
 
 template <typename Engine, typename Case>
 scenario bind_engine(Engine engine, Case c) {
-  return {c.from.json,
-    [engine, c] { return c(engine).transform_value(erase_value{}); },
-    std::move(c.expected).transform_value(erase_value{})};
+  return {
+    /*json=*/c.from.json,
+    /*run=*/[engine, c] { return erase_value{}(c(engine)); },
+    /*expected=*/erase_value{}(std::move(c.expected)),
+  };
 }
 
 // C++11 compat for a generic capturing lambda, binding each case before
@@ -798,18 +836,20 @@ class mapping_conformance: public ::testing::TestWithParam<scenario> {};
 
 TEST_P(mapping_conformance, conforms_to_expected_mapping) {
   SCOPED_TRACE(GetParam().json);
-  const auto actual = GetParam().run().transform_diagnostics(
-    [](serialization_test::collected_diagnostics diagnostics) {
-      std::vector<dsl::expected_issue> issues;
-      for (const auto &issue : diagnostics.issues) {
-        issues.push_back({issue.reason,
-          issue.expected,
-          omni::ryml::detail::render_path(issue.path),
-          issue.warning});
-      }
+  auto result = GetParam().run();
+  std::vector<dsl::expected_issue> issues;
+  for (const auto &issue : result.diagnostics.issues) {
+    issues.push_back({issue.reason,
+      issue.expected,
+      omni::ryml::detail::render_path(issue.path),
+      issue.warning});
+  }
 
-      return issues;
-    });
+  const omni::ryml::with_diagnostics<erased_value,
+    std::vector<dsl::expected_issue>> actual{
+    /*value=*/std::move(result.value),
+    /*diagnostics=*/std::move(issues),
+  };
 
   EXPECT_EQ(GetParam().expected, actual);
 }

@@ -22,8 +22,6 @@ struct mapping_state;
 
 namespace detail {
 
-
-
 // Strings remain scalar mappings even though they also model input ranges.
 template <typename T>
 struct is_mapped_range:

@@ -8,7 +8,28 @@
 
 namespace omni {
 namespace ryml {
-namespace mapping {
+
+/** Write key/value ranges as objects and element ranges as arrays.
+ * Empty optional array elements are omitted. Optional object values remain.
+ * Non-scalar C++ elements must be exposed as lvalue references to value_type;
+ * default mapping rejects temporary-producing iterators in both tree modes. */
+struct from_range_t {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::ryml::detail::is_mapped_range<const T>::value;
+  }
+
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
+      int> = 0>
+  void operator()(const T &value,
+    ::ryml::NodeRef node,
+    mapping_state<Config> context) const;
+};
+
+/** Default range serializer. */
+constexpr from_range_t from_range{};
 
 /** Read arrays into element ranges and objects into key/value ranges.
  * Elements are mapped before insertion through the shared operation adapters.
@@ -41,6 +62,5 @@ struct to_range_t {
 /** Default range mapper using the shared operation customization points. */
 constexpr to_range_t to_range{};
 
-} // namespace mapping
 } // namespace ryml
 } // namespace omni

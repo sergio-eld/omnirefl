@@ -32,29 +32,26 @@ int anonymous_record(int code) {
   return code;
 }
 
-TEST(deserialization, default_retains_diagnostics_and_transforms_the_value) {
+TEST(deserialization, default_retains_value_and_diagnostics) {
   EXPECT_EQ(0, serialization_test::deserialize.config.error_policy.error_limit);
   EXPECT_FALSE((serialization_test::deserialize.config.error_policy.unknown_fields
     == omni::json::unknown_policy::allow));
 
-  auto result =
-    serialization_test::deserialize(omni::type_t<serialization_data::payload>{},
-      R"({"name": "Ada", "code": 815})");
+  const auto result = serialization_test::deserialize(
+    omni::type_t<serialization_data::payload>{},
+    R"({"name": "Ada", "code": 815})");
+
   static_assert(std::is_same<decltype(result),
-                  omni::ryml::with_diagnostics<serialization_data::payload,
-                    serialization_test::collected_diagnostics>>::value,
+    const omni::ryml::with_diagnostics<serialization_data::payload,
+      serialization_test::collected_diagnostics>>::value,
     "the default deserializer must retain a value and diagnostics");
 
-  const auto code =
-    std::move(result) //
-      .transform_value([](serialization_data::payload p) { return p.code; }) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+  EXPECT_EQ("", result.diagnostics.message);
+  EXPECT_TRUE(result.value);
+  if (!result.value)
+    return;
 
-  EXPECT_EQ("", code.diagnostics);
-  EXPECT_TRUE(code.value);
-  if (code.value) {
-    EXPECT_EQ(815, *code.value);
-  }
+  EXPECT_EQ(815, result.value->code);
 }
 
 TEST(serialization_composition,
@@ -74,11 +71,14 @@ TEST(serialization_composition, parses_then_maps_a_record) {
   const auto result =
     omni::ryml::core::parse(R"({"name": "Ada", "code": 815})") //
       .transform([](::ryml::Tree tree) {
-        return omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
-          tree) //
-          .transform_diagnostics([&tree](omni::ryml::diagnostics report) {
-            return omni::ryml::render_diagnostics(tree, report);
-          });
+        auto mapped = omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
+          tree);
+        return omni::ryml::with_diagnostics<serialization_data::payload,
+          std::string>{
+          /*value=*/std::move(mapped.value),
+          /*diagnostics=*/omni::ryml::render_diagnostics(tree,
+            mapped.diagnostics),
+        };
       });
 
   EXPECT_TRUE(result);
@@ -95,11 +95,14 @@ TEST(serialization_composition, renders_mapping_errors_after_successful_parse) {
   const auto result =
     omni::ryml::core::parse(R"({"name": "Ada", "code": "bad"})") //
       .transform([](::ryml::Tree tree) {
-        return omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
-          tree) //
-          .transform_diagnostics([&tree](omni::ryml::diagnostics report) {
-            return omni::ryml::render_diagnostics(tree, report);
-          });
+        auto mapped = omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
+          tree);
+        return omni::ryml::with_diagnostics<serialization_data::payload,
+          std::string>{
+          /*value=*/std::move(mapped.value),
+          /*diagnostics=*/omni::ryml::render_diagnostics(tree,
+            mapped.diagnostics),
+        };
       });
 
   EXPECT_TRUE(result);
@@ -139,7 +142,7 @@ TEST(deserialization_config,
   transform_accepts_captures_and_preserves_the_source) {
   const int limit = 3;
   const auto source =
-    serialization_test::deserialize.transform_config([limit](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([limit](serialization_test::config s) {
       s.error_policy.error_limit = limit;
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
@@ -180,76 +183,17 @@ TEST(tree_mapping, rendered_diagnostics_outlive_the_tree) {
   omni::ryml::with_diagnostics<serialization_data::payload, std::string> retained;
   {
     const auto tree = ::ryml::parse_in_arena(R"({"name": "Ada", "code": "bad"})");
-    retained = omni::ryml::map_tree(
-      omni::type_t<serialization_data::payload>{}, tree)
-      .transform_diagnostics([&tree](omni::ryml::diagnostics report) {
-        return omni::ryml::render_diagnostics(tree, report);
-      });
+    auto mapped = omni::ryml::map_tree(
+      omni::type_t<serialization_data::payload>{}, tree);
+    retained = {
+      /*value=*/std::move(mapped.value),
+      /*diagnostics=*/omni::ryml::render_diagnostics(tree, mapped.diagnostics),
+    };
   }
 
   EXPECT_FALSE(retained.value);
   EXPECT_EQ("/code: \"bad\" is not an integer", retained.diagnostics);
 }
-
-class product_transforms: public testing::TestWithParam<bool> {};
-
-TEST_P(product_transforms, transforms_move_only_fields) {
-  omni::ryml::with_diagnostics<std::unique_ptr<int>, std::unique_ptr<int>>
-    result{
-      /*value=*/GetParam()
-        ? omni::compat::make_optional(omni::compat::make_unique<int>(42))
-        : omni::compat::optional<std::unique_ptr<int>>{},
-      /*diagnostics=*/omni::compat::make_unique<int>(7),
-    };
-  bool called = false;
-
-  const auto transformed = //
-    std::move(result) //
-      .transform_value([&called](std::unique_ptr<int> v) {
-        called = true;
-        return *v + 1;
-      }) //
-      .transform_diagnostics(
-        [](std::unique_ptr<int> d) { return std::to_string(*d); });
-
-  EXPECT_EQ(GetParam(), called);
-  EXPECT_EQ(GetParam(), bool(transformed.value));
-  if (transformed.value) {
-    EXPECT_EQ(43, *transformed.value);
-  }
-  EXPECT_EQ("7", transformed.diagnostics);
-}
-
-TEST_P(product_transforms, transforms_keep_the_same_product_behavior) {
-  omni::ryml::with_diagnostics<int, std::string> result{
-    /*value=*/GetParam() ? omni::compat::make_optional(42)
-                         : omni::compat::optional<int>{},
-    /*diagnostics=*/"warning",
-  };
-  bool called = false;
-
-  const auto transformed = //
-    std::move(result) //
-      .transform_value([&called](int v) {
-        called = true;
-        return v + 1;
-      }) //
-      .transform_diagnostics([](std::string d) { return d.size(); });
-
-  EXPECT_EQ(GetParam(), called);
-  EXPECT_EQ(GetParam(), bool(transformed.value));
-  if (transformed.value) {
-    EXPECT_EQ(43, *transformed.value);
-  }
-  EXPECT_EQ(7U, transformed.diagnostics);
-}
-
-INSTANTIATE_TEST_SUITE_P(values,
-  product_transforms,
-  testing::Bool(),
-  [](const testing::TestParamInfo<bool> &p) {
-    return p.param ? "available" : "unavailable";
-  });
 
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
@@ -516,43 +460,38 @@ struct person {
   int age;
 };
 
-TEST(deserialization, transforms_default_diagnostics_into_a_string) {
+TEST(deserialization, renders_default_diagnostics) {
   const std::string json = R"({"name": "Ada", "age": "bad"})";
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-  const auto result = serialization_test::deserialize(omni::type<person>, json) //
-                        .transform_diagnostics(serialization_test::render_diagnostics);
+  const auto result = serialization_test::deserialize(omni::type<person>, json);
 #else
-  const auto result = serialization_test::deserialize(omni::type_t<person>{}, json) //
-                        .transform_diagnostics(serialization_test::render_diagnostics);
+  const auto result = serialization_test::deserialize(omni::type_t<person>{}, json);
 #endif
 
   EXPECT_FALSE(result.value);
   if (result.value)
     return;
 
-  EXPECT_EQ("/age: \"bad\" is not an integer", result.diagnostics);
+  EXPECT_EQ("/age: \"bad\" is not an integer", result.diagnostics.message);
 }
 
 TEST(deserialization_diagnostics,
-  diagnostics_transformation_retains_errors_without_a_value) {
+  renders_errors_without_a_value) {
   auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 2;
       return s;
     })(omni::type_t<serialization_data::payload>{},
       R"({"name": "ok", "code": "bad"})");
 
   EXPECT_EQ(1U, result.diagnostics.issues.size());
-  const auto rendered = //
-    std::move(result) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
 
-  EXPECT_FALSE(rendered.value);
-  if (rendered.value) {
-    EXPECT_EQ("ok", rendered.value->name);
-    EXPECT_EQ(0, rendered.value->code);
+  EXPECT_FALSE(result.value);
+  if (result.value) {
+    EXPECT_EQ("ok", result.value->name);
+    EXPECT_EQ(0, result.value->code);
   }
-  EXPECT_EQ("/code: \"bad\" is not an integer", rendered.diagnostics);
+  EXPECT_EQ("/code: \"bad\" is not an integer", result.diagnostics.message);
 }
 
 TEST(deserialization, partially_applies_config_and_type) {
@@ -560,32 +499,34 @@ TEST(deserialization, partially_applies_config_and_type) {
     serialization_test::deserialize,
     omni::type_t<serialization_data::bitfield_values>{});
   const auto result =
-    deserialize(std::string{serialization_data::bitfield_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+    deserialize(std::string{serialization_data::bitfield_json});
 
   EXPECT_TRUE(result.value);
   if (!result.value)
     return;
 
-  EXPECT_EQ("", result.diagnostics);
+  EXPECT_EQ("", result.diagnostics.message);
   EXPECT_EQ(815U, result.value->code);
   EXPECT_TRUE(result.value->enabled);
 }
 
 TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
   const auto map =
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.error_limit = 2;
       return s;
     });
   EXPECT_EQ(2, map.config.error_policy.error_limit);
   const auto result = omni::ryml::core::parse(R"({"name": "ok", "code": "bad"})") //
                         .transform([map](const ::ryml::Tree &tree) {
-                          return map(omni::type_t<serialization_data::payload>{}, tree)
-                            .transform_diagnostics(
-                              [&tree](omni::ryml::diagnostics report) {
-                                return omni::ryml::render_diagnostics(tree, report);
-                              });
+                          auto mapped = map(
+                            omni::type_t<serialization_data::payload>{}, tree);
+                          return omni::ryml::with_diagnostics<
+                            serialization_data::payload, std::string>{
+                            /*value=*/std::move(mapped.value),
+                            /*diagnostics=*/omni::ryml::render_diagnostics(
+                              tree, mapped.diagnostics),
+                          };
                         });
 
   EXPECT_TRUE(result);
@@ -603,14 +544,13 @@ TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
 TEST(deserialization, maps_scalars_sequences_and_nested_records) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::scalar_values>{},
-      std::string{serialization_data::scalar_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::scalar_json});
 
   EXPECT_TRUE(result.value);
   if (!result.value)
     return;
 
-  EXPECT_EQ("", result.diagnostics);
+  EXPECT_EQ("", result.diagnostics.message);
   EXPECT_TRUE(result.value->enabled);
   EXPECT_EQ(108U, result.value->retries);
   EXPECT_EQ(-42, result.value->delta);
@@ -683,17 +623,19 @@ TEST_P(serialization, writes_nested_records_and_sequences) {
     /*format=*/GetParam(),
   }(value);
   EXPECT_TRUE(serialization_test::matches_json(
-    R"({
-      "enabled": true,
-      "retries": 108,
-      "delta": -42,
-      "values": [8, 15],
-      "label": "oceanic",
-      "records": [
-        {"name": "Ada", "code": 815},
-        {"name": "Grace", "code": 108}
-      ]
-    })",
+    R"(
+{
+  "enabled": true,
+  "retries": 108,
+  "delta": -42,
+  "values": [8, 15],
+  "label": "oceanic",
+  "records": [
+    {"name": "Ada", "code": 815},
+    {"name": "Grace", "code": 108}
+  ]
+}
+)",
     output));
 }
 
@@ -713,14 +655,13 @@ static_assert(std::is_aggregate<serialization_test::deserialize_type>::value,
 TEST(deserialization, maps_a_representative_document) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::document>{},
-      std::string{serialization_data::representative_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::representative_json});
 
   EXPECT_TRUE(result.value);
   if (!result.value)
     return;
 
-  EXPECT_EQ("", result.diagnostics);
+  EXPECT_EQ("", result.diagnostics.message);
   EXPECT_EQ(3U, result.value->schema_version);
   EXPECT_EQ("checkout-api", result.value->source);
   EXPECT_EQ(3U, result.value->orders.size());
@@ -751,14 +692,13 @@ TEST(deserialization, maps_a_representative_document) {
 TEST(deserialization, maps_the_same_schema_from_yaml) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::document>{},
-      std::string{serialization_data::representative_yaml}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::representative_yaml});
 
   EXPECT_TRUE(result.value);
   if (!result.value)
     return;
 
-  EXPECT_EQ("", result.diagnostics);
+  EXPECT_EQ("", result.diagnostics.message);
   EXPECT_EQ(3U, result.value->schema_version);
   EXPECT_EQ("checkout-api", result.value->source);
   EXPECT_EQ(3U, result.value->orders.size());
@@ -776,14 +716,13 @@ TEST(deserialization, maps_the_same_schema_from_yaml) {
 TEST(deserialization, assigns_bitfields_through_field_bindings) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
-      std::string{serialization_data::bitfield_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::bitfield_json});
 
   EXPECT_TRUE(result.value);
   if (!result.value)
     return;
 
-  EXPECT_EQ("", result.diagnostics);
+  EXPECT_EQ("", result.diagnostics.message);
   EXPECT_EQ(815U, result.value->code);
   EXPECT_TRUE(result.value->enabled);
 }
@@ -791,61 +730,55 @@ TEST(deserialization, assigns_bitfields_through_field_bindings) {
 TEST(deserialization, reports_the_schema_scalar_expected_by_a_field) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
-      std::string{serialization_data::invalid_nested_integer_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::invalid_nested_integer_json});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/data/code: \"invalid\" is not an integer", result.diagnostics);
+  EXPECT_EQ("/data/code: \"invalid\" is not an integer", result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_numeric_boolean_values) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
-      std::string{R"({"code": 815, "enabled": 108})"}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{R"({"code": 815, "enabled": 108})"});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/enabled: \"108\" is not a boolean", result.diagnostics);
+  EXPECT_EQ("/enabled: \"108\" is not a boolean", result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_quoted_boolean_values) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::bitfield_values>{},
-      std::string{R"({"code": 815, "enabled": "true"})"}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{R"({"code": 815, "enabled": "true"})"});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/enabled: \"true\" is not a boolean", result.diagnostics);
+  EXPECT_EQ("/enabled: \"true\" is not a boolean", result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_unknown_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
-      std::string{serialization_data::unknown_field_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::unknown_field_json});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/extra: unknown field", result.diagnostics);
+  EXPECT_EQ("/extra: unknown field", result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_duplicate_input_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
-      std::string{serialization_data::duplicate_field_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::duplicate_field_json});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/ratio: duplicate field", result.diagnostics);
+  EXPECT_EQ("/ratio: duplicate field", result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_missing_destination_fields_by_default) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
-      std::string{serialization_data::missing_field_json}) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      std::string{serialization_data::missing_field_json});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/data: missing field", result.diagnostics);
+  EXPECT_EQ("/data: missing field", result.diagnostics.message);
 }
 
 // Each document either supplies a payload code or a schema error.
@@ -867,15 +800,14 @@ TEST_P(configured_deserialization, maps_or_reports_invalid_input) {
   const auto deserialize =
     serialization_test::deserialize;
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
-    GetParam().source) //
-                        .transform_diagnostics(serialization_test::render_diagnostics);
+    GetParam().source);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
-    EXPECT_EQ("", result.diagnostics);
+    EXPECT_EQ("", result.diagnostics.message);
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics.message);
   }
   EXPECT_EQ(0, deserialize.config.error_policy.error_limit);
 }
@@ -886,15 +818,14 @@ TEST_P(configured_deserialization,
   maps_with_designated_constant_configuration) {
   const auto result =
     configured_deserialize(omni::type_t<serialization_data::payload>{},
-      GetParam().source) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      GetParam().source);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
-    EXPECT_EQ("", result.diagnostics);
+    EXPECT_EQ("", result.diagnostics.message);
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics.message);
   }
 }
 
@@ -908,15 +839,14 @@ TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
       },
   };
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
-    GetParam().source) //
-                        .transform_diagnostics(serialization_test::render_diagnostics);
+    GetParam().source);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
-    EXPECT_EQ("", result.diagnostics);
+    EXPECT_EQ("", result.diagnostics.message);
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics.message);
   }
   EXPECT_EQ(error_limit, deserialize.config.error_policy.error_limit);
 }
@@ -960,7 +890,7 @@ class extra_fields_policy:
 TEST_P(extra_fields_policy, applies_the_unknown_field_policy) {
   omni::compat::apply(
     [](const extra_fields_case &c, bool extra) {
-      const auto result = serialization_test::deserialize.transform_config(
+      const auto result = serialization_test::deserialize.tdm_config(
         [extra](serialization_test::config s) {
           s.error_policy.unknown_fields = extra
             ? omni::json::unknown_policy::allow
@@ -1001,23 +931,28 @@ INSTANTIATE_TEST_SUITE_P(config,
         R"({"ratio": 2.5, "data": {"name": "Ada", "extra": [], "code": 815}})",
         "/data/extra: unknown field"},
       extra_fields_case{"multiple",
-        R"({
-          "extra": 1,
-          "other": null,
-          "ratio": 2.5,
-          "data": {"name": "Ada", "code": 815, "more": [{}, false]}
-        })",
+        R"(
+{
+  "extra": 1,
+  "other": null,
+  "ratio": 2.5,
+  "data": {"name": "Ada", "code": 815, "more": [{}, false]}
+}
+)",
         "/extra: unknown field"},
       extra_fields_case{"duplicate_extra",
-        R"({
-          "extra": 1,
-          "extra": 2,
-          "ratio": 2.5,
-          "data": {"name": "Ada", "code": 815}
-        })",
+        R"(
+{
+  "extra": 1,
+  "extra": 2,
+  "ratio": 2.5,
+  "data": {"name": "Ada", "code": 815}
+}
+)",
         "/extra: unknown field"},
       extra_fields_case{"yaml",
-        R"(ratio: 2.5
+        R"(
+ratio: 2.5
 data:
   name: Ada
   code: 815
@@ -1039,18 +974,17 @@ class allowed_extra_fields: public testing::TestWithParam<mapping_case> {};
 TEST_P(allowed_extra_fields, validates_model_fields) {
   const auto result =
     serialization_test::deserialize
-      .transform_config([](serialization_test::config s) {
+      .tdm_config([](serialization_test::config s) {
         s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
         return s;
-      })(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      })(omni::type_t<serialization_data::payload>{}, GetParam().source);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
-    EXPECT_EQ("", result.diagnostics);
+    EXPECT_EQ("", result.diagnostics.message);
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics.message);
   }
 }
 
@@ -1087,19 +1021,21 @@ struct nested_extra_config {
 
 TEST(nested_extra_fields, ignores_extra_fields_in_records_and_containers) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<nested_extra_config>{},
-      R"({
-      "extra": null,
-      "object": {"name": "Ada", "code": 815, "extra": {}},
-      "records": [
-        {"name": "Grace", "code": 108, "extra": []},
-        {"name": "Linus", "code": 42, "extra": false}
-      ],
-      "optional": {"name": "Bjarne", "code": 23, "extra": {"more": 1}}
-    })");
+      R"(
+{
+  "extra": null,
+  "object": {"name": "Ada", "code": 815, "extra": {}},
+  "records": [
+    {"name": "Grace", "code": 108, "extra": []},
+    {"name": "Linus", "code": 42, "extra": false}
+  ],
+  "optional": {"name": "Bjarne", "code": 23, "extra": {"more": 1}}
+}
+)");
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -1124,12 +1060,11 @@ TEST(nested_extra_fields, ignores_extra_fields_in_records_and_containers) {
   }
 }
 
-
 TEST(tree_mapping, borrowed_mapping_accepts_extra_fields) {
   const auto tree =
     ::ryml::parse_in_arena(R"({"extra": [1, {}], "name": "Ada", "code": 815})");
   const auto result =
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<serialization_data::payload>{}, tree.crootref());
@@ -1146,7 +1081,7 @@ TEST(tree_mapping, borrowed_mapping_accepts_extra_fields) {
 
 TEST(deserialization, extra_fields_do_not_hide_syntax_errors) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<serialization_data::payload>{},
@@ -1166,12 +1101,12 @@ TEST(deserialization, extra_fields_do_not_hide_syntax_errors) {
 
 TEST(deserialization_config, transforms_preserve_unchanged_config) {
   const auto original =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 2;
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     });
-  const auto updated = original.transform_config([](serialization_test::config s) {
+  const auto updated = original.tdm_config([](serialization_test::config s) {
     s.error_policy.error_limit = 3;
     return s;
   });
@@ -1207,11 +1142,11 @@ TEST(deserialization_config, designated_configuration_accepts_extra_fields) {
 
 TEST(deserialization_config, changes_fields_without_changing_the_source) {
   const auto original =
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.error_limit = 2;
       return s;
     });
-  const auto updated = original.transform_config([](omni::ryml::config<> s) {
+  const auto updated = original.tdm_config([](omni::ryml::config<> s) {
     s.error_policy.error_limit = 5;
     return s;
   });
@@ -1252,7 +1187,7 @@ class deserialization_diagnostics:
 TEST_P(deserialization_diagnostics,
   retains_diagnostics_and_applies_independent_policies) {
   const auto deserialize =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     });
@@ -1271,7 +1206,7 @@ TEST_P(deserialization_diagnostics,
 
 TEST_P(deserialization_diagnostics, retains_config_for_inspection) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     })(omni::type_t<serialization_data::payload>{}, GetParam().source);
@@ -1281,17 +1216,16 @@ TEST_P(deserialization_diagnostics, retains_config_for_inspection) {
 }
 
 TEST_P(deserialization_diagnostics,
-  transforms_diagnostics_and_preserves_optional_value) {
+  renders_diagnostics_and_preserves_optional_value) {
   const auto result =
     serialization_test::deserialize
-      .transform_config([](serialization_test::config s) {
+      .tdm_config([](serialization_test::config s) {
         s.error_policy.error_limit = GetParam().error_limit;
         return s;
-      })(omni::type_t<serialization_data::payload>{}, GetParam().source) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      })(omni::type_t<serialization_data::payload>{}, GetParam().source);
 
   EXPECT_EQ(GetParam().has_value, bool(result.value));
-  EXPECT_EQ(GetParam().message, result.diagnostics);
+  EXPECT_EQ(GetParam().message, result.diagnostics.message);
   if (result.value) {
     EXPECT_EQ(GetParam().mapped_name, result.value->name);
     EXPECT_EQ(GetParam().mapped_code, result.value->code);
@@ -1399,7 +1333,8 @@ INSTANTIATE_TEST_SUITE_P(policies,
 TEST(deserialization_diagnostics, records_nested_input_path) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::nested_record>{},
-      R"(ratio: 2.5
+      R"(
+ratio: 2.5
 data:
   name: ok
   code: bad
@@ -1426,21 +1361,23 @@ data:
 
 TEST(deserialization_diagnostics, nested_container_errors_share_the_budget) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 1;
       return s;
     })(omni::type_t<serialization_data::scalar_values>{},
-      R"({
-      "enabled": true,
-      "retries": 2,
-      "delta": 3,
-      "values": [1, "bad", 3],
-      "label": "ok",
-      "records": [
-        {"name": "first", "code": "bad"},
-        {"name": "unvisited", "code": 8}
-      ]
-    })");
+      R"(
+{
+  "enabled": true,
+  "retries": 2,
+  "delta": 3,
+  "values": [1, "bad", 3],
+  "label": "ok",
+  "records": [
+    {"name": "first", "code": "bad"},
+    {"name": "unvisited", "code": 8}
+  ]
+}
+)");
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
@@ -1491,7 +1428,7 @@ TEST(deserialization_diagnostics,
     serialization_test::collected_diagnostics> retained;
   {
     auto result =
-      serialization_test::deserialize.transform_config([](serialization_test::config s) {
+      serialization_test::deserialize.tdm_config([](serialization_test::config s) {
         s.error_policy.error_limit = 2;
         return s;
       })(omni::type_t<serialization_data::payload>{},
@@ -1510,7 +1447,7 @@ TEST(deserialization_diagnostics, moved_result_retains_policy_values) {
     serialization_test::collected_diagnostics> retained;
   {
     auto result =
-      serialization_test::deserialize.transform_config([](serialization_test::config s) {
+      serialization_test::deserialize.tdm_config([](serialization_test::config s) {
         s.error_policy.error_limit = 2;
         return s;
       })(omni::type_t<serialization_data::payload>{},
@@ -1525,7 +1462,7 @@ TEST(deserialization_diagnostics, moved_result_retains_policy_values) {
 
 TEST(deserialization_diagnostics, parser_failure_precedes_mapping_policies) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 12;
       return s;
     })(omni::type_t<serialization_data::payload>{}, "name: [unterminated");
@@ -1559,7 +1496,7 @@ class diagnostic_rendering: public testing::TestWithParam<rendering_case> {};
 
 TEST_P(diagnostic_rendering, renders_paths_and_messages_on_error) {
   auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 4;
       return s;
     })(omni::type_t<serialization_data::payload>{}, GetParam().source);
@@ -1572,12 +1509,8 @@ TEST_P(diagnostic_rendering, renders_paths_and_messages_on_error) {
         return omni::json::issue_code::parse_error == e.reason;
       }));
 
-  const auto rendered = //
-    std::move(result) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
-
-  EXPECT_FALSE(rendered.value);
-  EXPECT_EQ(GetParam().message, rendered.diagnostics);
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(GetParam().message, result.diagnostics.message);
 }
 
 INSTANTIATE_TEST_SUITE_P(documents,
@@ -1588,7 +1521,8 @@ INSTANTIATE_TEST_SUITE_P(documents,
       "/code: \"bad\" is not an integer",
       false},
     rendering_case{"yaml_scalar",
-      R"(name: ok
+      R"(
+name: ok
 code: bad
 )",
       "/code: \"bad\" is not an integer",
@@ -1619,21 +1553,22 @@ code: bad
 TEST(diagnostic_rendering, renders_array_positions_in_nested_paths) {
   const auto result =
     strict_deserialize(omni::type_t<serialization_data::scalar_values>{},
-      R"({
-        "enabled": true,
-        "retries": 1,
-        "delta": 0,
-        "values": [],
-        "label": "ok",
-        "records": [
-          {"name": "ok", "code": 1},
-          {"name": "bad", "code": "x"}
-        ]
-      })") //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      R"(
+{
+  "enabled": true,
+  "retries": 1,
+  "delta": 0,
+  "values": [],
+  "label": "ok",
+  "records": [
+    {"name": "ok", "code": 1},
+    {"name": "bad", "code": "x"}
+  ]
+}
+)");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/records/1/code: \"x\" is not an integer", result.diagnostics);
+  EXPECT_EQ("/records/1/code: \"x\" is not an integer", result.diagnostics.message);
 }
 
 TEST(diagnostic_rendering, no_issues_render_as_an_empty_string) {
@@ -1643,66 +1578,6 @@ TEST(diagnostic_rendering, no_issues_render_as_an_empty_string) {
 
   EXPECT_TRUE(result.value);
   EXPECT_EQ("", serialization_test::render_diagnostics(result.diagnostics));
-}
-
-TEST(deserialization, diagnostics_transformation_moves_an_available_value) {
-  omni::ryml::with_diagnostics<std::unique_ptr<int>, std::string> result{
-    /*value=*/omni::compat::make_unique<int>(42),
-    /*diagnostics=*/{},
-  };
-
-  const auto transformed = //
-    std::move(result) //
-      .transform_diagnostics(serialization_test::render_diagnostics);
-
-  EXPECT_TRUE(transformed.value);
-  if (transformed.value) {
-    EXPECT_TRUE(*transformed.value);
-    if (*transformed.value) {
-      EXPECT_EQ(42, **transformed.value);
-    }
-  }
-  EXPECT_EQ("", transformed.diagnostics);
-}
-
-TEST(deserialization, transforms_move_only_diagnostics_repeatedly) {
-  omni::ryml::with_diagnostics<std::unique_ptr<int>, std::unique_ptr<int>>
-    result{
-      /*value=*/omni::compat::make_unique<int>(42),
-      /*diagnostics=*/omni::compat::make_unique<int>(7),
-    };
-
-  auto rendered =
-    std::move(result) //
-      .transform_diagnostics([](std::unique_ptr<int> d) {
-        return omni::compat::make_unique<std::string>(std::to_string(*d));
-      });
-
-  EXPECT_TRUE(rendered.value);
-  if (rendered.value) {
-    EXPECT_TRUE(*rendered.value);
-    if (*rendered.value) {
-      EXPECT_EQ(42, **rendered.value);
-    }
-  }
-  EXPECT_TRUE(rendered.diagnostics);
-  if (rendered.diagnostics) {
-    EXPECT_EQ("7", *rendered.diagnostics);
-  }
-
-  const auto measured = //
-    std::move(rendered) //
-      .transform_diagnostics(
-        [](std::unique_ptr<std::string> d) { return d->size(); });
-
-  EXPECT_TRUE(measured.value);
-  if (measured.value) {
-    EXPECT_TRUE(*measured.value);
-    if (*measured.value) {
-      EXPECT_EQ(42, **measured.value);
-    }
-  }
-  EXPECT_EQ(1U, measured.diagnostics);
 }
 
 // Malformed documents exercise different parser exits, including stack growth.
@@ -1718,7 +1593,7 @@ class parser_recovery: public testing::TestWithParam<parser_failure_case> {};
 
 TEST_P(parser_recovery, retains_failure_and_allows_the_next_invocation) {
   const auto deserialize =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 12;
       return s;
     });
@@ -1740,14 +1615,13 @@ TEST_P(parser_recovery, retains_failure_and_allows_the_next_invocation) {
 
   const auto recovered =
     deserialize(omni::type_t<serialization_data::payload>{},
-      R"({"name": "ok", "code": 7})") //
-      .transform_diagnostics(serialization_test::render_diagnostics);
+      R"({"name": "ok", "code": 7})");
   EXPECT_TRUE(recovered.value);
   if (recovered.value) {
     EXPECT_EQ("ok", recovered.value->name);
     EXPECT_EQ(7, recovered.value->code);
   }
-  EXPECT_EQ("", recovered.diagnostics);
+  EXPECT_EQ("", recovered.diagnostics.message);
 }
 
 INSTANTIATE_TEST_SUITE_P(malformed_documents,
@@ -1775,8 +1649,10 @@ TEST_P(parser_recovery, renders_parse_errors_with_the_standalone_parse_format) {
       strict_deserialize(omni::type_t<serialization_data::payload>{},
         GetParam().source);
     auto moved = std::move(result);
-    retained = std::move(moved) //
-                 .transform_diagnostics(serialization_test::render_diagnostics);
+    retained = {
+      /*value=*/std::move(moved.value),
+      /*diagnostics=*/moved.diagnostics.message,
+    };
   }
 
   EXPECT_FALSE(retained.value);
@@ -1787,7 +1663,7 @@ class parse_failure_policies: public testing::TestWithParam<int> {};
 
 TEST_P(parse_failure_policies, preserves_policies_without_returning_a_value) {
   const int error_limit = GetParam();
-  const auto result = serialization_test::deserialize.transform_config(
+  const auto result = serialization_test::deserialize.tdm_config(
     [error_limit](serialization_test::config options) {
       options.error_policy.error_limit = error_limit;
       return options;
@@ -1824,7 +1700,7 @@ struct initialized_payload {
 TEST(deserialization_diagnostics,
   parser_failure_never_produces_a_mapping_result) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 12;
       return s;
     })(omni::type_t<serialization_data::payload>{}, "name: [unterminated");
@@ -1859,7 +1735,8 @@ TEST(deserialization_diagnostics,
 #endif
 
 TEST(parsing, owns_text_and_decodes_scalars_after_source_destruction) {
-  const auto result = omni::ryml::core::parse(std::string{R"(name: "a\nb"
+  const auto result = omni::ryml::core::parse(std::string{R"(
+name: "a\nb"
 code: 7
 )"});
 
@@ -1872,8 +1749,11 @@ code: 7
 }
 
 TEST(parsing, forwards_rapidyaml_options) {
-  const std::string source = R"([one,
- two]
+  const std::string source = R"(
+[
+  one,
+  two
+]
 )";
   const auto detected = omni::ryml::core::parse(source);
   const auto disabled =
@@ -1923,23 +1803,20 @@ TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
     omni::type_t<serialization_data::payload>{});
   const auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
-  const auto result = map(tree).transform_diagnostics(
-    [&tree](omni::ryml::diagnostics report) {
-      return omni::ryml::render_diagnostics(tree, report);
-    });
+  const auto result = map(tree);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
-    EXPECT_EQ("", result.diagnostics);
+    EXPECT_EQ("", omni::ryml::render_diagnostics(tree, result.diagnostics));
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+    EXPECT_EQ(GetParam().expected_code.error(), omni::ryml::render_diagnostics(tree, result.diagnostics));
   }
 }
 
 TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
   const auto map =
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     });
@@ -1961,7 +1838,7 @@ TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
 
 TEST_P(deserialization_diagnostics, borrowed_mapper_applies_the_same_policies) {
   const auto map = omni::fn::partial( //
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     }),
@@ -1992,17 +1869,14 @@ TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
     mapped = strict_map_tree(omni::type_t<serialization_data::payload>{},
       tree.rootref());
   const auto result = //
-    std::move(mapped) //
-      .transform_diagnostics([&tree](omni::ryml::diagnostics report) {
-        return omni::ryml::render_diagnostics(tree, report);
-      });
+    std::move(mapped);
 
   EXPECT_EQ(bool(GetParam().expected_code), bool(result.value));
   if (GetParam().expected_code && result.value) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
-    EXPECT_EQ("", result.diagnostics);
+    EXPECT_EQ("", omni::ryml::render_diagnostics(tree, result.diagnostics));
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), result.diagnostics);
+    EXPECT_EQ(GetParam().expected_code.error(), omni::ryml::render_diagnostics(tree, result.diagnostics));
   }
 }
 
@@ -2053,19 +1927,20 @@ TEST(tree_mapping, rendered_borrowed_results_outlive_the_tree) {
   omni::ryml::with_diagnostics<serialization_data::payload, std::string>
     retained{};
   {
-    const auto tree = ::ryml::parse_in_arena(R"(name: "a\nb"
+    const auto tree = ::ryml::parse_in_arena(R"(
+name: "a\nb"
 code: bad
 )");
     auto result =
-      omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+      omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
         s.error_policy.error_limit = 2;
         return s;
       })(omni::type_t<serialization_data::payload>{}, tree.crootref());
 
-    retained = std::move(result) //
-                 .transform_diagnostics([&tree](omni::ryml::diagnostics report) {
-        return omni::ryml::render_diagnostics(tree, report);
-      });
+    retained = {
+      /*value=*/std::move(result.value),
+      /*diagnostics=*/omni::ryml::render_diagnostics(tree, result.diagnostics),
+    };
   }
 
   EXPECT_FALSE(retained.value);
@@ -2074,19 +1949,21 @@ code: bad
 
 TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
   const auto tree = ::ryml::parse_in_arena(
-    R"({
-      "enabled": true,
-      "retries": 2,
-      "delta": 3,
-      "values": [1, "bad", 3],
-      "label": "ok",
-      "records": [
-        {"name": "first", "code": "bad"},
-        {"name": "unvisited", "code": 8}
-      ]
-    })");
+    R"(
+{
+  "enabled": true,
+  "retries": 2,
+  "delta": 3,
+  "values": [1, "bad", 3],
+  "label": "ok",
+  "records": [
+    {"name": "first", "code": "bad"},
+    {"name": "unvisited", "code": 8}
+  ]
+}
+)");
   const auto result =
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.error_limit = 1;
       return s;
     })(omni::type_t<serialization_data::scalar_values>{}, tree.crootref());
@@ -2123,7 +2000,7 @@ TEST(tree_mapping, empty_model_accepts_extra_fields) {
   const auto tree = ::ryml::parse_in_arena(
     R"({"extra": 1, "extra": 2, "nested": {"more": []}})");
   const auto result =
-    omni::ryml::map_tree.transform_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<empty_record>{}, tree);
@@ -2339,7 +2216,7 @@ TEST(deserialization, default_rejects_invalid_optional_records_as_errors) {
 
 TEST(deserialization_warnings, duplicate_containers_warn_and_keep_first_value) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.duplicates = omni::json::duplicate_policy::allow
         | omni::json::duplicate_policy::warn;
       return s;
@@ -2372,9 +2249,11 @@ struct optional_sequence_config {
 
 TEST(deserialization_warnings, containers_reject_invalid_optional_elements) {
   const auto result =
-    serialization_test::deserialize(omni::type_t<optional_sequence_config>{}, R"({
-    "values": [1, null, "bad", 3]
-  })");
+    serialization_test::deserialize(omni::type_t<optional_sequence_config>{}, R"(
+{
+  "values": [1, null, "bad", 3]
+}
+)");
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/values/2: \"bad\" is not an integer",
@@ -2420,15 +2299,17 @@ struct required_record_config {
 
 TEST(deserialization_warnings, required_records_share_the_hard_error_budget) {
   const auto result =
-    serialization_test::deserialize.transform_config([](serialization_test::config s) {
+    serialization_test::deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.error_limit = 1;
       return s;
     })(omni::type_t<required_record_config>{},
-      R"({
-      "first": "bad",
-      "nested": {"name": "ok", "code": "bad"},
-      "following": 7
-    })");
+      R"(
+{
+  "first": "bad",
+  "nested": {"name": "ok", "code": "bad"},
+  "following": 7
+}
+)");
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
@@ -2526,7 +2407,7 @@ TEST_P(serialization, does_not_require_or_write_static_data_members) {
 TEST(deserialization, allowed_extra_fields_do_not_write_static_storage) {
   const int saved = record_with_shared_state::shared;
   const auto deserialize =
-    strict_deserialize.transform_config([](serialization_test::config s) {
+    strict_deserialize.tdm_config([](serialization_test::config s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     });

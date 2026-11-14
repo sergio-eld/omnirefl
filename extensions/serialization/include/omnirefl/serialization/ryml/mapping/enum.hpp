@@ -14,6 +14,20 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
+/** Write a declared enumerator name as a quoted scalar. */
+struct from_enum {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_enum<T>::value;
+  }
+
+  template <typename T, typename Config>
+  auto operator()(T value,
+    ::ryml::NodeRef node,
+    mapping_state<Config>) const
+    -> compat::enable_if_t<supports<T>()>;
+};
+
 /** Deserialize a string-valued node into a reflected enum value.
  * Declared enumerator names take precedence over aliases. Invalid node kinds
  * and unknown names produce diagnostics containing the original node value.

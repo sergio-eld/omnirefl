@@ -201,8 +201,7 @@ inline issue make_issue(json::issue_code reason,
 }
 
 // Format validation precedes conversion; failure here means out of range.
-template <typename T,
-  compat::enable_if_t<std::is_integral<T>::value, int> = 0>
+OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_integral<T>::value))
 compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
   T value{};
   // C4 accepts a pointer to either the checked wrapper or the original value.
@@ -216,8 +215,7 @@ compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
   return value;
 }
 
-template <typename T,
-  compat::enable_if_t<!std::is_integral<T>::value, int> = 0>
+OMNI_CONSTRAINED_TEMPLATE((typename T), (!std::is_integral<T>::value))
 compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
   T value{};
   if (!c4::from_chars(scalar, &value))
@@ -382,10 +380,12 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 
 namespace detail {
 
-template <typename T,
-  typename Config,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T,
+    typename Config,
+    typename Discovery = compat::remove_cvref_t<T>),
+
+  (cp::reflect_as_root<Discovery>::value))
 auto map_tree_dispatch(::ryml::ConstNodeRef node,
   T *into,
   mapping_state<Config> context)
@@ -399,13 +399,14 @@ auto map_tree_dispatch(::ryml::ConstNodeRef node,
     omni::type_t<Discovery>{});
 }
 
-template <typename T,
-  typename Config,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T,
+    typename Config,
+    typename Discovery = compat::remove_cvref_t<T>),
+
+  (!cp::reflect_as_root<Discovery>::value &&
+    !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value))
 auto map_tree_dispatch(::ryml::ConstNodeRef node,
   T *into,
   mapping_state<Config> context)
@@ -413,13 +414,14 @@ auto map_tree_dispatch(::ryml::ConstNodeRef node,
   return read_node(node, into, context);
 }
 
-template <typename T,
-  typename Config,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T,
+    typename Config,
+    typename Discovery = compat::remove_cvref_t<T>),
+
+  (!cp::reflect_as_root<Discovery>::value &&
+    compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value))
 auto map_tree_dispatch(::ryml::ConstNodeRef node,
   T *into,
   mapping_state<Config> context)
@@ -464,7 +466,7 @@ template <typename Config, typename Record,
   compat::enable_if_t<traits::is_specialization_of<config, Config>(), int>>
 #endif
 auto deserialize(Config &&options, omni::type_t<Record> record_type, std::string source)
-  -> with_diagnostics<Record, transformed_diagnostics_type<Config>> {
+  -> with_diagnostics<Record, diagnostics_result_t<Config>> {
   auto parsed = omni::ryml::core::parse(std::move(source));
   if (!parsed) {
     const ::ryml::Tree tree{/*node_capacity=*/0, /*arena_capacity=*/0};
@@ -497,21 +499,20 @@ auto deserialize(Config &&options, omni::type_t<Record> record_type, std::string
 
 namespace detail {
 
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T, typename Discovery = compat::remove_cvref_t<T>),
+  (cp::reflect_as_root<Discovery>::value))
 ::ryml::Tree as_owning_tree_dispatch(const T &value) {
   return omni::reflected_call(
     cpp11_lambda_write</*BorrowStrings=*/false, T>{/*value=*/value},
     omni::type_t<Discovery>{});
 }
 
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T, typename Discovery = compat::remove_cvref_t<T>),
+  (!cp::reflect_as_root<Discovery>::value &&
+    !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value))
 ::ryml::Tree as_owning_tree_dispatch(const T &value) {
   ::ryml::Tree tree;
   const config<> options{};
@@ -527,32 +528,30 @@ template <typename T,
   return tree;
 }
 
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T, typename Discovery = compat::remove_cvref_t<T>),
+  (!cp::reflect_as_root<Discovery>::value &&
+    compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value))
 ::ryml::Tree as_owning_tree_dispatch(const T &value) {
   return as_owning_tree_dispatch<T,
     typename omni::ryml::detail::discovered_range_type<Discovery>::type>(value);
 }
 
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T, typename Discovery = compat::remove_cvref_t<T>),
+  (cp::reflect_as_root<Discovery>::value))
 ::ryml::Tree as_ref_tree_dispatch(T &value) {
   return omni::reflected_call(
     cpp11_lambda_write</*BorrowStrings=*/true, T>{/*value=*/value},
     omni::type_t<Discovery>{});
 }
 
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T, typename Discovery = compat::remove_cvref_t<T>),
+  (!cp::reflect_as_root<Discovery>::value &&
+    !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value))
 ::ryml::Tree as_ref_tree_dispatch(T &value) {
   ::ryml::Tree tree;
   const config<> options{};
@@ -568,12 +567,11 @@ template <typename T,
   return tree;
 }
 
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename T, typename Discovery = compat::remove_cvref_t<T>),
+  (!cp::reflect_as_root<Discovery>::value &&
+    compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value))
 ::ryml::Tree as_ref_tree_dispatch(T &value) {
   return as_ref_tree_dispatch<T,
     typename omni::ryml::detail::discovered_range_type<Discovery>::type>(value);
@@ -592,358 +590,6 @@ template <typename T>
 }
 
 } // namespace core
-
-namespace mapping {
-
-namespace detail {
-
-template <typename T>
-auto is_null(const T &)
-  -> compat::enable_if_t<!traits::is_optional<T>::value, bool> {
-  return false;
-}
-
-template <typename T>
-auto is_null(const T &value)
-  -> compat::enable_if_t<traits::is_optional<T>::value, bool> {
-  return !adapt::has_value(value) || is_null(adapt::get_value(value));
-}
-
-} // namespace detail
-
-template <typename T, typename Config>
-auto from_string_like::operator()(const T &value,
-  ::ryml::NodeRef node,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<supports<T>()> {
-  const auto &text = adapt::as_string(value);
-  using storage_type = decltype(adapt::as_string(value));
-  using text_type = compat::remove_cvref_t<storage_type>;
-  static_assert(std::is_same<char, typename text_type::value_type>::value,
-    "Ryml string mapping requires char text; provide as_string and "
-    "assign_string conversions for non-char strings.");
-
-  using view_type = compat::basic_string_view<typename text_type::value_type,
-    typename text_type::traits_type>;
-
-  // Owning conversions are temporary: copy them even in a reference tree.
-  constexpr bool borrows_source = std::is_lvalue_reference<storage_type>::value
-    || std::is_same<text_type, view_type>::value;
-
-  const c4::csubstr scalar{text.data(), text.size()};
-  if (context.borrow_strings && borrows_source)
-    node.set_val(scalar);
-  else
-    node.set_serialized(scalar);
-
-  node.set_val_style(::ryml::VAL_DQUO);
-}
-
-template <typename T, typename Config>
-auto to_string_like::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<supports<T>(),
-    with_diagnostics<compat::monostate, diagnostics>> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
-  if (node.is_container()) {
-    result.report(omni::ryml::detail::make_issue(
-      json::issue_code::unexpected_kind,
-      json::value_kind::string,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
-
-  const auto scalar = node.val();
-  using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
-    std::declval<const T &>()))>;
-
-  static_assert(std::is_same<char, typename storage_type::value_type>::value,
-    "Ryml string mapping requires char text; provide as_string and "
-    "assign_string conversions for non-char strings.");
-
-  using view_type = compat::basic_string_view<typename storage_type::value_type,
-    typename storage_type::traits_type>;
-
-  adapt::assign_string(into, view_type{scalar.str, scalar.len});
-  return std::move(result).finish();
-}
-
-template <typename T, typename Config>
-auto from_arithmetic::operator()(const T &value,
-  ::ryml::NodeRef node,
-  mapping_state<Config>) const
-  -> compat::enable_if_t<std::is_arithmetic<T>::value> {
-  const auto write = typename traits::select<
-    traits::case_<std::is_same<bool, T>::value,
-      omni::ryml::detail::write_boolean>,
-    traits::case_<std::is_floating_point<T>::value,
-      omni::ryml::detail::write_real>,
-    omni::ryml::detail::write_integer>::type{};
-
-  write(value, &node);
-}
-
-template <typename T, typename Config>
-auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<supports<T>(),
-    with_diagnostics<compat::monostate, diagnostics>> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
-  const auto expected = std::is_same<bool, T>::value
-    ? json::value_kind::boolean
-    : std::is_unsigned<T>::value
-      ? json::value_kind::unsigned_integer
-      : std::is_integral<T>::value
-        ? json::value_kind::integer
-        : json::value_kind::number;
-
-  if (node.is_container()) {
-    result.report(omni::ryml::detail::make_issue(
-      json::issue_code::unexpected_kind,
-      expected,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
-
-  const auto scalar = node.val();
-  const bool valid = std::is_same<bool, T>::value
-    ? !node.is_val_quoted()
-      && ("true" == scalar
-        || "false" == scalar
-        || "True" == scalar
-        || "False" == scalar
-        || "TRUE" == scalar
-        || "FALSE" == scalar)
-    : std::is_unsigned<T>::value
-      ? scalar.is_unsigned_integer()
-      : std::is_integral<T>::value
-        ? scalar.is_integer()
-        : scalar.is_real();
-
-  if (!valid) {
-    result.report(omni::ryml::detail::make_issue(
-      json::issue_code::invalid_scalar,
-      expected,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
-
-  const auto converted = omni::ryml::detail::from_chars<T>(scalar);
-  if (!converted) {
-    result.report(omni::ryml::detail::make_issue(
-      converted.error(),
-      expected,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
-
-  *into = *converted;
-  return std::move(result).finish();
-}
-
-template <typename T, typename Config>
-auto from_optional_like::operator()(const T &value,
-  ::ryml::NodeRef node,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<traits::is_optional<T>::value> {
-  if (adapt::has_value(value)) {
-    core::write_node(adapt::get_value(value), node, context);
-  } else {
-    node.set_val("null");
-    node.set_val_style(::ryml::VAL_PLAIN);
-  }
-}
-
-template <typename T, typename Config>
-auto to_optional_like::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<traits::is_optional<T>::value,
-    with_diagnostics<compat::monostate, diagnostics>> {
-  if (!node.is_container() && node.val_is_null()
-    && (!node.has_val_tag()
-      || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {
-    adapt::reset(into);
-    return omni::ryml::detail::make_node_accumulator(context).finish();
-  }
-
-  typename T::value_type value{};
-  auto result = core::read_node(node, &value, context);
-  if (result.value)
-    adapt::emplace(into, std::move(value));
-
-  return result;
-}
-
-namespace detail {
-
-template <typename T, typename Config>
-void write_range(const T &value, ::ryml::NodeRef node,
-  mapping_state<Config> context, std::false_type) {
-  using element_type = compat::range_value_t<T>;
-  node.set_seq();
-  // Separate iterator/sentinel declarations also support non-common ranges
-  // before C++17 permitted them in range-based for loops.
-  using std::begin;
-  using std::end;
-  auto current = begin(value);
-  const auto last = end(value);
-  std::size_t index = 0;
-  for (; current != last; ++current) {
-    const element_type &element = *current;
-    if (!is_null(element)) {
-      const auto child_state = context.child({
-        /*field=*/{},
-        /*index=*/index++,
-      });
-
-      core::write_node(element, node.append_child(), child_state);
-    }
-  }
-}
-
-template <typename T, typename Config>
-void write_range(const T &value, ::ryml::NodeRef node,
-  mapping_state<Config> context, std::true_type) {
-  static_assert(traits::is_string<traits::key_type_t<T>>::value,
-    "from_range requires string-adaptable keys for JSON/YAML objects");
-
-  node.set_map();
-  using std::begin;
-  using std::end;
-  auto current = begin(value);
-  const auto last = end(value);
-  for (; current != last; ++current) {
-    const auto &entry = *current;
-    const auto &key = adapt::as_string(entry.first);
-    using storage_type = decltype(adapt::as_string(entry.first));
-    using text_type = compat::remove_cvref_t<storage_type>;
-    static_assert(std::is_same<char, typename text_type::value_type>::value,
-      "Ryml object keys require char text from the string adapter");
-
-    using view_type = compat::basic_string_view<typename text_type::value_type,
-      typename text_type::traits_type>;
-
-    constexpr bool borrows_source =
-      std::is_lvalue_reference<storage_type>::value
-      || std::is_same<text_type, view_type>::value;
-
-    const c4::csubstr text{key.data(), key.size()};
-    auto child = node.append_child();
-    // Owning key conversions are temporary, even for a reference tree.
-    if (context.borrow_strings && borrows_source)
-      child.set_key(text);
-    else
-      child.set_key_serialized(text);
-
-    child.set_key_style(::ryml::KEY_DQUO);
-    const auto child_state = context.child({
-      /*field=*/text,
-      /*index=*/compat::nullopt,
-    });
-
-    core::write_node(entry.second, child, child_state);
-  }
-}
-
-} // namespace detail
-
-template <typename T,
-  typename Config,
-  compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
-    int>>
-void from_range_t::operator()(const T &value,
-  ::ryml::NodeRef node,
-  mapping_state<Config> context) const {
-  using element_type = compat::range_value_t<T>;
-  using element_reference = compat::range_reference_t<const T>;
-
-  // Materialized non-scalar elements may own strings borrowed by the tree.
-  static_assert(compat::disjunction<std::is_scalar<element_type>,
-    compat::conjunction<std::is_lvalue_reference<element_reference>,
-      std::is_same<element_type,
-        compat::remove_cvref_t<element_reference>>>>::value,
-    "Default range serialization requires lvalue references to value_type "
-    "for non-scalar C++ elements; specialize cp::from_type for value-producing "
-    "or converting-proxy iterators.");
-
-  detail::write_range(value, node, context, traits::is_key_value<T>{});
-
-  // TODO: [medium] Consider supporting generators and temporary-producing
-  // iterators by copying materialized elements' strings into tree storage.
-}
-
-} // namespace mapping
-
-namespace detail {
-
-template <typename Config>
-struct cpp11_write_member {
-  ::ryml::NodeRef &node;
-  mapping_state<Config> context;
-
-  template <typename Record, typename _F>
-  void operator()(omni::data_member_binding_t<Record, _F> field) const {
-    auto child = this->node.append_child();
-    child.set_key_serialized(field.name());
-    const auto state = this->context.child({
-      /*field=*/c4::to_csubstr(field.name()),
-      /*index=*/compat::nullopt,
-    });
-
-    core::write_node(field.value(), child, state);
-  }
-};
-
-} // namespace detail
-
-namespace reflected_scope {
-
-template <typename T, typename Config>
-auto from_enum::operator()(T value,
-  ::ryml::NodeRef node,
-  mapping_state<Config>) const
-  -> compat::enable_if_t<supports<T>()> {
-  const auto enumerators = omni::meta_for<T>::enumerators();
-  using enumerator_type = typename decltype(enumerators)::value_type;
-  const auto found = std::find_if(enumerators.begin(),
-    enumerators.end(),
-    [value](const enumerator_type &enumerator) {
-      return value == enumerator.first;
-    });
-
-  if (found != enumerators.end()) {
-    node.set_serialized(c4::to_csubstr(found->second));
-    node.set_val_style(::ryml::VAL_DQUO);
-  }
-}
-
-template <typename T, typename Config>
-auto from_record::operator()(const T &value,
-  ::ryml::NodeRef node,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<omni::is_reflected_record<T>::value> {
-  node.set_map();
-  const auto binding = omni::meta_for<T>::bind(value);
-  binding.accessible_data_members()
-    | fn::filter<fn::non_static>()
-    | fn::each(omni::ryml::detail::cpp11_write_member<Config>{
-      /*node=*/node,
-      /*context=*/context,
-    });
-}
-
-} // namespace reflected_scope
 
 inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
   const diagnostics &d) const {

@@ -56,7 +56,7 @@ void tree_mapping_invalid_elements(benchmark::State &state) {
   }
 
   const auto map =
-    omni::ryml::map_tree.transform_config([count](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([count](omni::ryml::config<> s) {
       s.error_policy.error_limit = static_cast<std::uint16_t>(count);
       return s;
     });

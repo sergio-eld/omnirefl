@@ -611,7 +611,7 @@ class record_aliases: public testing::TestWithParam<alias_case> {};
 
 TEST_P(record_aliases, maps_with_configured_policies_and_original_paths) {
   const auto &c = GetParam();
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [&c](serialization_test::config options) {
       options.error_policy.duplicates = c.duplicates;
       options.error_policy.unknown_fields = c.unknown_fields;
@@ -681,7 +681,7 @@ TEST(record_aliases, preserves_nested_input_paths) {
 }
 
 TEST(record_aliases, observes_warning_limit_for_alias_duplicates) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.duplicates =
         duplicate_policy::allow | duplicate_policy::warn;
@@ -732,7 +732,7 @@ TEST(record_aliases, maps_optional_aliases_and_absence) {
 }
 
 TEST(record_aliases, continues_reporting_up_to_the_configured_error_limit) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.error_limit = 1;
       return options;
@@ -764,7 +764,7 @@ TEST_P(interleaved_aliases, selects_each_member_and_preserves_issue_order) {
   const auto policy = GetParam();
   const bool last = (policy & duplicate_policy::last) == duplicate_policy::last;
   const bool warn = (policy & duplicate_policy::warn) == duplicate_policy::warn;
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [policy](serialization_test::config options) {
       options.error_policy.duplicates = policy;
       return options;
@@ -819,7 +819,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
   });
 
 TEST(record_aliases, ignored_aliases_do_not_exhaust_warning_limit) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.duplicates =
         duplicate_policy::allow | duplicate_policy::warn;

@@ -56,20 +56,43 @@ TEST(diagnostics_transform, renders_by_default) {
   EXPECT_EQ("<root>: \"bad\" is not an integer", invalid.diagnostics);
 }
 
-TEST(diagnostics_transform, receives_the_tree_before_it_is_released) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config<> options) {
-      return options.with_configure_diagnostics(
-      [](const ::ryml::Tree &tree, omni::ryml::diagnostics report)
-        -> std::vector<std::string> {
-        std::vector<std::string> values;
-        for (const auto &issue : report.issues) {
-          const auto value = tree.val(issue.node_id);
-          values.emplace_back(value.str, value.len);
-        }
+TEST(diagnostics_transform, decorates_the_current_callable) {
+  const omni::ryml::config<> original{};
+  const auto options = original.tdm_transform_diagnostics(
+    [](omni::ryml::render_diagnostics_t previous) {
+      return [previous](const ::ryml::Tree &tree,
+        omni::ryml::diagnostics report) {
+        return "updated: " + previous(tree, report);
+      };
+    });
 
-        return values;
-      });
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [options](omni::ryml::config<>) { return options; });
+
+  const auto result = load(omni::type_t<int>{}, "bad");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("updated: <root>: \"bad\" is not an integer", result.diagnostics);
+  EXPECT_EQ("<root>: \"bad\" is not an integer",
+    omni::ryml::deserialize(omni::type_t<int>{}, "bad").diagnostics);
+}
+
+TEST(diagnostics_transform, receives_the_tree_before_it_is_released) {
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return [](const ::ryml::Tree &tree, omni::ryml::diagnostics report)
+            -> std::vector<std::string> {
+            std::vector<std::string> values;
+            for (const auto &issue : report.issues) {
+              const auto value = tree.val(issue.node_id);
+              values.emplace_back(value.str, value.len);
+            }
+
+            return values;
+          };
+        });
     });
 
   const auto result = load(omni::type_t<int>{}, "bad");
@@ -79,12 +102,14 @@ TEST(diagnostics_transform, receives_the_tree_before_it_is_released) {
 }
 
 TEST(diagnostics_transform, reports_parse_errors_without_a_valid_tree) {
-  const auto load = omni::ryml::deserialize.transform_config(
+  const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config<> options) {
-      return options.with_configure_diagnostics(
-      [](const ::ryml::Tree &tree, omni::ryml::diagnostics report) {
-        return tree.empty() ? report.parse_error_message : std::string{};
-      });
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return [](const ::ryml::Tree &tree, omni::ryml::diagnostics report) {
+            return tree.empty() ? report.parse_error_message : std::string{};
+          };
+        });
     });
 
   const auto result = load(omni::type_t<int>{}, "[unterminated");
@@ -94,12 +119,14 @@ TEST(diagnostics_transform, reports_parse_errors_without_a_valid_tree) {
 }
 
 TEST(diagnostics_transform, retains_mutable_renderer_state) {
-  auto load = omni::ryml::deserialize.transform_config(
+  auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config<> options) {
       int calls = 0;
-      return options.with_configure_diagnostics(
-        [calls](const ::ryml::Tree &, omni::ryml::diagnostics) mutable {
-          return ++calls;
+      return options.tdm_transform_diagnostics(
+        [calls](omni::ryml::render_diagnostics_t) {
+          return [calls](const ::ryml::Tree &, omni::ryml::diagnostics) mutable {
+            return ++calls;
+          };
         });
     });
 
@@ -113,18 +140,20 @@ TEST(diagnostics_transform, retains_mutable_renderer_state) {
 }
 
 TEST(diagnostics_transform, preserves_policies_and_the_original_binding) {
-  const auto limited = omni::ryml::deserialize.transform_config(
+  const auto limited = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config<> options) {
       options.error_policy.error_limit = 2;
       return options;
     });
 
-  const auto configured = limited.transform_config(
+  const auto configured = limited.tdm_config(
     [](omni::ryml::config<> options) {
-      return options.with_configure_diagnostics(
-      [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
-        return report.issues.size();
-      });
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
+            return report.issues.size();
+          };
+        });
     });
 
   EXPECT_EQ(2, configured.config.error_policy.error_limit);
@@ -142,8 +171,8 @@ TEST(diagnostics_transform, accepts_named_mutable_configurators) {
     return options;
   };
 
-  const auto first = omni::ryml::deserialize.transform_config(configure);
-  const auto second = omni::ryml::deserialize.transform_config(configure);
+  const auto first = omni::ryml::deserialize.tdm_config(configure);
+  const auto second = omni::ryml::deserialize.tdm_config(configure);
 
   EXPECT_EQ(1, first.config.error_policy.error_limit);
   EXPECT_EQ(2, second.config.error_policy.error_limit);

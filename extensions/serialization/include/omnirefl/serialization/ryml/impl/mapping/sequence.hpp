@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/to_range.hpp>
+#include <omnirefl/serialization/ryml/mapping/sequence.hpp>
 
 #include <map>
 #include <utility>
@@ -8,6 +8,114 @@
 
 namespace omni {
 namespace ryml {
+namespace detail {
+
+OMNI_CONSTRAINED_TEMPLATE((typename T), (!traits::is_optional<T>::value))
+bool is_null(const T &) {
+  return false;
+}
+
+OMNI_CONSTRAINED_TEMPLATE((typename T), (traits::is_optional<T>::value))
+bool is_null(const T &value) {
+  return !adapt::has_value(value) || is_null(adapt::get_value(value));
+}
+
+template <typename T, typename Config>
+void write_range(const T &value, ::ryml::NodeRef node,
+  mapping_state<Config> context, std::false_type) {
+  using element_type = compat::range_value_t<T>;
+  node.set_seq();
+  // Separate iterator/sentinel declarations also support non-common ranges
+  // before C++17 permitted them in range-based for loops.
+  using std::begin;
+  using std::end;
+  auto current = begin(value);
+  const auto last = end(value);
+  std::size_t index = 0;
+  for (; current != last; ++current) {
+    const element_type &element = *current;
+    if (!is_null(element)) {
+      const auto child_state = context.child({
+        /*field=*/{},
+        /*index=*/index++,
+      });
+
+      core::write_node(element, node.append_child(), child_state);
+    }
+  }
+}
+
+template <typename T, typename Config>
+void write_range(const T &value, ::ryml::NodeRef node,
+  mapping_state<Config> context, std::true_type) {
+  static_assert(traits::is_string<traits::key_type_t<T>>::value,
+    "from_range requires string-adaptable keys for JSON/YAML objects");
+
+  node.set_map();
+  using std::begin;
+  using std::end;
+  auto current = begin(value);
+  const auto last = end(value);
+  for (; current != last; ++current) {
+    const auto &entry = *current;
+    const auto &key = adapt::as_string(entry.first);
+    using storage_type = decltype(adapt::as_string(entry.first));
+    using text_type = compat::remove_cvref_t<storage_type>;
+    static_assert(std::is_same<char, typename text_type::value_type>::value,
+      "Ryml object keys require char text from the string adapter");
+
+    using view_type = compat::basic_string_view<typename text_type::value_type,
+      typename text_type::traits_type>;
+
+    constexpr bool borrows_source =
+      std::is_lvalue_reference<storage_type>::value
+      || std::is_same<text_type, view_type>::value;
+
+    const c4::csubstr text{key.data(), key.size()};
+    auto child = node.append_child();
+    // Owning key conversions are temporary, even for a reference tree.
+    if (context.borrow_strings && borrows_source)
+      child.set_key(text);
+    else
+      child.set_key_serialized(text);
+
+    child.set_key_style(::ryml::KEY_DQUO);
+    const auto child_state = context.child({
+      /*field=*/text,
+      /*index=*/compat::nullopt,
+    });
+
+    core::write_node(entry.second, child, child_state);
+  }
+}
+
+} // namespace detail
+
+template <typename T,
+  typename Config,
+  compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
+    int>>
+void from_range_t::operator()(const T &value,
+  ::ryml::NodeRef node,
+  mapping_state<Config> context) const {
+  using element_type = compat::range_value_t<T>;
+  using element_reference = compat::range_reference_t<const T>;
+
+  // Materialized non-scalar elements may own strings borrowed by the tree.
+  static_assert(compat::disjunction<std::is_scalar<element_type>,
+    compat::conjunction<std::is_lvalue_reference<element_reference>,
+      std::is_same<element_type,
+        compat::remove_cvref_t<element_reference>>>>::value,
+    "Default range serialization requires lvalue references to value_type "
+    "for non-scalar C++ elements; specialize cp::from_type for value-producing "
+    "or converting-proxy iterators.");
+
+  detail::write_range(value, node, context, traits::is_key_value<T>{});
+
+  // TODO: [medium] Consider supporting generators and temporary-producing
+  // iterators by copying materialized elements' strings into tree storage.
+}
+
 namespace detail {
 
 template <typename T, typename... Args>
@@ -201,8 +309,6 @@ void read_range(::ryml::ConstNodeRef node, T *into,
 
 } // namespace detail
 
-namespace mapping {
-
 template <typename T, typename Config>
 auto to_range_t::operator()(::ryml::ConstNodeRef node,
   T *into,
@@ -234,6 +340,5 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
   return std::move(result).finish();
 }
 
-} // namespace mapping
 } // namespace ryml
 } // namespace omni

@@ -237,7 +237,7 @@ TEST(node_mapping, returns_a_value_with_multiple_custom_warnings) {
 }
 
 TEST(node_mapping, reports_warning_limit_once_for_a_custom_warning_batch) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.warning_limit = 0;
       return options;
@@ -255,7 +255,7 @@ TEST(node_mapping, reports_warning_limit_once_for_a_custom_warning_batch) {
 }
 
 TEST(node_mapping, preserves_one_limit_error_through_nested_mapping) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.warning_limit = 1;
       return options;

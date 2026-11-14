@@ -1,5 +1,8 @@
 #pragma once
 
+// TODO: [medium] Consider recovery for missing data members in to_record,
+// including exposed default member initializers.
+
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
@@ -13,6 +16,23 @@
 namespace omni {
 namespace ryml {
 namespace reflected_scope {
+
+/** Write accessible non-static data members as mapping entries. */
+struct from_record {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_record<T>::value;
+  }
+
+  template <typename T, typename Config>
+  auto operator()(const T &value,
+    ::ryml::NodeRef node,
+    mapping_state<Config> context) const
+    -> compat::enable_if_t<omni::is_reflected_record<T>::value>;
+
+  // Use the trait directly: older GCC versions can mismatch member-call
+  // constraints between this declaration and its out-of-class definition.
+};
 
 /** Deserialize a node into a reflected record's accessible non-static data
  * members.

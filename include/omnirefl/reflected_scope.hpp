@@ -1356,17 +1356,13 @@ struct binding_t<T, reflected_entity::record>:
   friend meta;
 
   // non-owning: T is a reference (U& / const U& / U&&)
-  template <typename U,
-    typename std::enable_if<!owning::value
-        && std::is_convertible<U &&, T>::value,
-      int>::type = 0>
+  OMNI_CONSTRAINED_TEMPLATE((typename U),
+    (!owning::value && std::is_convertible<U &&, T>::value))
   constexpr explicit binding_t(U &&u) noexcept: _record(u) {}
 
   // owning: T is a value type (U / const U)
-  template <typename U,
-    typename std::enable_if<owning::value
-        && std::is_constructible<type, U &&>::value,
-      int>::type = 0>
+  OMNI_CONSTRAINED_TEMPLATE((typename U),
+    (owning::value && std::is_constructible<type, U &&>::value))
   constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_constructible<type, U &&>::value)
       : _record(std::forward<U>(u)) {}
@@ -1447,17 +1443,13 @@ struct binding_t<T, reflected_entity::enumeration>:
   friend meta;
 
   // non-owning: T is a reference (U& / const U& / U&&)
-  template <typename U,
-    typename std::enable_if<!owning::value
-        && std::is_convertible<U &&, T>::value,
-      int>::type = 0>
+  OMNI_CONSTRAINED_TEMPLATE((typename U),
+    (!owning::value && std::is_convertible<U &&, T>::value))
   constexpr explicit binding_t(U &&u) noexcept: _enum_value(u) {}
 
   // owning: T is a value type (U / const U)
-  template <typename U,
-    typename std::enable_if<owning::value
-        && std::is_constructible<type, U &&>::value,
-      int>::type = 0>
+  OMNI_CONSTRAINED_TEMPLATE((typename U),
+    (owning::value && std::is_constructible<type, U &&>::value))
   constexpr explicit binding_t(U &&u) noexcept(
     std::is_nothrow_constructible<type, U &&>::value)
       : _enum_value(std::forward<U>(u)) {}
@@ -1538,9 +1530,8 @@ concept enum_binding = binding<T> && enum_meta<T>;
 template <typename T>
 constexpr meta_t<detail::_meta<T>> reflected(type_t<T>) noexcept;
 
-template <typename T,
-  typename std::enable_if<!traits::is<type_t, compat::decay_t<T>>(),
-    int>::type = 0>
+OMNI_CONSTRAINED_TEMPLATE((typename T),
+  (!traits::is<type_t, compat::decay_t<T>>()))
 constexpr auto reflected(T &&) noexcept
   -> binding_t<compat::conditional_t<
     std::is_lvalue_reference<T &&>::value, T &&, compat::decay_t<T>>>;
@@ -1564,9 +1555,8 @@ constexpr meta_t<detail::_meta<T>> reflected(type_t<T>) noexcept {
  *
  * Query `is_reflected<T>` first when metadata availability is conditional.
  */
-template <typename T,
-  typename std::enable_if<!traits::is<type_t, compat::decay_t<T>>(),
-    int>::type = 0>
+OMNI_CONSTRAINED_TEMPLATE((typename T),
+  (!traits::is<type_t, compat::decay_t<T>>()))
 constexpr auto reflected(T &&t) noexcept(
   noexcept(meta_t<detail::_meta<T>>::bind(std::forward<T>(t))))
   -> decltype(meta_t<detail::_meta<T>>::bind(std::forward<T>(t))) {

@@ -68,7 +68,8 @@ struct document {
 constexpr char nested_json[] =
   R"({"ratio":23.42,"data":{"name":"oceanic","code":815}})";
 
-constexpr char scalar_json[] = R"({
+constexpr char scalar_json[] = R"(
+{
   "enabled": true,
   "retries": 108,
   "delta": -42,
@@ -78,14 +79,16 @@ constexpr char scalar_json[] = R"({
     {"name": "oceanic", "code": 815},
     {"name": "sunset", "code": 108}
   ]
-})";
+}
+)";
 
 constexpr char bitfield_json[] = R"({"code":815,"enabled":true})";
 
 // Repeated strings, nested records, and heterogeneous sequences make this a
 // representative allocation-heavy server payload rather than a scalar-only
 // parser microbenchmark.
-constexpr char representative_json[] = R"({
+constexpr char representative_json[] = R"(
+{
   "schema_version": 3,
   "source": "checkout-api",
   "orders": [
@@ -141,7 +144,8 @@ constexpr char representative_json[] = R"({
       "checkpoints": [8, 42, 108, 815]
     }
   ]
-})";
+}
+)";
 
 constexpr char representative_yaml[] = R"(
 schema_version: 3

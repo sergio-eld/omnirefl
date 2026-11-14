@@ -1,7 +1,7 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
-#include <omnirefl/serialization/ryml/to_record.hpp>
+#include <omnirefl/serialization/ryml/mapping/record.hpp>
 
 #include <algorithm>
 #include <tuple>
@@ -12,6 +12,24 @@
 namespace omni {
 namespace ryml {
 namespace detail {
+
+template <typename Config>
+struct cpp11_write_member {
+  ::ryml::NodeRef &node;
+  mapping_state<Config> context;
+
+  template <typename Record, typename _F>
+  void operator()(omni::data_member_binding_t<Record, _F> field) const {
+    auto child = this->node.append_child();
+    child.set_key_serialized(field.name());
+    const auto state = this->context.child({
+      /*field=*/c4::to_csubstr(field.name()),
+      /*index=*/compat::nullopt,
+    });
+
+    core::write_node(field.value(), child, state);
+  }
+};
 
 // Pending members retain their selected input node. Canonical presence is
 // known before classification, so aliases can be ignored regardless of order.
@@ -38,17 +56,17 @@ struct cpp11_collect_members {
 };
 
 // SFINAE keeps T{} out of instantiations for non-default-constructible fields.
-template <typename Record, typename _F>
-auto initialize_missing(omni::data_member_binding_t<Record, _F> field)
-  -> compat::enable_if_t<std::is_default_constructible<
-    typename omni::data_member_meta_t<_F>::type>::value> {
+OMNI_CONSTRAINED_TEMPLATE((typename Record, typename _F),
+  (std::is_default_constructible<
+    typename omni::data_member_meta_t<_F>::type>::value))
+void initialize_missing(omni::data_member_binding_t<Record, _F> field) {
   field.set_value(typename omni::data_member_meta_t<_F>::type{});
 }
 
-template <typename Record, typename _F>
-auto initialize_missing(omni::data_member_binding_t<Record, _F>)
-  -> compat::enable_if_t<!std::is_default_constructible<
-    typename omni::data_member_meta_t<_F>::type>::value> {}
+OMNI_CONSTRAINED_TEMPLATE((typename Record, typename _F),
+  (!std::is_default_constructible<
+    typename omni::data_member_meta_t<_F>::type>::value))
+void initialize_missing(omni::data_member_binding_t<Record, _F>) {}
 
 // A bound member operation is inert until the fold supplies its current state.
 template <typename Record, typename _F>
@@ -137,6 +155,21 @@ struct cpp11_fold_member {
 } // namespace detail
 
 namespace reflected_scope {
+
+template <typename T, typename Config>
+auto from_record::operator()(const T &value,
+  ::ryml::NodeRef node,
+  mapping_state<Config> context) const
+  -> compat::enable_if_t<omni::is_reflected_record<T>::value> {
+  node.set_map();
+  const auto binding = omni::meta_for<T>::bind(value);
+  binding.accessible_data_members()
+    | fn::filter<fn::non_static>()
+    | fn::each(omni::ryml::detail::cpp11_write_member<Config>{
+      /*node=*/node,
+      /*context=*/context,
+    });
+}
 
 template <typename NameByAlias>
 template <typename T,
