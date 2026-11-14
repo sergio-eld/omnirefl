@@ -71,6 +71,36 @@ struct wrapped_map {
   }
 };
 
+// Adapters supply the associated key/value types instead of nested aliases.
+template <typename Key, typename Value>
+struct adapted_map {
+  std::map<Key, Value> entries;
+  using value_type = typename decltype(entries)::value_type;
+
+  auto begin() const -> typename decltype(entries)::const_iterator {
+    return entries.begin();
+  }
+
+  auto end() const -> typename decltype(entries)::const_iterator {
+    return entries.end();
+  }
+
+  void clear() { entries.clear(); }
+
+  auto find(const Key &key) -> typename decltype(entries)::iterator {
+    return entries.find(key);
+  }
+
+  auto emplace(Key key, Value value)
+    -> decltype(entries.emplace(std::move(key), std::move(value))) {
+    return entries.emplace(std::move(key), std::move(value));
+  }
+
+  void erase(typename decltype(entries)::iterator position) {
+    entries.erase(position);
+  }
+};
+
 struct keyed_value {
   int id;
   std::string label;
@@ -85,12 +115,22 @@ struct keyed_value {
 // Skip wrapper metadata while retaining value_type/mapped_type discovery.
 // Concrete arguments identify the primary templates for these skip requests.
 OMNI_SKIP_METADATA(range_models::wrapped_values<int>,
-  range_models::wrapped_map<std::string, int>);
+  range_models::wrapped_map<std::string, int>,
+  range_models::adapted_map<std::string, int>);
 #endif
 
 namespace omni {
 namespace traits {
 namespace cp {
+
+template <typename Key, typename Value>
+struct key_value<range_models::adapted_map<Key, Value>> {
+  using key_type = Key;
+  using mapped_type = Value;
+};
+
+template <typename Key, typename Value>
+struct has_unique_key<range_models::adapted_map<Key, Value>>: std::true_type {};
 
 template <typename T, typename Storage>
 struct clear<range_models::wrapped_values<T, Storage>> {
@@ -100,13 +140,13 @@ struct clear<range_models::wrapped_values<T, Storage>> {
 };
 
 template <typename T, typename Storage>
-struct is_unique_key<range_models::wrapped_values<T, Storage>>:
-    traits::is_unique_key<Storage> {};
+struct has_unique_key<range_models::wrapped_values<T, Storage>>:
+    traits::has_unique_key<Storage> {};
 
 // Unique wrappers intentionally provide only try_emplace and replace.
 template <typename T, typename Storage>
 struct emplace<range_models::wrapped_values<T, Storage>,
-  compat::enable_if_t<!traits::is_unique_key<Storage>::value>> {
+  compat::enable_if_t<!traits::has_unique_key<Storage>::value>> {
   void operator()(range_models::wrapped_values<T, Storage> *into,
     T &&value) const {
     adapt::emplace(&into->values, std::move(value));
@@ -115,7 +155,7 @@ struct emplace<range_models::wrapped_values<T, Storage>,
 
 template <typename T, typename Storage>
 struct try_emplace<range_models::wrapped_values<T, Storage>,
-  compat::enable_if_t<traits::is_unique_key<Storage>::value>> {
+  compat::enable_if_t<traits::has_unique_key<Storage>::value>> {
   auto operator()(range_models::wrapped_values<T, Storage> *into,
     T &&value) const
     -> decltype(adapt::try_emplace(&into->values, std::move(value))) {
@@ -125,7 +165,7 @@ struct try_emplace<range_models::wrapped_values<T, Storage>,
 
 template <typename T, typename Storage>
 struct replace<range_models::wrapped_values<T, Storage>,
-  compat::enable_if_t<traits::is_unique_key<Storage>::value>> {
+  compat::enable_if_t<traits::has_unique_key<Storage>::value>> {
   template <typename Position>
   void operator()(range_models::wrapped_values<T, Storage> *into,
     Position position, T &&value) const {
@@ -134,7 +174,7 @@ struct replace<range_models::wrapped_values<T, Storage>,
 };
 
 template <typename Key, typename Value>
-struct is_unique_key<range_models::wrapped_map<Key, Value>>: std::true_type {};
+struct has_unique_key<range_models::wrapped_map<Key, Value>>: std::true_type {};
 
 template <typename Key, typename Value>
 struct clear<range_models::wrapped_map<Key, Value>> {
@@ -567,6 +607,28 @@ TEST(range_mapping, custom_unique_range_needs_no_emplace_or_erase_adapter) {
     EXPECT_EQ(1U, result.value->values.size());
     if (!result.value->values.empty())
       EXPECT_EQ("last", result.value->values.begin()->label);
+  }
+}
+
+TEST(range_mapping, adapts_associated_types_and_unique_key_semantics) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config options) {
+      options.error_policy.duplicates = duplicate_policy::last;
+      return options;
+    });
+
+  const auto result = load(
+    omni::type_t<range_models::adapted_map<std::string, int>>{},
+    R"({"port":7,"port":9})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    const std::map<std::string, int> expected{{"port", 9}};
+    EXPECT_EQ(expected, result.value->entries);
+
+    EXPECT_TRUE(serialization_test::matches_json(
+      R"({"port":9})", omni::ryml::as_json(*result.value)));
   }
 }
 

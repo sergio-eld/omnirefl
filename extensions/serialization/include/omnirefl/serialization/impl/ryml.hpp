@@ -839,7 +839,7 @@ void write_range(const T &value, ::ryml::NodeRef node,
 template <typename T>
 void write_range(const T &value, ::ryml::NodeRef node,
   const omni::ryml::detail::mapping_context &context, std::true_type) {
-  static_assert(traits::is_string<typename T::key_type>::value,
+  static_assert(traits::is_string<traits::key_type_t<T>>::value,
     "from_range requires string-adaptable keys for JSON/YAML objects");
 
   node.set_map();

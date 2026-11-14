@@ -98,68 +98,26 @@ auto emplace_member(T *into, insertion_priority<0>, Args &&...args)
   return into->emplace(std::forward<Args>(args)...);
 }
 
-template <typename T>
-struct default_emplace {
-  template <typename... Args>
-  auto operator()(T *into, Args &&...args) const
-    -> decltype(emplace_member(into, insertion_priority<2>{},
-      std::forward<Args>(args)...)) {
-    return emplace_member(into, insertion_priority<2>{},
-      std::forward<Args>(args)...);
-  }
-};
+// Detection keeps member aliases optional in the customizable primary.
+template <typename Range, typename = void>
+struct default_key_value {};
 
 template <typename Range>
-struct default_try_emplace {
-  template <typename Key, typename... Args, typename T = Range>
-  auto operator()(T *into, Key &&key, Args &&...args) const
-    -> decltype(std::make_pair(into->find(key),
-      bool(into->emplace(std::forward<Key>(key),
-        std::forward<Args>(args)...).second))) {
-    const auto found = into->find(key);
-    if (found != into->end())
-      return {found, false};
-
-    const auto inserted = into->emplace(std::forward<Key>(key),
-      std::forward<Args>(args)...);
-
-    return {inserted.first, bool(inserted.second)};
-  }
-};
-
-template <typename Range>
-struct default_clear {
-  template <typename T = Range>
-  auto operator()(T *into) const -> decltype(into->clear()) {
-    return into->clear();
-  }
-};
-
-template <typename Range>
-struct default_erase {
-  template <typename Position, typename T = Range>
-  auto operator()(T *into, Position position) const
-    -> decltype(into->erase(position)) { return into->erase(position); }
+struct default_key_value<Range,
+  compat::void_t<typename Range::key_type, typename Range::mapped_type>> {
+  using key_type = typename Range::key_type;
+  using mapped_type = typename Range::mapped_type;
 };
 
 template <typename Range, typename = void>
-struct default_is_key_value: std::false_type {};
+struct default_has_unique_key: std::false_type {};
 
 template <typename Range>
-struct default_is_key_value<Range,
-  compat::void_t<typename Range::key_type, typename Range::mapped_type>>:
-    compat::is_input_range<Range> {};
-
-template <typename Range, typename = void>
-struct default_is_unique_key: std::false_type {};
-
-template <typename Range>
-struct default_is_unique_key<Range,
+struct default_has_unique_key<Range,
   compat::void_t<decltype(std::declval<Range &>().emplace(
     std::declval<compat::range_value_t<Range>>()).second)>>:
-    compat::conjunction<compat::is_input_range<Range>,
-      std::is_convertible<decltype(std::declval<Range &>().emplace(
-        std::declval<compat::range_value_t<Range>>()).second), bool>> {};
+    std::is_convertible<decltype(std::declval<Range &>().emplace(
+      std::declval<compat::range_value_t<Range>>()).second), bool> {};
 
 } // namespace detail
 
@@ -192,21 +150,53 @@ struct reset: detail::default_reset<Optional> {};
 /** Insert arguments; defaults to emplace_back, push_back, then emplace.
  * Also replaces optional contents through its emplace member. */
 template <typename T, typename = void>
-struct emplace: detail::default_emplace<T> {};
+struct emplace {
+  template <typename... Args>
+  auto operator()(T *into, Args &&...args) const
+    -> decltype(detail::emplace_member(into, detail::insertion_priority<2>{},
+      std::forward<Args>(args)...)) {
+    return detail::emplace_member(into, detail::insertion_priority<2>{},
+      std::forward<Args>(args)...);
+  }
+};
 
 /** Insert only if the key is absent, returning {iterator, inserted}.
  * On collision, leave the destination and arguments unchanged. The default
  * checks find(key) before emplace so this guarantee also holds in C++11. */
 template <typename Range, typename = void>
-struct try_emplace: detail::default_try_emplace<Range> {};
+struct try_emplace {
+  template <typename Key, typename... Args, typename T = Range>
+  auto operator()(T *into, Key &&key, Args &&...args) const
+    -> decltype(std::make_pair(into->find(key),
+      bool(into->emplace(std::forward<Key>(key),
+        std::forward<Args>(args)...).second))) {
+    const auto found = into->find(key);
+    if (found != into->end())
+      return {found, false};
+
+    const auto inserted = into->emplace(std::forward<Key>(key),
+      std::forward<Args>(args)...);
+
+    return {inserted.first, bool(inserted.second)};
+  }
+};
 
 /** Remove all elements; defaults to the clear member. */
 template <typename Range, typename = void>
-struct clear: detail::default_clear<Range> {};
+struct clear {
+  template <typename T = Range>
+  auto operator()(T *into) const -> decltype(into->clear()) {
+    return into->clear();
+  }
+};
 
 /** Erase an existing position; defaults to the erase member. */
 template <typename Range, typename = void>
-struct erase: detail::default_erase<Range> {};
+struct erase {
+  template <typename Position, typename T = Range>
+  auto operator()(T *into, Position position) const
+    -> decltype(into->erase(position)) { return into->erase(position); }
+};
 
 /** Replace an existing position with the supplied element or key/value pair.
  * The default composes the adapted erase and emplace operations. Specialize
@@ -222,17 +212,16 @@ struct replace {
   }
 };
 
-/** Whether range elements have distinct keys and mapped values.
- * Defaults to detection of key_type and mapped_type; specialize for adapters
- * with different semantics. Key/value mapping uses those two type aliases. */
+/** Associated key and mapped-value types; defaults to the nested aliases.
+ * Specialize for key/value ranges exposing those types through another API. */
 template <typename Range, typename = void>
-struct is_key_value: detail::default_is_key_value<Range> {};
+struct key_value: detail::default_key_value<Range> {};
 
 /** Whether insertion enforces unique keys (or unique set elements).
  * Defaults to detecting emplace's {iterator, inserted} result. Specialize
  * when custom insertion operations provide this property. */
 template <typename Range, typename = void>
-struct is_unique_key: detail::default_is_unique_key<Range> {};
+struct has_unique_key: detail::default_has_unique_key<Range> {};
 
 } // namespace cp
 } // namespace traits
@@ -338,13 +327,26 @@ using string_view_t = compat::basic_string_view<
 
 } // namespace detail
 
-/** Whether range elements have separate keys and mapped values. */
+/** Adapted key type of a key/value range. */
 template <typename T>
-using is_key_value = cp::is_key_value<compat::remove_cvref_t<T>>;
+using key_type_t = typename cp::key_value<compat::remove_cvref_t<T>>::key_type;
+
+/** Adapted mapped-value type of a key/value range. */
+template <typename T>
+using mapped_type_t =
+  typename cp::key_value<compat::remove_cvref_t<T>>::mapped_type;
+
+/** Whether the associated key and mapped-value types are available. */
+template <typename T, typename = void>
+struct is_key_value: std::false_type {};
+
+template <typename T>
+struct is_key_value<T, compat::void_t<key_type_t<T>, mapped_type_t<T>>>:
+    std::true_type {};
 
 /** Whether equivalent keys cannot coexist in the adapted range. */
 template <typename T>
-using is_unique_key = cp::is_unique_key<compat::remove_cvref_t<T>>;
+using has_unique_key = cp::has_unique_key<compat::remove_cvref_t<T>>;
 
 /** Whether both adapted string operations accept normalized text storage.
  * Customize the operations rather than specializing this detection trait.

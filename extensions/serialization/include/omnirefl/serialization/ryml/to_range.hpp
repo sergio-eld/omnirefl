@@ -13,13 +13,13 @@ namespace mapping {
 /** Read arrays into element ranges and objects into key/value ranges.
  * Elements are mapped before insertion through the shared operation adapters.
  * is_key_value selects element versus key/mapped-value arguments;
- * is_unique_key selects try_emplace instead of emplace. Unique destinations
+ * has_unique_key selects try_emplace instead of emplace. Unique destinations
  * apply duplicate policies and require replace for last-wins; non-unique
  * ranges retain every occurrence. Exact repeated document names are selected
  * before value decoding. Destination-specific key equivalence is checked
  * during insertion; earlier conversion errors are retained.
- * Key/value ranges currently require string-adaptable key_type and expose
- * mapped_type. All destinations require adapted clear and insertion operations.
+ * Key/value ranges require string-adaptable keys and adapted key/mapped-value
+ * types. All destinations require adapted clear and insertion operations.
  */
 struct to_range_t {
   template <typename T>

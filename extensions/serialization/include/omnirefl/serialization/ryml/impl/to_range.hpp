@@ -18,7 +18,7 @@ using unique_range_insertion = compat::conjunction<
       std::declval<Args>()...).first), Args...>>;
 
 // Keep uniqueness-dependent expressions out of non-unique range checks.
-template <typename T, bool Unique = traits::is_unique_key<T>::value>
+template <typename T, bool Unique = traits::has_unique_key<T>::value>
 struct range_insertion_check {
   template <typename... Args>
   using accepts = compat::is_invocable<const traits::cp::emplace<T> &,
@@ -37,8 +37,8 @@ struct supports_range_insertion:
 
 template <typename T>
 struct supports_range_insertion<T, true>:
-    range_insertion_check<T>::template accepts<typename T::key_type &&,
-      typename T::mapped_type &&> {};
+    range_insertion_check<T>::template accepts<traits::key_type_t<T> &&,
+      traits::mapped_type_t<T> &&> {};
 
 inline void report_range_duplicate(::ryml::ConstNodeRef node,
   const std::vector<issue::path_segment> &path,
@@ -150,17 +150,17 @@ void read_range(::ryml::ConstNodeRef node, T *into,
     result->append(std::move(mapped));
     if (success)
       insert_range_value(into, child, context, result,
-        traits::is_unique_key<T>{}, std::move(element));
+        traits::has_unique_key<T>{}, std::move(element));
   }
 }
 
 template <typename T>
 void read_range(::ryml::ConstNodeRef node, T *into,
   node_accumulator *result, std::true_type) {
-  static_assert(traits::is_string<typename T::key_type>::value,
+  static_assert(traits::is_string<traits::key_type_t<T>>::value,
     "to_range requires string-adaptable keys for JSON/YAML objects");
 
-  using key_type = typename T::key_type;
+  using key_type = traits::key_type_t<T>;
   using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
     std::declval<const key_type &>()))>;
 
@@ -171,7 +171,7 @@ void read_range(::ryml::ConstNodeRef node, T *into,
     typename storage_type::traits_type>;
 
   const auto nodes = range_mapping_nodes(node, result,
-    traits::is_unique_key<T>{});
+    traits::has_unique_key<T>{});
 
   for (const auto child : nodes) {
     if (result->stopped())
@@ -182,16 +182,16 @@ void read_range(::ryml::ConstNodeRef node, T *into,
       /*index=*/compat::nullopt,
     });
 
-    typename T::key_type key{};
+    traits::key_type_t<T> key{};
     const auto name = child.key();
     adapt::assign_string(&key, view_type{name.str, name.len});
-    typename T::mapped_type value{};
+    traits::mapped_type_t<T> value{};
     auto mapped = core::read_node(child, &value, context);
     const bool success = bool(mapped.value);
     result->append(std::move(mapped));
     if (success)
       insert_range_value(into, child, context, result,
-        traits::is_unique_key<T>{}, std::move(key), std::move(value));
+        traits::has_unique_key<T>{}, std::move(key), std::move(value));
   }
 }
 

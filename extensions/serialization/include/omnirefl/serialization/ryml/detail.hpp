@@ -41,7 +41,7 @@ struct discovered_range_type<T, true, KeyValue> {
 
 template <typename T>
 struct discovered_range_type<T, false, true> {
-  using type = compat::remove_cvref_t<typename T::mapped_type>;
+  using type = compat::remove_cvref_t<traits::mapped_type_t<T>>;
 };
 
 struct alias_entry {
