@@ -145,9 +145,13 @@ TEST(diagnostics_transform, renders_a_collection_conversion_failure) {
     omni::ryml::render_diagnostics(*tree, report));
 }
 
-// C++20 aggregate deduction permits an inline lambda in designated config.
+// Designated config needs aggregate CTAD as well as designated initializers.
+// Clang 17 added aggregate CTAD; its shared feature macro also covers
+// alias CTAD.
 #if defined(__cpp_designated_initializers) \
-  && 201707L <= __cpp_designated_initializers
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
 TEST(diagnostics_transform, accepts_designated_callable_configuration) {
   const auto load = omni::ryml::deserialize_t{
     omni::ryml::config{
