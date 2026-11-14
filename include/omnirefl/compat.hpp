@@ -59,6 +59,45 @@
 #  define OMNI_CPP11_TRAILING_RETURN(...)
 #endif
 
+#define OMNI_DETAIL_UNPAREN(...) __VA_ARGS__
+
+/** (QoL) Declare a constrained template across supported C++ standards.
+ * Parameters is a parenthesized template-parameter list; Constraint is a
+ * parenthesized boolean expression. Expands to a template declaration with
+ * a requires-clause in C++20, or a defaulted SFINAE parameter earlier.
+ *
+```cpp
+OMNI_CONSTRAINED_TEMPLATE(
+  (typename F, typename T),
+  (omni::compat::is_invocable<F &, T>::value))
+auto apply(F f, T value) -> decltype(f(value));
+
+// C++20 expansion:
+template <typename F, typename T>
+  requires (omni::compat::is_invocable<F &, T>::value)
+auto apply(F f, T value) -> decltype(f(value));
+
+// C++11/14/17 expansion:
+template <typename F, typename T,
+  typename std::enable_if<
+    omni::compat::is_invocable<F &, T>::value, int>::type = 0>
+auto apply(F f, T value) -> decltype(f(value));
+```
+ * @details One spelling avoids per-declaration compatibility guards.
+ * Parentheses protect commas inside both arguments. Uses std::enable_if
+ * so it also works before compat::enable_if_t is declared in this header.
+ */
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+#  define OMNI_CONSTRAINED_TEMPLATE(Parameters, Constraint) \
+    template <OMNI_DETAIL_UNPAREN Parameters> \
+      requires (OMNI_DETAIL_UNPAREN Constraint)
+#else
+#  define OMNI_CONSTRAINED_TEMPLATE(Parameters, Constraint) \
+    template <OMNI_DETAIL_UNPAREN Parameters, \
+      typename ::std::enable_if<OMNI_DETAIL_UNPAREN Constraint, \
+        int>::type = 0>
+#endif
+
 // Invoke beside the enum so argument-dependent lookup finds these operators.
 #define OMNI_ENABLE_BIT_FLAGS(Enum)                                        \
   constexpr Enum operator|(Enum left, Enum right) noexcept {               \

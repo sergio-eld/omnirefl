@@ -14,6 +14,22 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
+/** Write a declared enumerator name as a quoted scalar. */
+struct from_enum {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::is_reflected_enum<T>::value;
+  }
+
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
+  auto operator()(T value,
+    ::ryml::NodeRef node,
+    mapping_state_t<Config>) const
+    -> void;
+};
+
 /** Deserialize a string-valued node into a reflected enum value.
  * Declared enumerator names take precedence over aliases. Invalid node kinds
  * and unknown names produce diagnostics containing the original node value.
@@ -34,15 +50,16 @@ struct to_enum_t {
   }
 
   template <typename T,
+    typename Config,
     compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const detail::mapping_context &context) const
-    -> with_diagnostics<compat::monostate, diagnostics>;
+    mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;
 
-  /** QoL for overriding the alias resolver inline, in a single expression.
+  /** (QoL) Override the alias resolver inline, in a single expression.
    * Copy or move f into a new mapper specialized for its concrete type.
    *
    * Resolves alias text to an optional canonical value text:
@@ -54,16 +71,12 @@ struct to_enum_t {
    * The callable must be copy-constructible and invocable through a const
    * reference, returning the same result for the same alias.
    */
-  template <typename F>
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::conjunction<std::is_copy_constructible<compat::decay_t<F>>,
+      std::is_constructible<compat::decay_t<F>, F &&>,
+      detail::is_alias_resolver<const compat::decay_t<F>>>::value))
   constexpr auto with_value_by_alias(F &&f) const
     -> to_enum_t<compat::decay_t<F>> {
-    static_assert(std::is_copy_constructible<compat::decay_t<F>>::value,
-      "with_value_by_alias requires a copy-constructible callable");
-
-    static_assert(detail::is_alias_resolver<const compat::decay_t<F>>::value,
-      "Invalid value_by_alias callable; expected: "
-      "value_by_alias :: compat::string_view -> optional<compat::string_view>");
-
     return {/*value_by_alias=*/std::forward<F>(f)};
   }
 };

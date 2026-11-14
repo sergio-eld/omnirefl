@@ -8,7 +8,28 @@
 
 namespace omni {
 namespace ryml {
-namespace mapping {
+
+/** Write key/value ranges as objects and element ranges as arrays.
+ * Empty optional array elements are omitted. Optional object values remain.
+ * Non-scalar C++ elements must be exposed as lvalue references to value_type;
+ * default mapping rejects temporary-producing iterators in both tree modes. */
+struct from_range_t {
+  template <typename T>
+  static constexpr bool supports() {
+    return omni::ryml::detail::is_mapped_range<const T>::value;
+  }
+
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
+      int> = 0>
+  void operator()(const T &value,
+    ::ryml::NodeRef node,
+    mapping_state_t<Config> context) const;
+};
+
+/** Default range serializer. */
+constexpr from_range_t from_range{};
 
 /** Read arrays into element ranges and objects into key/value ranges.
  * Elements are mapped before insertion through the shared operation adapters.
@@ -27,12 +48,13 @@ struct to_range_t {
     return omni::ryml::detail::is_mapped_range<T>::value;
   }
 
-  template <typename T>
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<detail::is_mapped_range<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const detail::mapping_context &context) const
-    -> compat::enable_if_t<detail::is_mapped_range<T>::value,
-      with_diagnostics<compat::monostate, diagnostics>>;
+    mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   // TODO: [high] Define the representation of non-string object keys before
   // enabling their default mapping. JSON object names are always strings.
@@ -41,6 +63,5 @@ struct to_range_t {
 /** Default range mapper using the shared operation customization points. */
 constexpr to_range_t to_range{};
 
-} // namespace mapping
 } // namespace ryml
 } // namespace omni
