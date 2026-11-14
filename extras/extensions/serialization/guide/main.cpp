@@ -1075,8 +1075,13 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   };
 
   auto into = c.initial;
-  const auto mapped = omni::ryml::core::map_tree(
-    parsed->crootref(), &into, context);
+  const auto mapped = omni::reflected_call(
+    [&parsed, &context](omni::record_binding auto record)
+      -> omni::ryml::with_diagnostics<omni::compat::monostate> {
+      return omni::ryml::core::read_node(
+        parsed->crootref(), &record.value(), context);
+    },
+    into);
 
   EXPECT_FALSE(mapped.value);
   EXPECT_EQ(static_cast<const std::vector<int> &>(c.initial),
@@ -1192,7 +1197,7 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   };
 
   auto into = c.initial;
-  const auto mapped = omni::ryml::core::map_tree(
+  const auto mapped = omni::ryml::core::read_node(
     parsed->crootref(), &into, context);
 
   EXPECT_EQ(bool(c.expected), bool(mapped.value));
