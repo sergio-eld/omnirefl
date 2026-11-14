@@ -1,0 +1,47 @@
+Subject: [PATCH] Compare char values as unsigned bytes without builtin memcmp
+
+The C++14 fallback compares plain char values directly when builtin memcmp
+is unavailable. On implementations with signed char, UTF-8 and other
+high-byte text therefore sorts before ASCII, unlike std::string_view and
+memcmp. This is reproducible with MSVC using string-view-lite's fallback.
+
+Provide the char overload regardless of builtin support, and compare
+unsigned char values in its portable loop. Preserve the existing intrinsic
+path and leave comparison of other character types unchanged.
+---
+
+diff --git a/include/nonstd/string_view.hpp b/include/nonstd/string_view.hpp
+--- a/include/nonstd/string_view.hpp
++++ b/include/nonstd/string_view.hpp
+@@ -506,16 +506,23 @@
+     return 0;
+ }
+ 
++// specialization of compare() for char, see also generic compare() above:
++
++inline nssv_constexpr14 int compare( char const * s1, char const * s2, std::size_t count )
++{
+ #if nssv_HAVE_BUILTIN_MEMCMP
+-
+-// specialization of compare() for char, see also generic compare() above:
+-
+-inline nssv_constexpr14 int compare( char const * s1, char const * s2, std::size_t count )
+-{
+     return nssv_BUILTIN_MEMCMP( s1, s2, count );
+-}
+-
+-#endif
++#else
++    while ( count-- != 0 )
++    {
++        unsigned char const c1 = static_cast<unsigned char>( *s1++ );
++        unsigned char const c2 = static_cast<unsigned char>( *s2++ );
++        if ( c1 < c2 ) return -1;
++        if ( c1 > c2 ) return +1;
++    }
++    return 0;
++#endif
++}
+ 
+ #if nssv_HAVE_BUILTIN_STRLEN
+ 

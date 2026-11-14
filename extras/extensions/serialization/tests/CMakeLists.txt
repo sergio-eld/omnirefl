@@ -19,8 +19,10 @@ endif()
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.extensions.serialization")
     add_executable(${_test_target} test.cpp scalar_roots.cpp sequence_roots.cpp
-        json_mapping.cpp alias_mapping.cpp string_mapping.cpp
-        container_discovery.cpp optional_mapping.cpp)
+        json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
+        string_mapping.cpp
+        container_discovery.cpp optional_mapping.cpp customization.cpp
+        diagnostics.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES
@@ -44,4 +46,35 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         add_test(NAME ${_test_target} COMMAND ${_test_target})
     endif()
 
+endforeach()
+
+# These targets compile only when CTest requests the expected failure.
+foreach(_standard IN LISTS _supported_cpp_standards)
+    set(_negative_cases missing_mapping)
+    if(_standard GREATER_EQUAL 14)
+        list(APPEND _negative_cases conflicting_mapping)
+    endif()
+    foreach(_case IN LISTS _negative_cases)
+        set(_target "cpp_${_standard}.negative.serialization.${_case}")
+        add_executable(${_target} EXCLUDE_FROM_ALL "negative/${_case}.cpp")
+        set_target_properties(${_target} PROPERTIES
+            CXX_STANDARD ${_standard}
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS NO)
+        target_link_libraries(${_target} PRIVATE omni::serialization)
+        omni_reflected_target(${_target})
+        if(_case STREQUAL "missing_mapping")
+            set(_message "No node mapping: specialize")
+        else()
+            set(_message "Conflicting node mappings: specialize either")
+        endif()
+        add_test(NAME "${_target}.build"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+                "-DTARGET=${_target}"
+                "-DEXPECTED_MESSAGE=${_message}"
+                -P "${omnirefl_PROJECTS_DIR}/tests/tool/expect_compile_failure.cmake")
+        # A build must not race another CTest build in the same configured tree.
+        set_tests_properties("${_target}.build" PROPERTIES RUN_SERIAL TRUE)
+    endforeach()
 endforeach()

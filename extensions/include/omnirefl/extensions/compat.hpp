@@ -6,6 +6,9 @@
 #  if __has_include(<version>)
 #    include <version>
 #  endif
+#  if 201703L <= OMNI_CPLUSPLUS && __has_include(<variant>)
+#    include <variant>
+#  endif
 #  if 201703L <= OMNI_CPLUSPLUS && __has_include(<string_view>)
 #    include <string_view>
 #  endif
@@ -21,6 +24,12 @@
 #  include <optional>
 #else
 #  include <tl/optional.hpp>
+#endif
+
+#if defined(__cpp_lib_variant) && 201606L <= __cpp_lib_variant
+#  include <variant>
+#else
+#  include <mpark/variant.hpp>
 #endif
 
 // The extensions use expected's monadic operations, not just value storage.
@@ -60,6 +69,24 @@ using std::unexpected;
 using tl::expected;
 using tl::unexpected;
 #endif
+
+#if defined(__cpp_lib_variant) && 201606L <= __cpp_lib_variant
+using std::variant;
+using std::monostate;
+using std::visit;
+using std::get_if;
+using std::holds_alternative;
+#else
+using mpark::variant;
+using mpark::monostate;
+using mpark::visit;
+using mpark::get_if;
+using mpark::holds_alternative;
+#endif
+
+// FIXME: [high] [external] Remove string_view_lite-compare.patch after upstream
+// fixes signed-char ordering in its comparison fallback. Fetched copies are
+// patched so UTF-8/high-byte strings use the same ordering as std::string_view.
 
 } // namespace compat
 } // namespace omni

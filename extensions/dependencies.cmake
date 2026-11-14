@@ -31,8 +31,19 @@ if(NOT TARGET nonstd::string-view-lite)
     set(STRING_VIEW_LITE_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(string_view_lite
         URL https://github.com/nonstd-lite/string-view-lite/archive/refs/tags/v1.8.1.tar.gz
-        URL_HASH SHA256=97b812275f07d02592efb092bd70366d310b2294f677644ea07828e6138b091d)
+        URL_HASH SHA256=97b812275f07d02592efb092bd70366d310b2294f677644ea07828e6138b091d
+        # Keep fallback char ordering consistent with unsigned-byte memcmp.
+        PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/patch_string_view_lite.cmake")
     list(APPEND _extensions_dependencies string_view_lite)
+endif()
+
+if(NOT TARGET mpark_variant)
+    set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)
+    FetchContent_Declare(mpark_variant
+        URL https://github.com/mpark/variant/archive/refs/tags/v1.4.0.tar.gz
+        URL_HASH SHA256=8f6b28ab3640b5d76d5b6664dda7257a4405ce59179220431b8fd196c79b2ecb)
+    list(APPEND _extensions_dependencies mpark_variant)
 endif()
 
 if(_extensions_dependencies)

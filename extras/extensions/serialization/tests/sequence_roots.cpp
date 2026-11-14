@@ -26,7 +26,7 @@ TEST(serialization_sequence_roots, writes_empty_record_array) {
 }
 
 TEST(deserialization_sequence_roots, discovers_nested_record_elements) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::vector<std::vector<pixel_sample>>>{},
     R"([[{"column": 7, "alpha": 0.5}], []])");
 
@@ -46,7 +46,7 @@ TEST(deserialization_sequence_roots, discovers_nested_record_elements) {
 }
 
 TEST(deserialization_sequence_roots, reads_empty_record_array) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::vector<pixel_sample>>{}, "[]");
 
   EXPECT_TRUE(result.value);

@@ -5,6 +5,7 @@
 // otherwise.
 
 #include <functional>
+#include <iterator>
 #include <memory>
 // FIXME: [low] Freestanding: separate the owning-string/to_string helpers and
 // this hosted dependency from the common compatibility header.
@@ -20,12 +21,26 @@
 #  define OMNI_CPLUSPLUS __cplusplus
 #endif
 
+// C++20 ranges are optional on standard libraries predating ranges support.
+#if 202002L <= OMNI_CPLUSPLUS && defined(__has_include)
+#  if __has_include(<ranges>)
+#    include <ranges>
+#  endif
+#endif
+
 // Enabled in C++14 and newer for functions whose bodies cannot be constexpr
 // under C++11's single-return-statement restriction.
 #if 201402L <= OMNI_CPLUSPLUS
 #  define OMNI_CPP14_CONSTEXPR constexpr
 #else
 #  define OMNI_CPP14_CONSTEXPR
+#endif
+
+// C++14 aggregates allow member defaults; omit them to preserve C++11 aggregates.
+#if defined(__cpp_aggregate_nsdmi) && 201304L <= __cpp_aggregate_nsdmi
+#  define OMNI_CPP14_DEFAULT_INIT(...) = {__VA_ARGS__}
+#else
+#  define OMNI_CPP14_DEFAULT_INIT(...)
 #endif
 
 // C++17 constexpr support includes literal lambda closure types.
@@ -169,6 +184,61 @@ using std::void_t;
 #else
 template <typename... Ts>
 using void_t = typename detail::make_void<Ts...>::type;
+#endif
+
+namespace detail {
+
+// Unqualified access supports arrays, member functions, and ADL-only ranges.
+using std::begin;
+using std::end;
+
+template <typename Range>
+using range_iterator_t = decltype(begin(std::declval<Range &>()));
+
+template <typename Range>
+using range_comparison_t = decltype(bool(begin(std::declval<Range &>())
+  != end(std::declval<Range &>())));
+
+template <typename Range>
+using range_reference_t = decltype(*std::declval<range_iterator_t<Range> &>());
+
+template <typename Range>
+using range_value_t = typename std::iterator_traits<
+  range_iterator_t<Range>>::value_type;
+
+/** Detect input ranges using legacy iterator categories and operations.
+ * Semantic iterator guarantees remain the range author's responsibility. */
+template <typename Range, typename = void>
+struct is_input_range: std::false_type {};
+
+template <typename Range>
+struct is_input_range<Range,
+  void_t<typename std::iterator_traits<
+      range_iterator_t<Range>>::iterator_category,
+    range_reference_t<Range>,
+    decltype(++std::declval<range_iterator_t<Range> &>()),
+    decltype(std::declval<range_iterator_t<Range> &>()++),
+    range_comparison_t<Range>>>:
+    std::is_base_of<std::input_iterator_tag,
+      typename std::iterator_traits<
+        range_iterator_t<Range>>::iterator_category> {};
+
+} // namespace detail
+
+// Use the standard range concept when the library provides C++20 ranges.
+#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
+template <typename Range>
+using range_reference_t = std::ranges::range_reference_t<Range>;
+
+template <typename Range>
+using range_value_t = std::ranges::range_value_t<Range>;
+
+template <typename Range>
+struct is_input_range: std::bool_constant<std::ranges::input_range<Range>> {};
+#else
+using detail::range_reference_t;
+using detail::range_value_t;
+using detail::is_input_range;
 #endif
 
 // apply

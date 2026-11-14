@@ -742,6 +742,96 @@ TEST(compat_conjunction, preserves_the_last_operand_value) {
       std::integral_constant<int, 7>>::value));
 }
 
+namespace input_ranges {
+
+// Free begin/end exercise ADL without member accessors.
+template <typename Iterator>
+struct iterator_range {
+  Iterator first;
+  Iterator last;
+};
+
+template <typename Iterator>
+Iterator begin(iterator_range<Iterator> &range) { return range.first; }
+
+template <typename Iterator>
+Iterator end(iterator_range<Iterator> &range) { return range.last; }
+
+} // namespace input_ranges
+
+TEST(compat_input_range, recognizes_arrays_and_standard_containers) {
+  EXPECT_TRUE((omni::compat::is_input_range<int[3]>::value));
+  EXPECT_TRUE((omni::compat::is_input_range<std::vector<int>>::value));
+  EXPECT_TRUE((omni::compat::is_input_range<const std::vector<int> &>::value));
+
+  static_assert(std::is_same<const int &,
+    omni::compat::range_reference_t<const std::vector<int>>>::value,
+    "Range references preserve element constness");
+
+  // C++20 ranges let us check the fallback against the standard concept.
+#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
+  static_assert(omni::compat::detail::is_input_range<int[3]>::value
+    == std::ranges::input_range<int[3]>);
+
+  static_assert(omni::compat::detail::is_input_range<std::vector<int>>::value
+    == std::ranges::input_range<std::vector<int>>);
+
+  static_assert(
+    omni::compat::detail::is_input_range<const std::vector<int> &>::value
+    == std::ranges::input_range<const std::vector<int> &>);
+
+  static_assert(std::is_same<
+    omni::compat::detail::range_reference_t<const std::vector<int>>,
+    std::ranges::range_reference_t<const std::vector<int>>>::value);
+
+  static_assert(std::is_same<
+    omni::compat::detail::range_value_t<const std::vector<int>>,
+    std::ranges::range_value_t<const std::vector<int>>>::value);
+#endif
+}
+
+TEST(compat_input_range, accepts_a_single_pass_adl_range) {
+  std::istringstream source{"4 8 15"};
+  input_ranges::iterator_range<std::istream_iterator<int>> range{
+    std::istream_iterator<int>{source},
+    std::istream_iterator<int>{},
+  };
+
+  EXPECT_TRUE(omni::compat::is_input_range<decltype(range)>::value);
+
+  // C++20 ranges let us check the fallback against the standard concept.
+#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
+  static_assert(omni::compat::detail::is_input_range<decltype(range)>::value
+    == std::ranges::input_range<decltype(range)>);
+#endif
+
+  const std::vector<int> values{begin(range), end(range)};
+  EXPECT_EQ((std::vector<int>{4, 8, 15}), values);
+}
+
+TEST(compat_input_range, rejects_output_ranges_and_non_ranges) {
+  using output_range = input_ranges::iterator_range<
+    std::back_insert_iterator<std::vector<int>>>;
+
+  struct incomplete;
+
+  EXPECT_FALSE(omni::compat::is_input_range<output_range>::value);
+  EXPECT_FALSE(omni::compat::is_input_range<int>::value);
+  EXPECT_FALSE(omni::compat::is_input_range<incomplete>::value);
+
+  // C++20 ranges let us check the fallback against the standard concept.
+#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
+  static_assert(omni::compat::detail::is_input_range<output_range>::value
+    == std::ranges::input_range<output_range>);
+
+  static_assert(omni::compat::detail::is_input_range<int>::value
+    == std::ranges::input_range<int>);
+
+  static_assert(omni::compat::detail::is_input_range<incomplete>::value
+    == std::ranges::input_range<incomplete>);
+#endif
+}
+
 TEST(compat_invoke, invokes_members_through_supported_object_forms) {
   invoke_record object{40};
   derived_invoke_record derived{40};
@@ -1124,6 +1214,16 @@ TEST(traits_is, compares_types_and_type_templates) {
   EXPECT_FALSE((omni::traits::is<std::vector, std::tuple<int>>()));
   EXPECT_FALSE(
     (std::is_same<omni::type_t<int>, omni::compat::type_identity<int>>::value));
+}
+
+TEST(traits_specialization, identifies_type_template_instances) {
+  EXPECT_TRUE((
+    omni::traits::is_specialization_of<std::vector, std::vector<int>>()));
+  EXPECT_TRUE((omni::traits::is_specialization_of<std::vector,
+    const std::vector<int> &>()));
+  EXPECT_FALSE((
+    omni::traits::is_specialization_of<std::vector, std::tuple<int>>()));
+  EXPECT_FALSE((omni::traits::is_specialization_of<std::vector, int>()));
 }
 
 TEST(traits_select, prioritizes_the_first_of_overlapping_predicates) {

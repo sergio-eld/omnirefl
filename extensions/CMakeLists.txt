@@ -8,7 +8,8 @@ if(BUILD_EXTENSIONS)
     target_include_directories(extensions_common INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(extensions_common INTERFACE
-        omni::refl tl::expected tl::optional nonstd::string-view-lite)
+        omni::refl tl::expected tl::optional nonstd::string-view-lite
+        mpark_variant)
 endif()
 
 add_subdirectory(serialization)
@@ -16,7 +17,8 @@ add_subdirectory(serialization)
 if(ENABLE_PACKAGE)
     install(DIRECTORY include/omnirefl/
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/omnirefl")
-    install(FILES dependencies.cmake
+    install(FILES dependencies.cmake patch_string_view_lite.cmake
+        string_view_lite-compare.patch
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components")
 endif()
 

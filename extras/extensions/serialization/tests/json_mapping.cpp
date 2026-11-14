@@ -12,7 +12,7 @@
 // and describe suites, automatically including new groups. Reuse the same data
 // across engines and benchmarks, retaining heterogeneous model types per group.
 
-#include <omnirefl/serialization/ryml.hpp>
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 
@@ -30,9 +30,9 @@
 namespace {
 
 /*
-D/U/L/E/R/C(config inputs, JSON) >> expect(struct value or none, ordered
+D/U/L/E/C(config inputs, JSON) >> expect(struct value or none, ordered
 issues) none = no returned value; an empty issue list means no diagnostics.
-error_limit = 0; warning_limit = nullopt (unlimited); recovery = nullopt.
+error_limit = 0; warning_limit = nullopt (unlimited).
 Each engine starts with explicit defaults; case transforms select the config
 under test. The expectation binds the struct type, independently of the engine.
 All JSON is well-formed; these cases specify mapping, not parser syntax errors.
@@ -80,7 +80,9 @@ struct mapping_case {
   omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected;
 
   template <typename Engine>
-  omni::ryml::with_diagnostics<Model> operator()(Engine engine) const {
+  auto operator()(Engine engine) const
+    -> decltype(engine.transform_config(
+      from.transform_config)(omni::type_t<Model>{}, from.json)) {
     return engine.transform_config(
       from.transform_config)(omni::type_t<Model>{}, from.json);
   }
@@ -128,37 +130,9 @@ struct nested_pair {
   pair_record nested;
 };
 
-struct default_record {
-  int value = 17;
-};
-
-int runtime_default() { return 23; }
-
-struct runtime_record {
-  int value = runtime_default();
-};
-
-struct nondefault {
-  nondefault() = delete;
-  explicit nondefault(int input): value{input} {}
-
-  int value;
-};
-
-nondefault runtime_nondefault() { return nondefault{5}; }
-
-struct nondefault_holder {
-  nondefault value = runtime_nondefault();
-};
-
 struct nested_records {
   integer_value nested;
   std::vector<integer_value> items;
-};
-
-struct nested_defaults {
-  default_record nested;
-  std::vector<default_record> items;
 };
 
 struct optional_record {
@@ -168,14 +142,6 @@ struct optional_record {
 struct sequence_record {
   std::vector<integer_value> items;
 };
-
-// C++11 records with member initializers cannot be aggregate-initialized.
-template <typename Record>
-Record with_value(int value) {
-  Record record{};
-  record.value = value;
-  return record;
-}
 
 } // namespace models
 
@@ -602,126 +568,7 @@ const auto cases = std::make_tuple(
 
 } // namespace error_limits
 
-namespace missing_field_recovery {
 
-using dsl::expect;
-using dsl::none;
-using omni::json::issue_code;
-using omni::json::recovery_policy;
-using omni::json::value_kind;
-
-// C++11 compat: select missing-field recovery and the warning limit.
-struct override_config {
-  omni::compat::optional<recovery_policy> recovery;
-  omni::compat::optional<std::uint16_t> warning_limit;
-
-  template <typename Config>
-  Config operator()(Config config) const {
-    config.recovery = recovery;
-    config.error_policy.warning_limit = warning_limit;
-    return config;
-  }
-};
-
-dsl::input<override_config> R(
-  omni::compat::optional<recovery_policy> recovery,
-  std::string json,
-  omni::compat::optional<std::uint16_t> warning_limit = none) {
-  return {{recovery, warning_limit}, std::move(json)};
-}
-
-const auto both =
-  recovery_policy::field_defaults | recovery_policy::default_initializable;
-
-const auto Emissing = dsl::error(issue_code::missing_field, "/value");
-const auto Etype =
-  dsl::error(issue_code::invalid_scalar, "/value", value_kind::integer);
-
-// Axes: [model][recovery methods][missing/present/invalid field].
-const auto cases = std::make_tuple(
-  // [default_record][none]
-  R(none, R"({"value": 9})")
-    >> expect(models::with_value<models::default_record>(9), {}),
-  R(none, "{}") >> expect<models::default_record>(none, {Emissing}),
-
-  // [default_record][field_defaults]
-  R(recovery_policy::field_defaults, "{}")
-    >> expect(models::default_record{}, {}),
-  R(recovery_policy::field_defaults, R"({"value": 9})")
-    >> expect(models::with_value<models::default_record>(9), {}),
-  R(recovery_policy::field_defaults, "{}", /*warning_limit=*/0)
-    >> expect(models::default_record{}, {}),
-  R(recovery_policy::field_defaults, R"({"value": null})")
-    >> expect<models::default_record>(none, {Etype}),
-
-  // [default_record][default_initializable]
-  R(recovery_policy::default_initializable, "{}")
-    >> expect(models::with_value<models::default_record>(0), {}),
-  R(recovery_policy::default_initializable, R"({"value": 9})")
-    >> expect(models::with_value<models::default_record>(9), {}),
-  R(recovery_policy::default_initializable, R"({"value": "bad"})")
-    >> expect<models::default_record>(none, {Etype}),
-  R(recovery_policy::default_initializable, R"({"value": null})")
-    >> expect<models::default_record>(none, {Etype}),
-
-  // [default_record][both]; exposed field defaults take precedence.
-  R(both, "{}") >> expect(models::default_record{}, {}),
-  R(both, R"({"value": 9})")
-    >> expect(models::with_value<models::default_record>(9), {}),
-  R(both, R"({"value": "bad"})")
-    >> expect<models::default_record>(none, {Etype}),
-
-  // [integer_value][field_defaults / default_initializable / both]
-  R(recovery_policy::field_defaults, "{}")
-    >> expect<models::integer_value>(none, {Emissing}),
-  R(recovery_policy::default_initializable, "{}")
-    >> expect(models::integer_value{0}, {}),
-  R(both, "{}") >> expect(models::integer_value{0}, {}),
-
-  // [runtime_record][field_defaults / default_initializable / both]
-  R(recovery_policy::field_defaults, "{}")
-    >> expect<models::runtime_record>(none, {Emissing}),
-  R(recovery_policy::default_initializable, "{}")
-    >> expect(models::with_value<models::runtime_record>(0), {}),
-  R(both, "{}") >> expect(models::with_value<models::runtime_record>(0), {}),
-
-  // [nondefault_holder][default_initializable / both]
-  R(recovery_policy::default_initializable, "{}")
-    >> expect<models::nondefault_holder>(none, {Emissing}),
-  R(both, "{}") >> expect<models::nondefault_holder>(none, {Emissing}),
-
-  // [nested_defaults][both / none]
-  R(both, R"({"nested": {}, "items": [{}]})")
-    >> expect(models::nested_defaults{models::default_record{},
-                {models::default_record{}}},
-      {}),
-  R(none, R"({"nested": {}, "items": [{}]})")
-    >> expect<models::nested_defaults>(none,
-      {dsl::error(issue_code::missing_field, "/nested/value")}),
-
-  // [nested_defaults][default_initializable]; missing and empty differ.
-  R(recovery_policy::default_initializable, R"({"items": []})")
-    >> expect(models::nested_defaults{models::default_record{}, {}}, {}),
-  R(recovery_policy::default_initializable,
-    R"({"nested": {}, "items": []})")
-    >> expect(models::nested_defaults{
-                models::with_value<models::default_record>(0), {}}, {}),
-  R(recovery_policy::default_initializable, R"({"nested": {"value": 9}})")
-    >> expect(models::nested_defaults{
-                models::with_value<models::default_record>(9), {}}, {}),
-
-  // [nested_defaults][none]; empty containers are present, not missing.
-  R(none, R"({"nested": {"value": 9}, "items": []})")
-    >> expect(models::nested_defaults{
-                models::with_value<models::default_record>(9), {}}, {}),
-  R(none, R"({"nested": {"value": 9}})")
-    >> expect<models::nested_defaults>(none,
-      {dsl::error(issue_code::missing_field, "/items")}),
-  R(none, R"({"items": []})")
-    >> expect<models::nested_defaults>(none,
-      {dsl::error(issue_code::missing_field, "/nested")}));
-
-} // namespace missing_field_recovery
 
 namespace policy_interactions {
 
@@ -730,15 +577,12 @@ using dsl::none;
 using dsl::warn_unknown_field;
 using omni::json::duplicate_policy;
 using omni::json::issue_code;
-using omni::json::recovery_policy;
 using omni::json::unknown_policy;
 using omni::json::value_kind;
 
-// C++11 compat: combine the two warning-producing policies with
-// limits/recovery.
+// C++11 lambda equivalent: combine warning-producing policies with limits.
 struct override_config {
   omni::compat::optional<std::uint16_t> warning_limit;
-  omni::compat::optional<recovery_policy> recovery;
 
   template <typename Config>
   Config operator()(Config config) const {
@@ -747,20 +591,16 @@ struct override_config {
     config.error_policy.unknown_fields =
       unknown_policy::allow | unknown_policy::warn;
     config.error_policy.warning_limit = warning_limit;
-    config.recovery = recovery;
     return config;
   }
 };
 
 dsl::input<override_config> C(omni::compat::optional<std::uint16_t> limit,
-  std::string json,
-  omni::compat::optional<recovery_policy> recovery = none) {
-  return {{limit, recovery}, std::move(json)};
-}
+  std::string json) { return {{limit}, std::move(json)}; }
 
 const auto Wdup = dsl::warning(issue_code::duplicate_field, "/value");
 
-// Axes: [model][warning limit/recovery][valid/invalid mapping input].
+// Axes: [model][warning limit][valid/invalid mapping input].
 const auto cases = std::make_tuple(
   C(none, R"({"value": 7, "value": 42, "other": 5})")
     >> expect(models::integer_value{7}, {Wdup, warn_unknown_field("/other")}),
@@ -769,13 +609,6 @@ const auto cases = std::make_tuple(
       {Wdup,
         warn_unknown_field("/other"),
         dsl::error(issue_code::warning_limit_exceeded, "/other")}),
-  C(0, "{}", recovery_policy::field_defaults)
-    >> expect(models::default_record{}, {}),
-  C(0, R"({"other": 5})", recovery_policy::field_defaults)
-    >> expect<models::default_record>(none,
-      {warn_unknown_field("/other"),
-        dsl::error(issue_code::warning_limit_exceeded, "/other")}),
-
   C(none, R"({"nested": {"value": 7, "other": 5}})")
     >> expect(models::optional_record{models::integer_value{7}},
       {warn_unknown_field("/nested/other")}),
@@ -791,9 +624,7 @@ const auto cases = std::make_tuple(
       {dsl::error(issue_code::invalid_scalar,
         "/items/1/value",
         value_kind::integer)}),
-  C(none,
-    R"({"items": [{"value": "bad"}]})",
-    recovery_policy::default_initializable)
+  C(none, R"({"items": [{"value": "bad"}]})")
     >> expect<models::sequence_record>(none,
       {dsl::error(issue_code::invalid_scalar,
         "/items/0/value",
@@ -909,7 +740,8 @@ struct erase_value {
 
 struct scenario {
   std::string json;
-  std::function<omni::ryml::with_diagnostics<erased_value>()> run;
+  std::function<omni::ryml::with_diagnostics<erased_value,
+    serialization_test::collected_diagnostics>()> run;
   omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
     expected;
 };
@@ -967,7 +799,7 @@ class mapping_conformance: public ::testing::TestWithParam<scenario> {};
 TEST_P(mapping_conformance, conforms_to_expected_mapping) {
   SCOPED_TRACE(GetParam().json);
   const auto actual = GetParam().run().transform_diagnostics(
-    [](omni::ryml::diagnostics<true> diagnostics) {
+    [](serialization_test::collected_diagnostics diagnostics) {
       std::vector<dsl::expected_issue> issues;
       for (const auto &issue : diagnostics.issues) {
         issues.push_back({issue.reason,
@@ -985,43 +817,36 @@ TEST_P(mapping_conformance, conforms_to_expected_mapping) {
 INSTANTIATE_TEST_SUITE_P(ryml_duplicates,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
-    bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::config{}}},
+    bind_cases<serialization_test::deserialize_type>{
+      serialization_test::deserialize_type{serialization_test::config{}}},
     duplicate_fields::duplicates)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_unknown_fields,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
-    bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::config{}}},
+    bind_cases<serialization_test::deserialize_type>{
+      serialization_test::deserialize_type{serialization_test::config{}}},
     unknown_fields::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_warning_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
-    bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::config{}}},
+    bind_cases<serialization_test::deserialize_type>{
+      serialization_test::deserialize_type{serialization_test::config{}}},
     warning_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_error_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
-    bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::config{}}},
+    bind_cases<serialization_test::deserialize_type>{
+      serialization_test::deserialize_type{serialization_test::config{}}},
     error_limits::cases)));
-
-INSTANTIATE_TEST_SUITE_P(ryml_missing_field_recovery,
-  mapping_conformance,
-  ::testing::ValuesIn(omni::compat::apply(
-    bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::config{}}},
-    missing_field_recovery::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
-    bind_cases<omni::ryml::deserialize_t>{
-      omni::ryml::deserialize_t{omni::ryml::config{}}},
+    bind_cases<serialization_test::deserialize_type>{
+      serialization_test::deserialize_type{serialization_test::config{}}},
     policy_interactions::cases)));
 
 } // namespace registration

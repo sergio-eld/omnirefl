@@ -96,26 +96,26 @@ TEST(serialization_scalar_roots, writes_standard_string_view_array) {
 #endif
 
 TEST(deserialization_scalar_roots, reads_scalars_without_record_metadata) {
-  const auto integer = omni::ryml::deserialize(omni::type_t<int>{}, "42");
+  const auto integer = serialization_test::deserialize(omni::type_t<int>{}, "42");
   EXPECT_TRUE(integer.value);
   if (integer.value) {
     EXPECT_EQ(42, *integer.value);
   }
   EXPECT_TRUE(integer.diagnostics.issues.empty());
 
-  const auto boolean = omni::ryml::deserialize(omni::type_t<bool>{}, "true");
+  const auto boolean = serialization_test::deserialize(omni::type_t<bool>{}, "true");
   EXPECT_TRUE(boolean.value);
   if (boolean.value) {
     EXPECT_TRUE(*boolean.value);
   }
 
-  const auto real = omni::ryml::deserialize(omni::type_t<double>{}, "1.5");
+  const auto real = serialization_test::deserialize(omni::type_t<double>{}, "1.5");
   EXPECT_TRUE(real.value);
   if (real.value) {
     EXPECT_EQ(1.5, *real.value);
   }
 
-  const auto text = omni::ryml::deserialize(
+  const auto text = serialization_test::deserialize(
     omni::type_t<std::string>{}, R"("text")");
 
   EXPECT_TRUE(text.value);
@@ -125,7 +125,7 @@ TEST(deserialization_scalar_roots, reads_scalars_without_record_metadata) {
 }
 
 TEST(deserialization_scalar_roots, keeps_a_valid_false_value) {
-  const auto result = omni::ryml::deserialize(omni::type_t<bool>{}, "false");
+  const auto result = serialization_test::deserialize(omni::type_t<bool>{}, "false");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {
@@ -144,7 +144,7 @@ class scalar_integer_ranges:
 
 TEST_P(scalar_integer_ranges, returns_a_value_or_a_range_error) {
   const auto &c = GetParam();
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::int8_t>{}, c.source);
   EXPECT_EQ(bool(c.expected), bool(result.value));
   if (c.expected && result.value) {
@@ -193,7 +193,7 @@ INSTANTIATE_TEST_SUITE_P(boundaries,
   });
 
 TEST(deserialization_scalar_roots, reports_invalid_root_values) {
-  const auto result = omni::ryml::deserialize(omni::type_t<int>{}, R"("bad")");
+  const auto result = serialization_test::deserialize(omni::type_t<int>{}, R"("bad")");
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
@@ -204,7 +204,7 @@ TEST(deserialization_scalar_roots, reports_invalid_root_values) {
 }
 
 TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
-  const auto numbers = omni::ryml::deserialize(
+  const auto numbers = serialization_test::deserialize(
     omni::type_t<std::vector<int>>{}, "[7, 42]");
 
   const std::vector<int> expected_numbers{7, 42};
@@ -213,7 +213,7 @@ TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
     EXPECT_EQ(expected_numbers, *numbers.value);
   }
 
-  const auto booleans = omni::ryml::deserialize(
+  const auto booleans = serialization_test::deserialize(
     omni::type_t<std::vector<bool>>{}, "[true, false]");
 
   const std::vector<bool> expected_booleans{true, false};
@@ -222,7 +222,7 @@ TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
     EXPECT_EQ(expected_booleans, *booleans.value);
   }
 
-  const auto nested = omni::ryml::deserialize(
+  const auto nested = serialization_test::deserialize(
     omni::type_t<std::vector<std::vector<int>>>{}, "[[7], [], [42]]");
 
   const std::vector<std::vector<int>> expected_nested{{7}, {}, {42}};
@@ -241,7 +241,7 @@ class invalid_deserialization_input:
     public testing::TestWithParam<invalid_input_case> {};
 
 TEST_P(invalid_deserialization_input, reports_failure_with_diagnostics) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<int>{}, GetParam().source);
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
@@ -249,7 +249,7 @@ TEST_P(invalid_deserialization_input, reports_failure_with_diagnostics) {
     EXPECT_FALSE(result.diagnostics.issues.front().warning);
     EXPECT_TRUE(result.diagnostics.issues.front().path.empty());
   }
-  EXPECT_FALSE(omni::ryml::render_diagnostics(result.diagnostics).empty());
+  EXPECT_FALSE(serialization_test::render_diagnostics(result.diagnostics).empty());
 }
 
 INSTANTIATE_TEST_SUITE_P(documents,
@@ -267,8 +267,8 @@ INSTANTIATE_TEST_SUITE_P(documents,
   });
 
 TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config s) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config s) {
       s.error_policy.error_limit = 1;
       return s;
     });
@@ -279,7 +279,7 @@ TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
   EXPECT_EQ("/0: \"bad\" is not an integer\n/1: \"also bad\" is not an integer",
-    omni::ryml::render_diagnostics(result.diagnostics));
+    serialization_test::render_diagnostics(result.diagnostics));
 }
 
 class optional_serialization:

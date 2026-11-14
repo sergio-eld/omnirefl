@@ -45,6 +45,16 @@ struct identity {
   }
 };
 
+/// Ignore the arguments and return a default-constructed Result.
+template <typename Result>
+struct default_value {
+  static_assert(std::is_default_constructible<Result>::value,
+    "default_value requires a default-constructible result");
+
+  template <typename... Args>
+  constexpr Result operator()(const Args &...) const { return {}; }
+};
+
 /// Return whether a function pointer is null.
 template <typename F>
 constexpr auto is_null_function(const F &f) noexcept
