@@ -1,5 +1,8 @@
 #pragma once
 
+// TODO: [medium] Validate alias_dict against other aliases and reflected
+// canonical names, possibly inline when constructing a dictionary.
+
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 
@@ -15,10 +18,10 @@ namespace ryml {
 struct diagnostics;
 
 template <typename T, typename Diagnostics>
-struct with_diagnostics;
+struct with_diagnostics_t;
 
 template <typename Config>
-struct mapping_state;
+struct mapping_state_t;
 
 namespace detail {
 
@@ -217,9 +220,6 @@ OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
     std::tuple_cat(compat::apply(
       detail::cpp11_invert_alias_group{}, groups)...));
 }
-
-// TODO: [medium] Add QoL validation against other aliases and reflected
-// canonical names, possibly usable inline when constructing a dictionary.
 
 } // namespace ryml
 } // namespace omni

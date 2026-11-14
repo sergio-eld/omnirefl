@@ -42,7 +42,7 @@ TEST(deserialization, default_retains_value_and_diagnostics) {
     R"({"name": "Ada", "code": 815})");
 
   static_assert(std::is_same<decltype(result),
-    const omni::ryml::with_diagnostics<serialization_data::payload,
+    const omni::ryml::with_diagnostics_t<serialization_data::payload,
       serialization_test::collected_diagnostics>>::value,
     "the default deserializer must retain a value and diagnostics");
 
@@ -73,7 +73,7 @@ TEST(serialization_composition, parses_then_maps_a_record) {
       .transform([](::ryml::Tree tree) {
         auto mapped = omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
           tree);
-        return omni::ryml::with_diagnostics<serialization_data::payload,
+        return omni::ryml::with_diagnostics_t<serialization_data::payload,
           std::string>{
           /*value=*/std::move(mapped.value),
           /*diagnostics=*/omni::ryml::render_diagnostics(tree,
@@ -97,7 +97,7 @@ TEST(serialization_composition, renders_mapping_errors_after_successful_parse) {
       .transform([](::ryml::Tree tree) {
         auto mapped = omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
           tree);
-        return omni::ryml::with_diagnostics<serialization_data::payload,
+        return omni::ryml::with_diagnostics_t<serialization_data::payload,
           std::string>{
           /*value=*/std::move(mapped.value),
           /*diagnostics=*/omni::ryml::render_diagnostics(tree,
@@ -167,7 +167,7 @@ TEST(tree_mapping, default_returns_borrowed_diagnostics) {
     omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
       tree.crootref());
   static_assert(std::is_same<typename std::decay<decltype(result)>::type,
-                  omni::ryml::with_diagnostics<serialization_data::payload,
+                  omni::ryml::with_diagnostics_t<serialization_data::payload,
                     omni::ryml::diagnostics>>::value,
     "mapping a node must return borrowed diagnostics");
 
@@ -180,7 +180,7 @@ TEST(tree_mapping, default_returns_borrowed_diagnostics) {
 }
 
 TEST(tree_mapping, rendered_diagnostics_outlive_the_tree) {
-  omni::ryml::with_diagnostics<serialization_data::payload, std::string> retained;
+  omni::ryml::with_diagnostics_t<serialization_data::payload, std::string> retained;
   {
     const auto tree = ::ryml::parse_in_arena(R"({"name": "Ada", "code": "bad"})");
     auto mapped = omni::ryml::map_tree(
@@ -209,7 +209,7 @@ TEST(deserialization_config, designated_configuration_uses_member_defaults) {
 TEST(deserialization_config, designated_configuration_retains_diagnostics) {
   const serialization_test::deserialize_type deserialize{
     .config =
-      serialization_test::config{
+      serialization_test::config_t{
         .error_policy = {.error_limit = 0,
           .unknown_fields = omni::json::unknown_policy::allow},
       },
@@ -220,7 +220,7 @@ TEST(deserialization_config, designated_configuration_retains_diagnostics) {
   auto result = deserialize(omni::type_t<serialization_data::payload>{},
     R"({"name": "Ada", "code": 815, "extra": null})");
   static_assert(std::is_same<decltype(result),
-                  omni::ryml::with_diagnostics<serialization_data::payload,
+                  omni::ryml::with_diagnostics_t<serialization_data::payload,
                     serialization_test::collected_diagnostics>>::value,
     "designated configuration must retain a value and diagnostics");
 
@@ -512,7 +512,7 @@ TEST(deserialization, partially_applies_config_and_type) {
 
 TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
   const auto map =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = 2;
       return s;
     });
@@ -521,7 +521,7 @@ TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
                         .transform([map](const ::ryml::Tree &tree) {
                           auto mapped = map(
                             omni::type_t<serialization_data::payload>{}, tree);
-                          return omni::ryml::with_diagnostics<
+                          return omni::ryml::with_diagnostics_t<
                             serialization_data::payload, std::string>{
                             /*value=*/std::move(mapped.value),
                             /*diagnostics=*/omni::ryml::render_diagnostics(
@@ -643,7 +643,7 @@ TEST_P(serialization, writes_nested_records_and_sequences) {
   && 201707L <= __cpp_designated_initializers
 const serialization_test::deserialize_type configured_deserialize{
   .config =
-    serialization_test::config{
+    serialization_test::config_t{
       .error_policy = {.error_limit = 0,
         .unknown_fields = omni::json::unknown_policy::reject},
     },
@@ -833,7 +833,7 @@ TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
   const std::uint16_t error_limit = 0;
   const serialization_test::deserialize_type deserialize{
     .config =
-      serialization_test::config{
+      serialization_test::config_t{
         .error_policy = {.error_limit = error_limit,
           .unknown_fields = omni::json::unknown_policy::reject},
       },
@@ -1064,7 +1064,7 @@ TEST(tree_mapping, borrowed_mapping_accepts_extra_fields) {
   const auto tree =
     ::ryml::parse_in_arena(R"({"extra": [1, {}], "name": "Ada", "code": 815})");
   const auto result =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<serialization_data::payload>{}, tree.crootref());
@@ -1121,7 +1121,7 @@ TEST(deserialization_config, transforms_preserve_unchanged_config) {
 TEST(deserialization_config, designated_configuration_accepts_extra_fields) {
   const serialization_test::deserialize_type deserialize{
     .config =
-      serialization_test::config{
+      serialization_test::config_t{
         .error_policy = {.error_limit = 0,
           .unknown_fields = omni::json::unknown_policy::allow},
       },
@@ -1142,11 +1142,11 @@ TEST(deserialization_config, designated_configuration_accepts_extra_fields) {
 
 TEST(deserialization_config, changes_fields_without_changing_the_source) {
   const auto original =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = 2;
       return s;
     });
-  const auto updated = original.tdm_config([](omni::ryml::config<> s) {
+  const auto updated = original.tdm_config([](omni::ryml::config_t<> s) {
     s.error_policy.error_limit = 5;
     return s;
   });
@@ -1424,7 +1424,7 @@ TEST(deserialization_diagnostics, configured_collector_retains_paths_after_moves
 
 TEST(deserialization_diagnostics,
   moved_result_retains_rendered_diagnostics) {
-  omni::ryml::with_diagnostics<serialization_data::payload,
+  omni::ryml::with_diagnostics_t<serialization_data::payload,
     serialization_test::collected_diagnostics> retained;
   {
     auto result =
@@ -1443,7 +1443,7 @@ TEST(deserialization_diagnostics,
 }
 
 TEST(deserialization_diagnostics, moved_result_retains_policy_values) {
-  omni::ryml::with_diagnostics<serialization_data::payload,
+  omni::ryml::with_diagnostics_t<serialization_data::payload,
     serialization_test::collected_diagnostics> retained;
   {
     auto result =
@@ -1597,7 +1597,7 @@ TEST_P(parser_recovery, retains_failure_and_allows_the_next_invocation) {
       s.error_policy.error_limit = 12;
       return s;
     });
-  omni::ryml::with_diagnostics<serialization_data::payload,
+  omni::ryml::with_diagnostics_t<serialization_data::payload,
     serialization_test::collected_diagnostics> retained{};
   {
     auto failed = deserialize(omni::type_t<serialization_data::payload>{},
@@ -1642,7 +1642,7 @@ TEST_P(parser_recovery, renders_parse_errors_with_the_standalone_parse_format) {
   if (expected)
     return;
 
-  omni::ryml::with_diagnostics<serialization_data::payload, std::string>
+  omni::ryml::with_diagnostics_t<serialization_data::payload, std::string>
     retained{};
   {
     auto result =
@@ -1721,7 +1721,7 @@ TEST(deserialization_diagnostics,
   designated_configuration_keeps_error_policy) {
   const serialization_test::deserialize_type configured{
     .config =
-      serialization_test::config{
+      serialization_test::config_t{
         .error_policy = {.error_limit = 2,
           .unknown_fields = omni::json::unknown_policy::reject},
       },
@@ -1816,7 +1816,7 @@ TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
 
 TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
   const auto map =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     });
@@ -1838,14 +1838,14 @@ TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
 
 TEST_P(deserialization_diagnostics, borrowed_mapper_applies_the_same_policies) {
   const auto map = omni::fn::partial( //
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     }),
     omni::type_t<serialization_data::payload>{});
   const auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
-  const omni::ryml::with_diagnostics<serialization_data::payload,
+  const omni::ryml::with_diagnostics_t<serialization_data::payload,
     omni::ryml::diagnostics>
     result = map(tree.crootref());
 
@@ -1864,7 +1864,7 @@ TEST_P(deserialization_diagnostics, borrowed_mapper_applies_the_same_policies) {
 TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
   auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
-  omni::ryml::with_diagnostics<serialization_data::payload,
+  omni::ryml::with_diagnostics_t<serialization_data::payload,
     omni::ryml::diagnostics>
     mapped = strict_map_tree(omni::type_t<serialization_data::payload>{},
       tree.rootref());
@@ -1924,7 +1924,7 @@ TEST(tree_mapping, borrows_subtrees_and_retains_relative_paths) {
 }
 
 TEST(tree_mapping, rendered_borrowed_results_outlive_the_tree) {
-  omni::ryml::with_diagnostics<serialization_data::payload, std::string>
+  omni::ryml::with_diagnostics_t<serialization_data::payload, std::string>
     retained{};
   {
     const auto tree = ::ryml::parse_in_arena(R"(
@@ -1932,7 +1932,7 @@ name: "a\nb"
 code: bad
 )");
     auto result =
-      omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+      omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
         s.error_policy.error_limit = 2;
         return s;
       })(omni::type_t<serialization_data::payload>{}, tree.crootref());
@@ -1963,7 +1963,7 @@ TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
 }
 )");
   const auto result =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = 1;
       return s;
     })(omni::type_t<serialization_data::scalar_values>{}, tree.crootref());
@@ -2000,7 +2000,7 @@ TEST(tree_mapping, empty_model_accepts_extra_fields) {
   const auto tree = ::ryml::parse_in_arena(
     R"({"extra": 1, "extra": 2, "nested": {"more": []}})");
   const auto result =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config<> s) {
+    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<empty_record>{}, tree);
@@ -2016,7 +2016,7 @@ TEST(tree_mapping, empty_model_accepts_extra_fields) {
 TEST(tree_mapping, supports_designated_configuration) {
   const omni::ryml::map_tree_t<> configured{
     .config =
-      omni::ryml::config<>{
+      omni::ryml::config_t<>{
         .error_policy = {.error_limit = 2,
           .unknown_fields = omni::json::unknown_policy::reject},
       },

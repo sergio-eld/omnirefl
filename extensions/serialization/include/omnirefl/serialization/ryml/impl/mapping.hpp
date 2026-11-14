@@ -10,11 +10,13 @@
 namespace omni {
 namespace ryml {
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<traits::is_string<T>::value, int>>
 auto from_string_like::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<supports<T>()> {
+  mapping_state_t<Config> context) const
+  -> void {
   const auto &text = adapt::as_string(value);
   using storage_type = decltype(adapt::as_string(value));
   using text_type = compat::remove_cvref_t<storage_type>;
@@ -38,12 +40,13 @@ auto from_string_like::operator()(const T &value,
   node.set_val_style(::ryml::VAL_DQUO);
 }
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<traits::is_string<T>::value, int>>
 auto to_string_like::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<supports<T>(),
-    with_diagnostics<compat::monostate, diagnostics>> {
+  mapping_state_t<Config> context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   if (node.is_container()) {
     result.report(omni::ryml::detail::make_issue(
@@ -70,11 +73,13 @@ auto to_string_like::operator()(::ryml::ConstNodeRef node,
   return std::move(result).finish();
 }
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<std::is_arithmetic<T>::value, int>>
 auto from_arithmetic::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state<Config>) const
-  -> compat::enable_if_t<std::is_arithmetic<T>::value> {
+  mapping_state_t<Config>) const
+  -> void {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, T>::value,
       omni::ryml::detail::write_boolean>,
@@ -85,12 +90,13 @@ auto from_arithmetic::operator()(const T &value,
   write(value, &node);
 }
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<std::is_arithmetic<T>::value, int>>
 auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<supports<T>(),
-    with_diagnostics<compat::monostate, diagnostics>> {
+  mapping_state_t<Config> context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   const auto expected = std::is_same<bool, T>::value
     ? json::value_kind::boolean
@@ -150,25 +156,27 @@ auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
   return std::move(result).finish();
 }
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<traits::is_optional<T>::value, int>>
 auto from_optional_like::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<traits::is_optional<T>::value> {
-  if (adapt::has_value(value)) {
-    core::write_node(adapt::get_value(value), node, context);
-  } else {
+  mapping_state_t<Config> context) const
+  -> void {
+  if (adapt::has_value(value))
+    core::write_node(adapt::get_value(value), node, context); else {
     node.set_val("null");
     node.set_val_style(::ryml::VAL_PLAIN);
   }
 }
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<traits::is_optional<T>::value, int>>
 auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<traits::is_optional<T>::value,
-    with_diagnostics<compat::monostate, diagnostics>> {
+  mapping_state_t<Config> context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   if (!node.is_container() && node.val_is_null()
     && (!node.has_val_tag()
       || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {

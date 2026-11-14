@@ -25,7 +25,7 @@ struct from_range_t {
       int> = 0>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    mapping_state<Config> context) const;
+    mapping_state_t<Config> context) const;
 };
 
 /** Default range serializer. */
@@ -48,12 +48,13 @@ struct to_range_t {
     return omni::ryml::detail::is_mapped_range<T>::value;
   }
 
-  template <typename T, typename Config>
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<detail::is_mapped_range<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state<Config> context) const
-    -> compat::enable_if_t<detail::is_mapped_range<T>::value,
-      with_diagnostics<compat::monostate, diagnostics>>;
+    mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   // TODO: [high] Define the representation of non-string object keys before
   // enabling their default mapping. JSON object names are always strings.

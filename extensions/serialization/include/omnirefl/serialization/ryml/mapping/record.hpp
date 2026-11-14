@@ -1,8 +1,5 @@
 #pragma once
 
-// TODO: [medium] Consider recovery for missing data members in to_record,
-// including exposed default member initializers.
-
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
@@ -24,14 +21,13 @@ struct from_record {
     return omni::is_reflected_record<T>::value;
   }
 
-  template <typename T, typename Config>
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    mapping_state<Config> context) const
-    -> compat::enable_if_t<omni::is_reflected_record<T>::value>;
-
-  // Use the trait directly: older GCC versions can mismatch member-call
-  // constraints between this declaration and its out-of-class definition.
+    mapping_state_t<Config> context) const
+    -> void;
 };
 
 /** Deserialize a node into a reflected record's accessible non-static data
@@ -63,12 +59,12 @@ struct to_record_t {
     compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state<Config> context) const
-    -> with_diagnostics<compat::monostate, diagnostics>;
+    mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   NameByAlias name_by_alias;
 
-  /** QoL for overriding the alias resolver inline, in a single expression.
+  /** (QoL) Override the alias resolver inline, in a single expression.
    * Copy or move f into a new mapper specialized for its concrete type.
    *
    * Resolves alias text to an optional canonical name:
@@ -80,22 +76,18 @@ struct to_record_t {
    * The callable must be copy-constructible and invocable through a const
    * reference, returning the same result for the same alias.
    */
-  template <typename F>
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::conjunction<std::is_copy_constructible<compat::decay_t<F>>,
+      std::is_constructible<compat::decay_t<F>, F &&>,
+      detail::is_alias_resolver<const compat::decay_t<F>>>::value))
   constexpr auto with_name_by_alias(F &&f) const
     -> to_record_t<compat::decay_t<F>> {
-    static_assert(std::is_copy_constructible<compat::decay_t<F>>::value,
-      "with_name_by_alias requires a copy-constructible callable");
-
-    static_assert(detail::is_alias_resolver<const compat::decay_t<F>>::value,
-      "Invalid name_by_alias callable; expected: "
-      "name_by_alias :: compat::string_view -> optional<compat::string_view>");
-
     return {/*name_by_alias=*/std::forward<F>(f)};
   }
 
   // TODO: [medium] Add with_validate_fields for configurable per-field
   // validation, following the alias compositor's functional update pattern.
-  // Explore T -> expected<T, error> and T -> with_diagnostics<T> for decoded
+  // Explore T -> expected<T, error> and T -> with_diagnostics_t<T> for decoded
   // values, such as email strings or numeric ranges, before field assignment.
   // Retain the source node's diagnostic path and apply normal error policies.
   // This should not require exception-based invariant-enforcing constructors
@@ -110,3 +102,6 @@ constexpr to_record_t<> to_record{};
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
+
+// TODO: [medium] Consider recovery for missing data members in to_record,
+// including exposed default member initializers.

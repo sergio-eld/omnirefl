@@ -9,11 +9,13 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
 auto from_enum::operator()(T value,
   ::ryml::NodeRef node,
-  mapping_state<Config>) const
-  -> compat::enable_if_t<supports<T>()> {
+  mapping_state_t<Config>) const
+  -> void {
   const auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
   const auto found = std::find_if(enumerators.begin(),
@@ -34,8 +36,8 @@ template <typename T,
   compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context) const
-  -> with_diagnostics<compat::monostate, diagnostics> {
+  mapping_state_t<Config> context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
   // plain null, numeric, and boolean forms before looking up the name.
@@ -71,7 +73,7 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   const compat::string_view value{node.val().str, node.val().len};
   auto found = find_name(value);
   if (found == enumerators.end()) {
-    if (const auto canonical = this->value_by_alias(value))
+    if (const auto canonical = compat::invoke(this->value_by_alias, value))
       found = find_name(*canonical);
   }
 

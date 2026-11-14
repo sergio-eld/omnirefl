@@ -49,10 +49,10 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct from_type<mapping_observation::number> {
+struct from_type_t<mapping_observation::number> {
   template <typename Config>
   void operator()(const mapping_observation::number &value,
-    ::ryml::NodeRef node, mapping_state<Config> state) const {
+    ::ryml::NodeRef node, mapping_state_t<Config> state) const {
     state.config.transform_diagnostics.observed->paths.push_back(
       detail::render_path(state.path.materialize()));
     core::write_node(value.value, node, state);
@@ -63,8 +63,8 @@ template <>
 struct to_type_t<mapping_observation::number> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
-    mapping_observation::number *into, mapping_state<Config> state) const
-    -> with_diagnostics<compat::monostate> {
+    mapping_observation::number *into, mapping_state_t<Config> state) const
+    -> with_diagnostics_t<compat::monostate> {
     auto &trace = *state.config.transform_diagnostics.observed;
     trace.paths.push_back(detail::render_path(state.path.materialize()));
     trace.errors.push_back(state.error_count);
@@ -85,17 +85,32 @@ struct to_type_t<mapping_observation::number> {
 // C++14 supports variable-template registration and partial specialization.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
+const auto from_type<endpoint<T>> = [](const endpoint<T> &value,
+  ::ryml::NodeRef node, auto state) {
+  core::write_node(value.port, node, state);
+};
+
+template <typename T>
 const auto to_type<endpoint<T>> = reflected_scope::to_record.with_name_by_alias(
   alias_dict(std::make_tuple("port", "service_port")));
 #else
+template <typename T>
+struct from_type_t<endpoint<T>> {
+  template <typename Config>
+  void operator()(const endpoint<T> &value,
+    ::ryml::NodeRef node, mapping_state_t<Config> state) const {
+    core::write_node(value.port, node, state);
+  }
+};
+
 // C++11 registers a struct and configures the default compositor at invocation.
 template <typename T>
 struct to_type_t<endpoint<T>> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     endpoint<T> *into,
-    omni::ryml::mapping_state<Config> context) const
-    -> with_diagnostics<compat::monostate, diagnostics> {
+    omni::ryml::mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
     return reflected_scope::to_record.with_name_by_alias(
       [](compat::string_view alias) -> compat::optional<compat::string_view> {
         return alias == "service_port"
@@ -117,8 +132,8 @@ template <typename T>
 struct cpp11_write_observed {
   const T &value;
   ::ryml::NodeRef node;
-  omni::ryml::mapping_state<
-    omni::ryml::config<mapping_observation::renderer>> state;
+  omni::ryml::mapping_state_t<
+    omni::ryml::config_t<mapping_observation::renderer>> state;
 
   template <typename _M>
   void operator()(omni::record_meta_t<_M>) const {
@@ -128,7 +143,7 @@ struct cpp11_write_observed {
 
 TEST(mapping_state, propagates_paths_through_record_and_range_serialization) {
   mapping_observation::trace trace;
-  const omni::ryml::config<mapping_observation::renderer> options{
+  const omni::ryml::config_t<mapping_observation::renderer> options{
     /*error_policy=*/{},
     /*transform_diagnostics=*/{&trace},
   };
@@ -160,7 +175,7 @@ TEST(mapping_state, propagates_paths_through_record_and_range_serialization) {
 
 TEST(mapping_state, passes_original_config_and_updated_counts_to_children) {
   mapping_observation::trace trace;
-  omni::ryml::config<mapping_observation::renderer> options{
+  omni::ryml::config_t<mapping_observation::renderer> options{
     /*error_policy=*/{},
     /*transform_diagnostics=*/{&trace},
   };
@@ -187,7 +202,7 @@ class record_mapping_limits: public testing::TestWithParam<bool> {};
 TEST_P(record_mapping_limits, stops_before_evaluating_later_members) {
   const bool warnings = GetParam();
   mapping_observation::trace trace;
-  omni::ryml::config<mapping_observation::renderer> options{
+  omni::ryml::config_t<mapping_observation::renderer> options{
     /*error_policy=*/{},
     /*transform_diagnostics=*/{&trace},
   };
@@ -217,7 +232,7 @@ INSTANTIATE_TEST_SUITE_P(budgets,
 
 TEST(record_mapping_events, missing_members_stop_before_value_operations) {
   mapping_observation::trace trace;
-  const omni::ryml::config<mapping_observation::renderer> options{
+  const omni::ryml::config_t<mapping_observation::renderer> options{
     /*error_policy=*/{},
     /*transform_diagnostics=*/{&trace},
   };
@@ -229,6 +244,12 @@ TEST(record_mapping_events, missing_members_stop_before_value_operations) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics);
   EXPECT_TRUE(trace.paths.empty());
+}
+
+TEST(mapping_customization, selects_serialization_registration) {
+  const endpoint<int> source{/*port=*/42};
+
+  EXPECT_EQ("42", omni::ryml::as_json(source));
 }
 
 TEST(mapping_customization, preserves_configured_alias_lookup) {

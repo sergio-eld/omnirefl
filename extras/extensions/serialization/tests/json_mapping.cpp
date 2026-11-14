@@ -77,7 +77,7 @@ expected_issue err_unknown_field(std::string path) {
 template <typename Model, typename TransformConfig>
 struct mapping_case {
   input<TransformConfig> from;
-  omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected;
+  omni::ryml::with_diagnostics_t<Model, std::vector<expected_issue>> expected;
 
   template <typename Engine>
   auto operator()(Engine engine) const
@@ -89,13 +89,13 @@ struct mapping_case {
 };
 
 template <typename Model>
-omni::ryml::with_diagnostics<Model, std::vector<expected_issue>>
+omni::ryml::with_diagnostics_t<Model, std::vector<expected_issue>>
   expect(Model value, std::vector<expected_issue> issues) {
   return {std::move(value), std::move(issues)};
 }
 
 template <typename Model>
-omni::ryml::with_diagnostics<Model, std::vector<expected_issue>>
+omni::ryml::with_diagnostics_t<Model, std::vector<expected_issue>>
   expect(omni::compat::nullopt_t, std::vector<expected_issue> issues) {
   return {omni::compat::nullopt, std::move(issues)};
 }
@@ -103,7 +103,7 @@ omni::ryml::with_diagnostics<Model, std::vector<expected_issue>>
 // Bind the model from the expectation; the engine is supplied on invocation.
 template <typename TransformConfig, typename Model>
 mapping_case<Model, TransformConfig> operator>>(input<TransformConfig> from,
-  omni::ryml::with_diagnostics<Model, std::vector<expected_issue>> expected) {
+  omni::ryml::with_diagnostics_t<Model, std::vector<expected_issue>> expected) {
   return {std::move(from), std::move(expected)};
 }
 
@@ -763,8 +763,8 @@ struct erased_value {
 
 struct erase_value {
   template <typename Model, typename Diagnostics>
-  omni::ryml::with_diagnostics<erased_value, Diagnostics> operator()(
-    omni::ryml::with_diagnostics<Model, Diagnostics> result) const {
+  omni::ryml::with_diagnostics_t<erased_value, Diagnostics> operator()(
+    omni::ryml::with_diagnostics_t<Model, Diagnostics> result) const {
     return {
       /*value=*/result.value
         ? omni::compat::make_optional(erased_value{std::move(*result.value)})
@@ -776,9 +776,9 @@ struct erase_value {
 
 struct scenario {
   std::string json;
-  std::function<omni::ryml::with_diagnostics<erased_value,
+  std::function<omni::ryml::with_diagnostics_t<erased_value,
     serialization_test::collected_diagnostics>()> run;
-  omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
+  omni::ryml::with_diagnostics_t<erased_value, std::vector<expected_issue>>
     expected;
 };
 
@@ -814,14 +814,14 @@ void PrintTo(const erased_value &value, std::ostream *out) {
   value.print(value.storage.get(), out);
 }
 
-bool operator==(const omni::ryml::with_diagnostics<erased_value,
+bool operator==(const omni::ryml::with_diagnostics_t<erased_value,
                   std::vector<expected_issue>> &left,
-  const omni::ryml::with_diagnostics<erased_value, std::vector<expected_issue>>
+  const omni::ryml::with_diagnostics_t<erased_value, std::vector<expected_issue>>
     &right) {
   return left.value == right.value && left.diagnostics == right.diagnostics;
 }
 
-void PrintTo(const omni::ryml::with_diagnostics<erased_value,
+void PrintTo(const omni::ryml::with_diagnostics_t<erased_value,
                std::vector<expected_issue>> &result,
   std::ostream *out) {
   *out << "{value: ";
@@ -845,7 +845,7 @@ TEST_P(mapping_conformance, conforms_to_expected_mapping) {
       issue.warning});
   }
 
-  const omni::ryml::with_diagnostics<erased_value,
+  const omni::ryml::with_diagnostics_t<erased_value,
     std::vector<dsl::expected_issue>> actual{
     /*value=*/std::move(result.value),
     /*diagnostics=*/std::move(issues),
@@ -858,35 +858,35 @@ INSTANTIATE_TEST_SUITE_P(ryml_duplicates,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize_type{serialization_test::config_t{}}},
     duplicate_fields::duplicates)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_unknown_fields,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize_type{serialization_test::config_t{}}},
     unknown_fields::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_warning_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize_type{serialization_test::config_t{}}},
     warning_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_error_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize_type{serialization_test::config_t{}}},
     error_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize_type{serialization_test::config_t{}}},
     policy_interactions::cases)));
 
 } // namespace registration

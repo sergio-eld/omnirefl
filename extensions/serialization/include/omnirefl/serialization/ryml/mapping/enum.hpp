@@ -21,11 +21,13 @@ struct from_enum {
     return omni::is_reflected_enum<T>::value;
   }
 
-  template <typename T, typename Config>
+  template <typename T,
+    typename Config,
+    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(T value,
     ::ryml::NodeRef node,
-    mapping_state<Config>) const
-    -> compat::enable_if_t<supports<T>()>;
+    mapping_state_t<Config>) const
+    -> void;
 };
 
 /** Deserialize a string-valued node into a reflected enum value.
@@ -52,12 +54,12 @@ struct to_enum_t {
     compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state<Config> context) const
-    -> with_diagnostics<compat::monostate, diagnostics>;
+    mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;
 
-  /** QoL for overriding the alias resolver inline, in a single expression.
+  /** (QoL) Override the alias resolver inline, in a single expression.
    * Copy or move f into a new mapper specialized for its concrete type.
    *
    * Resolves alias text to an optional canonical value text:
@@ -69,16 +71,12 @@ struct to_enum_t {
    * The callable must be copy-constructible and invocable through a const
    * reference, returning the same result for the same alias.
    */
-  template <typename F>
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::conjunction<std::is_copy_constructible<compat::decay_t<F>>,
+      std::is_constructible<compat::decay_t<F>, F &&>,
+      detail::is_alias_resolver<const compat::decay_t<F>>>::value))
   constexpr auto with_value_by_alias(F &&f) const
     -> to_enum_t<compat::decay_t<F>> {
-    static_assert(std::is_copy_constructible<compat::decay_t<F>>::value,
-      "with_value_by_alias requires a copy-constructible callable");
-
-    static_assert(detail::is_alias_resolver<const compat::decay_t<F>>::value,
-      "Invalid value_by_alias callable; expected: "
-      "value_by_alias :: compat::string_view -> optional<compat::string_view>");
-
     return {/*value_by_alias=*/std::forward<F>(f)};
   }
 };

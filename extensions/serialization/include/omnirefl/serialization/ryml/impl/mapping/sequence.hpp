@@ -10,84 +10,106 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-OMNI_CONSTRAINED_TEMPLATE((typename T), (!traits::is_optional<T>::value))
-bool is_null(const T &) {
-  return false;
-}
+template <typename T>
+bool is_null(const T &value);
 
-OMNI_CONSTRAINED_TEMPLATE((typename T), (traits::is_optional<T>::value))
+template <bool Optional>
+struct is_null_case {
+  template <typename T>
+  static bool get(const T &) { return false; }
+};
+
+template <>
+struct is_null_case<true> {
+  template <typename T>
+  static bool get(const T &value) {
+    return !adapt::has_value(value) || is_null(adapt::get_value(value));
+  }
+};
+
+template <typename T>
 bool is_null(const T &value) {
-  return !adapt::has_value(value) || is_null(adapt::get_value(value));
+  return is_null_case<traits::is_optional<T>::value>::get(value);
 }
 
-template <typename T, typename Config>
-void write_range(const T &value, ::ryml::NodeRef node,
-  mapping_state<Config> context, std::false_type) {
-  using element_type = compat::range_value_t<T>;
-  node.set_seq();
-  // Separate iterator/sentinel declarations also support non-common ranges
-  // before C++17 permitted them in range-based for loops.
-  using std::begin;
-  using std::end;
-  auto current = begin(value);
-  const auto last = end(value);
-  std::size_t index = 0;
-  for (; current != last; ++current) {
-    const element_type &element = *current;
-    if (!is_null(element)) {
-      const auto child_state = context.child({
-        /*field=*/{},
-        /*index=*/index++,
-      });
+template <bool KeyValue>
+struct write_range_case;
 
-      core::write_node(element, node.append_child(), child_state);
+template <>
+struct write_range_case<false> {
+  template <typename T, typename Config>
+  static void apply(const T &value, ::ryml::NodeRef node,
+    mapping_state_t<Config> context) {
+    using element_type = compat::range_value_t<T>;
+    node.set_seq();
+    // Separate iterator/sentinel declarations also support non-common ranges
+    // before C++17 permitted them in range-based for loops.
+    using std::begin;
+    using std::end;
+    auto current = begin(value);
+    const auto last = end(value);
+    std::size_t index = 0;
+    for (; current != last; ++current) {
+      const element_type &element = *current;
+      if (!is_null(element)) {
+        const auto child_state = context.child({
+          /*field=*/{},
+          /*index=*/index++,
+        });
+
+        core::write_node(element, node.append_child(), child_state);
+      }
     }
   }
-}
+};
 
-template <typename T, typename Config>
-void write_range(const T &value, ::ryml::NodeRef node,
-  mapping_state<Config> context, std::true_type) {
-  static_assert(traits::is_string<traits::key_type_t<T>>::value,
-    "from_range requires string-adaptable keys for JSON/YAML objects");
+template <>
+struct write_range_case<true> {
+  template <typename T, typename Config>
+  static void apply(const T &value, ::ryml::NodeRef node,
+    mapping_state_t<Config> context) {
+    static_assert(traits::is_string<traits::key_type_t<T>>::value,
+      "from_range requires string-adaptable keys for JSON/YAML objects");
 
-  node.set_map();
-  using std::begin;
-  using std::end;
-  auto current = begin(value);
-  const auto last = end(value);
-  for (; current != last; ++current) {
-    const auto &entry = *current;
-    const auto &key = adapt::as_string(entry.first);
-    using storage_type = decltype(adapt::as_string(entry.first));
-    using text_type = compat::remove_cvref_t<storage_type>;
-    static_assert(std::is_same<char, typename text_type::value_type>::value,
-      "Ryml object keys require char text from the string adapter");
+    node.set_map();
+    using std::begin;
+    using std::end;
+    auto current = begin(value);
+    const auto last = end(value);
+    for (; current != last; ++current) {
+      const auto &entry = *current;
+      const auto &key = adapt::as_string(entry.first);
+      using storage_type = decltype(adapt::as_string(entry.first));
+      using text_type = compat::remove_cvref_t<storage_type>;
+      static_assert(std::is_same<char, typename text_type::value_type>::value,
+        "Ryml object keys require char text from the string adapter");
 
-    using view_type = compat::basic_string_view<typename text_type::value_type,
-      typename text_type::traits_type>;
+      using view_type = compat::basic_string_view<
+        typename text_type::value_type,
+        typename text_type::traits_type>;
 
-    constexpr bool borrows_source =
-      std::is_lvalue_reference<storage_type>::value
-      || std::is_same<text_type, view_type>::value;
+      constexpr bool borrows_source =
+        std::is_lvalue_reference<storage_type>::value
+        || std::is_same<text_type, view_type>::value;
 
-    const c4::csubstr text{key.data(), key.size()};
-    auto child = node.append_child();
-    // Owning key conversions are temporary, even for a reference tree.
-    if (context.borrow_strings && borrows_source)
-      child.set_key(text);
-    else
-      child.set_key_serialized(text);
+      const c4::csubstr text{key.data(), key.size()};
+      auto child = node.append_child();
+      // Owning key conversions are temporary, even for a reference tree.
+      if (context.borrow_strings && borrows_source)
+        child.set_key(text);
+      else
+        child.set_key_serialized(text);
 
-    child.set_key_style(::ryml::KEY_DQUO);
-    const auto child_state = context.child({
-      /*field=*/text,
-      /*index=*/compat::nullopt,
-    });
+      child.set_key_style(::ryml::KEY_DQUO);
+      const auto child_state = context.child({
+        /*field=*/text,
+        /*index=*/compat::nullopt,
+      });
 
-    core::write_node(entry.second, child, child_state);
+      core::write_node(entry.second, child, child_state);
+    }
   }
-}
+};
 
 } // namespace detail
 
@@ -97,7 +119,7 @@ template <typename T,
     int>>
 void from_range_t::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state<Config> context) const {
+  mapping_state_t<Config> context) const {
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 
@@ -107,10 +129,11 @@ void from_range_t::operator()(const T &value,
       std::is_same<element_type,
         compat::remove_cvref_t<element_reference>>>>::value,
     "Default range serialization requires lvalue references to value_type "
-    "for non-scalar C++ elements; specialize cp::from_type for value-producing "
+    "for non-scalar elements; specialize cp::from_type_t for value-producing "
     "or converting-proxy iterators.");
 
-  detail::write_range(value, node, context, traits::is_key_value<T>{});
+  detail::write_range_case<traits::is_key_value<T>::value>::apply(
+    value, node, context);
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.
@@ -170,151 +193,180 @@ void report_range_duplicate(::ryml::ConstNodeRef node,
     /*warning=*/allowed));
 }
 
-template <typename T, typename Config, typename... Args>
-void insert_range_value(T *into, ::ryml::ConstNodeRef,
-  mapping_state<Config>, node_accumulator<Config> *, std::false_type,
-  Args &&...args) {
-  adapt::emplace(into, std::forward<Args>(args)...);
-}
+template <bool Unique>
+struct insert_range_value_case;
 
-template <typename T, typename Config, typename... Args>
-void insert_range_value(T *into, ::ryml::ConstNodeRef node,
-  mapping_state<Config> context, node_accumulator<Config> *result,
-  std::true_type,
-  Args &&...args) {
-  const auto inserted = adapt::try_emplace(into, std::forward<Args>(args)...);
-  if (inserted.second)
-    return;
-
-  const auto policy = context.config.error_policy.duplicates;
-  if ((policy & json::duplicate_policy::last) == json::duplicate_policy::last) {
-    adapt::replace(into, inserted.first, std::forward<Args>(args)...);
+template <>
+struct insert_range_value_case<false> {
+  template <typename T, typename Config, typename... Args>
+  static void apply(T *into, ::ryml::ConstNodeRef,
+    mapping_state_t<Config>, node_accumulator<Config> *,
+    Args &&...args) {
+    adapt::emplace(into, std::forward<Args>(args)...);
   }
+};
 
-  report_range_duplicate(node, context.path, traits::is_key_value<T>::value,
-    result);
-}
+template <>
+struct insert_range_value_case<true> {
+  template <typename T, typename Config, typename... Args>
+  static void apply(T *into, ::ryml::ConstNodeRef node,
+    mapping_state_t<Config> context, node_accumulator<Config> *result,
+    Args &&...args) {
+    const auto inserted = adapt::try_emplace(into, std::forward<Args>(args)...);
+    if (inserted.second)
+      return;
+
+    const auto policy = context.config.error_policy.duplicates;
+    if ((policy & json::duplicate_policy::last)
+        == json::duplicate_policy::last)
+      adapt::replace(into, inserted.first, std::forward<Args>(args)...);
+
+    report_range_duplicate(node, context.path, traits::is_key_value<T>::value,
+      result);
+  }
+};
 
 // Non-unique mappings retain every document member, including repeated names.
-template <typename Config>
-auto range_mapping_nodes(::ryml::ConstNodeRef node,
-  node_accumulator<Config> *, std::false_type) -> decltype(node.children()) {
-  return node.children();
-}
+template <bool Unique>
+struct range_mapping_nodes_case;
+
+template <>
+struct range_mapping_nodes_case<false> {
+  template <typename Config>
+  static auto apply(::ryml::ConstNodeRef node,
+    node_accumulator<Config> *) -> decltype(node.children()) {
+    return node.children();
+  }
+};
 
 // Select repeated names before decoding values, as record mapping does.
 // Iterate the document again to retain the selected nodes' document order.
-template <typename Config>
-std::vector<::ryml::ConstNodeRef> range_mapping_nodes(
-  ::ryml::ConstNodeRef node, node_accumulator<Config> *result, std::true_type) {
-  std::map<compat::string_view, ::ryml::ConstNodeRef> selected;
-  const auto policy = result->state.config.error_policy.duplicates;
-  for (const auto child : node.children()) {
-    if (result->stopped())
-      break;
+template <>
+struct range_mapping_nodes_case<true> {
+  template <typename Config>
+  static std::vector<::ryml::ConstNodeRef> apply(
+    ::ryml::ConstNodeRef node, node_accumulator<Config> *result) {
+    std::map<compat::string_view, ::ryml::ConstNodeRef> selected;
+    const auto policy = result->state.config.error_policy.duplicates;
+    for (const auto child : node.children()) {
+      if (result->stopped())
+        break;
 
-    const auto name = child.key();
-    const auto inserted = selected.emplace(
-      compat::string_view{name.str, name.len}, child);
+      const auto name = child.key();
+      const auto inserted = selected.emplace(
+        compat::string_view{name.str, name.len}, child);
 
-    if (inserted.second)
-      continue;
+      if (inserted.second)
+        continue;
 
-    if ((policy & json::duplicate_policy::last) == json::duplicate_policy::last)
-      inserted.first->second = child;
+      if ((policy & json::duplicate_policy::last)
+        == json::duplicate_policy::last)
+        inserted.first->second = child;
 
-    const auto context = result->state.child({
-      /*field=*/name,
-      /*index=*/compat::nullopt,
-    });
+      const auto context = result->state.child({
+        /*field=*/name,
+        /*index=*/compat::nullopt,
+      });
 
-    report_range_duplicate(child, context.path, /*key_value=*/true, result);
+      report_range_duplicate(child, context.path, /*key_value=*/true, result);
+    }
+
+    std::vector<::ryml::ConstNodeRef> nodes;
+    nodes.reserve(selected.size());
+    for (const auto child : node.children()) {
+      const auto name = child.key();
+      const auto found = selected.find({name.str, name.len});
+      if (found != selected.end() && found->second.id() == child.id())
+        nodes.push_back(child);
+    }
+
+    return nodes;
   }
+};
 
-  std::vector<::ryml::ConstNodeRef> nodes;
-  nodes.reserve(selected.size());
-  for (const auto child : node.children()) {
-    const auto name = child.key();
-    const auto found = selected.find({name.str, name.len});
-    if (found != selected.end() && found->second.id() == child.id())
-      nodes.push_back(child);
+template <bool KeyValue>
+struct read_range_case;
+
+template <>
+struct read_range_case<false> {
+  template <typename T, typename Config>
+  static void apply(::ryml::ConstNodeRef node, T *into,
+    node_accumulator<Config> *result) {
+    std::size_t index = 0;
+    for (const auto child : node.children()) {
+      if (result->stopped())
+        break;
+
+      const auto context = result->state.child({
+        /*field=*/{},
+        /*index=*/index++,
+      });
+
+      compat::range_value_t<T> element{};
+      auto mapped = core::read_node(child, &element, context);
+      const bool success = bool(mapped.value);
+      result->append(std::move(mapped));
+      if (success)
+        insert_range_value(into, child, context, result,
+          traits::has_unique_key<T>{}, std::move(element));
+    }
   }
+};
 
-  return nodes;
-}
+template <>
+struct read_range_case<true> {
+  template <typename T, typename Config>
+  static void apply(::ryml::ConstNodeRef node, T *into,
+    node_accumulator<Config> *result) {
+    static_assert(traits::is_string<traits::key_type_t<T>>::value,
+      "to_range requires string-adaptable keys for JSON/YAML objects");
 
-template <typename T, typename Config>
-void read_range(::ryml::ConstNodeRef node, T *into,
-  node_accumulator<Config> *result, std::false_type) {
-  std::size_t index = 0;
-  for (const auto child : node.children()) {
-    if (result->stopped())
-      break;
+    using key_type = traits::key_type_t<T>;
+    using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
+      std::declval<const key_type &>()))>;
 
-    const auto context = result->state.child({
-      /*field=*/{},
-      /*index=*/index++,
-    });
+    static_assert(std::is_same<char, typename storage_type::value_type>::value,
+      "Ryml object keys require char text from the string adapter");
 
-    compat::range_value_t<T> element{};
-    auto mapped = core::read_node(child, &element, context);
-    const bool success = bool(mapped.value);
-    result->append(std::move(mapped));
-    if (success)
-      insert_range_value(into, child, context, result,
-        traits::has_unique_key<T>{}, std::move(element));
+    using view_type = compat::basic_string_view<
+      typename storage_type::value_type,
+      typename storage_type::traits_type>;
+
+    const auto nodes = range_mapping_nodes(node, result,
+      traits::has_unique_key<T>{});
+
+    for (const auto child : nodes) {
+      if (result->stopped())
+        break;
+
+      const auto context = result->state.child({
+        /*field=*/child.key(),
+        /*index=*/compat::nullopt,
+      });
+
+      traits::key_type_t<T> key{};
+      const auto name = child.key();
+      adapt::assign_string(&key, view_type{name.str, name.len});
+      traits::mapped_type_t<T> value{};
+      auto mapped = core::read_node(child, &value, context);
+      const bool success = bool(mapped.value);
+      result->append(std::move(mapped));
+      if (success)
+        insert_range_value(into, child, context, result,
+          traits::has_unique_key<T>{}, std::move(key), std::move(value));
+    }
   }
-}
-
-template <typename T, typename Config>
-void read_range(::ryml::ConstNodeRef node, T *into,
-  node_accumulator<Config> *result, std::true_type) {
-  static_assert(traits::is_string<traits::key_type_t<T>>::value,
-    "to_range requires string-adaptable keys for JSON/YAML objects");
-
-  using key_type = traits::key_type_t<T>;
-  using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
-    std::declval<const key_type &>()))>;
-
-  static_assert(std::is_same<char, typename storage_type::value_type>::value,
-    "Ryml object keys require char text from the string adapter");
-
-  using view_type = compat::basic_string_view<typename storage_type::value_type,
-    typename storage_type::traits_type>;
-
-  const auto nodes = range_mapping_nodes(node, result,
-    traits::has_unique_key<T>{});
-
-  for (const auto child : nodes) {
-    if (result->stopped())
-      break;
-
-    const auto context = result->state.child({
-      /*field=*/child.key(),
-      /*index=*/compat::nullopt,
-    });
-
-    traits::key_type_t<T> key{};
-    const auto name = child.key();
-    adapt::assign_string(&key, view_type{name.str, name.len});
-    traits::mapped_type_t<T> value{};
-    auto mapped = core::read_node(child, &value, context);
-    const bool success = bool(mapped.value);
-    result->append(std::move(mapped));
-    if (success)
-      insert_range_value(into, child, context, result,
-        traits::has_unique_key<T>{}, std::move(key), std::move(value));
-  }
-}
+};
 
 } // namespace detail
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<detail::is_mapped_range<T>::value, int>>
 auto to_range_t::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<omni::ryml::detail::is_mapped_range<T>::value,
-    with_diagnostics<compat::monostate, diagnostics>> {
+  mapping_state_t<Config> context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   static_assert(compat::is_invocable<const traits::cp::clear<T> &, T *>::value,
     "to_range requires an adapted clear operation");
 
@@ -334,8 +386,8 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
   }
 
   adapt::clear(into);
-  omni::ryml::detail::read_range(node, into, &result,
-    traits::is_key_value<T>{});
+  omni::ryml::detail::read_range_case<traits::is_key_value<T>::value>::apply(
+    node, into, &result);
 
   return std::move(result).finish();
 }

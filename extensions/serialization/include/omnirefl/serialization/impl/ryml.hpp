@@ -1,5 +1,8 @@
 #pragma once
 
+// FIXME: [low] Freestanding: parse-error recovery requires setjmp/longjmp,
+// which are not guaranteed by a freestanding implementation.
+
 #include <omnirefl/functional.hpp>
 
 #include <c4/format.hpp>
@@ -7,28 +10,216 @@
 
 #include <algorithm>
 #include <cassert>
-// FIXME: [low] Freestanding: parse-error recovery requires setjmp/longjmp,
-// which are not guaranteed by a freestanding implementation.
 #include <csetjmp>
 #include <iterator>
 #include <limits>
 #include <type_traits>
 
-// TODO: Provide an omni::compat::string_view drop-in for the C++11 baseline.
-#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
-#  if __has_include(<string_view>)
-#    include <string_view>
-#  endif
-#endif
-
 namespace omni {
 namespace ryml {
+
+namespace detail {
+
+// Built-ins stay separate from registrations so a user override never competes
+// with a matching default partial specialization.
+template <typename T, typename = void>
+struct default_from_type:
+    std::conditional<omni::is_reflected_record<T>::value,
+      reflected_scope::from_record,
+      cp::unavailable>::type {};
+
+template <typename T>
+struct default_from_type<T,
+  compat::enable_if_t<from_string_like::supports<T>()>>:
+    from_string_like {};
+
+template <typename T>
+struct default_from_type<T,
+  compat::enable_if_t<from_arithmetic::supports<T>()>>:
+    from_arithmetic {};
+
+template <typename T>
+struct default_from_type<T,
+  compat::enable_if_t<from_optional_like::supports<T>()>>:
+    from_optional_like {};
+
+template <typename T>
+struct default_from_type<T,
+  compat::enable_if_t<from_range_t::supports<T>()>>:
+    from_range_t {};
+
+template <typename T>
+struct default_from_type<T,
+  compat::enable_if_t<reflected_scope::from_enum::supports<T>()>>:
+    reflected_scope::from_enum {};
+
+// Built-ins stay separate from registrations so a user override never competes
+// with a matching default partial specialization.
+template <typename T, typename = void>
+struct default_to_type:
+    std::conditional<omni::is_reflected_record<T>::value,
+      reflected_scope::to_record_t<>,
+      cp::unavailable>::type {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_string_like::supports<T>()>>:
+    to_string_like {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_arithmetic::supports<T>()>>:
+    to_arithmetic {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_optional_like::supports<T>()>>:
+    to_optional_like {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_range_t::supports<T>()>>:
+    to_range_t {};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>>:
+    reflected_scope::to_enum_t<> {};
+
+template <typename T>
+struct from_type_registration {
+  static constexpr bool has_struct =
+    !std::is_base_of<cp::unavailable, cp::from_type_t<T>>::value;
+
+// C++11 registers structs; C++14 also allows callable variable templates.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+  static constexpr bool has_variable = !std::is_same<cp::unavailable,
+    compat::remove_cvref_t<decltype(cp::from_type<T>)>>::value;
+#else
+  static constexpr bool has_variable = false;
+#endif
+};
+
+template <typename T,
+  bool Struct = from_type_registration<T>::has_struct,
+  bool Variable = from_type_registration<T>::has_variable>
+struct from_type_case {
+  using type = cp::from_type_t<T>;
+  static constexpr type get() { return {}; }
+};
+
+// Read the registered object itself so its configured state is preserved.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+template <typename T>
+struct from_type_case<T, false, true> {
+  using type = compat::remove_cvref_t<decltype(cp::from_type<T>)>;
+  static constexpr type get() { return cp::from_type<T>; }
+};
+#endif
+
+template <typename T>
+struct from_type_case<T, false, false> {
+  using type = default_from_type<T>;
+  static constexpr type get() { return {}; }
+};
+
+template <typename T>
+struct to_type_registration {
+  static constexpr bool has_struct =
+    !std::is_base_of<cp::unavailable, cp::to_type_t<T>>::value;
+
+// C++11 registers structs; C++14 also allows callable variable templates.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+  static constexpr bool has_variable = !std::is_same<cp::unavailable,
+    compat::remove_cvref_t<decltype(cp::to_type<T>)>>::value;
+#else
+  static constexpr bool has_variable = false;
+#endif
+};
+
+template <typename T,
+  bool Struct = to_type_registration<T>::has_struct,
+  bool Variable = to_type_registration<T>::has_variable>
+struct to_type_case {
+  using type = cp::to_type_t<T>;
+  static constexpr type get() { return {}; }
+};
+
+// Read the registered object itself so its configured state is preserved.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+template <typename T>
+struct to_type_case<T, false, true> {
+  using type = compat::remove_cvref_t<decltype(cp::to_type<T>)>;
+  static constexpr type get() { return cp::to_type<T>; }
+};
+#endif
+
+template <typename T>
+struct to_type_case<T, false, false> {
+  using type = default_to_type<T>;
+  static constexpr type get() { return {}; }
+};
+
+// Public accessor declarations need one dependent type; keep the Boolean
+// selection parameters and registration checks in this implementation header.
+template <typename T>
+struct from_type_selection: from_type_case<T> {};
+
+template <typename T>
+struct to_type_selection: to_type_case<T> {};
+
+} // namespace detail
+
+template <typename T>
+constexpr auto from_type(omni::type_t<T>)
+  -> typename detail::from_type_selection<T>::type {
+  using mapper = typename detail::from_type_selection<T>::type;
+
+  static_assert(!(detail::from_type_registration<T>::has_struct
+      && detail::from_type_registration<T>::has_variable),
+    "Conflicting value mappings: specialize either cp::from_type_t or "
+    "cp::from_type, not both");
+
+  static_assert(!std::is_base_of<cp::unavailable, mapper>::value,
+    "No value mapping: specialize cp::from_type_t or cp::from_type");
+
+  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
+      std::is_copy_constructible<mapper>>::value,
+    "Value mappers must be trivially copyable and copy-constructible");
+
+  return detail::from_type_selection<T>::get();
+}
+
+template <typename T>
+constexpr auto to_type(omni::type_t<T>)
+  -> typename detail::to_type_selection<T>::type {
+  using mapper = typename detail::to_type_selection<T>::type;
+
+  static_assert(!(detail::to_type_registration<T>::has_struct
+      && detail::to_type_registration<T>::has_variable),
+    "Conflicting node mappings: specialize either cp::to_type_t or "
+    "cp::to_type, not both");
+
+  static_assert(!std::is_base_of<cp::unavailable, mapper>::value,
+    "No node mapping: specialize cp::to_type_t or cp::to_type");
+
+  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
+      std::is_copy_constructible<mapper>>::value,
+    "Node mapping callables must be trivially copyable and copy-constructible");
+
+  return detail::to_type_selection<T>::get();
+}
 
 inline std::vector<issue::path_segment> mapping_path::materialize() const {
   std::vector<issue::path_segment> segments(this->depth);
   auto path = this;
   for (std::size_t remaining = this->depth; remaining; --remaining) {
-    segments[remaining - 1] = path->segment;
+    segments[remaining - 1] = {
+      /*field=*/path->field,
+      /*index=*/path->has_index
+        ? compat::optional<std::size_t>{path->index}
+        : compat::nullopt,
+    };
     path = path->parent;
   }
 
@@ -58,7 +249,8 @@ inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
   return json::value_kind::unknown;
 }
 
-inline std::string render_path(const std::vector<issue::path_segment> &segments) {
+inline std::string render_path(
+  const std::vector<issue::path_segment> &segments) {
   std::string path;
   for (const auto &segment : segments) {
     path += '/';
@@ -107,8 +299,8 @@ OMNI_CPP14_CONSTEXPR inline compat::string_view kind_name(json::value_kind k) {
 // Child states snapshot progress; diagnostics are returned separately.
 template <typename Config>
 struct node_accumulator {
-  mapping_state<Config> state;
-  with_diagnostics<compat::monostate, diagnostics> result;
+  mapping_state_t<Config> state;
+  with_diagnostics_t<compat::monostate, diagnostics> result;
 
   bool stopped() const { return this->state.limit_exceeded(); }
 
@@ -132,7 +324,7 @@ struct node_accumulator {
     }
   }
 
-  void append(with_diagnostics<compat::monostate, diagnostics> child) {
+  void append(with_diagnostics_t<compat::monostate, diagnostics> child) {
     if (!child.value)
       this->result.value.reset();
 
@@ -160,13 +352,13 @@ struct node_accumulator {
       this->result.value.reset();
   }
 
-  auto finish() && -> with_diagnostics<compat::monostate, diagnostics> {
+  auto finish() && -> with_diagnostics_t<compat::monostate, diagnostics> {
     return std::move(this->result);
   }
 };
 
 template <typename Config>
-node_accumulator<Config> make_node_accumulator(mapping_state<Config> state) {
+node_accumulator<Config> make_node_accumulator(mapping_state_t<Config> state) {
   return {
     /*state=*/state,
     /*result=*/{
@@ -193,9 +385,8 @@ inline issue make_issue(json::issue_code reason,
   result.actual = node_kind(node);
   result.warning = warning;
 
-  if (!node.invalid()) {
+  if (!node.invalid())
     result.node_id = node.id();
-  }
 
   return result;
 }
@@ -260,19 +451,18 @@ namespace core {
 template <typename T, typename Config>
 void write_node(const T &value,
   ::ryml::NodeRef node,
-  mapping_state<Config> context) {
-  cp::from_type<T>{}(value, node, context);
+  mapping_state_t<Config> context) {
+  omni::ryml::from_type(omni::type_t<T>{})(value, node, context);
 }
 
 template <typename T, typename Config>
 auto read_node(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context)
-  -> with_diagnostics<compat::monostate, diagnostics> {
+  mapping_state_t<Config> context)
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
-  if (context.limit_exceeded()) {
-    result.result.value.reset();
-  } else {
+  if (context.limit_exceeded())
+    result.result.value.reset(); else {
     result.append(omni::ryml::to_type(omni::type_t<T>{})(node, into, context));
   }
   return std::move(result).finish();
@@ -287,8 +477,8 @@ struct cpp11_lambda_write {
   template <typename _M, omni::reflected_entity Entity>
   ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
     ::ryml::Tree tree;
-    const config<> options{};
-    const mapping_state<> context{
+    const config_t<> options{};
+    const mapping_state_t<> context{
       /*config=*/options,
       /*path=*/{},
       /*error_count=*/0,
@@ -305,11 +495,11 @@ template <typename T, typename Config>
 struct cpp11_lambda_read {
   const ::ryml::ConstNodeRef &node;
   T &into;
-  mapping_state<Config> context;
+  mapping_state_t<Config> context;
 
   template <typename _M, omni::reflected_entity Entity>
   auto operator()(omni::meta_t<_M, Entity>) const
-    -> with_diagnostics<compat::monostate, diagnostics> {
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
     return core::read_node(this->node,
       &this->into,
       this->context);
@@ -360,7 +550,7 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   // that must not return, rather than a result. Keep setjmp in this lambda
   // so longjmp cannot make the modified outer tree/parser/error indeterminate
   // or skip their destructors.
-  return compat::invoke( //
+  return compat::invoke( //<
     [&error, &tree, &parser, &source]()
       -> compat::expected<::ryml::Tree, std::string> {
       if (parse_failed == setjmp(error.jump))
@@ -380,64 +570,57 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 
 namespace detail {
 
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T,
-    typename Config,
-    typename Discovery = compat::remove_cvref_t<T>),
+// The discovery cases keep reflected_call confined to types that need metadata.
+// Wrappers recurse through their element type without changing the destination.
+template <typename Discovery,
+  bool Reflect = cp::reflect_as_root<Discovery>::value,
+  bool Wrapper = compat::disjunction<
+    omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value>
+struct map_tree_case {
+  template <typename T, typename Config>
+  static auto map(::ryml::ConstNodeRef node, T *into,
+    mapping_state_t<Config> context)
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
+    return read_node(node, into, context);
+  }
+};
 
-  (cp::reflect_as_root<Discovery>::value))
-auto map_tree_dispatch(::ryml::ConstNodeRef node,
-  T *into,
-  mapping_state<Config> context)
-  -> with_diagnostics<compat::monostate, diagnostics> {
-  return omni::reflected_call(
-    cpp11_lambda_read<T, Config>{
-      /*node=*/node,
-      /*into=*/ *into,
-      /*context=*/context,
-    },
-    omni::type_t<Discovery>{});
-}
+template <typename Discovery, bool Wrapper>
+struct map_tree_case<Discovery, true, Wrapper> {
+  template <typename T, typename Config>
+  static auto map(::ryml::ConstNodeRef node, T *into,
+    mapping_state_t<Config> context)
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
+    return omni::reflected_call(
+      cpp11_lambda_read<T, Config>{
+        /*node=*/node,
+        /*into=*/ *into,
+        /*context=*/context,
+      },
+      omni::type_t<Discovery>{});
+  }
+};
 
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T,
-    typename Config,
-    typename Discovery = compat::remove_cvref_t<T>),
-
-  (!cp::reflect_as_root<Discovery>::value &&
-    !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value))
-auto map_tree_dispatch(::ryml::ConstNodeRef node,
-  T *into,
-  mapping_state<Config> context)
-  -> with_diagnostics<compat::monostate, diagnostics> {
-  return read_node(node, into, context);
-}
-
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T,
-    typename Config,
-    typename Discovery = compat::remove_cvref_t<T>),
-
-  (!cp::reflect_as_root<Discovery>::value &&
-    compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value))
-auto map_tree_dispatch(::ryml::ConstNodeRef node,
-  T *into,
-  mapping_state<Config> context)
-  -> with_diagnostics<compat::monostate, diagnostics> {
-  return map_tree_dispatch<T, Config,
-    typename omni::ryml::detail::discovered_range_type<Discovery>::type>(
-    node, into, context);
-}
+template <typename Discovery>
+struct map_tree_case<Discovery, false, true> {
+  template <typename T, typename Config>
+  static auto map(::ryml::ConstNodeRef node, T *into,
+    mapping_state_t<Config> context)
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
+    return map_tree_case<
+      typename omni::ryml::detail::discovered_range_type<Discovery>::type>::map(
+        node, into, context);
+  }
+};
 
 } // namespace detail
 
 template <typename T, typename TransformDiagnostics>
-with_diagnostics<T> map_tree(const config<TransformDiagnostics> &options,
+with_diagnostics_t<T> map_tree(const config_t<TransformDiagnostics> &options,
   omni::type_t<T>, ::ryml::ConstNodeRef node) {
   auto value = compat::make_optional<T>();
-  const mapping_state<config<TransformDiagnostics>> context{
+  const mapping_state_t<config_t<TransformDiagnostics>> context{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,
@@ -445,7 +628,8 @@ with_diagnostics<T> map_tree(const config<TransformDiagnostics> &options,
     /*borrow_strings=*/false,
   };
 
-  auto mapped = detail::map_tree_dispatch(node, &*value, context);
+  auto mapped = detail::map_tree_case<compat::remove_cvref_t<T>>::map(
+    node, &*value, context);
   return {
     /*value=*/mapped.value ? std::move(value) : compat::nullopt,
     /*diagnostics=*/std::move(mapped.diagnostics),
@@ -453,20 +637,21 @@ with_diagnostics<T> map_tree(const config<TransformDiagnostics> &options,
 }
 
 template <typename T, typename TransformDiagnostics>
-with_diagnostics<T> map_tree(const config<TransformDiagnostics> &options,
+with_diagnostics_t<T> map_tree(const config_t<TransformDiagnostics> &options,
   omni::type_t<T> type, const ::ryml::Tree &tree) {
   return map_tree(options, type, tree.crootref());
 }
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
 template <typename Config, typename Record>
-  requires (traits::is_specialization_of<config, Config>())
+  requires (is_config<Config>::value)
 #else
 template <typename Config, typename Record,
-  compat::enable_if_t<traits::is_specialization_of<config, Config>(), int>>
+  compat::enable_if_t<is_config<Config>::value, int>>
 #endif
-auto deserialize(Config &&options, omni::type_t<Record> record_type, std::string source)
-  -> with_diagnostics<Record, diagnostics_result_t<Config>> {
+auto deserialize(Config &&options, omni::type_t<Record> record_type,
+  std::string source)
+  -> with_diagnostics_t<Record, diagnostics_result_t<Config>> {
   auto parsed = omni::ryml::core::parse(std::move(source));
   if (!parsed) {
     const ::ryml::Tree tree{/*node_capacity=*/0, /*arena_capacity=*/0};
@@ -499,94 +684,61 @@ auto deserialize(Config &&options, omni::type_t<Record> record_type, std::string
 
 namespace detail {
 
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T, typename Discovery = compat::remove_cvref_t<T>),
-  (cp::reflect_as_root<Discovery>::value))
-::ryml::Tree as_owning_tree_dispatch(const T &value) {
-  return omni::reflected_call(
-    cpp11_lambda_write</*BorrowStrings=*/false, T>{/*value=*/value},
-    omni::type_t<Discovery>{});
-}
+template <typename Discovery,
+  bool Reflect = cp::reflect_as_root<Discovery>::value,
+  bool Wrapper = compat::disjunction<
+    omni::ryml::detail::is_mapped_range<Discovery>,
+    traits::is_optional<Discovery>>::value>
+struct tree_builder_case {
+  template <bool BorrowStrings, typename T>
+  static ::ryml::Tree build(T &value) {
+    ::ryml::Tree tree;
+    const config_t<> options{};
+    const mapping_state_t<> context{
+      /*config=*/options,
+      /*path=*/{},
+      /*error_count=*/0,
+      /*warning_count=*/0,
+      /*borrow_strings=*/BorrowStrings,
+    };
 
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T, typename Discovery = compat::remove_cvref_t<T>),
-  (!cp::reflect_as_root<Discovery>::value &&
-    !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value))
-::ryml::Tree as_owning_tree_dispatch(const T &value) {
-  ::ryml::Tree tree;
-  const config<> options{};
-  const mapping_state<> context{
-    /*config=*/options,
-    /*path=*/{},
-    /*error_count=*/0,
-    /*warning_count=*/0,
-    /*borrow_strings=*/false,
-  };
+    write_node(value, tree.rootref(), context);
+    return tree;
+  }
+};
 
-  write_node(value, tree.rootref(), context);
-  return tree;
-}
+template <typename Discovery, bool Wrapper>
+struct tree_builder_case<Discovery, true, Wrapper> {
+  template <bool BorrowStrings, typename T>
+  static ::ryml::Tree build(T &value) {
+    return omni::reflected_call(
+      cpp11_lambda_write<BorrowStrings, T>{/*value=*/value},
+      omni::type_t<Discovery>{});
+  }
+};
 
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T, typename Discovery = compat::remove_cvref_t<T>),
-  (!cp::reflect_as_root<Discovery>::value &&
-    compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value))
-::ryml::Tree as_owning_tree_dispatch(const T &value) {
-  return as_owning_tree_dispatch<T,
-    typename omni::ryml::detail::discovered_range_type<Discovery>::type>(value);
-}
-
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T, typename Discovery = compat::remove_cvref_t<T>),
-  (cp::reflect_as_root<Discovery>::value))
-::ryml::Tree as_ref_tree_dispatch(T &value) {
-  return omni::reflected_call(
-    cpp11_lambda_write</*BorrowStrings=*/true, T>{/*value=*/value},
-    omni::type_t<Discovery>{});
-}
-
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T, typename Discovery = compat::remove_cvref_t<T>),
-  (!cp::reflect_as_root<Discovery>::value &&
-    !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value))
-::ryml::Tree as_ref_tree_dispatch(T &value) {
-  ::ryml::Tree tree;
-  const config<> options{};
-  const mapping_state<> context{
-    /*config=*/options,
-    /*path=*/{},
-    /*error_count=*/0,
-    /*warning_count=*/0,
-    /*borrow_strings=*/true,
-  };
-
-  write_node(value, tree.rootref(), context);
-  return tree;
-}
-
-OMNI_CONSTRAINED_TEMPLATE(
-  (typename T, typename Discovery = compat::remove_cvref_t<T>),
-  (!cp::reflect_as_root<Discovery>::value &&
-    compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value))
-::ryml::Tree as_ref_tree_dispatch(T &value) {
-  return as_ref_tree_dispatch<T,
-    typename omni::ryml::detail::discovered_range_type<Discovery>::type>(value);
-}
+template <typename Discovery>
+struct tree_builder_case<Discovery, false, true> {
+  template <bool BorrowStrings, typename T>
+  static ::ryml::Tree build(T &value) {
+    return tree_builder_case<
+      typename omni::ryml::detail::discovered_range_type<Discovery>::type>
+        ::template build<BorrowStrings>(value);
+  }
+};
 
 } // namespace detail
 
 template <typename T>
 ::ryml::Tree as_owning_tree(const T &value) {
-  return detail::as_owning_tree_dispatch(value);
+  return detail::tree_builder_case<compat::remove_cvref_t<T>>
+    ::template build</*BorrowStrings=*/false>(value);
 }
 
 template <typename T>
 ::ryml::Tree as_ref_tree(T &value) {
-  return detail::as_ref_tree_dispatch(value);
+  return detail::tree_builder_case<compat::remove_cvref_t<T>>
+    ::template build</*BorrowStrings=*/true>(value);
 }
 
 } // namespace core
@@ -649,9 +801,8 @@ inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
       message += '"';
       message.append(value.data(), value.size());
       message += "\" ";
-      if (json::issue_code::out_of_range == entry.reason) {
-        message += "could not be converted to the destination scalar";
-      } else {
+      if (json::issue_code::out_of_range == entry.reason)
+        message += "could not be converted to the destination scalar"; else {
         message += "is not ";
         message += json::value_kind::integer == entry.expected
             || json::value_kind::unsigned_integer == entry.expected

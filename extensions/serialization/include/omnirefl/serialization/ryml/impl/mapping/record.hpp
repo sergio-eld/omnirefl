@@ -16,7 +16,7 @@ namespace detail {
 template <typename Config>
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
-  mapping_state<Config> context;
+  mapping_state_t<Config> context;
 
   template <typename Record, typename _F>
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
@@ -76,8 +76,8 @@ struct record_member_event {
   bool check_presence;
 
   template <typename Config>
-  auto operator()(mapping_state<Config> state) const
-    -> with_diagnostics<compat::monostate, diagnostics> {
+  auto operator()(mapping_state_t<Config> state) const
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
     const compat::string_view name{this->field.name()};
     const auto entry = std::find_if(this->pending.begin(), this->pending.end(),
       [name](const record_entry &entry) { return name == entry.name; });
@@ -156,11 +156,13 @@ struct cpp11_fold_member {
 
 namespace reflected_scope {
 
-template <typename T, typename Config>
+template <typename T,
+  typename Config,
+  compat::enable_if_t<omni::is_reflected_record<T>::value, int>>
 auto from_record::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state<Config> context) const
-  -> compat::enable_if_t<omni::is_reflected_record<T>::value> {
+  mapping_state_t<Config> context) const
+  -> void {
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
@@ -177,8 +179,8 @@ template <typename T,
   compat::enable_if_t<omni::is_reflected_record<T>::value, int>>
 auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state<Config> context) const
-  -> with_diagnostics<compat::monostate, diagnostics> {
+  mapping_state_t<Config> context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = detail::make_node_accumulator(context);
   if (!node.is_map()) {
     result.report(omni::ryml::detail::make_issue(
@@ -215,7 +217,8 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
       });
 
     if (entry == pending.end()) {
-      if (const auto canonical = this->name_by_alias(input_name)) {
+      if (const auto canonical =
+        compat::invoke(this->name_by_alias, input_name)) {
         entry = std::find_if(pending.begin(),
           pending.end(),
           [canonical](const detail::record_entry &entry) {

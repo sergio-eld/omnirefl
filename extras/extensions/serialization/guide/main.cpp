@@ -230,8 +230,9 @@ struct two_readings {
  * the calling scope. */
 TEST(basics, local_configuration) {
   const std::uint16_t limit = 2;
+  // C++11: spell the parameter type as omni::ryml::config_t<>.
   const auto load = omni::ryml::deserialize.tdm_config(
-    [limit](omni::ryml::config<> s) {
+    [limit](omni::ryml::config_like auto s) {
       s.error_policy.error_limit = limit;
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
@@ -267,7 +268,7 @@ TEST(basics, diagnostics) {
 /** The core operation takes configuration explicitly instead of using a bound
  * callable. */
 TEST(config, explicit_configuration) {
-  omni::ryml::config<> options{};
+  omni::ryml::config_t<> options{};
   options.error_policy.unknown_fields = omni::json::unknown_policy::allow;
   const auto result = omni::ryml::core::deserialize(options,
     omni::type<policy_examples::measurement>,
@@ -286,7 +287,7 @@ TEST(config, explicit_configuration) {
 TEST(config, unknown_fields) {
   using omni::json::unknown_policy;
   const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config<> s) {
+    [](omni::ryml::config_like auto s) {
       s.error_policy.unknown_fields =
         unknown_policy::allow | unknown_policy::warn;
       return s;
@@ -310,7 +311,7 @@ TEST(config, unknown_fields) {
 TEST(config, duplicate_fields) {
   using omni::json::duplicate_policy;
   const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config<> s) {
+    [](omni::ryml::config_like auto s) {
       s.error_policy.duplicates =
         duplicate_policy::last | duplicate_policy::warn;
       return s;
@@ -332,7 +333,7 @@ TEST(config, duplicate_fields) {
  */
 TEST(config, error_limit) {
   const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config<> s) {
+    [](omni::ryml::config_like auto s) {
       s.error_policy.error_limit = 1;
       return s;
     });
@@ -351,7 +352,7 @@ TEST(config, error_limit) {
  */
 TEST(config, warning_limit) {
   const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config<> s) {
+    [](omni::ryml::config_like auto s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow
         | omni::json::unknown_policy::warn;
       s.error_policy.warning_limit = 0;
@@ -453,7 +454,7 @@ TEST(diagnostics, custom_results) {
   };
 
   const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config<> options) {
+    [](omni::ryml::config_like auto options) {
       return options.tdm_transform_diagnostics(
         [](omni::ryml::render_diagnostics_t previous) {
           return [previous](const ::ryml::Tree &tree,
@@ -487,7 +488,7 @@ TEST(diagnostics, custom_results) {
 // Accepted input conditions can produce warnings alongside a valid value.
 TEST(diagnostics, valid_values_with_warnings) {
   const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config<> s) {
+    [](omni::ryml::config_like auto s) {
       s.error_policy.duplicates = omni::json::duplicate_policy::allow
         | omni::json::duplicate_policy::warn;
       return s;
@@ -795,15 +796,15 @@ namespace ryml {
 
 /** Custom node readers specialize to_type_t<T> or, since C++14, the callable
  * variable to_type<T>; registering both for one type is an error. Writers
- * specialize from_type<T>; supported unregistered types keep their defaults.
+ * register cp::from_type<T> or cp::from_type_t<T>; unregistered types use defaults.
  *
- * mapping_state<Config> borrows the configuration and carries the current
+ * mapping_state_t<Config> borrows the configuration and carries the current
  * path and accumulated error/warning counts. Pass it unchanged when delegating
  * the same node; use child(...) when descending to another key or index.
  * Child paths borrow their parent state, which must stay alive and unchanged
  * until that child mapping finishes.
  *
- * Readers update the destination and return with_diagnostics<monostate>:
+ * Readers update the destination and return with_diagnostics_t<monostate>:
  * an engaged value signals success, and diagnostics carry their issues.
  * Metadata queries stay dependent until called in reflected scope. */
 namespace cp {
@@ -821,8 +822,8 @@ struct to_type_t<customization_mapping::record> {
   template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state<Config> state) const
-    -> with_diagnostics<compat::monostate> {
+    mapping_state_t<Config> state) const
+    -> with_diagnostics_t<compat::monostate> {
     static const auto mapper = reflected_scope::to_record.with_name_by_alias(
       alias_dict(std::make_tuple("count", "legacy_count")));
 
@@ -837,8 +838,8 @@ struct to_type_t<customization_mapping::status> {
   template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state<Config> state) const
-    -> with_diagnostics<compat::monostate> {
+    mapping_state_t<Config> state) const
+    -> with_diagnostics_t<compat::monostate> {
     static const auto mapper = reflected_scope::to_enum.with_value_by_alias(
       alias_dict(std::make_tuple("busy", "working")));
 
@@ -855,11 +856,11 @@ struct reflect_as_root<customization_mapping::extended_values>:
 /** Record metadata describes the added fields; container adapters handle the
  * flat representation. The fields occupy its final two positions. */
 template <>
-struct from_type<customization_mapping::extended_values> {
+struct from_type_t<customization_mapping::extended_values> {
   template <typename Config>
   struct cpp11_append_member {
     ::ryml::NodeRef &node;
-    omni::ryml::mapping_state<Config> context;
+    omni::ryml::mapping_state_t<Config> context;
 
     template <typename Record, typename _F>
     void operator()(omni::data_member_binding_t<Record, _F> field) const {
@@ -875,7 +876,7 @@ struct from_type<customization_mapping::extended_values> {
   template <typename T, typename Config>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state<Config> context) const {
+    omni::ryml::mapping_state_t<Config> context) const {
     from_range(value, node, context);
 
     const auto binding = omni::meta_for<T>::bind(value);
@@ -902,8 +903,8 @@ struct to_type_t<customization_mapping::extended_values> {
   template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::mapping_state<Config> context) const
-    -> with_diagnostics<compat::monostate, diagnostics> {
+    omni::ryml::mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
     T values;
     auto result = to_range(node, &values, context);
     if (!result.value)
@@ -931,11 +932,11 @@ struct to_type_t<customization_mapping::extended_values> {
 };
 
 template <>
-struct from_type<customization_mapping::integer> {
+struct from_type_t<customization_mapping::integer> {
   template <typename Config>
   void operator()(const customization_mapping::integer &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state<Config> context) const {
+    omni::ryml::mapping_state_t<Config> context) const {
     core::write_node(value.value, node, context);
   }
 };
@@ -945,8 +946,8 @@ struct to_type_t<customization_mapping::integer> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
-    omni::ryml::mapping_state<Config> context) const
-    -> with_diagnostics<compat::monostate, diagnostics> {
+    omni::ryml::mapping_state_t<Config> context) const
+    -> with_diagnostics_t<compat::monostate, diagnostics> {
     int converted{};
     auto result = core::read_node(node, &converted, context);
     if (!result.value)
@@ -1139,12 +1140,12 @@ class invalid_extended_container_mapping:
 // C++11 lambda equivalent: map into an existing record within reflected scope.
 struct cpp11_lambda_read_into {
   ::ryml::ConstNodeRef node;
-  omni::ryml::mapping_state<> context;
+  omni::ryml::mapping_state_t<> context;
 
   // The explicit return type delays the body until generated metadata exists.
   template <typename Record>
   auto operator()(omni::record_binding_t<Record> record) const
-    -> omni::ryml::with_diagnostics<omni::compat::monostate> {
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     return omni::ryml::core::read_node(
       this->node, &record.value(), this->context);
   }
@@ -1157,8 +1158,8 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   if (!parsed)
     return;
 
-  const omni::ryml::config<> options{};
-  const omni::ryml::mapping_state<> context{
+  const omni::ryml::config_t<> options{};
+  const omni::ryml::mapping_state_t<> context{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,
@@ -1224,7 +1225,7 @@ class customization_mapping_limits:
 // Enclosing mappers accumulate custom readers' issues and apply limits.
 TEST_P(customization_mapping_limits,
   collects_default_and_custom_conversion_errors) {
-  omni::ryml::config<> options{};
+  omni::ryml::config_t<> options{};
   options.error_policy.error_limit = GetParam();
   const auto tree = omni::ryml::core::parse(R"(
 {
@@ -1282,8 +1283,8 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   if (!parsed)
     return;
 
-  const omni::ryml::config<> options{};
-  const omni::ryml::mapping_state<> context{
+  const omni::ryml::config_t<> options{};
+  const omni::ryml::mapping_state_t<> context{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,

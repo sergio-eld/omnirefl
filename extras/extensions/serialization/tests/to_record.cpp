@@ -303,11 +303,11 @@ TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
 struct cpp11_map_with_aliases {
   omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases> compositor;
   ::ryml::ConstNodeRef node;
-  omni::ryml::mapping_state<> context;
+  omni::ryml::mapping_state_t<> context;
 
   template <typename Record>
   auto operator()(omni::record_binding_t<Record> record) const
-    -> omni::ryml::with_diagnostics<omni::compat::monostate,
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate,
       omni::ryml::diagnostics> {
     return this->compositor(this->node, &record.value(), this->context);
   }
@@ -331,8 +331,8 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
     if (!tree)
       continue;
 
-    const omni::ryml::config<> options{};
-    const omni::ryml::mapping_state<> context{
+    const omni::ryml::config_t<> options{};
+    const omni::ryml::mapping_state_t<> context{
       /*config=*/options,
       /*path=*/{},
       /*error_count=*/0,

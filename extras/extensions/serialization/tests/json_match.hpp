@@ -40,9 +40,9 @@ struct collect_diagnostics {
   }
 };
 
-using config = omni::ryml::config<collect_diagnostics>;
+using config = omni::ryml::config_t<collect_diagnostics>;
 using deserialize_type = omni::ryml::deserialize_t<config>;
-const deserialize_type deserialize{config{}};
+const deserialize_type deserialize{config_t{}};
 
 // Existing conformance cases compare rendered text as well as structured data.
 struct render_collected_diagnostics {
