@@ -21,7 +21,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
     add_executable(${_test_target} test.cpp scalar_roots.cpp sequence_roots.cpp
         json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp
-        container_discovery.cpp optional_mapping.cpp customization.cpp)
+        container_discovery.cpp optional_mapping.cpp customization.cpp
+        diagnostics.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES

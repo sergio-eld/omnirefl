@@ -31,7 +31,7 @@ struct to_type_t<endpoint<T>> {
   auto operator()(::ryml::ConstNodeRef node,
     endpoint<T> *into,
     const detail::mapping_context &context) const
-    -> with_diagnostics<compat::monostate, diagnostics<false>> {
+    -> with_diagnostics<compat::monostate, diagnostics> {
     return reflected_scope::to_record.with_name_by_alias(
       [](compat::string_view alias) -> compat::optional<compat::string_view> {
         return alias == "service_port"
@@ -49,7 +49,7 @@ struct to_type_t<endpoint<T>> {
 namespace {
 
 TEST(mapping_customization, preserves_configured_alias_lookup) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<endpoint<int>>{}, R"({"service_port": 42})");
 
   EXPECT_TRUE(result.value);

@@ -17,7 +17,7 @@ namespace reflected_scope {
 /** Deserialize a node into a reflected record's accessible non-static data
  * members.
  * Traversal follows the record schema over the node, applying config's
- * duplicate, unknown-member, recovery, and diagnostic-limit policies.
+ * duplicate, unknown-member, and diagnostic-limit policies.
  *
  * A canonical name takes precedence over its aliases, even when its value is
  * invalid. Duplicate policies select among canonical occurrences when present,
@@ -38,14 +38,12 @@ struct to_record_t {
     return omni::is_reflected_record<T>::value;
   }
 
-  // TODO: [high] Define a public mapping context interface/type for
-  // customization points instead of exposing detail::mapping_context.
   template <typename T,
     compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const detail::mapping_context &context) const
-    -> with_diagnostics<compat::monostate, diagnostics<false>>;
+    -> with_diagnostics<compat::monostate, diagnostics>;
 
   NameByAlias name_by_alias;
 
@@ -73,6 +71,10 @@ struct to_record_t {
 
     return {/*name_by_alias=*/std::forward<F>(f)};
   }
+
+  // FIXME: [high] Implement fn::traverse and replace fn::each in record mapping
+  // so exceeding an error/warning limit stops tuple visitation instead of
+  // invoking remaining callbacks that immediately return.
 
   // TODO: [medium] Add with_validate_fields for configurable per-field
   // validation, following the alias compositor's functional update pattern.

@@ -36,6 +36,13 @@
 #  define OMNI_CPP14_CONSTEXPR
 #endif
 
+// C++14 aggregates allow member defaults; omit them to preserve C++11 aggregates.
+#if defined(__cpp_aggregate_nsdmi) && 201304L <= __cpp_aggregate_nsdmi
+#  define OMNI_CPP14_DEFAULT_INIT(...) = {__VA_ARGS__}
+#else
+#  define OMNI_CPP14_DEFAULT_INIT(...)
+#endif
+
 // C++17 constexpr support includes literal lambda closure types.
 #if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
 #  define OMNI_CPP17_CONSTEXPR constexpr

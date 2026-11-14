@@ -44,7 +44,7 @@ template <>
 struct to_type_t<my_int> {
   auto operator()(::ryml::ConstNodeRef node, my_int *into,
     const detail::mapping_context &context) const
-    -> with_diagnostics<compat::monostate, diagnostics<false>> {
+    -> with_diagnostics<compat::monostate, diagnostics> {
     return core::read_node(node, &into->value, context);
   }
 };
@@ -56,7 +56,7 @@ struct to_type_t<compatible_integer> {
   auto operator()(::ryml::ConstNodeRef node,
     compatible_integer *into,
     const detail::mapping_context &context) const
-    -> with_diagnostics<compat::monostate, diagnostics<false>> {
+    -> with_diagnostics<compat::monostate, diagnostics> {
     auto result = core::read_node(node, &into->value, context);
     if (!result.value)
       return result;
@@ -99,7 +99,7 @@ TYPED_TEST_SUITE(container_discovery, record_containers);
 
 TYPED_TEST(container_discovery, discovers_and_maps_record_elements) {
   const std::string document = R"([{"value": 7}, {"value": 42}])";
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<TypeParam>{}, document);
 
   EXPECT_TRUE(result.value);
@@ -116,7 +116,7 @@ TYPED_TEST(container_discovery, discovers_and_maps_record_elements) {
 }
 
 TYPED_TEST(container_discovery, supports_empty_record_containers) {
-  const auto result = omni::ryml::deserialize(omni::type_t<TypeParam>{}, "[]");
+  const auto result = serialization_test::deserialize(omni::type_t<TypeParam>{}, "[]");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {
@@ -128,7 +128,7 @@ TYPED_TEST(container_discovery, supports_empty_record_containers) {
 
 TEST(container_discovery, follows_nested_container_protocols) {
   const std::string document = R"([[{"value": 7}], [], [{"value": 42}]])";
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::deque<std::list<nested_record>>>{}, document);
 
   EXPECT_TRUE(result.value);
@@ -140,7 +140,7 @@ TEST(container_discovery, follows_nested_container_protocols) {
 }
 
 TEST(container_discovery, deserializes_three_nested_integer_vectors) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::vector<std::vector<std::vector<int>>>>{},
     "[[[7, 42], []], [], [[0]]]");
 
@@ -169,7 +169,7 @@ struct emplace_only {
 };
 
 TEST(container_discovery, inserts_into_an_emplace_only_container) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<emplace_only>{}, "[7, 42]");
 
   EXPECT_TRUE(result.value);
@@ -181,7 +181,7 @@ TEST(container_discovery, inserts_into_an_emplace_only_container) {
 
 TEST(container_discovery, deserializes_three_nested_custom_scalar_vectors) {
   const std::string document = "[[[7, 42], []], [], [[0]]]";
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::vector<std::vector<std::vector<my_int>>>>{}, document);
 
   EXPECT_TRUE(result.value);
@@ -194,7 +194,7 @@ TEST(container_discovery, deserializes_three_nested_custom_scalar_vectors) {
 
 TEST(container_discovery, discovers_enum_elements) {
   const std::string document = R"(["first", "second"])";
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::deque<container_status>>{}, document);
 
   EXPECT_TRUE(result.value);
@@ -211,7 +211,7 @@ TEST(container_discovery, discovers_enum_elements) {
 }
 
 TEST(node_mapping, returns_a_value_with_multiple_custom_warnings) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<compatible_integer>{}, R"("-7")");
 
   EXPECT_TRUE(result.value);
@@ -234,8 +234,8 @@ TEST(node_mapping, returns_a_value_with_multiple_custom_warnings) {
 }
 
 TEST(node_mapping, reports_warning_limit_once_for_a_custom_warning_batch) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config options) {
       options.error_policy.warning_limit = 0;
       return options;
     });
@@ -244,7 +244,6 @@ TEST(node_mapping, reports_warning_limit_once_for_a_custom_warning_batch) {
     omni::type_t<compatible_integer>{}, R"("-7")");
 
   EXPECT_FALSE(result.value);
-  EXPECT_TRUE(result.diagnostics.stopped());
   EXPECT_EQ(1, std::count_if(result.diagnostics.issues.begin(),
     result.diagnostics.issues.end(),
     [](const omni::ryml::issue &issue) {
@@ -253,8 +252,8 @@ TEST(node_mapping, reports_warning_limit_once_for_a_custom_warning_batch) {
 }
 
 TEST(node_mapping, preserves_one_limit_error_through_nested_mapping) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config options) {
       options.error_policy.warning_limit = 1;
       return options;
     });
@@ -263,7 +262,6 @@ TEST(node_mapping, preserves_one_limit_error_through_nested_mapping) {
     omni::type_t<std::vector<compatible_integer>>{}, R"(["-7", "bad"])");
 
   EXPECT_FALSE(result.value);
-  EXPECT_TRUE(result.diagnostics.stopped());
   EXPECT_EQ(1, std::count_if(result.diagnostics.issues.begin(),
     result.diagnostics.issues.end(),
     [](const omni::ryml::issue &issue) {

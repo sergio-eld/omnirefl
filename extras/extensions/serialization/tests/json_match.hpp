@@ -4,8 +4,56 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <deque>
+#include <memory>
 
 namespace serialization_test {
+
+// Capture both observable forms while deserialize still owns the source tree.
+// Copied field names keep paths valid after that tree is released; shared
+// storage preserves those views when a case result is copied or moved.
+struct collected_diagnostics: omni::ryml::diagnostics {
+  std::shared_ptr<std::deque<std::string>> fields;
+  std::string message;
+
+  collected_diagnostics() = default;
+
+  collected_diagnostics(const ::ryml::Tree &tree,
+    omni::ryml::diagnostics report)
+      : omni::ryml::diagnostics(std::move(report))
+      , fields(std::make_shared<std::deque<std::string>>())
+      , message(omni::ryml::render_diagnostics(tree, *this)) {
+    for (auto &entry : this->issues) {
+      for (auto &segment : entry.path) {
+        const auto text = omni::ryml::detail::to_string_view(segment.field);
+        this->fields->emplace_back(text.data(), text.size());
+        segment.field = c4::to_csubstr(this->fields->back());
+      }
+    }
+  }
+};
+
+struct collect_diagnostics {
+  collected_diagnostics operator()(const ::ryml::Tree &tree,
+    omni::ryml::diagnostics report) const {
+    return {tree, std::move(report)};
+  }
+};
+
+using config = omni::ryml::config<collect_diagnostics>;
+using deserialize_type = omni::ryml::deserialize_t<config>;
+const deserialize_type deserialize{config{}};
+
+// Existing conformance cases compare rendered text as well as structured data.
+struct render_collected_diagnostics {
+  std::string operator()(const collected_diagnostics &report) const {
+    return report.message;
+  }
+
+  std::string operator()(const std::string &message) const { return message; }
+};
+
+constexpr render_collected_diagnostics render_diagnostics{};
 
 // Compare structure, scalar spelling and quoting, ignoring map key order and
 // formatting. Quoting distinguishes JSON strings from numbers and booleans.

@@ -142,9 +142,15 @@ struct type_size_template_construct_result<Template,
  * types.
  */
 template <template <typename...> class Template, typename Type>
-constexpr bool is() noexcept {
+constexpr bool is_specialization_of() noexcept {
   return detail::is_type_template_specialization<Template,
     compat::remove_cvref_t<Type>>::value;
+}
+
+/** Whether Type specializes a type-parameter-only class template. */
+template <template <typename...> class Template, typename Type>
+constexpr bool is() noexcept {
+  return is_specialization_of<Template, Type>();
 }
 
 /**

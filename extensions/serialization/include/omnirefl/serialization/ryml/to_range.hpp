@@ -27,14 +27,12 @@ struct to_range_t {
     return omni::ryml::detail::is_mapped_range<T>::value;
   }
 
-  // TODO: [high] Define a public mapping context interface/type for
-  // customization points instead of exposing detail::mapping_context.
   template <typename T>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const detail::mapping_context &context) const
     -> compat::enable_if_t<detail::is_mapped_range<T>::value,
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
+      with_diagnostics<compat::monostate, diagnostics>>;
 
   // TODO: [high] Define the representation of non-string object keys before
   // enabling their default mapping. JSON object names are always strings.

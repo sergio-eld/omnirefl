@@ -1,4 +1,4 @@
-#include <omnirefl/serialization/ryml.hpp>
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 
@@ -79,7 +79,7 @@ TEST(optional_mapping, detects_adapted_operations_without_registration) {
 }
 
 TEST(optional_mapping, discovers_and_maps_the_contained_record) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<optional_mapping::nullable<optional_mapping::payload>>{},
     R"({"value": 42})");
 
@@ -93,7 +93,7 @@ TEST(optional_mapping, discovers_and_maps_the_contained_record) {
 }
 
 TEST(optional_mapping, maps_null_as_a_disengaged_optional) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<optional_mapping::nullable<int>>{}, "null");
 
   EXPECT_TRUE(result.value);

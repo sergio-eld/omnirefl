@@ -12,7 +12,6 @@
 namespace omni {
 namespace ryml {
 
-template <bool OwnsTree>
 struct diagnostics;
 
 template <typename T, typename Diagnostics>

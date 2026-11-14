@@ -33,14 +33,12 @@ struct to_enum_t {
     return omni::is_reflected_enum<T>::value;
   }
 
-  // TODO: [high] Define a public mapping context interface/type for
-  // customization points instead of exposing detail::mapping_context.
   template <typename T,
     compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
     const detail::mapping_context &context) const
-    -> with_diagnostics<compat::monostate, diagnostics<false>>;
+    -> with_diagnostics<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;
 

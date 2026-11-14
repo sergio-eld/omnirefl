@@ -15,7 +15,7 @@ template <typename T,
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> with_diagnostics<compat::monostate, diagnostics<false>> {
+  -> with_diagnostics<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context, node);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
   // plain null, numeric, and boolean forms before looking up the name.
@@ -39,10 +39,11 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   }
 
   const auto enumerators = omni::meta_for<T>::enumerators();
+  using enumerator_type = typename decltype(enumerators)::value_type;
   const auto find_name = [&enumerators](compat::string_view name) {
     return std::find_if(enumerators.begin(),
       enumerators.end(),
-      [name](const typename decltype(enumerators)::value_type &enumerator) {
+      [name](const enumerator_type &enumerator) {
         return name == compat::string_view{enumerator.second};
       });
   };

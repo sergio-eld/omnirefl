@@ -1,4 +1,4 @@
-#include <omnirefl/serialization/ryml.hpp>
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 
@@ -90,7 +90,7 @@ TYPED_TEST(custom_string_mapping, round_trips_scalar_text) {
   const auto document = omni::ryml::as_json(source);
   EXPECT_EQ(R"("hello")", document);
 
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<TypeParam>{}, document);
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -100,7 +100,7 @@ TYPED_TEST(custom_string_mapping, round_trips_scalar_text) {
 }
 
 TYPED_TEST(custom_string_mapping, accepts_empty_text) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<TypeParam>{}, R"("")");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -134,7 +134,7 @@ TEST(string_mapping, retains_owning_conversion_in_reference_tree) {
 }
 
 TEST(string_mapping, deserializes_through_owning_conversion_adapter) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<string_mapping::converted_text>{}, R"("converted text")");
 
   EXPECT_TRUE(result.value);
@@ -153,7 +153,7 @@ TEST(string_mapping, converts_wide_text) {
   const std::wstring source{L"hello"};
   EXPECT_EQ(R"("hello")", omni::ryml::as_json(source));
 
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<std::wstring>{}, R"("hello")");
   EXPECT_TRUE(result.value);
   if (result.value) {

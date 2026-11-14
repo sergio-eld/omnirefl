@@ -204,7 +204,7 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
   -> compat::enable_if_t<omni::ryml::detail::is_mapped_range<T>::value,
-    with_diagnostics<compat::monostate, diagnostics<false>>> {
+    with_diagnostics<compat::monostate, diagnostics>> {
   static_assert(compat::is_invocable<const traits::cp::clear<T> &, T *>::value,
     "to_range requires an adapted clear operation");
 

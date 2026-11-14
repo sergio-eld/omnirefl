@@ -1,4 +1,4 @@
-#include <omnirefl/serialization/ryml.hpp>
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 
@@ -308,7 +308,7 @@ struct cpp11_map_with_aliases {
   template <typename Record>
   auto operator()(omni::record_binding_t<Record> record) const
     -> omni::ryml::with_diagnostics<omni::compat::monostate,
-      omni::ryml::diagnostics<false>> {
+      omni::ryml::diagnostics> {
     return this->compositor(this->node, &record.value(), this->context);
   }
 };
@@ -331,7 +331,7 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
     if (!tree)
       continue;
 
-    const omni::ryml::config options{};
+    const omni::ryml::config<> options{};
     const omni::ryml::detail::mapping_context context{
       /*options=*/options,
       /*path=*/{},
@@ -421,7 +421,6 @@ struct endpoint_with_retries {
 };
 
 struct optional_endpoint { omni::compat::optional<int> port; };
-struct default_endpoint { int port = 42; };
 struct cluster {
   endpoint primary;
   std::vector<endpoint> peers;
@@ -454,10 +453,6 @@ struct to_type_t<alias_models::endpoint_with_retries>:
 
 template <>
 struct to_type_t<alias_models::optional_endpoint>:
-    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
-
-template <>
-struct to_type_t<alias_models::default_endpoint>:
     omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
 
 } // namespace cp
@@ -616,8 +611,8 @@ class record_aliases: public testing::TestWithParam<alias_case> {};
 
 TEST_P(record_aliases, maps_with_configured_policies_and_original_paths) {
   const auto &c = GetParam();
-  const auto load = omni::ryml::deserialize.transform_config(
-    [&c](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [&c](serialization_test::config options) {
       options.error_policy.duplicates = c.duplicates;
       options.error_policy.unknown_fields = c.unknown_fields;
       return options;
@@ -657,7 +652,7 @@ INSTANTIATE_TEST_SUITE_P(canonical_priority,
   });
 
 TEST(record_aliases, maps_nested_records_and_sequence_elements) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<alias_models::cluster>{},
     R"({"primary": {"service_port": 7}, "peers": [{"listen_port": 8}]})");
 
@@ -672,7 +667,7 @@ TEST(record_aliases, maps_nested_records_and_sequence_elements) {
 }
 
 TEST(record_aliases, preserves_nested_input_paths) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<alias_models::cluster>{},
     R"({"primary": {"service_port": 7}, "peers": [{"listen_port": "bad"}]})");
 
@@ -686,8 +681,8 @@ TEST(record_aliases, preserves_nested_input_paths) {
 }
 
 TEST(record_aliases, observes_warning_limit_for_alias_duplicates) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config options) {
       options.error_policy.duplicates =
         duplicate_policy::allow | duplicate_policy::warn;
 
@@ -708,36 +703,15 @@ TEST(record_aliases, observes_warning_limit_for_alias_duplicates) {
       result.diagnostics.issues.back().reason);
 }
 
-TEST(record_aliases, does_not_recover_an_invalid_present_alias) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
-      options.recovery = omni::json::recovery_policy::default_initializable;
-      return options;
-    });
-
-  const auto missing = load(omni::type_t<alias_models::endpoint>{}, "{}");
-  const auto invalid = load(omni::type_t<alias_models::endpoint>{},
-    R"({"service_port": "bad"})");
-
-  EXPECT_TRUE(missing.value);
-  if (missing.value)
-    EXPECT_EQ(0, missing.value->port);
-
-  EXPECT_FALSE(invalid.value);
-  EXPECT_EQ(1u, invalid.diagnostics.issues.size());
-  for (const auto &issue : invalid.diagnostics.issues)
-    EXPECT_EQ(issue_code::invalid_scalar, issue.reason);
-}
-
 TEST(record_aliases, maps_optional_aliases_and_absence) {
-  const auto present = omni::ryml::deserialize(
+  const auto present = serialization_test::deserialize(
     omni::type_t<alias_models::optional_endpoint>{},
     R"({"service_port": 7})");
 
-  const auto absent = omni::ryml::deserialize(
+  const auto absent = serialization_test::deserialize(
     omni::type_t<alias_models::optional_endpoint>{}, "{}");
 
-  const auto null = omni::ryml::deserialize(
+  const auto null = serialization_test::deserialize(
     omni::type_t<alias_models::optional_endpoint>{},
     R"({"service_port": null})");
 
@@ -757,31 +731,9 @@ TEST(record_aliases, maps_optional_aliases_and_absence) {
     EXPECT_FALSE(null.value->port);
 }
 
-TEST(record_aliases, alias_overrides_recoverable_member_default) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
-      options.recovery = omni::json::recovery_policy::field_defaults;
-      return options;
-    });
-
-  const auto absent = load(
-    omni::type_t<alias_models::default_endpoint>{}, "{}");
-
-  const auto present = load(omni::type_t<alias_models::default_endpoint>{},
-    R"({"service_port": 7})");
-
-  EXPECT_TRUE(absent.value);
-  if (absent.value)
-    EXPECT_EQ(42, absent.value->port);
-
-  EXPECT_TRUE(present.value);
-  if (present.value)
-    EXPECT_EQ(7, present.value->port);
-}
-
 TEST(record_aliases, continues_reporting_up_to_the_configured_error_limit) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config options) {
       options.error_policy.error_limit = 1;
       return options;
     });
@@ -812,8 +764,8 @@ TEST_P(interleaved_aliases, selects_each_member_and_preserves_issue_order) {
   const auto policy = GetParam();
   const bool last = (policy & duplicate_policy::last) == duplicate_policy::last;
   const bool warn = (policy & duplicate_policy::warn) == duplicate_policy::warn;
-  const auto load = omni::ryml::deserialize.transform_config(
-    [policy](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [policy](serialization_test::config options) {
       options.error_policy.duplicates = policy;
       return options;
     });
@@ -867,8 +819,8 @@ INSTANTIATE_TEST_SUITE_P(policies,
   });
 
 TEST(record_aliases, ignored_aliases_do_not_exhaust_warning_limit) {
-  const auto load = omni::ryml::deserialize.transform_config(
-    [](omni::ryml::config options) {
+  const auto load = serialization_test::deserialize.transform_config(
+    [](serialization_test::config options) {
       options.error_policy.duplicates =
         duplicate_policy::allow | duplicate_policy::warn;
 

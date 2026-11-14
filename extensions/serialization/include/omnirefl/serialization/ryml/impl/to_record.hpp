@@ -68,18 +68,8 @@ struct cpp11_require_member {
           }))
       return;
 
-    const auto recovery = this->result.context.options.recovery;
-    if (recovery
-      && (*recovery & json::recovery_policy::field_defaults)
-        == json::recovery_policy::field_defaults
-      && field.has_default_value_access())
-      return;
-
     using member_type = typename omni::data_member_meta_t<_F>::type;
-    if ((traits::is_optional<member_type>::value
-          || (recovery
-            && (*recovery & json::recovery_policy::default_initializable)
-              == json::recovery_policy::default_initializable))
+    if (traits::is_optional<member_type>::value
       && std::is_default_constructible<member_type>::value) {
       initialize_missing(field);
       return;
@@ -104,7 +94,7 @@ struct cpp11_read_member {
   template <typename Record, typename _F>
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     // Ad hoc: fn::each cannot short-circuit member traversal.
-    // TODO: Let core traversal check stopping before invoking adapters.
+    // Keep the budget guard until fn::traverse can stop tuple visitation.
     if (this->result.stopped())
       return;
 
@@ -113,7 +103,7 @@ struct cpp11_read_member {
       this->pending.end(),
       [name](const record_entry &entry) { return name == entry.name; });
 
-    // The preceding presence pass already recovered or reported missing fields.
+    // The presence pass already handled absent members.
     if (entry == this->pending.end() || entry->node.invalid())
       return;
 
@@ -145,7 +135,7 @@ template <typename T,
 auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
   const omni::ryml::detail::mapping_context &context) const
-  -> with_diagnostics<compat::monostate, diagnostics<false>> {
+  -> with_diagnostics<compat::monostate, diagnostics> {
   auto result = detail::make_node_accumulator(context, node);
   if (!node.is_map()) {
     result.report(omni::ryml::detail::make_issue(

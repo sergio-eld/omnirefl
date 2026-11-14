@@ -1,16 +1,7 @@
 #pragma once
 
-// TODO: [high] Rework deserialize/with_diagnostics to remove the diagnostics
-// ownership template parameter. map_tree borrows its tree and returns
-// with_diagnostics<T, diagnostics>; the caller retains the tree while using
-// borrowed results. Add deserialize.with_transform_diagnostics(f), where
-// f :: const Tree& -> diagnostics -> Result, applied while deserialize's tree
-// is alive, yielding with_diagnostics<T, Result>. The default transformation
-// can render diagnostics without requiring a separate call on the result.
-// Remove issue::value: renderers can read the exact node through node_id;
-// paths also describe missing fields. Resolve ownership of path_segment::field
-// when transformed diagnostics escape deserialize. Account separately for
-// deserialized string views that still borrow the tree's character storage.
+// TODO: [high] Define how deserialize can return values borrowing tree storage.
+// Such values need an external owner; map_tree lets the caller retain its tree.
 
 // TODO: [high] Document that users must not modify source strings or string
 // containers during serialization calls. Borrowed character storage must stay
@@ -27,7 +18,7 @@
 /**
  * YAML and JSON serialization backed by rapidyaml and omnirefl metadata.
  * Deserialization composes parsing, tree validation, and reflected field
- * assignment with configurable recovery and diagnostics rendered on demand.
+ * assignment with diagnostics transformed by the supplied configuration.
  * Serialization writes reflected records, supported scalars, and vectors with
  * as_yaml or as_json.
  * Compatible with C++11 and later.
@@ -38,8 +29,7 @@
  * Given a reflectable person type and a std::string source:
  *
 ```cpp
-auto result = omni::ryml::deserialize(omni::type<person>, source) //
-  .transform_diagnostics(omni::ryml::render_diagnostics);
+auto result = omni::ryml::deserialize(omni::type<person>, source);
 
 if (result.value) {
   const auto json = omni::ryml::as_json(*result.value);
@@ -51,6 +41,7 @@ if (result.value) {
 
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/functional.hpp>
+#include <omnirefl/traits.hpp>
 
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/to_enum.hpp>
@@ -197,38 +188,54 @@ struct error_policy {
   // TODO: Consider warning thresholds per policy.
 };
 
-/**
- * Select recovery methods for missing fields where applicable.
- * Invalid values and explicit null are not recovered by these flags.
- *
- * Flags may be combined. An exposed field default takes precedence over
- * default construction when both methods are enabled.
- * Successful recovery does not itself produce a warning.
- */
-enum class recovery_policy : std::uint8_t {
-  // Use field defaults where Omnirefl can expose them.
-  field_defaults = 1 << 0,
-  // Use value initialization (T{}) where supported, without a reflected
-  // default.
-  default_initializable = 1 << 1,
 
-  // TODO: Define when default initialization is valid recovery for the
-  // containing type; e.g. recovered map keys may collide and lose entries.
-  // TODO: Consider reporting defaulted fields separately from warnings.
-};
-
-OMNI_ENABLE_BIT_FLAGS(recovery_policy)
 
 } // namespace json
 
 namespace ryml {
 
-/** Configures mapping diagnostics and missing-field recovery. */
-struct config {
-  json::error_policy error_policy;
+struct diagnostics;
 
-  // No missing-field recovery unless explicitly configured.
-  compat::optional<json::recovery_policy> recovery = compat::nullopt;
+/** Render issue records using their source tree while it is alive. */
+struct render_diagnostics_t {
+  std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
+};
+
+constexpr render_diagnostics_t render_diagnostics{};
+
+/** Deserialization configuration.
+ * In C++20, aggregate deduction supports config{.transform_diagnostics = f}.
+ * Earlier standards can use with_configure_diagnostics to change the callable
+ * type without spelling the resulting config specialization. */
+template <typename TransformDiagnostics = render_diagnostics_t>
+struct config {
+  json::error_policy error_policy OMNI_CPP14_DEFAULT_INIT();
+
+  // Called with the live source tree and collected diagnostics on every result.
+  TransformDiagnostics transform_diagnostics OMNI_CPP14_DEFAULT_INIT();
+
+  /** QoL for replacing the diagnostics callable inline, in one expression.
+   * Returns a new config specialization, preserving the mapping policies.
+   * f :: (const Tree&, diagnostics) -> Result.
+   *
+```cpp
+const auto load = omni::ryml::deserialize.transform_config(
+  [](omni::ryml::config<> options) {
+    return options.with_configure_diagnostics(
+      [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
+        return report.issues.size();
+      });
+  });
+```
+   */
+  template <typename F>
+  constexpr auto with_configure_diagnostics(F &&f) const
+    -> config<compat::decay_t<F>> {
+    return {
+      this->error_policy,
+      /*transform_diagnostics=*/std::forward<F>(f),
+    };
+  }
 
   // TODO: [high] Add a configurable input-size limit to config and reject
   // oversized source text before parsing or allocating a tree. A std::string
@@ -238,7 +245,7 @@ struct config {
   // TODO: Make config select SAX-style validation and field assignment as
   // rapidyaml emits events, or the current parse-whole-tree -> map pipeline.
   // Event-based mapping could reject invalid input before parsing and retaining
-  // a huge remaining subtree. Preserve error and recovery policies, and
+  // a huge remaining subtree. Preserve mapping policies and
   // diagnostics; check missing fields when their object closes. Resolve YAML
   // aliases and diagnostic-view ownership before enabling the SAX path.
 
@@ -265,7 +272,7 @@ struct config {
  */
 struct issue {
   struct path_segment {
-    // Field name borrowed from metadata or the retained tree.
+    // Field name borrowed from metadata or the caller-owned tree.
     c4::csubstr field;
 
     // Sequence position; empty for a named field.
@@ -285,14 +292,11 @@ struct issue {
   // True for accepted input conditions reported by the selected policy.
   bool warning = false;
 
-  // Borrow the decoded scalar from the retained tree; render only on request.
-  c4::csubstr value;
-
   // Field names and sequence indices from the root to the issue.
   // TODO: Revisit path storage if C++11 constant evaluation becomes necessary.
   std::vector<path_segment> path;
 
-  // Node and field views borrow the tree retained by diagnostics.
+  // node_id refers to the caller-owned tree; field views may borrow its keys.
   // Missing fields may have no corresponding node.
   ::ryml::id_type node_id = ::ryml::NONE;
 
@@ -301,51 +305,36 @@ struct issue {
   // TODO: Add constraint metadata and renderer customization when needed.
 };
 
-/**
- * Keeps issue records and an owning tree or borrowed node view for rendering.
- * Issue node IDs and input string views refer into that tree.
- *
- * When OwnsTree is false, keep the caller's tree alive and unchanged while using
- * diagnostics. Moving or changing it can invalidate node and string views.
- * When true, move this object; copying does not rebind issue views to its copy.
- * The copy constructor is left implicit to keep initialization simple and avoid
- * explicit copy/move special-member declarations.
- */
-template <bool OwnsTree>
+/** Collected mapping issues without ownership of their source tree.
+ * Keep the tree and borrowed character storage alive and unchanged while
+ * rendering diagnostics. Field paths may borrow metadata or source keys. */
 struct diagnostics {
-  // Snapshot for inspection; mapping receives its config separately.
-  omni::ryml::config config;
-
-  // Retain the tree or refer to the caller's subtree, depending on OwnsTree.
-  // External string storage referenced by a caller-supplied tree must remain
-  // alive and unchanged while using diagnostics, even when OwnsTree is true.
-  compat::conditional_t<OwnsTree, ::ryml::Tree, ::ryml::ConstNodeRef> tree;
+  // Mapping-policy snapshot; the deserialize transformation is not retained.
+  omni::ryml::config<> config;
 
   // Validation and conversion issues in traversal order, including warnings.
   std::vector<issue> issues;
 
-  // Owns the parser's text for a parse_error issue; mapping leaves it empty.
-  std::string parse_message;
-
-  // True when an error or warning limit requires stopping.
-  bool stopped() const {
-    return config.error_policy.error_limit
-        < static_cast<std::size_t>(std::count_if(issues.begin(),
-          issues.end(),
-          [](const issue &e) { return !e.warning; }))
-      || std::any_of(issues.begin(), issues.end(),
-        [](const issue &e) { return json::issue_code::warning_limit_exceeded == e.reason; });
-  }
+  // Owns RapidYAML syntax-error text returned by core::parse.
+  // Empty when mapping an already parsed tree.
+  std::string parse_error_message;
 };
+
+/** Diagnostics result produced by Config, preserving its cv/ref qualification. */
+template <typename Config>
+using transformed_diagnostics_type = compat::decay_t<compat::invoke_result_t<
+  decltype((std::declval<Config>().transform_diagnostics)),
+  const ::ryml::Tree &,
+  diagnostics>>;
 
 /**
  * Holds the deserialized value, if available, and diagnostics even on failure.
  * Diagnostics can hold issue records or a rendered message.
  */
 template <typename T,
-  typename Diagnostics = omni::ryml::diagnostics</*OwnsTree=*/true>>
+  typename Diagnostics = omni::ryml::diagnostics>
 struct with_diagnostics {
-  // Available only when mapping succeeds, including permitted recovery.
+  // Available only when mapping succeeds.
   compat::optional<T> value;
 
   // Retained issue records, or the result of transforming them for display.
@@ -393,10 +382,17 @@ struct with_diagnostics {
 };
 
 namespace detail {
+
+// TODO: [high] Define a public mapping context interface/type for
+// customization points instead of exposing detail::mapping_context.
 struct mapping_context;
+
 } // namespace detail
 
 namespace cp {
+
+/** Sentinel for an unregistered node-to-C++ customization. */
+struct unavailable {};
 
 /** Ad hoc discovery override for types inheriting standard-library containers.
  * Inheriting those containers is discouraged. Specialize to std::true_type
@@ -405,6 +401,15 @@ namespace cp {
  *
  * The default follows the normal mapping traits. This override changes
  * discovery, not the representation selected by from_type/to_type.
+ *
+```cpp
+struct tagged_values: std::vector<int> {
+  int tag;
+};
+
+template <>
+struct omni::ryml::cp::reflect_as_root<tagged_values>: std::true_type {};
+```
  */
 template <typename T>
 struct reflect_as_root:
@@ -413,22 +418,58 @@ struct reflect_as_root:
       detail::is_mapped_range<T>,
       traits::is_optional<T>>> {};
 
-/** Select a C++-to-node adapter; the default maps reflected records. */
+/** C++-to-node customization; the default maps reflected records.
+ * A scalar wrapper can delegate conversion to its wrapped value:
+ *
+```cpp
+struct counter { int value; };
+
+template <>
+struct omni::ryml::cp::from_type<counter> {
+  void operator()(const counter &value, ::ryml::NodeRef node,
+    const omni::ryml::detail::mapping_context &context) const {
+    omni::ryml::core::write_node(value.value, node, context);
+  }
+};
+```
+ */
 template <typename T, typename Enable = void>
 struct from_type;
 
-/** Sentinel for an unregistered node-to-C++ customization. */
-struct unavailable {};
+/** Node-to-C++ callable customization. Unregistered types use the default
+ * compositor. Register either this struct or the variable template.
+ *
+```cpp
+struct counter { int value; };
 
-/** Specialize for a node-to-C++ callable. Unregistered types use the default
- * compositor. Register either this struct or the variable template. */
+template <>
+struct omni::ryml::cp::to_type_t<counter> {
+  auto operator()(::ryml::ConstNodeRef node, counter *into,
+    const omni::ryml::detail::mapping_context &context) const
+    -> omni::ryml::with_diagnostics<omni::compat::monostate> {
+    return omni::ryml::core::read_node(node, &into->value, context);
+  }
+};
+```
+ */
 template <typename T, typename Enable = void>
 struct to_type_t: unavailable {};
 
 // Callable variable-template registration is available starting with C++14.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-/** Specialize with a const callable, including a configured default compositor.
- * The selected object is copied when mapping a node. */
+/** Callable variable-template customization, available since C++14.
+ * The selected const object is copied when mapping a node. Configured default
+ * compositors can be registered directly:
+ *
+```cpp
+struct endpoint { int port; };
+
+template <>
+const auto omni::ryml::cp::to_type<endpoint> =
+  omni::ryml::reflected_scope::to_record.with_name_by_alias(
+    omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
+```
+ */
 template <typename T, typename Enable = void>
 constexpr unavailable to_type{};
 #endif
@@ -446,42 +487,14 @@ void write_node(const T &value, ::ryml::NodeRef node,
 template <typename T>
 auto read_node(::ryml::ConstNodeRef node, T *into,
   const omni::ryml::detail::mapping_context &context)
-  -> with_diagnostics<compat::monostate, diagnostics<false>>;
+  -> with_diagnostics<compat::monostate, diagnostics>;
 
-/** Map into an existing value, returning diagnostics without changing context.
- * @pre `node` must be a valid node reference.
- *
- * Discovery follows wrapper element types while T remains the destination. */
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
+/** Map a valid tree node into an existing value, returning diagnostics.
+ * The mapping context is not changed. */
+template <typename T>
 auto map_tree(::ryml::ConstNodeRef node, T *into,
   const omni::ryml::detail::mapping_context &context)
-  -> with_diagnostics<compat::monostate, diagnostics<false>>;
-
-/** Map into an existing value, returning diagnostics without changing context.
- * @pre `node` must be a valid node reference. */
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
-auto map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context)
-  -> with_diagnostics<compat::monostate, diagnostics<false>>;
-
-/** Map into an existing value, returning diagnostics without changing context.
- * @pre `node` must be a valid node reference. */
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
-auto map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context)
-  -> with_diagnostics<compat::monostate, diagnostics<false>>;
+  -> with_diagnostics<compat::monostate, diagnostics>;
 
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
@@ -504,39 +517,39 @@ auto result = core::parse(std::move(source))
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
-/** Map tree nodes into the requested type using explicit config.
- * @pre `tree` must contain a valid root node.
- *
- * Nested values are mapped depth-first through the selected customization
- * points.
- * Diagnostics take ownership of the supplied tree, retaining it for inspection
- * and lazy message rendering. Pass std::move(tree) to transfer an existing
- * tree.
- */
-template <typename Record>
-with_diagnostics<Record, diagnostics<true>> map_tree(const config &options,
-  omni::type_t<Record> record_type,
-  ::ryml::Tree tree);
+/** Map tree nodes depth-first through the selected customization points.
+ * @pre node must be valid. The caller retains its tree and character storage
+ * while using borrowed values or rendering the returned diagnostics.
+ * The diagnostics transformation in config is not applied by map_tree. */
+template <typename Record, typename TransformDiagnostics>
+with_diagnostics<Record> map_tree(const config<TransformDiagnostics> &options,
+  omni::type_t<Record> record_type, ::ryml::ConstNodeRef node);
 
-/** Map tree nodes into the requested type using explicit config.
- * @pre `node` must be a valid node reference.
- *
- * Nested values are mapped depth-first through the selected customization
- * points.
- * Diagnostics borrow the source tree rather than taking ownership.
- * Keep the source tree and its borrowed string storage alive and unchanged
- * while inspecting the retained diagnostics or rendering their messages.
- */
-template <typename Record>
-with_diagnostics<Record, diagnostics<false>> map_tree(const config &options,
-  omni::type_t<Record> record_type,
-  ::ryml::ConstNodeRef node);
+template <typename Record, typename TransformDiagnostics>
+with_diagnostics<Record> map_tree(const config<TransformDiagnostics> &options,
+  omni::type_t<Record> record_type, const ::ryml::Tree &tree);
 
-/** Parse the source into an owning tree, then map its nodes. */
-template <typename Record>
-with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
-  omni::type_t<Record> record_type,
-  std::string source);
+// Mapping borrows the tree; a temporary cannot outlive the returned result.
+template <typename Record, typename TransformDiagnostics>
+void map_tree(const config<TransformDiagnostics> &, omni::type_t<Record>,
+  const ::ryml::Tree &&) = delete;
+
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+/** Deserialize JSON/YAML text into the C++ type selected by record_type.
+ * Return an optional value together with transformed diagnostics.
+ */
+template <typename Config, typename Record>
+  requires (traits::is_specialization_of<config, Config>())
+#else
+/** Deserialize JSON/YAML text into the C++ type selected by record_type.
+ * Return an optional value together with transformed diagnostics.
+ */
+template <typename Config, typename Record,
+  compat::enable_if_t<traits::is_specialization_of<config, Config>(), int> = 0>
+#endif
+auto deserialize(Config &&options, omni::type_t<Record> record_type,
+  std::string source)
+  -> with_diagnostics<Record, transformed_diagnostics_type<Config>>;
 
 /** Build an owning RapidYAML tree from reflected records, supported scalars,
  * vectors, and optionals. Empty optionals produce null nodes; empty optional
@@ -545,25 +558,7 @@ with_diagnostics<Record, diagnostics<true>> deserialize(const config &options,
  * source value. The returned tree can be modified or passed to RapidYAML's
  * emitters.
  */
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
-::ryml::Tree as_owning_tree(const T &value);
-
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
-::ryml::Tree as_owning_tree(const T &value);
-
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+template <typename T>
 ::ryml::Tree as_owning_tree(const T &value);
 
 /** Build a RapidYAML tree borrowing the input's existing string storage.
@@ -571,25 +566,7 @@ template <typename T,
  * remain alive and unchanged while the tree is used. Accepts const or mutable
  * lvalues; temporaries are rejected to prevent dangling views.
  */
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<cp::reflect_as_root<Discovery>::value, int> = 0>
-::ryml::Tree as_ref_tree(T &value);
-
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
-::ryml::Tree as_ref_tree(T &value);
-
-template <typename T,
-  typename Discovery = compat::remove_cvref_t<T>,
-  compat::enable_if_t<!cp::reflect_as_root<Discovery>::value
-      && !compat::disjunction<omni::ryml::detail::is_mapped_range<Discovery>,
-        traits::is_optional<Discovery>>::value,
-    int> = 0>
+template <typename T>
 ::ryml::Tree as_ref_tree(T &value);
 
 // Also reject const temporaries, which could otherwise bind through Value&.
@@ -598,75 +575,78 @@ template <typename Value>
 
 } // namespace core
 
-/// Maps an owning tree or borrowed subtree with the bound config.
-/// Supports reflected records, scalars, and vectors of supported values.
+/// Map a caller-owned tree or subtree using the bound config.
+template <typename Config = omni::ryml::config<>>
 struct map_tree_t {
-  omni::ryml::config config;
+  static_assert(traits::is_specialization_of<omni::ryml::config, Config>(),
+    "map_tree_t requires a specialization of omni::ryml::config");
 
-  /// Returns a new binding with transformed config; preserves this binding.
+  Config config;
+
+  /** QoL for overriding the bound config inline, in one expression.
+   * Returns a new binding and leaves this binding unchanged. */
   template <typename F>
   auto transform_config(F &&f) const
-    -> compat::enable_if_t<
-      compat::is_invocable<F &&, omni::ryml::config>::value
-        && std::is_same<omni::ryml::config,
-          compat::invoke_result_t<F &&, omni::ryml::config>>::value,
-      map_tree_t> {
-    return {
-      compat::invoke(std::forward<F>(f), omni::ryml::config{this->config}),
-    };
+    -> map_tree_t<compat::decay_t<compat::invoke_result_t<F &, Config>>> {
+    return {compat::invoke(f, Config{this->config})};
   }
 
-  // Own the tree; move it after mapping so diagnostic views remain valid.
   template <typename Record>
-  with_diagnostics<Record, diagnostics<true>>
-    operator()(omni::type_t<Record> record_type, ::ryml::Tree tree) const {
-    return core::map_tree(this->config, record_type, std::move(tree));
+  with_diagnostics<Record> operator()(omni::type_t<Record> record_type,
+    const ::ryml::Tree &tree) const {
+    return core::map_tree(this->config, record_type, tree);
   }
 
-  // Keep the caller's tree alive and unchanged while using borrowed
-  // diagnostics.
   template <typename Record>
-  with_diagnostics<Record, diagnostics<false>> operator()(
-    omni::type_t<Record> record_type,
+  with_diagnostics<Record> operator()(omni::type_t<Record> record_type,
     ::ryml::ConstNodeRef node) const {
     return core::map_tree(this->config, record_type, node);
   }
+
+  // Reject temporary trees: returned values and diagnostics may borrow storage.
+  template <typename Record>
+  void operator()(omni::type_t<Record>, const ::ryml::Tree &&) const = delete;
 };
 
-/**
- * Parse JSON or YAML into a record, scalar, or vector.
- * Returns a valid value with any warnings, or diagnostics alone on failure.
- *
-```cpp
-const auto load = deserialize.transform_config([limit](ryml::config s) {
-  s.error_policy.error_limit = limit;
-  s.error_policy.unknown_fields = json::unknown_policy::allow;
-  return s;
-});
-auto result = load(omni::type_t<person>{}, source);
-```
- */
-struct deserialize_t {
-  omni::ryml::config config;
+const map_tree_t<> map_tree{};
 
-  /// Returns a new binding with transformed config; preserves this binding.
+/** Parse JSON/YAML and return an optional value with transformed diagnostics.
+ * The default config renders diagnostic text before releasing the source tree.
+ * Custom transforms receive const Tree& and diagnostics while the tree lives.
+ */
+template <typename Config = omni::ryml::config<>>
+struct deserialize_t {
+  static_assert(traits::is_specialization_of<omni::ryml::config, Config>(),
+    "deserialize_t requires a specialization of omni::ryml::config");
+
+  Config config;
+
+  /** QoL for overriding the bound config inline, in one expression.
+   * Returns a new binding and leaves this binding unchanged. */
   template <typename F>
   auto transform_config(F &&f) const
-    -> compat::enable_if_t<
-      compat::is_invocable<F &&, omni::ryml::config>::value
-        && std::is_same<omni::ryml::config,
-          compat::invoke_result_t<F &&, omni::ryml::config>>::value,
-      deserialize_t> {
-    return {
-      /*config=*/
-      compat::invoke(std::forward<F>(f), omni::ryml::config{this->config}),
-    };
+    -> deserialize_t<compat::decay_t<compat::invoke_result_t<F &, Config>>> {
+    return {compat::invoke(f, Config{this->config})};
   }
 
   template <typename Record>
-  with_diagnostics<Record, diagnostics<true>>
-    operator()(omni::type_t<Record> record_type, std::string source) const {
+  auto operator()(omni::type_t<Record> record_type, std::string source) &
+    -> decltype(core::deserialize(this->config, record_type, std::move(source))) {
     return core::deserialize(this->config, record_type, std::move(source));
+  }
+
+  template <typename Record>
+  auto operator()(omni::type_t<Record> record_type, std::string source) const &
+    -> decltype(core::deserialize(this->config, record_type, std::move(source))) {
+    return core::deserialize(this->config, record_type, std::move(source));
+  }
+
+  template <typename Record>
+  auto operator()(omni::type_t<Record> record_type, std::string source) &&
+    -> decltype(core::deserialize(std::move(this->config), record_type,
+      std::move(source))) {
+    return core::deserialize(std::move(this->config), record_type,
+      std::move(source));
   }
 
   // TODO: Add T *into overloads here and in core::deserialize to map into an
@@ -674,21 +654,7 @@ struct deserialize_t {
   // do not require constructing and assigning a replacement object.
 };
 
-const map_tree_t map_tree{};
-const deserialize_t deserialize{};
-
-// A generic callable lets transform_diagnostics(render_diagnostics) work with
-// both ownership modes; an overloaded function name cannot deduce its type.
-struct render_diagnostics_t {
-  template <bool OwnsTree>
-  std::string operator()(const diagnostics<OwnsTree> &d) const;
-};
-
-/**
- * Render retained issues with RFC 6901 paths, separated by newlines.
- * Display the root as <root>; return an empty string when there are no issues.
- */
-constexpr render_diagnostics_t render_diagnostics{};
+const deserialize_t<> deserialize{};
 
 /**
  * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
@@ -761,7 +727,7 @@ struct to_string_like {
     T *into,
     const omni::ryml::detail::mapping_context &context) const
     -> compat::enable_if_t<supports<T>(),
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
+      with_diagnostics<compat::monostate, diagnostics>>;
 
   // FIXME: [high] Define encoding conversion for non-char strings through
   // the shared operation specialization points, including standard strings.
@@ -779,7 +745,7 @@ struct from_arithmetic {
   auto operator()(const T &value,
     ::ryml::NodeRef node,
     const omni::ryml::detail::mapping_context &) const
-    -> compat::enable_if_t<supports<T>()>;
+    -> compat::enable_if_t<std::is_arithmetic<T>::value>;
 };
 
 /** Validate scalar format and range before assigning an arithmetic value. */
@@ -792,7 +758,7 @@ struct to_arithmetic {
     T *into,
     const omni::ryml::detail::mapping_context &context) const
     -> compat::enable_if_t<supports<T>(),
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
+      with_diagnostics<compat::monostate, diagnostics>>;
 };
 
 /** Write a present optional value or a null scalar. */
@@ -817,7 +783,7 @@ struct to_optional_like {
     T *into,
     const omni::ryml::detail::mapping_context &context) const
     -> compat::enable_if_t<traits::is_optional<T>::value,
-      with_diagnostics<compat::monostate, diagnostics<false>>>;
+      with_diagnostics<compat::monostate, diagnostics>>;
 };
 
 /** Write key/value ranges as objects and element ranges as arrays.

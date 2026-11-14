@@ -90,7 +90,7 @@ struct cpp11_map_with_aliases {
   template <typename _E>
   auto operator()(omni::enum_binding_t<_E> enumeration) const
     -> omni::ryml::with_diagnostics<omni::compat::monostate,
-      omni::ryml::diagnostics<false>> {
+      omni::ryml::diagnostics> {
     return this->compositor(this->node, &enumeration.value(), this->context);
   }
 };
@@ -107,7 +107,7 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   const auto tree = omni::ryml::core::parse(R"("active")");
   EXPECT_TRUE(tree);
   if (tree) {
-    const omni::ryml::config options{};
+    const omni::ryml::config<> options{};
     const omni::ryml::detail::mapping_context context{
       /*options=*/options,
       /*path=*/{},
@@ -203,7 +203,7 @@ class enum_aliases: public testing::TestWithParam<enum_alias_case> {};
 
 TEST_P(enum_aliases, maps_strings_and_preserves_kind_validation) {
   const auto &c = GetParam();
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<state>{}, c.document);
 
   EXPECT_EQ(bool(c.expected), bool(result.value));
@@ -232,7 +232,7 @@ INSTANTIATE_TEST_SUITE_P(documents,
   });
 
 TEST(enum_aliases, maps_nested_members_and_sequence_elements) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<enum_alias_models::service>{},
     R"({"mode":"working","history":["available","running","nil"]})");
 
@@ -246,7 +246,7 @@ TEST(enum_aliases, maps_nested_members_and_sequence_elements) {
 }
 
 TEST(enum_aliases, retains_the_original_value_and_nested_path_on_failure) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<enum_alias_models::service>{},
     R"({"mode":"obsolete","history":[]})");
 
@@ -256,12 +256,13 @@ TEST(enum_aliases, retains_the_original_value_and_nested_path_on_failure) {
     const auto &issue = result.diagnostics.issues.front();
     EXPECT_EQ(issue_code::invalid_scalar, issue.reason);
     EXPECT_EQ("/mode", omni::ryml::detail::render_path(issue.path));
-    EXPECT_EQ("obsolete", omni::ryml::detail::to_string_view(issue.value));
+    EXPECT_EQ("/mode: \"obsolete\" is not a string",
+      result.diagnostics.message);
   }
 }
 
 TEST(enum_aliases, serializes_a_mapped_alias_as_a_declared_name) {
-  const auto result = omni::ryml::deserialize(
+  const auto result = serialization_test::deserialize(
     omni::type_t<state>{}, R"("working")");
 
   EXPECT_TRUE(result.value);

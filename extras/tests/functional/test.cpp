@@ -1216,6 +1216,16 @@ TEST(traits_is, compares_types_and_type_templates) {
     (std::is_same<omni::type_t<int>, omni::compat::type_identity<int>>::value));
 }
 
+TEST(traits_specialization, identifies_type_template_instances) {
+  EXPECT_TRUE((
+    omni::traits::is_specialization_of<std::vector, std::vector<int>>()));
+  EXPECT_TRUE((omni::traits::is_specialization_of<std::vector,
+    const std::vector<int> &>()));
+  EXPECT_FALSE((
+    omni::traits::is_specialization_of<std::vector, std::tuple<int>>()));
+  EXPECT_FALSE((omni::traits::is_specialization_of<std::vector, int>()));
+}
+
 TEST(traits_select, prioritizes_the_first_of_overlapping_predicates) {
   using operation = typename omni::traits::select<
     omni::traits::case_<std::is_same<bool, bool>::value, observe>,
