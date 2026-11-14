@@ -938,12 +938,25 @@ template <typename Visit,
   typename... Rest>
 constexpr fold_control<Accumulator> try_fold_values(Visit &visit,
   fold_control<Accumulator> state, Element &&element, Rest &&...rest) {
+// C++14 permits branches in constexpr functions. Separate returns avoid an
+// extra move through the conditional expression on MSVC.
+#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
+  if (state.stopped)
+    return state;
+
+  return try_fold_values(visit,
+    compat::invoke(visit, std::move(state.value),
+      std::forward<Element>(element)),
+
+    std::forward<Rest>(rest)...);
+#else
   return state.stopped ? std::move(state)
     : try_fold_values(visit,
         compat::invoke(visit, std::move(state.value),
           std::forward<Element>(element)),
 
         std::forward<Rest>(rest)...);
+#endif
 }
 
 template <typename Visit, typename Accumulator>

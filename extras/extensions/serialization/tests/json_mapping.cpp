@@ -858,35 +858,35 @@ INSTANTIATE_TEST_SUITE_P(ryml_duplicates,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config_t{}}},
+      serialization_test::deserialize_type{serialization_test::config{}}},
     duplicate_fields::duplicates)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_unknown_fields,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config_t{}}},
+      serialization_test::deserialize_type{serialization_test::config{}}},
     unknown_fields::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_warning_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config_t{}}},
+      serialization_test::deserialize_type{serialization_test::config{}}},
     warning_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_error_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config_t{}}},
+      serialization_test::deserialize_type{serialization_test::config{}}},
     error_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config_t{}}},
+      serialization_test::deserialize_type{serialization_test::config{}}},
     policy_interactions::cases)));
 
 } // namespace registration

@@ -209,7 +209,7 @@ TEST(deserialization_config, designated_configuration_uses_member_defaults) {
 TEST(deserialization_config, designated_configuration_retains_diagnostics) {
   const serialization_test::deserialize_type deserialize{
     .config =
-      serialization_test::config_t{
+      serialization_test::config{
         .error_policy = {.error_limit = 0,
           .unknown_fields = omni::json::unknown_policy::allow},
       },
@@ -643,7 +643,7 @@ TEST_P(serialization, writes_nested_records_and_sequences) {
   && 201707L <= __cpp_designated_initializers
 const serialization_test::deserialize_type configured_deserialize{
   .config =
-    serialization_test::config_t{
+    serialization_test::config{
       .error_policy = {.error_limit = 0,
         .unknown_fields = omni::json::unknown_policy::reject},
     },
@@ -833,7 +833,7 @@ TEST_P(configured_deserialization, maps_with_designated_runtime_configuration) {
   const std::uint16_t error_limit = 0;
   const serialization_test::deserialize_type deserialize{
     .config =
-      serialization_test::config_t{
+      serialization_test::config{
         .error_policy = {.error_limit = error_limit,
           .unknown_fields = omni::json::unknown_policy::reject},
       },
@@ -1121,7 +1121,7 @@ TEST(deserialization_config, transforms_preserve_unchanged_config) {
 TEST(deserialization_config, designated_configuration_accepts_extra_fields) {
   const serialization_test::deserialize_type deserialize{
     .config =
-      serialization_test::config_t{
+      serialization_test::config{
         .error_policy = {.error_limit = 0,
           .unknown_fields = omni::json::unknown_policy::allow},
       },
@@ -1721,7 +1721,7 @@ TEST(deserialization_diagnostics,
   designated_configuration_keeps_error_policy) {
   const serialization_test::deserialize_type configured{
     .config =
-      serialization_test::config_t{
+      serialization_test::config{
         .error_policy = {.error_limit = 2,
           .unknown_fields = omni::json::unknown_policy::reject},
       },

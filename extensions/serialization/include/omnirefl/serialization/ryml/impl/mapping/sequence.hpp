@@ -307,8 +307,8 @@ struct read_range_case<false> {
       const bool success = bool(mapped.value);
       result->append(std::move(mapped));
       if (success)
-        insert_range_value(into, child, context, result,
-          traits::has_unique_key<T>{}, std::move(element));
+        insert_range_value_case<traits::has_unique_key<T>::value>::apply(
+          into, child, context, result, std::move(element));
     }
   }
 };
@@ -332,8 +332,9 @@ struct read_range_case<true> {
       typename storage_type::value_type,
       typename storage_type::traits_type>;
 
-    const auto nodes = range_mapping_nodes(node, result,
-      traits::has_unique_key<T>{});
+    const auto nodes =
+      range_mapping_nodes_case<traits::has_unique_key<T>::value>::apply(
+        node, result);
 
     for (const auto child : nodes) {
       if (result->stopped())
@@ -352,8 +353,8 @@ struct read_range_case<true> {
       const bool success = bool(mapped.value);
       result->append(std::move(mapped));
       if (success)
-        insert_range_value(into, child, context, result,
-          traits::has_unique_key<T>{}, std::move(key), std::move(value));
+        insert_range_value_case<traits::has_unique_key<T>::value>::apply(
+          into, child, context, result, std::move(key), std::move(value));
     }
   }
 };

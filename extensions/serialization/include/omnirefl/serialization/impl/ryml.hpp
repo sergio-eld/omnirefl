@@ -17,7 +17,6 @@
 
 namespace omni {
 namespace ryml {
-
 namespace detail {
 
 // Built-ins stay separate from registrations so a user override never competes

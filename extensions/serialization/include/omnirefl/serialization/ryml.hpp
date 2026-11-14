@@ -37,6 +37,7 @@ if (result.value) {
 #include <omnirefl/functional.hpp>
 #include <omnirefl/traits.hpp>
 
+#include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/mapping.hpp>
 
@@ -50,6 +51,7 @@ if (result.value) {
 #include <utility>
 #include <vector>
 
+// C++17 provides the standard string-view type checked below.
 #if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
 #  if __has_include(<string_view>)
 #    include <string_view>
@@ -235,7 +237,8 @@ const auto load = omni::ryml::deserialize.tdm_config(
   /** Transform `.transform_diagnostics`, consuming this configuration. */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (compat::is_invocable<F &&, TransformDiagnostics &&>::value))
-  constexpr auto tdm_transform_diagnostics(F &&f) &&
+  // C++11 constexpr member functions are implicitly const, preventing moves.
+  OMNI_CPP14_CONSTEXPR auto tdm_transform_diagnostics(F &&f) &&
     -> config_t<compat::decay_t<
       compat::invoke_result_t<F &&, TransformDiagnostics &&>>> {
     return {
@@ -630,7 +633,8 @@ struct map_tree_t {
   /** (QoL) Transform data member `.config`, consuming this binding. */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (compat::is_invocable<F &&, Config &&>::value))
-  constexpr auto tdm_config(F &&f) &&
+  // C++11 constexpr member functions are implicitly const, preventing moves.
+  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) &&
     -> map_tree_t<compat::decay_t<compat::invoke_result_t<F &&, Config &&>>> {
     return {
       /*config=*/compat::invoke(std::forward<F>(f), std::move(this->config)),
@@ -681,7 +685,8 @@ struct deserialize_t {
   /** (QoL) Transform data member `.config`, consuming this binding. */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (compat::is_invocable<F &&, Config &&>::value))
-  constexpr auto tdm_config(F &&f) &&
+  // C++11 constexpr member functions are implicitly const, preventing moves.
+  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) &&
     -> deserialize_t<compat::decay_t<
       compat::invoke_result_t<F &&, Config &&>>> {
     return {
