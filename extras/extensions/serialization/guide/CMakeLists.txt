@@ -34,6 +34,11 @@ if(NOT TARGET gtest_main)
 endif()
 
 add_executable(guide.json main.cpp)
+# The guide uses concepts and abbreviated templates; the extension stays C++11.
+set_target_properties(guide.json PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
 target_link_libraries(guide.json PRIVATE omni::serialization gtest_main)
 omni_reflected_target(guide.json)
 

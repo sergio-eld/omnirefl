@@ -34,14 +34,17 @@ if(BUILD_EXAMPLES)
         endif()
     endif()
 
-    if(NOT DEFINED BUILD_EXTENSIONS OR BUILD_EXTENSIONS)
+    omnirefl_check_cxx20_language(_examples_has_guide_features)
+
+    if(DEFINED BUILD_EXTENSIONS AND NOT BUILD_EXTENSIONS)
+        message(STATUS "omnirefl: skipping guide.json: extensions disabled")
+    elseif(NOT _examples_has_guide_features)
+        message(STATUS "omnirefl: skipping guide.json: C++20 language features are not available")
+    else()
         add_subdirectory(extensions/serialization/guide
             "${CMAKE_BINARY_DIR}/extensions/serialization/guide")
-    else()
-        message(STATUS "omnirefl: skipping guide.json: extensions disabled")
     endif()
 
-    omnirefl_check_cxx20_language(_examples_has_guide_features)
     if(_examples_has_guide_features)
         add_subdirectory(examples/comprehensive_guide
             "${CMAKE_BINARY_DIR}/examples/comprehensive_guide")
