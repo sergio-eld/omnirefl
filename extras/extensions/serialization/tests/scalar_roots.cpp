@@ -267,7 +267,7 @@ INSTANTIATE_TEST_SUITE_P(documents,
   });
 
 TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config s) {
       s.error_policy.error_limit = 1;
       return s;

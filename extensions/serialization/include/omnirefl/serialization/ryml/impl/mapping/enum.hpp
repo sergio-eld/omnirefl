@@ -1,6 +1,6 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/to_enum.hpp>
+#include <omnirefl/serialization/ryml/mapping/enum.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -9,14 +9,34 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
+template <typename T, typename Config>
+auto from_enum::operator()(T value,
+  ::ryml::NodeRef node,
+  mapping_state<Config>) const
+  -> compat::enable_if_t<supports<T>()> {
+  const auto enumerators = omni::meta_for<T>::enumerators();
+  using enumerator_type = typename decltype(enumerators)::value_type;
+  const auto found = std::find_if(enumerators.begin(),
+    enumerators.end(),
+    [value](const enumerator_type &enumerator) {
+      return value == enumerator.first;
+    });
+
+  if (found != enumerators.end()) {
+    node.set_serialized(c4::to_csubstr(found->second));
+    node.set_val_style(::ryml::VAL_DQUO);
+  }
+}
+
 template <typename ValueByAlias>
 template <typename T,
+  typename Config,
   compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  const omni::ryml::detail::mapping_context &context) const
+  mapping_state<Config> context) const
   -> with_diagnostics<compat::monostate, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context, node);
+  auto result = omni::ryml::detail::make_node_accumulator(context);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
   // plain null, numeric, and boolean forms before looking up the name.
   bool boolean{};

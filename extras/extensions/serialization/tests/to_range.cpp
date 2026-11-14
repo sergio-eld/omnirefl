@@ -300,7 +300,7 @@ class unique_map_duplicates:
 
 TEST_P(unique_map_duplicates, selects_occurrences_before_converting_values) {
   const auto &c = GetParam();
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [&c](serialization_test::config options) {
       options.error_policy.duplicates = c.policy;
       return options;
@@ -386,7 +386,7 @@ class unique_elements: public testing::TestWithParam<unique_element_case> {};
 
 TEST_P(unique_elements, applies_policy_without_consuming_a_rejected_value) {
   const auto &c = GetParam();
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [&c](serialization_test::config options) {
       options.error_policy.duplicates = c.policy;
       return options;
@@ -531,7 +531,7 @@ TEST(range_mapping, custom_map_enforces_its_unique_key_contract) {
 }
 
 TEST(range_mapping, map_duplicate_warnings_observe_the_warning_limit) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.duplicates =
         duplicate_policy::allow | duplicate_policy::warn;
@@ -591,7 +591,7 @@ TEST(range_mapping, serializes_const_mapped_values) {
 }
 
 TEST(range_mapping, custom_unique_range_needs_no_emplace_or_erase_adapter) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.duplicates = duplicate_policy::last;
       return options;
@@ -611,7 +611,7 @@ TEST(range_mapping, custom_unique_range_needs_no_emplace_or_erase_adapter) {
 }
 
 TEST(range_mapping, adapts_associated_types_and_unique_key_semantics) {
-  const auto load = serialization_test::deserialize.transform_config(
+  const auto load = serialization_test::deserialize.tdm_config(
     [](serialization_test::config options) {
       options.error_policy.duplicates = duplicate_policy::last;
       return options;
