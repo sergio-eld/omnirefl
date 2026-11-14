@@ -460,13 +460,6 @@ auto map_tree_dispatch(::ryml::ConstNodeRef node,
 
 } // namespace detail
 
-template <typename T>
-auto map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context)
-  -> with_diagnostics<compat::monostate, diagnostics> {
-  return detail::map_tree_dispatch(node, into, context);
-}
-
 template <typename T, typename TransformDiagnostics>
 with_diagnostics<T> map_tree(const config<TransformDiagnostics> &options,
   omni::type_t<T>, ::ryml::ConstNodeRef node) {
@@ -481,7 +474,7 @@ with_diagnostics<T> map_tree(const config<TransformDiagnostics> &options,
     /*borrow_strings=*/false,
   };
 
-  auto mapped = map_tree(node, &*value, context);
+  auto mapped = detail::map_tree_dispatch(node, &*value, context);
   return {
     /*value=*/mapped.value ? std::move(value) : compat::nullopt,
     /*diagnostics=*/std::move(mapped.diagnostics),

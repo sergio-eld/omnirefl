@@ -489,13 +489,6 @@ auto read_node(::ryml::ConstNodeRef node, T *into,
   const omni::ryml::detail::mapping_context &context)
   -> with_diagnostics<compat::monostate, diagnostics>;
 
-/** Map a valid tree node into an existing value, returning diagnostics.
- * The mapping context is not changed. */
-template <typename T>
-auto map_tree(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context)
-  -> with_diagnostics<compat::monostate, diagnostics>;
-
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
  * owning tree and returns syntax errors through expected.
