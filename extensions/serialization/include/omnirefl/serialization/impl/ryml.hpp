@@ -877,11 +877,12 @@ void write_range(const T &value, ::ryml::NodeRef node,
 
 } // namespace detail
 
-template <typename T>
-auto from_range_t::operator()(const T &value,
+template <typename T,
+  compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
+    int>>
+void from_range_t::operator()(const T &value,
   ::ryml::NodeRef node,
-  const omni::ryml::detail::mapping_context &context) const
-  -> compat::enable_if_t<supports<T>()> {
+  const omni::ryml::detail::mapping_context &context) const {
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 

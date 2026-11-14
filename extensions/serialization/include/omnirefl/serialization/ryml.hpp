@@ -789,11 +789,12 @@ struct from_range_t {
     return omni::ryml::detail::is_mapped_range<const T>::value;
   }
 
-  template <typename T>
-  auto operator()(const T &value,
+  template <typename T,
+    compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
+      int> = 0>
+  void operator()(const T &value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &context) const
-    -> compat::enable_if_t<supports<T>()>;
+    const omni::ryml::detail::mapping_context &context) const;
 };
 
 /** Default range serializer. */
