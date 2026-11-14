@@ -11,12 +11,13 @@ namespace reflected_scope {
 
 template <typename ValueByAlias>
 template <typename T,
+  typename Config,
   compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  const omni::ryml::detail::mapping_context &context) const
+  mapping_state<Config> context) const
   -> with_diagnostics<compat::monostate, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context, node);
+  auto result = omni::ryml::detail::make_node_accumulator(context);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
   // plain null, numeric, and boolean forms before looking up the name.
   bool boolean{};

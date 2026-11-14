@@ -17,9 +17,12 @@ struct diagnostics;
 template <typename T, typename Diagnostics>
 struct with_diagnostics;
 
+template <typename Config>
+struct mapping_state;
+
 namespace detail {
 
-struct mapping_context;
+
 
 // Strings remain scalar mappings even though they also model input ranges.
 template <typename T>

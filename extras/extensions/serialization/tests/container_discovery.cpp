@@ -34,16 +34,18 @@ namespace cp {
 
 template <>
 struct from_type<my_int> {
+  template <typename Config>
   void operator()(const my_int &value, ::ryml::NodeRef node,
-    const detail::mapping_context &context) const {
+    omni::ryml::mapping_state<Config> context) const {
     core::write_node(value.value, node, context);
   }
 };
 
 template <>
 struct to_type_t<my_int> {
+  template <typename Config>
   auto operator()(::ryml::ConstNodeRef node, my_int *into,
-    const detail::mapping_context &context) const
+    omni::ryml::mapping_state<Config> context) const
     -> with_diagnostics<compat::monostate, diagnostics> {
     return core::read_node(node, &into->value, context);
   }
@@ -53,9 +55,10 @@ struct to_type_t<my_int> {
 // Return both warnings directly; the core applies traversal limits.
 template <>
 struct to_type_t<compatible_integer> {
+  template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     compatible_integer *into,
-    const detail::mapping_context &context) const
+    omni::ryml::mapping_state<Config> context) const
     -> with_diagnostics<compat::monostate, diagnostics> {
     auto result = core::read_node(node, &into->value, context);
     if (!result.value)

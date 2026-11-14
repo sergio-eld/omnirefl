@@ -14,6 +14,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(__GNUC__) && !defined(__clang__)
+// GCC warns about GTest's internal conditionals in unbraced assertion guards.
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdangling-else"
+#endif
+
 namespace fn_test {
 
 struct record {
@@ -2141,6 +2147,122 @@ TEST(fn_foldl, copies_an_lvalue_visitor) {
   EXPECT_EQ(std::size_t{0}, visit.calls);
 }
 
+TEST(fn_try_fold, stops_before_evaluating_later_events) {
+  struct event {
+    int value;
+    std::vector<int> *evaluated;
+
+    int operator()() const {
+      evaluated->push_back(value);
+      return value;
+    }
+  };
+
+  std::vector<int> evaluated;
+  const auto events = std::make_tuple(event{1, &evaluated},
+    event{2, &evaluated}, event{99, &evaluated});
+
+  const auto result = omni::fn::try_fold(
+    [](int total, const event &next) {
+      const int value = next();
+      return 2 == value ? omni::fn::stop_with(total + value)
+                        : omni::fn::continue_with(total + value);
+    },
+    omni::fn::continue_with(0),
+    events);
+
+  EXPECT_TRUE(result.stopped);
+  EXPECT_EQ(3, result.value);
+  EXPECT_EQ((std::vector<int>{1, 2}), evaluated);
+}
+
+TEST(fn_try_fold, stopped_accumulators_do_not_move_through_remaining_elements) {
+  struct tracked {
+    int *moves;
+
+    explicit tracked(int *moves) : moves(moves) {}
+    tracked(tracked &&other) : moves(other.moves) { ++*moves; }
+  };
+
+  const auto stop = [](tracked value, int) {
+    return omni::fn::stop_with(std::move(value));
+  };
+
+  int short_moves = 0;
+  const auto short_result = omni::fn::try_fold(stop,
+    omni::fn::continue_with(tracked{&short_moves}),
+    std::make_tuple(1));
+
+  int long_moves = 0;
+  const auto long_result = omni::fn::try_fold(stop,
+    omni::fn::continue_with(tracked{&long_moves}),
+    std::make_tuple(1, 2, 3));
+
+  EXPECT_TRUE(short_result.stopped);
+  EXPECT_TRUE(long_result.stopped);
+  EXPECT_EQ(short_moves, long_moves);
+}
+
+TEST(fn_try_fold, supports_nonassignable_accumulators) {
+  struct total { const int value; };
+  const auto result = omni::fn::try_fold(
+    [](total accumulated, int value) {
+      return omni::fn::continue_with(total{accumulated.value + value});
+    },
+    omni::fn::continue_with(total{0}),
+    std::make_tuple(1, 2, 3));
+
+  EXPECT_FALSE(result.stopped);
+  EXPECT_EQ(6, result.value.value);
+}
+
+TEST(fn_try_fold, moves_the_accumulator_through_a_lazy_closure) {
+  auto reduce = omni::fn::try_fold(
+    [](std::unique_ptr<int> total, int value) {
+      *total += value;
+      return omni::fn::continue_with(std::move(total));
+    },
+    omni::fn::continue_with(omni::compat::make_unique<int>(0)));
+
+  auto result = std::make_tuple(1, 2, 3) | std::move(reduce);
+
+  EXPECT_FALSE(result.stopped);
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(6, *result.value);
+}
+
+TEST(fn_try_fold, preserves_an_initial_stop) {
+  int calls = 0;
+  const auto result = omni::fn::try_fold(
+    [&calls](int total, int value) {
+      ++calls;
+      return omni::fn::continue_with(total + value);
+    },
+    omni::fn::stop_with(7),
+    std::make_tuple(1, 2));
+
+  EXPECT_TRUE(result.stopped);
+  EXPECT_EQ(7, result.value);
+  EXPECT_EQ(0, calls);
+}
+
+TEST(fn_try_fold, returns_initial_control_for_an_empty_tuple) {
+  const auto reduce = omni::fn::try_fold(
+    [](int total, int value) {
+      return omni::fn::continue_with(total + value);
+    },
+    omni::fn::continue_with(7));
+
+  const auto called = reduce(std::tuple<>{});
+  const auto piped = std::tuple<>{} | reduce;
+
+  EXPECT_FALSE(called.stopped);
+  EXPECT_EQ(7, called.value);
+  EXPECT_FALSE(piped.stopped);
+  EXPECT_EQ(7, piped.value);
+}
+
 TEST(fn_foldr, reduces_from_right_to_left) {
   const auto tuple = std::make_tuple(
     std::string{"a"},
@@ -2541,3 +2663,7 @@ static_assert(9
 #endif
 
 } // namespace fn_test
+
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif

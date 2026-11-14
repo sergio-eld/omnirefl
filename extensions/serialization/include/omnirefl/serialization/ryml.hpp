@@ -381,13 +381,58 @@ struct with_diagnostics {
   // retain diagnostics when a value and issues are both present.
 };
 
-namespace detail {
+/** Borrowed path through active mapping states.
+ * Copies retain parent links without allocating. Referenced parent paths must
+ * remain alive and unchanged until child mappings finish. Issues materialize
+ * their own segment arrays, retaining the field-name storage they borrow. */
+struct mapping_path {
+  // Root paths have depth zero; their parent and segment are unused.
+  const mapping_path *parent;
+  issue::path_segment segment;
+  std::size_t depth;
 
-// TODO: [high] Define a public mapping context interface/type for
-// customization points instead of exposing detail::mapping_context.
-struct mapping_context;
+  /** Copy the path's segments into root-to-leaf order for diagnostics. */
+  std::vector<issue::path_segment> materialize() const;
+};
 
-} // namespace detail
+/** Mapping configuration and traversal progress passed to customization points.
+ * Config is borrowed; path links refer to active ancestor states. Copies do
+ * not copy configuration or allocate path storage. Counters include issues
+ * reported by preceding operations in the enclosing traversal. */
+template <typename Config = omni::ryml::config<>>
+struct mapping_state {
+  const Config &config;
+  mapping_path path;
+  std::size_t error_count;
+  std::size_t warning_count;
+
+  // FIXME: [high] Preserve the builder's compile-time string-ownership policy
+  // through the writing interface instead of erasing it into a runtime flag.
+  bool borrow_strings;
+
+  /** Whether an error or warning budget has been exceeded. */
+  constexpr bool limit_exceeded() const {
+    return this->config.error_policy.error_limit < this->error_count
+      || (this->config.error_policy.warning_limit
+        && *this->config.error_policy.warning_limit < this->warning_count);
+  }
+
+  /** Descend one path segment, preserving configuration and issue counts.
+   * This state must remain alive while the returned child is used. */
+  OMNI_CPP14_CONSTEXPR mapping_state child(issue::path_segment segment)
+    const & {
+    return {
+      /*config=*/this->config,
+      /*path=*/{&this->path, segment, this->path.depth + 1},
+      /*error_count=*/this->error_count,
+      /*warning_count=*/this->warning_count,
+      /*borrow_strings=*/this->borrow_strings,
+    };
+  }
+
+  // Child paths borrow the parent, so reject a temporary parent state.
+  mapping_state child(issue::path_segment) const && = delete;
+};
 
 namespace cp {
 
@@ -426,8 +471,9 @@ struct counter { int value; };
 
 template <>
 struct omni::ryml::cp::from_type<counter> {
+  template <typename Config>
   void operator()(const counter &value, ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &context) const {
+    mapping_state<Config> context) const {
     omni::ryml::core::write_node(value.value, node, context);
   }
 };
@@ -444,8 +490,9 @@ struct counter { int value; };
 
 template <>
 struct omni::ryml::cp::to_type_t<counter> {
+  template <typename Config>
   auto operator()(::ryml::ConstNodeRef node, counter *into,
-    const omni::ryml::detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> omni::ryml::with_diagnostics<omni::compat::monostate> {
     return omni::ryml::core::read_node(node, &into->value, context);
   }
@@ -478,15 +525,15 @@ constexpr unavailable to_type{};
 
 namespace core {
 
-/** Dispatch one value through cp::from_type with read-only mapping context. */
-template <typename T>
+/** Dispatch one value through cp::from_type with its current mapping state. */
+template <typename T, typename Config>
 void write_node(const T &value, ::ryml::NodeRef node,
-  const omni::ryml::detail::mapping_context &context);
+  mapping_state<Config> context);
 
 /** Dispatch one node through the selected to_type callable with diagnostics. */
-template <typename T>
+template <typename T, typename Config>
 auto read_node(::ryml::ConstNodeRef node, T *into,
-  const omni::ryml::detail::mapping_context &context)
+  mapping_state<Config> context)
   -> with_diagnostics<compat::monostate, diagnostics>;
 
 /**
@@ -703,10 +750,10 @@ struct from_string_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_string<T>::value; }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &) const
+    mapping_state<Config>) const
     -> compat::enable_if_t<supports<T>()>;
 };
 
@@ -715,10 +762,10 @@ struct to_string_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_string<T>::value; }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const omni::ryml::detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> compat::enable_if_t<supports<T>(),
       with_diagnostics<compat::monostate, diagnostics>>;
 
@@ -734,10 +781,10 @@ struct from_arithmetic {
   template <typename T>
   static constexpr bool supports() { return std::is_arithmetic<T>::value; }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &) const
+    mapping_state<Config>) const
     -> compat::enable_if_t<std::is_arithmetic<T>::value>;
 };
 
@@ -746,10 +793,10 @@ struct to_arithmetic {
   template <typename T>
   static constexpr bool supports() { return std::is_arithmetic<T>::value; }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const omni::ryml::detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> compat::enable_if_t<supports<T>(),
       with_diagnostics<compat::monostate, diagnostics>>;
 };
@@ -759,10 +806,10 @@ struct from_optional_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_optional<T>::value; }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> compat::enable_if_t<traits::is_optional<T>::value>;
 };
 
@@ -771,10 +818,10 @@ struct to_optional_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_optional<T>::value; }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const omni::ryml::detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> compat::enable_if_t<traits::is_optional<T>::value,
       with_diagnostics<compat::monostate, diagnostics>>;
 };
@@ -790,11 +837,12 @@ struct from_range_t {
   }
 
   template <typename T,
+    typename Config,
     compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
       int> = 0>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &context) const;
+    mapping_state<Config> context) const;
 };
 
 /** Default range serializer. */
@@ -811,10 +859,10 @@ struct from_enum {
     return omni::is_reflected_enum<T>::value;
   }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(T value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &) const
+    mapping_state<Config>) const
     -> compat::enable_if_t<supports<T>()>;
 };
 
@@ -825,10 +873,10 @@ struct from_record {
     return omni::is_reflected_record<T>::value;
   }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    const omni::ryml::detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> compat::enable_if_t<omni::is_reflected_record<T>::value>;
 
   // Use the trait directly: older GCC versions can mismatch member-call

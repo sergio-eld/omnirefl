@@ -772,16 +772,16 @@ namespace cp {
  * the application default; all other inputs use the normal record mapper. */
 template <>
 struct to_type_t<customization_mapping::recovering_measurement> {
-  template <typename Record>
+  template <typename Config, typename Record>
   auto operator()(::ryml::ConstNodeRef node,
     Record *into,
-    const detail::mapping_context &context) const
+    omni::ryml::mapping_state<Config> context) const
     -> with_diagnostics<compat::monostate> {
     if (node.is_map() && node.num_children() == 0) {
       into->value = 7;
       return {
         /*value=*/compat::monostate{},
-        /*diagnostics=*/{context.options, /*issues=*/{},
+        /*diagnostics=*/{{context.config.error_policy, {}}, /*issues=*/{},
           /*parse_error_message=*/{}},
       };
     }
@@ -810,9 +810,10 @@ struct reflect_as_root<customization_mapping::extended_values>:
  * flat representation. The fields occupy its final two positions. */
 template <>
 struct from_type<customization_mapping::extended_values> {
+  template <typename Config>
   struct cpp11_append_member {
     ::ryml::NodeRef &node;
-    const detail::mapping_context &context;
+    omni::ryml::mapping_state<Config> context;
 
     template <typename Record, typename _F>
     void operator()(omni::data_member_binding_t<Record, _F> field) const {
@@ -822,15 +823,15 @@ struct from_type<customization_mapping::extended_values> {
     }
   };
 
-  template <typename T>
+  template <typename T, typename Config>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    const detail::mapping_context &context) const {
+    omni::ryml::mapping_state<Config> context) const {
     mapping::from_range(value, node, context);
 
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
-      | fn::each(cpp11_append_member{
+      | fn::each(cpp11_append_member<Config>{
         /*node=*/node,
         /*context=*/context,
       });
@@ -849,10 +850,10 @@ struct to_type_t<customization_mapping::extended_values> {
     }
   };
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const detail::mapping_context &context) const
+    omni::ryml::mapping_state<Config> context) const
     -> with_diagnostics<compat::monostate, diagnostics> {
     T values;
     auto result = mapping::to_range(node, &values, context);
@@ -863,7 +864,7 @@ struct to_type_t<customization_mapping::extended_values> {
     const auto members = binding.accessible_data_members();
     const auto count = std::tuple_size<decltype(members)>::value;
     if (values.size() < count) {
-      auto failure = detail::make_node_accumulator(context, node);
+      auto failure = detail::make_node_accumulator(context);
       failure.append(std::move(result));
       failure.report(detail::make_issue(json::issue_code::out_of_range,
         json::value_kind::sequence,
@@ -882,18 +883,20 @@ struct to_type_t<customization_mapping::extended_values> {
 
 template <>
 struct from_type<customization_mapping::integer> {
+  template <typename Config>
   void operator()(const customization_mapping::integer &value,
     ::ryml::NodeRef node,
-    const detail::mapping_context &context) const {
+    omni::ryml::mapping_state<Config> context) const {
     core::write_node(value.value, node, context);
   }
 };
 
 template <>
 struct to_type_t<customization_mapping::integer> {
+  template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
-    const detail::mapping_context &context) const
+    omni::ryml::mapping_state<Config> context) const
     -> with_diagnostics<compat::monostate, diagnostics> {
     int converted{};
     auto result = core::read_node(node, &converted, context);
@@ -901,7 +904,7 @@ struct to_type_t<customization_mapping::integer> {
       return result;
 
     if (converted < 4 || 8 < converted) {
-      auto failure = detail::make_node_accumulator(context, node);
+      auto failure = detail::make_node_accumulator(context);
       failure.append(std::move(result));
       failure.report(detail::make_issue(json::issue_code::out_of_range,
         json::value_kind::integer,
@@ -1061,7 +1064,7 @@ class invalid_extended_container_mapping:
 // C++11 lambda equivalent: map into an existing record within reflected scope.
 struct cpp11_lambda_read_into {
   ::ryml::ConstNodeRef node;
-  const omni::ryml::detail::mapping_context &context;
+  omni::ryml::mapping_state<> context;
 
   // The explicit return type delays the body until generated metadata exists.
   template <typename Record>
@@ -1080,8 +1083,8 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
     return;
 
   const omni::ryml::config<> options{};
-  const omni::ryml::detail::mapping_context context{
-    /*options=*/options,
+  const omni::ryml::mapping_state<> context{
+    /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
@@ -1201,8 +1204,8 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
     return;
 
   const omni::ryml::config<> options{};
-  const omni::ryml::detail::mapping_context context{
-    /*options=*/options,
+  const omni::ryml::mapping_state<> context{
+    /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,

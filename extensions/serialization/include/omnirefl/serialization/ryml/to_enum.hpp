@@ -34,10 +34,11 @@ struct to_enum_t {
   }
 
   template <typename T,
+    typename Config,
     compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> with_diagnostics<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;

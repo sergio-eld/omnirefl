@@ -7,6 +7,45 @@
 
 namespace {
 
+TEST(mapping_state, copies_borrow_config_and_keep_independent_paths) {
+  const omni::ryml::config<> options{};
+  using state_type = omni::ryml::mapping_state<>;
+  const state_type root{
+    /*config=*/options,
+    /*path=*/{},
+    /*error_count=*/2,
+    /*warning_count=*/3,
+    /*borrow_strings=*/false,
+  };
+
+  const auto first = root.child({
+    /*field=*/c4::to_csubstr("first"),
+    /*index=*/omni::compat::nullopt,
+  });
+
+  const auto indexed = first.child({/*field=*/{}, /*index=*/3});
+  const auto sibling = root.child({
+    /*field=*/c4::to_csubstr("second"),
+    /*index=*/omni::compat::nullopt,
+  });
+
+  auto copied = first;
+  ++copied.error_count;
+
+  EXPECT_TRUE(std::is_trivially_copyable<state_type>::value);
+  EXPECT_EQ(&options, &copied.config);
+  EXPECT_EQ(&root.path, copied.path.parent);
+  EXPECT_EQ(2U, first.error_count);
+  EXPECT_EQ(3U, copied.error_count);
+  EXPECT_EQ(3U, copied.warning_count);
+  EXPECT_TRUE(root.path.materialize().empty());
+  EXPECT_EQ("/first/3",
+    omni::ryml::detail::render_path(indexed.path.materialize()));
+
+  EXPECT_EQ("/second",
+    omni::ryml::detail::render_path(sibling.path.materialize()));
+}
+
 TEST(diagnostics_transform, renders_by_default) {
   const auto valid = omni::ryml::deserialize(omni::type_t<int>{}, "7");
   const auto invalid = omni::ryml::deserialize(omni::type_t<int>{}, "bad");

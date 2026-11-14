@@ -27,10 +27,10 @@ struct to_range_t {
     return omni::ryml::detail::is_mapped_range<T>::value;
   }
 
-  template <typename T>
+  template <typename T, typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    const detail::mapping_context &context) const
+    mapping_state<Config> context) const
     -> compat::enable_if_t<detail::is_mapped_range<T>::value,
       with_diagnostics<compat::monostate, diagnostics>>;
 
