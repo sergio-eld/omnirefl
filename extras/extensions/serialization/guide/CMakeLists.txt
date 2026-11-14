@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18.2 FATAL_ERROR)
 
-project(guide.json LANGUAGES CXX)
+project(json_ryml.guide LANGUAGES CXX)
 
 # The serialization extension supports C++11; preserve newer compiler defaults.
 if(NOT DEFINED CMAKE_CXX_STANDARD
@@ -33,15 +33,15 @@ if(NOT TARGET gtest_main)
         PROPERTY EXCLUDE_FROM_ALL TRUE)
 endif()
 
-add_executable(guide.json main.cpp)
+add_executable(json_ryml.guide main.cpp)
 # The guide uses concepts and abbreviated templates; the extension stays C++11.
-set_target_properties(guide.json PROPERTIES
+set_target_properties(json_ryml.guide PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
-target_link_libraries(guide.json PRIVATE omni::serialization gtest_main)
-omni_reflected_target(guide.json)
+target_link_libraries(json_ryml.guide PRIVATE omni::serialization gtest_main)
+omni_reflected_target(json_ryml.guide)
 
 if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
-    add_test(NAME guide.json COMMAND guide.json)
+    add_test(NAME json_ryml.guide COMMAND json_ryml.guide)
 endif()

@@ -335,7 +335,7 @@ const auto result = tuple
   | omni::fn::foldl(combine, initial);
 ```
 
-See the [functional tests](extras/tests/functional/test.cpp) for detailed examples.
+See the [functional tests](extras/tests/functional/main.cpp) for detailed examples.
 
 ## Reflection Utilities
 

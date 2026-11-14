@@ -287,11 +287,10 @@ TEST(serialization_formats, keeps_records_with_null_fields_in_sequences) {
 }
 
 #if 0
-// TODO: [high] Implement enum-field serialization and deserialization for JSON
-// and YAML. Decide string versus integer output, acceptance of integer input,
-// unknown-value schema errors, and canonical/deprecated alias handling.
-// These candidate expectations use canonical names, accept known integers and
-// aliases, and reject unknown names/integers. Confirm policy before enabling.
+// TODO: [medium] Review these legacy cases for duplicate-valued and deprecated
+// enumerators. String-valued enum mapping and configured aliases are supported.
+// The integer-acceptance cases below conflict with the string-only default;
+// they would require a custom mapper rather than enabling this block as-is.
 enum class execution_state {
   stopped = 0,
   active = 7,

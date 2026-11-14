@@ -10,6 +10,9 @@ testing conventions used in Omnirefl.
 - [Constraints](#constraints)
 - [Customization points](#customization-points)
   - [Dispatchers](#dispatchers)
+- [Guides and examples](#guides-and-examples)
+- [Extension structure](#extension-structure)
+- [Value-based metaprogramming](#value-based-metaprogramming)
 
 [tdm-updates]: #tdm_-prefix-functional-data-member-updates
 
@@ -307,3 +310,146 @@ constexpr auto size(const auto &value) {
   return detail::size_case<std::is_array_v<T>>{}(value);
 }
 ```
+
+## Guides and examples
+
+Prefer **guide** for "how to" recipes teaching the interface, and **example**
+for a concrete application or use case. This is a naming guideline, not a strict
+division; a project may serve both purposes.
+
+Each project under `extras/examples/` must be self-contained: users can copy its
+directory and configure it independently. Apply the same requirement to
+standalone extension guides and examples.
+
+- Include the project's own `CMakeLists.txt`, sources, headers, and data.
+- Declare dependencies through package discovery or fetching. Use Omnirefl's
+  installed public CMake interface, without depending on repository-internal
+  scripts or the parent project's configuration.
+- Do not generate a standard matrix inside a guide or example project.
+- Require any specific language version in the project's CMake configuration:
+
+```cmake
+set_target_properties(example PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES)
+```
+
+When no particular version is required, invoke the shared
+lowest-default-standard CMake helper. This permitted shared policy helper must
+be available to copied standalone projects.
+
+The parent `CMakeLists.txt` checks whether a guide/example can be included
+before calling `add_subdirectory`. Report exclusions with
+`message(STATUS ...)`, stating the project and the unmet requirement.
+Standalone projects still declare their
+own requirements so they do not rely on those parent checks.
+
+## Extension structure
+
+Extension headers under `extensions/<module>/include/omnirefl/` ship in the
+Omnirefl packages, installed under `<includedir>/omnirefl/`. Each extension has
+a CMake component at `<libdir>/cmake/omnirefl/components/<module>.cmake`, alongside
+its dependency helpers and patches, and an entry in `Config.cmake.in`.
+
+Components are opt-in. For example:
+
+```cmake
+find_package(omnirefl CONFIG REQUIRED COMPONENTS serialization)
+```
+
+This resolves the serialization dependencies and provides the
+`omni::serialization` interface target.
+
+Guides, tests, benchmarks, and shared example data live under
+`extras/extensions/<module>/`. They ship as source in the separate
+`omnirefl-extras-<version>-<commit>.tar.gz` archive and build against the
+installed package. Keep their required sources and shared headers within that
+archive rather than depending on an unshipped repository checkout.
+
+Standalone guides and examples follow the [self-containment rules][guides].
+
+[guides]: #guides-and-examples
+
+Use `<module>/guide.cpp` for a single-file guide. Use
+`<module>/guide/main.cpp` when additional files, such as shared headers or
+standalone build configuration, warrant a directory.
+
+CMake executable targets follow `<module>.guide`, `<module>.test`, or
+`<module>.example`; benchmarks use `<module>.benchmark`. For example, the
+RapidYAML-backed JSON guide is `json_ryml.guide`.
+
+Several executables use `<module>.<kind>.<specific_name>`, such as
+`json_ryml.guide.aliases`. A main guide may retain `json_ryml.guide` alongside
+those specific guides. Existing target prefixes precede this name: standard
+matrix variants use `cpp_<standard>.`, for example
+`cpp_11.json_ryml.test` and `cpp_20.json_ryml.test`. Standard variants still
+represent one logical executable.
+
+Apply the same layout rule to tests and benchmarks. Within each directory:
+
+- Use `main.cpp` when there is only one logical executable. Additional sources
+  may contribute to that executable.
+- For several independent executables, use descriptive entry-source names such
+  as `specific_scenario.cpp`, without a `main.cpp`.
+- Different standard configurations of the same executable count as one.
+- Framework-provided entry points do not change the naming: `main.cpp` may link
+  against GTest's or Benchmark's supplied `main()`.
+
+```text
+<module>/
+  guide/
+    main.cpp
+    shared.hpp
+  tests/
+    main.cpp
+    specific_scenario.cpp
+  benchmarks/
+    main.cpp
+    shared.hpp
+```
+
+Here, `tests/main.cpp` and `tests/specific_scenario.cpp` form one executable.
+For independent scenario executables, use:
+
+```text
+<module>/tests/
+  first_scenario.cpp
+  second_scenario.cpp
+  shared.hpp
+```
+
+<!-- Keep this section last; insert future convention sections before it. -->
+
+## Value-based metaprogramming
+
+Prefer `constexpr` functions and ordinary data over encoding computations in
+template instantiations, where possible. This expresses algorithms directly,
+without type lists or specializations for intermediate results.
+
+Exception: prefer the template implementation if it is substantially faster to
+compile. Establish that advantage with measurements on representative inputs
+and relevant compilers.
+
+```cpp
+#include <type_traits>
+
+// Type-based computation.
+template <unsigned A, unsigned B>
+struct gcd_t : gcd_t<B, A % B> {};
+
+template <unsigned A>
+struct gcd_t<A, 0> : std::integral_constant<unsigned, A> {};
+
+constexpr auto first = gcd_t<42, 30>::value;
+
+// Value-based computation.
+constexpr unsigned gcd(unsigned a, unsigned b) {
+  return b ? gcd(b, a % b) : a;
+}
+
+constexpr auto second = gcd(42, 30);
+```
+
+Both compute at compile time. The function needs no specializations and also
+accepts runtime inputs. Templates remain appropriate for type selection,
+specialization, and generating different code.

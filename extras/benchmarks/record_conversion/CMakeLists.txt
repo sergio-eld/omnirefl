@@ -1,4 +1,4 @@
-add_executable(benchmark.record_conversion record_conversion.cpp)
+add_executable(benchmark.record_conversion main.cpp)
 
 set(_record_conversion_cpp_standard 20)
 if("cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
