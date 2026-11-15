@@ -1,7 +1,5 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/mapping.hpp>
-
 #include <c4/format.hpp>
 
 #include <type_traits>

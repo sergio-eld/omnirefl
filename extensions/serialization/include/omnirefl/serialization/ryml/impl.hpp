@@ -206,19 +206,15 @@ constexpr auto to_type(omni::type_t<T>)
 
 namespace core {
 
-// Core algorithm
-
-template <typename T, bool BorrowStrings>
-void write_node(const T &value,
-  ::ryml::NodeRef node,
-  write_state_t<BorrowStrings> context) {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(const T &value, ::ryml::NodeRef node, State context) {
   omni::ryml::from_type(omni::type_t<T>{})(value, node, context);
 }
 
-template <typename T, typename Config>
-auto read_node(::ryml::ConstNodeRef node,
-  T *into,
-  read_state_t<Config> context)
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(::ryml::ConstNodeRef node, T *into, State context)
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   if (context.limit_exceeded())
@@ -369,12 +365,12 @@ struct map_by_schema_case<Discovery, false, true> {
 
 } // namespace detail
 
-template <typename T, typename TransformDiagnostics>
-with_diagnostics_t<T> map_by_schema(
-  const config_t<TransformDiagnostics> &options,
-  omni::type_t<T>, ::ryml::ConstNodeRef node) {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
+  (is_config<Config>::value))
+auto map_by_schema(const Config &options, omni::type_t<T>,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
   auto value = compat::make_optional<T>();
-  const read_state_t<config_t<TransformDiagnostics>> context{
+  const read_state_t<Config> context{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,
@@ -389,20 +385,15 @@ with_diagnostics_t<T> map_by_schema(
   };
 }
 
-template <typename T, typename TransformDiagnostics>
-with_diagnostics_t<T> map_by_schema(
-  const config_t<TransformDiagnostics> &options,
-  omni::type_t<T> type, const ::ryml::Tree &tree) {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
+  (is_config<Config>::value))
+auto map_by_schema(const Config &options, omni::type_t<T> type,
+  const ::ryml::Tree &tree) -> with_diagnostics_t<T> {
   return map_by_schema(options, type, tree.crootref());
 }
 
-#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-template <typename Config, typename Record>
-  requires (is_config<Config>::value)
-#else
-template <typename Config, typename Record,
-  compat::enable_if_t<is_config<Config>::value, int>>
-#endif
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename Record),
+  (is_config<Config>::value))
 auto deserialize(Config &&options, omni::type_t<Record> record_type,
   std::string source)
   -> with_diagnostics_t<Record, diagnostics_result_t<Config>> {

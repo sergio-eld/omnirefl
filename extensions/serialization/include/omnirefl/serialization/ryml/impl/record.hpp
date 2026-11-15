@@ -1,8 +1,6 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
-#include <omnirefl/serialization/ryml/mapping/record.hpp>
-
 #include <algorithm>
 #include <tuple>
 #include <type_traits>

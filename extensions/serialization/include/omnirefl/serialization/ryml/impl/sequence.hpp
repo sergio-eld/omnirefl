@@ -1,7 +1,5 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/mapping/sequence.hpp>
-
 #include <map>
 #include <utility>
 #include <vector>

@@ -181,6 +181,23 @@ constexpr T twice(T value) {
 }
 ```
 
+For separate declarations and definitions, the first declaration uses
+`OMNI_CONSTRAINED_TEMPLATE`; subsequent declarations and the definition use
+`OMNI_CONSTRAINED_TEMPLATE_REDECL` with identical parameters and constraints:
+
+```cpp
+OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_arithmetic<T>::value))
+T twice(T value);
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T), (std::is_arithmetic<T>::value))
+T twice(T value) { return value + value; }
+```
+
+This is an ad hoc compatibility distinction: before C++20, the defaulted
+SFINAE parameter can receive its default only once. C++20 instead repeats the
+requires-clause. With C++20 as the baseline, direct requires-clauses replace
+these adapters.
+
 <!-- REFACTORME: [high] Revisit the customization-point conventions and example.
 -->
 

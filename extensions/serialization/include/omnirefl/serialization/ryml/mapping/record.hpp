@@ -3,7 +3,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/serialization/ryml/detail.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>

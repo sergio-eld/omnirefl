@@ -1,7 +1,5 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/state.hpp>
-
 namespace omni {
 namespace ryml {
 

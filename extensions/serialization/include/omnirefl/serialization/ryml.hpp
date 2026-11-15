@@ -188,14 +188,14 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
 /** Dispatch one value through its serialization customization or default. */
-template <typename T, bool BorrowStrings>
-void write_node(const T &value, ::ryml::NodeRef node,
-  write_state_t<BorrowStrings> context);
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(const T &value, ::ryml::NodeRef node, State context);
 
 /** Dispatch one node through the selected to_type callable with diagnostics. */
-template <typename T, typename Config>
-auto read_node(::ryml::ConstNodeRef node, T *into,
-  read_state_t<Config> context)
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(::ryml::ConstNodeRef node, T *into, State context)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 /** Map document nodes into a C++ value, traversing its schema over the
@@ -203,19 +203,20 @@ auto read_node(::ryml::ConstNodeRef node, T *into,
  * @pre node must be valid. The caller retains its tree and character storage
  * while using borrowed values or rendering the returned diagnostics.
  * The diagnostics transformation in config is not applied by map_by_schema. */
-template <typename Record, typename TransformDiagnostics>
-with_diagnostics_t<Record> map_by_schema(
-  const config_t<TransformDiagnostics> &options,
-  omni::type_t<Record> record_type, ::ryml::ConstNodeRef node);
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
+  (is_config<Config>::value))
+auto map_by_schema(const Config &options, omni::type_t<Record> record_type,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<Record>;
 
-template <typename Record, typename TransformDiagnostics>
-with_diagnostics_t<Record> map_by_schema(
-  const config_t<TransformDiagnostics> &options,
-  omni::type_t<Record> record_type, const ::ryml::Tree &tree);
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
+  (is_config<Config>::value))
+auto map_by_schema(const Config &options, omni::type_t<Record> record_type,
+  const ::ryml::Tree &tree) -> with_diagnostics_t<Record>;
 
 // Mapping borrows the tree; a temporary cannot outlive the returned result.
-template <typename Record, typename TransformDiagnostics>
-void map_by_schema(const config_t<TransformDiagnostics> &, omni::type_t<Record>,
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
+  (is_config<Config>::value))
+void map_by_schema(const Config &, omni::type_t<Record>,
   const ::ryml::Tree &&) = delete;
 
 /** Deserialize JSON/YAML text into the C++ type selected by record_type.

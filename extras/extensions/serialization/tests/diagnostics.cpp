@@ -4,6 +4,8 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -60,6 +62,59 @@ TEST(read_state, copies_borrow_config_and_keep_independent_paths) {
 
   EXPECT_EQ("/second",
     omni::ryml::detail::render_path(sibling.path.materialize()));
+}
+
+struct lvalue_renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &) & { return "lvalue"; }
+};
+
+struct rvalue_renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &) && { return "rvalue"; }
+};
+
+template <typename Config, typename = void>
+struct is_core_deserializable: std::false_type {};
+
+template <typename Config>
+struct is_core_deserializable<Config,
+  omni::compat::void_t<decltype(omni::ryml::core::deserialize(
+    std::declval<Config>(), omni::type_t<int>{}, std::string{}))>>:
+    std::true_type {};
+
+TEST(deserialize_binding, preserves_lvalue_config_invocability) {
+  using config_type = omni::ryml::config_t<lvalue_renderer>;
+  using binding_type = omni::ryml::deserialize_t<config_type>;
+
+  EXPECT_TRUE(is_core_deserializable<config_type &>::value);
+  EXPECT_TRUE((omni::compat::is_invocable<binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_FALSE(is_core_deserializable<config_type &&>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<binding_type &&,
+    omni::type_t<int>, std::string>::value));
+}
+
+TEST(deserialize_binding, preserves_rvalue_config_invocability) {
+  using config_type = omni::ryml::config_t<rvalue_renderer>;
+  using binding_type = omni::ryml::deserialize_t<config_type>;
+
+  EXPECT_FALSE(is_core_deserializable<config_type &>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_TRUE(is_core_deserializable<config_type &&>::value);
+  EXPECT_TRUE((omni::compat::is_invocable<binding_type &&,
+    omni::type_t<int>, std::string>::value));
 }
 
 struct move_only_renderer {

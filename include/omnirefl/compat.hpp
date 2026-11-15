@@ -98,6 +98,39 @@ auto apply(F f, T value) -> decltype(f(value));
         int>::type = 0>
 #endif
 
+/** (QoL) Repeat a constrained template declaration without its SFINAE default.
+ * Parameters and Constraint use the parenthesized arguments of
+ * OMNI_CONSTRAINED_TEMPLATE. Expands to the same C++20 requires-clause, or
+ * an unnamed SFINAE parameter without a default before C++20.
+ *
+```cpp
+OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_integral<T>::value))
+T twice(T value);
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T), (std::is_integral<T>::value))
+T twice(T value) { return value + value; }
+
+// C++11/14/17 definition expands to:
+template <typename T,
+  typename std::enable_if<std::is_integral<T>::value, int>::type>
+T twice(T value) { return value + value; }
+```
+ * @details Ad hoc compatibility adapter: C++20 repeats the requires-clause,
+ * but earlier standards must not repeat the template parameter's default.
+ * The first declaration supplies that default through
+ * OMNI_CONSTRAINED_TEMPLATE; redeclarations and definitions use this macro.
+ * Direct requires-clauses replace both adapters when C++20 is the baseline.
+ */
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+#  define OMNI_CONSTRAINED_TEMPLATE_REDECL(Parameters, Constraint) \
+    OMNI_CONSTRAINED_TEMPLATE(Parameters, Constraint)
+#else
+#  define OMNI_CONSTRAINED_TEMPLATE_REDECL(Parameters, Constraint) \
+    template <OMNI_DETAIL_UNPAREN Parameters, \
+      typename ::std::enable_if<OMNI_DETAIL_UNPAREN Constraint, \
+        int>::type>
+#endif
+
 // Invoke beside the enum so argument-dependent lookup finds these operators.
 #define OMNI_ENABLE_BIT_FLAGS(Enum)                                        \
   constexpr Enum operator|(Enum left, Enum right) noexcept {               \

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/mapping/enum.hpp>
-
 #include <algorithm>
 #include <utility>
 

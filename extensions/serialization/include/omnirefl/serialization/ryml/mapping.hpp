@@ -8,7 +8,7 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/serialization/ryml/detail.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 #include <omnirefl/serialization/ryml/mapping/enum.hpp>
 #include <omnirefl/serialization/ryml/mapping/record.hpp>
 #include <omnirefl/serialization/ryml/mapping/sequence.hpp>
