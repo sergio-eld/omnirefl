@@ -10,26 +10,9 @@
 namespace omni {
 namespace ryml {
 
-/** Write key/value ranges as objects and element ranges as arrays.
- * Empty optional array elements are omitted. Optional object values remain.
- * Non-scalar C++ elements must be exposed as lvalue references to value_type;
- * default mapping rejects temporary-producing iterators in both tree modes. */
-struct from_range_t {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::ryml::detail::is_mapped_range<const T>::value;
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      omni::ryml::detail::is_mapped_range<const T>>::value))
-  void operator()(const T &value, ::ryml::NodeRef node, State context) const;
-};
-
-/** Default range serializer. */
-constexpr from_range_t from_range{};
-
 /** Read arrays into element ranges and objects into key/value ranges.
+ * Direct calls bypass mapping_to_type selection for the range; element
+ * mappings still use mapping_to_type dispatch.
  * Elements are mapped before insertion through the shared operation adapters.
  * is_key_value selects element versus key/mapped-value arguments;
  * has_unique_key selects try_emplace instead of emplace. Unique destinations
@@ -41,11 +24,6 @@ constexpr from_range_t from_range{};
  * types. All destinations require adapted clear and insertion operations.
  */
 struct to_range_t {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::ryml::detail::is_mapped_range<T>::value;
-  }
-
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<is_read_state<State>,
       detail::is_mapped_range<T>>::value))
@@ -56,8 +34,22 @@ struct to_range_t {
   // enabling their default mapping. JSON object names are always strings.
 };
 
-/** Default range mapper using the shared operation customization points. */
 constexpr to_range_t to_range{};
+
+/** Write key/value ranges as objects and element ranges as arrays.
+ * Direct calls bypass mapping_from_type selection for the range; element
+ * mappings still use mapping_from_type dispatch.
+ * Empty optional array elements are omitted. Optional object values remain.
+ * Non-scalar C++ elements must be exposed as lvalue references to value_type;
+ * default mapping rejects temporary-producing iterators in both tree modes. */
+struct from_range_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::ryml::detail::is_mapped_range<const T>>::value))
+  void operator()(const T &value, ::ryml::NodeRef node, State context) const;
+};
+
+constexpr from_range_t from_range{};
 
 } // namespace ryml
 } // namespace omni

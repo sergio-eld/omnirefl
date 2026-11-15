@@ -21,8 +21,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
     add_executable(${_test_target} main.cpp scalar_roots.cpp sequence_roots.cpp
         json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp
-        container_discovery.cpp optional_mapping.cpp customization.cpp
-        diagnostics.cpp)
+        container_discovery.cpp optional_mapping.cpp type_mapping.cpp
+        diagnostics.cpp inplace.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES
@@ -66,7 +66,7 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         if(_case STREQUAL "missing_mapping")
             set(_message "No node mapping: specialize")
         else()
-            set(_message "Conflicting node mappings: specialize either")
+            set(_message "Specialize either cp::to_type_t or cp::to_type, not both")
         endif()
         add_test(NAME "${_target}.build"
             COMMAND "${CMAKE_COMMAND}"
