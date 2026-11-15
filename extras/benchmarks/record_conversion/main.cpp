@@ -63,8 +63,6 @@ inline constexpr auto benchmark_name = //
 
 } // namespace reflected_visitors
 
-// TODO: Consider exposing same-named reflected struct conversion as a QoL
-// utility.
 template <typename From, typename To>
 To reflected_convert(From &&from, omni::type_t<To> target_type) {
   // GCC 15 does not count the dependent call from the nested generic visitor
@@ -648,3 +646,6 @@ int main(int argc, char **argv) {
 }
 
 #undef RECORD_CONVERSION_NOINLINE
+
+// TODO: Consider exposing reflected_convert (same-named field conversion) as
+// a QoL utility.

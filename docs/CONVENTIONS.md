@@ -5,16 +5,52 @@ testing conventions used in Omnirefl.
 
 ## Contents
 
+- [Code style](#code-style)
 - [Types, objects, traits, and concepts](#types-objects-traits-and-concepts)
 - [`tdm_` prefix: functional data-member updates][tdm-updates]
 - [Constraints](#constraints)
 - [Customization points](#customization-points)
   - [Dispatchers](#dispatchers)
 - [Guides and examples](#guides-and-examples)
+  - [Guide structure](#guide-structure)
+  - [Standalone projects](#standalone-projects)
 - [Extension structure](#extension-structure)
+- [Standard compatibility](#standard-compatibility)
 - [Value-based metaprogramming](#value-based-metaprogramming)
 
 [tdm-updates]: #tdm_-prefix-functional-data-member-updates
+
+## Code style
+
+Names use `snake_case`, following the standard library: namespaces, types,
+concepts, functions, data members, variables, and enumerators. `CamelCase` is
+reserved for template parameters, such as `Value` or `BufferSize`.
+
+Macros use `OMNI_UPPER_SNAKE_CASE`.
+
+Single-letter parameters and locals may be used when their roles are clear
+and nothing in the scope is reassigned, regardless of scope length. Descriptive
+names help distinguish values of the same or convertible types and follow
+changing state. Mutating member calls alone do not require longer names.
+
+Two single-letter names may represent distinct source and destination roles:
+
+```cpp
+#include <iostream>
+
+struct source { int value; };
+struct destination { int doubled; };
+
+destination convert(const source &a) {
+  const destination b{.doubled = a.value * 2};
+  // Just an exposition to justify creating b instead of returning directly.
+  std::cout << "Converted " << a.value << " to " << b.doubled << '\n';
+  return b;
+}
+```
+
+Conventional short names include `i`, `j`, and `k` for indices, `n` for a count,
+`p` for a pointer, and `e` for an error.
 
 ## Types, objects, traits, and concepts
 
@@ -317,6 +353,64 @@ Prefer **guide** for "how to" recipes teaching the interface, and **example**
 for a concrete application or use case. This is a naming guideline, not a strict
 division; a project may serve both purposes.
 
+### Guide structure
+
+A guide presents the public interface through a TEST-oriented, cohesive
+top-down narration, starting with the basic ideas and building toward more
+involved uses. Comments explain the ideas, examples show them in code, and
+GTest assertions make the expected results explicit while keeping the guide
+executable.
+
+The opening block states the scope and language baseline (e.g. C++11), then lists
+`suite.topic - description` entries in source order, grouped by section.
+Searching for `TEST(suite, topic)` finds the entry point even when namespaces
+share its name; `--gtest_filter=suite.topic` runs it.
+
+The core guide introduces reflection concepts before building toward
+inspection, access, and modification.
+
+A shortened example of an opening block for the core reflection guide:
+
+```cpp
+/** Executable reflection guide. Examples use C++20 syntax; the interfaces
+ * remain C++11-compatible.
+ * Search for TEST(suite, topic) for each entry below.
+ *
+ * Basics
+ *   basics.reflected_scope - introduce reflected_call with a generic visitor
+ * Advanced
+ *   advanced.binding_ownership - inspect ownership and constrain callables
+ */
+```
+
+Extensions provide higher-level utilities intended to work out of the box:
+
+- **Basics:** roughly 90% of immediately useful usage, fewest extra steps first;
+  default interface before configuration and common customization.
+- **Advanced:** deeper customization and other topics by practical relevance,
+  after their prerequisites.
+- **Application examples:** separate from the Basics/Advanced progression,
+  or in separate example files.
+
+**Compatibility in guides and examples:**
+
+- Newer syntax may be used for brevity, with the supported baseline stated.
+- Earlier-standard equivalents appear once near the beginning.
+- New version-specific idioms have local alternatives, possibly commented out:
+
+```cpp
+const auto result = omni::ryml::deserialize(omni::type<int>, "42");
+// Before C++14:
+// const auto result = omni::ryml::deserialize(omni::type_t<int>{}, "42");
+```
+
+A topic's introductory annotation sits above its `TEST` entry point. Essential
+model declarations and expected results stay nearby; operation-specific
+explanations sit beside the relevant expression. The contents stay synchronized
+with topic names, descriptions, and source order as the guide changes.
+
+### Standalone projects
+
 Each project under `extras/examples/` must be self-contained: users can copy its
 directory and configure it independently. Apply the same requirement to
 standalone extension guides and examples.
@@ -417,6 +511,57 @@ For independent scenario executables, use:
   second_scenario.cpp
   shared.hpp
 ```
+
+## Standard compatibility
+
+Core and extension modules use standard C++ interfaces, with compatibility
+fallbacks for their supported language and library versions. Shared `compat`
+names select the standard implementation when available and a compatible
+fallback otherwise; calling code does not repeat those guards.
+
+```cpp
+#include <type_traits>
+
+#if defined(__has_include)
+#  if __has_include(<expected>)
+#    include <expected>
+#  endif
+#endif
+
+#if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202211L
+#  include <tl/expected.hpp>
+#endif
+
+namespace omni {
+namespace compat {
+
+#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202211L
+template <typename T, typename Error>
+using expected = std::expected<T, Error>;
+#else
+template <typename T, typename Error>
+using expected = tl::expected<T, Error>;
+#endif
+
+#if defined(__cpp_lib_transformation_trait_aliases)
+template <bool Condition, typename T = void>
+using enable_if_t = std::enable_if_t<Condition, T>;
+#else
+template <bool Condition, typename T = void>
+using enable_if_t = typename std::enable_if<Condition, T>::type;
+#endif
+
+} // namespace compat
+} // namespace omni
+```
+
+Feature-test macros describe library availability more precisely than the
+language version alone. Third-party fallbacks belong to the component that
+needs them; this example does not make `expected` a core dependency.
+
+Third-party dependencies of optional components are not bundled with the main
+tool. They are fetched only when the user requests the corresponding CMake
+component.
 
 <!-- Keep this section last; insert future convention sections before it. -->
 

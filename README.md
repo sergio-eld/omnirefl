@@ -958,6 +958,11 @@ gdb --batch -ex "thread apply all bt full" \
 If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
 systems route core dumps to a crash service instead of the current directory.
 
+## Codebase conventions
+
+[Codebase conventions](docs/CONVENTIONS.md) describe naming, API design,
+formatting, documentation, and project structure.
+
 ## License
 
 Omnirefl is available under the [MIT License](LICENSE).
