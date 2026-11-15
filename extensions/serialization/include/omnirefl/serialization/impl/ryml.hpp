@@ -576,7 +576,7 @@ template <typename Discovery,
   bool Wrapper = compat::disjunction<
     omni::ryml::detail::is_mapped_range<Discovery>,
     traits::is_optional<Discovery>>::value>
-struct map_tree_case {
+struct map_by_schema_case {
   template <typename T, typename Config>
   static auto map(::ryml::ConstNodeRef node, T *into,
     mapping_state_t<Config> context)
@@ -586,7 +586,7 @@ struct map_tree_case {
 };
 
 template <typename Discovery, bool Wrapper>
-struct map_tree_case<Discovery, true, Wrapper> {
+struct map_by_schema_case<Discovery, true, Wrapper> {
   template <typename T, typename Config>
   static auto map(::ryml::ConstNodeRef node, T *into,
     mapping_state_t<Config> context)
@@ -602,12 +602,12 @@ struct map_tree_case<Discovery, true, Wrapper> {
 };
 
 template <typename Discovery>
-struct map_tree_case<Discovery, false, true> {
+struct map_by_schema_case<Discovery, false, true> {
   template <typename T, typename Config>
   static auto map(::ryml::ConstNodeRef node, T *into,
     mapping_state_t<Config> context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return map_tree_case<
+    return map_by_schema_case<
       typename omni::ryml::detail::discovered_range_type<Discovery>::type>::map(
         node, into, context);
   }
@@ -616,7 +616,8 @@ struct map_tree_case<Discovery, false, true> {
 } // namespace detail
 
 template <typename T, typename TransformDiagnostics>
-with_diagnostics_t<T> map_tree(const config_t<TransformDiagnostics> &options,
+with_diagnostics_t<T> map_by_schema(
+  const config_t<TransformDiagnostics> &options,
   omni::type_t<T>, ::ryml::ConstNodeRef node) {
   auto value = compat::make_optional<T>();
   const mapping_state_t<config_t<TransformDiagnostics>> context{
@@ -627,7 +628,7 @@ with_diagnostics_t<T> map_tree(const config_t<TransformDiagnostics> &options,
     /*borrow_strings=*/false,
   };
 
-  auto mapped = detail::map_tree_case<compat::remove_cvref_t<T>>::map(
+  auto mapped = detail::map_by_schema_case<compat::remove_cvref_t<T>>::map(
     node, &*value, context);
   return {
     /*value=*/mapped.value ? std::move(value) : compat::nullopt,
@@ -636,9 +637,10 @@ with_diagnostics_t<T> map_tree(const config_t<TransformDiagnostics> &options,
 }
 
 template <typename T, typename TransformDiagnostics>
-with_diagnostics_t<T> map_tree(const config_t<TransformDiagnostics> &options,
+with_diagnostics_t<T> map_by_schema(
+  const config_t<TransformDiagnostics> &options,
   omni::type_t<T> type, const ::ryml::Tree &tree) {
-  return map_tree(options, type, tree.crootref());
+  return map_by_schema(options, type, tree.crootref());
 }
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
@@ -671,7 +673,7 @@ auto deserialize(Config &&options, omni::type_t<Record> record_type,
     };
   }
 
-  auto mapped = map_tree(options, record_type, parsed->crootref());
+  auto mapped = map_by_schema(options, record_type, parsed->crootref());
   return {
     /*value=*/std::move(mapped.value),
     /*diagnostics=*/compat::invoke(

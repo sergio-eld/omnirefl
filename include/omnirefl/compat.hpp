@@ -123,6 +123,14 @@ auto apply(F f, T value) -> decltype(f(value));
 namespace omni {
 namespace compat {
 
+// bool_constant
+#if defined(__cpp_lib_bool_constant) && 201505L <= __cpp_lib_bool_constant
+using std::bool_constant;
+#else
+template <bool Value>
+using bool_constant = std::integral_constant<bool, Value>;
+#endif
+
 template <typename T>
 struct type_identity {
   using type = T;
@@ -333,7 +341,7 @@ struct disjunction<B1, Bn...>:
 using std::negation;
 #else
 template <typename Trait>
-struct negation: std::integral_constant<bool, !bool(Trait::value)> {};
+struct negation: bool_constant<!bool(Trait::value)> {};
 #endif
 
 // invoke

@@ -74,11 +74,10 @@ using _reflected_type =
 
 template <typename Owner, typename FieldMeta>
 struct _is_writable_field:
-    std::integral_constant<bool,
-      !FieldMeta::is_const()
-        && (FieldMeta::is_static()
-          || !std::is_const<typename std::remove_reference<Owner>::type>::value
-          || FieldMeta::is_mutable())> {};
+    compat::bool_constant<!FieldMeta::is_const()
+      && (FieldMeta::is_static()
+        || !std::is_const<typename std::remove_reference<Owner>::type>::value
+        || FieldMeta::is_mutable())> {};
 
 namespace {
 
@@ -160,8 +159,7 @@ template <typename Record, typename _M>
 struct _is_public_method_visible_from<Record,
   function_meta_t<_M>,
   compat::void_t<decltype(_M::template pointer<Record>())>>:
-    std::integral_constant<bool,
-      std::is_same<decltype(_M::template pointer<Record>()),
+    compat::bool_constant<std::is_same<decltype(_M::template pointer<Record>()),
         decltype(_M::pointer())>::value
         && (_M::is_static()
           || std::is_convertible<Record *, typename _M::owner_type *>::value)> {
@@ -296,8 +294,8 @@ struct _get_t<Index, TargetField, Fields, Target, false> {
 
   static Target from(Fields &fields) {
     return from(fields,
-      std::integral_constant<bool,
-        omni::detail::_same_field_name(TargetField::name(), field::name())>{});
+      compat::bool_constant<omni::detail::_same_field_name(
+        TargetField::name(), field::name())>{});
   }
 
   private:

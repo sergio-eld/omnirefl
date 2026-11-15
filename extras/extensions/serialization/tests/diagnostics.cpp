@@ -220,7 +220,7 @@ TEST(diagnostics_transform, renders_a_caller_owned_tree) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_tree(omni::type_t<int>{}, *tree);
+  const auto result = omni::ryml::map_by_schema(omni::type_t<int>{}, *tree);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());

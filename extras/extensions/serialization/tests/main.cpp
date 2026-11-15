@@ -20,7 +20,7 @@
 namespace {
 
 const auto strict_deserialize = serialization_test::deserialize;
-const auto strict_map_tree = omni::ryml::map_tree;
+const auto strict_map_by_schema = omni::ryml::map_by_schema;
 
 struct anonymous_record {
   // Value serialized from the record despite the function sharing its name.
@@ -71,7 +71,8 @@ TEST(serialization_composition, parses_then_maps_a_record) {
   const auto result =
     omni::ryml::core::parse(R"({"name": "Ada", "code": 815})") //
       .transform([](::ryml::Tree tree) {
-        auto mapped = omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
+        auto mapped = omni::ryml::map_by_schema(
+          omni::type_t<serialization_data::payload>{},
           tree);
         return omni::ryml::with_diagnostics_t<serialization_data::payload,
           std::string>{
@@ -95,7 +96,8 @@ TEST(serialization_composition, renders_mapping_errors_after_successful_parse) {
   const auto result =
     omni::ryml::core::parse(R"({"name": "Ada", "code": "bad"})") //
       .transform([](::ryml::Tree tree) {
-        auto mapped = omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
+        auto mapped = omni::ryml::map_by_schema(
+          omni::type_t<serialization_data::payload>{},
           tree);
         return omni::ryml::with_diagnostics_t<serialization_data::payload,
           std::string>{
@@ -164,7 +166,7 @@ TEST(deserialization_config,
 TEST(tree_mapping, default_returns_borrowed_diagnostics) {
   const auto tree = ::ryml::parse_in_arena(R"({"name": "Ada", "code": "bad"})");
   const auto result =
-    omni::ryml::map_tree(omni::type_t<serialization_data::payload>{},
+    omni::ryml::map_by_schema(omni::type_t<serialization_data::payload>{},
       tree.crootref());
   static_assert(std::is_same<typename std::decay<decltype(result)>::type,
                   omni::ryml::with_diagnostics_t<serialization_data::payload,
@@ -183,7 +185,7 @@ TEST(tree_mapping, rendered_diagnostics_outlive_the_tree) {
   omni::ryml::with_diagnostics_t<serialization_data::payload, std::string> retained;
   {
     const auto tree = ::ryml::parse_in_arena(R"({"name": "Ada", "code": "bad"})");
-    auto mapped = omni::ryml::map_tree(
+    auto mapped = omni::ryml::map_by_schema(
       omni::type_t<serialization_data::payload>{}, tree);
     retained = {
       /*value=*/std::move(mapped.value),
@@ -511,7 +513,7 @@ TEST(deserialization, partially_applies_config_and_type) {
 
 TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
   const auto map =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = 2;
       return s;
     });
@@ -1063,7 +1065,7 @@ TEST(tree_mapping, borrowed_mapping_accepts_extra_fields) {
   const auto tree =
     ::ryml::parse_in_arena(R"({"extra": [1, {}], "name": "Ada", "code": 815})");
   const auto result =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<serialization_data::payload>{}, tree.crootref());
@@ -1141,7 +1143,7 @@ TEST(deserialization_config, designated_configuration_accepts_extra_fields) {
 
 TEST(deserialization_config, changes_fields_without_changing_the_source) {
   const auto original =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = 2;
       return s;
     });
@@ -1798,7 +1800,7 @@ TEST_P(parser_recovery, public_parse_retains_error_and_skips_transformation) {
 
 TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
   const auto map = omni::fn::partial(
-    omni::ryml::map_tree,
+    omni::ryml::map_by_schema,
     omni::type_t<serialization_data::payload>{});
   const auto tree = ::ryml::parse_in_arena(
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
@@ -1815,7 +1817,7 @@ TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
 
 TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
   const auto map =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     });
@@ -1837,7 +1839,7 @@ TEST_P(deserialization_diagnostics, public_mapper_applies_the_same_policies) {
 
 TEST_P(deserialization_diagnostics, borrowed_mapper_applies_the_same_policies) {
   const auto map = omni::fn::partial( //
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = GetParam().error_limit;
       return s;
     }),
@@ -1865,7 +1867,7 @@ TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
     c4::csubstr{GetParam().source.data(), GetParam().source.size()});
   omni::ryml::with_diagnostics_t<serialization_data::payload,
     omni::ryml::diagnostics>
-    mapped = strict_map_tree(omni::type_t<serialization_data::payload>{},
+    mapped = strict_map_by_schema(omni::type_t<serialization_data::payload>{},
       tree.rootref());
   const auto result = //
     std::move(mapped);
@@ -1881,7 +1883,7 @@ TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
 
 TEST(tree_mapping, borrows_lvalue_trees_without_modifying_them) {
   auto tree = ::ryml::parse_in_arena(R"({"name": "ok", "code": "bad"})");
-  const auto result = strict_map_tree(
+  const auto result = strict_map_by_schema(
     omni::type_t<serialization_data::payload>{}, tree);
 
   EXPECT_TRUE(serialization_test::matches_node(
@@ -1894,7 +1896,7 @@ TEST(tree_mapping, borrows_lvalue_trees_without_modifying_them) {
 TEST(tree_mapping, accepts_const_lvalue_trees) {
   const auto tree = ::ryml::parse_in_arena(R"({"name": "ok", "code": 7})");
   const auto result =
-    strict_map_tree(omni::type_t<serialization_data::payload>{}, tree);
+    strict_map_by_schema(omni::type_t<serialization_data::payload>{}, tree);
 
   EXPECT_TRUE(result.value);
   if (result.value) {
@@ -1911,7 +1913,7 @@ TEST(tree_mapping, borrows_subtrees_and_retains_relative_paths) {
     R"({"payload": {"name": "ok", "code": "bad"}, "other": 1})");
   const auto subtree = tree.crootref()["payload"];
   const auto result =
-    strict_map_tree(omni::type_t<serialization_data::payload>{}, subtree);
+    strict_map_by_schema(omni::type_t<serialization_data::payload>{}, subtree);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ("/code: \"bad\" is not an integer",
@@ -1931,7 +1933,7 @@ name: "a\nb"
 code: bad
 )");
     auto result =
-      omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+      omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
         s.error_policy.error_limit = 2;
         return s;
       })(omni::type_t<serialization_data::payload>{}, tree.crootref());
@@ -1962,7 +1964,7 @@ TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
 }
 )");
   const auto result =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = 1;
       return s;
     })(omni::type_t<serialization_data::scalar_values>{}, tree.crootref());
@@ -1977,7 +1979,7 @@ TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
 
 TEST(tree_mapping, defaults_to_strict_borrowed_mapping) {
   const auto tree = ::ryml::parse_in_arena(R"({"name": "ok", "code": "bad"})");
-  const auto result = strict_map_tree(
+  const auto result = strict_map_by_schema(
     omni::type_t<serialization_data::payload>{}, tree);
 
   EXPECT_FALSE(result.value);
@@ -1999,7 +2001,7 @@ TEST(tree_mapping, empty_model_accepts_extra_fields) {
   const auto tree = ::ryml::parse_in_arena(
     R"({"extra": 1, "extra": 2, "nested": {"more": []}})");
   const auto result =
-    omni::ryml::map_tree.tdm_config([](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([](omni::ryml::config_t<> s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     })(omni::type_t<empty_record>{}, tree);
@@ -2013,7 +2015,7 @@ TEST(tree_mapping, empty_model_accepts_extra_fields) {
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
 TEST(tree_mapping, supports_designated_configuration) {
-  const omni::ryml::map_tree_t<> configured{
+  const omni::ryml::map_by_schema_t<> configured{
     .config =
       omni::ryml::config_t<>{
         .error_policy = {.error_limit = 2,

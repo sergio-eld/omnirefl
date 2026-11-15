@@ -308,7 +308,7 @@ customization points reside in `traits::cp`.
 TODO: Explore a defaulted local-override accessor argument to `core::twice`.
 An explicitly supplied accessor could override global or default selection,
 or supply a customization when neither applies. The design is still in
-progress; this is the intended pattern for local overrides in `map_tree`
+progress; this is the intended pattern for local overrides in `map_by_schema`
 configuration.
 
 ### Dispatchers
@@ -363,8 +363,10 @@ executable.
 
 The opening block states the scope and language baseline (e.g. C++11), then lists
 `suite.topic - description` entries in source order, grouped by section.
-Searching for `TEST(suite, topic)` finds the entry point even when namespaces
-share its name; `--gtest_filter=suite.topic` runs it.
+Searching for `TEST(suite, topic)` or `TEST_P(suite, topic)` finds the entry
+point even when namespaces share its name. Ordinary tests run with
+`--gtest_filter=suite.topic`; parameterized instances use their generated names
+or a wildcard filter such as `--gtest_filter='*suite.topic*'`.
 
 The core guide introduces reflection concepts before building toward
 inspection, access, and modification.

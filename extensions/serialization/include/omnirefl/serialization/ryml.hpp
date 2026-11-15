@@ -278,8 +278,7 @@ const auto load = omni::ryml::deserialize.tdm_config(
 /** Whether T is a config_t specialization, ignoring cv/ref qualifiers. */
 template <typename T>
 struct is_config:
-    std::integral_constant<bool,
-      traits::is_specialization_of<config_t, T>()> {};
+    compat::bool_constant<traits::is_specialization_of<config_t, T>()> {};
 
 // C++14 adds variable templates for trait values.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
@@ -550,32 +549,34 @@ auto read_node(::ryml::ConstNodeRef node, T *into,
  *
 ```cpp
 // Supply a reflected person, config, and an owning std::string source.
-auto result = core::parse(std::move(source))
-  .transform([options](::ryml::Tree tree) {
-    return core::map_tree(options, omni::type_t<person>{}, std::move(tree));
-  });
-// Syntax errors use expected; mapping retains optional person and diagnostics.
+auto parsed = core::parse(std::move(source));
+if (parsed) {
+  auto result = core::map_by_schema(options, omni::type_t<person>{}, *parsed);
+  // Use result while parsed keeps its tree and character storage alive.
+}
+// Syntax errors use expected; mapping returns optional person and diagnostics.
 ``` */
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
 
-/** Map tree nodes depth-first through the selected customization points.
+/** Map document nodes into a C++ value, traversing its schema over the
+ * document through the selected customization points.
  * @pre node must be valid. The caller retains its tree and character storage
  * while using borrowed values or rendering the returned diagnostics.
- * The diagnostics transformation in config is not applied by map_tree. */
+ * The diagnostics transformation in config is not applied by map_by_schema. */
 template <typename Record, typename TransformDiagnostics>
-with_diagnostics_t<Record> map_tree(
+with_diagnostics_t<Record> map_by_schema(
   const config_t<TransformDiagnostics> &options,
   omni::type_t<Record> record_type, ::ryml::ConstNodeRef node);
 
 template <typename Record, typename TransformDiagnostics>
-with_diagnostics_t<Record> map_tree(
+with_diagnostics_t<Record> map_by_schema(
   const config_t<TransformDiagnostics> &options,
   omni::type_t<Record> record_type, const ::ryml::Tree &tree);
 
 // Mapping borrows the tree; a temporary cannot outlive the returned result.
 template <typename Record, typename TransformDiagnostics>
-void map_tree(const config_t<TransformDiagnostics> &, omni::type_t<Record>,
+void map_by_schema(const config_t<TransformDiagnostics> &, omni::type_t<Record>,
   const ::ryml::Tree &&) = delete;
 
 /** Deserialize JSON/YAML text into the C++ type selected by record_type.
@@ -611,11 +612,12 @@ template <typename Value>
 
 } // namespace core
 
-/** Map a caller-owned tree or subtree using the bound config. */
+/** Schema-driven mapping of a caller-owned tree or subtree with bound config.
+ */
 template <typename Config = omni::ryml::config_t<>>
-struct map_tree_t {
+struct map_by_schema_t {
   static_assert(is_config<Config>::value,
-    "map_tree_t requires a specialization of omni::ryml::config_t");
+    "map_by_schema_t requires a specialization of omni::ryml::config_t");
 
   Config config;
 
@@ -625,7 +627,7 @@ struct map_tree_t {
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (compat::is_invocable<F &&, const Config &>::value))
   constexpr auto tdm_config(F &&f) const &
-    -> map_tree_t<compat::decay_t<
+    -> map_by_schema_t<compat::decay_t<
       compat::invoke_result_t<F &&, const Config &>>> {
     return {/*config=*/compat::invoke(std::forward<F>(f), this->config)};
   }
@@ -635,7 +637,8 @@ struct map_tree_t {
     (compat::is_invocable<F &&, Config &&>::value))
   // C++11 constexpr member functions are implicitly const, preventing moves.
   OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) &&
-    -> map_tree_t<compat::decay_t<compat::invoke_result_t<F &&, Config &&>>> {
+    -> map_by_schema_t<
+      compat::decay_t<compat::invoke_result_t<F &&, Config &&>>> {
     return {
       /*config=*/compat::invoke(std::forward<F>(f), std::move(this->config)),
     };
@@ -644,13 +647,13 @@ struct map_tree_t {
   template <typename Record>
   with_diagnostics_t<Record> operator()(omni::type_t<Record> record_type,
     const ::ryml::Tree &tree) const {
-    return core::map_tree(this->config, record_type, tree);
+    return core::map_by_schema(this->config, record_type, tree);
   }
 
   template <typename Record>
   with_diagnostics_t<Record> operator()(omni::type_t<Record> record_type,
     ::ryml::ConstNodeRef node) const {
-    return core::map_tree(this->config, record_type, node);
+    return core::map_by_schema(this->config, record_type, node);
   }
 
   // Reject temporary trees: returned values and diagnostics may borrow storage.
@@ -658,7 +661,7 @@ struct map_tree_t {
   void operator()(omni::type_t<Record>, const ::ryml::Tree &&) const = delete;
 };
 
-const map_tree_t<> map_tree{};
+const map_by_schema_t<> map_by_schema{};
 
 /** Parse JSON/YAML and return an optional value with transformed diagnostics.
  * The default config renders diagnostic text before releasing the source tree.
@@ -832,7 +835,8 @@ OMNI_SKIP_METADATA(c4::csubstr,
 // configured callables can retain move-only state where mapping permits it.
 
 // TODO: [high] Define how deserialize can return values borrowing tree storage.
-// Such values need an external owner; map_tree lets the caller retain its tree.
+// Such values need an external owner; map_by_schema lets the caller retain
+// its tree.
 
 // TODO: Move the omni::json mapping contracts to a shared header if
 // another JSON parser is adopted.

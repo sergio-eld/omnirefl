@@ -131,7 +131,7 @@ struct bitfield_flags {
   std::vector<std::pair<std::string, bool>> operator()(Field... field) const {
     // Require a constant expression, including in C++11.
     return {{field.name(),
-      std::integral_constant<bool, Field::is_bitfield()>::value}...};
+      omni::compat::bool_constant<Field::is_bitfield()>::value}...};
   }
 };
 

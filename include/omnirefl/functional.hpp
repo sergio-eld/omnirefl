@@ -153,7 +153,7 @@ struct is_base_of_integral_constant:
 
 template <typename Predicate>
 using compile_time_result =
-  std::integral_constant<bool, static_cast<bool>(compat::invoke(Predicate{}))>;
+  compat::bool_constant<static_cast<bool>(compat::invoke(Predicate{}))>;
 
 template <typename Predicate, typename = void>
 struct is_compile_time_predicate: std::false_type {};
@@ -762,8 +762,7 @@ struct matches_any<Key,
   Left,
   Right,
   compat::index_sequence<Index, Remaining...>>:
-    std::integral_constant<bool,
-      Key{}.template operator()<Left>()
+    compat::bool_constant<Key{}.template operator()<Left>()
           == Key{}.template
           operator()<decltype(compat::detail::tuple_get<Index>(
             std::declval<Right>()))>()
@@ -1065,7 +1064,7 @@ constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
 /// Select static data-member or function metadata and bindings in `filter`.
 template <typename Member>
 struct is_static
-  : std::integral_constant<bool, compat::remove_cvref_t<Member>::is_static()> {};
+  : compat::bool_constant<compat::remove_cvref_t<Member>::is_static()> {};
 
 /// Select non-static data-member or function metadata and bindings in `filter`.
 template <typename Member>

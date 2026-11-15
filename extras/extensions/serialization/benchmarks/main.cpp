@@ -4,21 +4,21 @@ namespace {
 
 void tree_mapping_nested_json(benchmark::State &state) {
   serialization_benchmark::deserialize_preparsed(state,
-    omni::fn::partial(omni::ryml::map_tree,
+    omni::fn::partial(omni::ryml::map_by_schema,
       omni::type_t<serialization_data::nested_record>{}),
     serialization_data::nested_json);
 }
 
 void tree_mapping_document_json(benchmark::State &state) {
   serialization_benchmark::deserialize_preparsed(state,
-    omni::fn::partial(omni::ryml::map_tree,
+    omni::fn::partial(omni::ryml::map_by_schema,
       omni::type_t<serialization_data::document>{}),
     serialization_data::representative_json);
 }
 
 void tree_mapping_document_yaml(benchmark::State &state) {
   serialization_benchmark::deserialize_preparsed(state,
-    omni::fn::partial(omni::ryml::map_tree,
+    omni::fn::partial(omni::ryml::map_by_schema,
       omni::type_t<serialization_data::document>{}),
     serialization_data::representative_yaml);
 }
@@ -56,7 +56,7 @@ void tree_mapping_invalid_elements(benchmark::State &state) {
   }
 
   const auto map =
-    omni::ryml::map_tree.tdm_config([count](omni::ryml::config_t<> s) {
+    omni::ryml::map_by_schema.tdm_config([count](omni::ryml::config_t<> s) {
       s.error_policy.error_limit = static_cast<std::uint16_t>(count);
       return s;
     });
