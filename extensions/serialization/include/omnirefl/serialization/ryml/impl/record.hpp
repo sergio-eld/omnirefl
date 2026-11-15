@@ -12,19 +12,6 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-template <typename State>
-struct cpp11_write_member {
-  ::ryml::NodeRef &node;
-  State context;
-
-  template <typename Record, typename _F>
-  void operator()(omni::data_member_binding_t<Record, _F> field) const {
-    auto child = this->node.append_child();
-    child.set_key_serialized(field.name());
-    core::write_node(field.value(), child, this->context);
-  }
-};
-
 // Pending members retain their selected input node. Canonical presence is
 // known before classification, so aliases can be ignored regardless of order.
 struct record_entry {
@@ -146,26 +133,22 @@ struct cpp11_fold_member {
   }
 };
 
+template <typename State>
+struct cpp11_write_member {
+  ::ryml::NodeRef &node;
+  State context;
+
+  template <typename Record, typename _F>
+  void operator()(omni::data_member_binding_t<Record, _F> field) const {
+    auto child = this->node.append_child();
+    child.set_key_serialized(field.name());
+    core::write_node(field.value(), child, this->context);
+  }
+};
+
 } // namespace detail
 
 namespace reflected_scope {
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    omni::is_reflected_record<T>>::value))
-auto from_record::operator()(const T &value,
-  ::ryml::NodeRef node,
-  State context) const
-  -> void {
-  node.set_map();
-  const auto binding = omni::meta_for<T>::bind(value);
-  binding.accessible_data_members()
-    | fn::filter<fn::non_static>()
-    | fn::each(omni::ryml::detail::cpp11_write_member<State>{
-      /*node=*/node,
-      /*context=*/context,
-    });
-}
 
 template <typename NameByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -175,7 +158,7 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
-  auto result = detail::make_node_accumulator(context);
+  auto result = omni::ryml::detail::make_node_accumulator(context);
   if (!node.is_map()) {
     result.report(omni::ryml::detail::make_issue(
       json::issue_code::unexpected_kind,
@@ -189,9 +172,9 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   const auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter<fn::non_static>();
 
-  std::vector<detail::record_entry> pending;
+  std::vector<omni::ryml::detail::record_entry> pending;
   pending.reserve(std::tuple_size<decltype(fields)>::value);
-  fields | fn::each(detail::cpp11_collect_members{
+  fields | fn::each(omni::ryml::detail::cpp11_collect_members{
     /*node=*/node,
     /*pending=*/pending,
   });
@@ -206,7 +189,7 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
     const compat::string_view input_name{name.str, name.len};
     auto entry = std::find_if(pending.begin(),
       pending.end(),
-      [input_name](const detail::record_entry &entry) {
+      [input_name](const omni::ryml::detail::record_entry &entry) {
         return input_name == entry.name;
       });
 
@@ -215,7 +198,7 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
         compat::invoke(this->name_by_alias, input_name)) {
         entry = std::find_if(pending.begin(),
           pending.end(),
-          [canonical](const detail::record_entry &entry) {
+          [canonical](const omni::ryml::detail::record_entry &entry) {
             return *canonical == entry.name;
           });
       }
@@ -275,20 +258,37 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
     | fn::filter<fn::non_static>();
 
   const auto events = fn::concat(
-    members | fn::map(detail::cpp11_defer_member{
+    members | fn::map(omni::ryml::detail::cpp11_defer_member{
       /*pending=*/pending,
       /*check_presence=*/true,
     }),
 
-    members | fn::map(detail::cpp11_defer_member{
+    members | fn::map(omni::ryml::detail::cpp11_defer_member{
       /*pending=*/pending,
       /*check_presence=*/false,
     }));
 
-  auto folded = events | fn::try_fold(detail::cpp11_fold_member{},
+  auto folded = events | fn::try_fold(omni::ryml::detail::cpp11_fold_member{},
     fn::continue_with(std::move(result)));
 
   return std::move(folded.value).finish();
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    omni::is_reflected_record<T>>::value))
+auto from_record_t::operator()(const T &value,
+  ::ryml::NodeRef node,
+  State context) const
+  -> void {
+  node.set_map();
+  const auto binding = omni::meta_for<T>::bind(value);
+  binding.accessible_data_members()
+    | fn::filter<fn::non_static>()
+    | fn::each(omni::ryml::detail::cpp11_write_member<State>{
+      /*node=*/node,
+      /*context=*/context,
+    });
 }
 
 } // namespace reflected_scope

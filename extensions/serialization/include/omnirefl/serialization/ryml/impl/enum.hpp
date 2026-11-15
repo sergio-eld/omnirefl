@@ -7,24 +7,6 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    omni::is_reflected_enum<T>>::value))
-auto from_enum::operator()(T value, ::ryml::NodeRef node, State) const -> void {
-  const auto enumerators = omni::meta_for<T>::enumerators();
-  using enumerator_type = typename decltype(enumerators)::value_type;
-  const auto found = std::find_if(enumerators.begin(),
-    enumerators.end(),
-    [value](const enumerator_type &enumerator) {
-      return value == enumerator.first;
-    });
-
-  if (found != enumerators.end()) {
-    node.set_serialized(c4::to_csubstr(found->second));
-    node.set_val_style(::ryml::VAL_DQUO);
-  }
-}
-
 template <typename ValueByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<is_read_state<State>,
@@ -84,6 +66,24 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
 
   *into = found->first;
   return std::move(result).finish();
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    omni::is_reflected_enum<T>>::value))
+auto from_enum_t::operator()(T value, ::ryml::NodeRef node, State) const -> void {
+  const auto enumerators = omni::meta_for<T>::enumerators();
+  using enumerator_type = typename decltype(enumerators)::value_type;
+  const auto found = std::find_if(enumerators.begin(),
+    enumerators.end(),
+    [value](const enumerator_type &enumerator) {
+      return value == enumerator.first;
+    });
+
+  if (found != enumerators.end()) {
+    node.set_serialized(c4::to_csubstr(found->second));
+    node.set_val_style(::ryml::VAL_DQUO);
+  }
 }
 
 } // namespace reflected_scope

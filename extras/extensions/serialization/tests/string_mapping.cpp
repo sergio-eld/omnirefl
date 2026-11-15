@@ -67,14 +67,14 @@ struct assign_string<string_mapping::converted_text> {
 namespace {
 
 TEST(string_mapping, requires_both_operations) {
-  EXPECT_TRUE(omni::traits::is_string<
+  EXPECT_TRUE(omni::traits::is_string_like<
     string_mapping::basic_text<char>>::value);
   // Reading const strings is valid; assigning to them is not.
-  EXPECT_FALSE(omni::traits::is_string<const std::string>::value);
-  EXPECT_FALSE(omni::traits::is_string<std::vector<char>>::value);
-  EXPECT_FALSE(omni::traits::is_string<int>::value);
-  EXPECT_FALSE(omni::traits::is_string<int *>::value);
-  EXPECT_FALSE(omni::traits::is_string<
+  EXPECT_FALSE(omni::traits::is_string_like<const std::string>::value);
+  EXPECT_FALSE(omni::traits::is_string_like<std::vector<char>>::value);
+  EXPECT_FALSE(omni::traits::is_string_like<int>::value);
+  EXPECT_FALSE(omni::traits::is_string_like<int *>::value);
+  EXPECT_FALSE(omni::traits::is_string_like<
     string_mapping::basic_text<wchar_t>>::value);
 }
 

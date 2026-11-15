@@ -169,6 +169,14 @@ struct type_identity {
   using type = T;
 };
 
+// C++14 provides the standard alias; the fallback keeps it usable in C++11.
+#if OMNI_CPLUSPLUS >= 201402L
+using std::remove_cv_t;
+#else
+template <typename T>
+using remove_cv_t = typename std::remove_cv<T>::type;
+#endif
+
 // decay_t
 #if OMNI_CPLUSPLUS >= 201402L
 using std::decay_t;

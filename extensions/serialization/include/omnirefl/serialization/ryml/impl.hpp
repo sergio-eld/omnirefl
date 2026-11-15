@@ -1,182 +1,20 @@
 #pragma once
 
-// FIXME: [low] Freestanding: parse-error recovery requires setjmp/longjmp,
-// which are not guaranteed by a freestanding implementation.
+// FIXME: [low] [external] Freestanding: RapidYAML documents setjmp/longjmp
+// for parse-error recovery without exceptions; freestanding implementations
+// need not provide these functions.
 
 #include <c4/std/string.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <csetjmp>
 #include <iterator>
 #include <type_traits>
 
 namespace omni {
 namespace ryml {
-namespace detail {
-
-// Built-ins stay separate from registrations so a user override never competes
-// with a matching default partial specialization.
-template <typename T, typename>
-struct default_from_type {
-  using type = typename std::conditional<omni::is_reflected_record<T>::value,
-    reflected_scope::from_record,
-    traits::cp::unavailable>::type;
-};
-
-template <typename T>
-struct default_from_type<T,
-  compat::enable_if_t<from_string_like::supports<T>()>> {
-  using type = from_string_like;
-};
-
-template <typename T>
-struct default_from_type<T,
-  compat::enable_if_t<from_arithmetic::supports<T>()>> {
-  using type = from_arithmetic;
-};
-
-template <typename T>
-struct default_from_type<T,
-  compat::enable_if_t<from_optional_like::supports<T>()>> {
-  using type = from_optional_like;
-};
-
-template <typename T>
-struct default_from_type<T,
-  compat::enable_if_t<from_range_t::supports<T>()>> {
-  using type = from_range_t;
-};
-
-template <typename T>
-struct default_from_type<T,
-  compat::enable_if_t<reflected_scope::from_enum::supports<T>()>> {
-  using type = reflected_scope::from_enum;
-};
-
-// Built-ins stay separate from registrations so a user override never competes
-// with a matching default partial specialization.
-template <typename T, typename>
-struct default_to_type {
-  using type = typename std::conditional<omni::is_reflected_record<T>::value,
-    reflected_scope::to_record_t<>,
-    traits::cp::unavailable>::type;
-};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_string_like::supports<T>()>> {
-  using type = to_string_like;
-};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_arithmetic::supports<T>()>> {
-  using type = to_arithmetic;
-};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_optional_like::supports<T>()>> {
-  using type = to_optional_like;
-};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_range_t::supports<T>()>> {
-  using type = to_range_t;
-};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>> {
-  using type = reflected_scope::to_enum_t<>;
-};
-
-template <typename T, bool Struct, bool Variable>
-struct from_type_case {
-  using type = cp::from_type_t<T>;
-  static constexpr type get() { return {}; }
-};
-
-// Read the registered object so its configured state is preserved.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-template <typename T>
-struct from_type_case<T, false, true> {
-  using type = compat::remove_cvref_t<decltype(cp::from_type<T>)>;
-  static constexpr type get() { return cp::from_type<T>; }
-};
-#endif
-
-template <typename T>
-struct from_type_case<T, false, false> {
-  using type = default_from_type_t<T>;
-  static constexpr type get() { return {}; }
-};
-
-template <typename T>
-struct from_type_selection_t {
-  static constexpr bool has_struct =
-    !std::is_base_of<traits::cp::unavailable, cp::from_type_t<T>>::value;
-
-// C++11 registers structs; C++14 also allows callable variable templates.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-  static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
-    compat::remove_cvref_t<decltype(cp::from_type<T>)>>::value;
-#else
-  static constexpr bool has_variable = false;
-#endif
-
-  using selected = from_type_case<T, has_struct, has_variable>;
-  using type = typename selected::type;
-};
-
-template <typename T, bool Struct, bool Variable>
-struct to_type_case {
-  using type = cp::to_type_t<T>;
-  static constexpr type get() { return {}; }
-};
-
-// Read the registered object so its configured state is preserved.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-template <typename T>
-struct to_type_case<T, false, true> {
-  using type = compat::remove_cvref_t<decltype(cp::to_type<T>)>;
-  static constexpr type get() { return cp::to_type<T>; }
-};
-#endif
-
-template <typename T>
-struct to_type_case<T, false, false> {
-  using type = default_to_type_t<T>;
-  static constexpr type get() { return {}; }
-};
-
-template <typename T>
-struct to_type_selection_t {
-  static constexpr bool has_struct =
-    !std::is_base_of<traits::cp::unavailable, cp::to_type_t<T>>::value;
-
-// C++11 registers structs; C++14 also allows callable variable templates.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-  static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
-    compat::remove_cvref_t<decltype(cp::to_type<T>)>>::value;
-#else
-  static constexpr bool has_variable = false;
-#endif
-
-  using selected = to_type_case<T, has_struct, has_variable>;
-  using type = typename selected::type;
-};
-
-} // namespace detail
-
 namespace core {
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value))
-void write_node(const T &value, ::ryml::NodeRef node, State context) {
-  omni::ryml::from_type(omni::type_t<T>{})(value, node, context);
-}
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
@@ -186,26 +24,20 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
   if (context.limit_exceeded())
     result.result.value.reset();
   else
-    result.append(omni::ryml::to_type(omni::type_t<T>{})(node, into, context));
+    result.append(reflected_scope::mapping_to_type(omni::type_t<T>{})(
+      node, into, context));
 
   return std::move(result).finish();
 }
 
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(const T &value, ::ryml::NodeRef node, State context) {
+  reflected_scope::mapping_from_type(omni::type_t<T>{})(
+    value, node, context);
+}
+
 namespace detail {
-
-template <typename State, typename T>
-struct cpp11_lambda_write {
-  const T &value;
-
-  template <typename _M, omni::reflected_entity Entity>
-  ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
-    ::ryml::Tree tree;
-    const State context{};
-
-    core::write_node(this->value, tree.rootref(), context);
-    return tree;
-  }
-};
 
 template <typename T, typename State>
 struct cpp11_lambda_read {
@@ -222,6 +54,20 @@ struct cpp11_lambda_read {
   }
 };
 
+template <typename State, typename T>
+struct cpp11_lambda_write {
+  const T &value;
+
+  template <typename _M, omni::reflected_entity Entity>
+  ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
+    ::ryml::Tree tree;
+    const State context{};
+
+    core::write_node(this->value, tree.rootref(), context);
+    return tree;
+  }
+};
+
 } // namespace detail
 
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
@@ -235,7 +81,8 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
     ::ryml::Location location;
   } error{};
 
-  // ryml documents jump recovery for its non-returning error callbacks.
+  // RapidYAML Quickstart, sample_error_handler(): non-returning error recovery.
+  // https://rapidyaml.readthedocs.io/latest/doxygen/group__doc__quickstart.html
   // Both the parser and tree can report syntax errors during parsing.
   ::ryml::EventHandlerTree handler{
     ::ryml::Callbacks{}.set_user_data(&error).set_error_parse(
@@ -336,10 +183,11 @@ struct map_by_schema_case<Discovery, false, true> {
 } // namespace detail
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value))
-auto map_by_schema(const Config &options, omni::type_t<T>,
-  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
-  auto value = compat::make_optional<T>();
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, T *into, ::ryml::ConstNodeRef node)
+  -> with_diagnostics_t<compat::monostate> {
+  assert(into);
   const read_state_t<Config> context{
     /*config=*/options,
     /*path=*/{},
@@ -347,8 +195,25 @@ auto map_by_schema(const Config &options, omni::type_t<T>,
     /*warning_count=*/0,
   };
 
-  auto mapped = detail::map_by_schema_case<compat::remove_cvref_t<T>>::map(
-    node, &*value, context);
+  return detail::map_by_schema_case<compat::remove_cvref_t<T>>::map(
+    node, into, context);
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, T *into, const ::ryml::Tree &tree)
+  -> with_diagnostics_t<compat::monostate> {
+  return map_by_schema(options, into, tree.crootref());
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, omni::type_t<T>,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
+  auto value = compat::make_optional<T>();
+  auto mapped = map_by_schema(options, &*value, node);
   return {
     /*value=*/mapped.value ? std::move(value) : compat::nullopt,
     /*diagnostics=*/std::move(mapped.diagnostics),
@@ -356,38 +221,75 @@ auto map_by_schema(const Config &options, omni::type_t<T>,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value))
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
 auto map_by_schema(const Config &options, omni::type_t<T> type,
   const ::ryml::Tree &tree) -> with_diagnostics_t<T> {
   return map_by_schema(options, type, tree.crootref());
 }
 
+namespace detail {
+
+// Both overloads transform syntax-error diagnostics while an empty tree
+// remains alive for the configured callback.
+OMNI_CONSTRAINED_TEMPLATE((typename Config), (is_config<Config>::value))
+auto parse_error_diagnostics(Config &&options, std::string message)
+  -> diagnostics_result_t<Config> {
+  const ::ryml::Tree tree{/*node_capacity=*/0, /*arena_capacity=*/0};
+  diagnostics report{
+    /*config=*/{options.error_policy, {}},
+    /*issues=*/{
+      omni::ryml::detail::make_issue(json::issue_code::parse_error,
+        json::value_kind::unknown, ::ryml::ConstNodeRef{}, /*path=*/{}),
+    },
+    /*parse_error_message=*/std::move(message),
+  };
+
+  return compat::invoke(std::forward<Config>(options).transform_diagnostics,
+    tree, std::move(report));
+}
+
+} // namespace detail
+
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename Record),
-  (is_config<Config>::value))
+  (is_config<Config>::value && std::is_object<Record>::value
+    && !std::is_const<Record>::value))
 auto deserialize(Config &&options, omni::type_t<Record> record_type,
   std::string source)
   -> with_diagnostics_t<Record, diagnostics_result_t<Config>> {
   auto parsed = omni::ryml::core::parse(std::move(source));
-  if (!parsed) {
-    const ::ryml::Tree tree{/*node_capacity=*/0, /*arena_capacity=*/0};
-    diagnostics report{
-      /*config=*/{options.error_policy, {}},
-      /*issues=*/{
-        omni::ryml::detail::make_issue(json::issue_code::parse_error,
-          json::value_kind::unknown, ::ryml::ConstNodeRef{}, /*path=*/{}),
-      },
-      /*parse_error_message=*/std::move(parsed.error()),
-    };
-
+  if (!parsed)
     return {
       /*value=*/compat::nullopt,
-      /*diagnostics=*/compat::invoke(
-        std::forward<Config>(options).transform_diagnostics, tree,
-        std::move(report)),
+      /*diagnostics=*/detail::parse_error_diagnostics(
+        std::forward<Config>(options), std::move(parsed.error())),
     };
-  }
 
   auto mapped = map_by_schema(options, record_type, parsed->crootref());
+  return {
+    /*value=*/std::move(mapped.value),
+    /*diagnostics=*/compat::invoke(
+      std::forward<Config>(options).transform_diagnostics,
+      static_cast<const ::ryml::Tree &>(*parsed),
+      std::move(mapped.diagnostics)),
+  };
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto deserialize(Config &&options, T *into, std::string source)
+  -> with_diagnostics_t<compat::monostate, diagnostics_result_t<Config>> {
+  assert(into);
+  auto parsed = omni::ryml::core::parse(std::move(source));
+  if (!parsed)
+    return {
+      /*value=*/compat::nullopt,
+      /*diagnostics=*/detail::parse_error_diagnostics(
+        std::forward<Config>(options), std::move(parsed.error())),
+    };
+
+  auto mapped = map_by_schema(options, into, parsed->crootref());
   return {
     /*value=*/std::move(mapped.value),
     /*diagnostics=*/compat::invoke(

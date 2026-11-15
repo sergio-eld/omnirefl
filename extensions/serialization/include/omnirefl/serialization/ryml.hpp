@@ -14,7 +14,7 @@
  * containers. Customization points adapt other types and representations.
  *
  * This header supplies the complete public interface, including configuration,
- * read/write states, and default mappers. core::parse and map_by_schema also
+ * read/write states, and default type mappings. core::parse and map_by_schema also
  * support composing parsing and schema-driven mapping explicitly.
  *
  * Compatible with C++11 and later; examples use C++20 syntax for brevity.
@@ -41,7 +41,7 @@ if (result.value) {
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
-#include <omnirefl/serialization/ryml/mapping.hpp>
+#include <omnirefl/serialization/ryml/type_mapping.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -51,29 +51,7 @@ if (result.value) {
 #include <utility>
 
 namespace omni {
-namespace traits {
-namespace cp {
-
-// c4 views use the same operation customization points as user strings.
-template <>
-struct as_string<c4::csubstr> {
-  constexpr compat::string_view operator()(c4::csubstr value) const {
-    return {value.str, value.len};
-  }
-};
-
-template <>
-struct assign_string<c4::csubstr> {
-  void operator()(c4::csubstr *into, compat::string_view text) const {
-    *into = {text.data(), text.size()};
-  }
-};
-
-} // namespace cp
-} // namespace traits
-
 namespace ryml {
-
 namespace cp {
 
 /** Ad hoc discovery override for types inheriting standard-library containers.
@@ -95,156 +73,11 @@ struct omni::ryml::cp::reflect_as_root<tagged_values>: std::true_type {};
 template <typename T>
 struct reflect_as_root:
     compat::negation<compat::disjunction<std::is_arithmetic<T>,
-      traits::is_string<T>,
+      traits::is_string_like<T>,
       detail::is_mapped_range<T>,
       traits::is_optional<T>>> {};
 
-/** C++11 C++-to-node customization; unregistered types use a default mapper.
- * A scalar wrapper can delegate conversion to its wrapped value:
- *
-```cpp
-struct counter { int value; };
-
-template <>
-struct omni::ryml::cp::from_type_t<counter> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_write_state<State>::value))
-  void operator()(const counter &value, ::ryml::NodeRef node,
-    State context) const {
-    omni::ryml::core::write_node(value.value, node, context);
-  }
-};
-``` */
-template <typename T, typename Enable = void>
-struct from_type_t: traits::cp::unavailable {};
-
-// C++14 adds variable-template registration for serialization callables.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-/** C++-to-node callable customization. Register either this variable template
- * or from_type_t for a given type; the dispatcher selects a default otherwise.
- */
-template <typename T, typename Enable = void>
-constexpr traits::cp::unavailable from_type{};
-#endif
-
-/** Node-to-C++ callable customization. Unregistered types use the default
- * compositor. Register either this struct or the variable template.
- *
-```cpp
-struct counter { int value; };
-
-template <>
-struct omni::ryml::cp::to_type_t<counter> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, counter *into,
-    State context) const
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::core::read_node(node, &into->value, context);
-  }
-};
-``` */
-template <typename T, typename Enable = void>
-struct to_type_t: traits::cp::unavailable {};
-
-// Callable variable-template registration is available starting with C++14.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-/** Callable variable-template customization, available since C++14.
- * The selected const object is copied when mapping a node. Configured default
- * compositors can be registered directly:
- *
-```cpp
-struct endpoint { int port; };
-
-template <>
-const auto omni::ryml::cp::to_type<endpoint> =
-  omni::ryml::reflected_scope::to_record.with_name_by_alias(
-    omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
-``` */
-template <typename T, typename Enable = void>
-constexpr traits::cp::unavailable to_type{};
-#endif
-
 } // namespace cp
-
-namespace detail {
-
-// Default and registration selection remains dependent on the mapped type.
-template <typename T, typename = void>
-struct default_from_type;
-
-template <typename T, typename = void>
-struct default_to_type;
-
-template <typename T>
-struct from_type_selection_t;
-
-template <typename T>
-struct to_type_selection_t;
-
-} // namespace detail
-
-/** Built-in C++-to-node mapper for T, bypassing user registrations.
- * Reuse this in a customization without re-entering from_type dispatch.
- * Reflected defaults require metadata available in reflected scope.
- * Resolves to traits::cp::unavailable when no built-in mapping applies. */
-template <typename T>
-using default_from_type_t = typename detail::default_from_type<T>::type;
-
-/** Built-in node-to-C++ mapper for T, bypassing user registrations.
- * Reuse this in a customization without re-entering to_type dispatch.
- * Reflected defaults require metadata available in reflected scope.
- * Resolves to traits::cp::unavailable when no built-in mapping applies. */
-template <typename T>
-using default_to_type_t = typename detail::default_to_type<T>::type;
-
-/** Return the registered C++-to-node callable by value, or the default
- * compositor when neither customization is registered. Selected callables
- * must be trivially copyable and copy-constructible. Registration conflicts
- * and missing mappings are diagnosed here, before invoking the mapper. */
-template <typename T>
-constexpr auto from_type(omni::type_t<T>)
-  -> typename detail::from_type_selection_t<T>::type {
-  using selection = detail::from_type_selection_t<T>;
-  using mapper = typename selection::type;
-
-  static_assert(!(selection::has_struct && selection::has_variable),
-    "Conflicting value mappings: specialize either cp::from_type_t or "
-    "cp::from_type, not both");
-
-  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
-    "No value mapping: specialize cp::from_type_t or cp::from_type");
-
-  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
-      std::is_copy_constructible<mapper>>::value,
-    "Value mappers must be trivially copyable and copy-constructible");
-
-  return selection::selected::get();
-}
-
-/** Return the registered node-to-C++ callable by value, or the default
- * compositor when neither customization is registered. Selected callables
- * must be trivially copyable and copy-constructible. Registration conflicts
- * and missing mappings are diagnosed here, before invoking the mapper. */
-template <typename T>
-constexpr auto to_type(omni::type_t<T>)
-  -> typename detail::to_type_selection_t<T>::type {
-  using selection = detail::to_type_selection_t<T>;
-  using mapper = typename selection::type;
-
-  static_assert(!(selection::has_struct && selection::has_variable),
-    "Conflicting node mappings: specialize either cp::to_type_t or "
-    "cp::to_type, not both");
-
-  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
-    "No node mapping: specialize cp::to_type_t or cp::to_type");
-
-  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
-      std::is_copy_constructible<mapper>>::value,
-    "Node mapping callables must be trivially copyable and copy-constructible");
-
-  return selection::selected::get();
-}
 
 namespace core {
 
@@ -283,29 +116,70 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
  * while using borrowed values or rendering the returned diagnostics.
  * The diagnostics transformation in config is not applied by map_by_schema. */
 OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
-  (is_config<Config>::value))
+  (is_config<Config>::value && std::is_object<Record>::value
+    && !std::is_const<Record>::value))
 auto map_by_schema(const Config &options, omni::type_t<Record> record_type,
   ::ryml::ConstNodeRef node) -> with_diagnostics_t<Record>;
 
 OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
-  (is_config<Config>::value))
+  (is_config<Config>::value && std::is_object<Record>::value
+    && !std::is_const<Record>::value))
 auto map_by_schema(const Config &options, omni::type_t<Record> record_type,
   const ::ryml::Tree &tree) -> with_diagnostics_t<Record>;
 
 // Mapping borrows the tree; a temporary cannot outlive the returned result.
 OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
-  (is_config<Config>::value))
+  (is_config<Config>::value && std::is_object<Record>::value
+    && !std::is_const<Record>::value))
 void map_by_schema(const Config &, omni::type_t<Record>,
   const ::ryml::Tree &&) = delete;
+
+/** Map document nodes into *into, traversing its schema over the document.
+ * Successfully mapped ranges replace their existing contents. Mapping errors
+ * leave the destination state unspecified and may produce partial updates.
+ * value holds monostate only when mapping succeeds.
+ * @pre into must be non-null and node must be valid. The caller retains the
+ * tree and character storage while using borrowed values or diagnostics.
+ * The diagnostics transformation in config is not applied. */
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, T *into, ::ryml::ConstNodeRef node)
+  -> with_diagnostics_t<compat::monostate>;
+
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, T *into, const ::ryml::Tree &tree)
+  -> with_diagnostics_t<compat::monostate>;
+
+// Mapping borrows the tree; its storage must outlive the returned diagnostics.
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+void map_by_schema(const Config &, T *, const ::ryml::Tree &&) = delete;
 
 /** Deserialize JSON/YAML text into the C++ type selected by record_type.
  * Return an optional value together with transformed diagnostics.
  */
 OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
-  (is_config<Config>::value))
+  (is_config<Config>::value && std::is_object<Record>::value
+    && !std::is_const<Record>::value))
 auto deserialize(Config &&options, omni::type_t<Record> record_type,
   std::string source)
   -> with_diagnostics_t<Record, diagnostics_result_t<Config>>;
+
+/** Deserialize JSON/YAML text into *into, returning transformed diagnostics.
+ * Successfully mapped ranges replace their existing contents. Syntax errors
+ * leave *into unchanged; on mapping failure, its state is unspecified and may
+ * contain partial updates.
+ * value holds monostate only when mapping succeeds.
+ * @pre into must be non-null. */
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto deserialize(Config &&options, T *into, std::string source)
+  -> with_diagnostics_t<compat::monostate, diagnostics_result_t<Config>>;
 
 /** Build an owning RapidYAML tree from reflected records, supported scalars,
  * vectors, and optionals. Empty optionals produce null nodes; empty optional
@@ -363,21 +237,43 @@ struct map_by_schema_t {
     };
   }
 
-  template <typename Record>
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
   with_diagnostics_t<Record> operator()(omni::type_t<Record> record_type,
     const ::ryml::Tree &tree) const {
     return core::map_by_schema(this->config, record_type, tree);
   }
 
-  template <typename Record>
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
   with_diagnostics_t<Record> operator()(omni::type_t<Record> record_type,
     ::ryml::ConstNodeRef node) const {
     return core::map_by_schema(this->config, record_type, node);
   }
 
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  auto operator()(T *into, const ::ryml::Tree &tree) const
+    -> decltype(core::map_by_schema(this->config, into, tree)) {
+    return core::map_by_schema(this->config, into, tree);
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  auto operator()(T *into, ::ryml::ConstNodeRef node) const
+    -> decltype(core::map_by_schema(this->config, into, node)) {
+    return core::map_by_schema(this->config, into, node);
+  }
+
   // Reject temporary trees: returned values and diagnostics may borrow storage.
-  template <typename Record>
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
   void operator()(omni::type_t<Record>, const ::ryml::Tree &&) const = delete;
+
+  // Existing-object mapping also returns diagnostics borrowing the tree.
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  void operator()(T *, const ::ryml::Tree &&) const = delete;
 };
 
 const map_by_schema_t<> map_by_schema{};
@@ -418,21 +314,24 @@ struct deserialize_t {
     };
   }
 
-  template <typename Record>
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) &
     -> decltype(core::deserialize(this->config, record_type,
       std::move(source))) {
     return core::deserialize(this->config, record_type, std::move(source));
   }
 
-  template <typename Record>
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) const &
     -> decltype(core::deserialize(this->config, record_type,
       std::move(source))) {
     return core::deserialize(this->config, record_type, std::move(source));
   }
 
-  template <typename Record>
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) &&
     -> decltype(core::deserialize(std::move(this->config), record_type,
       std::move(source))) {
@@ -440,9 +339,27 @@ struct deserialize_t {
       std::move(source));
   }
 
-  // TODO: Add T *into overloads here and in core::deserialize to map into an
-  // existing object. Define mutation on failure and the result contract;
-  // do not require constructing and assigning a replacement object.
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  auto operator()(T *into, std::string source) &
+    -> decltype(core::deserialize(this->config, into, std::move(source))) {
+    return core::deserialize(this->config, into, std::move(source));
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  auto operator()(T *into, std::string source) const &
+    -> decltype(core::deserialize(this->config, into, std::move(source))) {
+    return core::deserialize(this->config, into, std::move(source));
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  auto operator()(T *into, std::string source) &&
+    -> decltype(core::deserialize(std::move(this->config), into,
+      std::move(source))) {
+    return core::deserialize(std::move(this->config), into, std::move(source));
+  }
 };
 
 const deserialize_t<> deserialize{};
@@ -494,7 +411,6 @@ constexpr serialize_t as_json{
   /*format=*/::ryml::EMIT_JSON,
 };
 
-
 } // namespace ryml
 } // namespace omni
 
@@ -502,12 +418,12 @@ constexpr serialize_t as_json{
 #include <omnirefl/serialization/ryml/impl.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
-static_assert(omni::traits::is_string<std::string>::value,
+static_assert(omni::traits::is_string_like<std::string>::value,
   "std::string must provide the string mapping operations");
-static_assert(omni::traits::is_string<c4::csubstr>::value,
+static_assert(omni::traits::is_string_like<c4::csubstr>::value,
   "c4::csubstr must provide the string mapping operations");
 #if defined(__cpp_lib_string_view)
-static_assert(omni::traits::is_string<std::string_view>::value,
+static_assert(omni::traits::is_string_like<std::string_view>::value,
   "std::string_view must provide the string mapping operations");
 #endif
 

@@ -15,20 +15,9 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-/** Write a declared enumerator name as a quoted scalar. */
-struct from_enum {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::is_reflected_enum<T>::value;
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      omni::is_reflected_enum<T>>::value))
-  auto operator()(T value, ::ryml::NodeRef node, State) const -> void;
-};
-
-/** Deserialize a string-valued node into a reflected enum value.
+/** Deserialize a string-valued node into a reflected enum value without
+ * recursive mapping_to_type dispatch. Direct calls bypass mapping_to_type
+ * selection.
  * Declared enumerator names take precedence over aliases. Invalid node kinds
  * and unknown names produce diagnostics containing the original node value.
  *
@@ -42,11 +31,6 @@ struct from_enum {
 template <typename ValueByAlias = fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_enum_t {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::is_reflected_enum<T>::value;
-  }
-
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<is_read_state<State>,
       omni::is_reflected_enum<T>>::value))
@@ -70,15 +54,25 @@ struct to_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (compat::conjunction<std::is_copy_constructible<compat::decay_t<F>>,
       std::is_constructible<compat::decay_t<F>, F &&>,
-      detail::is_alias_resolver<const compat::decay_t<F>>>::value))
+      omni::ryml::detail::is_alias_resolver<const compat::decay_t<F>>>::value))
   constexpr auto with_value_by_alias(F &&f) const
     -> to_enum_t<compat::decay_t<F>> {
     return {/*value_by_alias=*/std::forward<F>(f)};
   }
 };
 
-/** Default enum deserializer without aliases. */
 constexpr to_enum_t<> to_enum{};
+
+/** Write a declared enumerator name as a quoted scalar without recursive
+ * mapping_from_type dispatch. Direct calls bypass mapping_from_type selection. */
+struct from_enum_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::is_reflected_enum<T>>::value))
+  auto operator()(T value, ::ryml::NodeRef node, State) const -> void;
+};
+
+constexpr from_enum_t from_enum{};
 
 } // namespace reflected_scope
 } // namespace ryml

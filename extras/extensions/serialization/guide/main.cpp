@@ -7,6 +7,7 @@
  *
  * Basics
  *   basics.deserialize_record - default mapping interface and its result
+ *   basics.deserialize_into - update an existing value and replace containers
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
  *   basics.enum_mapping - declared enumerator names as strings
@@ -26,6 +27,7 @@
  *   basics.optional_sequence_elements - omit empty optional elements
  *   basics.key_value_ranges - map string-keyed objects
  *   basics.mapping_result - values, success markers, and structured issues
+ *   basics.fundamental_mapping_results - decode values or assign on success
  *   basics.custom_scalar_mapping
  *     map a wrapper through the default scalar mappers
  *   basics.custom_scalar_mapping_cpp11 - equivalent C++11 struct registration
@@ -153,6 +155,34 @@ TEST(basics, deserialize_record) {
   }
 }
 
+/** Passing a pointer updates an existing value. The result's optional value
+ * holds a success marker (compat::monostate); the mapped data stays in into.
+ * Successfully mapped containers replace their previous contents.
+ * Syntax errors leave into unchanged; mapping errors can retain earlier field
+ * updates. `basics.mapping_result` explains the success marker in more detail. */
+TEST(basics, deserialize_into) {
+  basic_mapping::service into{
+    .name = "old",
+    .upstream = {.host = "stale.example.com", .port = 80},
+    .tags = {"stale"},
+  };
+  const auto result = omni::ryml::deserialize(&into,
+    R"(
+{
+  "name": "gateway",
+  "upstream": {"host": "api.example.com", "port": 443},
+  "tags": []
+}
+)");
+
+  EXPECT_TRUE(result.value.has_value());
+  EXPECT_TRUE(result.diagnostics.empty());
+  EXPECT_EQ("gateway", into.name);
+  EXPECT_EQ("api.example.com", into.upstream.host);
+  EXPECT_EQ(443U, into.upstream.port);
+  EXPECT_TRUE(into.tags.empty());
+}
+
 /** JSON and YAML output represent the same C++ value. as_json and as_yaml
  * select the output format; deserialize accepts either format automatically. */
 TEST(basics, serialize_record) {
@@ -192,6 +222,18 @@ TEST(basics, scalar_and_sequence_roots) {
   EXPECT_TRUE(scalar.value);
   if (scalar.value)
     EXPECT_EQ(42, *scalar.value);
+
+  EXPECT_EQ("true", omni::ryml::as_json(true));
+  const auto boolean = omni::ryml::deserialize(omni::type<bool>, "true");
+  EXPECT_TRUE(boolean.value);
+  if (boolean.value)
+    EXPECT_TRUE(*boolean.value);
+
+  EXPECT_EQ("0.5", omni::ryml::as_json(0.5));
+  const auto real = omni::ryml::deserialize(omni::type<double>, "0.5");
+  EXPECT_TRUE(real.value);
+  if (real.value)
+    EXPECT_DOUBLE_EQ(0.5, *real.value);
 
   const std::vector values{7, 42};
   EXPECT_TRUE(same_document("[7, 42]", omni::ryml::as_json(values)));
@@ -537,11 +579,11 @@ TEST(basics, key_value_ranges) {
  * warnings; an empty .value means failure. The source tree stays alive while
  * its node references and diagnostic paths are used.
  *
- * A node reader updates an existing T through a pointer, so its result uses
+ * A pointer-based node reader updates an existing T, so its result uses
  * with_diagnostics_t<compat::monostate>. The engaged monostate marks success;
  * the decoded object is in the supplied destination. On failure, .value is
- * empty and .diagnostics describes the errors. Partial updates depend on the
- * mapper; failure does not promise rollback.
+ * empty and .diagnostics describes the errors. The destination state is then
+ * unspecified and may contain partial updates; failure promises no rollback.
  *
  * Custom readers return this result to the enclosing mapper, which collects
  * its issues and applies the error/warning limits. Reading state supplies the
@@ -562,6 +604,66 @@ TEST(basics, mapping_result) {
     EXPECT_EQ(42, *result.value);
 }
 
+/** Fundamental readers return a decoded value when given a type tag.
+ * Their pointer overloads adapt the result into an existing destination and
+ * return a success marker. Both forms retain structured diagnostics. */
+TEST(basics, fundamental_mapping_results) {
+  const auto tree = omni::ryml::core::parse(
+    R"({"boolean": true, "integer": 7, "real": 2.5, "text": "hello"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::config_t options{};
+  const omni::ryml::read_state_t state{
+    .config = options,
+    .path = {},
+    .error_count = 0,
+    .warning_count = 0,
+  };
+
+  const auto node = tree->crootref();
+  const auto boolean = omni::ryml::to_boolean(
+    node["boolean"], omni::type<bool>, state);
+  const auto integer = omni::ryml::to_integer(
+    node["integer"], omni::type<int>, state);
+  const auto natural = omni::ryml::to_integer(
+    node["integer"], omni::type<unsigned>, state);
+  const auto real = omni::ryml::to_real(
+    node["real"], omni::type<double>, state);
+  const auto arithmetic = omni::ryml::to_arithmetic(
+    node["integer"], omni::type<int>, state);
+  const auto text = omni::ryml::to_string_like(
+    node["text"], omni::type<std::string>, state);
+  const auto view = omni::ryml::to_string_like(
+    node["text"], omni::type<omni::compat::string_view>, state);
+
+  EXPECT_EQ(true, boolean.value);
+  EXPECT_EQ(7, integer.value);
+  EXPECT_EQ(7U, natural.value);
+  EXPECT_EQ(2.5, real.value);
+  EXPECT_EQ(7, arithmetic.value);
+  EXPECT_EQ("hello", text.value);
+  EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
+
+  int into{};
+  const auto invalid = omni::ryml::to_integer(
+    node["text"], omni::type<int>, state);
+  const auto failed = omni::ryml::to_integer(node["text"], &into, state);
+
+  EXPECT_FALSE(invalid.value);
+  EXPECT_FALSE(failed.value);
+  EXPECT_EQ(omni::ryml::render_diagnostics(*tree, invalid.diagnostics),
+    omni::ryml::render_diagnostics(*tree, failed.diagnostics));
+  EXPECT_FALSE(invalid.diagnostics.issues.empty());
+
+  const auto assigned = omni::ryml::to_integer(node["integer"], &into, state);
+
+  EXPECT_TRUE(assigned.value);
+  EXPECT_TRUE(assigned.diagnostics.issues.empty());
+  EXPECT_EQ(7, into);
+}
+
 namespace basic_customization {
 
 struct my_integer { int value; };
@@ -573,27 +675,27 @@ struct my_integer { int value; };
 // Register one reader and writer per type. The callable form is available
 // since C++14; the struct form below is its C++11 equivalent.
 template <>
-const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
-  [](const basic_customization::my_integer &value,
-    ::ryml::NodeRef node,
-    omni::ryml::write_state_like auto state) -> void {
-    omni::ryml::from_arithmetic{}(value.value, node, state);
-  };
-
-template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_integer> =
   [](::ryml::ConstNodeRef node, basic_customization::my_integer *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_arithmetic{}(node, &into->value, state);
+    return omni::ryml::to_integer(node, &into->value, state);
+  };
+
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
+  [](const basic_customization::my_integer &value,
+    ::ryml::NodeRef node,
+    omni::ryml::write_state_like auto state) -> void {
+    omni::ryml::from_integer(value.value, node, state);
   };
 
 namespace {
 
-/** A wrapper need not map to an object. from_type and to_type select its
+/** A wrapper need not map to an object. to_type and from_type select its
  * representation globally; only one registration form is used per direction.
- * These callables delegate scalar checks and diagnostics to from_arithmetic
- * and to_arithmetic. write_state_like and read_state_like identify each
+ * These callables delegate integer checks and diagnostics to to_integer
+ * and from_integer. write_state_like and read_state_like identify each
  * direction's state without spelling its implementation parameters. The
  * generic signatures delay instantiation until called within reflected scope.
  * `basics.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
@@ -619,17 +721,6 @@ struct my_cpp11_integer { int value; };
 
 // One C++11 equivalent: the same scalar mapping needs named operator() bodies.
 template <>
-struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_write_state<State>::value))
-  void operator()(const basic_customization::my_cpp11_integer &value,
-    ::ryml::NodeRef node,
-    State state) const {
-    omni::ryml::from_arithmetic{}(value.value, node, state);
-  }
-};
-
-template <>
 struct omni::ryml::cp::to_type_t<basic_customization::my_cpp11_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_read_state<State>::value))
@@ -637,13 +728,24 @@ struct omni::ryml::cp::to_type_t<basic_customization::my_cpp11_integer> {
     basic_customization::my_cpp11_integer *into,
     State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_arithmetic{}(node, &into->value, state);
+    return omni::ryml::to_integer(node, &into->value, state);
+  }
+};
+
+template <>
+struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
+  void operator()(const basic_customization::my_cpp11_integer &value,
+    ::ryml::NodeRef node,
+    State state) const {
+    omni::ryml::from_integer(value.value, node, state);
   }
 };
 
 namespace {
 
-/** Before C++14, specialize from_type_t and to_type_t instead of variable
+/** Before C++14, specialize to_type_t and from_type_t instead of variable
  * templates. my_cpp11_integer uses the equivalent named callables above. */
 TEST(basics, custom_scalar_mapping_cpp11) {
   const auto result = omni::ryml::deserialize(
@@ -666,14 +768,6 @@ struct my_container { std::vector<int> values; };
 } // namespace
 
 template <>
-const auto omni::ryml::cp::from_type<basic_customization::my_container> =
-  [](const basic_customization::my_container &value,
-    ::ryml::NodeRef node,
-    omni::ryml::write_state_like auto state) -> void {
-    omni::ryml::from_range(value.values, node, state);
-  };
-
-template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_container> =
   [](::ryml::ConstNodeRef node, basic_customization::my_container *into,
     omni::ryml::read_state_like auto state)
@@ -681,9 +775,17 @@ const auto omni::ryml::cp::to_type<basic_customization::my_container> =
     return omni::ryml::to_range(node, &into->values, state);
   };
 
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_container> =
+  [](const basic_customization::my_container &value,
+    ::ryml::NodeRef node,
+    omni::ryml::write_state_like auto state) -> void {
+    omni::ryml::from_range(value.values, node, state);
+  };
+
 namespace {
 
-/** A container wrapper can reuse from_range and to_range for its elements.
+/** A container wrapper can reuse to_range and from_range for its elements.
  * The default range mappers handle insertion, element mapping, and diagnostics;
  * the specialization only exposes the wrapped container. */
 TEST(basics, custom_container_mapping) {
@@ -708,24 +810,24 @@ struct my_string { std::string value; };
 } // namespace
 
 template <>
-const auto omni::ryml::cp::from_type<basic_customization::my_string> =
-  [](const basic_customization::my_string &value,
-    ::ryml::NodeRef node,
-    omni::ryml::write_state_like auto state) -> void {
-    omni::ryml::from_string_like{}(value.value, node, state);
-  };
-
-template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_string> =
   [](::ryml::ConstNodeRef node, basic_customization::my_string *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_string_like{}(node, &into->value, state);
+    return omni::ryml::to_string_like(node, &into->value, state);
+  };
+
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_string> =
+  [](const basic_customization::my_string &value,
+    ::ryml::NodeRef node,
+    omni::ryml::write_state_like auto state) -> void {
+    omni::ryml::from_string_like(value.value, node, state);
   };
 
 namespace {
 
-/** from_string_like and to_string_like provide the default string mapping.
+/** to_string_like and from_string_like provide the default string mapping.
  * A wrapper can delegate to them using its stored string; custom string APIs
  * can instead adapt the shared string operations. */
 TEST(basics, custom_string_mapping) {
@@ -751,10 +853,6 @@ struct my_record {
 
 } // namespace
 
-template <>
-const auto omni::ryml::cp::from_type<basic_customization::my_record> =
-  omni::ryml::reflected_scope::from_record{};
-
 // Reader signature: (ConstNodeRef, T *, read_state_like)
 //   -> with_diagnostics_t<monostate>.
 // Exposition: spell out state forwarding; direct registration can reuse
@@ -768,9 +866,13 @@ const auto omni::ryml::cp::to_type<basic_customization::my_record> =
     return omni::ryml::reflected_scope::to_record(node, into, state);
   };
 
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_record> =
+  omni::ryml::reflected_scope::from_record;
+
 namespace {
 
-/** from_record and to_record map accessible non-static members. They already
+/** to_record and from_record map accessible non-static members. They already
  * supply the default reflected-record mapping, and remain available for custom
  * registrations. The reader receives the node, destination pointer, and mapping
  * state; it returns success or failure with diagnostics. A custom mapper passes
@@ -1081,22 +1183,22 @@ namespace cp {
 
 // A configured default compositor can be registered without a wrapper.
 template <>
-const auto from_type<customization_mapping::record> =
-  reflected_scope::from_record{};
-
-template <>
 const auto to_type<customization_mapping::record> =
   reflected_scope::to_record.with_name_by_alias(
     alias_dict(std::tuple{"count", "legacy_count"}));
 
 template <>
-const auto from_type<customization_mapping::status> =
-  reflected_scope::from_enum{};
+const auto from_type<customization_mapping::record> =
+  reflected_scope::from_record;
 
 template <>
 const auto to_type<customization_mapping::status> =
   reflected_scope::to_enum.with_value_by_alias(
     alias_dict(std::tuple{"busy", "working"}));
+
+template <>
+const auto from_type<customization_mapping::status> =
+  reflected_scope::from_enum;
 
 /** Ad hoc: inheriting standard containers is discouraged. This custom mapping
  * needs the derived record's metadata as well as container iteration. */
@@ -1106,23 +1208,6 @@ struct reflect_as_root<customization_mapping::extended_values>:
 
 /** Record metadata describes the added fields; container adapters handle the
  * flat representation. The fields occupy its final two positions. */
-template <>
-struct from_type_t<customization_mapping::extended_values> {
-  template <typename T, omni::ryml::write_state_like State>
-  void operator()(const T &value,
-    ::ryml::NodeRef node,
-    State context) const {
-    from_range(value, node, context);
-
-    const auto binding = omni::meta_for<T>::bind(value);
-    binding.accessible_data_members()
-      | fn::each(
-        [&node, context](omni::data_member_binding auto field) -> void {
-          core::write_node(field.value(), node.append_child(), context);
-        });
-  }
-};
-
 template <>
 struct to_type_t<customization_mapping::extended_values> {
   template <typename T, omni::ryml::read_state_like State>
@@ -1162,12 +1247,19 @@ struct to_type_t<customization_mapping::extended_values> {
 };
 
 template <>
-struct from_type_t<customization_mapping::integer> {
-  template <omni::ryml::write_state_like State>
-  void operator()(const customization_mapping::integer &value,
+struct from_type_t<customization_mapping::extended_values> {
+  template <typename T, omni::ryml::write_state_like State>
+  void operator()(const T &value,
     ::ryml::NodeRef node,
     State context) const {
-    core::write_node(value.value, node, context);
+    from_range(value, node, context);
+
+    const auto binding = omni::meta_for<T>::bind(value);
+    binding.accessible_data_members()
+      | fn::each(
+        [&node, context](omni::data_member_binding auto field) -> void {
+          core::write_node(field.value(), node.append_child(), context);
+        });
   }
 };
 
@@ -1196,6 +1288,16 @@ struct to_type_t<customization_mapping::integer> {
 
     into->value = converted;
     return result;
+  }
+};
+
+template <>
+struct from_type_t<customization_mapping::integer> {
+  template <omni::ryml::write_state_like State>
+  void operator()(const customization_mapping::integer &value,
+    ::ryml::NodeRef node,
+    State context) const {
+    core::write_node(value.value, node, context);
   }
 };
 

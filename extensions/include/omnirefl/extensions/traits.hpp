@@ -124,7 +124,18 @@ struct default_has_unique_key<Range,
 namespace cp {
 
 /** Sentinel for an unregistered customization. */
-struct unavailable {};
+struct unavailable {
+  /** Recognize unregistered lookups, including sentinel-derived primaries. */
+  template <typename T>
+  constexpr bool operator==(const T &) const noexcept {
+    return std::is_base_of<unavailable, T>::value;
+  }
+
+  template <typename T>
+  constexpr bool operator!=(const T &value) const noexcept {
+    return !(*this == value);
+  }
+};
 
 /** Adapt text to std::basic_string or compat::basic_string_view.
  * A returned string owns converted characters; a returned view borrows from
@@ -355,10 +366,10 @@ using has_unique_key = cp::has_unique_key<compat::remove_cvref_t<T>>;
  * Customize the operations rather than specializing this detection trait.
  */
 template <typename T, typename = void>
-struct is_string: std::false_type {};
+struct is_string_like: std::false_type {};
 
 template <typename T>
-struct is_string<T,
+struct is_string_like<T,
   compat::void_t<detail::string_storage_t<T>,
     decltype(adapt::assign_string(std::declval<T *>(),
       std::declval<detail::string_view_t<T>>()))>>:

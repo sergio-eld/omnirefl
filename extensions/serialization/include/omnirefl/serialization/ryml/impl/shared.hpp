@@ -12,37 +12,97 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <limits>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
+// c4 views use the same operation customization points as user strings.
+template <>
+struct omni::traits::cp::as_string<c4::csubstr> {
+  constexpr omni::compat::string_view operator()(c4::csubstr value) const {
+    return {value.str, value.len};
+  }
+};
+
+template <>
+struct omni::traits::cp::assign_string<c4::csubstr> {
+  void operator()(c4::csubstr *into, omni::compat::string_view text) const {
+    *into = {text.data(), text.size()};
+  }
+};
+
 namespace omni {
 namespace ryml {
-
 namespace core {
 
 // Mapper bodies delegate recursively through these dispatchers, whose
 // definitions live in the umbrella's implementation header. The first
 // declaration supplies SFINAE defaults; later declarations omit them.
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-  (is_write_state<State>::value))
-void write_node(const T &value, ::ryml::NodeRef node, State state);
-
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(::ryml::ConstNodeRef node, T *into, State state)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(const T &value, ::ryml::NodeRef node, State state);
 
 } // namespace core
 
 namespace detail {
 
+// Before constexpr if, tag dispatch selects among different result types.
+#if !defined(__cpp_if_constexpr) || 201606L > __cpp_if_constexpr
+template <bool FirstAvailable, bool SecondAvailable>
+struct first_available_case {
+  template <typename First, typename Second, typename Third>
+  static constexpr First get(const First &first, const Second &,
+    const Third &) { return first; }
+};
+
+template <>
+struct first_available_case<false, true> {
+  template <typename First, typename Second, typename Third>
+  static constexpr Second get(const First &, const Second &second,
+    const Third &) { return second; }
+};
+
+template <>
+struct first_available_case<false, false> {
+  template <typename First, typename Second, typename Third>
+  static constexpr Third get(const First &, const Second &,
+    const Third &third) { return third; }
+};
+#endif
+
+// Return the first registered mapping, or the default (possibly unavailable).
+template <typename First, typename Second, typename Third>
+constexpr auto first_available(const First &first, const Second &second,
+  const Third &third)
+  OMNI_CPP11_TRAILING_RETURN(decltype(first_available_case<
+    !std::is_base_of<traits::cp::unavailable, First>::value,
+    !std::is_base_of<traits::cp::unavailable, Second>::value>
+      ::get(first, second, third))) {
+#if defined(__cpp_if_constexpr) && 201606L <= __cpp_if_constexpr
+  if constexpr (!std::is_base_of<traits::cp::unavailable, First>::value)
+    return first;
+  else if constexpr (!std::is_base_of<traits::cp::unavailable, Second>::value)
+    return second;
+  else
+    return third;
+#else
+  return first_available_case<
+    !std::is_base_of<traits::cp::unavailable, First>::value,
+    !std::is_base_of<traits::cp::unavailable, Second>::value>
+      ::get(first, second, third);
+#endif
+}
+
 // Strings remain scalar mappings even though they also model input ranges.
 template <typename T>
 struct is_mapped_range:
     compat::conjunction<compat::is_input_range<T>,
-      compat::negation<traits::is_string<compat::remove_cvref_t<T>>>> {};
+      compat::negation<traits::is_string_like<compat::remove_cvref_t<T>>>> {};
 
 template <typename T,
   bool Optional = traits::is_optional<T>::value,
@@ -422,33 +482,6 @@ compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
 
   return value;
 }
-
-struct write_integer {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    node->set_serialized(value);
-  }
-};
-
-struct write_boolean {
-  void operator()(bool value, ::ryml::NodeRef *node) const {
-    assert(node);
-    // c4's plain bool conversion emits 0/1, rather than document booleans.
-    node->set_serialized(c4::fmt::boolalpha(value));
-  }
-};
-
-struct write_real {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    // Preserve enough significant digits to recover the original value.
-    node->set_serialized(c4::fmt::real(value,
-      std::numeric_limits<Value>::max_digits10,
-      c4::FTOA_FLEX));
-  }
-};
 
 } // namespace detail
 

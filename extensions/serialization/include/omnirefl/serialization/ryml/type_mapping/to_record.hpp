@@ -15,22 +15,9 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-/** Write accessible non-static data members as mapping entries. */
-struct from_record {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::is_reflected_record<T>::value;
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      omni::is_reflected_record<T>>::value))
-  auto operator()(const T &value, ::ryml::NodeRef node, State context) const
-    -> void;
-};
-
 /** Deserialize a node into a reflected record's accessible non-static data
- * members.
+ * members. Direct calls bypass mapping_to_type selection for the record; member
+ * mappings still use mapping_to_type dispatch.
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
  *
@@ -48,11 +35,6 @@ struct from_record {
 template <typename NameByAlias = fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_record_t {
-  template <typename T>
-  static constexpr bool supports() {
-    return omni::is_reflected_record<T>::value;
-  }
-
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<is_read_state<State>,
       omni::is_reflected_record<T>>::value))
@@ -76,7 +58,7 @@ struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (compat::conjunction<std::is_copy_constructible<compat::decay_t<F>>,
       std::is_constructible<compat::decay_t<F>, F &&>,
-      detail::is_alias_resolver<const compat::decay_t<F>>>::value))
+      omni::ryml::detail::is_alias_resolver<const compat::decay_t<F>>>::value))
   constexpr auto with_name_by_alias(F &&f) const
     -> to_record_t<compat::decay_t<F>> {
     return {/*name_by_alias=*/std::forward<F>(f)};
@@ -93,8 +75,20 @@ struct to_record_t {
   // mapping diagnostics, before considering a separate cp::validate for types.
 };
 
-/** Default record deserializer without aliases. */
 constexpr to_record_t<> to_record{};
+
+/** Write accessible non-static data members as mapping entries. Direct calls
+ * bypass mapping_from_type selection for the record; member mappings still use
+ * mapping_from_type dispatch. */
+struct from_record_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::is_reflected_record<T>>::value))
+  auto operator()(const T &value, ::ryml::NodeRef node, State context) const
+    -> void;
+};
+
+constexpr from_record_t from_record{};
 
 } // namespace reflected_scope
 } // namespace ryml
