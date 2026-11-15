@@ -20,13 +20,10 @@ struct from_range_t {
     return omni::ryml::detail::is_mapped_range<const T>::value;
   }
 
-  template <typename T,
-    bool BorrowStrings,
-    compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
-      int> = 0>
-  void operator()(const T &value,
-    ::ryml::NodeRef node,
-    write_state_t<BorrowStrings> context) const;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::ryml::detail::is_mapped_range<const T>>::value))
+  void operator()(const T &value, ::ryml::NodeRef node, State context) const;
 };
 
 /** Default range serializer. */
@@ -49,12 +46,10 @@ struct to_range_t {
     return omni::ryml::detail::is_mapped_range<T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<detail::is_mapped_range<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    read_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      detail::is_mapped_range<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   // TODO: [high] Define the representation of non-string object keys before

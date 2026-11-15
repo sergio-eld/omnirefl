@@ -305,9 +305,9 @@ OMNI_CPP14_CONSTEXPR inline compat::string_view kind_name(json::value_kind k) {
 
 // Local traversal output owns the accumulated diagnostics and limit counters.
 // Child states snapshot progress; diagnostics are returned separately.
-template <typename Config>
+template <typename State>
 struct node_accumulator {
-  read_state_t<Config> state;
+  State state;
   with_diagnostics_t<compat::monostate, diagnostics> result;
 
   bool stopped() const { return this->state.limit_exceeded(); }
@@ -365,8 +365,8 @@ struct node_accumulator {
   }
 };
 
-template <typename Config>
-node_accumulator<Config> make_node_accumulator(read_state_t<Config> state) {
+OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
+node_accumulator<State> make_node_accumulator(State state) {
   return {
     /*state=*/state,
     /*result=*/{

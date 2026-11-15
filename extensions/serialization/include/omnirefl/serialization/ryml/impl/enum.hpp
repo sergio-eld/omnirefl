@@ -7,13 +7,10 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-template <typename T,
-  bool BorrowStrings,
-  compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
-auto from_enum::operator()(T value,
-  ::ryml::NodeRef node,
-  write_state_t<BorrowStrings>) const
-  -> void {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    omni::is_reflected_enum<T>>::value))
+auto from_enum::operator()(T value, ::ryml::NodeRef node, State) const -> void {
   const auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
   const auto found = std::find_if(enumerators.begin(),
@@ -29,12 +26,12 @@ auto from_enum::operator()(T value,
 }
 
 template <typename ValueByAlias>
-template <typename T,
-  typename Config,
-  compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_read_state<State>,
+    omni::is_reflected_enum<T>>::value))
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  read_state_t<Config> context) const
+  State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject

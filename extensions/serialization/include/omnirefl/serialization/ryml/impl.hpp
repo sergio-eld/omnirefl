@@ -16,93 +16,89 @@ namespace detail {
 
 // Built-ins stay separate from registrations so a user override never competes
 // with a matching default partial specialization.
-template <typename T, typename = void>
-struct default_from_type:
-    std::conditional<omni::is_reflected_record<T>::value,
-      reflected_scope::from_record,
-      traits::cp::unavailable>::type {};
+template <typename T, typename>
+struct default_from_type {
+  using type = typename std::conditional<omni::is_reflected_record<T>::value,
+    reflected_scope::from_record,
+    traits::cp::unavailable>::type;
+};
 
 template <typename T>
 struct default_from_type<T,
-  compat::enable_if_t<from_string_like::supports<T>()>>:
-    from_string_like {};
+  compat::enable_if_t<from_string_like::supports<T>()>> {
+  using type = from_string_like;
+};
 
 template <typename T>
 struct default_from_type<T,
-  compat::enable_if_t<from_arithmetic::supports<T>()>>:
-    from_arithmetic {};
+  compat::enable_if_t<from_arithmetic::supports<T>()>> {
+  using type = from_arithmetic;
+};
 
 template <typename T>
 struct default_from_type<T,
-  compat::enable_if_t<from_optional_like::supports<T>()>>:
-    from_optional_like {};
+  compat::enable_if_t<from_optional_like::supports<T>()>> {
+  using type = from_optional_like;
+};
 
 template <typename T>
 struct default_from_type<T,
-  compat::enable_if_t<from_range_t::supports<T>()>>:
-    from_range_t {};
+  compat::enable_if_t<from_range_t::supports<T>()>> {
+  using type = from_range_t;
+};
 
 template <typename T>
 struct default_from_type<T,
-  compat::enable_if_t<reflected_scope::from_enum::supports<T>()>>:
-    reflected_scope::from_enum {};
+  compat::enable_if_t<reflected_scope::from_enum::supports<T>()>> {
+  using type = reflected_scope::from_enum;
+};
 
 // Built-ins stay separate from registrations so a user override never competes
 // with a matching default partial specialization.
-template <typename T, typename = void>
-struct default_to_type:
-    std::conditional<omni::is_reflected_record<T>::value,
-      reflected_scope::to_record_t<>,
-      traits::cp::unavailable>::type {};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_string_like::supports<T>()>>:
-    to_string_like {};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_arithmetic::supports<T>()>>:
-    to_arithmetic {};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_optional_like::supports<T>()>>:
-    to_optional_like {};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<to_range_t::supports<T>()>>:
-    to_range_t {};
-
-template <typename T>
-struct default_to_type<T,
-  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>>:
-    reflected_scope::to_enum_t<> {};
-
-template <typename T>
-struct from_type_registration {
-  static constexpr bool has_struct =
-    !std::is_base_of<traits::cp::unavailable, cp::from_type_t<T>>::value;
-
-// C++11 registers structs; C++14 also allows callable variable templates.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-  static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
-    compat::remove_cvref_t<decltype(cp::from_type<T>)>>::value;
-#else
-  static constexpr bool has_variable = false;
-#endif
+template <typename T, typename>
+struct default_to_type {
+  using type = typename std::conditional<omni::is_reflected_record<T>::value,
+    reflected_scope::to_record_t<>,
+    traits::cp::unavailable>::type;
 };
 
-template <typename T,
-  bool Struct = from_type_registration<T>::has_struct,
-  bool Variable = from_type_registration<T>::has_variable>
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_string_like::supports<T>()>> {
+  using type = to_string_like;
+};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_arithmetic::supports<T>()>> {
+  using type = to_arithmetic;
+};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_optional_like::supports<T>()>> {
+  using type = to_optional_like;
+};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<to_range_t::supports<T>()>> {
+  using type = to_range_t;
+};
+
+template <typename T>
+struct default_to_type<T,
+  compat::enable_if_t<reflected_scope::to_enum_t<>::supports<T>()>> {
+  using type = reflected_scope::to_enum_t<>;
+};
+
+template <typename T, bool Struct, bool Variable>
 struct from_type_case {
   using type = cp::from_type_t<T>;
   static constexpr type get() { return {}; }
 };
 
-// Read the registered object itself so its configured state is preserved.
+// Read the registered object so its configured state is preserved.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
 struct from_type_case<T, false, true> {
@@ -113,33 +109,34 @@ struct from_type_case<T, false, true> {
 
 template <typename T>
 struct from_type_case<T, false, false> {
-  using type = default_from_type<T>;
+  using type = default_from_type_t<T>;
   static constexpr type get() { return {}; }
 };
 
 template <typename T>
-struct to_type_registration {
+struct from_type_selection_t {
   static constexpr bool has_struct =
-    !std::is_base_of<traits::cp::unavailable, cp::to_type_t<T>>::value;
+    !std::is_base_of<traits::cp::unavailable, cp::from_type_t<T>>::value;
 
 // C++11 registers structs; C++14 also allows callable variable templates.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
   static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
-    compat::remove_cvref_t<decltype(cp::to_type<T>)>>::value;
+    compat::remove_cvref_t<decltype(cp::from_type<T>)>>::value;
 #else
   static constexpr bool has_variable = false;
 #endif
+
+  using selected = from_type_case<T, has_struct, has_variable>;
+  using type = typename selected::type;
 };
 
-template <typename T,
-  bool Struct = to_type_registration<T>::has_struct,
-  bool Variable = to_type_registration<T>::has_variable>
+template <typename T, bool Struct, bool Variable>
 struct to_type_case {
   using type = cp::to_type_t<T>;
   static constexpr type get() { return {}; }
 };
 
-// Read the registered object itself so its configured state is preserved.
+// Read the registered object so its configured state is preserved.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
 struct to_type_case<T, false, true> {
@@ -150,59 +147,28 @@ struct to_type_case<T, false, true> {
 
 template <typename T>
 struct to_type_case<T, false, false> {
-  using type = default_to_type<T>;
+  using type = default_to_type_t<T>;
   static constexpr type get() { return {}; }
 };
 
-// Public accessor declarations need one dependent type; keep the Boolean
-// selection parameters and registration checks in this implementation header.
 template <typename T>
-struct from_type_selection_t: from_type_case<T> {};
+struct to_type_selection_t {
+  static constexpr bool has_struct =
+    !std::is_base_of<traits::cp::unavailable, cp::to_type_t<T>>::value;
 
-template <typename T>
-struct to_type_selection_t: to_type_case<T> {};
+// C++11 registers structs; C++14 also allows callable variable templates.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+  static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
+    compat::remove_cvref_t<decltype(cp::to_type<T>)>>::value;
+#else
+  static constexpr bool has_variable = false;
+#endif
+
+  using selected = to_type_case<T, has_struct, has_variable>;
+  using type = typename selected::type;
+};
 
 } // namespace detail
-
-template <typename T>
-constexpr auto from_type(omni::type_t<T>)
-  -> typename detail::from_type_selection_t<T>::type {
-  using mapper = typename detail::from_type_selection_t<T>::type;
-
-  static_assert(!(detail::from_type_registration<T>::has_struct
-      && detail::from_type_registration<T>::has_variable),
-    "Conflicting value mappings: specialize either cp::from_type_t or "
-    "cp::from_type, not both");
-
-  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
-    "No value mapping: specialize cp::from_type_t or cp::from_type");
-
-  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
-      std::is_copy_constructible<mapper>>::value,
-    "Value mappers must be trivially copyable and copy-constructible");
-
-  return detail::from_type_selection_t<T>::get();
-}
-
-template <typename T>
-constexpr auto to_type(omni::type_t<T>)
-  -> typename detail::to_type_selection_t<T>::type {
-  using mapper = typename detail::to_type_selection_t<T>::type;
-
-  static_assert(!(detail::to_type_registration<T>::has_struct
-      && detail::to_type_registration<T>::has_variable),
-    "Conflicting node mappings: specialize either cp::to_type_t or "
-    "cp::to_type, not both");
-
-  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
-    "No node mapping: specialize cp::to_type_t or cp::to_type");
-
-  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
-      std::is_copy_constructible<mapper>>::value,
-    "Node mapping callables must be trivially copyable and copy-constructible");
-
-  return detail::to_type_selection_t<T>::get();
-}
 
 namespace core {
 
@@ -227,25 +193,25 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
 
 namespace detail {
 
-template <bool BorrowStrings, typename T>
+template <typename State, typename T>
 struct cpp11_lambda_write {
   const T &value;
 
   template <typename _M, omni::reflected_entity Entity>
   ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
     ::ryml::Tree tree;
-    const write_state_t<BorrowStrings> context{};
+    const State context{};
 
     core::write_node(this->value, tree.rootref(), context);
     return tree;
   }
 };
 
-template <typename T, typename Config>
+template <typename T, typename State>
 struct cpp11_lambda_read {
   const ::ryml::ConstNodeRef &node;
   T &into;
-  read_state_t<Config> context;
+  State context;
 
   template <typename _M, omni::reflected_entity Entity>
   auto operator()(omni::meta_t<_M, Entity>) const
@@ -328,9 +294,10 @@ template <typename Discovery,
     omni::ryml::detail::is_mapped_range<Discovery>,
     traits::is_optional<Discovery>>::value>
 struct map_by_schema_case {
-  template <typename T, typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_read_state<State>::value))
   static auto map(::ryml::ConstNodeRef node, T *into,
-    read_state_t<Config> context)
+    State context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return read_node(node, into, context);
   }
@@ -338,12 +305,13 @@ struct map_by_schema_case {
 
 template <typename Discovery, bool Wrapper>
 struct map_by_schema_case<Discovery, true, Wrapper> {
-  template <typename T, typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_read_state<State>::value))
   static auto map(::ryml::ConstNodeRef node, T *into,
-    read_state_t<Config> context)
+    State context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return omni::reflected_call(
-      cpp11_lambda_read<T, Config>{
+      cpp11_lambda_read<T, State>{
         /*node=*/node,
         /*into=*/ *into,
         /*context=*/context,
@@ -354,9 +322,10 @@ struct map_by_schema_case<Discovery, true, Wrapper> {
 
 template <typename Discovery>
 struct map_by_schema_case<Discovery, false, true> {
-  template <typename T, typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_read_state<State>::value))
   static auto map(::ryml::ConstNodeRef node, T *into,
-    read_state_t<Config> context)
+    State context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return map_by_schema_case<
       typename omni::ryml::detail::discovered_range_type<Discovery>::type>::map(
@@ -436,10 +405,11 @@ template <typename Discovery,
     omni::ryml::detail::is_mapped_range<Discovery>,
     traits::is_optional<Discovery>>::value>
 struct tree_builder_case {
-  template <bool BorrowStrings, typename T>
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+    (is_write_state<State>::value))
   static ::ryml::Tree build(T &value) {
     ::ryml::Tree tree;
-    const write_state_t<BorrowStrings> context{};
+    const State context{};
 
     write_node(value, tree.rootref(), context);
     return tree;
@@ -448,21 +418,23 @@ struct tree_builder_case {
 
 template <typename Discovery, bool Wrapper>
 struct tree_builder_case<Discovery, true, Wrapper> {
-  template <bool BorrowStrings, typename T>
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+    (is_write_state<State>::value))
   static ::ryml::Tree build(T &value) {
     return omni::reflected_call(
-      cpp11_lambda_write<BorrowStrings, T>{/*value=*/value},
+      cpp11_lambda_write<State, T>{/*value=*/value},
       omni::type_t<Discovery>{});
   }
 };
 
 template <typename Discovery>
 struct tree_builder_case<Discovery, false, true> {
-  template <bool BorrowStrings, typename T>
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+    (is_write_state<State>::value))
   static ::ryml::Tree build(T &value) {
     return tree_builder_case<
       typename omni::ryml::detail::discovered_range_type<Discovery>::type>
-        ::template build<BorrowStrings>(value);
+        ::template build<State>(value);
   }
 };
 
@@ -471,13 +443,13 @@ struct tree_builder_case<Discovery, false, true> {
 template <typename T>
 ::ryml::Tree as_owning_tree(const T &value) {
   return detail::tree_builder_case<compat::remove_cvref_t<T>>
-    ::template build</*BorrowStrings=*/false>(value);
+    ::template build<write_state_t<false>>(value);
 }
 
 template <typename T>
 ::ryml::Tree as_ref_tree(T &value) {
   return detail::tree_builder_case<compat::remove_cvref_t<T>>
-    ::template build</*BorrowStrings=*/true>(value);
+    ::template build<write_state_t<true>>(value);
 }
 
 } // namespace core

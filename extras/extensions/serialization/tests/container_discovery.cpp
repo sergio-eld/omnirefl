@@ -34,18 +34,17 @@ namespace cp {
 
 template <>
 struct from_type_t<my_int> {
-  template <bool BorrowStrings>
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const my_int &value, ::ryml::NodeRef node,
-    omni::ryml::write_state_t<BorrowStrings> context) const {
+    State context) const {
     core::write_node(value.value, node, context);
   }
 };
 
 template <>
 struct to_type_t<my_int> {
-  template <typename Config>
-  auto operator()(::ryml::ConstNodeRef node, my_int *into,
-    omni::ryml::read_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, my_int *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return core::read_node(node, &into->value, context);
   }
@@ -55,10 +54,10 @@ struct to_type_t<my_int> {
 // Return both warnings directly; the core applies traversal limits.
 template <>
 struct to_type_t<compatible_integer> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node,
     compatible_integer *into,
-    omni::ryml::read_state_t<Config> context) const
+    State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     auto result = core::read_node(node, &into->value, context);
     if (!result.value)

@@ -50,18 +50,18 @@ namespace cp {
 
 template <>
 struct from_type_t<mapping_observation::number> {
-  template <bool BorrowStrings>
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const mapping_observation::number &value,
-    ::ryml::NodeRef node, write_state_t<BorrowStrings> state) const {
-    core::write_node(value.value, node, state);
+    ::ryml::NodeRef node, State state) const {
+    default_from_type_t<int>{}(value.value, node, state);
   }
 };
 
 template <>
 struct to_type_t<mapping_observation::number> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node,
-    mapping_observation::number *into, read_state_t<Config> state) const
+    mapping_observation::number *into, State state) const
     -> with_diagnostics_t<compat::monostate> {
     auto &trace = *state.config.transform_diagnostics.observed;
     trace.paths.push_back(detail::render_path(state.path.materialize()));
@@ -89,14 +89,14 @@ const auto from_type<endpoint<T>> = [](const endpoint<T> &value,
 };
 
 template <typename T>
-const auto to_type<endpoint<T>> = reflected_scope::to_record.with_name_by_alias(
-  alias_dict(std::make_tuple("port", "service_port")));
+const auto to_type<endpoint<T>> = default_to_type_t<endpoint<T>>{}
+  .with_name_by_alias(alias_dict(std::make_tuple("port", "service_port")));
 #else
 template <typename T>
 struct from_type_t<endpoint<T>> {
-  template <bool BorrowStrings>
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const endpoint<T> &value,
-    ::ryml::NodeRef node, write_state_t<BorrowStrings> state) const {
+    ::ryml::NodeRef node, State state) const {
     core::write_node(value.port, node, state);
   }
 };
@@ -104,12 +104,12 @@ struct from_type_t<endpoint<T>> {
 // C++11 registers a struct and configures the default compositor at invocation.
 template <typename T>
 struct to_type_t<endpoint<T>> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node,
     endpoint<T> *into,
-    omni::ryml::read_state_t<Config> context) const
+    State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return reflected_scope::to_record.with_name_by_alias(
+    return default_to_type_t<endpoint<T>>{}.with_name_by_alias(
       [](compat::string_view alias) -> compat::optional<compat::string_view> {
         return alias == "service_port"
           ? compat::optional<compat::string_view>{"port"}

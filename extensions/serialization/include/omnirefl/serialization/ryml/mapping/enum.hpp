@@ -22,13 +22,10 @@ struct from_enum {
     return omni::is_reflected_enum<T>::value;
   }
 
-  template <typename T,
-    bool BorrowStrings,
-    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
-  auto operator()(T value,
-    ::ryml::NodeRef node,
-    write_state_t<BorrowStrings>) const
-    -> void;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::is_reflected_enum<T>>::value))
+  auto operator()(T value, ::ryml::NodeRef node, State) const -> void;
 };
 
 /** Deserialize a string-valued node into a reflected enum value.
@@ -50,12 +47,10 @@ struct to_enum_t {
     return omni::is_reflected_enum<T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    read_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      omni::is_reflected_enum<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;

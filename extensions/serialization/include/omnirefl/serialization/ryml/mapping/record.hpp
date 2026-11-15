@@ -22,12 +22,10 @@ struct from_record {
     return omni::is_reflected_record<T>::value;
   }
 
-  template <typename T,
-    bool BorrowStrings,
-    compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
-  auto operator()(const T &value,
-    ::ryml::NodeRef node,
-    write_state_t<BorrowStrings> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::is_reflected_record<T>>::value))
+  auto operator()(const T &value, ::ryml::NodeRef node, State context) const
     -> void;
 };
 
@@ -55,12 +53,10 @@ struct to_record_t {
     return omni::is_reflected_record<T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    read_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      omni::is_reflected_record<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   NameByAlias name_by_alias;

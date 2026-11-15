@@ -167,6 +167,85 @@ constexpr traits::cp::unavailable to_type{};
 
 } // namespace cp
 
+namespace detail {
+
+// Default and registration selection remains dependent on the mapped type.
+template <typename T, typename = void>
+struct default_from_type;
+
+template <typename T, typename = void>
+struct default_to_type;
+
+template <typename T>
+struct from_type_selection_t;
+
+template <typename T>
+struct to_type_selection_t;
+
+} // namespace detail
+
+/** Built-in C++-to-node mapper for T, bypassing user registrations.
+ * Reuse this in a customization without re-entering from_type dispatch.
+ * Reflected defaults require metadata available in reflected scope.
+ * Resolves to traits::cp::unavailable when no built-in mapping applies. */
+template <typename T>
+using default_from_type_t = typename detail::default_from_type<T>::type;
+
+/** Built-in node-to-C++ mapper for T, bypassing user registrations.
+ * Reuse this in a customization without re-entering to_type dispatch.
+ * Reflected defaults require metadata available in reflected scope.
+ * Resolves to traits::cp::unavailable when no built-in mapping applies. */
+template <typename T>
+using default_to_type_t = typename detail::default_to_type<T>::type;
+
+/** Return the registered C++-to-node callable by value, or the default
+ * compositor when neither customization is registered. Selected callables
+ * must be trivially copyable and copy-constructible. Registration conflicts
+ * and missing mappings are diagnosed here, before invoking the mapper. */
+template <typename T>
+constexpr auto from_type(omni::type_t<T>)
+  -> typename detail::from_type_selection_t<T>::type {
+  using selection = detail::from_type_selection_t<T>;
+  using mapper = typename selection::type;
+
+  static_assert(!(selection::has_struct && selection::has_variable),
+    "Conflicting value mappings: specialize either cp::from_type_t or "
+    "cp::from_type, not both");
+
+  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
+    "No value mapping: specialize cp::from_type_t or cp::from_type");
+
+  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
+      std::is_copy_constructible<mapper>>::value,
+    "Value mappers must be trivially copyable and copy-constructible");
+
+  return selection::selected::get();
+}
+
+/** Return the registered node-to-C++ callable by value, or the default
+ * compositor when neither customization is registered. Selected callables
+ * must be trivially copyable and copy-constructible. Registration conflicts
+ * and missing mappings are diagnosed here, before invoking the mapper. */
+template <typename T>
+constexpr auto to_type(omni::type_t<T>)
+  -> typename detail::to_type_selection_t<T>::type {
+  using selection = detail::to_type_selection_t<T>;
+  using mapper = typename selection::type;
+
+  static_assert(!(selection::has_struct && selection::has_variable),
+    "Conflicting node mappings: specialize either cp::to_type_t or "
+    "cp::to_type, not both");
+
+  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
+    "No node mapping: specialize cp::to_type_t or cp::to_type");
+
+  static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
+      std::is_copy_constructible<mapper>>::value,
+    "Node mapping callables must be trivially copyable and copy-constructible");
+
+  return selection::selected::get();
+}
+
 namespace core {
 
 /**
@@ -415,35 +494,6 @@ constexpr serialize_t as_json{
   /*format=*/::ryml::EMIT_JSON,
 };
 
-namespace detail {
-
-// Declared for the public accessor's dependent return type; registration
-// selection is defined in the implementation header.
-template <typename T>
-struct from_type_selection_t;
-
-// Declared for the public accessor's dependent return type; registration
-// selection is defined in the implementation header.
-template <typename T>
-struct to_type_selection_t;
-
-} // namespace detail
-
-/** Return the registered C++-to-node callable by value, or the default
- * compositor when neither customization is registered. Selected callables
- * must be trivially copyable and copy-constructible. Registration conflicts
- * and missing mappings are diagnosed here, before invoking the mapper. */
-template <typename T>
-constexpr auto from_type(omni::type_t<T>)
-  -> typename detail::from_type_selection_t<T>::type;
-
-/** Return the registered node-to-C++ callable by value, or the default
- * compositor when neither customization is registered. Selected callables
- * must be trivially copyable and copy-constructible. Registration conflicts
- * and missing mappings are diagnosed here, before invoking the mapper. */
-template <typename T>
-constexpr auto to_type(omni::type_t<T>)
-  -> typename detail::to_type_selection_t<T>::type;
 
 } // namespace ryml
 } // namespace omni

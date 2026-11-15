@@ -35,9 +35,10 @@ struct write_range_case;
 
 template <>
 struct write_range_case<false> {
-  template <typename T, bool BorrowStrings>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_write_state<State>::value))
   static void apply(const T &value, ::ryml::NodeRef node,
-    write_state_t<BorrowStrings> context) {
+    State context) {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
     // Separate iterator/sentinel declarations also support non-common ranges
@@ -57,9 +58,10 @@ struct write_range_case<false> {
 
 template <>
 struct write_range_case<true> {
-  template <typename T, bool BorrowStrings>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_write_state<State>::value))
   static void apply(const T &value, ::ryml::NodeRef node,
-    write_state_t<BorrowStrings> context) {
+    State context) {
     static_assert(traits::is_string<traits::key_type_t<T>>::value,
       "from_range requires string-adaptable keys for JSON/YAML objects");
 
@@ -100,13 +102,12 @@ struct write_range_case<true> {
 
 } // namespace detail
 
-template <typename T,
-  bool BorrowStrings,
-  compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
-    int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    omni::ryml::detail::is_mapped_range<const T>>::value))
 void from_range_t::operator()(const T &value,
   ::ryml::NodeRef node,
-  write_state_t<BorrowStrings> context) const {
+  State context) const {
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 
@@ -158,11 +159,11 @@ struct supports_range_insertion<T, true>:
     range_insertion_check<T>::template accepts<traits::key_type_t<T> &&,
       traits::mapped_type_t<T> &&> {};
 
-template <typename Config>
+template <typename State>
 void report_range_duplicate(::ryml::ConstNodeRef node,
   mapping_path path,
   bool key_value,
-  node_accumulator<Config> *result) {
+  node_accumulator<State> *result) {
   const auto policy = result->state.config.error_policy.duplicates;
   const bool allowed = (policy
     & (json::duplicate_policy::allow | json::duplicate_policy::last))
@@ -185,9 +186,9 @@ struct insert_range_value_case;
 
 template <>
 struct insert_range_value_case<false> {
-  template <typename T, typename Config, typename... Args>
+  template <typename T, typename State, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef,
-    read_state_t<Config>, node_accumulator<Config> *,
+    State, node_accumulator<State> *,
     Args &&...args) {
     adapt::emplace(into, std::forward<Args>(args)...);
   }
@@ -195,9 +196,9 @@ struct insert_range_value_case<false> {
 
 template <>
 struct insert_range_value_case<true> {
-  template <typename T, typename Config, typename... Args>
+  template <typename T, typename State, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef node,
-    read_state_t<Config> context, node_accumulator<Config> *result,
+    State context, node_accumulator<State> *result,
     Args &&...args) {
     const auto inserted = adapt::try_emplace(into, std::forward<Args>(args)...);
     if (inserted.second)
@@ -219,9 +220,9 @@ struct range_mapping_nodes_case;
 
 template <>
 struct range_mapping_nodes_case<false> {
-  template <typename Config>
+  template <typename State>
   static auto apply(::ryml::ConstNodeRef node,
-    node_accumulator<Config> *) -> decltype(node.children()) {
+    node_accumulator<State> *) -> decltype(node.children()) {
     return node.children();
   }
 };
@@ -230,9 +231,9 @@ struct range_mapping_nodes_case<false> {
 // Iterate the document again to retain the selected nodes' document order.
 template <>
 struct range_mapping_nodes_case<true> {
-  template <typename Config>
+  template <typename State>
   static std::vector<::ryml::ConstNodeRef> apply(
-    ::ryml::ConstNodeRef node, node_accumulator<Config> *result) {
+    ::ryml::ConstNodeRef node, node_accumulator<State> *result) {
     std::map<compat::string_view, ::ryml::ConstNodeRef> selected;
     const auto policy = result->state.config.error_policy.duplicates;
     for (const auto child : node.children()) {
@@ -276,9 +277,9 @@ struct read_range_case;
 
 template <>
 struct read_range_case<false> {
-  template <typename T, typename Config>
+  template <typename T, typename State>
   static void apply(::ryml::ConstNodeRef node, T *into,
-    node_accumulator<Config> *result) {
+    node_accumulator<State> *result) {
     std::size_t index = 0;
     for (const auto child : node.children()) {
       if (result->stopped())
@@ -302,9 +303,9 @@ struct read_range_case<false> {
 
 template <>
 struct read_range_case<true> {
-  template <typename T, typename Config>
+  template <typename T, typename State>
   static void apply(::ryml::ConstNodeRef node, T *into,
-    node_accumulator<Config> *result) {
+    node_accumulator<State> *result) {
     static_assert(traits::is_string<traits::key_type_t<T>>::value,
       "to_range requires string-adaptable keys for JSON/YAML objects");
 
@@ -348,12 +349,12 @@ struct read_range_case<true> {
 
 } // namespace detail
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<detail::is_mapped_range<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_read_state<State>,
+    detail::is_mapped_range<T>>::value))
 auto to_range_t::operator()(::ryml::ConstNodeRef node,
   T *into,
-  read_state_t<Config> context) const
+  State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   static_assert(compat::is_invocable<const traits::cp::clear<T> &, T *>::value,
     "to_range requires an adapted clear operation");
