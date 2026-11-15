@@ -1,7 +1,5 @@
 #pragma once
 
-#include <omnirefl/serialization/ryml/mapping.hpp>
-
 #include <c4/format.hpp>
 
 #include <type_traits>
@@ -10,12 +8,12 @@
 namespace omni {
 namespace ryml {
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<traits::is_string<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    traits::is_string<T>>::value))
 auto from_string_like::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config> context) const
+  State context) const
   -> void {
   const auto &text = adapt::as_string(value);
   using storage_type = decltype(adapt::as_string(value));
@@ -40,12 +38,12 @@ auto from_string_like::operator()(const T &value,
   node.set_val_style(::ryml::VAL_DQUO);
 }
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<traits::is_string<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_read_state<State>,
+    traits::is_string<T>>::value))
 auto to_string_like::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   if (node.is_container()) {
@@ -73,12 +71,12 @@ auto to_string_like::operator()(::ryml::ConstNodeRef node,
   return std::move(result).finish();
 }
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<std::is_arithmetic<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    std::is_arithmetic<T>>::value))
 auto from_arithmetic::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config>) const
+  State) const
   -> void {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, T>::value,
@@ -90,12 +88,12 @@ auto from_arithmetic::operator()(const T &value,
   write(value, &node);
 }
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<std::is_arithmetic<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_read_state<State>,
+    std::is_arithmetic<T>>::value))
 auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   const auto expected = std::is_same<bool, T>::value
@@ -156,26 +154,27 @@ auto to_arithmetic::operator()(::ryml::ConstNodeRef node,
   return std::move(result).finish();
 }
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<traits::is_optional<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    traits::is_optional<T>>::value))
 auto from_optional_like::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config> context) const
+  State context) const
   -> void {
   if (adapt::has_value(value))
-    core::write_node(adapt::get_value(value), node, context); else {
+    core::write_node(adapt::get_value(value), node, context);
+  else {
     node.set_val("null");
     node.set_val_style(::ryml::VAL_PLAIN);
   }
 }
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<traits::is_optional<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_read_state<State>,
+    traits::is_optional<T>>::value))
 auto to_optional_like::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   if (!node.is_container() && node.val_is_null()
     && (!node.has_val_tag()

@@ -3,8 +3,9 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/serialization/ryml/detail.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <type_traits>
@@ -21,13 +22,10 @@ struct from_enum {
     return omni::is_reflected_enum<T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
-  auto operator()(T value,
-    ::ryml::NodeRef node,
-    mapping_state_t<Config>) const
-    -> void;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::is_reflected_enum<T>>::value))
+  auto operator()(T value, ::ryml::NodeRef node, State) const -> void;
 };
 
 /** Deserialize a string-valued node into a reflected enum value.
@@ -49,12 +47,10 @@ struct to_enum_t {
     return omni::is_reflected_enum<T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      omni::is_reflected_enum<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;
@@ -87,3 +83,5 @@ constexpr to_enum_t<> to_enum{};
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/enum.hpp>

@@ -181,6 +181,23 @@ constexpr T twice(T value) {
 }
 ```
 
+For separate declarations and definitions, the first declaration uses
+`OMNI_CONSTRAINED_TEMPLATE`; subsequent declarations and the definition use
+`OMNI_CONSTRAINED_TEMPLATE_REDECL` with identical parameters and constraints:
+
+```cpp
+OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_arithmetic<T>::value))
+T twice(T value);
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T), (std::is_arithmetic<T>::value))
+T twice(T value) { return value + value; }
+```
+
+This is an ad hoc compatibility distinction: before C++20, the defaulted
+SFINAE parameter can receive its default only once. C++20 instead repeats the
+requires-clause. With C++20 as the baseline, direct requires-clauses replace
+these adapters.
+
 <!-- REFACTORME: [high] Revisit the customization-point conventions and example.
 -->
 
@@ -305,12 +322,6 @@ customization points reside in `traits::cp`.
 - Document accepted arguments, normalized result types, and ownership or
   lifetime requirements for each operation.
 
-TODO: Explore a defaulted local-override accessor argument to `core::twice`.
-An explicitly supplied accessor could override global or default selection,
-or supply a customization when neither applies. The design is still in
-progress; this is the intended pattern for local overrides in `map_tree`
-configuration.
-
 ### Dispatchers
 
 - Expose operations through dispatchers such as `core::twice(value)`;
@@ -363,8 +374,10 @@ executable.
 
 The opening block states the scope and language baseline (e.g. C++11), then lists
 `suite.topic - description` entries in source order, grouped by section.
-Searching for `TEST(suite, topic)` finds the entry point even when namespaces
-share its name; `--gtest_filter=suite.topic` runs it.
+Searching for `TEST(suite, topic)` or `TEST_P(suite, topic)` finds the entry
+point even when namespaces share its name. Ordinary tests run with
+`--gtest_filter=suite.topic`; parameterized instances use their generated names
+or a wildcard filter such as `--gtest_filter='*suite.topic*'`.
 
 The core guide introduces reflection concepts before building toward
 inspection, access, and modification.

@@ -1129,8 +1129,8 @@ struct record {
 
 // C++11 equivalent of the C++20 predicate below:
 // template <typename Member>
-// struct has_default_value_access: std::integral_constant<bool,
-//   Member::has_default_value_access()> {};
+// struct has_default_value_access:
+//     omni::compat::bool_constant<Member::has_default_value_access()> {};
 
 } // namespace default_member_values
 

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
-#include <omnirefl/serialization/ryml/mapping/record.hpp>
 
 #include <algorithm>
 #include <tuple>
@@ -13,21 +12,16 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-template <typename Config>
+template <typename State>
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
-  mapping_state_t<Config> context;
+  State context;
 
   template <typename Record, typename _F>
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    const auto state = this->context.child({
-      /*field=*/c4::to_csubstr(field.name()),
-      /*index=*/compat::nullopt,
-    });
-
-    core::write_node(field.value(), child, state);
+    core::write_node(field.value(), child, this->context);
   }
 };
 
@@ -75,8 +69,8 @@ struct record_member_event {
   const std::vector<record_entry> &pending;
   bool check_presence;
 
-  template <typename Config>
-  auto operator()(mapping_state_t<Config> state) const
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
+  auto operator()(State state) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     const compat::string_view name{this->field.name()};
     const auto entry = std::find_if(this->pending.begin(), this->pending.end(),
@@ -143,9 +137,9 @@ struct cpp11_defer_member {
 
 // C++11 lambda equivalent: own diagnostics and budget accounting in the fold.
 struct cpp11_fold_member {
-  template <typename Config, typename Event>
-  fn::fold_control<node_accumulator<Config>> operator()(
-    node_accumulator<Config> result, const Event &event) const {
+  template <typename State, typename Event>
+  fn::fold_control<node_accumulator<State>> operator()(
+    node_accumulator<State> result, const Event &event) const {
     result.append(event(result.state));
     return result.stopped() ? fn::stop_with(std::move(result))
                             : fn::continue_with(std::move(result));
@@ -156,30 +150,30 @@ struct cpp11_fold_member {
 
 namespace reflected_scope {
 
-template <typename T,
-  typename Config,
-  compat::enable_if_t<omni::is_reflected_record<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_write_state<State>,
+    omni::is_reflected_record<T>>::value))
 auto from_record::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config> context) const
+  State context) const
   -> void {
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
     | fn::filter<fn::non_static>()
-    | fn::each(omni::ryml::detail::cpp11_write_member<Config>{
+    | fn::each(omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/context,
     });
 }
 
 template <typename NameByAlias>
-template <typename T,
-  typename Config,
-  compat::enable_if_t<omni::is_reflected_record<T>::value, int>>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<is_read_state<State>,
+    omni::is_reflected_record<T>>::value))
 auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = detail::make_node_accumulator(context);
   if (!node.is_map()) {

@@ -153,7 +153,7 @@ struct is_base_of_integral_constant:
 
 template <typename Predicate>
 using compile_time_result =
-  std::integral_constant<bool, static_cast<bool>(compat::invoke(Predicate{}))>;
+  compat::bool_constant<static_cast<bool>(compat::invoke(Predicate{}))>;
 
 template <typename Predicate, typename = void>
 struct is_compile_time_predicate: std::false_type {};
@@ -645,6 +645,14 @@ template <typename Tuple>
 struct is_tuple_like<Tuple,
   compat::void_t<decltype(std::tuple_size<Tuple>::value)>>: std::true_type {};
 
+// Invoke the nullary type-based protocol without constructing element values.
+// Keep its explicit operator-template syntax out of tuple selection logic.
+template <typename... Element, typename F>
+constexpr auto invoke_type(F &&f)
+  -> decltype(std::forward<F>(f).template operator()<Element...>()) {
+  return std::forward<F>(f).template operator()<Element...>();
+}
+
 template <typename Predicate>
 struct is_type_callable: std::is_empty<Predicate> {};
 
@@ -668,7 +676,7 @@ template <auto Predicate>
 struct nttp_unary_predicate {
   template <typename Element>
   constexpr bool operator()() const {
-    return Predicate.template operator()<Element>();
+    return invoke_type<Element>(Predicate);
   }
 };
 #endif
@@ -691,9 +699,8 @@ struct filtered_indices<Predicate,
     filtered_indices<Predicate,
       Tuple,
       compat::index_sequence<Remaining...>,
-      compat::conditional_t<Predicate{}.template
-        operator()<decltype(compat::detail::tuple_get<Index>(
-          std::declval<Tuple>()))>(),
+      compat::conditional_t<invoke_type<decltype(
+        compat::detail::tuple_get<Index>(std::declval<Tuple>()))>(Predicate{}),
         compat::index_sequence<Selected..., Index>,
         compat::index_sequence<Selected...>>> {};
 
@@ -762,11 +769,9 @@ struct matches_any<Key,
   Left,
   Right,
   compat::index_sequence<Index, Remaining...>>:
-    std::integral_constant<bool,
-      Key{}.template operator()<Left>()
-          == Key{}.template
-          operator()<decltype(compat::detail::tuple_get<Index>(
-            std::declval<Right>()))>()
+    compat::bool_constant<invoke_type<Left>(Key{})
+          == invoke_type<decltype(compat::detail::tuple_get<Index>(
+            std::declval<Right>()))>(Key{})
         || matches_any<Key,
           Left,
           Right,
@@ -1065,7 +1070,7 @@ constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
 /// Select static data-member or function metadata and bindings in `filter`.
 template <typename Member>
 struct is_static
-  : std::integral_constant<bool, compat::remove_cvref_t<Member>::is_static()> {};
+  : compat::bool_constant<compat::remove_cvref_t<Member>::is_static()> {};
 
 /// Select non-static data-member or function metadata and bindings in `filter`.
 template <typename Member>
@@ -1347,7 +1352,7 @@ struct not_closure {
 
   template <typename... Element>
   constexpr bool operator()() const {
-    return !predicate.template operator()<Element...>();
+    return !detail::invoke_type<Element...>(this->predicate);
   }
 
   template <typename First, typename... Argument>

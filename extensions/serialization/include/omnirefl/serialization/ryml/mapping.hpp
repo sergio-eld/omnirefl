@@ -8,11 +8,12 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/serialization/ryml/detail.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 #include <omnirefl/serialization/ryml/mapping/enum.hpp>
 #include <omnirefl/serialization/ryml/mapping/record.hpp>
 #include <omnirefl/serialization/ryml/mapping/sequence.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <type_traits>
@@ -25,13 +26,10 @@ struct from_string_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_string<T>::value; }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<traits::is_string<T>::value, int> = 0>
-  auto operator()(const T &value,
-    ::ryml::NodeRef node,
-    mapping_state_t<Config>) const
-    -> void;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      traits::is_string<T>>::value))
+  auto operator()(const T &value, ::ryml::NodeRef node, State) const -> void;
 };
 
 /** Read scalar text into a string-like type; views borrow tree storage. */
@@ -39,12 +37,10 @@ struct to_string_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_string<T>::value; }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<traits::is_string<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      traits::is_string<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -53,13 +49,10 @@ struct from_arithmetic {
   template <typename T>
   static constexpr bool supports() { return std::is_arithmetic<T>::value; }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<std::is_arithmetic<T>::value, int> = 0>
-  auto operator()(const T &value,
-    ::ryml::NodeRef node,
-    mapping_state_t<Config>) const
-    -> void;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      std::is_arithmetic<T>>::value))
+  auto operator()(const T &value, ::ryml::NodeRef node, State) const -> void;
 };
 
 /** Validate scalar format and range before assigning an arithmetic value. */
@@ -67,12 +60,10 @@ struct to_arithmetic {
   template <typename T>
   static constexpr bool supports() { return std::is_arithmetic<T>::value; }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<std::is_arithmetic<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      std::is_arithmetic<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -81,12 +72,10 @@ struct from_optional_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_optional<T>::value; }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<traits::is_optional<T>::value, int> = 0>
-  auto operator()(const T &value,
-    ::ryml::NodeRef node,
-    mapping_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      traits::is_optional<T>>::value))
+  auto operator()(const T &value, ::ryml::NodeRef node, State context) const
     -> void;
 };
 
@@ -95,14 +84,14 @@ struct to_optional_like {
   template <typename T>
   static constexpr bool supports() { return traits::is_optional<T>::value; }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<traits::is_optional<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      traits::is_optional<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/mapping.hpp>

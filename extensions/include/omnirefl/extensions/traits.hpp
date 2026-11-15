@@ -123,6 +123,9 @@ struct default_has_unique_key<Range,
 
 namespace cp {
 
+/** Sentinel for an unregistered customization. */
+struct unavailable {};
+
 /** Adapt text to std::basic_string or compat::basic_string_view.
  * A returned string owns converted characters; a returned view borrows from
  * the source and must remain valid while the source is alive and unchanged.

@@ -2,8 +2,9 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/serialization/ryml/detail.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 namespace omni {
@@ -19,13 +20,10 @@ struct from_range_t {
     return omni::ryml::detail::is_mapped_range<const T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
-      int> = 0>
-  void operator()(const T &value,
-    ::ryml::NodeRef node,
-    mapping_state_t<Config> context) const;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_write_state<State>,
+      omni::ryml::detail::is_mapped_range<const T>>::value))
+  void operator()(const T &value, ::ryml::NodeRef node, State context) const;
 };
 
 /** Default range serializer. */
@@ -48,12 +46,10 @@ struct to_range_t {
     return omni::ryml::detail::is_mapped_range<T>::value;
   }
 
-  template <typename T,
-    typename Config,
-    compat::enable_if_t<detail::is_mapped_range<T>::value, int> = 0>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> context) const
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<is_read_state<State>,
+      detail::is_mapped_range<T>>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   // TODO: [high] Define the representation of non-string object keys before
@@ -65,3 +61,5 @@ constexpr to_range_t to_range{};
 
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/sequence.hpp>

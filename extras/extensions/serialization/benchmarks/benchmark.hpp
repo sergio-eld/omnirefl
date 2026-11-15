@@ -7,6 +7,7 @@
 #include <omnirefl/reflected_scope.hpp>
 
 #include <benchmark/benchmark.h>
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <cstddef>

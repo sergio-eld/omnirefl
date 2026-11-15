@@ -68,8 +68,7 @@ struct is_reflected_record: std::false_type {};
 
 template <typename T>
 struct is_reflected_record<T, true>:
-    std::integral_constant<bool,
-      omni::reflected_entity::record
+    omni::compat::bool_constant<omni::reflected_entity::record
         == omni::reflected(omni::type_t<T>{}).entity()> {};
 
 template <typename T>

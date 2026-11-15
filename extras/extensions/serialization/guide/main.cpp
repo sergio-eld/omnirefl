@@ -2,24 +2,38 @@
  * Examples use C++20 syntax for simplicity. Equivalent implementations are
  * possible through Omnirefl's C++11-compatible interfaces.
  *
- * Search for TEST(suite, topic) to find an entry point. The contents follow
- * source order; topics may have dedicated model namespaces.
+ * Search for TEST(suite, topic) or TEST_P(suite, topic) for an entry point.
+ * The contents follow source order; topics may have dedicated model namespaces.
  *
  * Basics
  *   basics.deserialize_record - default mapping interface and its result
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
+ *   basics.enum_mapping - declared enumerator names as strings
  *   basics.local_configuration - customize config for an individual call
  *   basics.diagnostics - value availability, errors, and warnings
- *
- * Config and policies
- *   config.explicit_configuration - pass config and input explicitly
- *   config.unknown_fields - reject, ignore, or warn about unknown fields
- *   config.duplicate_fields - choose a repeated field occurrence
- *   config.error_limit - collect errors before stopping
- *   config.warning_limit - fail when the warning limit is exceeded
- *   config.missing_fields - missing required data members are errors
- *   config.invalid_fields - invalid input is not a missing field
+ *   basics.explicit_configuration - pass config and input explicitly
+ *   basics.unknown_fields - reject, ignore, or warn about unknown fields
+ *   basics.duplicate_fields - choose a repeated field occurrence
+ *   basics.error_limit - collect errors before stopping
+ *   basics.warning_limit - fail when the warning limit is exceeded
+ *   basics.missing_fields - missing required data members are errors
+ *   basics.invalid_fields - invalid input is not a missing field
+ *   basics.nested_records - discover nested record types
+ *   basics.sequences - vectors of records and nested vectors
+ *   basics.optional_fields - missing, null, present, and invalid values
+ *   basics.serialize_optional_fields - empty optionals become null
+ *   basics.optional_sequence_elements - omit empty optional elements
+ *   basics.key_value_ranges - map string-keyed objects
+ *   basics.mapping_result - values, success markers, and structured issues
+ *   basics.custom_scalar_mapping
+ *     map a wrapper through the default scalar mappers
+ *   basics.custom_scalar_mapping_cpp11 - equivalent C++11 struct registration
+ *   basics.custom_container_mapping
+ *     reuse range mapping for a container wrapper
+ *   basics.custom_string_mapping - reuse string mapping for a string wrapper
+ *   basics.custom_record_mapping
+ *     reuse record mapping and member customizations
  *
  * Diagnostics
  *   diagnostics.structured_issues - issue codes, values, and paths
@@ -27,19 +41,11 @@
  *   diagnostics.custom_results - choose and compose the diagnostics result
  *   diagnostics.valid_values_with_warnings - success can retain warnings
  *
- * Supported mappings
- *   mappings.nested_records - discover nested record types
- *   mappings.sequences - vectors of records and nested vectors
- *   mappings.optional_fields - missing, null, present, and invalid values
- *   mappings.serialize_optional_fields - empty optionals become null
- *   mappings.optional_sequence_elements - omit empty optional elements
- *   mappings.key_value_ranges - map string-keyed objects
- *
  * Advanced
  *   advanced.tree_ownership - choose owning or borrowed string storage
  *   advanced.borrowed_input - tree and diagnostic lifetimes
  *
- * Customization examples (experimental)
+ * Examples
  *   customization_mapping.default_and_custom_adapters_round_trip
  *     select scalar, container, record, and custom mappings
  *   customization_mapping.standard_range_insertion
@@ -108,12 +114,14 @@ struct service {
   std::vector<std::string> tags;
 };
 
+enum class status { ready, busy };
+
 } // namespace basic_mapping
 
 /** The RapidYAML-backed interface accepts JSON and YAML input. deserialize is
  * a callable with default config already bound: pass the requested type and
  * input text to map it into a C++ value. See `basics.local_configuration` for
- * local customization and `config.explicit_configuration` for explicit config.
+ * local customization and `basics.explicit_configuration` for explicit config.
  *
  * The result contains an optional value and retained diagnostics; a value is
  * available only on success. The default diagnostics are rendered text; see
@@ -185,7 +193,7 @@ TEST(basics, scalar_and_sequence_roots) {
   if (scalar.value)
     EXPECT_EQ(42, *scalar.value);
 
-  const std::vector<int> values{7, 42};
+  const std::vector values{7, 42};
   EXPECT_TRUE(same_document("[7, 42]", omni::ryml::as_json(values)));
   EXPECT_TRUE(same_document("- 7\n- 42\n", omni::ryml::as_yaml(values)));
   const auto sequence = omni::ryml::deserialize(
@@ -194,6 +202,20 @@ TEST(basics, scalar_and_sequence_roots) {
   EXPECT_TRUE(sequence.value);
   if (sequence.value)
     EXPECT_EQ(values, *sequence.value);
+}
+
+/** Reflected enums use their declared names as strings in JSON and YAML.
+ * Numeric values and strings without a declared name are rejected. */
+TEST(basics, enum_mapping) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<basic_mapping::status>, R"("busy")");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ(basic_mapping::status::busy, *result.value);
+    EXPECT_EQ(R"("busy")", omni::ryml::as_json(*result.value));
+  }
 }
 
 namespace policy_examples {
@@ -249,9 +271,13 @@ TEST(basics, diagnostics) {
 
 /** The core operation takes configuration explicitly instead of using a bound
  * callable. */
-TEST(config, explicit_configuration) {
-  omni::ryml::config_t<> options{};
-  options.error_policy.unknown_fields = omni::json::unknown_policy::allow;
+TEST(basics, explicit_configuration) {
+  // GCC 10 needs the nested policy type for aggregate deduction.
+  const omni::ryml::config_t options{
+    .error_policy = omni::json::error_policy{
+      .unknown_fields = omni::json::unknown_policy::allow,
+    },
+  };
   const auto result = omni::ryml::core::deserialize(options,
     omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
@@ -266,7 +292,7 @@ TEST(config, explicit_configuration) {
 /** Unknown fields are rejected by default. allow ignores them; allow | warn
  * retains a warning. warn alone does not allow an unknown field.
  */
-TEST(config, unknown_fields) {
+TEST(basics, unknown_fields) {
   using omni::json::unknown_policy;
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
@@ -290,7 +316,7 @@ TEST(config, unknown_fields) {
  * when accepted. Discarded occurrences are not mapped; an invalid selected
  * occurrence does not fall back to a different occurrence.
  */
-TEST(config, duplicate_fields) {
+TEST(basics, duplicate_fields) {
   using omni::json::duplicate_policy;
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
@@ -313,7 +339,7 @@ TEST(config, duplicate_fields) {
  * Zero stops at the first error; one permits collecting two. Warnings do not
  * consume this budget, and increasing it never exposes an invalid value.
  */
-TEST(config, error_limit) {
+TEST(basics, error_limit) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.error_limit = 1;
@@ -332,7 +358,7 @@ TEST(config, error_limit) {
 /** warning_limit is optional: unset means unlimited, zero fails on the first
  * warning. Exceeding it adds an error and prevents returning a value.
  */
-TEST(config, warning_limit) {
+TEST(basics, warning_limit) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow
@@ -350,7 +376,7 @@ TEST(config, warning_limit) {
 }
 
 // Missing required data members produce errors.
-TEST(config, missing_fields) {
+TEST(basics, missing_fields) {
   const auto result = omni::ryml::deserialize(
     omni::type<policy_examples::measurement>, "{}");
 
@@ -359,7 +385,7 @@ TEST(config, missing_fields) {
 }
 
 // Invalid scalar values and explicit null are errors for an integer member.
-TEST(config, invalid_fields) {
+TEST(basics, invalid_fields) {
   const auto load = omni::ryml::deserialize;
 
   const std::vector<std::string> documents{
@@ -377,6 +403,396 @@ TEST(config, invalid_fields) {
   }
 }
 
+// The outer record's metadata discovers its nested record dependencies.
+TEST(basics, nested_records) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<basic_mapping::service>,
+    R"(
+{
+  "name": "gateway", "upstream": {"host": "localhost", "port": 8080},
+  "tags": []
+}
+)");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ("localhost", result.value->upstream.host);
+    EXPECT_EQ(8080U, result.value->upstream.port);
+    EXPECT_TRUE(result.value->tags.empty());
+  }
+}
+
+namespace sequence_mapping {
+
+struct batch {
+  std::vector<policy_examples::measurement> readings;
+  std::vector<std::vector<int>> groups;
+};
+
+} // namespace sequence_mapping
+
+// Vectors can contain reflected records or further vectors.
+TEST(basics, sequences) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<sequence_mapping::batch>,
+    R"(
+{
+  "readings": [{"value": 7}, {"value": 42}],
+  "groups": [[1], [], [2, 3]]
+}
+)");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    std::vector<int> values;
+    for (const auto &reading : result.value->readings)
+      values.push_back(reading.value);
+
+    const std::vector expected_values{7, 42};
+    const std::vector<std::vector<int>> expected_groups{{1}, {}, {2, 3}};
+    EXPECT_EQ(expected_values, values);
+    EXPECT_EQ(expected_groups, result.value->groups);
+  }
+}
+
+namespace optional_mapping {
+
+struct measurement {
+  omni::compat::optional<int> value;
+};
+
+} // namespace optional_mapping
+
+/** An optional field accepts a missing field or explicit null as no value.
+ * A supplied invalid value remains an error; optional does not hide it.
+ */
+TEST(basics, optional_fields) {
+  const std::vector<std::string> absent{"{}", R"({"value": null})"};
+  for (const auto &document : absent) {
+    SCOPED_TRACE(document);
+    const auto result = omni::ryml::deserialize(
+      omni::type<optional_mapping::measurement>, document);
+
+    EXPECT_TRUE(result.value);
+    if (result.value)
+      EXPECT_FALSE(result.value->value);
+  }
+
+  const auto present = omni::ryml::deserialize(
+    omni::type<optional_mapping::measurement>, R"({"value": 7})");
+
+  EXPECT_TRUE(present.value);
+  if (present.value) {
+    EXPECT_TRUE(present.value->value);
+    if (present.value->value) {
+      EXPECT_EQ(7, *present.value->value);
+    }
+  }
+
+  const auto invalid = omni::ryml::deserialize(
+    omni::type<optional_mapping::measurement>, R"({"value": "bad"})");
+
+  EXPECT_FALSE(invalid.value);
+}
+
+// Empty optional fields emit null; populated fields emit their value.
+TEST(basics, serialize_optional_fields) {
+  const optional_mapping::measurement empty{omni::compat::nullopt};
+  EXPECT_TRUE(same_document(R"({"value": null})", omni::ryml::as_json(empty)));
+  EXPECT_TRUE(same_document("value: null", omni::ryml::as_yaml(empty)));
+
+  const optional_mapping::measurement present{7};
+  EXPECT_TRUE(same_document(R"({"value": 7})", omni::ryml::as_json(present)));
+}
+
+/** Empty optional sequence elements are omitted. Remaining elements keep their
+ * order, so their output indices can differ from their original indices. */
+TEST(basics, optional_sequence_elements) {
+  const std::vector<omni::compat::optional<int>> values{
+    7, omni::compat::nullopt, 0, omni::compat::nullopt,
+  };
+
+  EXPECT_TRUE(same_document("[7, 0]", omni::ryml::as_json(values)));
+  EXPECT_TRUE(same_document("- 7\n- 0", omni::ryml::as_yaml(values)));
+}
+
+/** Key/value ranges map to objects. Unique keys follow duplicate policies;
+ * non-unique ranges such as multimap retain every repeated name. */
+TEST(basics, key_value_ranges) {
+  const std::map<std::string, int> source{{"first", 7}, {"second", 42}};
+  const std::string json = R"({"first": 7, "second": 42})";
+  EXPECT_TRUE(same_document(json, omni::ryml::as_json(source)));
+  EXPECT_TRUE(same_document(json, omni::ryml::as_yaml(source)));
+  const auto result = omni::ryml::deserialize(
+    omni::type<std::map<std::string, int>>, json);
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(source, *result.value);
+}
+
+/** map_by_schema returns with_diagnostics_t<T>: .value is optional<T>, and
+ * .diagnostics contains structured issues rather than the default deserialize
+ * binding's rendered text. An engaged .value means success, possibly with
+ * warnings; an empty .value means failure. The source tree stays alive while
+ * its node references and diagnostic paths are used.
+ *
+ * A node reader updates an existing T through a pointer, so its result uses
+ * with_diagnostics_t<compat::monostate>. The engaged monostate marks success;
+ * the decoded object is in the supplied destination. On failure, .value is
+ * empty and .diagnostics describes the errors. Partial updates depend on the
+ * mapper; failure does not promise rollback.
+ *
+ * Custom readers return this result to the enclosing mapper, which collects
+ * its issues and applies the error/warning limits. Reading state supplies the
+ * config, current path, and accumulated counts; it is passed down explicitly,
+ * rather than used as a mutable output for diagnostics.
+ * See `diagnostics.structured_issues` for individual issue fields. */
+TEST(basics, mapping_result) {
+  const auto tree = omni::ryml::core::parse("42");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto result = omni::ryml::map_by_schema(omni::type<int>, *tree);
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(42, *result.value);
+}
+
+namespace basic_customization {
+
+struct my_integer { int value; };
+
+} // namespace basic_customization
+
+} // namespace
+
+// Register one reader and writer per type. The callable form is available
+// since C++14; the struct form below is its C++11 equivalent.
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
+  [](const basic_customization::my_integer &value,
+    ::ryml::NodeRef node,
+    omni::ryml::write_state_like auto state) -> void {
+    omni::ryml::from_arithmetic{}(value.value, node, state);
+  };
+
+template <>
+const auto omni::ryml::cp::to_type<basic_customization::my_integer> =
+  [](::ryml::ConstNodeRef node, basic_customization::my_integer *into,
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::to_arithmetic{}(node, &into->value, state);
+  };
+
+namespace {
+
+/** A wrapper need not map to an object. from_type and to_type select its
+ * representation globally; only one registration form is used per direction.
+ * These callables delegate scalar checks and diagnostics to from_arithmetic
+ * and to_arithmetic. write_state_like and read_state_like identify each
+ * direction's state without spelling its implementation parameters. The
+ * generic signatures delay instantiation until called within reflected scope.
+ * `basics.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
+TEST(basics, custom_scalar_mapping) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<basic_customization::my_integer>, "42");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ(42, result.value->value);
+    EXPECT_EQ("42", omni::ryml::as_json(*result.value));
+  }
+}
+
+namespace basic_customization {
+
+struct my_cpp11_integer { int value; };
+
+} // namespace basic_customization
+
+} // namespace
+
+// One C++11 equivalent: the same scalar mapping needs named operator() bodies.
+template <>
+struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
+  void operator()(const basic_customization::my_cpp11_integer &value,
+    ::ryml::NodeRef node,
+    State state) const {
+    omni::ryml::from_arithmetic{}(value.value, node, state);
+  }
+};
+
+template <>
+struct omni::ryml::cp::to_type_t<basic_customization::my_cpp11_integer> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node,
+    basic_customization::my_cpp11_integer *into,
+    State state) const
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::to_arithmetic{}(node, &into->value, state);
+  }
+};
+
+namespace {
+
+/** Before C++14, specialize from_type_t and to_type_t instead of variable
+ * templates. my_cpp11_integer uses the equivalent named callables above. */
+TEST(basics, custom_scalar_mapping_cpp11) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<basic_customization::my_cpp11_integer>{}, "42");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ(42, result.value->value);
+    EXPECT_EQ("42", omni::ryml::as_json(*result.value));
+  }
+}
+
+namespace basic_customization {
+
+struct my_container { std::vector<int> values; };
+
+} // namespace basic_customization
+
+} // namespace
+
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_container> =
+  [](const basic_customization::my_container &value,
+    ::ryml::NodeRef node,
+    omni::ryml::write_state_like auto state) -> void {
+    omni::ryml::from_range(value.values, node, state);
+  };
+
+template <>
+const auto omni::ryml::cp::to_type<basic_customization::my_container> =
+  [](::ryml::ConstNodeRef node, basic_customization::my_container *into,
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::to_range(node, &into->values, state);
+  };
+
+namespace {
+
+/** A container wrapper can reuse from_range and to_range for its elements.
+ * The default range mappers handle insertion, element mapping, and diagnostics;
+ * the specialization only exposes the wrapped container. */
+TEST(basics, custom_container_mapping) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<basic_customization::my_container>, "[7, 42]");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    const std::vector expected{7, 42};
+    EXPECT_EQ(expected, result.value->values);
+    EXPECT_TRUE(same_document("[7, 42]", omni::ryml::as_json(*result.value)));
+  }
+}
+
+namespace basic_customization {
+
+struct my_string { std::string value; };
+
+} // namespace basic_customization
+
+} // namespace
+
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_string> =
+  [](const basic_customization::my_string &value,
+    ::ryml::NodeRef node,
+    omni::ryml::write_state_like auto state) -> void {
+    omni::ryml::from_string_like{}(value.value, node, state);
+  };
+
+template <>
+const auto omni::ryml::cp::to_type<basic_customization::my_string> =
+  [](::ryml::ConstNodeRef node, basic_customization::my_string *into,
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::to_string_like{}(node, &into->value, state);
+  };
+
+namespace {
+
+/** from_string_like and to_string_like provide the default string mapping.
+ * A wrapper can delegate to them using its stored string; custom string APIs
+ * can instead adapt the shared string operations. */
+TEST(basics, custom_string_mapping) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<basic_customization::my_string>, R"("gateway")");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ("gateway", result.value->value);
+    EXPECT_EQ(R"("gateway")", omni::ryml::as_json(*result.value));
+  }
+}
+
+namespace basic_customization {
+
+struct my_record {
+  my_integer reading;
+  std::string name;
+};
+
+} // namespace basic_customization
+
+} // namespace
+
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_record> =
+  omni::ryml::reflected_scope::from_record{};
+
+// Reader signature: (ConstNodeRef, T *, read_state_like)
+//   -> with_diagnostics_t<monostate>.
+// Exposition: spell out state forwarding; direct registration can reuse
+// to_record itself. The generic destination delays metadata queries.
+template <>
+const auto omni::ryml::cp::to_type<basic_customization::my_record> =
+  [](::ryml::ConstNodeRef node, auto *into,
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    // Same-node delegation forwards path, counters, and config unchanged.
+    return omni::ryml::reflected_scope::to_record(node, into, state);
+  };
+
+namespace {
+
+/** from_record and to_record map accessible non-static members. They already
+ * supply the default reflected-record mapping, and remain available for custom
+ * registrations. The reader receives the node, destination pointer, and mapping
+ * state; it returns success or failure with diagnostics. A custom mapper passes
+ * state unchanged when delegating the same node, as above. When descending to
+ * a child, it supplies state.child(...) instead; see the extended-container
+ * example for accumulated diagnostics.
+ * Member mappings still use their own customization points: my_record::reading
+ * uses the scalar representation of my_integer. */
+TEST(basics, custom_record_mapping) {
+  const std::string document = R"({"reading": 7, "name": "sensor"})";
+  const auto result = omni::ryml::deserialize(
+    omni::type<basic_customization::my_record>, document);
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ(7, result.value->reading.value);
+    EXPECT_EQ("sensor", result.value->name);
+    EXPECT_TRUE(same_document(document, omni::ryml::as_json(*result.value)));
+  }
+}
+
 /** Inspect issue codes and field/index paths with the caller-owned tree.
  * node_id identifies the original node, including duplicate-key occurrences.
  * Keep the tree and its character storage alive while using these diagnostics.
@@ -387,7 +803,7 @@ TEST(diagnostics, structured_issues) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_tree(
+  const auto result = omni::ryml::map_by_schema(
     omni::type<policy_examples::measurement>, *tree);
 
   EXPECT_EQ(1U, result.diagnostics.issues.size());
@@ -414,7 +830,7 @@ TEST(diagnostics, rendering) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_tree(
+  const auto result = omni::ryml::map_by_schema(
     omni::type<policy_examples::measurement>, *tree);
 
   const std::string message =
@@ -442,8 +858,8 @@ TEST(diagnostics, custom_results) {
           return [previous](const ::ryml::Tree &tree,
             omni::ryml::diagnostics report) {
             return summary{
-              /*issue_count=*/report.issues.size(),
-              /*message=*/previous(tree, report),
+              .issue_count = report.issues.size(),
+              .message = previous(tree, report),
             };
           };
         });
@@ -486,134 +902,6 @@ TEST(diagnostics, valid_values_with_warnings) {
   EXPECT_EQ("/value: warning: duplicate field", result.diagnostics);
 }
 
-// The outer record's metadata discovers its nested record dependencies.
-TEST(mappings, nested_records) {
-  const auto result = omni::ryml::deserialize(
-    omni::type<basic_mapping::service>,
-    R"(
-{
-  "name": "gateway", "upstream": {"host": "localhost", "port": 8080},
-  "tags": []
-}
-)");
-
-  EXPECT_TRUE(result.value);
-  if (result.value) {
-    EXPECT_EQ("localhost", result.value->upstream.host);
-    EXPECT_EQ(8080U, result.value->upstream.port);
-    EXPECT_TRUE(result.value->tags.empty());
-  }
-}
-
-namespace sequence_mapping {
-
-struct batch {
-  std::vector<policy_examples::measurement> readings;
-  std::vector<std::vector<int>> groups;
-};
-
-} // namespace sequence_mapping
-
-// Vectors can contain reflected records or further vectors.
-TEST(mappings, sequences) {
-  const auto result = omni::ryml::deserialize(
-    omni::type<sequence_mapping::batch>,
-    R"(
-{
-  "readings": [{"value": 7}, {"value": 42}],
-  "groups": [[1], [], [2, 3]]
-}
-)");
-
-  EXPECT_TRUE(result.value);
-  if (result.value) {
-    std::vector<int> values;
-    for (const auto &reading : result.value->readings)
-      values.push_back(reading.value);
-
-    const std::vector<int> expected_values{7, 42};
-    const std::vector<std::vector<int>> expected_groups{{1}, {}, {2, 3}};
-    EXPECT_EQ(expected_values, values);
-    EXPECT_EQ(expected_groups, result.value->groups);
-  }
-}
-
-namespace optional_mapping {
-
-struct measurement {
-  omni::compat::optional<int> value;
-};
-
-} // namespace optional_mapping
-
-/** An optional field accepts a missing field or explicit null as no value.
- * A supplied invalid value remains an error; optional does not hide it.
- */
-TEST(mappings, optional_fields) {
-  const std::vector<std::string> absent{"{}", R"({"value": null})"};
-  for (const auto &document : absent) {
-    SCOPED_TRACE(document);
-    const auto result = omni::ryml::deserialize(
-      omni::type<optional_mapping::measurement>, document);
-
-    EXPECT_TRUE(result.value);
-    if (result.value)
-      EXPECT_FALSE(result.value->value);
-  }
-
-  const auto present = omni::ryml::deserialize(
-    omni::type<optional_mapping::measurement>, R"({"value": 7})");
-
-  EXPECT_TRUE(present.value);
-  if (present.value) {
-    EXPECT_TRUE(present.value->value);
-    if (present.value->value) {
-      EXPECT_EQ(7, *present.value->value);
-    }
-  }
-
-  const auto invalid = omni::ryml::deserialize(
-    omni::type<optional_mapping::measurement>, R"({"value": "bad"})");
-
-  EXPECT_FALSE(invalid.value);
-}
-
-// Empty optional fields emit null; populated fields emit their value.
-TEST(mappings, serialize_optional_fields) {
-  const optional_mapping::measurement empty{omni::compat::nullopt};
-  EXPECT_TRUE(same_document(R"({"value": null})", omni::ryml::as_json(empty)));
-  EXPECT_TRUE(same_document("value: null", omni::ryml::as_yaml(empty)));
-
-  const optional_mapping::measurement present{7};
-  EXPECT_TRUE(same_document(R"({"value": 7})", omni::ryml::as_json(present)));
-}
-
-/** Empty optional sequence elements are omitted. Remaining elements keep their
- * order, so their output indices can differ from their original indices. */
-TEST(mappings, optional_sequence_elements) {
-  const std::vector<omni::compat::optional<int>> values{
-    7, omni::compat::nullopt, 0, omni::compat::nullopt,
-  };
-
-  EXPECT_TRUE(same_document("[7, 0]", omni::ryml::as_json(values)));
-  EXPECT_TRUE(same_document("- 7\n- 0", omni::ryml::as_yaml(values)));
-}
-
-/** Key/value ranges map to objects. Unique keys follow duplicate policies;
- * non-unique ranges such as multimap retain every repeated name. */
-TEST(mappings, key_value_ranges) {
-  const std::map<std::string, int> source{{"first", 7}, {"second", 42}};
-  const std::string json = R"({"first": 7, "second": 42})";
-  EXPECT_TRUE(same_document(json, omni::ryml::as_json(source)));
-  EXPECT_TRUE(same_document(json, omni::ryml::as_yaml(source)));
-  const auto result = omni::ryml::deserialize(
-    omni::type<std::map<std::string, int>>, json);
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(source, *result.value);
-}
-
 namespace tree_ownership {
 
 struct reading {
@@ -643,7 +931,8 @@ TEST(advanced, tree_ownership) {
     ::ryml::emitrs_yaml<std::string>(owning)));
 }
 
-/** map_tree borrows its input; the caller keeps the tree and character storage
+/** map_by_schema borrows its input; the caller keeps the tree and character
+ * storage
  * alive while using borrowed values or rendering diagnostics. A subtree can
  * be mapped independently, with paths relative to that subtree.
  */
@@ -653,7 +942,7 @@ TEST(advanced, borrowed_input) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_tree(
+  const auto result = omni::ryml::map_by_schema(
     omni::type<policy_examples::measurement>, tree->crootref()["entry"]);
 
   EXPECT_FALSE(result.value);
@@ -747,14 +1036,6 @@ struct record {
 struct extended_values: std::vector<int> {
   int first;
   int second;
-
-  // C++11 classes with bases need a constructor for case-data initialization.
-  extended_values(std::vector<int> elements = {},
-    int first = 0,
-    int second = 0)
-      : std::vector<int>(std::move(elements))
-      , first(first)
-      , second(second) {}
 };
 
 } // namespace customization_mapping
@@ -780,11 +1061,16 @@ namespace ryml {
  * variable to_type<T>; registering both for one type is an error. Writers
  * register cp::from_type<T> or cp::from_type_t<T>; unregistered types use defaults.
  *
- * mapping_state_t<Config> borrows the configuration and carries the current
+ * read_state_like constrains a reader's state without naming its template
+ * parameters. The state borrows the configuration and carries the current
  * path and accumulated error/warning counts. Pass it unchanged when delegating
  * the same node; use child(...) when descending to another key or index.
  * Child paths borrow their parent state, which must stay alive and unchanged
  * until that child mapping finishes.
+ * write_state_like constrains the writer's state, which carries the string
+ * storage policy. Forward it unchanged to nested writers.
+ * Before C++20, is_read_state<State> and is_write_state<State> provide the
+ * corresponding Boolean traits; C++14 also provides their _v forms.
  *
  * Readers update the destination and return with_diagnostics_t<monostate>:
  * an engaged value signals success, and diagnostics carry their issues.
@@ -793,43 +1079,24 @@ namespace ryml {
  * available. Non-dependent metadata queries are checked too early. */
 namespace cp {
 
-// C++14 callable registration stores a configured default compositor directly.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+// A configured default compositor can be registered without a wrapper.
+template <>
+const auto from_type<customization_mapping::record> =
+  reflected_scope::from_record{};
+
 template <>
 const auto to_type<customization_mapping::record> =
   reflected_scope::to_record.with_name_by_alias(
-    alias_dict(std::make_tuple("count", "legacy_count")));
-#else
-// C++11 registration provides the same callable through a struct.
+    alias_dict(std::tuple{"count", "legacy_count"}));
+
 template <>
-struct to_type_t<customization_mapping::record> {
-  template <typename T, typename Config>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> state) const
-    -> with_diagnostics_t<compat::monostate> {
-    static const auto mapper = reflected_scope::to_record.with_name_by_alias(
-      alias_dict(std::make_tuple("count", "legacy_count")));
+const auto from_type<customization_mapping::status> =
+  reflected_scope::from_enum{};
 
-    return mapper(node, into, state);
-  }
-};
-#endif
-
-// Struct registration can likewise reuse the configurable enum compositor.
 template <>
-struct to_type_t<customization_mapping::status> {
-  template <typename T, typename Config>
-  auto operator()(::ryml::ConstNodeRef node,
-    T *into,
-    mapping_state_t<Config> state) const
-    -> with_diagnostics_t<compat::monostate> {
-    static const auto mapper = reflected_scope::to_enum.with_value_by_alias(
-      alias_dict(std::make_tuple("busy", "working")));
-
-    return mapper(node, into, state);
-  }
-};
+const auto to_type<customization_mapping::status> =
+  reflected_scope::to_enum.with_value_by_alias(
+    alias_dict(std::tuple{"busy", "working"}));
 
 /** Ad hoc: inheriting standard containers is discouraged. This custom mapping
  * needs the derived record's metadata as well as container iteration. */
@@ -841,53 +1108,27 @@ struct reflect_as_root<customization_mapping::extended_values>:
  * flat representation. The fields occupy its final two positions. */
 template <>
 struct from_type_t<customization_mapping::extended_values> {
-  template <typename Config>
-  struct cpp11_append_member {
-    ::ryml::NodeRef &node;
-    omni::ryml::mapping_state_t<Config> context;
-
-    template <typename Record, typename _F>
-    void operator()(omni::data_member_binding_t<Record, _F> field) const {
-      const auto child = this->context.child({
-        /*field=*/{},
-        /*index=*/this->node.num_children(),
-      });
-
-      core::write_node(field.value(), this->node.append_child(), child);
-    }
-  };
-
-  template <typename T, typename Config>
+  template <typename T, omni::ryml::write_state_like State>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state_t<Config> context) const {
+    State context) const {
     from_range(value, node, context);
 
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
-      | fn::each(cpp11_append_member<Config>{
-        /*node=*/node,
-        /*context=*/context,
-      });
+      | fn::each(
+        [&node, context](omni::data_member_binding auto field) -> void {
+          core::write_node(field.value(), node.append_child(), context);
+        });
   }
 };
 
 template <>
 struct to_type_t<customization_mapping::extended_values> {
-  struct cpp11_restore_member {
-    template <typename Record, typename _F>
-    typename Record::const_iterator operator()(
-      typename Record::const_iterator from,
-      omni::data_member_binding_t<Record, _F> field) const {
-      field.set_value(*from);
-      return std::next(from);
-    }
-  };
-
-  template <typename T, typename Config>
+  template <typename T, omni::ryml::read_state_like State>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     T values;
     auto result = to_range(node, &values, context);
@@ -909,7 +1150,12 @@ struct to_type_t<customization_mapping::extended_values> {
     }
 
     const auto tail = std::next(values.cbegin(), values.size() - count);
-    members | fn::foldl(cpp11_restore_member{}, tail);
+    members | fn::foldl(
+      [](auto from, omni::data_member_binding auto field) -> decltype(from) {
+        field.set_value(*from);
+        return std::next(from);
+      },
+      tail);
     into->assign(values.cbegin(), tail);
     return result;
   }
@@ -917,20 +1163,20 @@ struct to_type_t<customization_mapping::extended_values> {
 
 template <>
 struct from_type_t<customization_mapping::integer> {
-  template <typename Config>
+  template <omni::ryml::write_state_like State>
   void operator()(const customization_mapping::integer &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state_t<Config> context) const {
+    State context) const {
     core::write_node(value.value, node, context);
   }
 };
 
 template <>
 struct to_type_t<customization_mapping::integer> {
-  template <typename Config>
+  template <omni::ryml::read_state_like State>
   auto operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     int converted{};
     auto result = core::read_node(node, &converted, context);
@@ -1121,20 +1367,6 @@ struct invalid_extended_container_case {
 class invalid_extended_container_mapping:
     public testing::TestWithParam<invalid_extended_container_case> {};
 
-// C++11 lambda equivalent: map into an existing record within reflected scope.
-struct cpp11_lambda_read_into {
-  ::ryml::ConstNodeRef node;
-  omni::ryml::mapping_state_t<> context;
-
-  // The explicit return type delays the body until generated metadata exists.
-  template <typename Record>
-  auto operator()(omni::record_binding_t<Record> record) const
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::core::read_node(
-      this->node, &record.value(), this->context);
-  }
-};
-
 TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   const auto &c = GetParam();
   auto parsed = omni::ryml::core::parse(c.document);
@@ -1142,20 +1374,19 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   if (!parsed)
     return;
 
-  const omni::ryml::config_t<> options{};
-  const omni::ryml::mapping_state_t<> context{
-    /*config=*/options,
-    /*path=*/{},
-    /*error_count=*/0,
-    /*warning_count=*/0,
-    /*borrow_strings=*/false,
+  const omni::ryml::config_t options{};
+  const omni::ryml::read_state_t context{
+    .config = options,
+    .path = {},
+    .error_count = 0,
+    .warning_count = 0,
   };
 
   auto into = c.initial;
   const auto mapped = omni::reflected_call(
-    cpp11_lambda_read_into{
-      /*node=*/parsed->crootref(),
-      /*context=*/context,
+    [node = parsed->crootref(), context](omni::record_binding auto record)
+      -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+      return omni::ryml::core::read_node(node, &record.value(), context);
     },
     into);
 
@@ -1209,8 +1440,10 @@ class customization_mapping_limits:
 // Enclosing mappers accumulate custom readers' issues and apply limits.
 TEST_P(customization_mapping_limits,
   collects_default_and_custom_conversion_errors) {
-  omni::ryml::config_t<> options{};
-  options.error_policy.error_limit = GetParam();
+  // GCC 10 needs the nested policy type for aggregate deduction.
+  const omni::ryml::config_t options{
+    .error_policy = omni::json::error_policy{.error_limit = GetParam()},
+  };
   const auto tree = omni::ryml::core::parse(R"(
 {
   "count": 2,
@@ -1222,7 +1455,7 @@ TEST_P(customization_mapping_limits,
   if (!tree)
     return;
 
-  const auto result = omni::ryml::core::map_tree(options,
+  const auto result = omni::ryml::core::map_by_schema(options,
     omni::type<customization_mapping::record>, *tree);
 
   EXPECT_FALSE(result.value);
@@ -1267,13 +1500,12 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   if (!parsed)
     return;
 
-  const omni::ryml::config_t<> options{};
-  const omni::ryml::mapping_state_t<> context{
-    /*config=*/options,
-    /*path=*/{},
-    /*error_count=*/0,
-    /*warning_count=*/0,
-    /*borrow_strings=*/false,
+  const omni::ryml::config_t options{};
+  const omni::ryml::read_state_t context{
+    .config = options,
+    .path = {},
+    .error_count = 0,
+    .warning_count = 0,
   };
 
   auto into = c.initial;
@@ -1389,7 +1621,7 @@ TEST_P(customization_enum_mapping, accepts_only_declared_string_names) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_tree(
+  const auto result = omni::ryml::map_by_schema(
     omni::type<customization_mapping::status>, *tree);
 
   EXPECT_EQ(bool(c.expected), bool(result.value));

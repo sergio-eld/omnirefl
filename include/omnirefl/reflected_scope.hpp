@@ -1718,8 +1718,8 @@ struct is_reflected_record: std::false_type {};
 
 template <typename T>
 struct is_reflected_record<T, compat::enable_if_t<is_reflected<T>::value>>:
-    std::integral_constant<bool,
-      reflected_entity::record == meta_t<detail::_meta<T>>::entity()> {};
+    compat::bool_constant<reflected_entity::record
+      == meta_t<detail::_meta<T>>::entity()> {};
 
 /** Whether T has enum metadata within the reflected scope.
  * Ignores cv/ref qualification. Users must not specialize this trait. */
@@ -1728,8 +1728,8 @@ struct is_reflected_enum: std::false_type {};
 
 template <typename T>
 struct is_reflected_enum<T, compat::enable_if_t<is_reflected<T>::value>>:
-    std::integral_constant<bool,
-      reflected_entity::enumeration == meta_t<detail::_meta<T>>::entity()> {};
+    compat::bool_constant<reflected_entity::enumeration
+      == meta_t<detail::_meta<T>>::entity()> {};
 
 /** Experimental utilities callable only within a reflected scope. */
 namespace refl {
@@ -1741,8 +1741,7 @@ struct is_aggregatable: std::false_type {};
 template <typename T>
 struct is_aggregatable<T,
   compat::void_t<decltype(meta_t<omni::detail::_meta<T>>::is_aggregatable())>>:
-    std::integral_constant<bool,
-      meta_t<omni::detail::_meta<T>>::is_aggregatable()> {};
+    compat::bool_constant<meta_t<omni::detail::_meta<T>>::is_aggregatable()> {};
 
 /**
  * Field-lookup customization point used by `aggregate_into`.

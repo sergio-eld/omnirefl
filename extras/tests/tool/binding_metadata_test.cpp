@@ -356,7 +356,7 @@ template <omni::data_member_meta Field>
 #else
 template <typename Field>
 #endif
-struct mutable_member: std::integral_constant<bool, Field::is_mutable()> {};
+struct mutable_member: omni::compat::bool_constant<Field::is_mutable()> {};
 
 struct inspect_mutable_members {
 #if defined(__cpp_concepts)

@@ -85,7 +85,7 @@ template <typename Compositor>
 struct cpp11_map_with_aliases {
   Compositor compositor;
   ::ryml::ConstNodeRef node;
-  omni::ryml::mapping_state_t<> context;
+  omni::ryml::read_state_t<> context;
 
   template <typename _E>
   auto operator()(omni::enum_binding_t<_E> enumeration) const
@@ -108,13 +108,12 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   EXPECT_TRUE(tree);
   if (tree) {
     const omni::ryml::config_t<> options{};
-    const omni::ryml::mapping_state_t<> context{
+    const omni::ryml::read_state_t<> context{
       /*config=*/options,
       /*path=*/{},
       /*error_count=*/0,
       /*warning_count=*/0,
-      /*borrow_strings=*/false,
-    };
+      };
 
     state into = state::idle;
     const auto result = omni::reflected_call(

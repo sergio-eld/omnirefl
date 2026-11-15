@@ -4,19 +4,36 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
 
-TEST(mapping_state, copies_borrow_config_and_keep_independent_paths) {
+TEST(read_state, identifies_read_state_specializations) {
+  EXPECT_TRUE(omni::ryml::is_read_state<omni::ryml::read_state_t<>>::value);
+  EXPECT_TRUE(omni::ryml::is_read_state<
+    const omni::ryml::read_state_t<> &>::value);
+  EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::write_state_t<false>>::value);
+  EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::config_t<>>::value);
+}
+
+TEST(write_state, identifies_write_state_specializations) {
+  EXPECT_TRUE(omni::ryml::is_write_state<omni::ryml::write_state_t<false>>::value);
+  EXPECT_TRUE(omni::ryml::is_write_state<
+    const omni::ryml::write_state_t<true> &>::value);
+  EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::read_state_t<>>::value);
+  EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::config_t<>>::value);
+}
+
+TEST(read_state, copies_borrow_config_and_keep_independent_paths) {
   const omni::ryml::config_t<> options{};
-  using state_type = omni::ryml::mapping_state_t<>;
+  using state_type = omni::ryml::read_state_t<>;
   const state_type root{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/2,
     /*warning_count=*/3,
-    /*borrow_strings=*/false,
   };
 
   const auto first = root.child({
@@ -45,6 +62,59 @@ TEST(mapping_state, copies_borrow_config_and_keep_independent_paths) {
 
   EXPECT_EQ("/second",
     omni::ryml::detail::render_path(sibling.path.materialize()));
+}
+
+struct lvalue_renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &) & { return "lvalue"; }
+};
+
+struct rvalue_renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &) && { return "rvalue"; }
+};
+
+template <typename Config, typename = void>
+struct is_core_deserializable: std::false_type {};
+
+template <typename Config>
+struct is_core_deserializable<Config,
+  omni::compat::void_t<decltype(omni::ryml::core::deserialize(
+    std::declval<Config>(), omni::type_t<int>{}, std::string{}))>>:
+    std::true_type {};
+
+TEST(deserialize_binding, preserves_lvalue_config_invocability) {
+  using config_type = omni::ryml::config_t<lvalue_renderer>;
+  using binding_type = omni::ryml::deserialize_t<config_type>;
+
+  EXPECT_TRUE(is_core_deserializable<config_type &>::value);
+  EXPECT_TRUE((omni::compat::is_invocable<binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_FALSE(is_core_deserializable<config_type &&>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<binding_type &&,
+    omni::type_t<int>, std::string>::value));
+}
+
+TEST(deserialize_binding, preserves_rvalue_config_invocability) {
+  using config_type = omni::ryml::config_t<rvalue_renderer>;
+  using binding_type = omni::ryml::deserialize_t<config_type>;
+
+  EXPECT_FALSE(is_core_deserializable<config_type &>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
+  EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
+    omni::type_t<int>, std::string>::value));
+
+  EXPECT_TRUE(is_core_deserializable<config_type &&>::value);
+  EXPECT_TRUE((omni::compat::is_invocable<binding_type &&,
+    omni::type_t<int>, std::string>::value));
 }
 
 struct move_only_renderer {
@@ -220,7 +290,7 @@ TEST(diagnostics_transform, renders_a_caller_owned_tree) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_tree(omni::type_t<int>{}, *tree);
+  const auto result = omni::ryml::map_by_schema(omni::type_t<int>{}, *tree);
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
