@@ -111,6 +111,11 @@ not currently a compatibility requirement.
 
 Proposed precedence: local override > global specialization > built-in mapping.
 
+TODO: Explore a defaulted local-override accessor argument to the dispatcher.
+An explicitly supplied accessor could override global or built-in selection,
+or supply a customization when neither applies. This remains the proposed
+pattern for local overrides in `map_by_schema` configuration.
+
 CP objects must have internal linkage, without exported symbols. Verify this
 for variable templates and their specializations; const/constexpr alone should
 not be assumed to establish the intended linkage.

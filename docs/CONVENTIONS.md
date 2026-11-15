@@ -322,12 +322,6 @@ customization points reside in `traits::cp`.
 - Document accepted arguments, normalized result types, and ownership or
   lifetime requirements for each operation.
 
-TODO: Explore a defaulted local-override accessor argument to `core::twice`.
-An explicitly supplied accessor could override global or default selection,
-or supply a customization when neither applies. The design is still in
-progress; this is the intended pattern for local overrides in `map_by_schema`
-configuration.
-
 ### Dispatchers
 
 - Expose operations through dispatchers such as `core::twice(value)`;
