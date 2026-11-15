@@ -272,8 +272,11 @@ TEST(basics, diagnostics) {
 /** The core operation takes configuration explicitly instead of using a bound
  * callable. */
 TEST(basics, explicit_configuration) {
+  // GCC 10 needs the nested policy type for aggregate deduction.
   const omni::ryml::config_t options{
-    .error_policy = {.unknown_fields = omni::json::unknown_policy::allow},
+    .error_policy = omni::json::error_policy{
+      .unknown_fields = omni::json::unknown_policy::allow,
+    },
   };
   const auto result = omni::ryml::core::deserialize(options,
     omni::type<policy_examples::measurement>,
@@ -1437,8 +1440,9 @@ class customization_mapping_limits:
 // Enclosing mappers accumulate custom readers' issues and apply limits.
 TEST_P(customization_mapping_limits,
   collects_default_and_custom_conversion_errors) {
+  // GCC 10 needs the nested policy type for aggregate deduction.
   const omni::ryml::config_t options{
-    .error_policy = {.error_limit = GetParam()},
+    .error_policy = omni::json::error_policy{.error_limit = GetParam()},
   };
   const auto tree = omni::ryml::core::parse(R"(
 {

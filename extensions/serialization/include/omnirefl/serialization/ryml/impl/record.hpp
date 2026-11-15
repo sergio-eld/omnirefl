@@ -1,6 +1,7 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
+
 #include <algorithm>
 #include <tuple>
 #include <type_traits>

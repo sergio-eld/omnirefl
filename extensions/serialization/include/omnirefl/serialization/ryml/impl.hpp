@@ -218,9 +218,10 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   if (context.limit_exceeded())
-    result.result.value.reset(); else {
+    result.result.value.reset();
+  else
     result.append(omni::ryml::to_type(omni::type_t<T>{})(node, into, context));
-  }
+
   return std::move(result).finish();
 }
 
