@@ -1,6 +1,6 @@
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_target "cpp_${_standard}.functional")
-    add_executable(${_target} test.cpp)
+    add_executable(${_target} main.cpp)
     set_target_properties(${_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES

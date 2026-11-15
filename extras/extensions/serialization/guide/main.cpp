@@ -64,24 +64,6 @@
  *     validate enum input kind and name membership
  */
 
-// TODO: Define global default-config customization. For now, bind local
-// configuration with tdm_config or pass it explicitly to core functions.
-
-// TODO: [high] Add cases for records with ryml::Tree data members, retaining
-// subtrees whose value types are not known at compile time.
-// Probably use OMNI_SKIP_METADATA(::ryml::Tree), guarded by OMNI_TOOL_RUN,
-// to avoid reflecting the backend implementation.
-// TODO: [high] Add an extensible-record case with three differently typed data
-// members (e.g. string, int, bool) and an additional_properties map. Map known
-// object keys to their members and collect the remaining entries in
-// std::map<std::string, ryml::Tree> additional_properties. Also cover a
-// string-valued map when all additional values are strings.
-
-// TODO: [high] Define representations for non-string keys and which range
-// constraints can be expressed by JSON Schema. uniqueItems compares whole
-// entries, not just keys. Ordered ranges can sort during insertion without
-// requiring sorted input.
-
 #include <gtest/gtest.h>
 
 #include <omnirefl/functional.hpp>
@@ -806,7 +788,9 @@ namespace ryml {
  *
  * Readers update the destination and return with_diagnostics_t<monostate>:
  * an engaged value signals success, and diagnostics carry their issues.
- * Metadata queries stay dependent until called in reflected scope. */
+ * Customizations run within reflected scope. Keep metadata queries dependent
+ * on template arguments so their bodies are instantiated after metadata is
+ * available. Non-dependent metadata queries are checked too early. */
 namespace cp {
 
 // C++14 callable registration stores a configured default compositor directly.
@@ -1492,3 +1476,21 @@ INSTANTIATE_TEST_SUITE_P(strings,
 #if defined(__GNUC__) && !defined(__clang__)
 #  pragma GCC diagnostic pop
 #endif
+
+// TODO: Define global default-config customization. For now, bind local
+// configuration with tdm_config or pass it explicitly to core functions.
+
+// TODO: [high] Add cases for records with ryml::Tree data members, retaining
+// subtrees whose value types are not known at compile time.
+// Probably use OMNI_SKIP_METADATA(::ryml::Tree), guarded by OMNI_TOOL_RUN,
+// to avoid reflecting the backend implementation.
+// TODO: [high] Add an extensible-record case with three differently typed data
+// members (e.g. string, int, bool) and an additional_properties map. Map known
+// object keys to their members and collect the remaining entries in
+// std::map<std::string, ryml::Tree> additional_properties. Also cover a
+// string-valued map when all additional values are strings.
+
+// TODO: [high] Define representations for non-string keys and which range
+// constraints can be expressed by JSON Schema. uniqueItems compares whole
+// entries, not just keys. Ordered ranges can sort during insertion without
+// requiring sorted input.

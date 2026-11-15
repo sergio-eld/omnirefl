@@ -16,7 +16,7 @@
  * Compatible with C++11 and later.
  *
  * Examples prefer C++20 syntax. Compatibility interfaces are available for
- * C++11; see extras/extensions/serialization/tests/test.cpp for complete usage.
+ * C++11; see extras/extensions/serialization/tests/main.cpp for complete usage.
  *
  * Given a reflectable person type and a std::string source:
  *
@@ -328,7 +328,7 @@ struct issue {
   // TODO: Revisit path storage if C++11 constant evaluation becomes necessary.
   // TODO: Accept retained parser source-location metadata when mapping;
   // standalone trees do not retain source positions.
-  // TODO: Add constraint metadata and renderer customization when needed.
+  // TODO: Add constraint metadata when needed.
 };
 
 /** Collected mapping issues without ownership of their source tree.
@@ -732,6 +732,8 @@ const deserialize_t<> deserialize{};
  * sequence elements are omitted; remaining elements keep their relative order.
  * Populated optionals serialize their contained value.
  * Strings are quoted and borrowed from the input until emission completes.
+ * Keep their storage alive and unchanged until the call returns, including
+ * mutable data members and storage exposed by custom iterators.
  * Reflected enums serialize as their declared names.
  */
 struct serialize_t {
@@ -832,23 +834,11 @@ OMNI_SKIP_METADATA(c4::csubstr,
 // TODO: [high] Define how deserialize can return values borrowing tree storage.
 // Such values need an external owner; map_tree lets the caller retain its tree.
 
-// TODO: [high] Document that users must not modify source strings or string
-// containers during serialization calls. Borrowed character storage must stay
-// valid and unchanged until emission completes, including mutable members and
-// storage exposed by custom iterators; a const reference cannot guarantee this.
-
 // TODO: Move the omni::json mapping contracts to a shared header if
 // another JSON parser is adopted.
 
 // TODO: Consider global-default customization without requiring users to name
 // config_t before this header has declared it; config_t has no separate header.
-
-// TODO: [high] Document and demonstrate the reflected-scope contract for
-// from_type/to_type customizations. Metadata queries must depend on template
-// arguments so instantiation is delayed until the reflected scope. A concrete
-// `[](const Tree &) -> expected<my_type, error>` body is checked eagerly;
-// metadata queries there can occur outside the reflected scope. Cover the
-// dependent callable form in the guide before advertising callable CPs.
 
 // TODO: Remove core::parse when RapidYAML provides native non-throwing
 // parsing with a result-based error interface.

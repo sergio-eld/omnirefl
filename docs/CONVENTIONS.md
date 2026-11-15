@@ -5,13 +5,52 @@ testing conventions used in Omnirefl.
 
 ## Contents
 
+- [Code style](#code-style)
 - [Types, objects, traits, and concepts](#types-objects-traits-and-concepts)
 - [`tdm_` prefix: functional data-member updates][tdm-updates]
 - [Constraints](#constraints)
 - [Customization points](#customization-points)
   - [Dispatchers](#dispatchers)
+- [Guides and examples](#guides-and-examples)
+  - [Guide structure](#guide-structure)
+  - [Standalone projects](#standalone-projects)
+- [Extension structure](#extension-structure)
+- [Standard compatibility](#standard-compatibility)
+- [Value-based metaprogramming](#value-based-metaprogramming)
 
 [tdm-updates]: #tdm_-prefix-functional-data-member-updates
+
+## Code style
+
+Names use `snake_case`, following the standard library: namespaces, types,
+concepts, functions, data members, variables, and enumerators. `CamelCase` is
+reserved for template parameters, such as `Value` or `BufferSize`.
+
+Macros use `OMNI_UPPER_SNAKE_CASE`.
+
+Single-letter parameters and locals may be used when their roles are clear
+and nothing in the scope is reassigned, regardless of scope length. Descriptive
+names help distinguish values of the same or convertible types and follow
+changing state. Mutating member calls alone do not require longer names.
+
+Two single-letter names may represent distinct source and destination roles:
+
+```cpp
+#include <iostream>
+
+struct source { int value; };
+struct destination { int doubled; };
+
+destination convert(const source &a) {
+  const destination b{.doubled = a.value * 2};
+  // Just an exposition to justify creating b instead of returning directly.
+  std::cout << "Converted " << a.value << " to " << b.doubled << '\n';
+  return b;
+}
+```
+
+Conventional short names include `i`, `j`, and `k` for indices, `n` for a count,
+`p` for a pointer, and `e` for an error.
 
 ## Types, objects, traits, and concepts
 
@@ -307,3 +346,255 @@ constexpr auto size(const auto &value) {
   return detail::size_case<std::is_array_v<T>>{}(value);
 }
 ```
+
+## Guides and examples
+
+Prefer **guide** for "how to" recipes teaching the interface, and **example**
+for a concrete application or use case. This is a naming guideline, not a strict
+division; a project may serve both purposes.
+
+### Guide structure
+
+A guide presents the public interface through a TEST-oriented, cohesive
+top-down narration, starting with the basic ideas and building toward more
+involved uses. Comments explain the ideas, examples show them in code, and
+GTest assertions make the expected results explicit while keeping the guide
+executable.
+
+The opening block states the scope and language baseline (e.g. C++11), then lists
+`suite.topic - description` entries in source order, grouped by section.
+Searching for `TEST(suite, topic)` finds the entry point even when namespaces
+share its name; `--gtest_filter=suite.topic` runs it.
+
+The core guide introduces reflection concepts before building toward
+inspection, access, and modification.
+
+A shortened example of an opening block for the core reflection guide:
+
+```cpp
+/** Executable reflection guide. Examples use C++20 syntax; the interfaces
+ * remain C++11-compatible.
+ * Search for TEST(suite, topic) for each entry below.
+ *
+ * Basics
+ *   basics.reflected_scope - introduce reflected_call with a generic visitor
+ * Advanced
+ *   advanced.binding_ownership - inspect ownership and constrain callables
+ */
+```
+
+Extensions provide higher-level utilities intended to work out of the box:
+
+- **Basics:** roughly 90% of immediately useful usage, fewest extra steps first;
+  default interface before configuration and common customization.
+- **Advanced:** deeper customization and other topics by practical relevance,
+  after their prerequisites.
+- **Application examples:** separate from the Basics/Advanced progression,
+  or in separate example files.
+
+**Compatibility in guides and examples:**
+
+- Newer syntax may be used for brevity, with the supported baseline stated.
+- Earlier-standard equivalents appear once near the beginning.
+- New version-specific idioms have local alternatives, possibly commented out:
+
+```cpp
+const auto result = omni::ryml::deserialize(omni::type<int>, "42");
+// Before C++14:
+// const auto result = omni::ryml::deserialize(omni::type_t<int>{}, "42");
+```
+
+A topic's introductory annotation sits above its `TEST` entry point. Essential
+model declarations and expected results stay nearby; operation-specific
+explanations sit beside the relevant expression. The contents stay synchronized
+with topic names, descriptions, and source order as the guide changes.
+
+### Standalone projects
+
+Each project under `extras/examples/` must be self-contained: users can copy its
+directory and configure it independently. Apply the same requirement to
+standalone extension guides and examples.
+
+- Include the project's own `CMakeLists.txt`, sources, headers, and data.
+- Declare dependencies through package discovery or fetching. Use Omnirefl's
+  installed public CMake interface, without depending on repository-internal
+  scripts or the parent project's configuration.
+- Do not generate a standard matrix inside a guide or example project.
+- Require any specific language version in the project's CMake configuration:
+
+```cmake
+set_target_properties(example PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES)
+```
+
+When no particular version is required, invoke the shared
+lowest-default-standard CMake helper. This permitted shared policy helper must
+be available to copied standalone projects.
+
+The parent `CMakeLists.txt` checks whether a guide/example can be included
+before calling `add_subdirectory`. Report exclusions with
+`message(STATUS ...)`, stating the project and the unmet requirement.
+Standalone projects still declare their
+own requirements so they do not rely on those parent checks.
+
+## Extension structure
+
+Extension headers under `extensions/<module>/include/omnirefl/` ship in the
+Omnirefl packages, installed under `<includedir>/omnirefl/`. Each extension has
+a CMake component at `<libdir>/cmake/omnirefl/components/<module>.cmake`, alongside
+its dependency helpers and patches, and an entry in `Config.cmake.in`.
+
+Components are opt-in. For example:
+
+```cmake
+find_package(omnirefl CONFIG REQUIRED COMPONENTS serialization)
+```
+
+This resolves the serialization dependencies and provides the
+`omni::serialization` interface target.
+
+Guides, tests, benchmarks, and shared example data live under
+`extras/extensions/<module>/`. They ship as source in the separate
+`omnirefl-extras-<version>-<commit>.tar.gz` archive and build against the
+installed package. Keep their required sources and shared headers within that
+archive rather than depending on an unshipped repository checkout.
+
+Standalone guides and examples follow the [self-containment rules][guides].
+
+[guides]: #guides-and-examples
+
+Use `<module>/guide.cpp` for a single-file guide. Use
+`<module>/guide/main.cpp` when additional files, such as shared headers or
+standalone build configuration, warrant a directory.
+
+CMake executable targets follow `<module>.guide`, `<module>.test`, or
+`<module>.example`; benchmarks use `<module>.benchmark`. For example, the
+RapidYAML-backed JSON guide is `json_ryml.guide`.
+
+Several executables use `<module>.<kind>.<specific_name>`, such as
+`json_ryml.guide.aliases`. A main guide may retain `json_ryml.guide` alongside
+those specific guides. Existing target prefixes precede this name: standard
+matrix variants use `cpp_<standard>.`, for example
+`cpp_11.json_ryml.test` and `cpp_20.json_ryml.test`. Standard variants still
+represent one logical executable.
+
+Apply the same layout rule to tests and benchmarks. Within each directory:
+
+- Use `main.cpp` when there is only one logical executable. Additional sources
+  may contribute to that executable.
+- For several independent executables, use descriptive entry-source names such
+  as `specific_scenario.cpp`, without a `main.cpp`.
+- Different standard configurations of the same executable count as one.
+- Framework-provided entry points do not change the naming: `main.cpp` may link
+  against GTest's or Benchmark's supplied `main()`.
+
+```text
+<module>/
+  guide/
+    main.cpp
+    shared.hpp
+  tests/
+    main.cpp
+    specific_scenario.cpp
+  benchmarks/
+    main.cpp
+    shared.hpp
+```
+
+Here, `tests/main.cpp` and `tests/specific_scenario.cpp` form one executable.
+For independent scenario executables, use:
+
+```text
+<module>/tests/
+  first_scenario.cpp
+  second_scenario.cpp
+  shared.hpp
+```
+
+## Standard compatibility
+
+Core and extension modules use standard C++ interfaces, with compatibility
+fallbacks for their supported language and library versions. Shared `compat`
+names select the standard implementation when available and a compatible
+fallback otherwise; calling code does not repeat those guards.
+
+```cpp
+#include <type_traits>
+
+#if defined(__has_include)
+#  if __has_include(<expected>)
+#    include <expected>
+#  endif
+#endif
+
+#if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202211L
+#  include <tl/expected.hpp>
+#endif
+
+namespace omni {
+namespace compat {
+
+#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202211L
+template <typename T, typename Error>
+using expected = std::expected<T, Error>;
+#else
+template <typename T, typename Error>
+using expected = tl::expected<T, Error>;
+#endif
+
+#if defined(__cpp_lib_transformation_trait_aliases)
+template <bool Condition, typename T = void>
+using enable_if_t = std::enable_if_t<Condition, T>;
+#else
+template <bool Condition, typename T = void>
+using enable_if_t = typename std::enable_if<Condition, T>::type;
+#endif
+
+} // namespace compat
+} // namespace omni
+```
+
+Feature-test macros describe library availability more precisely than the
+language version alone. Third-party fallbacks belong to the component that
+needs them; this example does not make `expected` a core dependency.
+
+Third-party dependencies of optional components are not bundled with the main
+tool. They are fetched only when the user requests the corresponding CMake
+component.
+
+<!-- Keep this section last; insert future convention sections before it. -->
+
+## Value-based metaprogramming
+
+Prefer `constexpr` functions and ordinary data over encoding computations in
+template instantiations, where possible. This expresses algorithms directly,
+without type lists or specializations for intermediate results.
+
+Exception: prefer the template implementation if it is substantially faster to
+compile. Establish that advantage with measurements on representative inputs
+and relevant compilers.
+
+```cpp
+#include <type_traits>
+
+// Type-based computation.
+template <unsigned A, unsigned B>
+struct gcd_t : gcd_t<B, A % B> {};
+
+template <unsigned A>
+struct gcd_t<A, 0> : std::integral_constant<unsigned, A> {};
+
+constexpr auto first = gcd_t<42, 30>::value;
+
+// Value-based computation.
+constexpr unsigned gcd(unsigned a, unsigned b) {
+  return b ? gcd(b, a % b) : a;
+}
+
+constexpr auto second = gcd(42, 30);
+```
+
+Both compute at compile time. The function needs no specializations and also
+accepts runtime inputs. Templates remain appropriate for type selection,
+specialization, and generating different code.

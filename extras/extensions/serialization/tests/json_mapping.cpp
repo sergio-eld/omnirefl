@@ -6,11 +6,6 @@
 // JSON. Preserve repeated field names in the source text; do not normalize the
 // input. Case groups are heterogeneous tuples, bound to an engine before
 // registration.
-// TODO: Collect the case groups in one struct, conceptually initialized with
-// .duplicates = ..., .unknown_fields = ..., etc. Annotate each field with its
-// group's description; reflection can use field names and comments to register
-// and describe suites, automatically including new groups. Reuse the same data
-// across engines and benchmarks, retaining heterogeneous model types per group.
 
 #include "json_match.hpp"
 
@@ -892,3 +887,9 @@ INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
 } // namespace registration
 
 } // namespace
+
+// TODO: Collect the case groups in one struct, conceptually initialized with
+// .duplicates = ..., .unknown_fields = ..., etc. Annotate each field with its
+// group's description; reflection can use field names and comments to register
+// and describe suites, automatically including new groups. Reuse the same data
+// across engines and benchmarks, retaining heterogeneous model types per group.

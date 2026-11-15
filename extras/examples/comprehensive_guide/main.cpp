@@ -2118,8 +2118,6 @@ struct nonassignable {
 struct record {
   int writable;
   const int fixed;
-  // TODO(High): provide a safe whole-field access path for misaligned packed
-  // raw arrays without changing their declared type.
   int raw[2];
   std::array<int, 2> values;
   nonassignable locked;
@@ -2287,8 +2285,6 @@ struct counter {
 // Both member queries include static members. filter<fn::is_static>() selects
 // shared members; filter<fn::non_static>() selects instance members. Access
 // through either path still uses a record binding.
-// TODO: [medium] Replace this synthetic counter with a practical example of
-// static-member access and filtering.
 TEST(example, accesses_static_members_through_a_record_binding) {
   const static_access::counter input{7};
   const auto result = omni::reflected_call(
@@ -2621,11 +2617,17 @@ TEST(example, annotated_schema_small_record) {
     schema::annotate_schema(omni::type<schema::feature_toggle>));
 }
 
-// TODO: [high] Extend the nested-enum example with nested records, explaining
-// their supported discovery routes and declaration restrictions.
-
 // TU-wide request; the guard keeps it out of ordinary compilation. The macro
 // instantiates tweaks::skip_metadata without creating a namespace-scope object.
 #if defined(OMNI_TOOL_RUN)
 OMNI_SKIP_METADATA(metadata_tweaks::view<metadata_tweaks::element>);
 #endif
+
+// TODO: [high] Provide safe whole-field access for misaligned packed raw
+// arrays without changing their declared type (writable_fields::record::raw).
+
+// TODO: [medium] Replace static_access::counter with a practical example of
+// static-member access and filtering.
+
+// TODO: [high] Extend the nested-enum example with nested records, explaining
+// their supported discovery routes and declaration restrictions.

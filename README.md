@@ -335,7 +335,7 @@ const auto result = tuple
   | omni::fn::foldl(combine, initial);
 ```
 
-See the [functional tests](extras/tests/functional/test.cpp) for detailed examples.
+See the [functional tests](extras/tests/functional/main.cpp) for detailed examples.
 
 ## Reflection Utilities
 
@@ -957,6 +957,11 @@ gdb --batch -ex "thread apply all bt full" \
 
 If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
 systems route core dumps to a crash service instead of the current directory.
+
+## Codebase conventions
+
+[Codebase conventions](docs/CONVENTIONS.md) describe naming, API design,
+formatting, documentation, and project structure.
 
 ## License
 

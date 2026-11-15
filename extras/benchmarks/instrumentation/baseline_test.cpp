@@ -36,7 +36,6 @@
 #  endif
 #endif
 
-// TODO: move shared test variant helpers into a separate test header.
 namespace compat {
 template <typename T, typename... V>
 T *get_if(mpark::variant<V...> *value) {
@@ -220,7 +219,6 @@ struct write_fields_from_std_map {
     if (!value)
       return;
 
-    // TODO: use the frontend mutability interface once it exists.
     field.set_value(*value);
   }
 
@@ -237,7 +235,6 @@ struct write_fields_from_std_map {
     omni::compat::apply(_bind_map<std::map<std::string, V>>{from},
       nested_binding.accessible_data_members());
 
-    // TODO: use the frontend mutability interface once it exists.
     field.set_value(nested_binding);
   }
 
@@ -252,7 +249,6 @@ struct write_fields_from_std_map {
     omni::compat::apply(_bind_map<Nested>{*nested},
       nested_binding.accessible_data_members());
 
-    // TODO: use the frontend mutability interface once it exists.
     field.set_value(nested_binding);
     return true;
   }
@@ -3167,3 +3163,5 @@ TEST(write_values, in_cpp_allocator_crtp_from_std_map) {
   ASSERT_EQ((values{1, 2, 3}), p.in_cpp_allocator_crtp_values);
   ASSERT_EQ("allocator crtp", p.in_cpp_allocator_crtp_name);
 }
+
+// TODO: Move compat::get_if variant helpers into a shared test header.
