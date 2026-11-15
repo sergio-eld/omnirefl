@@ -10,11 +10,11 @@ namespace ryml {
 namespace reflected_scope {
 
 template <typename T,
-  typename Config,
+  bool BorrowStrings,
   compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
 auto from_enum::operator()(T value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config>) const
+  write_state_t<BorrowStrings>) const
   -> void {
   const auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
@@ -36,7 +36,7 @@ template <typename T,
   compat::enable_if_t<omni::is_reflected_enum<T>::value, int>>
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  read_state_t<Config> context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject

@@ -13,6 +13,7 @@
 #include <omnirefl/serialization/ryml/mapping/record.hpp>
 #include <omnirefl/serialization/ryml/mapping/sequence.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <type_traits>
@@ -26,11 +27,11 @@ struct from_string_like {
   static constexpr bool supports() { return traits::is_string<T>::value; }
 
   template <typename T,
-    typename Config,
+    bool BorrowStrings,
     compat::enable_if_t<traits::is_string<T>::value, int> = 0>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    mapping_state_t<Config>) const
+    write_state_t<BorrowStrings>) const
     -> void;
 };
 
@@ -44,7 +45,7 @@ struct to_string_like {
     compat::enable_if_t<traits::is_string<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state_t<Config> context) const
+    read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -54,11 +55,11 @@ struct from_arithmetic {
   static constexpr bool supports() { return std::is_arithmetic<T>::value; }
 
   template <typename T,
-    typename Config,
+    bool BorrowStrings,
     compat::enable_if_t<std::is_arithmetic<T>::value, int> = 0>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    mapping_state_t<Config>) const
+    write_state_t<BorrowStrings>) const
     -> void;
 };
 
@@ -72,7 +73,7 @@ struct to_arithmetic {
     compat::enable_if_t<std::is_arithmetic<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state_t<Config> context) const
+    read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -82,11 +83,11 @@ struct from_optional_like {
   static constexpr bool supports() { return traits::is_optional<T>::value; }
 
   template <typename T,
-    typename Config,
+    bool BorrowStrings,
     compat::enable_if_t<traits::is_optional<T>::value, int> = 0>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    mapping_state_t<Config> context) const
+    write_state_t<BorrowStrings> context) const
     -> void;
 };
 
@@ -100,9 +101,11 @@ struct to_optional_like {
     compat::enable_if_t<traits::is_optional<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state_t<Config> context) const
+    read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/mapping.hpp>

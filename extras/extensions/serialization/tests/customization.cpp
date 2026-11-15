@@ -50,11 +50,9 @@ namespace cp {
 
 template <>
 struct from_type_t<mapping_observation::number> {
-  template <typename Config>
+  template <bool BorrowStrings>
   void operator()(const mapping_observation::number &value,
-    ::ryml::NodeRef node, mapping_state_t<Config> state) const {
-    state.config.transform_diagnostics.observed->paths.push_back(
-      detail::render_path(state.path.materialize()));
+    ::ryml::NodeRef node, write_state_t<BorrowStrings> state) const {
     core::write_node(value.value, node, state);
   }
 };
@@ -63,7 +61,7 @@ template <>
 struct to_type_t<mapping_observation::number> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
-    mapping_observation::number *into, mapping_state_t<Config> state) const
+    mapping_observation::number *into, read_state_t<Config> state) const
     -> with_diagnostics_t<compat::monostate> {
     auto &trace = *state.config.transform_diagnostics.observed;
     trace.paths.push_back(detail::render_path(state.path.materialize()));
@@ -96,9 +94,9 @@ const auto to_type<endpoint<T>> = reflected_scope::to_record.with_name_by_alias(
 #else
 template <typename T>
 struct from_type_t<endpoint<T>> {
-  template <typename Config>
+  template <bool BorrowStrings>
   void operator()(const endpoint<T> &value,
-    ::ryml::NodeRef node, mapping_state_t<Config> state) const {
+    ::ryml::NodeRef node, write_state_t<BorrowStrings> state) const {
     core::write_node(value.port, node, state);
   }
 };
@@ -109,7 +107,7 @@ struct to_type_t<endpoint<T>> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     endpoint<T> *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    omni::ryml::read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return reflected_scope::to_record.with_name_by_alias(
       [](compat::string_view alias) -> compat::optional<compat::string_view> {
@@ -127,53 +125,25 @@ struct to_type_t<endpoint<T>> {
 
 namespace {
 
-// C++11 lambda equivalent; explicit void defers metadata-dependent work.
-template <typename T>
-struct cpp11_write_observed {
-  const T &value;
-  ::ryml::NodeRef node;
-  omni::ryml::mapping_state_t<
-    omni::ryml::config_t<mapping_observation::renderer>> state;
+TEST(write_state, preserves_string_storage_through_custom_mapping) {
+  std::vector<endpoint<std::string>> source{{"east"}, {"west"}};
+  const auto owning = omni::ryml::core::as_owning_tree(source);
 
-  template <typename _M>
-  void operator()(omni::record_meta_t<_M>) const {
-    omni::ryml::core::write_node(this->value, this->node, this->state);
+  {
+    const auto borrowed = omni::ryml::core::as_ref_tree(source);
+    EXPECT_TRUE(serialization_test::matches_node(
+      R"(["east", "west"])", borrowed.crootref()));
+
+    EXPECT_EQ(static_cast<const void *>(source.front().port.data()),
+      static_cast<const void *>(borrowed.crootref()[0].val().str));
   }
-};
 
-TEST(mapping_state, propagates_paths_through_record_and_range_serialization) {
-  mapping_observation::trace trace;
-  const omni::ryml::config_t<mapping_observation::renderer> options{
-    /*error_policy=*/{},
-    /*transform_diagnostics=*/{&trace},
-  };
-
-  const std::vector<mapping_observation::record> source{
-    {{1}, {2}, {3}},
-    {{4}, {5}, {6}},
-  };
-
-  ::ryml::Tree tree;
-  omni::reflected_call(cpp11_write_observed<decltype(source)>{
-    /*value=*/source,
-    /*node=*/tree.rootref(),
-    /*state=*/{options, /*path=*/{}, /*error_count=*/0, /*warning_count=*/0,
-      /*borrow_strings=*/false},
-  },
-    omni::type_t<mapping_observation::record>{});
-
-  const std::vector<std::string> expected{
-    "/0/first", "/0/second", "/0/third",
-    "/1/first", "/1/second", "/1/third",
-  };
-
-  EXPECT_EQ(expected, trace.paths);
-  EXPECT_TRUE(serialization_test::matches_json(
-    R"([{"first":1,"second":2,"third":3},{"first":4,"second":5,"third":6}])",
-    ::ryml::emitrs_json<std::string>(tree)));
+  source.clear();
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"(["east", "west"])", owning.crootref()));
 }
 
-TEST(mapping_state, passes_original_config_and_updated_counts_to_children) {
+TEST(read_state, passes_original_config_and_updated_counts_to_children) {
   mapping_observation::trace trace;
   omni::ryml::config_t<mapping_observation::renderer> options{
     /*error_policy=*/{},

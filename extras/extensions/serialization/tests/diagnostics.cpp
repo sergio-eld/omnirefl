@@ -8,15 +8,30 @@
 
 namespace {
 
-TEST(mapping_state, copies_borrow_config_and_keep_independent_paths) {
+TEST(read_state, identifies_read_state_specializations) {
+  EXPECT_TRUE(omni::ryml::is_read_state<omni::ryml::read_state_t<>>::value);
+  EXPECT_TRUE(omni::ryml::is_read_state<
+    const omni::ryml::read_state_t<> &>::value);
+  EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::write_state_t<false>>::value);
+  EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::config_t<>>::value);
+}
+
+TEST(write_state, identifies_write_state_specializations) {
+  EXPECT_TRUE(omni::ryml::is_write_state<omni::ryml::write_state_t<false>>::value);
+  EXPECT_TRUE(omni::ryml::is_write_state<
+    const omni::ryml::write_state_t<true> &>::value);
+  EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::read_state_t<>>::value);
+  EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::config_t<>>::value);
+}
+
+TEST(read_state, copies_borrow_config_and_keep_independent_paths) {
   const omni::ryml::config_t<> options{};
-  using state_type = omni::ryml::mapping_state_t<>;
+  using state_type = omni::ryml::read_state_t<>;
   const state_type root{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/2,
     /*warning_count=*/3,
-    /*borrow_strings=*/false,
   };
 
   const auto first = root.child({

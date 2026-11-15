@@ -7,16 +7,19 @@
     "With CMake, call omni_reflected_target(<target>)."
 #endif
 
-/**
- * YAML and JSON serialization backed by rapidyaml and omnirefl metadata.
- * Deserialization composes parsing, tree validation, and reflected field
- * assignment with diagnostics transformed by the supplied configuration.
- * Serialization writes reflected records, supported scalars, and vectors with
- * as_yaml or as_json.
- * Compatible with C++11 and later.
+/** JSON/YAML serialization and deserialization using RapidYAML.
+ * deserialize reads text into C++ values and returns diagnostics; as_json and
+ * as_yaml write those values back. Default mappings cover reflected records
+ * and enums, arithmetic values, strings, optionals, sequences, and string-keyed
+ * containers. Customization points adapt other types and representations.
  *
- * Examples prefer C++20 syntax. Compatibility interfaces are available for
- * C++11; see extras/extensions/serialization/tests/main.cpp for complete usage.
+ * This header supplies the complete public interface, including configuration,
+ * read/write states, and default mappers. core::parse and map_by_schema also
+ * support composing parsing and schema-driven mapping explicitly.
+ *
+ * Compatible with C++11 and later; examples use C++20 syntax for brevity.
+ * Guide: extras/extensions/serialization/guide/main.cpp.
+ * C++11 examples: extras/extensions/serialization/tests/main.cpp.
  *
  * Given a reflectable person type and a std::string source:
  *
@@ -34,29 +37,18 @@ if (result.value) {
 // owning strings and vectors; provide an alternative representation.
 
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/functional.hpp>
-#include <omnirefl/traits.hpp>
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/serialization/ryml/mapping.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
-
-// C++17 provides the standard string-view type checked below.
-#if 201703L <= OMNI_CPLUSPLUS && defined(__has_include)
-#  if __has_include(<string_view>)
-#    include <string_view>
-#  endif
-#endif
 
 namespace omni {
 namespace traits {
@@ -80,364 +72,9 @@ struct assign_string<c4::csubstr> {
 } // namespace cp
 } // namespace traits
 
-// Only backend-independent JSON/YAML mapping contracts belong here.
-namespace json {
-
-/** Member-name mapping contract.
- * Each mapped member has a canonical name and may accept aliases. The sets
- * consisting of each member's canonical name and aliases must be disjoint
- * across members. The caller must ensure this; collisions are not validated,
- * and mapping results are unspecified when this precondition is violated.
- *
- * If any canonical occurrence exists, its aliases are ignored regardless of
- * value validity. Otherwise aliases identify the member. Duplicate policies
- * select among canonical occurrences or, only when absent, among aliases.
- * Only the selected occurrence is decoded; invalid canonical input never
- * falls back to an alias. Present but invalid input is not a missing member.
- */
-
-/** JSON/YAML parsing and mapping failures, independent of the parser backend.
- * Field presence and diagnostic limits follow the requested mapping contract.
- */
-enum class issue_code : std::uint8_t {
-  unexpected_kind,
-  invalid_scalar,
-  out_of_range, //< Value lies outside the range accepted by the mapping.
-  missing_field,
-  unknown_field,
-  duplicate_field,
-  parse_error,
-  warning_limit_exceeded,
-  duplicate_element //< Repeated value in a unique-element destination.
-};
-
-/** Value categories used in mapping expectations and observed input.
- * These describe values, not destination-language storage types. */
-enum class value_kind : std::uint8_t {
-  unknown, //< No category is known or applicable.
-  scalar, //< A non-collection value whose category has not been resolved.
-  mapping,
-  sequence,
-  string,
-  boolean,
-  integer, //< An integral number.
-  unsigned_integer, //< A non-negative integral number.
-  number,
-  null
-};
-
-/** Controls repeated object names and elements of unique destinations.
- * Last implies allow; warn is ignored when duplicates are rejected. */
-enum duplicate_policy : std::uint8_t {
-  reject = 0,
-  allow = 1 << 0, //< Keep the first occurrence, without a warning.
-  last = 1 << 1, //< Keep the last occurrence.
-  warn = 1 << 2 //< Warn about repeated field names when duplicates are allowed.
-};
-
-OMNI_ENABLE_BIT_FLAGS(duplicate_policy)
-
-/** Input fields absent from the struct; warn is ignored without allow. */
-enum class unknown_policy : std::uint8_t {
-  reject = 0,
-  allow = 1 << 0, //< Ignore unknown fields without a warning.
-  warn = 1 << 1 //< Warn about unknown fields only when allow is set.
-};
-
-OMNI_ENABLE_BIT_FLAGS(unknown_policy)
-
-/**
- * Controls mapping errors independently of the JSON or YAML parsing algorithm.
- *
- * @details
- * Mapping returns with_diagnostics_t: a valid
- * value may accompany warnings, whereas expected<T, Diagnostics> holds either
- * the value or diagnostics. Error limits allow collecting more diagnostics;
- * they do not permit returning an invalid value.
- *
- * A partially initialized object is an implementation detail, not a result.
- * Exposing it would constrain implementations that construct the result in
- * one expression from mapped fields. Field types can represent recoverable
- * invalid input explicitly. A future invalid-value recovery mechanism may
- * define what it exposes during mapping without promising a partial result.
- */
-struct error_policy {
-  // Number of mapping errors processing may pass before stopping on the next.
-  // Warnings do not count. Zero stops at the first error.
-  std::uint16_t error_limit = 0;
-
-  // Maximum permitted warnings; unset means unlimited. The next warning
-  // exceeds the limit, produces an error, and prevents returning a value.
-  // Zero fails on the first warning.
-  compat::optional<std::uint16_t> warning_limit = compat::nullopt;
-
-  // Reject duplicates unless allow or last is set; warn alone does not allow.
-  duplicate_policy duplicates = duplicate_policy::reject;
-
-  // Reject input fields absent from the struct by default.
-  unknown_policy unknown_fields = unknown_policy::reject;
-
-  // TODO: Consider warning thresholds per policy.
-};
-
-} // namespace json
-
 namespace ryml {
 
-struct diagnostics;
-
-/** Render issue records using their source tree while it is alive. */
-struct render_diagnostics_t {
-  std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
-};
-
-constexpr render_diagnostics_t render_diagnostics{};
-
-/** Deserialization configuration.
- * In C++20, aggregate deduction supports config_t{.transform_diagnostics = f}.
- * Earlier standards can use tdm_transform_diagnostics to change the callable
- * type without spelling the resulting config specialization. */
-template <typename TransformDiagnostics = render_diagnostics_t>
-struct config_t {
-  json::error_policy error_policy OMNI_CPP14_DEFAULT_INIT();
-
-  // Called with the live source tree and collected diagnostics on every result.
-  TransformDiagnostics transform_diagnostics OMNI_CPP14_DEFAULT_INIT();
-
-  /** (QoL) Transform data member `.transform_diagnostics` inplace.
-   * Configure it within a single expression.
-   * Invokes f immediately with the current callable and returns a new config
-   * containing its result, preserving error_policy and this config.
-   * f :: TransformDiagnostics -> NewTransformDiagnostics.
-   *
-```cpp
-const auto load = omni::ryml::deserialize.tdm_config(
-  [](omni::ryml::config_t<> options) {
-    return options.tdm_transform_diagnostics(
-      [](omni::ryml::render_diagnostics_t previous) {
-        return [previous](const ::ryml::Tree &tree,
-          omni::ryml::diagnostics report) {
-          return previous(tree, report).size();
-        };
-      });
-  });
-``` */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const TransformDiagnostics &>::value))
-  constexpr auto tdm_transform_diagnostics(F &&f) const &
-    -> config_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const TransformDiagnostics &>>> {
-    return {
-      this->error_policy,
-      /*transform_diagnostics=*/compat::invoke(
-        std::forward<F>(f), this->transform_diagnostics),
-    };
-  }
-
-  /** Transform `.transform_diagnostics`, consuming this configuration. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, TransformDiagnostics &&>::value))
-  // C++11 constexpr member functions are implicitly const, preventing moves.
-  OMNI_CPP14_CONSTEXPR auto tdm_transform_diagnostics(F &&f) &&
-    -> config_t<compat::decay_t<
-      compat::invoke_result_t<F &&, TransformDiagnostics &&>>> {
-    return {
-      std::move(this->error_policy),
-      /*transform_diagnostics=*/compat::invoke(std::forward<F>(f),
-        std::move(this->transform_diagnostics)),
-    };
-  }
-
-  // TODO: [high] Add a configurable input-size limit to config and reject
-  // oversized source text before parsing or allocating a tree. A std::string
-  // argument is already buffered; callers must also bound request-body reads
-  // to prevent oversized REST requests from consuming memory before this call.
-
-  // TODO: Make config select SAX-style validation and field assignment as
-  // rapidyaml emits events, or the current parse-whole-tree -> map pipeline.
-  // Event-based mapping could reject invalid input before parsing and retaining
-  // a huge remaining subtree. Preserve mapping policies and
-  // diagnostics; check missing fields when their object closes. Resolve YAML
-  // aliases and diagnostic-view ownership before enabling the SAX path.
-
-  // TODO: [high] Detect at compile time whether a model permits unbounded
-  // nesting (e.g. a vector of itself); consider a traversal-depth limit in
-  // config to prevent stack exhaustion from deeply nested or malicious input.
-
-  // TODO: [high] Define a union deserialization policy before mapping
-  // std::variant. JSON Schema commonly represents alternatives with oneOf;
-  // trying every alternative is ambiguous and may repeat expensive work.
-  // Prefer a configurable discriminator that selects an alternative from a
-  // field value. Decide how metadata names alternatives, where the
-  // discriminator lives, and whether untagged matching is ever allowed.
-
-  // TODO: Consider storing ryml::ParserOptions if rapidyaml's defaults prove
-  // insufficient; do not mirror ParserOptions' private flags in another type.
-};
-
-/** Whether T is a config_t specialization, ignoring cv/ref qualifiers. */
-template <typename T>
-struct is_config:
-    compat::bool_constant<traits::is_specialization_of<config_t, T>()> {};
-
-// C++14 adds variable templates for trait values.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-template <typename T>
-constexpr bool is_config_v = is_config<T>::value;
-#endif
-
-// C++20 callers can constrain configuration arguments directly.
-#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
-template <typename T>
-concept config_like = is_config<T>::value;
-#endif
-
-/**
- * Describes an input issue without rendering a message or deciding failure.
- */
-struct issue {
-  struct path_segment {
-    // Field name borrowed from metadata or the caller-owned tree.
-    c4::csubstr field;
-
-    // Sequence position; empty for a named field.
-    compat::optional<std::size_t> index;
-  };
-
-  // Group byte-sized kinds and the warning flag before rendering data.
-  // Validation or conversion that failed.
-  json::issue_code reason;
-
-  // Input kind required by the destination field.
-  json::value_kind expected;
-
-  // Input kind encountered at the failing node.
-  json::value_kind actual;
-
-  // True for accepted input conditions reported by the selected policy.
-  bool warning = false;
-
-  // Field names and sequence indices from the root to the issue.
-  std::vector<path_segment> path;
-
-  // node_id refers to the caller-owned tree; field views may borrow its keys.
-  // Missing fields may have no corresponding node.
-  ::ryml::id_type node_id = ::ryml::NONE;
-
-  // TODO: Revisit path storage if C++11 constant evaluation becomes necessary.
-  // TODO: Accept retained parser source-location metadata when mapping;
-  // standalone trees do not retain source positions.
-  // TODO: Add constraint metadata when needed.
-};
-
-/** Collected mapping issues without ownership of their source tree.
- * Keep the tree and borrowed character storage alive and unchanged while
- * rendering diagnostics. Field paths may borrow metadata or source keys. */
-struct diagnostics {
-  // Mapping-policy snapshot; the deserialize transformation is not retained.
-  omni::ryml::config_t<> config;
-
-  // Validation and conversion issues in traversal order, including warnings.
-  std::vector<issue> issues;
-
-  // Owns RapidYAML syntax-error text returned by core::parse.
-  // Empty when mapping an already parsed tree.
-  std::string parse_error_message;
-};
-
-/** Diagnostics result produced by Config, preserving its cv/ref qualifiers. */
-template <typename Config>
-using diagnostics_result_t = compat::decay_t<compat::invoke_result_t<
-  decltype((std::declval<Config>().transform_diagnostics)),
-  const ::ryml::Tree &,
-  diagnostics>>;
-
-/**
- * Holds the deserialized value, if available, and diagnostics even on failure.
- * Diagnostics can hold issue records or a rendered message.
- */
-template <typename T,
-  typename Diagnostics = omni::ryml::diagnostics>
-struct with_diagnostics_t {
-  // Available only when mapping succeeds.
-  compat::optional<T> value;
-
-  // Retained issue records, or the result of transforming them for display.
-  Diagnostics diagnostics;
-
-  // TODO: Collect defaulted fields separately from warnings and errors.
-  // TODO: Add and_then for generic expected-style sequencing; specify how to
-  // retain diagnostics from both the input and the returned result.
-  // TODO: Add or_else for generic expected-style recovery; specify how to
-  // retain diagnostics when a value and issues are both present.
-};
-
-/** Borrowed path through active mapping states.
- * Copies retain parent links without allocating. Referenced parent paths must
- * remain alive and unchanged until child mappings finish. Issues materialize
- * their own segment arrays, retaining the field-name storage they borrow. */
-struct mapping_path {
-  // Root paths have depth zero; their parent and segment fields are unused.
-  const mapping_path *parent;
-  c4::csubstr field;
-  // Keep active paths trivial even with older non-trivial optional libraries.
-  std::size_t index;
-  bool has_index;
-  std::size_t depth;
-
-  /** Copy the path's segments into root-to-leaf order for diagnostics. */
-  std::vector<issue::path_segment> materialize() const;
-};
-
-/** Mapping configuration and traversal progress passed to customization points.
- * Config is borrowed; path links refer to active ancestor states. Copies do
- * not copy configuration or allocate path storage. Counters include issues
- * reported by preceding operations in the enclosing traversal. */
-template <typename Config = omni::ryml::config_t<>>
-struct mapping_state_t {
-  const Config &config;
-  mapping_path path;
-  std::size_t error_count;
-  std::size_t warning_count;
-
-  // FIXME: [high] Preserve the builder's compile-time string-ownership policy
-  // through the writing interface instead of erasing it into a runtime flag.
-  bool borrow_strings;
-
-  /** Whether an error or warning budget has been exceeded. */
-  constexpr bool limit_exceeded() const {
-    return this->config.error_policy.error_limit < this->error_count
-      || (this->config.error_policy.warning_limit
-        && *this->config.error_policy.warning_limit < this->warning_count);
-  }
-
-  /** Descend one path segment, preserving configuration and issue counts.
-   * This state must remain alive while the returned child is used. */
-  OMNI_CPP14_CONSTEXPR mapping_state_t child(issue::path_segment segment)
-    const & {
-    return {
-      /*config=*/this->config,
-      /*path=*/{
-        /*parent=*/&this->path,
-        /*field=*/segment.field,
-        /*index=*/segment.index ? *segment.index : 0,
-        /*has_index=*/bool(segment.index),
-        /*depth=*/this->path.depth + 1,
-      },
-      /*error_count=*/this->error_count,
-      /*warning_count=*/this->warning_count,
-      /*borrow_strings=*/this->borrow_strings,
-    };
-  }
-
-  // Child paths borrow the parent, so reject a temporary parent state.
-  mapping_state_t child(issue::path_segment) const && = delete;
-};
-
 namespace cp {
-
-/** Sentinel for an unregistered node-to-C++ customization. */
-struct unavailable {};
 
 /** Ad hoc discovery override for types inheriting standard-library containers.
  * Inheriting those containers is discouraged. Specialize to std::true_type
@@ -470,15 +107,16 @@ struct counter { int value; };
 
 template <>
 struct omni::ryml::cp::from_type_t<counter> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
   void operator()(const counter &value, ::ryml::NodeRef node,
-    mapping_state_t<Config> context) const {
+    State context) const {
     omni::ryml::core::write_node(value.value, node, context);
   }
 };
 ``` */
 template <typename T, typename Enable = void>
-struct from_type_t: unavailable {};
+struct from_type_t: traits::cp::unavailable {};
 
 // C++14 adds variable-template registration for serialization callables.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
@@ -486,7 +124,7 @@ struct from_type_t: unavailable {};
  * or from_type_t for a given type; the dispatcher selects a default otherwise.
  */
 template <typename T, typename Enable = void>
-constexpr unavailable from_type{};
+constexpr traits::cp::unavailable from_type{};
 #endif
 
 /** Node-to-C++ callable customization. Unregistered types use the default
@@ -497,16 +135,17 @@ struct counter { int value; };
 
 template <>
 struct omni::ryml::cp::to_type_t<counter> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, counter *into,
-    mapping_state_t<Config> context) const
+    State context) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     return omni::ryml::core::read_node(node, &into->value, context);
   }
 };
 ``` */
 template <typename T, typename Enable = void>
-struct to_type_t: unavailable {};
+struct to_type_t: traits::cp::unavailable {};
 
 // Callable variable-template registration is available starting with C++14.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
@@ -523,23 +162,12 @@ const auto omni::ryml::cp::to_type<endpoint> =
     omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
 ``` */
 template <typename T, typename Enable = void>
-constexpr unavailable to_type{};
+constexpr traits::cp::unavailable to_type{};
 #endif
 
 } // namespace cp
 
 namespace core {
-
-/** Dispatch one value through its serialization customization or default. */
-template <typename T, typename Config>
-void write_node(const T &value, ::ryml::NodeRef node,
-  mapping_state_t<Config> context);
-
-/** Dispatch one node through the selected to_type callable with diagnostics. */
-template <typename T, typename Config>
-auto read_node(::ryml::ConstNodeRef node, T *into,
-  mapping_state_t<Config> context)
-  -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
@@ -558,6 +186,17 @@ if (parsed) {
 ``` */
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options = {});
+
+/** Dispatch one value through its serialization customization or default. */
+template <typename T, bool BorrowStrings>
+void write_node(const T &value, ::ryml::NodeRef node,
+  write_state_t<BorrowStrings> context);
+
+/** Dispatch one node through the selected to_type callable with diagnostics. */
+template <typename T, typename Config>
+auto read_node(::ryml::ConstNodeRef node, T *into,
+  read_state_t<Config> context)
+  -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 /** Map document nodes into a C++ value, traversing its schema over the
  * document through the selected customization points.
@@ -663,9 +302,11 @@ struct map_by_schema_t {
 
 const map_by_schema_t<> map_by_schema{};
 
-/** Parse JSON/YAML and return an optional value with transformed diagnostics.
- * The default config renders diagnostic text before releasing the source tree.
- * Custom transforms receive const Tree& and diagnostics while the tree lives.
+/** (QoL) Partial application of core::deserialize with inspectable config.
+ * Provides the global default deserialize; tdm_config transforms its bound
+ * config in a single expression, returning a new binding.
+ * Its call operators preserve the core template's argument constraints through
+ * the C++11-compatible interface.
  */
 template <typename Config = omni::ryml::config_t<>>
 struct deserialize_t {
@@ -775,11 +416,15 @@ constexpr serialize_t as_json{
 
 namespace detail {
 
+// Declared for the public accessor's dependent return type; registration
+// selection is defined in the implementation header.
 template <typename T>
-struct from_type_selection;
+struct from_type_selection_t;
 
+// Declared for the public accessor's dependent return type; registration
+// selection is defined in the implementation header.
 template <typename T>
-struct to_type_selection;
+struct to_type_selection_t;
 
 } // namespace detail
 
@@ -789,7 +434,7 @@ struct to_type_selection;
  * and missing mappings are diagnosed here, before invoking the mapper. */
 template <typename T>
 constexpr auto from_type(omni::type_t<T>)
-  -> typename detail::from_type_selection<T>::type;
+  -> typename detail::from_type_selection_t<T>::type;
 
 /** Return the registered node-to-C++ callable by value, or the default
  * compositor when neither customization is registered. Selected callables
@@ -797,18 +442,13 @@ constexpr auto from_type(omni::type_t<T>)
  * and missing mappings are diagnosed here, before invoking the mapper. */
 template <typename T>
 constexpr auto to_type(omni::type_t<T>)
-  -> typename detail::to_type_selection<T>::type;
+  -> typename detail::to_type_selection_t<T>::type;
 
 } // namespace ryml
 } // namespace omni
 
-// Inline and template definitions depend on the complete public interface
-// above. Including them here keeps the detail header private to this header.
-#include <omnirefl/serialization/impl/ryml.hpp>
-#include <omnirefl/serialization/ryml/impl/mapping.hpp>
-#include <omnirefl/serialization/ryml/impl/mapping/enum.hpp>
-#include <omnirefl/serialization/ryml/impl/mapping/record.hpp>
-#include <omnirefl/serialization/ryml/impl/mapping/sequence.hpp>
+// Entry-point definitions depend on the complete public interface above.
+#include <omnirefl/serialization/ryml/impl.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
 static_assert(omni::traits::is_string<std::string>::value,
@@ -841,8 +481,34 @@ OMNI_SKIP_METADATA(c4::csubstr,
 // TODO: Move the omni::json mapping contracts to a shared header if
 // another JSON parser is adopted.
 
-// TODO: Consider global-default customization without requiring users to name
-// config_t before this header has declared it; config_t has no separate header.
+// TODO: Consider global default-config customization.
 
 // TODO: Remove core::parse when RapidYAML provides native non-throwing
 // parsing with a result-based error interface.
+
+// TODO: [low] Consider warning thresholds per policy in json::error_policy.
+
+// TODO: [high] Consider a configurable mapping-depth limit for recursive
+// deserialization to prevent stack exhaustion. It should also apply when
+// map_by_schema receives an existing tree.
+
+// TODO: [medium] Consider a config_t input-size limit checked by deserialize
+// before parsing or allocating a tree. Source text is already buffered in a
+// std::string; callers still need to bound reads before supplying it.
+
+// TODO: [medium] Consider compile-time detection of models permitting unbounded
+// nesting, such as a record containing a vector of itself. This can identify
+// recursive schemas but does not replace a runtime mapping-depth limit.
+
+// TODO: [medium] Define default variant mapping before supporting std::variant.
+// Consider a discriminator selecting an alternative, its location and metadata,
+// and whether untagged matching is allowed. Trying every alternative may be
+// ambiguous and repeat expensive work; JSON Schema oneOf does not select one.
+
+// TODO: [low] Explore SAX-driven validation and assignment as an alternative to
+// parsing a whole tree before mapping. Early rejection could avoid retaining
+// unused subtrees. Preserve mapping policies and diagnostics, check missing
+// fields when objects close, and resolve YAML aliases and diagnostic lifetimes.
+
+// TODO: [low] Consider exposing core::parse's existing ryml::ParserOptions
+// through config_t if needed, without duplicating the backend's option fields.

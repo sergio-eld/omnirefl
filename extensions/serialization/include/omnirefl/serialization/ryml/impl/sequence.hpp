@@ -37,9 +37,9 @@ struct write_range_case;
 
 template <>
 struct write_range_case<false> {
-  template <typename T, typename Config>
+  template <typename T, bool BorrowStrings>
   static void apply(const T &value, ::ryml::NodeRef node,
-    mapping_state_t<Config> context) {
+    write_state_t<BorrowStrings> context) {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
     // Separate iterator/sentinel declarations also support non-common ranges
@@ -48,16 +48,10 @@ struct write_range_case<false> {
     using std::end;
     auto current = begin(value);
     const auto last = end(value);
-    std::size_t index = 0;
     for (; current != last; ++current) {
       const element_type &element = *current;
       if (!is_null(element)) {
-        const auto child_state = context.child({
-          /*field=*/{},
-          /*index=*/index++,
-        });
-
-        core::write_node(element, node.append_child(), child_state);
+        core::write_node(element, node.append_child(), context);
       }
     }
   }
@@ -65,9 +59,9 @@ struct write_range_case<false> {
 
 template <>
 struct write_range_case<true> {
-  template <typename T, typename Config>
+  template <typename T, bool BorrowStrings>
   static void apply(const T &value, ::ryml::NodeRef node,
-    mapping_state_t<Config> context) {
+    write_state_t<BorrowStrings> context) {
     static_assert(traits::is_string<traits::key_type_t<T>>::value,
       "from_range requires string-adaptable keys for JSON/YAML objects");
 
@@ -101,12 +95,7 @@ struct write_range_case<true> {
         child.set_key_serialized(text);
 
       child.set_key_style(::ryml::KEY_DQUO);
-      const auto child_state = context.child({
-        /*field=*/text,
-        /*index=*/compat::nullopt,
-      });
-
-      core::write_node(entry.second, child, child_state);
+      core::write_node(entry.second, child, context);
     }
   }
 };
@@ -114,12 +103,12 @@ struct write_range_case<true> {
 } // namespace detail
 
 template <typename T,
-  typename Config,
+  bool BorrowStrings,
   compat::enable_if_t<omni::ryml::detail::is_mapped_range<const T>::value,
     int>>
 void from_range_t::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config> context) const {
+  write_state_t<BorrowStrings> context) const {
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 
@@ -200,7 +189,7 @@ template <>
 struct insert_range_value_case<false> {
   template <typename T, typename Config, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef,
-    mapping_state_t<Config>, node_accumulator<Config> *,
+    read_state_t<Config>, node_accumulator<Config> *,
     Args &&...args) {
     adapt::emplace(into, std::forward<Args>(args)...);
   }
@@ -210,7 +199,7 @@ template <>
 struct insert_range_value_case<true> {
   template <typename T, typename Config, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef node,
-    mapping_state_t<Config> context, node_accumulator<Config> *result,
+    read_state_t<Config> context, node_accumulator<Config> *result,
     Args &&...args) {
     const auto inserted = adapt::try_emplace(into, std::forward<Args>(args)...);
     if (inserted.second)
@@ -366,7 +355,7 @@ template <typename T,
   compat::enable_if_t<detail::is_mapped_range<T>::value, int>>
 auto to_range_t::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  read_state_t<Config> context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   static_assert(compat::is_invocable<const traits::cp::clear<T> &, T *>::value,
     "to_range requires an adapted clear operation");

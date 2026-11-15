@@ -5,6 +5,7 @@
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/detail.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <type_traits>
@@ -22,11 +23,11 @@ struct from_enum {
   }
 
   template <typename T,
-    typename Config,
+    bool BorrowStrings,
     compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(T value,
     ::ryml::NodeRef node,
-    mapping_state_t<Config>) const
+    write_state_t<BorrowStrings>) const
     -> void;
 };
 
@@ -54,7 +55,7 @@ struct to_enum_t {
     compat::enable_if_t<omni::is_reflected_enum<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state_t<Config> context) const
+    read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   ValueByAlias value_by_alias;
@@ -87,3 +88,5 @@ constexpr to_enum_t<> to_enum{};
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/enum.hpp>

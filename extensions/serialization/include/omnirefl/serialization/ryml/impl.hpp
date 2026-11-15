@@ -3,16 +3,11 @@
 // FIXME: [low] Freestanding: parse-error recovery requires setjmp/longjmp,
 // which are not guaranteed by a freestanding implementation.
 
-#include <omnirefl/functional.hpp>
-
-#include <c4/format.hpp>
 #include <c4/std/string.hpp>
 
 #include <algorithm>
-#include <cassert>
 #include <csetjmp>
 #include <iterator>
-#include <limits>
 #include <type_traits>
 
 namespace omni {
@@ -25,7 +20,7 @@ template <typename T, typename = void>
 struct default_from_type:
     std::conditional<omni::is_reflected_record<T>::value,
       reflected_scope::from_record,
-      cp::unavailable>::type {};
+      traits::cp::unavailable>::type {};
 
 template <typename T>
 struct default_from_type<T,
@@ -58,7 +53,7 @@ template <typename T, typename = void>
 struct default_to_type:
     std::conditional<omni::is_reflected_record<T>::value,
       reflected_scope::to_record_t<>,
-      cp::unavailable>::type {};
+      traits::cp::unavailable>::type {};
 
 template <typename T>
 struct default_to_type<T,
@@ -88,11 +83,11 @@ struct default_to_type<T,
 template <typename T>
 struct from_type_registration {
   static constexpr bool has_struct =
-    !std::is_base_of<cp::unavailable, cp::from_type_t<T>>::value;
+    !std::is_base_of<traits::cp::unavailable, cp::from_type_t<T>>::value;
 
 // C++11 registers structs; C++14 also allows callable variable templates.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-  static constexpr bool has_variable = !std::is_same<cp::unavailable,
+  static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
     compat::remove_cvref_t<decltype(cp::from_type<T>)>>::value;
 #else
   static constexpr bool has_variable = false;
@@ -125,11 +120,11 @@ struct from_type_case<T, false, false> {
 template <typename T>
 struct to_type_registration {
   static constexpr bool has_struct =
-    !std::is_base_of<cp::unavailable, cp::to_type_t<T>>::value;
+    !std::is_base_of<traits::cp::unavailable, cp::to_type_t<T>>::value;
 
 // C++11 registers structs; C++14 also allows callable variable templates.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-  static constexpr bool has_variable = !std::is_same<cp::unavailable,
+  static constexpr bool has_variable = !std::is_same<traits::cp::unavailable,
     compat::remove_cvref_t<decltype(cp::to_type<T>)>>::value;
 #else
   static constexpr bool has_variable = false;
@@ -162,302 +157,68 @@ struct to_type_case<T, false, false> {
 // Public accessor declarations need one dependent type; keep the Boolean
 // selection parameters and registration checks in this implementation header.
 template <typename T>
-struct from_type_selection: from_type_case<T> {};
+struct from_type_selection_t: from_type_case<T> {};
 
 template <typename T>
-struct to_type_selection: to_type_case<T> {};
+struct to_type_selection_t: to_type_case<T> {};
 
 } // namespace detail
 
 template <typename T>
 constexpr auto from_type(omni::type_t<T>)
-  -> typename detail::from_type_selection<T>::type {
-  using mapper = typename detail::from_type_selection<T>::type;
+  -> typename detail::from_type_selection_t<T>::type {
+  using mapper = typename detail::from_type_selection_t<T>::type;
 
   static_assert(!(detail::from_type_registration<T>::has_struct
       && detail::from_type_registration<T>::has_variable),
     "Conflicting value mappings: specialize either cp::from_type_t or "
     "cp::from_type, not both");
 
-  static_assert(!std::is_base_of<cp::unavailable, mapper>::value,
+  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
     "No value mapping: specialize cp::from_type_t or cp::from_type");
 
   static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
       std::is_copy_constructible<mapper>>::value,
     "Value mappers must be trivially copyable and copy-constructible");
 
-  return detail::from_type_selection<T>::get();
+  return detail::from_type_selection_t<T>::get();
 }
 
 template <typename T>
 constexpr auto to_type(omni::type_t<T>)
-  -> typename detail::to_type_selection<T>::type {
-  using mapper = typename detail::to_type_selection<T>::type;
+  -> typename detail::to_type_selection_t<T>::type {
+  using mapper = typename detail::to_type_selection_t<T>::type;
 
   static_assert(!(detail::to_type_registration<T>::has_struct
       && detail::to_type_registration<T>::has_variable),
     "Conflicting node mappings: specialize either cp::to_type_t or "
     "cp::to_type, not both");
 
-  static_assert(!std::is_base_of<cp::unavailable, mapper>::value,
+  static_assert(!std::is_base_of<traits::cp::unavailable, mapper>::value,
     "No node mapping: specialize cp::to_type_t or cp::to_type");
 
   static_assert(compat::conjunction<std::is_trivially_copyable<mapper>,
       std::is_copy_constructible<mapper>>::value,
     "Node mapping callables must be trivially copyable and copy-constructible");
 
-  return detail::to_type_selection<T>::get();
+  return detail::to_type_selection_t<T>::get();
 }
-
-inline std::vector<issue::path_segment> mapping_path::materialize() const {
-  std::vector<issue::path_segment> segments(this->depth);
-  auto path = this;
-  for (std::size_t remaining = this->depth; remaining; --remaining) {
-    segments[remaining - 1] = {
-      /*field=*/path->field,
-      /*index=*/path->has_index
-        ? compat::optional<std::size_t>{path->index}
-        : compat::nullopt,
-    };
-    path = path->parent;
-  }
-
-  return segments;
-}
-
-namespace detail {
-
-constexpr compat::string_view to_string_view(c4::csubstr s) {
-  // Keep empty views safe to append through C++11 string's pointer/size API.
-  return {s.len ? s.str : "", s.len};
-}
-
-inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
-  if (n.invalid())
-    return json::value_kind::unknown;
-
-  if (n.is_map())
-    return json::value_kind::mapping;
-
-  if (n.is_seq())
-    return json::value_kind::sequence;
-
-  if (n.has_val())
-    return n.val_is_null() ? json::value_kind::null : json::value_kind::scalar;
-
-  return json::value_kind::unknown;
-}
-
-inline std::string render_path(
-  const std::vector<issue::path_segment> &segments) {
-  std::string path;
-  for (const auto &segment : segments) {
-    path += '/';
-    if (segment.index) {
-      path += std::to_string(*segment.index);
-      continue;
-    }
-
-    for (const char ch : segment.field) {
-      if ('~' == ch)
-        path += "~0";
-      else if ('/' == ch)
-        path += "~1";
-      else
-        path += ch;
-    }
-  }
-
-  return path;
-}
-
-OMNI_CPP14_CONSTEXPR inline compat::string_view kind_name(json::value_kind k) {
-  switch (k) {
-  case json::value_kind::mapping:
-    return "object";
-  case json::value_kind::sequence:
-    return "array";
-  case json::value_kind::string:
-    return "string";
-  case json::value_kind::boolean:
-    return "boolean";
-  case json::value_kind::integer:
-    return "integer";
-  case json::value_kind::unsigned_integer:
-    return "unsigned integer";
-  case json::value_kind::number:
-    return "real number";
-  case json::value_kind::null:
-    return "null";
-  default:
-    return "scalar";
-  }
-}
-
-// Local traversal output owns the accumulated diagnostics and limit counters.
-// Child states snapshot progress; diagnostics are returned separately.
-template <typename Config>
-struct node_accumulator {
-  mapping_state_t<Config> state;
-  with_diagnostics_t<compat::monostate, diagnostics> result;
-
-  bool stopped() const { return this->state.limit_exceeded(); }
-
-  void report(issue entry) {
-    this->state.error_count += !entry.warning;
-    this->state.warning_count += entry.warning;
-    if (!entry.warning)
-      this->result.value.reset();
-
-    this->result.diagnostics.issues.push_back(std::move(entry));
-    if (this->result.diagnostics.issues.back().warning
-      && this->state.config.error_policy.warning_limit
-      && this->state.warning_count
-        == std::size_t{1} + *this->state.config.error_policy.warning_limit) {
-      auto exceeded = this->result.diagnostics.issues.back();
-      exceeded.reason = json::issue_code::warning_limit_exceeded;
-      exceeded.warning = false;
-      this->result.diagnostics.issues.push_back(std::move(exceeded));
-      ++this->state.error_count;
-      this->result.value.reset();
-    }
-  }
-
-  void append(with_diagnostics_t<compat::monostate, diagnostics> child) {
-    if (!child.value)
-      this->result.value.reset();
-
-    // A child may already have emitted the limit error. Preserve that report
-    // without generating the same warning-limit error again at each parent.
-    const bool has_limit_error = std::any_of(child.diagnostics.issues.begin(),
-      child.diagnostics.issues.end(),
-      [](const issue &entry) {
-        return entry.reason == json::issue_code::warning_limit_exceeded;
-      });
-
-    for (auto &entry : child.diagnostics.issues) {
-      if (has_limit_error) {
-        this->state.error_count += !entry.warning;
-        this->state.warning_count += entry.warning;
-        if (!entry.warning)
-          this->result.value.reset();
-
-        this->result.diagnostics.issues.push_back(std::move(entry));
-      } else {
-        this->report(std::move(entry));
-      }
-    }
-    if (this->stopped())
-      this->result.value.reset();
-  }
-
-  auto finish() && -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return std::move(this->result);
-  }
-};
-
-template <typename Config>
-node_accumulator<Config> make_node_accumulator(mapping_state_t<Config> state) {
-  return {
-    /*state=*/state,
-    /*result=*/{
-      /*value=*/compat::monostate{},
-      /*diagnostics=*/{
-        /*config=*/{state.config.error_policy, {}},
-        /*issues=*/{},
-        /*parse_error_message=*/{},
-      },
-    },
-  };
-}
-
-inline issue make_issue(json::issue_code reason,
-  json::value_kind expected,
-  ::ryml::ConstNodeRef node,
-  mapping_path path,
-  bool warning = false) {
-  // C++11 cannot aggregate-initialize issue because it has member defaults.
-  issue result{};
-  result.reason = reason;
-  result.path = path.materialize();
-  result.expected = expected;
-  result.actual = node_kind(node);
-  result.warning = warning;
-
-  if (!node.invalid())
-    result.node_id = node.id();
-
-  return result;
-}
-
-// Format validation precedes conversion; failure here means out of range.
-OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_integral<T>::value))
-compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
-  T value{};
-  // C4 accepts a pointer to either the checked wrapper or the original value.
-  compat::conditional_t<std::is_same<bool, T>::value,
-    T &,
-    c4::fmt::overflow_checked_<T>> target{value};
-
-  if (!c4::from_chars(scalar, &target))
-    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
-
-  return value;
-}
-
-OMNI_CONSTRAINED_TEMPLATE((typename T), (!std::is_integral<T>::value))
-compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
-  T value{};
-  if (!c4::from_chars(scalar, &value))
-    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
-
-  return value;
-}
-
-struct write_integer {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    node->set_serialized(value);
-  }
-};
-
-struct write_boolean {
-  void operator()(bool value, ::ryml::NodeRef *node) const {
-    assert(node);
-    // c4's plain bool conversion emits 0/1, rather than document booleans.
-    node->set_serialized(c4::fmt::boolalpha(value));
-  }
-};
-
-struct write_real {
-  template <typename Value>
-  void operator()(const Value &value, ::ryml::NodeRef *node) const {
-    assert(node);
-    // Preserve enough significant digits to recover the original value.
-    node->set_serialized(c4::fmt::real(value,
-      std::numeric_limits<Value>::max_digits10,
-      c4::FTOA_FLEX));
-  }
-};
-
-} // namespace detail
 
 namespace core {
 
 // Core algorithm
 
-template <typename T, typename Config>
+template <typename T, bool BorrowStrings>
 void write_node(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config> context) {
+  write_state_t<BorrowStrings> context) {
   omni::ryml::from_type(omni::type_t<T>{})(value, node, context);
 }
 
 template <typename T, typename Config>
 auto read_node(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context)
+  read_state_t<Config> context)
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
   if (context.limit_exceeded())
@@ -476,14 +237,7 @@ struct cpp11_lambda_write {
   template <typename _M, omni::reflected_entity Entity>
   ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
     ::ryml::Tree tree;
-    const config_t<> options{};
-    const mapping_state_t<> context{
-      /*config=*/options,
-      /*path=*/{},
-      /*error_count=*/0,
-      /*warning_count=*/0,
-      /*borrow_strings=*/BorrowStrings,
-    };
+    const write_state_t<BorrowStrings> context{};
 
     core::write_node(this->value, tree.rootref(), context);
     return tree;
@@ -494,7 +248,7 @@ template <typename T, typename Config>
 struct cpp11_lambda_read {
   const ::ryml::ConstNodeRef &node;
   T &into;
-  mapping_state_t<Config> context;
+  read_state_t<Config> context;
 
   template <typename _M, omni::reflected_entity Entity>
   auto operator()(omni::meta_t<_M, Entity>) const
@@ -579,7 +333,7 @@ template <typename Discovery,
 struct map_by_schema_case {
   template <typename T, typename Config>
   static auto map(::ryml::ConstNodeRef node, T *into,
-    mapping_state_t<Config> context)
+    read_state_t<Config> context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return read_node(node, into, context);
   }
@@ -589,7 +343,7 @@ template <typename Discovery, bool Wrapper>
 struct map_by_schema_case<Discovery, true, Wrapper> {
   template <typename T, typename Config>
   static auto map(::ryml::ConstNodeRef node, T *into,
-    mapping_state_t<Config> context)
+    read_state_t<Config> context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return omni::reflected_call(
       cpp11_lambda_read<T, Config>{
@@ -605,7 +359,7 @@ template <typename Discovery>
 struct map_by_schema_case<Discovery, false, true> {
   template <typename T, typename Config>
   static auto map(::ryml::ConstNodeRef node, T *into,
-    mapping_state_t<Config> context)
+    read_state_t<Config> context)
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return map_by_schema_case<
       typename omni::ryml::detail::discovered_range_type<Discovery>::type>::map(
@@ -620,12 +374,11 @@ with_diagnostics_t<T> map_by_schema(
   const config_t<TransformDiagnostics> &options,
   omni::type_t<T>, ::ryml::ConstNodeRef node) {
   auto value = compat::make_optional<T>();
-  const mapping_state_t<config_t<TransformDiagnostics>> context{
+  const read_state_t<config_t<TransformDiagnostics>> context{
     /*config=*/options,
     /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
-    /*borrow_strings=*/false,
   };
 
   auto mapped = detail::map_by_schema_case<compat::remove_cvref_t<T>>::map(
@@ -694,14 +447,7 @@ struct tree_builder_case {
   template <bool BorrowStrings, typename T>
   static ::ryml::Tree build(T &value) {
     ::ryml::Tree tree;
-    const config_t<> options{};
-    const mapping_state_t<> context{
-      /*config=*/options,
-      /*path=*/{},
-      /*error_count=*/0,
-      /*warning_count=*/0,
-      /*borrow_strings=*/BorrowStrings,
-    };
+    const write_state_t<BorrowStrings> context{};
 
     write_node(value, tree.rootref(), context);
     return tree;

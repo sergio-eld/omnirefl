@@ -69,6 +69,13 @@ template <template <typename...> class Template, typename... Argument>
 struct is_type_template_specialization<Template, Template<Argument...>>:
     std::true_type {};
 
+template <template <bool...> class, typename>
+struct is_bool_template_specialization: std::false_type {};
+
+template <template <bool...> class Template, bool... Value>
+struct is_bool_template_specialization<Template, Template<Value...>>:
+    std::true_type {};
+
 template <template <typename T, T> class, typename>
 struct is_type_value_template_specialization: std::false_type {};
 
@@ -137,6 +144,7 @@ struct type_size_template_construct_result<Template,
 
 } // namespace detail
 
+// Additional template <...> parameter patterns can be supported on request.
 /**
  * Whether `Type` is a specialization of a template whose parameters are
  * types.
@@ -144,6 +152,13 @@ struct type_size_template_construct_result<Template,
 template <template <typename...> class Template, typename Type>
 constexpr bool is_specialization_of() noexcept {
   return detail::is_type_template_specialization<Template,
+    compat::remove_cvref_t<Type>>::value;
+}
+
+/** Whether Type specializes a template whose parameters are Booleans. */
+template <template <bool...> class Template, typename Type>
+constexpr bool is_specialization_of() noexcept {
+  return detail::is_bool_template_specialization<Template,
     compat::remove_cvref_t<Type>>::value;
 }
 

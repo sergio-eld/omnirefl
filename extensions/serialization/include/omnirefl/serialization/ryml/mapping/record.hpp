@@ -5,6 +5,7 @@
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/detail.hpp>
 
+// RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <type_traits>
@@ -22,11 +23,11 @@ struct from_record {
   }
 
   template <typename T,
-    typename Config,
+    bool BorrowStrings,
     compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
   auto operator()(const T &value,
     ::ryml::NodeRef node,
-    mapping_state_t<Config> context) const
+    write_state_t<BorrowStrings> context) const
     -> void;
 };
 
@@ -59,7 +60,7 @@ struct to_record_t {
     compat::enable_if_t<omni::is_reflected_record<T>::value, int> = 0>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    mapping_state_t<Config> context) const
+    read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   NameByAlias name_by_alias;
@@ -102,6 +103,8 @@ constexpr to_record_t<> to_record{};
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/record.hpp>
 
 // TODO: [medium] Consider recovery for missing data members in to_record,
 // including exposed default member initializers.

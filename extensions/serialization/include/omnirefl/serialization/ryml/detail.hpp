@@ -3,7 +3,7 @@
 // TODO: [medium] Validate alias_dict against other aliases and reflected
 // canonical names, possibly inline when constructing a dictionary.
 
-#include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/extensions/traits.hpp>
 
 #include <algorithm>
@@ -15,13 +15,19 @@
 namespace omni {
 namespace ryml {
 
-struct diagnostics;
+namespace core {
 
-template <typename T, typename Diagnostics>
-struct with_diagnostics_t;
+// Mapper bodies delegate recursively through these dispatchers. Their
+// definitions live in the umbrella's implementation header.
+template <typename T, bool BorrowStrings>
+void write_node(const T &value, ::ryml::NodeRef node,
+  write_state_t<BorrowStrings> state);
 
-template <typename Config>
-struct mapping_state_t;
+template <typename T, typename Config>
+auto read_node(::ryml::ConstNodeRef node, T *into, read_state_t<Config> state)
+  -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+} // namespace core
 
 namespace detail {
 
@@ -223,3 +229,5 @@ OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
 
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/detail.hpp>

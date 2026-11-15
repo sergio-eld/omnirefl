@@ -541,7 +541,7 @@ TEST(basics, key_value_ranges) {
  * mapper; failure does not promise rollback.
  *
  * Custom readers return this result to the enclosing mapper, which collects
- * its issues and applies the error/warning limits. Mapping state supplies the
+ * its issues and applies the error/warning limits. Reading state supplies the
  * config, current path, and accumulated counts; it is passed down explicitly,
  * rather than used as a mutable output for diagnostics.
  * See `diagnostics.structured_issues` for individual issue fields. */
@@ -573,14 +573,15 @@ template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
   [](const basic_customization::my_integer &value,
     ::ryml::NodeRef node,
-    auto state) -> void {
+    omni::ryml::write_state_like auto state) -> void {
     omni::ryml::from_arithmetic{}(value.value, node, state);
   };
 
 template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_integer> =
   [](::ryml::ConstNodeRef node, basic_customization::my_integer *into,
-    auto state) -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     return omni::ryml::to_arithmetic{}(node, &into->value, state);
   };
 
@@ -589,8 +590,10 @@ namespace {
 /** A wrapper need not map to an object. from_type and to_type select its
  * representation globally; only one registration form is used per direction.
  * These callables delegate scalar checks and diagnostics to from_arithmetic
- * and to_arithmetic. Their generic state parameters delay instantiation until
- * they are called within reflected scope. */
+ * and to_arithmetic. write_state_like and read_state_like identify each
+ * direction's state without spelling its implementation parameters. The
+ * generic signatures delay instantiation until called within reflected scope.
+ * `basics.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
 TEST(basics, custom_scalar_mapping) {
   const auto result = omni::ryml::deserialize(
     omni::type<basic_customization::my_integer>, "42");
@@ -614,20 +617,22 @@ struct my_cpp11_integer { int value; };
 // One C++11 equivalent: the same scalar mapping needs named operator() bodies.
 template <>
 struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
   void operator()(const basic_customization::my_cpp11_integer &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state_t<Config> state) const {
+    State state) const {
     omni::ryml::from_arithmetic{}(value.value, node, state);
   }
 };
 
 template <>
 struct omni::ryml::cp::to_type_t<basic_customization::my_cpp11_integer> {
-  template <typename Config>
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node,
     basic_customization::my_cpp11_integer *into,
-    omni::ryml::mapping_state_t<Config> state) const
+    State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     return omni::ryml::to_arithmetic{}(node, &into->value, state);
   }
@@ -661,14 +666,15 @@ template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_container> =
   [](const basic_customization::my_container &value,
     ::ryml::NodeRef node,
-    auto state) -> void {
+    omni::ryml::write_state_like auto state) -> void {
     omni::ryml::from_range(value.values, node, state);
   };
 
 template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_container> =
   [](::ryml::ConstNodeRef node, basic_customization::my_container *into,
-    auto state) -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     return omni::ryml::to_range(node, &into->values, state);
   };
 
@@ -702,14 +708,15 @@ template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_string> =
   [](const basic_customization::my_string &value,
     ::ryml::NodeRef node,
-    auto state) -> void {
+    omni::ryml::write_state_like auto state) -> void {
     omni::ryml::from_string_like{}(value.value, node, state);
   };
 
 template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_string> =
   [](::ryml::ConstNodeRef node, basic_customization::my_string *into,
-    auto state) -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    omni::ryml::read_state_like auto state)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     return omni::ryml::to_string_like{}(node, &into->value, state);
   };
 
@@ -745,13 +752,14 @@ template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_record> =
   omni::ryml::reflected_scope::from_record{};
 
-// Reader signature: (ConstNodeRef, T *, mapping_state_t<Config>)
+// Reader signature: (ConstNodeRef, T *, read_state_like)
 //   -> with_diagnostics_t<monostate>.
 // Exposition: spell out state forwarding; direct registration can reuse
 // to_record itself. The generic destination delays metadata queries.
 template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_record> =
-  [](::ryml::ConstNodeRef node, auto *into, auto state)
+  [](::ryml::ConstNodeRef node, auto *into,
+    omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     // Same-node delegation forwards path, counters, and config unchanged.
     return omni::ryml::reflected_scope::to_record(node, into, state);
@@ -765,7 +773,7 @@ namespace {
  * state; it returns success or failure with diagnostics. A custom mapper passes
  * state unchanged when delegating the same node, as above. When descending to
  * a child, it supplies state.child(...) instead; see the extended-container
- * example for child paths and accumulated diagnostics.
+ * example for accumulated diagnostics.
  * Member mappings still use their own customization points: my_record::reading
  * uses the scalar representation of my_integer. */
 TEST(basics, custom_record_mapping) {
@@ -1050,11 +1058,16 @@ namespace ryml {
  * variable to_type<T>; registering both for one type is an error. Writers
  * register cp::from_type<T> or cp::from_type_t<T>; unregistered types use defaults.
  *
- * mapping_state_t<Config> borrows the configuration and carries the current
+ * read_state_like constrains a reader's state without naming its template
+ * parameters. The state borrows the configuration and carries the current
  * path and accumulated error/warning counts. Pass it unchanged when delegating
  * the same node; use child(...) when descending to another key or index.
  * Child paths borrow their parent state, which must stay alive and unchanged
  * until that child mapping finishes.
+ * write_state_like constrains the writer's state, which carries the string
+ * storage policy. Forward it unchanged to nested writers.
+ * Before C++20, is_read_state<State> and is_write_state<State> provide the
+ * corresponding Boolean traits; C++14 also provides their _v forms.
  *
  * Readers update the destination and return with_diagnostics_t<monostate>:
  * an engaged value signals success, and diagnostics carry their issues.
@@ -1092,32 +1105,27 @@ struct reflect_as_root<customization_mapping::extended_values>:
  * flat representation. The fields occupy its final two positions. */
 template <>
 struct from_type_t<customization_mapping::extended_values> {
-  template <typename T, typename Config>
+  template <typename T, omni::ryml::write_state_like State>
   void operator()(const T &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state_t<Config> context) const {
+    State context) const {
     from_range(value, node, context);
 
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
       | fn::each(
         [&node, context](omni::data_member_binding auto field) -> void {
-          const auto child = context.child({
-            .field = {},
-            .index = node.num_children(),
-          });
-
-          core::write_node(field.value(), node.append_child(), child);
+          core::write_node(field.value(), node.append_child(), context);
         });
   }
 };
 
 template <>
 struct to_type_t<customization_mapping::extended_values> {
-  template <typename T, typename Config>
+  template <typename T, omni::ryml::read_state_like State>
   auto operator()(::ryml::ConstNodeRef node,
     T *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     T values;
     auto result = to_range(node, &values, context);
@@ -1152,20 +1160,20 @@ struct to_type_t<customization_mapping::extended_values> {
 
 template <>
 struct from_type_t<customization_mapping::integer> {
-  template <typename Config>
+  template <omni::ryml::write_state_like State>
   void operator()(const customization_mapping::integer &value,
     ::ryml::NodeRef node,
-    omni::ryml::mapping_state_t<Config> context) const {
+    State context) const {
     core::write_node(value.value, node, context);
   }
 };
 
 template <>
 struct to_type_t<customization_mapping::integer> {
-  template <typename Config>
+  template <omni::ryml::read_state_like State>
   auto operator()(::ryml::ConstNodeRef node,
     customization_mapping::integer *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     int converted{};
     auto result = core::read_node(node, &converted, context);
@@ -1364,12 +1372,11 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
     return;
 
   const omni::ryml::config_t options{};
-  const omni::ryml::mapping_state_t context{
+  const omni::ryml::read_state_t context{
     .config = options,
     .path = {},
     .error_count = 0,
     .warning_count = 0,
-    .borrow_strings = false,
   };
 
   auto into = c.initial;
@@ -1490,12 +1497,11 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
     return;
 
   const omni::ryml::config_t options{};
-  const omni::ryml::mapping_state_t context{
+  const omni::ryml::read_state_t context{
     .config = options,
     .path = {},
     .error_count = 0,
     .warning_count = 0,
-    .borrow_strings = false,
   };
 
   auto into = c.initial;

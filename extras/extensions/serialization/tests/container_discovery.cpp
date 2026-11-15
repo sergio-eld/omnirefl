@@ -34,9 +34,9 @@ namespace cp {
 
 template <>
 struct from_type_t<my_int> {
-  template <typename Config>
+  template <bool BorrowStrings>
   void operator()(const my_int &value, ::ryml::NodeRef node,
-    omni::ryml::mapping_state_t<Config> context) const {
+    omni::ryml::write_state_t<BorrowStrings> context) const {
     core::write_node(value.value, node, context);
   }
 };
@@ -45,7 +45,7 @@ template <>
 struct to_type_t<my_int> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node, my_int *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    omni::ryml::read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     return core::read_node(node, &into->value, context);
   }
@@ -58,7 +58,7 @@ struct to_type_t<compatible_integer> {
   template <typename Config>
   auto operator()(::ryml::ConstNodeRef node,
     compatible_integer *into,
-    omni::ryml::mapping_state_t<Config> context) const
+    omni::ryml::read_state_t<Config> context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     auto result = core::read_node(node, &into->value, context);
     if (!result.value)

@@ -13,21 +13,16 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-template <typename Config>
+template <bool BorrowStrings>
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
-  mapping_state_t<Config> context;
+  write_state_t<BorrowStrings> context;
 
   template <typename Record, typename _F>
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    const auto state = this->context.child({
-      /*field=*/c4::to_csubstr(field.name()),
-      /*index=*/compat::nullopt,
-    });
-
-    core::write_node(field.value(), child, state);
+    core::write_node(field.value(), child, this->context);
   }
 };
 
@@ -76,7 +71,7 @@ struct record_member_event {
   bool check_presence;
 
   template <typename Config>
-  auto operator()(mapping_state_t<Config> state) const
+  auto operator()(read_state_t<Config> state) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     const compat::string_view name{this->field.name()};
     const auto entry = std::find_if(this->pending.begin(), this->pending.end(),
@@ -157,17 +152,17 @@ struct cpp11_fold_member {
 namespace reflected_scope {
 
 template <typename T,
-  typename Config,
+  bool BorrowStrings,
   compat::enable_if_t<omni::is_reflected_record<T>::value, int>>
 auto from_record::operator()(const T &value,
   ::ryml::NodeRef node,
-  mapping_state_t<Config> context) const
+  write_state_t<BorrowStrings> context) const
   -> void {
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
     | fn::filter<fn::non_static>()
-    | fn::each(omni::ryml::detail::cpp11_write_member<Config>{
+    | fn::each(omni::ryml::detail::cpp11_write_member<BorrowStrings>{
       /*node=*/node,
       /*context=*/context,
     });
@@ -179,7 +174,7 @@ template <typename T,
   compat::enable_if_t<omni::is_reflected_record<T>::value, int>>
 auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
-  mapping_state_t<Config> context) const
+  read_state_t<Config> context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = detail::make_node_accumulator(context);
   if (!node.is_map()) {
