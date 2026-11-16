@@ -1162,8 +1162,8 @@ namespace cp {
 // A configured default compositor can be registered without a wrapper.
 template <>
 const auto to_type<customization_mapping::record> =
-  reflected_scope::to_record.with_name_by_alias(
-    alias_dict(std::tuple{"count", "legacy_count"}));
+  reflected_scope::to_record.tdm_name_by_alias(
+    [](const auto &) { return alias_dict(std::tuple{"count", "legacy_count"}); });
 
 template <>
 const auto from_type<customization_mapping::record> =
@@ -1171,8 +1171,8 @@ const auto from_type<customization_mapping::record> =
 
 template <>
 const auto to_type<customization_mapping::status> =
-  reflected_scope::to_enum.with_value_by_alias(
-    alias_dict(std::tuple{"busy", "working"}));
+  reflected_scope::to_enum.tdm_value_by_alias(
+    [](const auto &) { return alias_dict(std::tuple{"busy", "working"}); });
 
 template <>
 const auto from_type<customization_mapping::status> =

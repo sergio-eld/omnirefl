@@ -12,6 +12,8 @@
 
 namespace {
 
+using omni::ryml::reflected_scope::to_enum;
+
 using string_view = omni::compat::string_view;
 
 namespace enum_alias_models {
@@ -58,11 +60,19 @@ using omni::json::issue_code;
 
 TEST(to_enum_aliases, dictionary_replaces_the_previous_resolver) {
   const auto original =
-    omni::ryml::reflected_scope::to_enum.with_value_by_alias(
-      omni::ryml::alias_dict(std::make_tuple("idle", "available")));
+    to_enum.tdm_value_by_alias(
+      [](const decltype(to_enum.value_by_alias) &) {
+        return omni::ryml::alias_dict(std::make_tuple("idle", "available"));
+      });
 
-  const auto replacement = original.with_value_by_alias(
-    omni::ryml::alias_dict(std::make_tuple("active", "working")));
+  const auto retained = original.tdm_value_by_alias(omni::fn::identity{});
+  EXPECT_EQ(original.value_by_alias("available"),
+    retained.value_by_alias("available"));
+
+  const auto replacement = original.tdm_value_by_alias(
+    [](const decltype(original.value_by_alias) &) {
+      return omni::ryml::alias_dict(std::make_tuple("active", "working"));
+    });
 
   const auto idle = original.value_by_alias("available");
   EXPECT_TRUE(idle);
@@ -98,10 +108,12 @@ struct cpp11_map_with_aliases {
 TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   std::size_t calls = 0;
   const auto compositor =
-    omni::ryml::reflected_scope::to_enum.with_value_by_alias(
-      [&calls](string_view) -> omni::compat::optional<string_view> {
-        ++calls;
-        return omni::compat::nullopt;
+    to_enum.tdm_value_by_alias(
+      [&calls](const decltype(to_enum.value_by_alias) &) {
+        return [&calls](string_view) -> omni::compat::optional<string_view> {
+          ++calls;
+          return omni::compat::nullopt;
+        };
       });
 
   const auto tree = omni::ryml::core::parse(R"("active")");

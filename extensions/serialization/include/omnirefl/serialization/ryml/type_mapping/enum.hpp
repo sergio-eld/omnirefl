@@ -24,8 +24,7 @@ namespace reflected_scope {
  * ValueByAlias maps alias text to an optional canonical value text.
  * An empty result means the input is not a registered alias. The default
  * resolver accepts no aliases.
- * with_value_by_alias returns a new mapper storing the supplied callable's
- * concrete type.
+ * tdm_value_by_alias transforms the resolver into a new mapper.
  * Returned canonical-value views must remain valid throughout the mapping call.
  */
 template <typename ValueByAlias = fn::default_value<
@@ -48,25 +47,23 @@ struct to_enum_t {
 
   ValueByAlias value_by_alias;
 
-  /** (QoL) Override the alias resolver inline, in a single expression.
-   * Copy or move f into a new mapper specialized for its concrete type.
-   *
-   * Resolves alias text to an optional canonical value text:
-   * f :: compat::string_view -> compat::optional<compat::string_view>
-   *
-   * An empty result means the input is not a registered alias. Returned views
-   * must remain valid throughout the mapping call.
-   *
-   * The callable must be copy-constructible and invocable through a const
-   * reference, returning the same result for the same alias.
+  /** (QoL) Transform data member `.value_by_alias` inplace in an expression.
+   * Return a new mapper with f(current resolver); the source is unchanged.
+   * The returned resolver must be copy-constructible and const-invocable as
+   * string_view -> optional<string_view>, with stable results for each input.
+   * Returned views must remain valid throughout the mapping call.
    */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::conjunction<std::is_copy_constructible<compat::decay_t<F>>,
-      std::is_constructible<compat::decay_t<F>, F &&>,
-      omni::ryml::detail::is_alias_resolver<const compat::decay_t<F>>>::value))
-  constexpr auto with_value_by_alias(F &&f) const
-    -> to_enum_t<compat::decay_t<F>> {
-    return {/*value_by_alias=*/std::forward<F>(f)};
+    (compat::conjunction<
+      std::is_copy_constructible<compat::decay_t<
+        compat::invoke_result_t<F &&, const ValueByAlias &>>>,
+      omni::ryml::detail::is_alias_resolver<const compat::decay_t<
+        compat::invoke_result_t<F &&, const ValueByAlias &>>>>::value))
+  constexpr auto tdm_value_by_alias(F &&f) const
+    -> to_enum_t<compat::decay_t<
+      compat::invoke_result_t<F &&, const ValueByAlias &>>> {
+    return {/*value_by_alias=*/compat::invoke(
+      std::forward<F>(f), this->value_by_alias)};
   }
 };
 

@@ -95,7 +95,9 @@ const auto from_type<endpoint<T>> = [](const endpoint<T> &value,
 
 template <typename T>
 const auto to_type<endpoint<T>> = reflected_scope::to_record
-  .with_name_by_alias(alias_dict(std::make_tuple("port", "service_port")));
+  .tdm_name_by_alias([](const auto &) {
+    return alias_dict(std::make_tuple("port", "service_port"));
+  });
 #else
 template <typename T>
 struct from_type_t<endpoint<T>> {
@@ -114,11 +116,14 @@ struct to_type_t<endpoint<T>> {
     endpoint<T> *into,
     State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return reflected_scope::to_record.with_name_by_alias(
-      [](compat::string_view alias) -> compat::optional<compat::string_view> {
-        return alias == "service_port"
-          ? compat::optional<compat::string_view>{"port"}
-          : compat::nullopt;
+    return reflected_scope::to_record.tdm_name_by_alias(
+      [](const decltype(reflected_scope::to_record.name_by_alias) &) {
+        return [](compat::string_view alias)
+          -> compat::optional<compat::string_view> {
+          return alias == "service_port"
+            ? compat::optional<compat::string_view>{"port"}
+            : compat::nullopt;
+        };
       })(node, into, context);
   }
 };

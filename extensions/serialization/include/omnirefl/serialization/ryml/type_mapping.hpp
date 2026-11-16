@@ -227,8 +227,10 @@ struct endpoint { int port; };
 
 template <>
 const auto omni::ryml::cp::to_type<endpoint> =
-  omni::ryml::reflected_scope::to_record.with_name_by_alias(
-    omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
+  omni::ryml::reflected_scope::to_record.tdm_name_by_alias(
+    [](const auto &) {
+      return omni::ryml::alias_dict(std::make_tuple("port", "service_port"));
+    });
 ```
  *
  * @warning Keep specializations narrow: concrete types or specific template
