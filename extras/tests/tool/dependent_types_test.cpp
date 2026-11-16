@@ -129,8 +129,11 @@ struct inspect_suite {
   template <typename _M>
   std::vector<std::string> operator()(omni::record_meta_t<_M> meta) const {
     constexpr auto fields = meta.accessible_data_members();
-    constexpr auto duplicates = std::get</*duplicates=*/0>(fields);
-    constexpr auto unknown = std::get</*unknown_fields=*/1>(fields);
+    // Tuple element access is constexpr only from C++14 on libc++.
+    OMNI_CPP14_CONSTEXPR const auto duplicates =
+      std::get</*duplicates=*/0>(fields);
+    OMNI_CPP14_CONSTEXPR const auto unknown =
+      std::get</*unknown_fields=*/1>(fields);
     using first_case = typename std::tuple_element</*first case=*/0,
       typename decltype(duplicates)::type>::type;
     using second_case = typename std::tuple_element</*second case=*/1,
