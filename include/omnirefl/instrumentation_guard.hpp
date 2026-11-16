@@ -3,21 +3,25 @@
 
 #pragma once
 
-/** (QoL) Check reflection prerequisites without running instrumentation.
+/** (QoL) Guard library headers whose interfaces require instrumentation.
+ * Intended for those library headers, not direct inclusion in users' .cpp
+ * files. It checks prerequisites without running the tool or generating
+ * metadata.
+ *
  * Takes no arguments. Expands to static_assert, reporting missing generated
  * reflection outside instrumentation runs and explaining CMake integration.
  *
 ```cpp
+// In a library header that requires reflected metadata:
 #include <omnirefl/instrumentation_guard.hpp>
+
 OMNI_REQUIRE_INSTRUMENTATION();
 
-// During instrumentation or generated-header compilation:
-// static_assert(true, "");
+#include <omnirefl/reflected_scope.hpp>
 ```
- * @details This macro only checks the compilation mode; it does not run the
- * tool or generate metadata. Include this header after generated reflection,
- * or during instrumentation. The mode is fixed when this header is first
- * included. The check remains opt-in for headers that require reflection.
+ * @details The compilation mode is fixed when this header is first included.
+ * Generated reflection must precede the guarded library header outside an
+ * instrumentation run.
  */
 #if defined(OMNI_TOOL_RUN) || defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
 #  define OMNI_REQUIRE_INSTRUMENTATION() static_assert(true, "")

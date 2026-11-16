@@ -19,10 +19,10 @@
 // owning strings and vectors; provide an alternative representation.
 
 #include <omnirefl/instrumentation_guard.hpp>
-#include <omnirefl/reflected_scope.hpp>
 
 OMNI_REQUIRE_INSTRUMENTATION();
 
+#include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/traits.hpp>
 
 #include <omnirefl/extensions/compat.hpp>
