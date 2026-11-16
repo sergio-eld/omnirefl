@@ -171,12 +171,12 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
 
   // C++11 tuple forwarding constructors need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
-  constexpr
-#else
-  const
-#endif
-  auto fields = omni::meta_for<T>::accessible_data_members()
+  constexpr auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter(fn::is_non_static);
+#else
+  const auto fields = omni::meta_for<T>::accessible_data_members()
+    | fn::filter(fn::is_non_static);
+#endif
 
   std::vector<omni::ryml::detail::record_entry> pending;
   pending.reserve(std::tuple_size<decltype(fields)>::value);

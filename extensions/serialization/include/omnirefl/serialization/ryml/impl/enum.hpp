@@ -37,31 +37,36 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
     return std::move(result).finish();
   }
 
-  // The lookup uses iterators into this type's immutable metadata table.
   // C++11 pair forwarding constructors need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
-  static constexpr
+  constexpr auto enumerators = omni::meta_for<T>::enumerators();
 #else
-  static const
+  const auto enumerators = omni::meta_for<T>::enumerators();
 #endif
-  auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
-  const auto find_name = [](compat::string_view name) {
-    return std::find_if(enumerators.begin(),
+  // Return a value so iterators into the captured copy cannot escape.
+  const auto find_name = [enumerators](compat::string_view name)
+    -> compat::optional<T> {
+    const auto found = std::find_if(enumerators.begin(),
       enumerators.end(),
       [name](const enumerator_type &enumerator) {
         return name == compat::string_view{enumerator.second};
       });
+
+    if (found == enumerators.end())
+      return compat::nullopt;
+
+    return found->first;
   };
 
   const compat::string_view value{node.val().str, node.val().len};
   auto found = find_name(value);
-  if (found == enumerators.end()) {
+  if (!found) {
     if (const auto canonical = compat::invoke(this->value_by_alias, value))
       found = find_name(*canonical);
   }
 
-  if (found == enumerators.end()) {
+  if (!found) {
     result.report(omni::ryml::detail::make_issue(
       json::issue_code::invalid_scalar,
       json::value_kind::string,
@@ -71,7 +76,7 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
     return std::move(result).finish();
   }
 
-  *into = found->first;
+  *into = *found;
   return std::move(result).finish();
 }
 
@@ -79,14 +84,12 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
 auto from_enum_t::operator()(T value, ::ryml::NodeRef node, State) const -> void {
-  // The lookup uses iterators into this type's immutable metadata table.
   // C++11 pair forwarding constructors need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
-  static constexpr
+  constexpr auto enumerators = omni::meta_for<T>::enumerators();
 #else
-  static const
+  const auto enumerators = omni::meta_for<T>::enumerators();
 #endif
-  auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
   const auto found = std::find_if(enumerators.begin(),
     enumerators.end(),
