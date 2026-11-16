@@ -31,3 +31,7 @@ OMNI_REQUIRE_INSTRUMENTATION();
       "Include the generated reflection header before reflection-dependent " \
       "headers. With CMake, call omni_reflected_target(<target>).")
 #endif
+
+// TODO: [medium] Reassess this guard if metadata-only headers are separated
+// from reflected_call.hpp. Those headers could enforce instrumentation while
+// reflected_call remains usable without metadata-only declarations.
