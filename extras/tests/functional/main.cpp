@@ -38,6 +38,10 @@ struct without_internal_name {
 
 int tagged_operation(int value) { return value; }
 
+// OMNI_FUNCTION may name a const variable; qualify the fields explicitly.
+using operation_tag = omni::compat::decay_t<decltype(
+  OMNI_FUNCTION(&tagged_operation))>;
+
 struct callable_data {
   int operator()(int value) const { return value; }
 };
@@ -50,9 +54,9 @@ struct function_fields {
   int value;
   const int constant = 7;
   static int shared;
-  decltype(OMNI_FUNCTION(&tagged_operation)) operation;
-  const decltype(OMNI_FUNCTION(&tagged_operation)) const_operation{};
-  static decltype(OMNI_FUNCTION(&tagged_operation)) shared_operation;
+  operation_tag operation;
+  const operation_tag const_operation{};
+  static operation_tag shared_operation;
   locked_data locked;
   callable_data callable;
   int (*pointer)(int);

@@ -2286,6 +2286,7 @@ struct counter {
 // Both member queries include static members. filter(fn::is_static) selects
 // shared members; filter(fn::is_non_static) selects instance members. Access
 // through either path still uses a record binding.
+// The type-based spelling is also supported: filter<fn::is_static_t>().
 TEST(example, accesses_static_members_through_a_record_binding) {
   const static_access::counter input{7};
   const auto result = omni::reflected_call(
