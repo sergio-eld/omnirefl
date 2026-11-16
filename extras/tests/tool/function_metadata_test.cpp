@@ -553,7 +553,7 @@ struct inspect_methods {
   method_observation operator()(Binding binding) const {
     return omni::compat::apply(inspect_method{},
       binding.accessible_member_functions()
-        | omni::fn::filter<omni::fn::non_static>());
+        | omni::fn::filter(omni::fn::is_non_static));
   }
 };
 

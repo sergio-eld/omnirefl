@@ -36,6 +36,79 @@ struct without_internal_name {
   }
 };
 
+int tagged_operation(int value) { return value; }
+
+struct callable_data {
+  int operator()(int value) const { return value; }
+};
+
+struct locked_data {
+  locked_data &operator=(const locked_data &) = delete;
+};
+
+struct function_fields {
+  int value;
+  const int constant = 7;
+  static int shared;
+  decltype(OMNI_FUNCTION(&tagged_operation)) operation;
+  const decltype(OMNI_FUNCTION(&tagged_operation)) const_operation{};
+  static decltype(OMNI_FUNCTION(&tagged_operation)) shared_operation;
+  locked_data locked;
+  callable_data callable;
+  int (*pointer)(int);
+};
+
+struct field_names {
+  template <typename... Fields>
+  std::vector<std::string> operator()(const Fields &...fields) const {
+    return {fields.name()...};
+  }
+};
+
+template <typename Predicate>
+struct filtered_field_names {
+  Predicate predicate;
+  template <typename Record>
+  std::vector<std::string> operator()(Record record) const {
+    return omni::compat::apply(field_names{}, record.accessible_data_members()
+      | omni::fn::filter(this->predicate));
+  }
+};
+
+template <typename T>
+struct requires_accepted_type: T::accepted {};
+
+struct accepted_type { using accepted = std::true_type; };
+struct rejected_type { using accepted = std::false_type; };
+
+template <typename Field>
+struct selected_data_field:
+    omni::compat::conjunction<omni::fn::is_non_static_t<Field>,
+      omni::fn::is_assignable_t<Field>,
+      omni::fn::is_non_functional_t<Field>> {};
+
+struct trait_filtered_field_names {
+  template <typename Record>
+  std::vector<std::string> operator()(Record record) const {
+    return omni::compat::apply(field_names{}, record.accessible_data_members()
+      | omni::fn::filter<selected_data_field>());
+  }
+};
+
+struct accepts_integer {
+  using predicate_tag = void;
+
+  constexpr std::true_type operator()(const int &) const { return {}; }
+};
+
+template <typename Predicate, typename = void>
+struct has_predicate_conjunction: std::false_type {};
+
+template <typename Predicate>
+struct has_predicate_conjunction<Predicate,
+  omni::compat::void_t<decltype(omni::fn::operator&&(Predicate{}, Predicate{}))>>:
+    std::true_type {};
+
 struct stringify_field {
   template <typename Field>
   std::string operator()(Field field) const {
@@ -1555,6 +1628,121 @@ TEST(fn_filter, accepts_a_standard_unary_type_trait) {
   EXPECT_EQ(std::make_tuple(20, 22L), called);
   EXPECT_EQ(std::make_tuple(20, 22L), piped);
 }
+
+TEST(fn_filter, excludes_function_tags_from_data_member_metadata) {
+  const auto names = omni::reflected_call(filtered_field_names<
+      decltype(omni::fn::is_non_functional)>{omni::fn::is_non_functional},
+    omni::type_t<function_fields>{});
+
+  EXPECT_EQ((std::vector<std::string>{"value", "constant", "shared", "locked",
+    "callable", "pointer"}), names);
+}
+
+TEST(fn_filter, excludes_function_tags_from_data_member_bindings) {
+  function_fields value{};
+
+  const auto names = omni::reflected_call(filtered_field_names<
+      decltype(omni::fn::is_non_functional)>{omni::fn::is_non_functional}, value);
+
+  EXPECT_EQ((std::vector<std::string>{"value", "constant", "shared", "locked",
+    "callable", "pointer"}), names);
+}
+
+TEST(fn_predicates, combines_non_static_assignable_non_functional_fields) {
+  namespace fn = omni::fn;
+  constexpr auto predicate = fn::is_non_static && fn::is_assignable
+    && fn::not_(fn::has_callable_metadata);
+
+  const auto names = omni::reflected_call(
+    filtered_field_names<decltype(predicate)>{predicate},
+    omni::type_t<function_fields>{});
+
+  EXPECT_EQ((std::vector<std::string>{"value", "callable", "pointer"}), names);
+}
+
+TEST(fn_predicates, selects_static_or_function_tag_fields) {
+  namespace fn = omni::fn;
+  constexpr auto predicate = fn::is_static || fn::has_callable_metadata;
+
+  const auto names = omni::reflected_call(
+    filtered_field_names<decltype(predicate)>{predicate},
+    omni::type_t<function_fields>{});
+
+  EXPECT_EQ((std::vector<std::string>{"shared", "operation", "const_operation",
+    "shared_operation"}), names);
+}
+
+TEST(fn_predicates, short_circuits_inapplicable_right_predicates) {
+  namespace fn = omni::fn;
+  constexpr fn::predicate_t<requires_accepted_type> accepted{};
+  constexpr fn::predicate_t<std::is_integral> integral{};
+  // Neither fundamental type has the nested alias required by accepted.
+  constexpr auto rejected = (integral && accepted)(2.5);
+  constexpr auto selected = (integral || accepted)(42);
+  constexpr auto negated = fn::not_(integral && accepted)(2.5);
+
+  EXPECT_FALSE(rejected);
+  EXPECT_TRUE(selected);
+  EXPECT_TRUE(negated);
+}
+
+TEST(fn_predicates, evaluates_applicable_right_predicates) {
+  namespace fn = omni::fn;
+  constexpr fn::predicate_t<requires_accepted_type> accepted{};
+  constexpr fn::predicate_t<std::is_class> record{};
+  constexpr fn::predicate_t<std::is_integral> integral{};
+
+  constexpr auto both = record && accepted;
+  constexpr auto either = integral || accepted;
+
+  EXPECT_TRUE(both(accepted_type{}));
+  EXPECT_FALSE(both(rejected_type{}));
+  EXPECT_TRUE(either(accepted_type{}));
+  EXPECT_FALSE(either(rejected_type{}));
+}
+
+TEST(fn_predicates, supplies_constant_predicates_for_filtering) {
+  namespace fn = omni::fn;
+  const auto values = std::make_tuple(42, std::string{"value"});
+
+  EXPECT_EQ(values, values | fn::filter(fn::always_true));
+  EXPECT_EQ(std::tuple<>{}, values | fn::filter(fn::always_false));
+  EXPECT_TRUE(fn::always_true(42));
+  EXPECT_FALSE(fn::always_false(42));
+  EXPECT_FALSE((fn::always_false && fn::always_true)(42));
+  EXPECT_TRUE((fn::always_true || fn::always_false)(42));
+}
+
+TEST(fn_predicates, keeps_traits_usable_with_conjunction) {
+  constexpr bool accepted = omni::compat::conjunction<
+    omni::fn::always_true_t<int>, omni::fn::always_true_t<double>>::value;
+  constexpr bool rejected = omni::compat::conjunction<
+    omni::fn::always_true_t<int>, omni::fn::always_false_t<double>>::value;
+
+  EXPECT_TRUE(accepted);
+  EXPECT_FALSE(rejected);
+}
+
+TEST(fn_predicates, filters_with_conjoined_field_traits) {
+  const auto names = omni::reflected_call(trait_filtered_field_names{},
+    omni::type_t<function_fields>{});
+
+  EXPECT_EQ((std::vector<std::string>{"value", "callable", "pointer"}), names);
+}
+
+TEST(fn_predicates, composes_custom_predicates_with_the_opt_in_alias) {
+  using omni::fn::operator&&;
+  using omni::fn::operator||;
+  constexpr auto both = accepts_integer{} && accepts_integer{};
+  constexpr auto either = accepts_integer{} || accepts_integer{};
+
+  EXPECT_TRUE(both(42));
+  EXPECT_TRUE(either(42));
+  EXPECT_TRUE((has_predicate_conjunction<accepts_integer>::value));
+  EXPECT_FALSE((has_predicate_conjunction<omni::fn::default_value<
+    std::true_type>>::value));
+}
+
 
 #if OMNI_FN_HAS_NTTP_UNARY
 TEST(fn_filter, lifts_a_structural_predicate_value) {

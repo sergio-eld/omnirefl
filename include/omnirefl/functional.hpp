@@ -82,17 +82,6 @@ constexpr auto stop_with(Accumulator &&value)
   return {std::forward<Accumulator>(value), /*stopped=*/true};
 }
 
-/// Return whether a function pointer is null.
-OMNI_CONSTRAINED_TEMPLATE((typename F), (std::is_pointer<F>::value))
-constexpr bool is_null_function(const F &f) noexcept {
-  return nullptr == f;
-}
-
-/// Return false for callable objects, which need not compare with nullptr.
-OMNI_CONSTRAINED_TEMPLATE((typename F), (!std::is_pointer<F>::value))
-constexpr bool is_null_function(const F &) noexcept {
-  return false;
-}
 
 namespace detail {
 
@@ -278,7 +267,7 @@ constexpr auto type_template_constructor() {
 
 /** Elevates a stateless predicate into a type-level boolean. */
 template <typename Predicate>
-struct compile_time_predicate {
+struct compile_time_predicate_t {
   template <typename Selected = Predicate>
   constexpr detail::compile_time_result<Selected> operator()() const {
     return {};
@@ -336,7 +325,7 @@ constexpr ct_const_t<int, Value> ct_const() {
 
 /** Elevate a stateless predicate into a type-level boolean. */
 template <typename Predicate>
-constexpr compile_time_predicate<Predicate> ct_pred(Predicate) {
+constexpr compile_time_predicate_t<Predicate> ct_pred(Predicate) {
   static_assert(std::is_empty<Predicate>::value,
     "compile-time predicate must be stateless");
   static_assert(detail::is_compile_time_predicate<Predicate>::value,
@@ -1073,19 +1062,189 @@ constexpr auto not_(Predicate predicate, First &&first, Argument &&...argument)
     std::forward<Argument>(argument)...);
 }
 
-/// Select static data-member or function metadata and bindings in `filter`.
-template <typename Member>
-struct is_static
-  : compat::bool_constant<compat::remove_cvref_t<Member>::is_static()> {};
+/** Callable form of a unary Boolean trait, preserving its constant result.
+ * Accepts a value for deduction or a type through operator()<T>().
+ * The predicate_tag alias enables Boolean predicate composition. */
+template <template <typename> class Trait>
+struct predicate_t {
+  using predicate_tag = void;
 
-/// Select non-static data-member or function metadata and bindings in `filter`.
+  template <typename T>
+  constexpr Trait<compat::remove_cvref_t<T>> operator()(const T &) const {
+    return {};
+  }
+
+  template <typename T>
+  constexpr Trait<compat::remove_cvref_t<T>> operator()() const { return {}; }
+};
+
+namespace detail {
+
+template <typename Predicate, typename = void>
+struct is_predicate: std::false_type {};
+
+template <typename Predicate>
+struct is_predicate<Predicate,
+  compat::void_t<typename Predicate::predicate_tag>>:
+    std::true_type {};
+
+// A class defers invocation substitution until conjunction/disjunction needs
+// its value. An alias here would instantiate both operands eagerly.
+template <typename Predicate, typename T>
+struct predicate_result:
+    decltype(Predicate{}(std::declval<const T &>())) {};
+
+} // namespace detail
+
+/** Compile-time conjunction of stateless predicates.
+ * A false left result prevents instantiating the right invocation. */
+template <typename Left, typename Right>
+struct conjunction_predicate_t {
+  using predicate_tag = void;
+
+  // A bool_constant result keeps ADL from instantiating skipped operands
+  // retained in a conjunction/disjunction's template arguments.
+  template <typename T>
+  constexpr compat::bool_constant<compat::conjunction<
+    detail::predicate_result<Left, T>,
+    detail::predicate_result<Right, T>>::value>
+  operator()(const T &) const { return {}; }
+
+  template <typename T>
+  constexpr compat::bool_constant<compat::conjunction<
+    detail::predicate_result<Left, compat::remove_cvref_t<T>>,
+    detail::predicate_result<Right, compat::remove_cvref_t<T>>>::value>
+  operator()() const { return {}; }
+};
+
+/** Compile-time disjunction of stateless predicates.
+ * A true left result prevents instantiating the right invocation. */
+template <typename Left, typename Right>
+struct disjunction_predicate_t {
+  using predicate_tag = void;
+
+  template <typename T>
+  constexpr compat::bool_constant<compat::disjunction<
+    detail::predicate_result<Left, T>,
+    detail::predicate_result<Right, T>>::value>
+  operator()(const T &) const { return {}; }
+
+  template <typename T>
+  constexpr compat::bool_constant<compat::disjunction<
+    detail::predicate_result<Left, compat::remove_cvref_t<T>>,
+    detail::predicate_result<Right, compat::remove_cvref_t<T>>>::value>
+  operator()() const { return {}; }
+};
+
+/** Compile-time negation of a stateless predicate. */
+template <typename Predicate>
+struct not_predicate_t {
+  using predicate_tag = void;
+
+  template <typename T>
+  constexpr compat::bool_constant<
+    !detail::predicate_result<Predicate, T>::value>
+  operator()(const T &) const { return {}; }
+
+  template <typename T>
+  constexpr compat::bool_constant<!detail::predicate_result<Predicate,
+    compat::remove_cvref_t<T>>::value> operator()() const { return {}; }
+};
+
+/** Boolean predicate composition; both operands opt in through predicate_tag.
+ * Predicates are empty and default constructible; their result types encode
+ * selection. Operand expressions are evaluated when composing, while the
+ * resulting predicate short-circuits invocation instantiation. */
+OMNI_CONSTRAINED_TEMPLATE((typename Left, typename Right),
+  (compat::conjunction<detail::is_predicate<Left>,
+    detail::is_predicate<Right>>::value))
+constexpr conjunction_predicate_t<Left, Right> operator&&(Left, Right) {
+  static_assert(compat::conjunction<std::is_empty<Left>, std::is_empty<Right>,
+      std::is_default_constructible<Left>,
+      std::is_default_constructible<Right>>::value,
+    "Predicate composition requires stateless, default-constructible operands");
+  return {};
+}
+
+/** Boolean disjunction with the same operand contract as operator&&. */
+OMNI_CONSTRAINED_TEMPLATE((typename Left, typename Right),
+  (compat::conjunction<detail::is_predicate<Left>,
+    detail::is_predicate<Right>>::value))
+constexpr disjunction_predicate_t<Left, Right> operator||(Left, Right) {
+  static_assert(compat::conjunction<std::is_empty<Left>, std::is_empty<Right>,
+      std::is_default_constructible<Left>,
+      std::is_default_constructible<Right>>::value,
+    "Predicate composition requires stateless, default-constructible operands");
+  return {};
+}
+
+/** Negation of a compile-time predicate, preserving its Boolean result type. */
+OMNI_CONSTRAINED_TEMPLATE((typename Predicate),
+  (detail::is_predicate<Predicate>::value))
+constexpr not_predicate_t<Predicate> not_(Predicate) {
+  static_assert(compat::conjunction<std::is_empty<Predicate>,
+      std::is_default_constructible<Predicate>>::value,
+    "Predicate composition requires a stateless, "
+    "default-constructible operand");
+  return {};
+}
+
+/// Accept every type or value in compile-time predicate composition.
+template <typename>
+using always_true_t = std::true_type;
+
+constexpr predicate_t<always_true_t> always_true{};
+
+/// Reject every type or value in compile-time predicate composition.
+template <typename>
+using always_false_t = std::false_type;
+
+constexpr predicate_t<always_false_t> always_false{};
+
+/// Whether field or function metadata describes a static member.
 template <typename Member>
-struct non_static: compat::negation<is_static<Member>> {};
+struct is_static_t:
+    compat::bool_constant<compat::remove_cvref_t<Member>::is_static()> {};
+
+constexpr predicate_t<is_static_t> is_static{};
+
+/// Whether field or function metadata describes a non-static member.
+template <typename Member>
+struct is_non_static_t: compat::negation<is_static_t<Member>> {};
+
+constexpr predicate_t<is_non_static_t> is_non_static{};
+
+/** Whether data-member metadata or a binding exposes associated function
+ * metadata. Recognizes fixed function_t tags, rather than arbitrary callable
+ * objects or function-pointer fields. */
+template <typename Member>
+struct has_callable_metadata_t:
+    compat::bool_constant<
+      compat::remove_cvref_t<Member>::has_callable_metadata()> {};
+
+constexpr predicate_t<has_callable_metadata_t> has_callable_metadata{};
+
+/// Whether a data member has no associated function metadata.
+template <typename Member>
+struct is_non_functional_t:
+    compat::negation<has_callable_metadata_t<Member>> {};
+
+constexpr predicate_t<is_non_functional_t> is_non_functional{};
+
+/** Whether the declared data-member type accepts an assigned value of that
+ * type. This checks type assignability, not accessibility of a particular
+ * record binding or the bound record's constness. */
+template <typename Member>
+struct is_assignable_t:
+    std::is_assignable<typename compat::remove_cvref_t<Member>::type &,
+      typename compat::remove_cvref_t<Member>::type> {};
+
+constexpr predicate_t<is_assignable_t> is_assignable{};
 
 /** QoL key projection for comparing reflected fields by name. */
 // TODO: Constrain Field to reflected field metadata or field bindings.
-// TODO: Add reflected-field predicates for filtering fields by record/field
-// writability and value assignability before calling `set_value()`.
+// TODO: Consider a predicate for assignment through a particular binding;
+// is_assignable checks only the declared field type.
 struct field_name {
   template <typename Field>
   constexpr detail::field_name_key<Field> operator()() const {
@@ -1704,7 +1863,8 @@ constexpr none_of_closure<Predicate> none_of(Predicate predicate) {
 }
 
 /** Store `predicate` for later negated call or type-predicate application. */
-template <typename Predicate>
+OMNI_CONSTRAINED_TEMPLATE((typename Predicate),
+  (!detail::is_predicate<Predicate>::value))
 constexpr not_closure<Predicate> not_(Predicate predicate) {
   return not_closure<Predicate>{std::move(predicate)};
 }

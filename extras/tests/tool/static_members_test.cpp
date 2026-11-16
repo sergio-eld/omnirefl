@@ -273,7 +273,7 @@ struct update_static {
   std::pair<int, int *> operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(assign_shared{},
       record.accessible_data_members()
-        | omni::fn::filter<omni::fn::is_static>());
+        | omni::fn::filter<omni::fn::is_static_t>());
   }
 };
 
@@ -339,7 +339,7 @@ struct invoke_static {
   int operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(invoke_function{},
       record.accessible_member_functions()
-        | omni::fn::filter<omni::fn::is_static>());
+        | omni::fn::filter<omni::fn::is_static_t>());
   }
 };
 
@@ -433,10 +433,10 @@ TEST(static_members, filters_static_and_non_static_data_members) {
   const std::vector<std::pair<std::string, bool>> non_statics{{"local", false}};
 
   EXPECT_EQ(statics,
-    omni::reflected_call(select_data<omni::fn::is_static>{},
+    omni::reflected_call(select_data<omni::fn::is_static_t>{},
       omni::type_t<static_record>{}));
   EXPECT_EQ(non_statics,
-    omni::reflected_call(select_data<omni::fn::non_static>{},
+    omni::reflected_call(select_data<omni::fn::is_non_static_t>{},
       omni::type_t<static_record>{}));
 }
 
@@ -531,7 +531,7 @@ TEST(static_members, derived_members_hide_inherited_statics) {
   const std::vector<std::pair<std::string, bool>> none;
 
   EXPECT_EQ(none,
-    omni::reflected_call(select_data<omni::fn::is_static>{},
+    omni::reflected_call(select_data<omni::fn::is_static_t>{},
       omni::type_t<hidden_base>{}));
   EXPECT_EQ(none,
     omni::reflected_call(inspect_functions{}, omni::type_t<hidden_base>{}));
