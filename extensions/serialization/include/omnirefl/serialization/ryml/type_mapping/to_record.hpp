@@ -1,8 +1,11 @@
 #pragma once
 
+#include <omnirefl/reflected_scope.hpp>
+
+OMNI_REQUIRE_INSTRUMENTATION();
+
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
-#include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/impl/shared.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -36,8 +39,8 @@ template <typename NameByAlias = fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_read_state<State>,
-      omni::is_reflected_record<T>>::value))
+    (compat::conjunction<omni::is_reflected_record<T>,
+      is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
@@ -82,8 +85,8 @@ constexpr to_record_t<> to_record{};
  * mapping_from_type dispatch. */
 struct from_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      omni::is_reflected_record<T>>::value))
+    (compat::conjunction<omni::is_reflected_record<T>,
+      is_write_state<State>>::value))
   auto operator()(const T &value, ::ryml::NodeRef node, State context) const
     -> void;
 };

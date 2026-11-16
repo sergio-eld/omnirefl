@@ -28,8 +28,7 @@ auto assign_mapped_value(T *into, with_diagnostics_t<Value, diagnostics> result)
 } // namespace detail
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_read_state<State>,
-    traits::is_string_like<T>>::value))
+  (compat::conjunction<traits::is_string_like<T>, is_read_state<State>>::value))
 auto to_string_like_t::operator()(::ryml::ConstNodeRef node,
   omni::type_t<T>,
   State context) const
@@ -65,8 +64,7 @@ auto to_string_like_t::operator()(::ryml::ConstNodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_read_state<State>,
-    traits::is_string_like<T>>::value))
+  (compat::conjunction<traits::is_string_like<T>, is_read_state<State>>::value))
 auto to_string_like_t::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
@@ -76,8 +74,8 @@ auto to_string_like_t::operator()(::ryml::ConstNodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    traits::is_string_like<T>>::value))
+  (compat::conjunction<traits::is_string_like<T>,
+    is_write_state<State>>::value))
 auto from_string_like_t::operator()(const T &value,
   ::ryml::NodeRef node,
   State context) const
@@ -157,9 +155,8 @@ auto read_scalar(::ryml::ConstNodeRef node, omni::type_t<T>, State context,
 } // namespace detail
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value
-    && std::is_same<bool, compat::remove_cv_t<T>>::value
-    && !std::is_const<T>::value))
+  (std::is_same<bool, compat::remove_cv_t<T>>::value
+    && !std::is_const<T>::value && is_read_state<State>::value))
 auto to_boolean_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
   State context) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -174,9 +171,8 @@ auto to_boolean_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value
-    && std::is_same<bool, compat::remove_cv_t<T>>::value
-    && !std::is_const<T>::value))
+  (std::is_same<bool, compat::remove_cv_t<T>>::value
+    && !std::is_const<T>::value && is_read_state<State>::value))
 auto to_boolean_t::operator()(::ryml::ConstNodeRef node, T *into,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
@@ -185,8 +181,8 @@ auto to_boolean_t::operator()(::ryml::ConstNodeRef node, T *into,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value
-    && std::is_same<bool, compat::remove_cv_t<T>>::value))
+  (std::is_same<bool, compat::remove_cv_t<T>>::value
+    && is_write_state<State>::value))
 void from_boolean_t::operator()(const T &value, ::ryml::NodeRef node,
   State) const {
   // C4's plain bool conversion emits 0/1 rather than document booleans.
@@ -194,8 +190,9 @@ void from_boolean_t::operator()(const T &value, ::ryml::NodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value && std::is_integral<T>::value
-    && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+  (std::is_integral<T>::value
+    && !std::is_same<bool, compat::remove_cv_t<T>>::value
+    && is_read_state<State>::value))
 auto to_integer_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
   State context) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -210,8 +207,9 @@ auto to_integer_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value && std::is_integral<T>::value
-    && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+  (std::is_integral<T>::value
+    && !std::is_same<bool, compat::remove_cv_t<T>>::value
+    && is_read_state<State>::value))
 auto to_integer_t::operator()(::ryml::ConstNodeRef node, T *into,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
@@ -220,15 +218,16 @@ auto to_integer_t::operator()(::ryml::ConstNodeRef node, T *into,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value && std::is_integral<T>::value
-    && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+  (std::is_integral<T>::value
+    && !std::is_same<bool, compat::remove_cv_t<T>>::value
+    && is_write_state<State>::value))
 void from_integer_t::operator()(const T &value, ::ryml::NodeRef node,
   State) const {
   node.set_serialized(value);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value && std::is_floating_point<T>::value))
+  (std::is_floating_point<T>::value && is_read_state<State>::value))
 auto to_real_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
   State context) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -238,7 +237,7 @@ auto to_real_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value && std::is_floating_point<T>::value))
+  (std::is_floating_point<T>::value && is_read_state<State>::value))
 auto to_real_t::operator()(::ryml::ConstNodeRef node, T *into,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
@@ -247,7 +246,7 @@ auto to_real_t::operator()(::ryml::ConstNodeRef node, T *into,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value && std::is_floating_point<T>::value))
+  (std::is_floating_point<T>::value && is_write_state<State>::value))
 void from_real_t::operator()(const T &value, ::ryml::NodeRef node,
   State) const {
   // Preserve enough significant digits to recover the original value.
@@ -256,7 +255,7 @@ void from_real_t::operator()(const T &value, ::ryml::NodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value && std::is_arithmetic<T>::value))
+  (std::is_arithmetic<T>::value && is_read_state<State>::value))
 auto to_arithmetic_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
   State context) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -270,7 +269,7 @@ auto to_arithmetic_t::operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value && std::is_arithmetic<T>::value))
+  (std::is_arithmetic<T>::value && is_read_state<State>::value))
 auto to_arithmetic_t::operator()(::ryml::ConstNodeRef node, T *into,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
@@ -279,7 +278,7 @@ auto to_arithmetic_t::operator()(::ryml::ConstNodeRef node, T *into,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value && std::is_arithmetic<T>::value))
+  (std::is_arithmetic<T>::value && is_write_state<State>::value))
 auto from_arithmetic_t::operator()(const T &value,
   ::ryml::NodeRef node, State context) const -> void {
   const auto write = typename traits::select<
@@ -292,8 +291,7 @@ auto from_arithmetic_t::operator()(const T &value,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_read_state<State>,
-    traits::is_optional<T>>::value))
+  (compat::conjunction<traits::is_optional<T>, is_read_state<State>>::value))
 auto to_optional_like_t::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
@@ -314,8 +312,7 @@ auto to_optional_like_t::operator()(::ryml::ConstNodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    traits::is_optional<T>>::value))
+  (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
 auto from_optional_like_t::operator()(const T &value,
   ::ryml::NodeRef node,
   State context) const

@@ -9,8 +9,8 @@ namespace reflected_scope {
 
 template <typename ValueByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_read_state<State>,
-    omni::is_reflected_enum<T>>::value))
+  (compat::conjunction<omni::is_reflected_enum<T>,
+    is_read_state<State>>::value))
 auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
@@ -69,8 +69,8 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    omni::is_reflected_enum<T>>::value))
+  (compat::conjunction<omni::is_reflected_enum<T>,
+    is_write_state<State>>::value))
 auto from_enum_t::operator()(T value, ::ryml::NodeRef node, State) const -> void {
   const auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;

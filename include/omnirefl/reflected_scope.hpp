@@ -22,6 +22,31 @@
 #include <omnirefl/compat.hpp>
 #include <omnirefl/traits.hpp>
 
+/** (QoL) Check that instrumentation or generated reflection is active.
+ * Takes no arguments. Expands to static_assert; compilation without either
+ * mode reports how to include generated reflection or enable CMake integration.
+ *
+```cpp
+#include <omnirefl/reflected_scope.hpp>
+OMNI_REQUIRE_INSTRUMENTATION();
+
+// During instrumentation or generated-header compilation:
+// static_assert(true, "");
+```
+ * @details The mode is fixed when reflected_scope.hpp is first included,
+ * matching its metadata declarations. The check is opt-in so core declarations
+ * remain available for IDE parsing before generation. A shared diagnostic
+ * avoids repeating per-extension preprocessor checks.
+ */
+#if defined(OMNI_TOOL_RUN) || defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+#  define OMNI_REQUIRE_INSTRUMENTATION() static_assert(true, "")
+#else
+#  define OMNI_REQUIRE_INSTRUMENTATION() \
+    static_assert(false, \
+      "Include the generated reflection header before reflection-dependent " \
+      "headers. With CMake, call omni_reflected_target(<target>).")
+#endif
+
 namespace omni {
 
 namespace tweaks {

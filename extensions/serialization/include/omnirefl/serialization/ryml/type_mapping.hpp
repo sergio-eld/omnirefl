@@ -3,6 +3,10 @@
 /** Default type mappings, customization registration, and dispatch.
  * See docs/CONVENTIONS.md#customization-points. */
 
+#include <omnirefl/reflected_scope.hpp>
+
+OMNI_REQUIRE_INSTRUMENTATION();
+
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/enum.hpp>
@@ -30,8 +34,8 @@ namespace ryml {
  * the tree must remain alive and that storage must remain valid while used. */
 struct to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_read_state<State>,
-      traits::is_string_like<T>>::value))
+    (compat::conjunction<traits::is_string_like<T>,
+      is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
     State context) const
     -> with_diagnostics_t<T, diagnostics>;
@@ -40,8 +44,8 @@ struct to_string_like_t {
    * returns diagnostics with a success marker. If .value is empty, the
    * destination state is unspecified and may contain partial updates. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_read_state<State>,
-      traits::is_string_like<T>>::value))
+    (compat::conjunction<traits::is_string_like<T>,
+      is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
@@ -53,8 +57,8 @@ constexpr to_string_like_t to_string_like{};
  * customizations avoid re-entering mapping_from_type selection. */
 struct from_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      traits::is_string_like<T>>::value))
+    (compat::conjunction<traits::is_string_like<T>,
+      is_write_state<State>>::value))
   auto operator()(const T &value, ::ryml::NodeRef node, State) const -> void;
 };
 
@@ -63,9 +67,8 @@ constexpr from_string_like_t from_string_like{};
 /** Fundamental boolean mapping: accepts unquoted true/false spellings. */
 struct to_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value
-      && std::is_same<bool, compat::remove_cv_t<T>>::value
-      && !std::is_const<T>::value))
+    (std::is_same<bool, compat::remove_cv_t<T>>::value
+      && !std::is_const<T>::value && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
     State context) const
     -> with_diagnostics_t<T, diagnostics>;
@@ -74,9 +77,8 @@ struct to_boolean_t {
    * returns diagnostics with a success marker. If .value is empty, the
    * destination state is unspecified and may contain partial updates. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value
-      && std::is_same<bool, compat::remove_cv_t<T>>::value
-      && !std::is_const<T>::value))
+    (std::is_same<bool, compat::remove_cv_t<T>>::value
+      && !std::is_const<T>::value && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
@@ -86,8 +88,8 @@ constexpr to_boolean_t to_boolean{};
 /** Fundamental boolean mapping: writes a JSON/YAML boolean scalar. */
 struct from_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_write_state<State>::value
-      && std::is_same<bool, compat::remove_cv_t<T>>::value))
+    (std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_write_state<State>::value))
   void operator()(const T &value, ::ryml::NodeRef node, State) const;
 };
 
@@ -97,8 +99,9 @@ constexpr from_boolean_t from_boolean{};
  * Boolean destinations are handled by to_boolean. */
 struct to_integer_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value && std::is_integral<T>::value
-      && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+    (std::is_integral<T>::value
+      && !std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
     State context) const
     -> with_diagnostics_t<T, diagnostics>;
@@ -107,8 +110,9 @@ struct to_integer_t {
    * returns diagnostics with a success marker. If .value is empty, the
    * destination state is unspecified and may contain partial updates. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value && std::is_integral<T>::value
-      && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+    (std::is_integral<T>::value
+      && !std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
@@ -118,8 +122,9 @@ constexpr to_integer_t to_integer{};
 /** Fundamental integer mapping: writes a signed or unsigned integer scalar. */
 struct from_integer_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_write_state<State>::value && std::is_integral<T>::value
-      && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+    (std::is_integral<T>::value
+      && !std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_write_state<State>::value))
   void operator()(const T &value, ::ryml::NodeRef node, State) const;
 };
 
@@ -129,7 +134,7 @@ constexpr from_integer_t from_integer{};
  * range. */
 struct to_real_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value && std::is_floating_point<T>::value))
+    (std::is_floating_point<T>::value && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
     State context) const
     -> with_diagnostics_t<T, diagnostics>;
@@ -138,7 +143,7 @@ struct to_real_t {
    * returns diagnostics with a success marker. If .value is empty, the
    * destination state is unspecified and may contain partial updates. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value && std::is_floating_point<T>::value))
+    (std::is_floating_point<T>::value && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
@@ -149,7 +154,7 @@ constexpr to_real_t to_real{};
  * round-trip precision. */
 struct from_real_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_write_state<State>::value && std::is_floating_point<T>::value))
+    (std::is_floating_point<T>::value && is_write_state<State>::value))
   void operator()(const T &value, ::ryml::NodeRef node, State) const;
 };
 
@@ -159,7 +164,7 @@ constexpr from_real_t from_real{};
  * to_real without mapping_to_type dispatch. */
 struct to_arithmetic_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value && std::is_arithmetic<T>::value))
+    (std::is_arithmetic<T>::value && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>,
     State context) const
     -> with_diagnostics_t<T, diagnostics>;
@@ -168,7 +173,7 @@ struct to_arithmetic_t {
    * returns diagnostics with a success marker. If .value is empty, the
    * destination state is unspecified and may contain partial updates. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value && std::is_arithmetic<T>::value))
+    (std::is_arithmetic<T>::value && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
@@ -179,7 +184,7 @@ constexpr to_arithmetic_t to_arithmetic{};
  * from_real without mapping_from_type dispatch. */
 struct from_arithmetic_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_write_state<State>::value && std::is_arithmetic<T>::value))
+    (std::is_arithmetic<T>::value && is_write_state<State>::value))
   auto operator()(const T &value, ::ryml::NodeRef node, State) const -> void;
 };
 
@@ -193,8 +198,7 @@ constexpr from_arithmetic_t from_arithmetic{};
  * value and emplace it on success. */
 struct to_optional_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_read_state<State>,
-      traits::is_optional<T>>::value))
+    (compat::conjunction<traits::is_optional<T>, is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
@@ -205,8 +209,7 @@ constexpr to_optional_like_t to_optional_like{};
  * mapping_from_type for the contained value. */
 struct from_optional_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      traits::is_optional<T>>::value))
+    (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
   auto operator()(const T &value, ::ryml::NodeRef node, State context) const
     -> void;
 };

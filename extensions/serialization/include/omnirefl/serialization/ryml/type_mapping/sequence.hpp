@@ -25,8 +25,8 @@ namespace ryml {
  */
 struct to_range_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_read_state<State>,
-      detail::is_mapped_range<T>>::value))
+    (compat::conjunction<detail::is_mapped_range<T>,
+      is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
@@ -44,8 +44,8 @@ constexpr to_range_t to_range{};
  * default mapping rejects temporary-producing iterators in both tree modes. */
 struct from_range_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      omni::ryml::detail::is_mapped_range<const T>>::value))
+    (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
+      is_write_state<State>>::value))
   void operator()(const T &value, ::ryml::NodeRef node, State context) const;
 };
 
