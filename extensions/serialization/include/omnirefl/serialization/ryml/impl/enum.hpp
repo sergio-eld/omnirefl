@@ -37,15 +37,16 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
     return std::move(result).finish();
   }
 
+  // The lookup uses iterators into this type's immutable metadata table.
   // C++11 pair forwarding constructors need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
-  constexpr
+  static constexpr
 #else
-  const
+  static const
 #endif
   auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
-  const auto find_name = [&enumerators](compat::string_view name) {
+  const auto find_name = [](compat::string_view name) {
     return std::find_if(enumerators.begin(),
       enumerators.end(),
       [name](const enumerator_type &enumerator) {
@@ -78,11 +79,12 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
 auto from_enum_t::operator()(T value, ::ryml::NodeRef node, State) const -> void {
+  // The lookup uses iterators into this type's immutable metadata table.
   // C++11 pair forwarding constructors need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
-  constexpr
+  static constexpr
 #else
-  const
+  static const
 #endif
   auto enumerators = omni::meta_for<T>::enumerators();
   using enumerator_type = typename decltype(enumerators)::value_type;
