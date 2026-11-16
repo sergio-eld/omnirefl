@@ -6901,7 +6901,7 @@ std::string inner_aggregate_into_head(const meta::nm_qual_type &t,
 std::string reflectable_body(const meta::enum_data &d) {
   return std::format(
     "\n  constexpr static auto enumerators() noexcept"
-    "\n    -> std::array<std::pair<type, const char*>, {}> {{"
+    "\n    -> std::array<::omni::compat::pair<type, const char*>, {}> {{"
     "\n      return {{{{"
     "\n        {},"
     "\n      }}}};"
@@ -7540,6 +7540,7 @@ auto render::generate_reflection(reflection_context ctx, std::ofstream file)
     std::to_array<std::string_view>({
       "omnirefl/reflected_scope.hpp",
       has_enums ? "array" : "",
+      has_enums ? "omnirefl/compat/pair.hpp" : "",
     }) //
     | std::views::filter([](std::string_view s) { return !s.empty(); })
     | std::ranges::to<std::vector>();

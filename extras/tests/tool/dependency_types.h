@@ -124,7 +124,7 @@ static const struct second_field_type_name_t {
 static const struct enum_names_t {
   template <typename Enum>
   std::vector<std::string> operator()(const Enum &e) const {
-    const auto enumerators = e.enumerators();
+    constexpr auto enumerators = e.enumerators();
     std::vector<std::string> names;
     names.reserve(enumerators.size());
 

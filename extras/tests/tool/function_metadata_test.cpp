@@ -287,7 +287,7 @@ struct inspect_callable_type {
 
   template <typename Field, typename... Other>
   callable_type_queries operator()(Field field, Other...) const {
-    const auto callable = field.callable_metadata();
+    constexpr auto callable = field.callable_metadata();
 #if defined(__cpp_concepts)
     static_assert(omni::function_meta<decltype(callable)>);
 #endif

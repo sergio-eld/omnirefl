@@ -47,7 +47,7 @@ inline constexpr auto benchmark_name = //
   const auto type_separator = qualified_type.rfind("::");
   const auto namespace_separator =
     qualified_type.rfind("::", type_separator - 1);
-  const auto enumerators = conversion.enumerators();
+  constexpr auto enumerators = conversion.enumerators();
   const std::map enumerator_names{enumerators.begin(), enumerators.end()};
 
   std::string name{batch_convert.type_name()};

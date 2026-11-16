@@ -2,8 +2,7 @@
  * The examples use C++20 syntax for convenience. Omnirefl's reflection
  * interfaces remain C++11-compatible.
  * NOTE: `<concepts>` is deliberately excluded for toolchains with partial
- * C++20 support. The examples also use `std::find_if` rather than ranges
- * algorithms.
+ * C++20 support.
  *
  * For each suite.test entry below, search for TEST(suite, test) to find its
  * entry point; topics may have dedicated namespaces.
@@ -69,7 +68,6 @@
 
 #include <mpark/variant.hpp>
 
-#include <algorithm>
 #include <array>
 #include <functional>
 #include <map>
@@ -210,12 +208,12 @@ TEST(basics, reflected_scope_indirection) {
   EXPECT_EQ("basics::account", name);
 }
 
-// Enumerators are value/name pairs in declaration order.
+// Enumerators are std::pair-like value/name entries in declaration order.
 TEST(basics, enum_metadata) {
   const auto enumerators = omni::reflected_call(
     [](omni::enum_meta auto e)
       -> std::vector<std::pair<status, std::string_view>> {
-      const auto entries = e.enumerators();
+      constexpr auto entries = e.enumerators();
       // Names refer to generated string literals with static storage.
       // Destroying the local entries array does not invalidate these views.
       return {entries.begin(), entries.end()};
@@ -1274,12 +1272,12 @@ TEST(advanced, data_member_type_names) {
 TEST(advanced, enum_value_name) {
   const auto name = omni::reflected_call(
     [](omni::enum_binding auto e) -> std::string_view {
-      const auto enumerators = e.enumerators();
-      const auto found = std::find_if(enumerators.begin(),
-        enumerators.end(),
-        [&e](const auto &entry) { return entry.first == e.value(); });
+      constexpr auto enumerators = e.enumerators();
+      for (const auto &entry : enumerators)
+        if (entry.first == e.value())
+          return entry.second;
 
-      return enumerators.end() == found ? "unknown" : found->second;
+      return "unknown";
     },
     basics::status::idle);
 

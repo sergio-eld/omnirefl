@@ -149,7 +149,7 @@ namespace enumerators {
 struct enum_type_enumerators_t {
   template <typename T>
   std::string operator()(omni::enum_binding_t<T> binding) const {
-    auto es = binding.enumerators();
+    constexpr auto es = binding.enumerators();
     std::string result;
     bool first = true;
     for (const auto &p : es) {

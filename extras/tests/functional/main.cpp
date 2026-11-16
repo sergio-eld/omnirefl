@@ -29,6 +29,21 @@ struct record {
   int _cached_count;
 };
 
+enum class pair_state { idle, active };
+
+struct inspect_constexpr_enum_pairs {
+  template <typename _M>
+  std::vector<std::pair<pair_state, std::string>> operator()(
+    omni::enum_meta_t<_M> meta) const {
+    constexpr auto entries = meta.enumerators();
+    std::vector<std::pair<pair_state, std::string>> result;
+    for (const auto &entry : entries)
+      result.emplace_back(entry.first, entry.second);
+
+    return result;
+  }
+};
+
 struct without_internal_name {
   template <typename Field>
   constexpr bool operator()() const {
@@ -777,6 +792,14 @@ TEST(fn_composition, returns_stringified_reflected_field_values) {
   const auto values = omni::reflected_call(transform_record{}, input);
 
   EXPECT_EQ((std::vector<std::string>{"3", "ignored", "2.5"}), values);
+}
+
+TEST(fn_composition, reads_generated_enum_pairs_in_constant_evaluation) {
+  const auto entries = omni::reflected_call(inspect_constexpr_enum_pairs{},
+    omni::type_t<pair_state>{});
+
+  EXPECT_EQ((std::vector<std::pair<pair_state, std::string>>{
+    {pair_state::idle, "idle"}, {pair_state::active, "active"}}), entries);
 }
 
 TEST(fn_identity, preserves_reference_qualification) {
