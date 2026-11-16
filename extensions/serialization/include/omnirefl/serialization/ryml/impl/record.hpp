@@ -159,15 +159,7 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
-  if (!node.is_map()) {
-    result.report(omni::ryml::detail::make_issue(
-      json::issue_code::unexpected_kind,
-      json::value_kind::mapping,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
+  assert(into && node.is_map());
 
   // C++11 tuple forwarding constructors need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS

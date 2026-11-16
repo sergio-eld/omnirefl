@@ -1,46 +1,21 @@
 #pragma once
 
-#include <utility>
+#include <cassert>
 
 namespace omni {
 namespace ryml {
+namespace core {
 namespace reflected_scope {
 
 template <typename ValueByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_read_state<State>>::value))
-auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
+auto map_node_to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   omni::type_t<T>,
   State context) const
   -> with_diagnostics_t<T, diagnostics> {
-  // RapidYAML retains scalar text. Honor !!str and quotes; otherwise reject
-  // plain null, numeric, and boolean forms before looking up the name.
-  const bool wrong_kind = compat::invoke([node]() -> bool {
-    bool boolean{}; // Discard the parsed value; only conversion success matters.
-    return node.is_container()
-      || (node.has_val_tag()
-        ? ::ryml::TAG_STR != ::ryml::to_tag(node.val_tag())
-        : !node.is_val_quoted()
-          && (node.val_is_null()
-            || node.val().is_number()
-            || c4::from_chars(node.val(), &boolean)));
-  });
-
-  if (wrong_kind) {
-    return {
-      /*value=*/compat::nullopt,
-      /*diagnostics=*/{
-        /*config=*/{context.config.error_policy, {}},
-        /*issues=*/{omni::ryml::detail::make_issue(
-          json::issue_code::unexpected_kind,
-          json::value_kind::string,
-          node,
-          context.path)},
-        /*parse_error_message=*/{},
-      },
-    };
-  }
+  assert(core::expect_string_node(node).value);
 
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
   const auto find_name = [enumerators](compat::string_view name)
@@ -90,24 +65,10 @@ auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   };
 }
 
-template <typename ValueByAlias>
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_enum<T>,
-    is_read_state<State>>::value))
-auto to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  State context) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  auto result = (*this)(node, omni::type_t<T>{}, context);
-  if (result.value)
-    *into = *result.value;
+} // namespace reflected_scope
+} // namespace core
 
-  return {
-    /*value=*/result.value
-      ? compat::make_optional(compat::monostate{}) : compat::nullopt,
-    /*diagnostics=*/std::move(result.diagnostics),
-  };
-}
+namespace reflected_scope {
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,

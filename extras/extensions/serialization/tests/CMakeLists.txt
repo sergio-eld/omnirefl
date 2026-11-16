@@ -22,6 +22,7 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp
         container_discovery.cpp optional_mapping.cpp type_mapping.cpp
+        compositors.cpp
         diagnostics.cpp inplace.cpp)
     set_target_properties(${_test_target} PROPERTIES
         CXX_STANDARD ${_standard}

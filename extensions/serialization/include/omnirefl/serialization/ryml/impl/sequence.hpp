@@ -338,16 +338,8 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
     "to_range requires emplace, or try_emplace and replace for unique keys");
 
   auto result = omni::ryml::detail::make_node_accumulator(context);
-  constexpr bool key_value = traits::is_key_value<T>::value;
-  if (key_value ? !node.is_map() : !node.is_seq()) {
-    result.report(omni::ryml::detail::make_issue(
-      json::issue_code::unexpected_kind,
-      key_value ? json::value_kind::mapping : json::value_kind::sequence,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
+  assert(into);
+  assert(traits::is_key_value<T>::value ? node.is_map() : node.is_seq());
 
   adapt::clear(into);
   omni::ryml::detail::read_range_case<traits::is_key_value<T>::value>::apply(

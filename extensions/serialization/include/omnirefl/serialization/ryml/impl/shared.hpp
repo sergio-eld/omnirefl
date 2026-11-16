@@ -273,13 +273,18 @@ struct is_alias_resolver<F,
 
 } // namespace detail
 
-/** Build an alias-to-name resolver from tuple-like string-view groups.
+/** Builds an alias-to-name resolver from tuple-like string-view groups.
  * Each group starts with the canonical name; remaining entries are aliases.
  * The caller must ensure aliases do not match another group's canonical
  * name or aliases; collisions are not validated. Mapping results are
  * unspecified for collisions. Canonical names are not implicitly added as
  * aliases. Returned views borrow the supplied strings, whose storage must
  * outlive use of the resolver.
+ *
+```text
+alias_dict :: (group, ...) -> (string_view -> optional<string_view>)
+```
+ *
  * Full constexpr factory evaluation requires C++14: std::make_tuple,
  * std::tuple_cat, and std::get are not guaranteed constexpr in C++11.
  * The sorting implementation itself supports C++11 constant evaluation.
@@ -481,6 +486,32 @@ compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
     return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
 
   return value;
+}
+
+// Shared checked conversion; node format is validated before this call.
+template <typename T, typename State>
+auto read_scalar(::ryml::ConstNodeRef node, omni::type_t<T>, State context,
+  json::value_kind expected)
+  -> with_diagnostics_t<T, diagnostics> {
+  auto result = omni::ryml::detail::make_node_accumulator(context);
+  const auto scalar = node.val();
+  const auto converted = omni::ryml::detail::from_chars<compat::remove_cv_t<T>>(
+    scalar);
+
+  if (!converted) {
+    result.report(omni::ryml::detail::make_issue(
+      converted.error(),
+      expected,
+      node,
+      context.path));
+
+    return {compat::nullopt, std::move(result.result.diagnostics)};
+  }
+
+  return {
+    /*value=*/ *converted,
+    /*diagnostics=*/std::move(result.result.diagnostics),
+  };
 }
 
 } // namespace detail

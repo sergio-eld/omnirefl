@@ -16,6 +16,16 @@ namespace {
 template <typename T>
 struct endpoint { T port; };
 
+// TODO: [high] Move this alias fixture to the model customization API.
+struct endpoint_names {
+  omni::compat::optional<omni::compat::string_view> operator()(
+    omni::compat::string_view alias) const {
+    return alias == "service_port"
+      ? omni::compat::optional<omni::compat::string_view>{"port"}
+      : omni::compat::nullopt;
+  }
+};
+
 struct shifted_integer { int value; };
 struct qualified_integer { int value; };
 
@@ -94,10 +104,9 @@ const auto from_type<endpoint<T>> = [](const endpoint<T> &value,
 };
 
 template <typename T>
-const auto to_type<endpoint<T>> = reflected_scope::to_record
-  .tdm_name_by_alias([](const auto &) {
-    return alias_dict(std::make_tuple("port", "service_port"));
-  });
+const auto to_type<endpoint<T>> =
+  compose::with_node_check<core::expect_object_node>(
+    reflected_scope::to_record_t<endpoint_names>{});
 #else
 template <typename T>
 struct from_type_t<endpoint<T>> {
@@ -110,23 +119,9 @@ struct from_type_t<endpoint<T>> {
 
 // C++11 registers a struct and configures the default compositor at invocation.
 template <typename T>
-struct to_type_t<endpoint<T>> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node,
-    endpoint<T> *into,
-    State context) const
-    -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return reflected_scope::to_record.tdm_name_by_alias(
-      [](const decltype(reflected_scope::to_record.name_by_alias) &) {
-        return [](compat::string_view alias)
-          -> compat::optional<compat::string_view> {
-          return alias == "service_port"
-            ? compat::optional<compat::string_view>{"port"}
-            : compat::nullopt;
-        };
-      })(node, into, context);
-  }
-};
+struct to_type_t<endpoint<T>>:
+    decltype(compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<endpoint_names>{})) {};
 #endif
 
 // Initialized captures must survive dispatcher selection in both directions.
@@ -135,7 +130,7 @@ template <>
 const auto to_type<shifted_integer> =
   [bias = 7](::ryml::ConstNodeRef node, shifted_integer *into, auto state) {
     int decoded{};
-    auto result = to_integer(node, &decoded, state);
+    auto result = to_integer(omni::type_t<int>{})(node, &decoded, state);
     if (result.value)
       into->value = decoded + bias;
 
@@ -158,7 +153,7 @@ struct to_type_t<shifted_integer> {
   auto operator()(::ryml::ConstNodeRef node, shifted_integer *into,
     State state) const -> with_diagnostics_t<compat::monostate> {
     int decoded{};
-    auto result = to_integer(node, &decoded, state);
+    auto result = to_integer(omni::type_t<int>{})(node, &decoded, state);
     if (result.value)
       into->value = decoded + this->bias;
 
@@ -205,25 +200,25 @@ static_assert(omni::traits::cp::unavailable{}
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<bool>{})),
-    omni::ryml::to_boolean_t>::value,
+    decltype(omni::ryml::to_boolean(omni::type_t<bool>{}))>::value,
   "Boolean precedes the integral mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<int>{})),
-    omni::ryml::to_integer_t>::value,
+    decltype(omni::ryml::to_integer(omni::type_t<int>{}))>::value,
   "Signed integers use the integer mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<unsigned>{})),
-    omni::ryml::to_integer_t>::value,
+    decltype(omni::ryml::to_integer(omni::type_t<int>{}))>::value,
   "Unsigned integers use the integer mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<double>{})),
-    omni::ryml::to_real_t>::value,
+    decltype(omni::ryml::to_real(omni::type_t<double>{}))>::value,
   "Floating-point values use the real mapping");
 
 static_assert(std::is_same<
@@ -253,7 +248,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<std::string>{})),
-    omni::ryml::to_string_like_t>::value,
+    decltype(omni::ryml::to_string_like(omni::type_t<std::string>{}))>::value,
   "String to-type selection");
 
 static_assert(std::is_same<
@@ -265,7 +260,8 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<std::vector<int>>{})),
-    omni::ryml::to_range_t>::value,
+    decltype(omni::ryml::to_range(
+      omni::type_t<std::vector<int>>{}))>::value,
   "Range to-type selection");
 
 static_assert(std::is_same<
@@ -277,7 +273,8 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<omni::compat::optional<int>>{})),
-    omni::ryml::to_optional_like_t>::value,
+    decltype(omni::ryml::to_optional_like(
+      omni::type_t<omni::compat::optional<int>>{}))>::value,
   "Optional to-type selection");
 
 static_assert(std::is_same<
@@ -301,7 +298,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const bool>{})),
-    omni::ryml::to_boolean_t>::value,
+    decltype(omni::ryml::to_boolean(omni::type_t<bool>{}))>::value,
   "const bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
@@ -313,7 +310,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<volatile bool>{})),
-    omni::ryml::to_boolean_t>::value,
+    decltype(omni::ryml::to_boolean(omni::type_t<bool>{}))>::value,
   "volatile bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
@@ -325,7 +322,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const volatile bool>{})),
-    omni::ryml::to_boolean_t>::value,
+    decltype(omni::ryml::to_boolean(omni::type_t<bool>{}))>::value,
   "const volatile bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
@@ -337,7 +334,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const std::string>{})),
-    omni::ryml::to_string_like_t>::value,
+    decltype(omni::ryml::to_string_like(omni::type_t<std::string>{}))>::value,
   "Qualified string to-type selection");
 
 static_assert(std::is_same<
@@ -349,7 +346,8 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const std::vector<int>>{})),
-    omni::ryml::to_range_t>::value,
+    decltype(omni::ryml::to_range(
+      omni::type_t<std::vector<int>>{}))>::value,
   "Qualified range to-type selection");
 
 static_assert(std::is_same<
@@ -361,7 +359,8 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const omni::compat::optional<int>>{})),
-    omni::ryml::to_optional_like_t>::value,
+    decltype(omni::ryml::to_optional_like(
+      omni::type_t<omni::compat::optional<int>>{}))>::value,
   "Qualified optional to-type selection");
 
 static_assert(std::is_same<
@@ -428,11 +427,13 @@ struct cpp11_check_mapping_types {
 
 TEST(type_mapping, selects_reflected_defaults) {
   omni::reflected_call(cpp11_check_mapping_types<
-      omni::ryml::reflected_scope::to_record_t<>,
+      decltype(omni::ryml::reflected_scope::to_record(
+        omni::type_t<uncustomized_record>{})),
       omni::ryml::reflected_scope::from_record_t>{},
     omni::type_t<uncustomized_record>{});
   omni::reflected_call(cpp11_check_mapping_types<
-      omni::ryml::reflected_scope::to_enum_t<>,
+      decltype(omni::ryml::reflected_scope::to_enum(
+        omni::type_t<uncustomized_enum>{})),
       omni::ryml::reflected_scope::from_enum_t>{},
     omni::type_t<uncustomized_enum>{});
 }

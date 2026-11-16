@@ -5,10 +5,10 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type_t<int>: to_arithmetic_t {};
+struct to_type_t<int>: decltype(to_arithmetic(omni::type_t<int>{})) {};
 
 template <>
-constexpr auto to_type<int> = to_arithmetic;
+constexpr auto to_type<int> = to_arithmetic(omni::type_t<int>{});
 
 } // namespace cp
 } // namespace ryml
