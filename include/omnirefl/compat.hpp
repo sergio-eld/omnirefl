@@ -1,5 +1,11 @@
 #pragma once
 
+/** @file
+ * Reflection-independent C++ compatibility utilities.
+ * @warning Dependencies on reflected_scope.hpp or generated metadata must not
+ * be introduced into this header.
+ */
+
 // Standard-library compatibility for the C++11 public baseline. Facilities
 // use their standard implementation when available and a local drop-in
 // otherwise.

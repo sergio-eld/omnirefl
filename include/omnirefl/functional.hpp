@@ -1,5 +1,11 @@
 #pragma once
 
+/** @file
+ * Reflection-independent functional utilities.
+ * @warning Dependencies on reflected_scope.hpp or generated metadata must not
+ * be introduced into this header.
+ */
+
 #include <omnirefl/compat.hpp>
 #include <omnirefl/traits.hpp>
 

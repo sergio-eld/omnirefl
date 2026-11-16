@@ -1,9 +1,5 @@
 #pragma once
 
-#include <omnirefl/instrumentation_guard.hpp>
-
-OMNI_REQUIRE_INSTRUMENTATION();
-
 #include <omnirefl/reflected_scope.hpp>
 
 #include <omnirefl/extensions/compat.hpp>

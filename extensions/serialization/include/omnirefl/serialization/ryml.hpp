@@ -18,10 +18,6 @@
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 
-#include <omnirefl/instrumentation_guard.hpp>
-
-OMNI_REQUIRE_INSTRUMENTATION();
-
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/traits.hpp>
 

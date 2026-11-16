@@ -7,6 +7,15 @@
 
 #pragma once
 
+// Public metadata queries and reflected_call require generated reflection.
+// The tool defines OMNI_TOOL_RUN while collecting the requests that generate it.
+#if !defined(OMNI_TOOL_RUN) \
+  && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
+#  error \
+    "Include the generated reflection header before reflection-dependent " \
+    "headers. With CMake, call omni_reflected_target(<target>)."
+#endif
+
 // Instrumentation and IDE parsing before generation need wrapper declarations
 // without generated members; explicit visitor results remain deducible.
 #if defined(OMNI_TOOL_RUN) \
