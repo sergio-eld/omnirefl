@@ -300,7 +300,7 @@ void print_reachable_records::operator()(Root) const {
   // Follow reflected data members and `mapped_type` dependencies depth-first.
   const auto dfs = []<typename T>(const auto &self, omni::type_t<T>) -> void {
     if constexpr (omni::is_reflected<T>::value && !std::is_enum_v<T>) {
-      const auto metadata = omni::reflected(omni::type<T>);
+      constexpr auto metadata = omni::reflected(omni::type<T>);
       reflected_scope::print_record(metadata);
       metadata.accessible_data_members()
         | fn::filter(fn::is_non_static)

@@ -169,7 +169,7 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
     return std::move(result).finish();
   }
 
-  const auto fields = omni::meta_for<T>::accessible_data_members()
+  constexpr auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter(fn::is_non_static);
 
   std::vector<omni::ryml::detail::record_entry> pending;

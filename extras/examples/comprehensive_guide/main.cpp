@@ -1011,7 +1011,7 @@ struct commands {
  */
 TEST(advanced, function_tags) {
   const auto invoke = [](omni::record_meta auto record) -> std::vector<int> {
-    const auto callable = record.accessible_data_members()
+    constexpr auto callable = record.accessible_data_members()
       | omni::fn::filter([]<omni::data_member_meta Member>() {
           using Meta = omni::compat::remove_cvref_t<Member>;
           return Meta::has_callable_metadata();
@@ -1020,7 +1020,7 @@ TEST(advanced, function_tags) {
     return std::apply(
       [](auto... v) { return std::vector<int>{v...}; },
       callable | omni::fn::map([](omni::data_member_meta auto member) {
-        const auto func = member.callable_metadata();
+        constexpr auto func = member.callable_metadata();
         return std::invoke(func.pointer(), 21);
       }));
   };
