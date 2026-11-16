@@ -3,13 +3,12 @@
 /** Default type mappings, customization registration, and dispatch.
  * See docs/CONVENTIONS.md#customization-points. */
 
-#include <omnirefl/reflected_scope.hpp>
-
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/enum.hpp>
-#include <omnirefl/serialization/ryml/type_mapping/to_record.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/sequence.hpp>
+#include <omnirefl/serialization/ryml/type_mapping/to_record.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>

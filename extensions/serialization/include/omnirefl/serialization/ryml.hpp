@@ -18,13 +18,12 @@
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 
-#include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/traits.hpp>
-
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/serialization/ryml/type_mapping.hpp>
+#include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
