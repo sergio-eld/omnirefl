@@ -3,6 +3,7 @@
 /** Default type mappings, customization registration, and dispatch.
  * See docs/CONVENTIONS.md#customization-points. */
 
+#include <omnirefl/instrumentation_guard.hpp>
 #include <omnirefl/reflected_scope.hpp>
 
 OMNI_REQUIRE_INSTRUMENTATION();
