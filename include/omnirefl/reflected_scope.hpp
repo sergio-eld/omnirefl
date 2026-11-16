@@ -12,8 +12,8 @@
 #if !defined(OMNI_TOOL_RUN) \
   && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
 #  error \
-    "Include the generated reflection header before reflection-dependent " \
-    "headers. With CMake, call omni_reflected_target(<target>)."
+    "Force-include the generated reflection header using the compiler's " \
+    "-include or /FI flag. With CMake, call omni_reflected_target(<target>)."
 #endif
 
 // Instrumentation and IDE parsing before generation need wrapper declarations
