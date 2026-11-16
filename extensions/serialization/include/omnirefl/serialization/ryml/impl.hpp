@@ -16,60 +16,6 @@ namespace omni {
 namespace ryml {
 namespace core {
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(::ryml::ConstNodeRef node, T *into, State context)
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
-  if (context.limit_exceeded())
-    result.result.value.reset();
-  else
-    result.append(reflected_scope::mapping_to_type(omni::type_t<T>{})(
-      node, into, context));
-
-  return std::move(result).finish();
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value))
-void write_node(const T &value, ::ryml::NodeRef node, State context) {
-  reflected_scope::mapping_from_type(omni::type_t<T>{})(
-    value, node, context);
-}
-
-namespace detail {
-
-template <typename T, typename State>
-struct cpp11_lambda_read {
-  const ::ryml::ConstNodeRef &node;
-  T &into;
-  State context;
-
-  template <typename _M, omni::reflected_entity Entity>
-  auto operator()(omni::meta_t<_M, Entity>) const
-    -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return core::read_node(this->node,
-      &this->into,
-      this->context);
-  }
-};
-
-template <typename State, typename T>
-struct cpp11_lambda_write {
-  const T &value;
-
-  template <typename _M, omni::reflected_entity Entity>
-  ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
-    ::ryml::Tree tree;
-    const State context{};
-
-    core::write_node(this->value, tree.rootref(), context);
-    return tree;
-  }
-};
-
-} // namespace detail
-
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
   ::ryml::ParserOptions options) {
   // Static storage lets the parser callback use the signal without captures.
@@ -131,93 +77,166 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
     });
 }
 
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(::ryml::ConstNodeRef node, T *into, State context)
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
+  auto result = omni::ryml::detail::make_node_accumulator(context);
+  if (context.limit_exceeded())
+    result.result.value.reset();
+  else
+    result.append(reflected_scope::mapping_to_type(omni::type_t<T>{})(
+      node, into, context));
+
+  return std::move(result).finish();
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(const T &value, ::ryml::NodeRef node, State context) {
+  reflected_scope::mapping_from_type(omni::type_t<T>{})(
+    value, node, context);
+}
+
 namespace detail {
 
-// The discovery cases keep reflected_call confined to types that need metadata.
-// Wrappers recurse through their element type without changing the destination.
-template <typename Discovery,
-  bool Reflect = cp::reflect_as_root<Discovery>::value,
-  bool Wrapper = compat::disjunction<
-    omni::ryml::detail::is_mapped_range<Discovery>,
-    traits::is_optional<Discovery>>::value>
-struct map_by_schema_case {
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value))
-  static auto map(::ryml::ConstNodeRef node, T *into,
-    State context)
+// A callable defers registration lookup until the non-reflected branch is
+// selected, including in C++11. Its explicit default needs no metadata, unlike
+// reflected_scope::mapping_to_type's built-in classification.
+template <typename Default>
+struct map_registered_or {
+  template <typename T, typename State>
+  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return read_node(node, into, context);
+    const cp::to_type_t<T> mapping_t{};
+    const auto mapping_var =
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+      cp::to_type<T>;
+#else
+      traits::cp::unavailable{};
+#endif
+
+    static_assert(traits::cp::unavailable{} == mapping_t
+        || traits::cp::unavailable{} == mapping_var,
+      "Specialize either cp::to_type_t or cp::to_type, not both");
+
+    const auto mapping = omni::ryml::detail::first_available(
+      mapping_t, mapping_var, Default{});
+
+    static_assert(std::is_trivially_copyable<decltype(mapping)>::value
+        && std::is_copy_constructible<decltype(mapping)>::value,
+      "Node mapping callables must be trivially copyable "
+      "and copy-constructible");
+
+    auto result = omni::ryml::detail::make_node_accumulator(context);
+    if (context.limit_exceeded())
+      result.result.value.reset();
+    else
+      result.append(mapping(node, into, context));
+
+    return std::move(result).finish();
   }
 };
 
-template <typename Discovery, bool Wrapper>
-struct map_by_schema_case<Discovery, true, Wrapper> {
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value))
-  static auto map(::ryml::ConstNodeRef node, T *into,
-    State context)
-    -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return omni::reflected_call(
-      cpp11_lambda_read<T, State>{
-        /*node=*/node,
-        /*into=*/ *into,
-        /*context=*/context,
-      },
-      omni::type_t<Discovery>{});
-  }
-};
+// reflected_call needs a metadata-bearing type, even for an empty range.
+// Only discovery unwraps wrappers; the mapped destination stays T.
+template <typename T, typename = void>
+struct reflection_target { using type = T; };
 
-template <typename Discovery>
-struct map_by_schema_case<Discovery, false, true> {
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value))
-  static auto map(::ryml::ConstNodeRef node, T *into,
-    State context)
+template <typename T>
+struct reflection_target<T,
+  compat::enable_if_t<!cp::reflect_as_root<T>::value
+    && compat::disjunction<omni::ryml::detail::is_mapped_range<T>,
+      traits::is_optional<T>>::value>>:
+    reflection_target<
+      typename omni::ryml::detail::discovered_range_type<T>::type> {};
+
+} // namespace detail
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_arithmetic<T>::value && !std::is_const<T>::value
+    && is_read_state<State>::value))
+auto map_to_fundamental_t::operator()(::ryml::ConstNodeRef node, T *into,
+  State context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
+  assert(into);
+  return detail::map_registered_or<to_arithmetic_t>{}(node, into, context);
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (traits::is_string_like<T>::value && !std::is_const<T>::value
+    && is_read_state<State>::value))
+auto map_to_string_like_t::operator()(::ryml::ConstNodeRef node, T *into,
+  State context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
+  assert(into);
+  return detail::map_registered_or<to_string_like_t>{}(node, into, context);
+}
+
+namespace detail {
+
+template <typename T, typename State>
+struct cpp11_lambda_read {
+  const ::ryml::ConstNodeRef &node;
+  T &into;
+  State context;
+
+  template <typename _M, omni::reflected_entity Entity>
+  auto operator()(omni::meta_t<_M, Entity>) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return map_by_schema_case<
-      typename omni::ryml::detail::discovered_range_type<Discovery>::type>::map(
-        node, into, context);
+    return core::read_node(this->node,
+      &this->into,
+      this->context);
   }
 };
 
 } // namespace detail
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value && std::is_object<T>::value
-    && !std::is_const<T>::value))
-auto map_by_schema(const Config &options, T *into, ::ryml::ConstNodeRef node)
-  -> with_diagnostics_t<compat::monostate> {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_object<T>::value && !std::is_const<T>::value
+    && is_read_state<State>::value))
+auto map_to_reflected_t::operator()(::ryml::ConstNodeRef node, T *into,
+  State context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
-  const read_state_t<Config> context{
-    /*config=*/options,
-    /*path=*/{},
-    /*error_count=*/0,
-    /*warning_count=*/0,
-  };
-
-  return detail::map_by_schema_case<compat::remove_cvref_t<T>>::map(
-    node, into, context);
+  using target = typename detail::reflection_target<T>::type;
+  return omni::reflected_call(
+    detail::cpp11_lambda_read<T, State>{
+      /*node=*/node,
+      /*into=*/ *into,
+      /*context=*/context,
+    },
+    omni::type_t<target>{});
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value && std::is_object<T>::value
-    && !std::is_const<T>::value))
-auto map_by_schema(const Config &options, T *into, const ::ryml::Tree &tree)
-  -> with_diagnostics_t<compat::monostate> {
-  return map_by_schema(options, into, tree.crootref());
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
+    && is_read_state<State>::value))
+auto map_to_sequence_t::operator()(::ryml::ConstNodeRef node, T *into,
+  State context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
+  assert(into);
+  using target = typename detail::reflection_target<T>::type;
+  const auto map = typename traits::select<
+    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
+    detail::map_registered_or<to_range_t>>::type{};
+
+  return map(node, into, context);
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value && std::is_object<T>::value
-    && !std::is_const<T>::value))
-auto map_by_schema(const Config &options, omni::type_t<T>,
-  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
-  auto value = compat::make_optional<T>();
-  auto mapped = map_by_schema(options, &*value, node);
-  return {
-    /*value=*/mapped.value ? std::move(value) : compat::nullopt,
-    /*diagnostics=*/std::move(mapped.diagnostics),
-  };
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (traits::is_optional<T>::value && !std::is_const<T>::value
+    && is_read_state<State>::value))
+auto map_to_optional_t::operator()(::ryml::ConstNodeRef node, T *into,
+  State context) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
+  assert(into);
+  using target = typename detail::reflection_target<T>::type;
+  const auto map = typename traits::select<
+    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
+    detail::map_registered_or<to_optional_like_t>>::type{};
+
+  return map(node, into, context);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
@@ -226,6 +245,14 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
 auto map_by_schema(const Config &options, omni::type_t<T> type,
   const ::ryml::Tree &tree) -> with_diagnostics_t<T> {
   return map_by_schema(options, type, tree.crootref());
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, T *into, const ::ryml::Tree &tree)
+  -> with_diagnostics_t<compat::monostate> {
+  return map_by_schema(options, into, tree.crootref());
 }
 
 namespace detail {
@@ -300,6 +327,20 @@ auto deserialize(Config &&options, T *into, std::string source)
 }
 
 namespace detail {
+
+template <typename State, typename T>
+struct cpp11_lambda_write {
+  const T &value;
+
+  template <typename _M, omni::reflected_entity Entity>
+  ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
+    ::ryml::Tree tree;
+    const State context{};
+
+    core::write_node(this->value, tree.rootref(), context);
+    return tree;
+  }
+};
 
 template <typename Discovery,
   bool Reflect = cp::reflect_as_root<Discovery>::value,
@@ -415,7 +456,8 @@ inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
       message.append(value.data(), value.size());
       message += "\" ";
       if (json::issue_code::out_of_range == entry.reason)
-        message += "could not be converted to the destination scalar"; else {
+        message += "is out of range";
+      else {
         message += "is not ";
         message += json::value_kind::integer == entry.expected
             || json::value_kind::unsigned_integer == entry.expected

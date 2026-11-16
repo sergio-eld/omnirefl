@@ -32,8 +32,8 @@ template <typename ValueByAlias = fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_read_state<State>,
-      omni::is_reflected_enum<T>>::value))
+    (compat::conjunction<omni::is_reflected_enum<T>,
+      is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
@@ -67,8 +67,8 @@ constexpr to_enum_t<> to_enum{};
  * mapping_from_type dispatch. Direct calls bypass mapping_from_type selection. */
 struct from_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<is_write_state<State>,
-      omni::is_reflected_enum<T>>::value))
+    (compat::conjunction<omni::is_reflected_enum<T>,
+      is_write_state<State>>::value))
   auto operator()(T value, ::ryml::NodeRef node, State) const -> void;
 };
 

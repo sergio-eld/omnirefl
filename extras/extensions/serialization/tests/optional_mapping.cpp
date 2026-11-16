@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -28,6 +29,14 @@ struct nullable {
 };
 
 struct payload { int value; };
+
+struct optional_payload {
+  omni::compat::optional<int> value;
+
+  bool operator==(const optional_payload &other) const {
+    return this->value == other.value;
+  }
+};
 
 } // namespace optional_mapping
 } // namespace
@@ -68,6 +77,117 @@ struct emplace<optional_mapping::nullable<T>> {
 } // namespace omni
 
 namespace {
+
+struct optional_string_case {
+  const char *name;
+  const char *source;
+  omni::compat::optional<std::string> expected;
+};
+
+class optional_strings: public testing::TestWithParam<optional_string_case> {};
+
+TEST_P(optional_strings, distinguishes_null_from_string_values) {
+  const auto &c = GetParam();
+  const auto result = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<std::string>>{}, c.source);
+
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(omni::compat::make_optional(c.expected), result.value);
+}
+
+INSTANTIATE_TEST_SUITE_P(inputs,
+  optional_strings,
+  testing::Values(
+    optional_string_case{"null", "null", omni::compat::nullopt},
+    optional_string_case{"quoted_null", R"("null")", std::string{"null"}},
+    optional_string_case{
+      "escaped_null", R"("\u006eull")", std::string{"null"},
+    },
+
+    optional_string_case{"empty_string", R"("")", std::string{}}),
+
+  [](const testing::TestParamInfo<optional_string_case> &info) {
+    return info.param.name;
+  });
+
+TEST(optional_mapping, distinguishes_null_from_an_empty_array) {
+  const auto null = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<std::vector<int>>>{}, "null");
+
+  const auto empty = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<std::vector<int>>>{}, "[]");
+
+  EXPECT_TRUE(null.diagnostics.issues.empty());
+  EXPECT_TRUE(empty.diagnostics.issues.empty());
+  EXPECT_EQ(omni::compat::make_optional(
+    omni::compat::optional<std::vector<int>>{}), null.value);
+
+  EXPECT_EQ(omni::compat::make_optional(
+    omni::compat::make_optional(std::vector<int>{})), empty.value);
+}
+
+TEST(optional_mapping, distinguishes_null_from_an_empty_record) {
+  const auto null = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<optional_mapping::optional_payload>>{},
+    "null");
+
+  const auto empty = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<optional_mapping::optional_payload>>{},
+    "{}");
+
+  EXPECT_TRUE(null.diagnostics.issues.empty());
+  EXPECT_TRUE(empty.diagnostics.issues.empty());
+  EXPECT_EQ(omni::compat::make_optional(
+    omni::compat::optional<optional_mapping::optional_payload>{}), null.value);
+
+  EXPECT_EQ(omni::compat::make_optional(omni::compat::make_optional(
+    optional_mapping::optional_payload{})), empty.value);
+}
+
+TEST(optional_mapping, keeps_false_as_an_engaged_optional) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<bool>>{}, "false");
+
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(omni::compat::make_optional(omni::compat::make_optional(false)),
+    result.value);
+}
+
+TEST(optional_mapping, reads_null_into_a_standard_optional) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<omni::compat::optional<int>>{}, "null");
+
+  // A decoded empty optional is still a successful mapping result.
+  const auto expected = omni::compat::make_optional(
+    omni::compat::optional<int>{});
+
+  EXPECT_EQ(expected, result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
+
+TEST(optional_mapping, reads_null_elements_in_an_optional_vector) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<omni::compat::optional<int>>>{},
+    "[0, null, 7, null]");
+
+  const std::vector<omni::compat::optional<int>> expected{
+    0,
+    omni::compat::nullopt,
+    7,
+    omni::compat::nullopt,
+  };
+
+  EXPECT_EQ(expected, result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
+
+TEST(optional_mapping, reads_an_empty_optional_vector) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<omni::compat::optional<int>>>{}, "[]");
+
+  EXPECT_EQ((std::vector<omni::compat::optional<int>>{}), result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
 
 TEST(optional_mapping, detects_adapted_operations_without_registration) {
   EXPECT_TRUE(omni::traits::is_optional<

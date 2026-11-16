@@ -298,7 +298,7 @@ TEST(diagnostics_transform, renders_a_caller_owned_tree) {
     omni::ryml::render_diagnostics(*tree, result.diagnostics));
 }
 
-TEST(diagnostics_transform, renders_a_collection_conversion_failure) {
+TEST(diagnostics_transform, renders_a_scalar_kind_mismatch) {
   const auto tree = omni::ryml::core::parse("[1, 2]");
   EXPECT_TRUE(tree);
   if (!tree)
@@ -307,15 +307,15 @@ TEST(diagnostics_transform, renders_a_collection_conversion_failure) {
   const omni::ryml::diagnostics report{
     /*config=*/{},
     /*issues=*/{
-      omni::ryml::detail::make_issue(omni::json::issue_code::out_of_range,
-        omni::json::value_kind::sequence,
+      omni::ryml::detail::make_issue(omni::json::issue_code::unexpected_kind,
+        omni::json::value_kind::scalar,
         tree->crootref(),
         /*path=*/{}),
     },
     /*parse_error_message=*/{},
   };
 
-  EXPECT_EQ("<root>: \"\" could not be converted to the destination scalar",
+  EXPECT_EQ("<root>: expected scalar, found array",
     omni::ryml::render_diagnostics(*tree, report));
 }
 

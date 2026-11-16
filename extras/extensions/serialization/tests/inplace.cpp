@@ -242,14 +242,12 @@ TEST(inplace_deserialization, syntax_errors_preserve_existing_values) {
       result.diagnostics.issues.front().reason);
 }
 
-TEST(inplace_deserialization, retains_successful_fields_when_mapping_fails) {
+TEST(inplace_deserialization, reports_mapping_errors) {
   inplace_models::readings into{7, 9};
   const auto result = omni::ryml::deserialize(
     &into, R"({"first": 42, "second": "bad"})");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ(42, into.first);
-  EXPECT_EQ(9, into.second);
   EXPECT_EQ("/second: \"bad\" is not an integer", result.diagnostics);
 }
 

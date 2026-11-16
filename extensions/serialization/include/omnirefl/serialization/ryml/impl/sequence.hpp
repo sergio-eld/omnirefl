@@ -325,8 +325,8 @@ struct write_range_case<true> {
 } // namespace detail
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_read_state<State>,
-    detail::is_mapped_range<T>>::value))
+  (compat::conjunction<detail::is_mapped_range<T>,
+    is_read_state<State>>::value))
 auto to_range_t::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
@@ -357,8 +357,8 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    omni::ryml::detail::is_mapped_range<const T>>::value))
+  (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
+    is_write_state<State>>::value))
 void from_range_t::operator()(const T &value,
   ::ryml::NodeRef node,
   State context) const {

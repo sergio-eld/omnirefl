@@ -48,6 +48,24 @@ foreach(_standard IN LISTS _supported_cpp_standards)
 
 endforeach()
 
+# Discovery regressions have their own executable so focused header iterations
+# need not rebuild all serialization test sources.
+foreach(_standard IN LISTS _supported_cpp_standards)
+    set(_dispatch_target "cpp_${_standard}.json_ryml.test.dispatch")
+    add_executable(${_dispatch_target} dispatch.cpp)
+    set_target_properties(${_dispatch_target} PROPERTIES
+        OUTPUT_NAME "json_ryml_test_dispatch_cpp_${_standard}"
+        CXX_STANDARD ${_standard}
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO)
+    target_link_libraries(${_dispatch_target} PRIVATE
+        gtest_main omni::serialization)
+    omni_reflected_target(${_dispatch_target})
+    if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
+        add_test(NAME ${_dispatch_target} COMMAND ${_dispatch_target})
+    endif()
+endforeach()
+
 # These targets compile only when CTest requests the expected failure.
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_negative_cases missing_mapping)

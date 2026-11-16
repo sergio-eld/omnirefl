@@ -7,7 +7,7 @@
  *
  * Basics
  *   basics.deserialize_record - default mapping interface and its result
- *   basics.deserialize_into - update an existing value and replace containers
+ *   basics.deserialize_into - map a non-default-constructible record
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
  *   basics.enum_mapping - declared enumerator names as strings
@@ -27,7 +27,7 @@
  *   basics.optional_sequence_elements - omit empty optional elements
  *   basics.key_value_ranges - map string-keyed objects
  *   basics.mapping_result - values, success markers, and structured issues
- *   basics.fundamental_mapping_results - decode values or assign on success
+ *   basics.fundamental_mapping_results - decoded values and conversion errors
  *   basics.custom_scalar_mapping
  *     map a wrapper through the default scalar mappers
  *   basics.custom_scalar_mapping_cpp11 - equivalent C++11 struct registration
@@ -116,6 +116,11 @@ struct service {
   std::vector<std::string> tags;
 };
 
+struct measurement {
+  explicit measurement(int initial): value(initial) {}
+  int value;
+};
+
 enum class status { ready, busy };
 
 } // namespace basic_mapping
@@ -155,32 +160,17 @@ TEST(basics, deserialize_record) {
   }
 }
 
-/** Passing a pointer updates an existing value. The result's optional value
- * holds a success marker (compat::monostate); the mapped data stays in into.
- * Successfully mapped containers replace their previous contents.
- * Syntax errors leave into unchanged; mapping errors can retain earlier field
- * updates. `basics.mapping_result` explains the success marker in more detail. */
+/** A pointer destination allows mapping a record without a default constructor.
+ * The result holds a success marker (compat::monostate); the mapped value stays
+ * in the supplied object. A failed mapping leaves its state unspecified.
+ * `basics.mapping_result` explains the success marker in more detail. */
 TEST(basics, deserialize_into) {
-  basic_mapping::service into{
-    .name = "old",
-    .upstream = {.host = "stale.example.com", .port = 80},
-    .tags = {"stale"},
-  };
-  const auto result = omni::ryml::deserialize(&into,
-    R"(
-{
-  "name": "gateway",
-  "upstream": {"host": "api.example.com", "port": 443},
-  "tags": []
-}
-)");
+  basic_mapping::measurement into{7};
+  const auto result = omni::ryml::deserialize(&into, R"({"value": 42})");
 
   EXPECT_TRUE(result.value.has_value());
   EXPECT_TRUE(result.diagnostics.empty());
-  EXPECT_EQ("gateway", into.name);
-  EXPECT_EQ("api.example.com", into.upstream.host);
-  EXPECT_EQ(443U, into.upstream.port);
-  EXPECT_TRUE(into.tags.empty());
+  EXPECT_EQ(42, into.value);
 }
 
 /** JSON and YAML output represent the same C++ value. as_json and as_yaml
@@ -604,9 +594,8 @@ TEST(basics, mapping_result) {
     EXPECT_EQ(42, *result.value);
 }
 
-/** Fundamental readers return a decoded value when given a type tag.
- * Their pointer overloads adapt the result into an existing destination and
- * return a success marker. Both forms retain structured diagnostics. */
+/** Fundamental readers return a decoded value and structured diagnostics
+ * when given a type tag. */
 TEST(basics, fundamental_mapping_results) {
   const auto tree = omni::ryml::core::parse(
     R"({"boolean": true, "integer": 7, "real": 2.5, "text": "hello"})");
@@ -646,22 +635,11 @@ TEST(basics, fundamental_mapping_results) {
   EXPECT_EQ("hello", text.value);
   EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
 
-  int into{};
   const auto invalid = omni::ryml::to_integer(
     node["text"], omni::type<int>, state);
-  const auto failed = omni::ryml::to_integer(node["text"], &into, state);
 
   EXPECT_FALSE(invalid.value);
-  EXPECT_FALSE(failed.value);
-  EXPECT_EQ(omni::ryml::render_diagnostics(*tree, invalid.diagnostics),
-    omni::ryml::render_diagnostics(*tree, failed.diagnostics));
   EXPECT_FALSE(invalid.diagnostics.issues.empty());
-
-  const auto assigned = omni::ryml::to_integer(node["integer"], &into, state);
-
-  EXPECT_TRUE(assigned.value);
-  EXPECT_TRUE(assigned.diagnostics.issues.empty());
-  EXPECT_EQ(7, into);
 }
 
 namespace basic_customization {

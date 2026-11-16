@@ -152,8 +152,8 @@ namespace reflected_scope {
 
 template <typename NameByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_read_state<State>,
-    omni::is_reflected_record<T>>::value))
+  (compat::conjunction<omni::is_reflected_record<T>,
+    is_read_state<State>>::value))
 auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
@@ -275,8 +275,8 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<is_write_state<State>,
-    omni::is_reflected_record<T>>::value))
+  (compat::conjunction<omni::is_reflected_record<T>,
+    is_write_state<State>>::value))
 auto from_record_t::operator()(const T &value,
   ::ryml::NodeRef node,
   State context) const
