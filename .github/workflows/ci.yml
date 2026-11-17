@@ -598,6 +598,19 @@ jobs:
           name: packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}
           path: ./artifacts/packages/cosmo
 
+      - name: Report Runner Characteristics
+        continue-on-error: true
+        run: |
+          sw_vers
+          uname -m
+          sysctl hw.model machdep.cpu.brand_string \
+            hw.physicalcpu hw.logicalcpu hw.memsize
+          uptime
+          vm_stat
+          sysctl vm.swapusage
+          # Hosted VMs may not expose thermal status.
+          pmset -g therm
+
       - name: Run Package Tests
         run: |
           set -euo pipefail
