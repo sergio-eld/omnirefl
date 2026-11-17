@@ -586,7 +586,9 @@ struct field_names {
   std::pair<std::string, std::string> operator()(
     omni::record_meta_t<_M> meta) const {
 #endif
-    const auto field = std::get<0>(meta.accessible_data_members());
+    // Tuple element access is constexpr only from C++14 on libc++.
+    OMNI_CPP14_CONSTEXPR const auto field =
+      std::get<0>(meta.accessible_data_members());
     return {
       field.spelled_type_name(),
       field.spelled_qualified_type_name(),

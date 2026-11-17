@@ -287,7 +287,7 @@ struct inspect_callable_type {
 
   template <typename Field, typename... Other>
   callable_type_queries operator()(Field field, Other...) const {
-    const auto callable = field.callable_metadata();
+    constexpr auto callable = field.callable_metadata();
 #if defined(__cpp_concepts)
     static_assert(omni::function_meta<decltype(callable)>);
 #endif
@@ -553,7 +553,7 @@ struct inspect_methods {
   method_observation operator()(Binding binding) const {
     return omni::compat::apply(inspect_method{},
       binding.accessible_member_functions()
-        | omni::fn::filter<omni::fn::non_static>());
+        | omni::fn::filter(omni::fn::is_non_static));
   }
 };
 

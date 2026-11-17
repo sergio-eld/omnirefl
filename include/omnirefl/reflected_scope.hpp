@@ -924,7 +924,8 @@ struct meta_t<_M, reflected_entity::enumeration> {
   }
 
   /**
-   * Return enumerators in declaration order as `{value, name}` pairs.
+   * Returns std::pair-like entries in declaration order, containing
+   * `{value, name}`. Names point to string literals.
    *
    * Given this enum:
    * ```cpp
@@ -935,7 +936,7 @@ struct meta_t<_M, reflected_entity::enumeration> {
    * using status_meta = omni::meta_for<status>;
    *
    * constexpr std::array pairs = status_meta::enumerators();
-   * for (const std::pair entry : pairs) {
+   * for (const auto &entry : pairs) {
    *   const auto &[value, name] = entry;
    *   std::cout << name << ": " << static_cast<int>(value) << '\n';
    * }

@@ -169,8 +169,14 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
     return std::move(result).finish();
   }
 
+  // C++11 tuple forwarding constructors need not support constant evaluation.
+#if 201402L <= OMNI_CPLUSPLUS
+  constexpr auto fields = omni::meta_for<T>::accessible_data_members()
+    | fn::filter(fn::is_non_static);
+#else
   const auto fields = omni::meta_for<T>::accessible_data_members()
-    | fn::filter<fn::non_static>();
+    | fn::filter(fn::is_non_static);
+#endif
 
   std::vector<omni::ryml::detail::record_entry> pending;
   pending.reserve(std::tuple_size<decltype(fields)>::value);
@@ -255,7 +261,7 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
 
   const auto binding = omni::meta_for<T>::bind(*into);
   const auto members = binding.accessible_data_members()
-    | fn::filter<fn::non_static>();
+    | fn::filter(fn::is_non_static);
 
   const auto events = fn::concat(
     members | fn::map(omni::ryml::detail::cpp11_defer_member{
@@ -284,7 +290,7 @@ auto from_record_t::operator()(const T &value,
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
-    | fn::filter<fn::non_static>()
+    | fn::filter(fn::is_non_static)
     | fn::each(omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/context,

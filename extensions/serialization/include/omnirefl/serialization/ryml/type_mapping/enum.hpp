@@ -34,6 +34,15 @@ struct to_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_read_state<State>>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State context) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  /** (QoL) Mutating adapter for the value-producing enum mapping.
+   * Assigns a successfully read enum and returns monostate with its diagnostics.
+   * @pre into must be non-null. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<omni::is_reflected_enum<T>,
+      is_read_state<State>>::value))
   auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 

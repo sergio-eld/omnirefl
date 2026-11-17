@@ -22,6 +22,7 @@ const sections = [
   'experience',
   'sneak-peek',
   'status',
+  'functional-utilities',
   'install',
   'examples-tests-and-benchmarks',
   'extensions',

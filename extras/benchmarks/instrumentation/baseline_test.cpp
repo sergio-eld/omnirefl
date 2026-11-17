@@ -360,7 +360,7 @@ static const struct {
   template <typename Enum>
   std::vector<std::string> operator()(
     omni::enum_binding_t<Enum> binding) const noexcept {
-    const auto enums = binding.enumerators();
+    constexpr auto enums = binding.enumerators();
     std::vector<std::string> names;
     for (const auto &value_name : enums)
       names.emplace_back(value_name.second);
@@ -1019,7 +1019,7 @@ TEST(print_enums, in_cpp_scoped_enum_with_underlying) {
         // lambda will not compile. This assertion is documentation, not a
         // separate runtime path.
         static_assert(omni::is_reflected<Enum>::value, "enum not reflected");
-        const auto enums = binding.enumerators();
+        constexpr auto enums = binding.enumerators();
         std::vector<std::string> names;
         for (const auto &value_name : enums)
           names.emplace_back(value_name.second);

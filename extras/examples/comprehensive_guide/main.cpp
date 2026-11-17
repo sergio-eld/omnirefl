@@ -2,8 +2,7 @@
  * The examples use C++20 syntax for convenience. Omnirefl's reflection
  * interfaces remain C++11-compatible.
  * NOTE: `<concepts>` is deliberately excluded for toolchains with partial
- * C++20 support. The examples also use `std::find_if` rather than ranges
- * algorithms.
+ * C++20 support.
  *
  * For each suite.test entry below, search for TEST(suite, test) to find its
  * entry point; topics may have dedicated namespaces.
@@ -54,6 +53,7 @@
  *   example.accessible_data_members_follow_member_visibility
  *   example.accessible_data_members_omit_ambiguous_base_members
  *   example.accesses_static_members_through_a_record_binding
+ *   example.composes_field_predicates - combine compile-time member filters
  *   example.visit_compound_variant_inputs
  *   example.annotated_schema_profile
  *   example.annotated_schema_address_book
@@ -68,7 +68,6 @@
 
 #include <mpark/variant.hpp>
 
-#include <algorithm>
 #include <array>
 #include <functional>
 #include <map>
@@ -209,12 +208,12 @@ TEST(basics, reflected_scope_indirection) {
   EXPECT_EQ("basics::account", name);
 }
 
-// Enumerators are value/name pairs in declaration order.
+// Enumerators are std::pair-like value/name entries in declaration order.
 TEST(basics, enum_metadata) {
   const auto enumerators = omni::reflected_call(
     [](omni::enum_meta auto e)
       -> std::vector<std::pair<status, std::string_view>> {
-      const auto entries = e.enumerators();
+      constexpr auto entries = e.enumerators();
       // Names refer to generated string literals with static storage.
       // Destroying the local entries array does not invalidate these views.
       return {entries.begin(), entries.end()};
@@ -1010,7 +1009,7 @@ struct commands {
  */
 TEST(advanced, function_tags) {
   const auto invoke = [](omni::record_meta auto record) -> std::vector<int> {
-    const auto callable = record.accessible_data_members()
+    constexpr auto callable = record.accessible_data_members()
       | omni::fn::filter([]<omni::data_member_meta Member>() {
           using Meta = omni::compat::remove_cvref_t<Member>;
           return Meta::has_callable_metadata();
@@ -1019,7 +1018,7 @@ TEST(advanced, function_tags) {
     return std::apply(
       [](auto... v) { return std::vector<int>{v...}; },
       callable | omni::fn::map([](omni::data_member_meta auto member) {
-        const auto func = member.callable_metadata();
+        constexpr auto func = member.callable_metadata();
         return std::invoke(func.pointer(), 21);
       }));
   };
@@ -1273,12 +1272,12 @@ TEST(advanced, data_member_type_names) {
 TEST(advanced, enum_value_name) {
   const auto name = omni::reflected_call(
     [](omni::enum_binding auto e) -> std::string_view {
-      const auto enumerators = e.enumerators();
-      const auto found = std::find_if(enumerators.begin(),
-        enumerators.end(),
-        [&e](const auto &entry) { return entry.first == e.value(); });
+      constexpr auto enumerators = e.enumerators();
+      for (const auto &entry : enumerators)
+        if (entry.first == e.value())
+          return entry.second;
 
-      return enumerators.end() == found ? "unknown" : found->second;
+      return "unknown";
     },
     basics::status::idle);
 
@@ -2282,9 +2281,10 @@ struct counter {
 
 } // namespace static_access
 
-// Both member queries include static members. filter<fn::is_static>() selects
-// shared members; filter<fn::non_static>() selects instance members. Access
+// Both member queries include static members. filter(fn::is_static) selects
+// shared members; filter(fn::is_non_static) selects instance members. Access
 // through either path still uses a record binding.
+// The type-based spelling is also supported: filter<fn::is_static_t>().
 TEST(example, accesses_static_members_through_a_record_binding) {
   const static_access::counter input{7};
   const auto result = omni::reflected_call(
@@ -2292,12 +2292,12 @@ TEST(example, accesses_static_members_through_a_record_binding) {
       -> std::pair<std::tuple<int>, std::tuple<int>> {
       return {
         record.accessible_data_members()
-          | omni::fn::filter<omni::fn::is_static>()
+          | omni::fn::filter(omni::fn::is_static)
           | omni::fn::map([](omni::data_member_binding auto field) {
               return field.value();
             }),
         record.accessible_member_functions()
-          | omni::fn::filter<omni::fn::is_static>()
+          | omni::fn::filter(omni::fn::is_static)
           | omni::fn::map([](omni::function_binding auto function) {
               return function(5);
             }),
@@ -2308,6 +2308,45 @@ TEST(example, accesses_static_members_through_a_record_binding) {
   EXPECT_EQ(std::tuple{10}, result.first);
   EXPECT_EQ(std::tuple{15}, result.second);
   EXPECT_EQ(7, input.local);
+}
+
+namespace predicate_composition {
+
+int measure(int value) { return value; }
+
+struct record {
+  int port;
+  const int version = 1;
+  inline static int shared;
+  omni::function_t<measure> operation;
+};
+
+} // namespace predicate_composition
+
+/** Boolean predicate objects select fields without constructing their values.
+ * Function tags are data members too: has_callable_metadata distinguishes
+ * them from ordinary data.
+ *
+ * This composition is C++11-compatible. Before C++14, pass
+ * omni::type_t<predicate_composition::record>{}; before generic lambdas,
+ * use a named visitor as in basics.reflected_scope_cpp11. */
+TEST(example, composes_field_predicates) {
+  const auto names = omni::reflected_call(
+    [](omni::record_meta auto meta) -> std::vector<std::string_view> {
+      namespace fn = omni::fn;
+      constexpr auto non_static_data_fields = fn::is_non_static
+        && fn::not_(fn::has_callable_metadata);
+
+      constexpr auto fields = meta.accessible_data_members()
+        | fn::filter(non_static_data_fields);
+
+      return std::apply([](auto... fields) {
+        return std::vector<std::string_view>{fields.name()...};
+      }, fields);
+    },
+    omni::type<predicate_composition::record>);
+
+  EXPECT_EQ((std::vector<std::string_view>{"port", "version"}), names);
 }
 
 namespace variant_visitation {

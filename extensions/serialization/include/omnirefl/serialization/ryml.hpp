@@ -578,3 +578,6 @@ OMNI_SKIP_METADATA(c4::csubstr,
 
 // TODO: [low] Consider exposing core::parse's existing ryml::ParserOptions
 // through config_t if needed, without duplicating the backend's option fields.
+
+// REFACTORME: [medium] Consider a dedicated enumerator type with named value
+// and name fields instead of std::pair/compat::pair.

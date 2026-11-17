@@ -208,15 +208,22 @@ struct inspect_data {
   }
 };
 
-template <template <typename> class Predicate>
-struct select_data {
+template <typename Predicate>
+struct select_data_t {
+  Predicate predicate;
   template <typename _M>
   std::vector<std::pair<std::string, bool>> operator()(
     omni::record_meta_t<_M> record) const {
     return omni::compat::apply(member_properties{},
-      record.accessible_data_members() | omni::fn::filter<Predicate>());
+      record.accessible_data_members() | omni::fn::filter(this->predicate));
   }
 };
+
+// C++11 construction sugar keeps the test's predicate selection value-based.
+template <typename Predicate>
+constexpr select_data_t<Predicate> select_data(Predicate predicate) {
+  return {predicate};
+}
 
 struct inspect_functions {
   template <typename _M>
@@ -273,7 +280,7 @@ struct update_static {
   std::pair<int, int *> operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(assign_shared{},
       record.accessible_data_members()
-        | omni::fn::filter<omni::fn::is_static>());
+        | omni::fn::filter(omni::fn::is_static));
   }
 };
 
@@ -339,7 +346,7 @@ struct invoke_static {
   int operator()(omni::record_binding_t<T> record) const {
     return omni::compat::apply(invoke_function{},
       record.accessible_member_functions()
-        | omni::fn::filter<omni::fn::is_static>());
+        | omni::fn::filter(omni::fn::is_static));
   }
 };
 
@@ -433,10 +440,10 @@ TEST(static_members, filters_static_and_non_static_data_members) {
   const std::vector<std::pair<std::string, bool>> non_statics{{"local", false}};
 
   EXPECT_EQ(statics,
-    omni::reflected_call(select_data<omni::fn::is_static>{},
+    omni::reflected_call(select_data(omni::fn::is_static),
       omni::type_t<static_record>{}));
   EXPECT_EQ(non_statics,
-    omni::reflected_call(select_data<omni::fn::non_static>{},
+    omni::reflected_call(select_data(omni::fn::is_non_static),
       omni::type_t<static_record>{}));
 }
 
@@ -531,7 +538,7 @@ TEST(static_members, derived_members_hide_inherited_statics) {
   const std::vector<std::pair<std::string, bool>> none;
 
   EXPECT_EQ(none,
-    omni::reflected_call(select_data<omni::fn::is_static>{},
+    omni::reflected_call(select_data(omni::fn::is_static),
       omni::type_t<hidden_base>{}));
   EXPECT_EQ(none,
     omni::reflected_call(inspect_functions{}, omni::type_t<hidden_base>{}));

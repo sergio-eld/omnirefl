@@ -154,7 +154,7 @@ struct field_names_t {
 struct enum_names_t {
   template <typename Enum>
   std::vector<std::string> operator()(Enum e) const {
-    const auto enums = e.enumerators();
+    constexpr auto enums = e.enumerators();
     std::vector<std::string> names;
     for (const auto &value_name : enums)
       names.emplace_back(value_name.second);

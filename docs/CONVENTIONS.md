@@ -83,6 +83,20 @@ struct operation_t {};
 constexpr operation_t operation{};
 ```
 
+Callable Boolean predicates retain their `is_` or `has_` prefix in both forms:
+`is_<check>_t<T>` / `is_<check>` and `has_<property>_t<T>` / `has_<property>`.
+The type form remains a Boolean trait; the object accepts a value for deduction
+and returns the corresponding constant type. This distinguishes callable
+predicates from traits that expose only `::value` or an `_v` variable.
+
+```cpp
+using selected = omni::compat::conjunction<
+  omni::fn::is_non_static_t<Field>, omni::fn::is_non_functional_t<Field>>;
+
+constexpr auto predicate = omni::fn::is_non_static
+  && omni::fn::not_(omni::fn::has_callable_metadata);
+```
+
 ## `tdm_` prefix: functional data-member updates
 
 QoL for functional inplace modifications: update a data member within a single

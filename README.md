@@ -323,6 +323,7 @@ and package layout may change without compatibility guarantees. Release notes
 aim to call out every breaking interface change.
 <!-- pages:status:end -->
 
+<!-- pages:functional-utilities:start -->
 ## Functional Utilities
 
 `<omnirefl/functional.hpp>` provides compositors such as `each`, `filter`,
@@ -335,7 +336,27 @@ const auto result = tuple
   | omni::fn::foldl(combine, initial);
 ```
 
-See the [functional tests](extras/tests/functional/main.cpp) for detailed examples.
+Compile-time field predicates compose with `&&`, `||`, and `not_`:
+
+```cpp
+namespace fn = omni::fn;
+
+constexpr auto non_static_data_fields = fn::is_non_static
+  && fn::not_(fn::has_callable_metadata);
+
+// Within reflected scope, given record metadata:
+constexpr auto fields = meta.accessible_data_members()
+  | fn::filter(non_static_data_fields);
+```
+
+The predicates are constexpr. `always_true` selects every field;
+`is_assignable` checks the declared field type's assignability. For type-based
+code, `is_non_static_t<Field>` remains a Boolean trait.
+
+See the [functional tests](extras/tests/functional/main.cpp) and
+[comprehensive guide](extras/examples/comprehensive_guide/main.cpp) for
+executable examples and C++11-compatible use.
+<!-- pages:functional-utilities:end -->
 
 ## Reflection Utilities
 

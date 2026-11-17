@@ -10,6 +10,8 @@
 // use their standard implementation when available and a local drop-in
 // otherwise.
 
+#include <omnirefl/compat/pair.hpp>
+
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -215,6 +217,9 @@ struct _make_integer_sequence<T, N, N, integers...> {
 template <class T, T N>
 using make_integer_sequence = typename _make_integer_sequence<T, 0, N>::type;
 
+// Unqualified access admits the tuple-like type's ADL get overloads.
+using std::get;
+
 template <std::size_t I, typename Tuple>
 using tuple_element_rvalue_t = typename std::add_rvalue_reference<
   typename std::tuple_element<
@@ -222,8 +227,8 @@ using tuple_element_rvalue_t = typename std::add_rvalue_reference<
     typename std::remove_reference<Tuple>::type>::type>::type;
 
 template <std::size_t I, typename Tuple>
-constexpr auto tuple_get(Tuple &tuple) -> decltype(std::get<I>(tuple)) {
-  return std::get<I>(tuple);
+constexpr auto tuple_get(Tuple &tuple) -> decltype(get<I>(tuple)) {
+  return get<I>(tuple);
 }
 
 // ad hoc: older libstdc++ releases lack the corrected const-rvalue `std::get`
@@ -233,7 +238,7 @@ constexpr auto tuple_get(Tuple &&tuple) //
   -> typename std::enable_if<
     !std::is_lvalue_reference<Tuple>::value,
     tuple_element_rvalue_t<I, Tuple>>::type {
-  return static_cast<tuple_element_rvalue_t<I, Tuple>>(std::get<I>(tuple));
+  return static_cast<tuple_element_rvalue_t<I, Tuple>>(get<I>(tuple));
 }
 
 template <typename Visit, typename Tuple, std::size_t... I>
