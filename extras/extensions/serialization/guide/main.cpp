@@ -298,7 +298,7 @@ TEST(basics, diagnostics) {
     omni::type<policy_examples::measurement>, R"({"value": "bad"})");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/value: \"bad\" is not an integer", result.diagnostics);
+  EXPECT_EQ("/value: expected integer, found scalar", result.diagnostics);
 }
 
 /** The core operation takes configuration explicitly instead of using a bound
@@ -382,8 +382,8 @@ TEST(basics, error_limit) {
     R"({"first": "bad", "second": "bad"})");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/first: \"bad\" is not an integer\n"
-            "/second: \"bad\" is not an integer",
+  EXPECT_EQ("/first: expected integer, found scalar\n"
+            "/second: expected integer, found scalar",
     result.diagnostics);
 }
 
@@ -893,7 +893,7 @@ TEST(diagnostics, structured_issues) {
 
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::invalid_scalar, issue.reason);
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
     EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
     EXPECT_EQ(omni::json::value_kind::scalar, issue.actual);
     EXPECT_EQ("bad", tree->val(issue.node_id));
@@ -921,7 +921,7 @@ TEST(diagnostics, rendering) {
   const std::string message =
     omni::ryml::render_diagnostics(*tree, result.diagnostics);
 
-  EXPECT_EQ("/value: \"bad\" is not an integer", message);
+  EXPECT_EQ("/value: expected integer, found scalar", message);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
 }
 
@@ -965,7 +965,7 @@ TEST(diagnostics, custom_results) {
 
   EXPECT_FALSE(failure.value);
   EXPECT_EQ(1U, failure.diagnostics.issue_count);
-  EXPECT_EQ("/value: \"bad\" is not an integer", failure.diagnostics.message);
+  EXPECT_EQ("/value: expected integer, found scalar", failure.diagnostics.message);
 }
 
 // Accepted input conditions can produce warnings alongside a valid value.
@@ -1031,7 +1031,7 @@ TEST(advanced, borrowed_input) {
     omni::type<policy_examples::measurement>, tree->crootref()["entry"]);
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/value: \"bad\" is not an integer",
+  EXPECT_EQ("/value: expected integer, found scalar",
     omni::ryml::render_diagnostics(*tree, result.diagnostics));
 }
 
@@ -1517,14 +1517,14 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
       "invalid_tail",
       R"([1, 2, 4, "bad"])",
       {{10, 20}, 5, 9},
-      omni::json::issue_code::invalid_scalar,
+      omni::json::issue_code::unexpected_kind,
       "/3",
     },
     {
       "invalid_prefix",
       R"(["bad", 4, 8])",
       {{}, 2, 7},
-      omni::json::issue_code::invalid_scalar,
+      omni::json::issue_code::unexpected_kind,
       "/0",
     },
   }),
@@ -1562,7 +1562,7 @@ TEST_P(customization_mapping_limits,
   const std::size_t expected_errors = 0 == GetParam() ? 1 : 2;
   EXPECT_EQ(expected_errors, issues.size());
   if (!issues.empty()) {
-    EXPECT_EQ(omni::json::issue_code::invalid_scalar, issues[0].reason);
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issues[0].reason);
     EXPECT_FALSE(issues[0].warning);
     EXPECT_EQ("/entries/0/value",
       omni::ryml::detail::render_path(issues[0].path));
@@ -1641,7 +1641,7 @@ INSTANTIATE_TEST_SUITE_P(nullable,
       R"("bad")",
       99,
       omni::compat::unexpected<omni::json::issue_code>{
-        omni::json::issue_code::invalid_scalar,
+        omni::json::issue_code::unexpected_kind,
       },
     },
   }),
