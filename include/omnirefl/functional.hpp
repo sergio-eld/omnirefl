@@ -61,6 +61,46 @@ struct default_value {
   constexpr Result operator()(const Args &...) const { return {}; }
 };
 
+/** (Ad hoc: see detail) Boolean validation across instrumentation.
+ * @details OMNI_TOOL_RUN selects std::true_type without invoking check;
+ * normal compilation evaluates static_cast<bool>(check(args...)). The real
+ * check remains defined in both phases.
+ * @warning Intended only for isolated static_assert checks through
+ * reflected_call. Apply transformations such as not_ before this adapter;
+ * do not use its placeholder to select later code or types. */
+template <typename Check>
+struct instrumented_validation_t {
+  Check check;
+
+  // The instrumenter default-constructs the visitor's declared result instead
+  // of evaluating it. A bool result would default to false and reject checks.
+#if defined(OMNI_TOOL_RUN)
+  template <typename... Args>
+  constexpr std::true_type operator()(Args &&...args) const {
+    return ((void)sizeof...(args), std::true_type{});
+  }
+#else
+  template <typename... Args>
+  constexpr auto operator()(Args &&...args) const
+    -> decltype(static_cast<bool>(compat::invoke(this->check,
+      std::forward<Args>(args)...))) {
+    return static_cast<bool>(compat::invoke(this->check,
+      std::forward<Args>(args)...));
+  }
+#endif
+};
+
+/** (Ad hoc: see detail) Bind a check for static_assert validation.
+ * instrumented_validation :: check -> instrumented_validation_t<check>
+ * @details Instrumentation cannot evaluate metadata queries before generation.
+ * The adapter supplies a successful placeholder while normal compilation
+ * evaluates the real check. See instrumented_validation_t for limitations. */
+template <typename Check>
+constexpr auto instrumented_validation(Check &&check)
+  -> instrumented_validation_t<compat::decay_t<Check>> {
+  return {/*check=*/std::forward<Check>(check)};
+}
+
 /** Accumulator and a decision to stop before the next operation. */
 template <typename Accumulator>
 struct fold_control {

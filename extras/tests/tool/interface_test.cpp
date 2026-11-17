@@ -2,6 +2,7 @@
 #include "odr_test.hpp"
 #include <gtest/gtest.h>
 
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
 
 #include <memory>
@@ -1557,4 +1558,89 @@ TEST(record_type_t, field_value_write) {
   EXPECT_EQ_FIELDS(k_expected, owned);
 
 #undef EXPECT_EQ_FIELDS
+}
+
+namespace interface_test {
+namespace reflected_results {
+
+struct constexpr_record { int value; };
+
+template <int Value>
+struct constant_result {
+  template <typename Meta>
+  constexpr std::integral_constant<int, Value> operator()(
+    omni::record_meta_t<Meta>) const { return {}; }
+};
+
+struct non_default_result {
+  int value;
+
+  non_default_result() = delete;
+  explicit constexpr non_default_result(int value): value(value) {}
+};
+
+struct make_non_default_result {
+  int value;
+
+  template <typename Meta>
+  constexpr non_default_result operator()(omni::record_meta_t<Meta>) const {
+    return non_default_result{this->value};
+  }
+};
+
+struct validation_status {
+  bool valid;
+
+  explicit constexpr operator bool() const { return this->valid; }
+};
+
+struct validate_field_count {
+  std::size_t expected;
+
+  template <typename Meta>
+  constexpr validation_status operator()(omni::record_meta_t<Meta> record) const {
+    return {this->expected
+      == std::tuple_size<decltype(record.accessible_data_members())>::value};
+  }
+};
+
+} // namespace reflected_results
+} // namespace interface_test
+
+TEST(reflected_call, preserves_a_non_default_constructible_result) {
+  const auto result = omni::reflected_call(
+    interface_test::reflected_results::make_non_default_result{42},
+    omni::type_t<interface_test::record_type_t>{});
+
+  EXPECT_EQ(42, result.value);
+}
+
+TEST(reflected_call, evaluates_a_literal_result_in_a_constant_expression) {
+  constexpr auto result = omni::reflected_call(
+    interface_test::reflected_results::constant_result<42>{},
+    omni::type_t<interface_test::reflected_results::constexpr_record>{});
+
+  EXPECT_EQ(42, result.value);
+}
+
+TEST(reflected_call, validates_metadata_in_a_constant_expression) {
+  static_assert(omni::reflected_call(
+    omni::fn::instrumented_validation(
+      interface_test::reflected_results::validate_field_count{1}),
+    omni::type_t<interface_test::reflected_results::constexpr_record>{}),
+    "Expected one field");
+
+  constexpr bool valid = omni::reflected_call(
+    omni::fn::instrumented_validation(
+      interface_test::reflected_results::validate_field_count{2}),
+    omni::type_t<interface_test::reflected_results::constexpr_record>{});
+
+  EXPECT_FALSE(valid);
+}
+
+TEST(reflected_call, validates_negated_metadata_in_a_constant_expression) {
+  static_assert(omni::reflected_call(omni::fn::instrumented_validation(
+    omni::fn::not_(interface_test::reflected_results::validate_field_count{2})),
+    omni::type_t<interface_test::reflected_results::constexpr_record>{}),
+    "Expected a field count different from two");
 }

@@ -160,6 +160,15 @@ using detail::get;
 } // namespace compat
 } // namespace omni
 
+// libstdc++ 7 declares these templates with both class and struct. Clang 6
+// diagnoses either spelling in our specializations, although the tags are
+// interchangeable here. Limit the compatibility workaround to these traits.
+#if defined(__clang__) && __clang_major__ < 7 \
+  && defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE <= 7
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wmismatched-tags"
+#endif
+
 namespace std {
 
 template <typename First, typename Second>
@@ -173,4 +182,9 @@ struct tuple_element<Index, omni::compat::detail::cpp11_pair<First, Second>> {
 };
 
 } // namespace std
+
+#if defined(__clang__) && __clang_major__ < 7 \
+  && defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE <= 7
+#  pragma clang diagnostic pop
+#endif
 #endif
