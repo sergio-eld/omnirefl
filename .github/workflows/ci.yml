@@ -599,6 +599,7 @@ jobs:
           path: ./artifacts/packages/cosmo
 
       - name: Report Runner Characteristics
+        continue-on-error: true
         run: |
           sw_vers
           uname -m
@@ -608,7 +609,7 @@ jobs:
           vm_stat
           sysctl vm.swapusage
           # Hosted VMs may not expose thermal status.
-          pmset -g therm || true
+          pmset -g therm
 
       - name: Run Package Tests
         run: |
