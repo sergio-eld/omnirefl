@@ -1,0 +1,33 @@
+# Manual A/B policy: both runs receive the same application PCH settings.
+if(NOT DEFINED PCH_RESEARCH_MIN_SOURCES)
+    set(PCH_RESEARCH_MIN_SOURCES 1)
+endif()
+
+function(_pch_research_apply directory)
+    get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_target IN LISTS _targets)
+        get_target_property(_links "${_target}" LINK_LIBRARIES)
+        get_target_property(_type "${_target}" TYPE)
+        get_target_property(_source "${_target}" SOURCE_DIR)
+        if(_source MATCHES "^${CMAKE_SOURCE_DIR}/"
+                AND _links MATCHES "gtest|GTest"
+                AND _type MATCHES "^(EXECUTABLE|STATIC_LIBRARY)$")
+            get_target_property(_sources "${_target}" SOURCES)
+            list(FILTER _sources INCLUDE REGEX "\\.(cpp|cc|cxx|C)$")
+            list(LENGTH _sources _source_count)
+            if(_source_count LESS PCH_RESEARCH_MIN_SOURCES)
+                continue()
+            endif()
+            target_precompile_headers("${_target}" PRIVATE
+                <gtest/gtest.h> <omnirefl/functional.hpp>)
+            message(STATUS "PCH A/B target: ${_target}")
+        endif()
+    endforeach()
+    get_property(_children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(_child IN LISTS _children)
+        if(_child MATCHES "^${CMAKE_SOURCE_DIR}/")
+            _pch_research_apply("${_child}")
+        endif()
+    endforeach()
+endfunction()
+cmake_language(DEFER CALL _pch_research_apply "${CMAKE_SOURCE_DIR}")

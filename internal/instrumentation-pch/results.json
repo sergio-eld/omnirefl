@@ -1,0 +1,511 @@
+{
+  "base_commit": "1d72e76",
+  "date": "2026-11-17",
+  "embedded_llvm": "22.1.8",
+  "language_standard": 20,
+  "cold_prefix_each_round": true,
+  "distinct_tool_process_per_file": true,
+  "profiles": [
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "standard",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 12.611623030970804,
+            "first_file_seconds": 2.3422626400133595,
+            "second_file_seconds": 2.2542215359862894
+          },
+          "pch": {
+            "sequence_seconds": 10.62184530403465,
+            "first_file_seconds": 2.8103382640110794,
+            "second_file_seconds": 1.6948537550051697
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 12.754193222004687,
+            "first_file_seconds": 2.3433253740076907,
+            "second_file_seconds": 2.2911045819928404
+          },
+          "pch": {
+            "sequence_seconds": 10.710984002042096,
+            "first_file_seconds": 2.8203061840031296,
+            "second_file_seconds": 1.6970582730136812
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.384668590995716,
+            "first_file_seconds": 2.3527304169838317,
+            "second_file_seconds": 2.283085448987549
+          },
+          "pch": {
+            "sequence_seconds": 10.852544764988124,
+            "first_file_seconds": 2.848571752983844,
+            "second_file_seconds": 1.8182616400008556
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000657,
+          "parsed ast": 1.989696,
+          "precompiled headers": 0.0,
+          "fold matches": 0.278487,
+          "resolve reflection context": 0.000145,
+          "emit outputs": 0.008462
+        },
+        "pch": {
+          "compiler invocation": 0.000664,
+          "parsed ast": 1.235963,
+          "precompiled headers": 0.022917,
+          "fold matches": 0.434743,
+          "resolve reflection context": 0.000199,
+          "emit outputs": 0.008268
+        }
+      }
+    },
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "gtest",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 12.788505413976964,
+            "first_file_seconds": 2.565139835991431,
+            "second_file_seconds": 2.3409315930039156
+          },
+          "pch": {
+            "sequence_seconds": 9.256884077040013,
+            "first_file_seconds": 3.177364444010891,
+            "second_file_seconds": 1.3604875080054626
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 13.109811978967628,
+            "first_file_seconds": 2.4116084589913953,
+            "second_file_seconds": 2.610414608992869
+          },
+          "pch": {
+            "sequence_seconds": 9.122896518994821,
+            "first_file_seconds": 3.113408689998323,
+            "second_file_seconds": 1.231878811988281
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.463874475011835,
+            "first_file_seconds": 2.3903045089973602,
+            "second_file_seconds": 2.2660285040037706
+          },
+          "pch": {
+            "sequence_seconds": 9.196317861031275,
+            "first_file_seconds": 3.167408825014718,
+            "second_file_seconds": 1.2385917129868176
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000694,
+          "parsed ast": 2.045014,
+          "precompiled headers": 0.0,
+          "fold matches": 0.281361,
+          "resolve reflection context": 0.000164,
+          "emit outputs": 0.008584
+        },
+        "pch": {
+          "compiler invocation": 0.000648,
+          "parsed ast": 0.617149,
+          "precompiled headers": 0.03678,
+          "fold matches": 0.571064,
+          "resolve reflection context": 0.0002,
+          "emit outputs": 0.009035
+        }
+      }
+    },
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "functional",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 13.896790216997033,
+            "first_file_seconds": 2.352787323005032,
+            "second_file_seconds": 2.356417192000663
+          },
+          "pch": {
+            "sequence_seconds": 8.659380216995487,
+            "first_file_seconds": 3.1197324759850744,
+            "second_file_seconds": 1.1495945320057217
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 12.447965948987985,
+            "first_file_seconds": 2.310380247014109,
+            "second_file_seconds": 2.3178926299733575
+          },
+          "pch": {
+            "sequence_seconds": 9.01103389399941,
+            "first_file_seconds": 3.12762072798796,
+            "second_file_seconds": 1.1397932870022487
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.581006958003854,
+            "first_file_seconds": 2.3632570930058137,
+            "second_file_seconds": 2.333107309998013
+          },
+          "pch": {
+            "sequence_seconds": 9.015544505004073,
+            "first_file_seconds": 3.18749452198972,
+            "second_file_seconds": 1.2453376060002483
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000677,
+          "parsed ast": 2.018403,
+          "precompiled headers": 0.0,
+          "fold matches": 0.287371,
+          "resolve reflection context": 0.000157,
+          "emit outputs": 0.008736
+        },
+        "pch": {
+          "compiler invocation": 0.000673,
+          "parsed ast": 0.519015,
+          "precompiled headers": 0.034482,
+          "fold matches": 0.586902,
+          "resolve reflection context": 0.000185,
+          "emit outputs": 0.008187
+        }
+      }
+    },
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "json",
+      "sources": [
+        "to_record.cpp",
+        "to_enum.cpp",
+        "dispatch.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 14.49885570097831,
+            "first_file_seconds": 5.2191690409963485,
+            "second_file_seconds": 4.2265038219920825
+          },
+          "pch": {
+            "sequence_seconds": 10.780051865032874,
+            "first_file_seconds": 5.672019265010022,
+            "second_file_seconds": 2.1832710820017383
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 13.666932410007576,
+            "first_file_seconds": 4.74703381198924,
+            "second_file_seconds": 4.149904051009798
+          },
+          "pch": {
+            "sequence_seconds": 10.877327613037778,
+            "first_file_seconds": 5.801012625015574,
+            "second_file_seconds": 2.1992877940065227
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 13.572276585997315,
+            "first_file_seconds": 4.666576752002584,
+            "second_file_seconds": 4.068814049009234
+          },
+          "pch": {
+            "sequence_seconds": 11.029394751007203,
+            "first_file_seconds": 5.760086683003465,
+            "second_file_seconds": 2.197055647004163
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000661,
+          "parsed ast": 3.639203,
+          "precompiled headers": 0.0,
+          "fold matches": 0.50266,
+          "resolve reflection context": 2.7e-05,
+          "emit outputs": 0.000546
+        },
+        "pch": {
+          "compiler invocation": 0.000654,
+          "parsed ast": 1.217141,
+          "precompiled headers": 0.039055,
+          "fold matches": 0.92277,
+          "resolve reflection context": 5.6e-05,
+          "emit outputs": 0.003128
+        }
+      }
+    },
+    {
+      "compiler": "Clang 21.1",
+      "prefix_profile": "functional",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 13.338736185018206,
+            "first_file_seconds": 2.434617872000672,
+            "second_file_seconds": 2.8640934319992084
+          },
+          "pch": {
+            "sequence_seconds": 8.750838455045596,
+            "first_file_seconds": 3.2007921329932287,
+            "second_file_seconds": 1.1297144610143732
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 12.511218336003367,
+            "first_file_seconds": 2.3076449329964817,
+            "second_file_seconds": 2.420758876018226
+          },
+          "pch": {
+            "sequence_seconds": 8.576959013007581,
+            "first_file_seconds": 3.1047766800038517,
+            "second_file_seconds": 1.114689490001183
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.172830013965722,
+            "first_file_seconds": 2.2819997479964513,
+            "second_file_seconds": 2.187969002989121
+          },
+          "pch": {
+            "sequence_seconds": 8.734731465985533,
+            "first_file_seconds": 3.058961666014511,
+            "second_file_seconds": 1.1141895609907806
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000606,
+          "parsed ast": 2.1064,
+          "precompiled headers": 0.0,
+          "fold matches": 0.300557,
+          "resolve reflection context": 0.000126,
+          "emit outputs": 0.008708
+        },
+        "pch": {
+          "compiler invocation": 0.000594,
+          "parsed ast": 0.482567,
+          "precompiled headers": 0.033404,
+          "fold matches": 0.587089,
+          "resolve reflection context": 0.000182,
+          "emit outputs": 0.008455
+        }
+      }
+    },
+    {
+      "compiler": "MSVC 19.44",
+      "prefix_profile": "functional",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 7.7994921999999995,
+            "first_file_seconds": 1.8624995999999998,
+            "second_file_seconds": 1.2933552
+          },
+          "pch": {
+            "sequence_seconds": 6.4027264,
+            "first_file_seconds": 2.014998,
+            "second_file_seconds": 0.8784417999999999
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 7.2663841,
+            "first_file_seconds": 1.3327995,
+            "second_file_seconds": 1.2821384999999998
+          },
+          "pch": {
+            "sequence_seconds": 6.4171906000000005,
+            "first_file_seconds": 2.1145647999999997,
+            "second_file_seconds": 0.8722335999999999
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 7.3491056,
+            "first_file_seconds": 1.4021588,
+            "second_file_seconds": 1.3061888
+          },
+          "pch": {
+            "sequence_seconds": 6.3438561,
+            "first_file_seconds": 1.9593771,
+            "second_file_seconds": 0.9018911
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.001563,
+          "parsed ast": 1.035007,
+          "precompiled headers": 0,
+          "fold matches": 0.211041,
+          "resolve reflection context": 9.4e-05,
+          "emit outputs": 0.005158
+        },
+        "pch": {
+          "compiler invocation": 0.001754,
+          "parsed ast": 0.339386,
+          "precompiled headers": 0.033871,
+          "fold matches": 0.454454,
+          "resolve reflection context": 0.000148,
+          "emit outputs": 0.004821
+        }
+      }
+    }
+  ],
+  "full_package_suite": {
+    "compiler": "GCC 15.2",
+    "standards": [
+      11,
+      14,
+      17,
+      20,
+      23
+    ],
+    "configuration": "Release",
+    "source": "tracked extras archive",
+    "path_contains_spaces": true,
+    "examples": true,
+    "extensions": true,
+    "benchmarks": false,
+    "runs_per_policy": 1,
+    "runs": [
+      {
+        "mode": "baseline",
+        "parallel": 8,
+        "configure_seconds": 1.3698256769857835,
+        "configure_exit": 0,
+        "build_seconds": 332.24885649600765,
+        "build_exit": 0,
+        "test_seconds": 361.4453235040128,
+        "test_exit": 0,
+        "total_seconds": 695.0640056770062,
+        "change_from_stock_ci_percent": 13.446298774883658,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 70
+      },
+      {
+        "mode": "cached",
+        "parallel": 8,
+        "configure_seconds": 1.4691402289899997,
+        "configure_exit": 0,
+        "build_seconds": 315.8425448460039,
+        "build_exit": 0,
+        "test_seconds": 378.3225914129871,
+        "test_exit": 0,
+        "total_seconds": 695.634276487981,
+        "change_from_stock_ci_percent": 13.539376696162897,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 70
+      },
+      {
+        "mode": "ci-baseline",
+        "parallel": 8,
+        "configure_seconds": 1.4191833460063208,
+        "configure_exit": 0,
+        "build_seconds": 320.892611932999,
+        "build_exit": 0,
+        "test_seconds": 290.3692821850127,
+        "test_exit": 0,
+        "total_seconds": 612.681077464018,
+        "change_from_stock_ci_percent": 0.0,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 0
+      },
+      {
+        "mode": "targeted",
+        "parallel": 8,
+        "configure_seconds": 1.4707141839899123,
+        "configure_exit": 0,
+        "build_seconds": 311.8640347259934,
+        "build_exit": 0,
+        "test_seconds": 279.5227769589983,
+        "test_exit": 0,
+        "total_seconds": 592.8575258689816,
+        "change_from_stock_ci_percent": -3.235541674812148,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 15
+      }
+    ]
+  }
+}

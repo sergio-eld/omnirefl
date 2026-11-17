@@ -48,6 +48,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Option/Arg.h>
 #include <llvm/Option/ArgList.h>
@@ -56,7 +57,10 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/LockFileManager.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Path.h>
+#include <llvm/Support/SHA256.h>
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
@@ -80,6 +84,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -279,6 +284,10 @@ struct options {
   // output dir or generated header path
   fs::path out;
   fs::path resource_dir;
+
+  // Investigation-only: build a tool-owned prefix with the normalized flags.
+  fs::path pch_header;
+  fs::path pch_cache;
 
   // todo: implement parsing
   bool generate_dep_file = true;
@@ -853,11 +862,17 @@ namespace pipeline {
 struct compiler_invocation {
   fs::path source;
   std::shared_ptr<clang::CompilerInvocation> ci;
+  fs::path pch_header;
+  fs::path pch_cache;
+  std::set<fs::path> pch_dependencies;
 };
 
 std::expected<compiler_invocation, app_error> to_compiler_invocation(
   const diagnostics &log,
   const cli::options &cli_args) noexcept;
+
+std::expected<compiler_invocation, app_error> with_precompiled_headers(
+  const diagnostics &log, compiler_invocation ci);
 
 struct parsed_ast {
   fs::path source;
@@ -1009,6 +1024,10 @@ int main(int argc, char **argv) {
     std::bind_front(measured("parsed ast", pipeline::to_parsed_ast),
       std::cref(log));
 
+  const auto with_precompiled_headers = std::bind_front(
+    measured("precompiled headers", pipeline::with_precompiled_headers),
+    std::cref(log));
+
   const auto fold_matches =
     std::bind_front(measured("fold matches", pipeline::fold_matches),
       std::cref(log));
@@ -1045,6 +1064,7 @@ int main(int argc, char **argv) {
   };
 
   return to_compiler_invocation(*args)
+    .and_then(with_precompiled_headers)
     .and_then(to_parsed_ast)
     .and_then(fold_matches)
     .transform(with_print_matches)
@@ -3023,6 +3043,12 @@ std::expected<cli::options, app_error> cli::parse(int argc,
       ->check(CLI::ExistingFile)
       ->required();
 
+  CLI::Option *const pch_header = app.add_option("--pch-header",
+    "Investigation: header prefix to precompile with tool flags.")
+    ->check(CLI::ExistingFile);
+  CLI::Option *const pch_cache = app.add_option("--pch-cache-dir",
+    "Investigation: directory for tool-owned PCH files.");
+
   CLI::Option *const out = //
     app.add_option("-o,--out", "output directory (may contain filename)")
       ->type_name("PATH")
@@ -3101,6 +3127,10 @@ std::expected<cli::options, app_error> cli::parse(int argc,
     .flags = std::move(flags),
     .out = out->as<fs::path>(),
     .resource_dir = std::move(*parsed_resource_dir),
+    .pch_header = pch_header->count()
+      ? fs::absolute(pch_header->as<fs::path>()).lexically_normal() : fs::path{},
+    .pch_cache = pch_cache->count()
+      ? fs::absolute(pch_cache->as<fs::path>()).lexically_normal() : fs::path{},
     .annotations = !no_annotations->as<bool>(),
     .level = *parsed_level,
     .timings = 0 == timings->count() ? log_level::silent != *parsed_level
@@ -3985,9 +4015,8 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   {
     clang::PreprocessorOptions &p = clang_invocation->getPreprocessorOpts();
 
-    // Disable any pch generation/usage operations. Since serialized
-    // preamble format is unstable, using an incompatible one might result
-    // in unexpected behaviours, including crashes.
+    // Discard the compiler-owned PCH. The optional prefix stage builds its
+    // own PCH with Omnirefl's normalized invocation and Clang version.
     p.ImplicitPCHInclude.clear();
     p.PrecompiledPreambleBytes = {0, false};
     p.PCHThroughHeader.clear();
@@ -4028,6 +4057,12 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
         return util::is_subpath(s, out) || filename.ends_with(".omnirefl.hpp");
       });
 
+    // CMake's MSVC PCH dispatcher names a different generated header per TU.
+    // That dispatcher is excluded above; its private macro is not tool input.
+    std::erase_if(po.Macros, [](const auto &macro) {
+      return macro.first.starts_with("OMNIREFL_GENERATED_HEADER=");
+    });
+
     std::ranges::for_each(po.Macros, [&log](const auto &pair) {
       const auto &[macro, is_undef] = pair;
       log(log_level::debug, [macro, is_undef] {
@@ -4049,7 +4084,147 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
   return compiler_invocation{
     .source = source,
     .ci = std::move(clang_invocation),
+    .pch_header = cli_args.pch_header,
+    .pch_cache = cli_args.pch_cache,
+    .pch_dependencies = {},
   };
+}
+
+std::expected<pipeline::compiler_invocation, app_error>
+pipeline::with_precompiled_headers(const diagnostics &log,
+  compiler_invocation ci) {
+  if (ci.pch_header.empty())
+    return ci;
+
+  if (ci.pch_cache.empty())
+    return std::unexpected(processing_error(ci.source,
+      "--pch-header requires --pch-cache-dir"));
+
+  // Investigation prototype: use the same normalized environment for both
+  // prefix generation and consumption, not the application's binary PCH.
+  auto prefix = std::make_shared<clang::CompilerInvocation>(*ci.ci);
+  auto &frontend = prefix->getFrontendOpts();
+  frontend.Inputs = {clang::FrontendInputFile(ci.pch_header.string(),
+    frontend.Inputs.front().getKind())};
+  frontend.ProgramAction = clang::frontend::GeneratePCH;
+  frontend.OutputFile.clear();
+  prefix->getCodeGenOpts().MainFileName = ci.pch_header.filename().string();
+  auto &includes = prefix->getPreprocessorOpts().Includes;
+  const auto selected = std::ranges::find(includes, ci.pch_header.string());
+  const std::size_t consumed = selected == includes.end()
+    ? includes.size() : std::distance(includes.begin(), selected) + 1;
+  if (selected != includes.end())
+    includes.erase(selected, includes.end());
+
+  llvm::SHA256 key;
+  key.update(LLVM_VERSION_STRING);
+  for (const auto &arg : prefix->getCC1CommandLine()) {
+    key.update(arg);
+    key.update(llvm::StringRef{"\0", 1});
+  }
+  const fs::path entry = ci.pch_cache / llvm::toHex(key.final());
+  const fs::path manifest = entry.string() + ".deps";
+  fs::create_directories(ci.pch_cache);
+
+  // Different TUs can reach the same cold prefix concurrently under Ninja.
+  llvm::LockFileManager lock{entry.string()};
+  for (;;) {
+    auto acquired = lock.tryLock();
+    if (!acquired)
+      return std::unexpected(processing_error(ci.source,
+        llvm::toString(acquired.takeError())));
+
+    if (*acquired)
+      break;
+
+    if (llvm::WaitForUnlockResult::Timeout
+      == lock.waitForUnlockFor(std::chrono::seconds{60}))
+      return std::unexpected(processing_error(ci.source,
+        "Timed out waiting for instrumentation PCH generation"));
+  }
+
+  const auto fingerprint = [](const fs::path &path) -> std::string {
+    auto contents = llvm::MemoryBuffer::getFile(path.string());
+    if (!contents)
+      return {};
+
+    std::error_code error;
+    const auto modified = fs::last_write_time(path, error);
+    if (error)
+      return {};
+
+    llvm::SHA256 hash;
+    // Clang validates mtimes even when a touched header's bytes are unchanged.
+    hash.update(std::to_string(modified.time_since_epoch().count()));
+    hash.update((*contents)->getBuffer());
+    return llvm::toHex(hash.final());
+  };
+  std::ifstream dependencies{manifest};
+  std::string cached_path;
+  std::size_t dependency_count{};
+  bool reusable = static_cast<bool>(
+      dependencies >> std::quoted(cached_path) >> dependency_count)
+    && fs::is_regular_file(cached_path);
+  fs::path cached{cached_path};
+  std::string path;
+  std::string digest;
+  while (dependencies >> std::quoted(path) >> digest) {
+    ci.pch_dependencies.insert(path);
+    reusable = reusable && fingerprint(path) == digest;
+  }
+  // A truncated manifest must not validate only the dependencies it retained.
+  reusable = reusable && dependency_count
+    && dependency_count == ci.pch_dependencies.size() && dependencies.eof();
+  dependencies.close();
+
+  if (!reusable) {
+    struct prefix_dependencies final: clang::DependencyCollector {
+      bool needSystemDependencies() override { return true; }
+    };
+    auto collected = std::make_shared<prefix_dependencies>();
+    // Never overwrite a PCH that another ASTUnit may still map lazily.
+    int descriptor;
+    llvm::SmallString<128> unique;
+    if (const auto error = llvm::sys::fs::createUniqueFile(
+          entry.string() + "-%%%%%%.pch", descriptor, unique))
+      return std::unexpected(processing_error(ci.source, error.message()));
+
+    llvm::raw_fd_ostream output{descriptor, /*shouldClose=*/true};
+    output.close();
+    cached = unique.str().str();
+    frontend.OutputFile = cached.string();
+    clang::CompilerInstance compiler{prefix};
+    compiler.setDiagnostics(log.clang_engine.get());
+    // Match ASTUnit's application of the normalized diagnostic options.
+    compiler.getDiagnostics().setIgnoreAllWarnings(
+      prefix->getDiagnosticOpts().IgnoreWarnings);
+    compiler.addDependencyCollector(collected);
+    clang::GeneratePCHAction action;
+    if (!compiler.ExecuteAction(action))
+      return std::unexpected(processing_error(ci.source,
+        "Failed to generate instrumentation PCH"));
+
+    ci.pch_dependencies.clear();
+    ci.pch_dependencies.insert(ci.pch_header);
+    for (const auto &dependency : collected->getDependencies())
+      ci.pch_dependencies.insert(dependency);
+
+    std::ofstream stored{manifest};
+    stored << std::quoted(cached.string()) << ' '
+      << ci.pch_dependencies.size() << '\n';
+    for (const auto &dependency : ci.pch_dependencies)
+      stored << std::quoted(dependency.string()) << ' '
+        << fingerprint(dependency) << '\n';
+  }
+
+  log(log_level::info, [&] {
+    return std::format("instrumentation PCH: {} {}", reusable ? "reuse" : "build",
+      cached.string());
+  });
+  ci.ci->getPreprocessorOpts().ImplicitPCHInclude = cached.string();
+  auto &original = ci.ci->getPreprocessorOpts().Includes;
+  original.erase(original.begin(), original.begin() + consumed);
+  return ci;
 }
 
 std::expected<pipeline::parsed_ast, app_error>
@@ -4065,7 +4240,8 @@ std::expected<pipeline::parsed_ast, app_error>
       // includes must still invalidate reflection when the wrapper is parsed.
       return forced_includes;
     }
-  } deps_collector{!ci.ci->getPreprocessorOpts().Includes.empty()};
+  } deps_collector{!ci.ci->getPreprocessorOpts().Includes.empty()
+    || !ci.ci->getPreprocessorOpts().ImplicitPCHInclude.empty()};
 
   struct action_t final: clang::SyntaxOnlyAction {
     clang::DependencyCollector &dc;
@@ -4175,11 +4351,7 @@ std::expected<pipeline::parsed_ast, app_error>
     return std::unexpected(
       processing_error(ci.source, "Failed to build AST Unit."));
 
-  return parsed_ast{
-    .source = std::move(ci.source),
-    .ast = std::move(ast),
-
-    .includes_deps = deps_collector.getDependencies()
+  auto includes_deps = deps_collector.getDependencies()
       | std::views::transform([](const std::string &p) -> fs::path {
 #if defined(__COSMOPOLITAN__)
         // DependencyCollector retains the requested spelling, including any
@@ -4189,7 +4361,14 @@ std::expected<pipeline::parsed_ast, app_error>
 #endif
         return p;
       })
-      | std::ranges::to<std::set>(),
+      | std::ranges::to<std::set>();
+  // Prefix declarations do not replay their original include callbacks.
+  includes_deps.merge(ci.pch_dependencies);
+
+  return parsed_ast{
+    .source = std::move(ci.source),
+    .ast = std::move(ast),
+    .includes_deps = std::move(includes_deps),
   };
 }
 

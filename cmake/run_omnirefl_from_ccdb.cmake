@@ -89,6 +89,23 @@ if(TIMINGS)
     list(APPEND _omnirefl_args --timings)
 endif()
 
+# Investigation opt-in. GCC spells CMake PCH consumption as an ordinary
+# -include, and reflection runs before the compiler creates its .gch file.
+# CMake's target property supplies the missing intent; forced includes alone
+# must not enable prefix caching.
+if(PCH_ENABLED AND PCH_CACHE_DIR)
+    foreach(_argument IN LISTS _compiler_args)
+        string(REGEX REPLACE "^[-/]FI" "" _candidate "${_argument}")
+        if(_candidate MATCHES "[/\\\\]cmake_pch\\.(h|hxx)$"
+                AND EXISTS "${_candidate}")
+            list(APPEND _omnirefl_args
+                --pch-header "${_candidate}"
+                --pch-cache-dir "${PCH_CACHE_DIR}")
+            break()
+        endif()
+    endforeach()
+endif()
+
 list(APPEND _omnirefl_args -- ${_compiler_args})
 
 # CMake compile commands use the top-level build directory as their working

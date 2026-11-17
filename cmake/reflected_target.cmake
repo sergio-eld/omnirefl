@@ -347,6 +347,15 @@ function(omni_reflected_target target)
         set(_msvc_cxx23_preview_ad_hoc 1)
     endif()
 
+    string(CONCAT _uses_pch
+        "$<AND:"
+            "$<NOT:$<BOOL:$<TARGET_PROPERTY:${target},DISABLE_PRECOMPILE_HEADERS>>>,"
+            "$<OR:"
+                "$<BOOL:$<TARGET_PROPERTY:${target},PRECOMPILE_HEADERS>>,"
+                "$<BOOL:$<TARGET_PROPERTY:${target},PRECOMPILE_HEADERS_REUSE_FROM>>"
+            ">"
+        ">")
+
     # MSVC also covers clang-cl: both use /FI and the /Yu PCH boundary.
     if(MSVC)
         # ad hoc: CMake puts source /FI options before its PCH /FI, where MSVC
@@ -356,21 +365,10 @@ function(omni_reflected_target target)
         # wrapper path, including PCH reuse and configuration-specific directories.
         # The reflection-header suffix excludes this dispatcher from tool parsing.
         # Evaluate PCH availability during generation: callers may enable it later.
-        string(CONCAT _msvc_pch
-            "$<AND:"
-                "$<NOT:$<BOOL:$<TARGET_PROPERTY:DISABLE_PRECOMPILE_HEADERS>>>,"
-                "$<OR:"
-                    "$<BOOL:$<TARGET_PROPERTY:PRECOMPILE_HEADERS>>,"
-                    "$<BOOL:$<TARGET_PROPERTY:PRECOMPILE_HEADERS_REUSE_FROM>>"
-                ">"
-            ">")
         set(_pch_dispatch "${_out_dir}/internal/pch_dispatch.omnirefl.hpp")
-        # file(GENERATE) has no consuming-target context; qualify its condition.
-        string(REPLACE "$<TARGET_PROPERTY:" "$<TARGET_PROPERTY:${target},"
-            _pch_file_condition "${_msvc_pch}")
         file(GENERATE OUTPUT "${_pch_dispatch}" CONTENT
             "#ifdef OMNIREFL_GENERATED_HEADER\n#include OMNIREFL_GENERATED_HEADER\n#endif\n"
-            CONDITION "${_pch_file_condition}")
+            CONDITION "${_uses_pch}")
         get_target_property(_pch_options ${target} CXX_COMPILE_OPTIONS_USE_PCH)
         if(NOT _pch_options)
             set(_pch_options "${CMAKE_CXX_COMPILE_OPTIONS_USE_PCH}")
@@ -449,6 +447,8 @@ function(omni_reflected_target target)
                 -D "NO_ANNOTATIONS=${_no_annotations}"
                 -D "LOG_LEVEL=${OMNIREFL_LOG_LEVEL}"
                 -D "TIMINGS=${_timings}"
+                -D "PCH_ENABLED=${_uses_pch}"
+                -D "PCH_CACHE_DIR=${OMNIREFL_PCH_CACHE_DIR}"
                 -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
@@ -477,7 +477,7 @@ function(omni_reflected_target target)
                 COMPILE_OPTIONS "/FI$<TARGET_PROPERTY:${_fi_prop}>")
             # The shared PCH dispatcher selects this translation unit's header.
             set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_DEFINITIONS
-                "$<${_msvc_pch}:OMNIREFL_GENERATED_HEADER=\"$<TARGET_PROPERTY:${_fi_prop}>\">")
+                "$<${_uses_pch}:OMNIREFL_GENERATED_HEADER=\"$<TARGET_PROPERTY:${_fi_prop}>\">")
         else()
             set_source_files_properties("${_src}" PROPERTIES
                 COMPILE_OPTIONS "-include;$<TARGET_PROPERTY:${_fi_prop}>")
