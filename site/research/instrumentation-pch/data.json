@@ -1,0 +1,2489 @@
+{
+  "fullSuite": {
+    "compiler": "GCC 15.2",
+    "standards": [
+      11,
+      14,
+      17,
+      20,
+      23
+    ],
+    "configuration": "Release",
+    "source": "tracked extras archive",
+    "path_contains_spaces": true,
+    "examples": true,
+    "extensions": true,
+    "benchmarks": false,
+    "runs_per_policy": 1,
+    "runs": [
+      {
+        "mode": "master",
+        "commit": "1d72e76",
+        "parallel": 8,
+        "package": "/tmp/omnirefl-pch-base-master-package",
+        "binary_sha256": "e719861e6f994ff030d417d522194f9a30c82893781191ef2dfa2919d6cde44c",
+        "configure_seconds": 1.7691682160075288,
+        "configure_exit": 0,
+        "build_seconds": 382.1210576540034,
+        "build_exit": 0,
+        "validation": "Clean build succeeded; CTest is excluded from this build-performance comparison",
+        "change_from_master_build_percent": 0.0,
+        "pch_targets": 0
+      },
+      {
+        "mode": "prototype-disabled",
+        "commit": "f1e1c78",
+        "parallel": 8,
+        "package": "/tmp/omnirefl-pch-final-package",
+        "binary_sha256": "6b322456d6cdd028b3adb0980ed48fc66a90efeaeefd3e18b2aa3dedcfac16ec",
+        "configure_seconds": 1.818388870015042,
+        "configure_exit": 0,
+        "build_seconds": 381.5064602220082,
+        "build_exit": 0,
+        "validation": "Clean build succeeded; CTest is excluded from this build-performance comparison",
+        "change_from_master_build_percent": -0.16083840963082574,
+        "pch_targets": 0
+      },
+      {
+        "mode": "targeted-current",
+        "commit": "f1e1c78",
+        "parallel": 8,
+        "package": "/tmp/omnirefl-pch-final-package",
+        "pch_targets": 15,
+        "binary_sha256": "6b322456d6cdd028b3adb0980ed48fc66a90efeaeefd3e18b2aa3dedcfac16ec",
+        "configure_seconds": 1.5676908759924117,
+        "configure_exit": 0,
+        "build_seconds": 392.70364201199845,
+        "build_exit": 0,
+        "validation": "Clean build succeeded; CTest excluded from this build-performance comparison",
+        "change_from_master_build_percent": 2.769432394792859
+      }
+    ],
+    "earlier_runs": [
+      {
+        "mode": "baseline",
+        "parallel": 8,
+        "configure_seconds": 1.3698256769857835,
+        "configure_exit": 0,
+        "build_seconds": 332.24885649600765,
+        "build_exit": 0,
+        "test_seconds": 361.4453235040128,
+        "test_exit": 0,
+        "total_seconds": 695.0640056770062,
+        "change_from_no_pch_percent": 13.446298774883658,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 70
+      },
+      {
+        "mode": "cached",
+        "parallel": 8,
+        "configure_seconds": 1.4691402289899997,
+        "configure_exit": 0,
+        "build_seconds": 315.8425448460039,
+        "build_exit": 0,
+        "test_seconds": 378.3225914129871,
+        "test_exit": 0,
+        "total_seconds": 695.634276487981,
+        "change_from_no_pch_percent": 13.539376696162897,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 70
+      },
+      {
+        "mode": "ci-baseline",
+        "parallel": 8,
+        "configure_seconds": 1.4191833460063208,
+        "configure_exit": 0,
+        "build_seconds": 320.892611932999,
+        "build_exit": 0,
+        "test_seconds": 290.3692821850127,
+        "test_exit": 0,
+        "total_seconds": 612.681077464018,
+        "change_from_no_pch_percent": 0.0,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 0
+      },
+      {
+        "mode": "targeted",
+        "parallel": 8,
+        "configure_seconds": 1.4707141839899123,
+        "configure_exit": 0,
+        "build_seconds": 311.8640347259934,
+        "build_exit": 0,
+        "test_seconds": 279.5227769589983,
+        "test_exit": 0,
+        "total_seconds": 592.8575258689816,
+        "change_from_no_pch_percent": -3.235541674812148,
+        "passed_tests": 249,
+        "disabled_tests": 28,
+        "registered_tests": 277,
+        "pch_targets": 15
+      }
+    ],
+    "baseline_commit": "1d72e76",
+    "prototype_commit": "f1e1c78",
+    "measurement": "Local sequential runs; master, prototype disabled, targeted PCH/cache",
+    "tool_build_type": "RelWithDebInfo",
+    "consumer_build_type": "Release"
+  },
+  "compilerProfiles": [
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "standard",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 12.611623030970804,
+            "first_file_seconds": 2.3422626400133595,
+            "second_file_seconds": 2.2542215359862894
+          },
+          "pch": {
+            "sequence_seconds": 10.62184530403465,
+            "first_file_seconds": 2.8103382640110794,
+            "second_file_seconds": 1.6948537550051697
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 12.754193222004687,
+            "first_file_seconds": 2.3433253740076907,
+            "second_file_seconds": 2.2911045819928404
+          },
+          "pch": {
+            "sequence_seconds": 10.710984002042096,
+            "first_file_seconds": 2.8203061840031296,
+            "second_file_seconds": 1.6970582730136812
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.384668590995716,
+            "first_file_seconds": 2.3527304169838317,
+            "second_file_seconds": 2.283085448987549
+          },
+          "pch": {
+            "sequence_seconds": 10.852544764988124,
+            "first_file_seconds": 2.848571752983844,
+            "second_file_seconds": 1.8182616400008556
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000657,
+          "parsed ast": 1.989696,
+          "precompiled headers": 0.0,
+          "fold matches": 0.278487,
+          "resolve reflection context": 0.000145,
+          "emit outputs": 0.008462
+        },
+        "pch": {
+          "compiler invocation": 0.000664,
+          "parsed ast": 1.235963,
+          "precompiled headers": 0.022917,
+          "fold matches": 0.434743,
+          "resolve reflection context": 0.000199,
+          "emit outputs": 0.008268
+        }
+      }
+    },
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "gtest",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 12.788505413976964,
+            "first_file_seconds": 2.565139835991431,
+            "second_file_seconds": 2.3409315930039156
+          },
+          "pch": {
+            "sequence_seconds": 9.256884077040013,
+            "first_file_seconds": 3.177364444010891,
+            "second_file_seconds": 1.3604875080054626
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 13.109811978967628,
+            "first_file_seconds": 2.4116084589913953,
+            "second_file_seconds": 2.610414608992869
+          },
+          "pch": {
+            "sequence_seconds": 9.122896518994821,
+            "first_file_seconds": 3.113408689998323,
+            "second_file_seconds": 1.231878811988281
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.463874475011835,
+            "first_file_seconds": 2.3903045089973602,
+            "second_file_seconds": 2.2660285040037706
+          },
+          "pch": {
+            "sequence_seconds": 9.196317861031275,
+            "first_file_seconds": 3.167408825014718,
+            "second_file_seconds": 1.2385917129868176
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000694,
+          "parsed ast": 2.045014,
+          "precompiled headers": 0.0,
+          "fold matches": 0.281361,
+          "resolve reflection context": 0.000164,
+          "emit outputs": 0.008584
+        },
+        "pch": {
+          "compiler invocation": 0.000648,
+          "parsed ast": 0.617149,
+          "precompiled headers": 0.03678,
+          "fold matches": 0.571064,
+          "resolve reflection context": 0.0002,
+          "emit outputs": 0.009035
+        }
+      }
+    },
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "functional",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 13.896790216997033,
+            "first_file_seconds": 2.352787323005032,
+            "second_file_seconds": 2.356417192000663
+          },
+          "pch": {
+            "sequence_seconds": 8.659380216995487,
+            "first_file_seconds": 3.1197324759850744,
+            "second_file_seconds": 1.1495945320057217
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 12.447965948987985,
+            "first_file_seconds": 2.310380247014109,
+            "second_file_seconds": 2.3178926299733575
+          },
+          "pch": {
+            "sequence_seconds": 9.01103389399941,
+            "first_file_seconds": 3.12762072798796,
+            "second_file_seconds": 1.1397932870022487
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.581006958003854,
+            "first_file_seconds": 2.3632570930058137,
+            "second_file_seconds": 2.333107309998013
+          },
+          "pch": {
+            "sequence_seconds": 9.015544505004073,
+            "first_file_seconds": 3.18749452198972,
+            "second_file_seconds": 1.2453376060002483
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000677,
+          "parsed ast": 2.018403,
+          "precompiled headers": 0.0,
+          "fold matches": 0.287371,
+          "resolve reflection context": 0.000157,
+          "emit outputs": 0.008736
+        },
+        "pch": {
+          "compiler invocation": 0.000673,
+          "parsed ast": 0.519015,
+          "precompiled headers": 0.034482,
+          "fold matches": 0.586902,
+          "resolve reflection context": 0.000185,
+          "emit outputs": 0.008187
+        }
+      }
+    },
+    {
+      "compiler": "GCC 15.2",
+      "prefix_profile": "json",
+      "sources": [
+        "to_record.cpp",
+        "to_enum.cpp",
+        "dispatch.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 14.49885570097831,
+            "first_file_seconds": 5.2191690409963485,
+            "second_file_seconds": 4.2265038219920825
+          },
+          "pch": {
+            "sequence_seconds": 10.780051865032874,
+            "first_file_seconds": 5.672019265010022,
+            "second_file_seconds": 2.1832710820017383
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 13.666932410007576,
+            "first_file_seconds": 4.74703381198924,
+            "second_file_seconds": 4.149904051009798
+          },
+          "pch": {
+            "sequence_seconds": 10.877327613037778,
+            "first_file_seconds": 5.801012625015574,
+            "second_file_seconds": 2.1992877940065227
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 13.572276585997315,
+            "first_file_seconds": 4.666576752002584,
+            "second_file_seconds": 4.068814049009234
+          },
+          "pch": {
+            "sequence_seconds": 11.029394751007203,
+            "first_file_seconds": 5.760086683003465,
+            "second_file_seconds": 2.197055647004163
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000661,
+          "parsed ast": 3.639203,
+          "precompiled headers": 0.0,
+          "fold matches": 0.50266,
+          "resolve reflection context": 2.7e-05,
+          "emit outputs": 0.000546
+        },
+        "pch": {
+          "compiler invocation": 0.000654,
+          "parsed ast": 1.217141,
+          "precompiled headers": 0.039055,
+          "fold matches": 0.92277,
+          "resolve reflection context": 5.6e-05,
+          "emit outputs": 0.003128
+        }
+      }
+    },
+    {
+      "compiler": "Clang 21.1",
+      "prefix_profile": "functional",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 13.338736185018206,
+            "first_file_seconds": 2.434617872000672,
+            "second_file_seconds": 2.8640934319992084
+          },
+          "pch": {
+            "sequence_seconds": 8.750838455045596,
+            "first_file_seconds": 3.2007921329932287,
+            "second_file_seconds": 1.1297144610143732
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 12.511218336003367,
+            "first_file_seconds": 2.3076449329964817,
+            "second_file_seconds": 2.420758876018226
+          },
+          "pch": {
+            "sequence_seconds": 8.576959013007581,
+            "first_file_seconds": 3.1047766800038517,
+            "second_file_seconds": 1.114689490001183
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 12.172830013965722,
+            "first_file_seconds": 2.2819997479964513,
+            "second_file_seconds": 2.187969002989121
+          },
+          "pch": {
+            "sequence_seconds": 8.734731465985533,
+            "first_file_seconds": 3.058961666014511,
+            "second_file_seconds": 1.1141895609907806
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.000606,
+          "parsed ast": 2.1064,
+          "precompiled headers": 0.0,
+          "fold matches": 0.300557,
+          "resolve reflection context": 0.000126,
+          "emit outputs": 0.008708
+        },
+        "pch": {
+          "compiler invocation": 0.000594,
+          "parsed ast": 0.482567,
+          "precompiled headers": 0.033404,
+          "fold matches": 0.587089,
+          "resolve reflection context": 0.000182,
+          "emit outputs": 0.008455
+        }
+      }
+    },
+    {
+      "compiler": "MSVC 19.44",
+      "prefix_profile": "functional",
+      "sources": [
+        "static_members_test.cpp",
+        "function_metadata_test.cpp",
+        "interface_test.cpp",
+        "dependent_types_test.cpp",
+        "binding_metadata_test.cpp"
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "baseline": {
+            "sequence_seconds": 7.7994921999999995,
+            "first_file_seconds": 1.8624995999999998,
+            "second_file_seconds": 1.2933552
+          },
+          "pch": {
+            "sequence_seconds": 6.4027264,
+            "first_file_seconds": 2.014998,
+            "second_file_seconds": 0.8784417999999999
+          }
+        },
+        {
+          "round": 1,
+          "baseline": {
+            "sequence_seconds": 7.2663841,
+            "first_file_seconds": 1.3327995,
+            "second_file_seconds": 1.2821384999999998
+          },
+          "pch": {
+            "sequence_seconds": 6.4171906000000005,
+            "first_file_seconds": 2.1145647999999997,
+            "second_file_seconds": 0.8722335999999999
+          }
+        },
+        {
+          "round": 2,
+          "baseline": {
+            "sequence_seconds": 7.3491056,
+            "first_file_seconds": 1.4021588,
+            "second_file_seconds": 1.3061888
+          },
+          "pch": {
+            "sequence_seconds": 6.3438561,
+            "first_file_seconds": 1.9593771,
+            "second_file_seconds": 0.9018911
+          }
+        }
+      ],
+      "median_second_file_phases_seconds": {
+        "baseline": {
+          "compiler invocation": 0.001563,
+          "parsed ast": 1.035007,
+          "precompiled headers": 0,
+          "fold matches": 0.211041,
+          "resolve reflection context": 9.4e-05,
+          "emit outputs": 0.005158
+        },
+        "pch": {
+          "compiler invocation": 0.001754,
+          "parsed ast": 0.339386,
+          "precompiled headers": 0.033871,
+          "fold matches": 0.454454,
+          "resolve reflection context": 0.000148,
+          "emit outputs": 0.004821
+        }
+      }
+    }
+  ],
+  "disabledPathProbe": {
+    "rounds": 3,
+    "standard": 20,
+    "cpu_pinned": true,
+    "identical_commands": true,
+    "records": [
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 5.124716973979957,
+        "phases": {
+          "compiler invocation": 0.001459,
+          "emit outputs": 0.008783,
+          "fold matches": 0.639963,
+          "parsed ast": 4.463064,
+          "resolve reflection context": 0.000209
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 4.018337599001825,
+        "phases": {
+          "compiler invocation": 0.001616,
+          "emit outputs": 0.007124,
+          "fold matches": 0.403004,
+          "parsed ast": 3.596974,
+          "resolve reflection context": 0.000157
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.054784521023976,
+        "phases": {
+          "compiler invocation": 0.001,
+          "emit outputs": 0.012223,
+          "fold matches": 0.46263,
+          "parsed ast": 3.570525,
+          "resolve reflection context": 0.000264
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.4958160259993747,
+        "phases": {
+          "compiler invocation": 0.000872,
+          "emit outputs": 0.01756,
+          "fold matches": 0.517269,
+          "parsed ast": 2.951823,
+          "resolve reflection context": 0.000476
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.427517005999107,
+        "phases": {
+          "compiler invocation": 0.000811,
+          "emit outputs": 0.002182,
+          "fold matches": 0.435279,
+          "parsed ast": 2.981849,
+          "resolve reflection context": 4.5e-05
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.508057131024543,
+        "phases": {
+          "compiler invocation": 0.000779,
+          "emit outputs": 0.00773,
+          "fold matches": 0.424199,
+          "parsed ast": 3.066884,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.00018
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.41727255700971,
+        "phases": {
+          "compiler invocation": 0.000807,
+          "emit outputs": 0.007388,
+          "fold matches": 0.393539,
+          "parsed ast": 3.006562,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000149
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.0208403389842715,
+        "phases": {
+          "compiler invocation": 0.000992,
+          "emit outputs": 0.012307,
+          "fold matches": 0.430149,
+          "parsed ast": 3.567886,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000225
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.7293671810184605,
+        "phases": {
+          "compiler invocation": 0.000879,
+          "emit outputs": 0.018151,
+          "fold matches": 0.584128,
+          "parsed ast": 3.117646,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000418
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.9501520629855804,
+        "phases": {
+          "compiler invocation": 0.000884,
+          "emit outputs": 0.002803,
+          "fold matches": 0.504051,
+          "parsed ast": 3.433678,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 7.5e-05
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.617010115995072,
+        "phases": {
+          "compiler invocation": 0.000944,
+          "emit outputs": 0.008891,
+          "fold matches": 0.43282,
+          "parsed ast": 3.164669,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000225
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.2477066320134327,
+        "phases": {
+          "compiler invocation": 0.000896,
+          "emit outputs": 0.006669,
+          "fold matches": 0.397398,
+          "parsed ast": 2.833368,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000192
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.212304531014524,
+        "phases": {
+          "compiler invocation": 0.000767,
+          "emit outputs": 0.012648,
+          "fold matches": 0.476803,
+          "parsed ast": 3.713276,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.00029
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 4.2260371320007835,
+        "phases": {
+          "compiler invocation": 0.000861,
+          "emit outputs": 0.016881,
+          "fold matches": 0.620208,
+          "parsed ast": 3.579102,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000369
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.3486877609975636,
+        "phases": {
+          "compiler invocation": 0.00075,
+          "emit outputs": 0.00203,
+          "fold matches": 0.377087,
+          "parsed ast": 2.961822,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 4.3e-05
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.590692008001497,
+        "phases": {
+          "compiler invocation": 0.000754,
+          "emit outputs": 0.008692,
+          "fold matches": 0.479626,
+          "parsed ast": 3.092616,
+          "resolve reflection context": 0.0002
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.520326786005171,
+        "phases": {
+          "compiler invocation": 0.000958,
+          "emit outputs": 0.007256,
+          "fold matches": 0.448865,
+          "parsed ast": 3.054887,
+          "resolve reflection context": 0.00016
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.084815842012176,
+        "phases": {
+          "compiler invocation": 0.000877,
+          "emit outputs": 0.015583,
+          "fold matches": 0.476471,
+          "parsed ast": 3.582548,
+          "resolve reflection context": 0.000321
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 4.242085470003076,
+        "phases": {
+          "compiler invocation": 0.000999,
+          "emit outputs": 0.019796,
+          "fold matches": 0.661907,
+          "parsed ast": 3.549983,
+          "resolve reflection context": 0.000436
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.87592200099607,
+        "phases": {
+          "compiler invocation": 0.000948,
+          "emit outputs": 0.002316,
+          "fold matches": 0.439058,
+          "parsed ast": 3.425761,
+          "resolve reflection context": 4.8e-05
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.306313205976039,
+        "phases": {
+          "compiler invocation": 0.000741,
+          "emit outputs": 0.008209,
+          "fold matches": 0.398557,
+          "parsed ast": 2.891244,
+          "resolve reflection context": 0.000251
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.3227024330117274,
+        "phases": {
+          "compiler invocation": 0.000891,
+          "emit outputs": 0.00874,
+          "fold matches": 0.403723,
+          "parsed ast": 2.899227,
+          "resolve reflection context": 0.000239
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.087806298019132,
+        "phases": {
+          "compiler invocation": 0.001113,
+          "emit outputs": 0.014351,
+          "fold matches": 0.484172,
+          "parsed ast": 3.579372,
+          "resolve reflection context": 0.000282
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.8627691570145544,
+        "phases": {
+          "compiler invocation": 0.000876,
+          "emit outputs": 0.016559,
+          "fold matches": 0.519846,
+          "parsed ast": 3.317191,
+          "resolve reflection context": 0.000352
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.349167333013611,
+        "phases": {
+          "compiler invocation": 0.0007,
+          "emit outputs": 0.002054,
+          "fold matches": 0.372423,
+          "parsed ast": 2.967172,
+          "resolve reflection context": 4.1e-05
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 2.977808174007805,
+        "phases": {
+          "compiler invocation": 0.000718,
+          "emit outputs": 0.006666,
+          "fold matches": 0.358549,
+          "parsed ast": 2.6045,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000142
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.3508766379964072,
+        "phases": {
+          "compiler invocation": 0.00075,
+          "emit outputs": 0.007957,
+          "fold matches": 0.434907,
+          "parsed ast": 2.898883,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000219
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.2850323939928785,
+        "phases": {
+          "compiler invocation": 0.000926,
+          "emit outputs": 0.012468,
+          "fold matches": 0.47106,
+          "parsed ast": 3.791073,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000232
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.739323484012857,
+        "phases": {
+          "compiler invocation": 0.00083,
+          "emit outputs": 0.018738,
+          "fold matches": 0.607489,
+          "parsed ast": 3.102854,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000415
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.058998344989959,
+        "phases": {
+          "compiler invocation": 0.000859,
+          "emit outputs": 0.002193,
+          "fold matches": 0.412183,
+          "parsed ast": 2.635421,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 4.3e-05
+        }
+      }
+    ],
+    "master": {
+      "sequence_seconds": [
+        20.12117212600424,
+        19.31384210701799,
+        17.928758427035064
+      ],
+      "median_seconds": 19.31384210701799
+    },
+    "prototype-disabled": {
+      "sequence_seconds": [
+        18.625689271022566,
+        18.651746172021376,
+        17.412039034999907
+      ],
+      "median_seconds": 18.625689271022566
+    },
+    "change_percent": -3.5630033226033975
+  },
+  "files": [
+    {
+      "source": "benchmarks/instrumentation/baseline_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 31.313925,
+          "compilation": 118.697,
+          "combined": 150.01092500000001
+        },
+        "prototype-disabled": {
+          "instrumentation": 32.600679,
+          "compilation": 116.19500000000001,
+          "combined": 148.795679
+        },
+        "targeted-current": {
+          "instrumentation": 33.429141,
+          "compilation": 125.93199999999999,
+          "combined": 159.36114099999998
+        },
+        "ci-baseline": {
+          "instrumentation": 25.686134,
+          "compilation": 98.146,
+          "combined": 123.832134
+        },
+        "baseline": {
+          "instrumentation": 25.126793,
+          "compilation": 99.086,
+          "combined": 124.212793
+        },
+        "cached": {
+          "instrumentation": 27.447416,
+          "compilation": 99.41300000000001,
+          "combined": 126.86041600000001
+        },
+        "targeted": {
+          "instrumentation": 29.022975000000002,
+          "compilation": 98.324,
+          "combined": 127.346975
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/alias_mapping.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 35.639851,
+          "compilation": 52.481,
+          "combined": 88.120851
+        },
+        "prototype-disabled": {
+          "instrumentation": 35.603362000000004,
+          "compilation": 49.05200000000001,
+          "combined": 84.65536200000001
+        },
+        "targeted-current": {
+          "instrumentation": 41.566591,
+          "compilation": 56.303,
+          "combined": 97.869591
+        },
+        "ci-baseline": {
+          "instrumentation": 28.888282000000004,
+          "compilation": 42.332,
+          "combined": 71.220282
+        },
+        "baseline": {
+          "instrumentation": 28.973433,
+          "compilation": 43.012,
+          "combined": 71.985433
+        },
+        "cached": {
+          "instrumentation": 32.618014,
+          "compilation": 42.496,
+          "combined": 75.114014
+        },
+        "targeted": {
+          "instrumentation": 33.478974,
+          "compilation": 43.42999999999999,
+          "combined": 76.908974
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/container_discovery.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 40.50384,
+          "compilation": 84.869,
+          "combined": 125.37284
+        },
+        "prototype-disabled": {
+          "instrumentation": 39.533288999999996,
+          "compilation": 86.76800000000001,
+          "combined": 126.30128900000001
+        },
+        "targeted-current": {
+          "instrumentation": 42.889083,
+          "compilation": 91.05000000000001,
+          "combined": 133.939083
+        },
+        "ci-baseline": {
+          "instrumentation": 32.312446,
+          "compilation": 72.647,
+          "combined": 104.95944600000001
+        },
+        "baseline": {
+          "instrumentation": 32.423320000000004,
+          "compilation": 73.47300000000001,
+          "combined": 105.89632000000002
+        },
+        "cached": {
+          "instrumentation": 35.161129,
+          "compilation": 72.836,
+          "combined": 107.997129
+        },
+        "targeted": {
+          "instrumentation": 33.623484999999995,
+          "compilation": 73.108,
+          "combined": 106.73148499999999
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/diagnostics.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 32.025878999999996,
+          "compilation": 37.493,
+          "combined": 69.518879
+        },
+        "prototype-disabled": {
+          "instrumentation": 31.300209000000002,
+          "compilation": 38.697,
+          "combined": 69.997209
+        },
+        "targeted-current": {
+          "instrumentation": 31.548866999999998,
+          "compilation": 39.724000000000004,
+          "combined": 71.272867
+        },
+        "ci-baseline": {
+          "instrumentation": 25.037357999999998,
+          "compilation": 32.652,
+          "combined": 57.689358
+        },
+        "baseline": {
+          "instrumentation": 25.120212,
+          "compilation": 32.007,
+          "combined": 57.127212
+        },
+        "cached": {
+          "instrumentation": 24.287697,
+          "compilation": 31.278,
+          "combined": 55.565697
+        },
+        "targeted": {
+          "instrumentation": 24.898882,
+          "compilation": 32.641000000000005,
+          "combined": 57.539882000000006
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/dispatch.cpp",
+      "contexts": [
+        "cpp_11.json_ryml.test.dispatch",
+        "cpp_14.json_ryml.test.dispatch",
+        "cpp_17.json_ryml.test.dispatch",
+        "cpp_20.json_ryml.test.dispatch",
+        "cpp_23.json_ryml.test.dispatch"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 43.558884,
+          "compilation": 95.92,
+          "combined": 139.478884
+        },
+        "prototype-disabled": {
+          "instrumentation": 42.841002,
+          "compilation": 97.054,
+          "combined": 139.895002
+        },
+        "targeted-current": {
+          "instrumentation": 46.229023999999995,
+          "compilation": 106.585,
+          "combined": 152.814024
+        },
+        "ci-baseline": {
+          "instrumentation": 37.025166999999996,
+          "compilation": 86.113,
+          "combined": 123.138167
+        },
+        "baseline": {
+          "instrumentation": 35.507372000000004,
+          "compilation": 82.51299999999999,
+          "combined": 118.020372
+        },
+        "cached": {
+          "instrumentation": 42.340056,
+          "compilation": 80.328,
+          "combined": 122.668056
+        },
+        "targeted": {
+          "instrumentation": 34.617760999999994,
+          "compilation": 88.571,
+          "combined": 123.188761
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/inplace.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 38.399813,
+          "compilation": 76.238,
+          "combined": 114.637813
+        },
+        "prototype-disabled": {
+          "instrumentation": 37.428854,
+          "compilation": 76.005,
+          "combined": 113.433854
+        },
+        "targeted-current": {
+          "instrumentation": 34.372398000000004,
+          "compilation": 80.23,
+          "combined": 114.60239800000001
+        },
+        "ci-baseline": {
+          "instrumentation": 31.162858,
+          "compilation": 65.01400000000001,
+          "combined": 96.17685800000001
+        },
+        "baseline": {
+          "instrumentation": 30.959595,
+          "compilation": 64.226,
+          "combined": 95.185595
+        },
+        "cached": {
+          "instrumentation": 28.940636999999995,
+          "compilation": 64.302,
+          "combined": 93.242637
+        },
+        "targeted": {
+          "instrumentation": 28.651281,
+          "compilation": 64.975,
+          "combined": 93.62628099999999
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/json_mapping.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 41.364464000000005,
+          "compilation": 99.47,
+          "combined": 140.834464
+        },
+        "prototype-disabled": {
+          "instrumentation": 40.802828000000005,
+          "compilation": 97.756,
+          "combined": 138.558828
+        },
+        "targeted-current": {
+          "instrumentation": 34.011388000000004,
+          "compilation": 106.885,
+          "combined": 140.896388
+        },
+        "ci-baseline": {
+          "instrumentation": 33.501094,
+          "compilation": 83.73599999999999,
+          "combined": 117.23709399999998
+        },
+        "baseline": {
+          "instrumentation": 34.010276,
+          "compilation": 84.72,
+          "combined": 118.730276
+        },
+        "cached": {
+          "instrumentation": 26.954866000000003,
+          "compilation": 82.292,
+          "combined": 109.24686600000001
+        },
+        "targeted": {
+          "instrumentation": 27.680797000000002,
+          "compilation": 83.057,
+          "combined": 110.737797
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/main.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 61.679976,
+          "compilation": 349.82,
+          "combined": 411.499976
+        },
+        "prototype-disabled": {
+          "instrumentation": 61.239402,
+          "compilation": 352.62,
+          "combined": 413.859402
+        },
+        "targeted-current": {
+          "instrumentation": 53.704083,
+          "compilation": 377.92,
+          "combined": 431.62408300000004
+        },
+        "ci-baseline": {
+          "instrumentation": 51.150256,
+          "compilation": 299.583,
+          "combined": 350.73325600000004
+        },
+        "baseline": {
+          "instrumentation": 50.721927,
+          "compilation": 301.02700000000004,
+          "combined": 351.74892700000004
+        },
+        "cached": {
+          "instrumentation": 43.237425,
+          "compilation": 295.992,
+          "combined": 339.229425
+        },
+        "targeted": {
+          "instrumentation": 42.557292000000004,
+          "compilation": 299.874,
+          "combined": 342.43129200000004
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/optional_mapping.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 40.37037,
+          "compilation": 58.422,
+          "combined": 98.79237
+        },
+        "prototype-disabled": {
+          "instrumentation": 39.83688,
+          "compilation": 59.296,
+          "combined": 99.13288
+        },
+        "targeted-current": {
+          "instrumentation": 30.369101999999998,
+          "compilation": 61.394999999999996,
+          "combined": 91.764102
+        },
+        "ci-baseline": {
+          "instrumentation": 33.165313000000005,
+          "compilation": 50.519999999999996,
+          "combined": 83.68531300000001
+        },
+        "baseline": {
+          "instrumentation": 33.491001,
+          "compilation": 49.96,
+          "combined": 83.45100099999999
+        },
+        "cached": {
+          "instrumentation": 25.226321000000002,
+          "compilation": 49.230000000000004,
+          "combined": 74.456321
+        },
+        "targeted": {
+          "instrumentation": 25.974381999999995,
+          "compilation": 48.532,
+          "combined": 74.50638199999999
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/scalar_roots.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 43.393412999999995,
+          "compilation": 99.513,
+          "combined": 142.906413
+        },
+        "prototype-disabled": {
+          "instrumentation": 43.433689,
+          "compilation": 98.187,
+          "combined": 141.620689
+        },
+        "targeted-current": {
+          "instrumentation": 34.801564,
+          "compilation": 106.07400000000001,
+          "combined": 140.875564
+        },
+        "ci-baseline": {
+          "instrumentation": 35.459398,
+          "compilation": 83.281,
+          "combined": 118.740398
+        },
+        "baseline": {
+          "instrumentation": 35.065257,
+          "compilation": 84.80099999999999,
+          "combined": 119.86625699999999
+        },
+        "cached": {
+          "instrumentation": 27.638513000000003,
+          "compilation": 81.90299999999999,
+          "combined": 109.541513
+        },
+        "targeted": {
+          "instrumentation": 27.262249999999998,
+          "compilation": 83.57100000000001,
+          "combined": 110.83325
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/sequence_roots.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 34.530488999999996,
+          "compilation": 64.64,
+          "combined": 99.170489
+        },
+        "prototype-disabled": {
+          "instrumentation": 34.135084,
+          "compilation": 62.65,
+          "combined": 96.785084
+        },
+        "targeted-current": {
+          "instrumentation": 25.543351,
+          "compilation": 68.28200000000001,
+          "combined": 93.82535100000001
+        },
+        "ci-baseline": {
+          "instrumentation": 28.282415999999998,
+          "compilation": 53.754,
+          "combined": 82.036416
+        },
+        "baseline": {
+          "instrumentation": 28.997945,
+          "compilation": 54.077,
+          "combined": 83.074945
+        },
+        "cached": {
+          "instrumentation": 20.636905,
+          "compilation": 53.03,
+          "combined": 73.666905
+        },
+        "targeted": {
+          "instrumentation": 20.541916999999998,
+          "compilation": 52.92100000000001,
+          "combined": 73.462917
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/string_mapping.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 30.327935000000004,
+          "compilation": 36.944,
+          "combined": 67.27193500000001
+        },
+        "prototype-disabled": {
+          "instrumentation": 29.459632999999997,
+          "compilation": 37.076,
+          "combined": 66.53563299999999
+        },
+        "targeted-current": {
+          "instrumentation": 21.074167,
+          "compilation": 39.307,
+          "combined": 60.381167000000005
+        },
+        "ci-baseline": {
+          "instrumentation": 25.162878,
+          "compilation": 31.27,
+          "combined": 56.432878
+        },
+        "baseline": {
+          "instrumentation": 25.890653,
+          "compilation": 31.331999999999997,
+          "combined": 57.222652999999994
+        },
+        "cached": {
+          "instrumentation": 16.46816,
+          "compilation": 30.43,
+          "combined": 46.898160000000004
+        },
+        "targeted": {
+          "instrumentation": 17.194327,
+          "compilation": 30.179000000000002,
+          "combined": 47.373327
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/to_enum.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 36.003133000000005,
+          "compilation": 49.093,
+          "combined": 85.09613300000001
+        },
+        "prototype-disabled": {
+          "instrumentation": 35.147749,
+          "compilation": 47.58,
+          "combined": 82.72774899999999
+        },
+        "targeted-current": {
+          "instrumentation": 26.513832999999998,
+          "compilation": 52.002,
+          "combined": 78.515833
+        },
+        "ci-baseline": {
+          "instrumentation": 29.87784,
+          "compilation": 40.681000000000004,
+          "combined": 70.55884
+        },
+        "baseline": {
+          "instrumentation": 29.703746000000002,
+          "compilation": 41.402,
+          "combined": 71.10574600000001
+        },
+        "cached": {
+          "instrumentation": 21.852127,
+          "compilation": 39.641999999999996,
+          "combined": 61.49412699999999
+        },
+        "targeted": {
+          "instrumentation": 21.677407999999996,
+          "compilation": 40.452,
+          "combined": 62.129408
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/to_range.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 52.628412000000004,
+          "compilation": 121.396,
+          "combined": 174.024412
+        },
+        "prototype-disabled": {
+          "instrumentation": 52.128172,
+          "compilation": 121.857,
+          "combined": 173.985172
+        },
+        "targeted-current": {
+          "instrumentation": 41.808538,
+          "compilation": 129.266,
+          "combined": 171.074538
+        },
+        "ci-baseline": {
+          "instrumentation": 43.410388000000005,
+          "compilation": 103.438,
+          "combined": 146.848388
+        },
+        "baseline": {
+          "instrumentation": 44.496404000000005,
+          "compilation": 105.524,
+          "combined": 150.020404
+        },
+        "cached": {
+          "instrumentation": 34.017486999999996,
+          "compilation": 102.65100000000001,
+          "combined": 136.668487
+        },
+        "targeted": {
+          "instrumentation": 34.231951,
+          "compilation": 102.36,
+          "combined": 136.591951
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/to_record.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 40.610206,
+          "compilation": 79.361,
+          "combined": 119.971206
+        },
+        "prototype-disabled": {
+          "instrumentation": 41.010958,
+          "compilation": 80.057,
+          "combined": 121.067958
+        },
+        "targeted-current": {
+          "instrumentation": 30.544693,
+          "compilation": 87.504,
+          "combined": 118.048693
+        },
+        "ci-baseline": {
+          "instrumentation": 34.119651000000005,
+          "compilation": 67.84,
+          "combined": 101.95965100000001
+        },
+        "baseline": {
+          "instrumentation": 34.259788,
+          "compilation": 69.557,
+          "combined": 103.816788
+        },
+        "cached": {
+          "instrumentation": 23.684891,
+          "compilation": 67.022,
+          "combined": 90.70689100000001
+        },
+        "targeted": {
+          "instrumentation": 24.991656000000003,
+          "compilation": 66.816,
+          "combined": 91.80765600000001
+        }
+      }
+    },
+    {
+      "source": "extensions/serialization/tests/type_mapping.cpp",
+      "contexts": [
+        "cpp_11.extensions.serialization",
+        "cpp_14.extensions.serialization",
+        "cpp_17.extensions.serialization",
+        "cpp_20.extensions.serialization",
+        "cpp_23.extensions.serialization"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 36.676517,
+          "compilation": 57.214,
+          "combined": 93.89051699999999
+        },
+        "prototype-disabled": {
+          "instrumentation": 35.885002,
+          "compilation": 57.815,
+          "combined": 93.700002
+        },
+        "targeted-current": {
+          "instrumentation": 25.389709,
+          "compilation": 60.31400000000001,
+          "combined": 85.703709
+        },
+        "ci-baseline": {
+          "instrumentation": 30.649568000000002,
+          "compilation": 49.605000000000004,
+          "combined": 80.254568
+        },
+        "baseline": {
+          "instrumentation": 30.261704,
+          "compilation": 48.838,
+          "combined": 79.099704
+        },
+        "cached": {
+          "instrumentation": 20.179545,
+          "compilation": 48.70399999999999,
+          "combined": 68.883545
+        },
+        "targeted": {
+          "instrumentation": 20.985302,
+          "compilation": 49.14900000000001,
+          "combined": 70.134302
+        }
+      }
+    },
+    {
+      "source": "tests/ccdb_query/dummy/shared.cpp",
+      "contexts": [
+        "alpha",
+        "beta"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 0,
+          "compilation": 0.063,
+          "combined": 0.063
+        },
+        "prototype-disabled": {
+          "instrumentation": 0,
+          "compilation": 0.060000000000000005,
+          "combined": 0.060000000000000005
+        },
+        "targeted-current": {
+          "instrumentation": 0,
+          "compilation": 0.06,
+          "combined": 0.06
+        },
+        "ci-baseline": {
+          "instrumentation": 0,
+          "compilation": 0.049,
+          "combined": 0.049
+        },
+        "baseline": {
+          "instrumentation": 0,
+          "compilation": 0.034,
+          "combined": 0.034
+        },
+        "cached": {
+          "instrumentation": 0,
+          "compilation": 0.054,
+          "combined": 0.054
+        },
+        "targeted": {
+          "instrumentation": 0,
+          "compilation": 0.049,
+          "combined": 0.049
+        }
+      }
+    },
+    {
+      "source": "tests/ccdb_query/dummy/unique.cpp",
+      "contexts": [
+        "unique_target"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 0,
+          "compilation": 0.035,
+          "combined": 0.035
+        },
+        "prototype-disabled": {
+          "instrumentation": 0,
+          "compilation": 0.027,
+          "combined": 0.027
+        },
+        "targeted-current": {
+          "instrumentation": 0,
+          "compilation": 0.032,
+          "combined": 0.032
+        },
+        "ci-baseline": {
+          "instrumentation": 0,
+          "compilation": 0.025,
+          "combined": 0.025
+        },
+        "baseline": {
+          "instrumentation": 0,
+          "compilation": 0.022,
+          "combined": 0.022
+        },
+        "cached": {
+          "instrumentation": 0,
+          "compilation": 0.039,
+          "combined": 0.039
+        },
+        "targeted": {
+          "instrumentation": 0,
+          "compilation": 0.027,
+          "combined": 0.027
+        }
+      }
+    },
+    {
+      "source": "tests/functional/compat_pair.cpp",
+      "contexts": [
+        "cpp_11.functional",
+        "cpp_14.functional",
+        "cpp_17.functional",
+        "cpp_20.functional",
+        "cpp_23.functional"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 21.030776,
+          "compilation": 19.075,
+          "combined": 40.105776
+        },
+        "prototype-disabled": {
+          "instrumentation": 20.110298,
+          "compilation": 19.003999999999998,
+          "combined": 39.114298
+        },
+        "targeted-current": {
+          "instrumentation": 28.320415,
+          "compilation": 20.698,
+          "combined": 49.018415000000005
+        },
+        "ci-baseline": {
+          "instrumentation": 16.397964,
+          "compilation": 15.740000000000002,
+          "combined": 32.137964000000004
+        },
+        "baseline": {
+          "instrumentation": 17.629869000000003,
+          "compilation": 16.139,
+          "combined": 33.768869
+        },
+        "cached": {
+          "instrumentation": 20.818953,
+          "compilation": 16.362000000000002,
+          "combined": 37.180953
+        },
+        "targeted": {
+          "instrumentation": 19.856864,
+          "compilation": 15.981,
+          "combined": 35.837864
+        }
+      }
+    },
+    {
+      "source": "tests/functional/main.cpp",
+      "contexts": [
+        "cpp_11.functional",
+        "cpp_14.functional",
+        "cpp_17.functional",
+        "cpp_20.functional",
+        "cpp_23.functional"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 42.716899,
+          "compilation": 93.386,
+          "combined": 136.10289899999998
+        },
+        "prototype-disabled": {
+          "instrumentation": 41.449301000000006,
+          "compilation": 92.417,
+          "combined": 133.86630100000002
+        },
+        "targeted-current": {
+          "instrumentation": 51.48474,
+          "compilation": 100.096,
+          "combined": 151.58074
+        },
+        "ci-baseline": {
+          "instrumentation": 33.479454,
+          "compilation": 78.09400000000001,
+          "combined": 111.573454
+        },
+        "baseline": {
+          "instrumentation": 34.22837799999999,
+          "compilation": 79.05799999999999,
+          "combined": 113.28637799999998
+        },
+        "cached": {
+          "instrumentation": 36.513692999999996,
+          "compilation": 78.613,
+          "combined": 115.12669299999999
+        },
+        "targeted": {
+          "instrumentation": 36.547741,
+          "compilation": 77.983,
+          "combined": 114.530741
+        }
+      }
+    },
+    {
+      "source": "tests/tool/aggregate_into/test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 20.468515,
+          "compilation": 23.872,
+          "combined": 44.340514999999996
+        },
+        "prototype-disabled": {
+          "instrumentation": 20.991152999999997,
+          "compilation": 23.528,
+          "combined": 44.519152999999996
+        },
+        "targeted-current": {
+          "instrumentation": 9.920138,
+          "compilation": 25.066000000000003,
+          "combined": 34.986138000000004
+        },
+        "ci-baseline": {
+          "instrumentation": 17.061291,
+          "compilation": 19.977,
+          "combined": 37.038291
+        },
+        "baseline": {
+          "instrumentation": 17.166355,
+          "compilation": 20.381999999999998,
+          "combined": 37.548355
+        },
+        "cached": {
+          "instrumentation": 8.256107,
+          "compilation": 20.58,
+          "combined": 28.836107
+        },
+        "targeted": {
+          "instrumentation": 8.596518999999999,
+          "compilation": 19.947,
+          "combined": 28.543518999999996
+        }
+      }
+    },
+    {
+      "source": "tests/tool/binding_metadata_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 22.747113,
+          "compilation": 35.980000000000004,
+          "combined": 58.727113
+        },
+        "prototype-disabled": {
+          "instrumentation": 24.099935,
+          "compilation": 35.028999999999996,
+          "combined": 59.128935
+        },
+        "targeted-current": {
+          "instrumentation": 26.206353,
+          "compilation": 37.909,
+          "combined": 64.115353
+        },
+        "ci-baseline": {
+          "instrumentation": 19.183366999999997,
+          "compilation": 30.567,
+          "combined": 49.750367
+        },
+        "baseline": {
+          "instrumentation": 18.519928,
+          "compilation": 30.400999999999996,
+          "combined": 48.920927999999996
+        },
+        "cached": {
+          "instrumentation": 21.933472000000002,
+          "compilation": 30.733000000000004,
+          "combined": 52.666472000000006
+        },
+        "targeted": {
+          "instrumentation": 21.487673,
+          "compilation": 29.554,
+          "combined": 51.041673
+        }
+      }
+    },
+    {
+      "source": "tests/tool/dependency_alias_depth_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 19.710027,
+          "compilation": 8.765,
+          "combined": 28.475027
+        },
+        "prototype-disabled": {
+          "instrumentation": 20.363965,
+          "compilation": 8.642,
+          "combined": 29.005965
+        },
+        "targeted-current": {
+          "instrumentation": 21.939534000000002,
+          "compilation": 9.671000000000001,
+          "combined": 31.610534
+        },
+        "ci-baseline": {
+          "instrumentation": 16.633864000000003,
+          "compilation": 7.586,
+          "combined": 24.219864
+        },
+        "baseline": {
+          "instrumentation": 16.426997,
+          "compilation": 7.811999999999999,
+          "combined": 24.238996999999998
+        },
+        "cached": {
+          "instrumentation": 15.546492,
+          "compilation": 7.698,
+          "combined": 23.244492
+        },
+        "targeted": {
+          "instrumentation": 17.666404,
+          "compilation": 7.7059999999999995,
+          "combined": 25.372404
+        }
+      }
+    },
+    {
+      "source": "tests/tool/dependent_types_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 25.525295,
+          "compilation": 70.28,
+          "combined": 95.805295
+        },
+        "prototype-disabled": {
+          "instrumentation": 27.016313999999998,
+          "compilation": 69.715,
+          "combined": 96.731314
+        },
+        "targeted-current": {
+          "instrumentation": 27.730173,
+          "compilation": 74.161,
+          "combined": 101.89117300000001
+        },
+        "ci-baseline": {
+          "instrumentation": 21.417296,
+          "compilation": 58.787,
+          "combined": 80.204296
+        },
+        "baseline": {
+          "instrumentation": 21.107281999999998,
+          "compilation": 59.097,
+          "combined": 80.204282
+        },
+        "cached": {
+          "instrumentation": 20.625257,
+          "compilation": 59.855999999999995,
+          "combined": 80.481257
+        },
+        "targeted": {
+          "instrumentation": 22.088772,
+          "compilation": 58.745999999999995,
+          "combined": 80.83477199999999
+        }
+      }
+    },
+    {
+      "source": "tests/tool/example_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 20.075559,
+          "compilation": 12.342,
+          "combined": 32.417559
+        },
+        "prototype-disabled": {
+          "instrumentation": 20.39024,
+          "compilation": 12.795,
+          "combined": 33.18524
+        },
+        "targeted-current": {
+          "instrumentation": 19.297259,
+          "compilation": 13.931000000000001,
+          "combined": 33.228259
+        },
+        "ci-baseline": {
+          "instrumentation": 16.364079,
+          "compilation": 10.743,
+          "combined": 27.107079
+        },
+        "baseline": {
+          "instrumentation": 16.611181000000002,
+          "compilation": 10.876,
+          "combined": 27.487181
+        },
+        "cached": {
+          "instrumentation": 14.655187000000002,
+          "compilation": 10.724,
+          "combined": 25.379187
+        },
+        "targeted": {
+          "instrumentation": 16.67566,
+          "compilation": 10.513,
+          "combined": 27.18866
+        }
+      }
+    },
+    {
+      "source": "tests/tool/function_metadata_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 21.131831,
+          "compilation": 32.343,
+          "combined": 53.474831
+        },
+        "prototype-disabled": {
+          "instrumentation": 22.154508,
+          "compilation": 32.245000000000005,
+          "combined": 54.399508000000004
+        },
+        "targeted-current": {
+          "instrumentation": 21.567406000000002,
+          "compilation": 34.572,
+          "combined": 56.13940600000001
+        },
+        "ci-baseline": {
+          "instrumentation": 17.541367,
+          "compilation": 26.898,
+          "combined": 44.439367000000004
+        },
+        "baseline": {
+          "instrumentation": 17.505506000000004,
+          "compilation": 27.442,
+          "combined": 44.947506000000004
+        },
+        "cached": {
+          "instrumentation": 15.717193,
+          "compilation": 27.775000000000002,
+          "combined": 43.492193
+        },
+        "targeted": {
+          "instrumentation": 18.328674999999997,
+          "compilation": 27.006,
+          "combined": 45.334675
+        }
+      }
+    },
+    {
+      "source": "tests/tool/interface_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 25.601412000000003,
+          "compilation": 75.743,
+          "combined": 101.344412
+        },
+        "prototype-disabled": {
+          "instrumentation": 26.595487,
+          "compilation": 77.196,
+          "combined": 103.79148699999999
+        },
+        "targeted-current": {
+          "instrumentation": 20.843335,
+          "compilation": 83.301,
+          "combined": 104.144335
+        },
+        "ci-baseline": {
+          "instrumentation": 21.516599,
+          "compilation": 64.364,
+          "combined": 85.880599
+        },
+        "baseline": {
+          "instrumentation": 20.754535,
+          "compilation": 64.593,
+          "combined": 85.34753500000001
+        },
+        "cached": {
+          "instrumentation": 16.351236,
+          "compilation": 66.34700000000001,
+          "combined": 82.69823600000001
+        },
+        "targeted": {
+          "instrumentation": 16.890179000000003,
+          "compilation": 64.00999999999999,
+          "combined": 80.900179
+        }
+      }
+    },
+    {
+      "source": "tests/tool/packed_field_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 20.913132,
+          "compilation": 18.491,
+          "combined": 39.404132000000004
+        },
+        "prototype-disabled": {
+          "instrumentation": 21.299955,
+          "compilation": 18.887,
+          "combined": 40.186955
+        },
+        "targeted-current": {
+          "instrumentation": 10.710854,
+          "compilation": 20.617,
+          "combined": 31.327854000000002
+        },
+        "ci-baseline": {
+          "instrumentation": 17.382151,
+          "compilation": 15.826,
+          "combined": 33.208151
+        },
+        "baseline": {
+          "instrumentation": 16.564625,
+          "compilation": 16.412,
+          "combined": 32.976625
+        },
+        "cached": {
+          "instrumentation": 8.690767999999998,
+          "compilation": 16.539,
+          "combined": 25.229768
+        },
+        "targeted": {
+          "instrumentation": 8.486459,
+          "compilation": 15.807,
+          "combined": 24.293459
+        }
+      }
+    },
+    {
+      "source": "tests/tool/regressions/nested_template_field_name.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 18.913017,
+          "compilation": 12.355,
+          "combined": 31.268017
+        },
+        "prototype-disabled": {
+          "instrumentation": 20.650595,
+          "compilation": 12.236999999999998,
+          "combined": 32.887595
+        },
+        "targeted-current": {
+          "instrumentation": 8.65184,
+          "compilation": 12.783000000000001,
+          "combined": 21.43484
+        },
+        "ci-baseline": {
+          "instrumentation": 15.832982000000001,
+          "compilation": 9.944,
+          "combined": 25.776982000000004
+        },
+        "baseline": {
+          "instrumentation": 15.770913,
+          "compilation": 9.958,
+          "combined": 25.728913
+        },
+        "cached": {
+          "instrumentation": 7.238214,
+          "compilation": 10.122,
+          "combined": 17.360214
+        },
+        "targeted": {
+          "instrumentation": 7.31323,
+          "compilation": 9.812000000000001,
+          "combined": 17.125230000000002
+        }
+      }
+    },
+    {
+      "source": "tests/tool/static_members_test.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 22.421399,
+          "compilation": 28.683999999999997,
+          "combined": 51.105399
+        },
+        "prototype-disabled": {
+          "instrumentation": 22.733424,
+          "compilation": 28.790000000000003,
+          "combined": 51.523424000000006
+        },
+        "targeted-current": {
+          "instrumentation": 11.582347,
+          "compilation": 30.752000000000002,
+          "combined": 42.334347
+        },
+        "ci-baseline": {
+          "instrumentation": 18.362343000000003,
+          "compilation": 24.189,
+          "combined": 42.551343
+        },
+        "baseline": {
+          "instrumentation": 17.985369999999996,
+          "compilation": 24.118000000000002,
+          "combined": 42.10337
+        },
+        "cached": {
+          "instrumentation": 9.578991,
+          "compilation": 24.848,
+          "combined": 34.426991
+        },
+        "targeted": {
+          "instrumentation": 9.101421,
+          "compilation": 23.561999999999998,
+          "combined": 32.663421
+        }
+      }
+    },
+    {
+      "source": "tests/tool/test_main.cpp",
+      "contexts": [
+        "cpp_11.test",
+        "cpp_14.test",
+        "cpp_17.test",
+        "cpp_20.test",
+        "cpp_23.test"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 18.569157,
+          "compilation": 12.895,
+          "combined": 31.464157
+        },
+        "prototype-disabled": {
+          "instrumentation": 19.233535,
+          "compilation": 12.327,
+          "combined": 31.560535
+        },
+        "targeted-current": {
+          "instrumentation": 8.574337,
+          "compilation": 14.251,
+          "combined": 22.825336999999998
+        },
+        "ci-baseline": {
+          "instrumentation": 15.682894000000001,
+          "compilation": 11.043,
+          "combined": 26.725894
+        },
+        "baseline": {
+          "instrumentation": 15.441647999999999,
+          "compilation": 10.934000000000001,
+          "combined": 26.375647999999998
+        },
+        "cached": {
+          "instrumentation": 6.565527,
+          "compilation": 11.155000000000001,
+          "combined": 17.720527
+        },
+        "targeted": {
+          "instrumentation": 6.647665,
+          "compilation": 10.452000000000002,
+          "combined": 17.099665
+        }
+      }
+    },
+    {
+      "source": "tests/tool/test_static_odr.cpp",
+      "contexts": [
+        "cpp_11.test.static_odr",
+        "cpp_14.test.static_odr",
+        "cpp_17.test.static_odr",
+        "cpp_20.test.static_odr",
+        "cpp_23.test.static_odr"
+      ],
+      "policies": {
+        "master": {
+          "instrumentation": 17.902402000000002,
+          "compilation": 12.412,
+          "combined": 30.314402
+        },
+        "prototype-disabled": {
+          "instrumentation": 18.705892,
+          "compilation": 12.546999999999999,
+          "combined": 31.252891999999996
+        },
+        "targeted-current": {
+          "instrumentation": 13.934212,
+          "compilation": 13.717,
+          "combined": 27.651212
+        },
+        "ci-baseline": {
+          "instrumentation": 14.548164000000002,
+          "compilation": 10.895,
+          "combined": 25.443164000000003
+        },
+        "baseline": {
+          "instrumentation": 14.084841,
+          "compilation": 11.14,
+          "combined": 25.224841
+        },
+        "cached": {
+          "instrumentation": 19.514021999999997,
+          "compilation": 10.702,
+          "combined": 30.216021999999995
+        },
+        "targeted": {
+          "instrumentation": 12.008596,
+          "compilation": 10.270999999999999,
+          "combined": 22.279595999999998
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "files": 32,
+    "compiledContexts": 153,
+    "instrumentedContexts": 150,
+    "allInstrumentationCalls": 150
+  }
+}

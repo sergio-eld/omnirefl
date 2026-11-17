@@ -443,6 +443,50 @@
     "runs_per_policy": 1,
     "runs": [
       {
+        "mode": "master",
+        "commit": "1d72e76",
+        "parallel": 8,
+        "package": "/tmp/omnirefl-pch-base-master-package",
+        "binary_sha256": "e719861e6f994ff030d417d522194f9a30c82893781191ef2dfa2919d6cde44c",
+        "configure_seconds": 1.7691682160075288,
+        "configure_exit": 0,
+        "build_seconds": 382.1210576540034,
+        "build_exit": 0,
+        "validation": "Clean build succeeded; CTest is excluded from this build-performance comparison",
+        "change_from_master_build_percent": 0.0,
+        "pch_targets": 0
+      },
+      {
+        "mode": "prototype-disabled",
+        "commit": "f1e1c78",
+        "parallel": 8,
+        "package": "/tmp/omnirefl-pch-final-package",
+        "binary_sha256": "6b322456d6cdd028b3adb0980ed48fc66a90efeaeefd3e18b2aa3dedcfac16ec",
+        "configure_seconds": 1.818388870015042,
+        "configure_exit": 0,
+        "build_seconds": 381.5064602220082,
+        "build_exit": 0,
+        "validation": "Clean build succeeded; CTest is excluded from this build-performance comparison",
+        "change_from_master_build_percent": -0.16083840963082574,
+        "pch_targets": 0
+      },
+      {
+        "mode": "targeted-current",
+        "commit": "f1e1c78",
+        "parallel": 8,
+        "package": "/tmp/omnirefl-pch-final-package",
+        "pch_targets": 15,
+        "binary_sha256": "6b322456d6cdd028b3adb0980ed48fc66a90efeaeefd3e18b2aa3dedcfac16ec",
+        "configure_seconds": 1.5676908759924117,
+        "configure_exit": 0,
+        "build_seconds": 392.70364201199845,
+        "build_exit": 0,
+        "validation": "Clean build succeeded; CTest excluded from this build-performance comparison",
+        "change_from_master_build_percent": 2.769432394792859
+      }
+    ],
+    "earlier_runs": [
+      {
         "mode": "baseline",
         "parallel": 8,
         "configure_seconds": 1.3698256769857835,
@@ -452,7 +496,7 @@
         "test_seconds": 361.4453235040128,
         "test_exit": 0,
         "total_seconds": 695.0640056770062,
-        "change_from_stock_ci_percent": 13.446298774883658,
+        "change_from_no_pch_percent": 13.446298774883658,
         "passed_tests": 249,
         "disabled_tests": 28,
         "registered_tests": 277,
@@ -468,7 +512,7 @@
         "test_seconds": 378.3225914129871,
         "test_exit": 0,
         "total_seconds": 695.634276487981,
-        "change_from_stock_ci_percent": 13.539376696162897,
+        "change_from_no_pch_percent": 13.539376696162897,
         "passed_tests": 249,
         "disabled_tests": 28,
         "registered_tests": 277,
@@ -484,7 +528,7 @@
         "test_seconds": 290.3692821850127,
         "test_exit": 0,
         "total_seconds": 612.681077464018,
-        "change_from_stock_ci_percent": 0.0,
+        "change_from_no_pch_percent": 0.0,
         "passed_tests": 249,
         "disabled_tests": 28,
         "registered_tests": 277,
@@ -500,12 +544,447 @@
         "test_seconds": 279.5227769589983,
         "test_exit": 0,
         "total_seconds": 592.8575258689816,
-        "change_from_stock_ci_percent": -3.235541674812148,
+        "change_from_no_pch_percent": -3.235541674812148,
         "passed_tests": 249,
         "disabled_tests": 28,
         "registered_tests": 277,
         "pch_targets": 15
       }
-    ]
+    ],
+    "baseline_commit": "1d72e76",
+    "prototype_commit": "f1e1c78",
+    "measurement": "Local sequential runs; master, prototype disabled, targeted PCH/cache",
+    "tool_build_type": "RelWithDebInfo",
+    "consumer_build_type": "Release"
+  },
+  "disabled_path_probe": {
+    "rounds": 3,
+    "standard": 20,
+    "cpu_pinned": true,
+    "identical_commands": true,
+    "records": [
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 5.124716973979957,
+        "phases": {
+          "compiler invocation": 0.001459,
+          "emit outputs": 0.008783,
+          "fold matches": 0.639963,
+          "parsed ast": 4.463064,
+          "resolve reflection context": 0.000209
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 4.018337599001825,
+        "phases": {
+          "compiler invocation": 0.001616,
+          "emit outputs": 0.007124,
+          "fold matches": 0.403004,
+          "parsed ast": 3.596974,
+          "resolve reflection context": 0.000157
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.054784521023976,
+        "phases": {
+          "compiler invocation": 0.001,
+          "emit outputs": 0.012223,
+          "fold matches": 0.46263,
+          "parsed ast": 3.570525,
+          "resolve reflection context": 0.000264
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.4958160259993747,
+        "phases": {
+          "compiler invocation": 0.000872,
+          "emit outputs": 0.01756,
+          "fold matches": 0.517269,
+          "parsed ast": 2.951823,
+          "resolve reflection context": 0.000476
+        }
+      },
+      {
+        "round": 0,
+        "mode": "master",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.427517005999107,
+        "phases": {
+          "compiler invocation": 0.000811,
+          "emit outputs": 0.002182,
+          "fold matches": 0.435279,
+          "parsed ast": 2.981849,
+          "resolve reflection context": 4.5e-05
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.508057131024543,
+        "phases": {
+          "compiler invocation": 0.000779,
+          "emit outputs": 0.00773,
+          "fold matches": 0.424199,
+          "parsed ast": 3.066884,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.00018
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.41727255700971,
+        "phases": {
+          "compiler invocation": 0.000807,
+          "emit outputs": 0.007388,
+          "fold matches": 0.393539,
+          "parsed ast": 3.006562,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000149
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.0208403389842715,
+        "phases": {
+          "compiler invocation": 0.000992,
+          "emit outputs": 0.012307,
+          "fold matches": 0.430149,
+          "parsed ast": 3.567886,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000225
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.7293671810184605,
+        "phases": {
+          "compiler invocation": 0.000879,
+          "emit outputs": 0.018151,
+          "fold matches": 0.584128,
+          "parsed ast": 3.117646,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000418
+        }
+      },
+      {
+        "round": 0,
+        "mode": "prototype-disabled",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.9501520629855804,
+        "phases": {
+          "compiler invocation": 0.000884,
+          "emit outputs": 0.002803,
+          "fold matches": 0.504051,
+          "parsed ast": 3.433678,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 7.5e-05
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.617010115995072,
+        "phases": {
+          "compiler invocation": 0.000944,
+          "emit outputs": 0.008891,
+          "fold matches": 0.43282,
+          "parsed ast": 3.164669,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000225
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.2477066320134327,
+        "phases": {
+          "compiler invocation": 0.000896,
+          "emit outputs": 0.006669,
+          "fold matches": 0.397398,
+          "parsed ast": 2.833368,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000192
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.212304531014524,
+        "phases": {
+          "compiler invocation": 0.000767,
+          "emit outputs": 0.012648,
+          "fold matches": 0.476803,
+          "parsed ast": 3.713276,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.00029
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 4.2260371320007835,
+        "phases": {
+          "compiler invocation": 0.000861,
+          "emit outputs": 0.016881,
+          "fold matches": 0.620208,
+          "parsed ast": 3.579102,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000369
+        }
+      },
+      {
+        "round": 1,
+        "mode": "prototype-disabled",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.3486877609975636,
+        "phases": {
+          "compiler invocation": 0.00075,
+          "emit outputs": 0.00203,
+          "fold matches": 0.377087,
+          "parsed ast": 2.961822,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 4.3e-05
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.590692008001497,
+        "phases": {
+          "compiler invocation": 0.000754,
+          "emit outputs": 0.008692,
+          "fold matches": 0.479626,
+          "parsed ast": 3.092616,
+          "resolve reflection context": 0.0002
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.520326786005171,
+        "phases": {
+          "compiler invocation": 0.000958,
+          "emit outputs": 0.007256,
+          "fold matches": 0.448865,
+          "parsed ast": 3.054887,
+          "resolve reflection context": 0.00016
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.084815842012176,
+        "phases": {
+          "compiler invocation": 0.000877,
+          "emit outputs": 0.015583,
+          "fold matches": 0.476471,
+          "parsed ast": 3.582548,
+          "resolve reflection context": 0.000321
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 4.242085470003076,
+        "phases": {
+          "compiler invocation": 0.000999,
+          "emit outputs": 0.019796,
+          "fold matches": 0.661907,
+          "parsed ast": 3.549983,
+          "resolve reflection context": 0.000436
+        }
+      },
+      {
+        "round": 1,
+        "mode": "master",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.87592200099607,
+        "phases": {
+          "compiler invocation": 0.000948,
+          "emit outputs": 0.002316,
+          "fold matches": 0.439058,
+          "parsed ast": 3.425761,
+          "resolve reflection context": 4.8e-05
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 3.306313205976039,
+        "phases": {
+          "compiler invocation": 0.000741,
+          "emit outputs": 0.008209,
+          "fold matches": 0.398557,
+          "parsed ast": 2.891244,
+          "resolve reflection context": 0.000251
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.3227024330117274,
+        "phases": {
+          "compiler invocation": 0.000891,
+          "emit outputs": 0.00874,
+          "fold matches": 0.403723,
+          "parsed ast": 2.899227,
+          "resolve reflection context": 0.000239
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.087806298019132,
+        "phases": {
+          "compiler invocation": 0.001113,
+          "emit outputs": 0.014351,
+          "fold matches": 0.484172,
+          "parsed ast": 3.579372,
+          "resolve reflection context": 0.000282
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.8627691570145544,
+        "phases": {
+          "compiler invocation": 0.000876,
+          "emit outputs": 0.016559,
+          "fold matches": 0.519846,
+          "parsed ast": 3.317191,
+          "resolve reflection context": 0.000352
+        }
+      },
+      {
+        "round": 2,
+        "mode": "master",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.349167333013611,
+        "phases": {
+          "compiler invocation": 0.0007,
+          "emit outputs": 0.002054,
+          "fold matches": 0.372423,
+          "parsed ast": 2.967172,
+          "resolve reflection context": 4.1e-05
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "static_members_test.cpp",
+        "wall_seconds": 2.977808174007805,
+        "phases": {
+          "compiler invocation": 0.000718,
+          "emit outputs": 0.006666,
+          "fold matches": 0.358549,
+          "parsed ast": 2.6045,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000142
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "function_metadata_test.cpp",
+        "wall_seconds": 3.3508766379964072,
+        "phases": {
+          "compiler invocation": 0.00075,
+          "emit outputs": 0.007957,
+          "fold matches": 0.434907,
+          "parsed ast": 2.898883,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000219
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "interface_test.cpp",
+        "wall_seconds": 4.2850323939928785,
+        "phases": {
+          "compiler invocation": 0.000926,
+          "emit outputs": 0.012468,
+          "fold matches": 0.47106,
+          "parsed ast": 3.791073,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000232
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "dependent_types_test.cpp",
+        "wall_seconds": 3.739323484012857,
+        "phases": {
+          "compiler invocation": 0.00083,
+          "emit outputs": 0.018738,
+          "fold matches": 0.607489,
+          "parsed ast": 3.102854,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 0.000415
+        }
+      },
+      {
+        "round": 2,
+        "mode": "prototype-disabled",
+        "source": "binding_metadata_test.cpp",
+        "wall_seconds": 3.058998344989959,
+        "phases": {
+          "compiler invocation": 0.000859,
+          "emit outputs": 0.002193,
+          "fold matches": 0.412183,
+          "parsed ast": 2.635421,
+          "precompiled headers": 0.0,
+          "resolve reflection context": 4.3e-05
+        }
+      }
+    ],
+    "master": {
+      "sequence_seconds": [
+        20.12117212600424,
+        19.31384210701799,
+        17.928758427035064
+      ],
+      "median_seconds": 19.31384210701799
+    },
+    "prototype-disabled": {
+      "sequence_seconds": [
+        18.625689271022566,
+        18.651746172021376,
+        17.412039034999907
+      ],
+      "median_seconds": 18.625689271022566
+    },
+    "change_percent": -3.5630033226033975
   }
 }

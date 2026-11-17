@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Precompiled-header reuse in Omnirefl: full-package A/B results and per-file percentile distributions.">
+  <title>Instrumentation header reuse · Omnirefl research</title>
+  <link rel="stylesheet" href="../research.css">
+  <script type="module" src="./report.js"></script>
+</head>
+<body>
+  <nav class="research-nav" aria-label="Research navigation">
+    <a class="brand" href="/">Omnirefl</a>
+    <a href="/research/">Research</a>
+    <a class="optional" href="#full-suite">Build comparison</a>
+    <a href="#per-file">Per-file results</a>
+    <a class="optional" href="#method">Method</a>
+  </nav>
+  <main>
+    <header>
+      <p class="eyebrow">17 November 2026 · Compiler instrumentation</p>
+      <h1>Reusing instrumentation headers</h1>
+      <p class="lead">A tool-owned Clang PCH lets a new translation unit reuse headers parsed for an earlier file. The investigation tested existing package sources under GCC, Clang, and MSVC in Windows Docker.</p>
+      <div class="decision">
+        <strong>Decision: not adopted</strong>
+        <p id="decision-summary"></p>
+      </div>
+    </header>
+
+    <section id="full-suite">
+      <p class="eyebrow">The adoption decision</p>
+      <h2>Clean package builds against master</h2>
+      <p>The baseline is a separately built package from commit <code>1d72e76</code>, the prototype’s parent. The prototype package is from <code>f1e1c78</code>. Both tools use the same GCC, embedded LLVM 22.1.8, and RelWithDebInfo build flags.</p>
+      <p>Each local run builds the same tracked extras sources in Release mode, with examples and extensions, C++11/14/17/20/23, eight build jobs, and already fetched dependencies. Master and PCH-disabled clean builds ran consecutively; the targeted PCH build followed in the same container.</p>
+      <div class="table-scroll">
+        <table class="suite-table">
+          <caption class="caption">One clean build per configuration. Configuration and CTest are excluded.</caption>
+          <thead><tr><th>Package / policy</th><th class="numeric">Build</th><th class="numeric">Against master</th></tr></thead>
+          <tbody id="build-results"></tbody>
+        </table>
+      </div>
+      <h3>Does disabled support add overhead?</h3>
+      <p>The master-versus-disabled comparison isolates the added implementation with PCH unused. Across all 150 instrumentation calls, the summed reported phase durations were:</p>
+      <div class="table-scroll">
+        <table><thead><tr><th>Tool</th><th class="numeric">Summed instrumentation phases</th></tr></thead><tbody id="disabled-phases"></tbody></table>
+      </div>
+      <p class="note">These process durations include concurrent work and waiting; they are not build wall time.</p>
+      <p id="disabled-probe"></p>
+      <details>
+        <summary>Earlier prototype-only workflow measurements</summary>
+        <p class="note">These earlier runs compare prototype PCH policies with each other. They are retained as a separate workflow experiment. The master-based build comparison above uses the new runs; CTest is excluded from it. CTest forces reflection regeneration and recompilation as well as running tests. All 249 enabled cases passed in each earlier run; 28 were disabled.</p>
+        <div class="table-scroll">
+          <table class="suite-table">
+            <caption class="caption">Earlier measurements; total includes configuration + build + CTest.</caption>
+            <thead><tr><th>Prototype policy</th><th class="numeric">Build</th><th class="numeric">CTest</th><th class="numeric">Total</th></tr></thead>
+            <tbody id="suite-results"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section id="per-file">
+      <p class="eyebrow">Distribution, not selected examples</p>
+      <h2>Per-.cpp changes in 20% bands</h2>
+      <p id="coverage"></p>
+      <div class="controls">
+        <label>Comparison
+          <select id="comparison">
+            <option value="master-disabled">Base master → prototype, PCH/cache off</option>
+            <option value="master-targeted">Base master → multi-source PCH + cache</option>
+            <option value="disabled-targeted">Prototype, PCH off → multi-source PCH + cache</option>
+            <option value="earlier-broad">Earlier broad PCH: cache off → on</option>
+          </select>
+        </label>
+        <label>Measured work per file
+          <select id="metric">
+            <option value="combined">Instrumentation + native compilation</option>
+            <option value="instrumentation">Instrumentation only</option>
+            <option value="compilation">Native compilation only</option>
+          </select>
+        </label>
+      </div>
+      <p class="caption" id="distribution-summary" aria-live="polite"></p>
+      <div class="distribution">
+        <div class="quintile-chart" role="img" aria-label="Median change in each fifth of files, ranked from least to most improved">
+          <div class="chart-legend"><span>← Slower</span><span>Median change · Faster →</span></div>
+          <div id="quintile-bars"></div>
+          <p class="note">Files are ranked by percentage change. Each band contains approximately one fifth of files. Positive values mean faster.</p>
+        </div>
+        <div class="table-scroll">
+          <table class="quintile-table">
+            <thead><tr><th>File percentile band</th><th class="numeric">Files</th><th class="numeric">Median</th><th class="numeric">Range</th></tr></thead>
+            <tbody id="quintile-results"></tbody>
+          </table>
+          <div class="quantiles" id="percentile-boundaries"></div>
+          <p class="note">Boundary values use linear interpolation at P0, P20, P40, P60, P80, and P100. The band medians above describe the actual ranked groups.</p>
+        </div>
+      </div>
+      <p class="note">These are initial-build measurements, including cold-prefix preparation and lock waits. The same file’s matched target/standard variants are summed before calculating its change. “Instrumentation + compilation” sums stage durations; parallel work and omitted PCH/link overhead mean these totals are not full-build wall time.</p>
+
+      <h3>Fastest and slowest files</h3>
+      <p class="note">For the selected comparison and metric, summed across the listed CMake targets.</p>
+      <ul id="extreme-files"></ul>
+
+      <h3>Every matched source file</h3>
+      <div class="file-tools">
+        <label>Find a source<input id="file-search" type="search" placeholder="e.g. to_record.cpp" autocomplete="off"></label>
+        <label>Sort files<select id="sort"><option value="least">Least improved first</option><option value="most">Most improved first</option><option value="name">Source path</option><option value="time">Largest baseline time</option></select></label>
+        <span class="caption count" id="file-count"></span>
+      </div>
+      <div class="table-scroll">
+        <table class="file-table">
+          <thead><tr><th>Source / matched variants</th><th class="numeric">Baseline (s)</th><th class="numeric">Candidate (s)</th><th class="numeric">Saved (s)</th><th class="numeric">Change</th></tr></thead>
+          <tbody id="file-results"></tbody>
+        </table>
+      </div>
+      <p class="note">Searching filters this table only. Percentile bands continue to represent the complete selected corpus.</p>
+    </section>
+
+    <section id="compiler-checks">
+      <h2>Reuse works across compiler drivers</h2>
+      <p>Earlier prototype-only C++20 comparisons used existing sources, three alternating rounds, and a fresh prefix cache each round. These are instrumentation-only medians, including preparation in the whole sequence. They explain the mechanism; they do not replace the full-package result.</p>
+      <div class="table-scroll">
+        <table class="suite-table">
+          <thead><tr><th>Driver / prefix</th><th class="numeric">Next file (s)</th><th class="numeric">Whole sequence (s)</th><th class="numeric">Less time</th></tr></thead>
+          <tbody id="compiler-results"></tbody>
+        </table>
+      </div>
+      <p class="note">Core comparisons use five existing metadata test sources; the JSON comparison uses three serialization sources. Windows timings include the CMake invocation bridge. Each row compares the same sources and invocation path with cache off and on.</p>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>What limits the gain</h2>
+      <div class="findings">
+        <div><h3>Preparation needs reuse</h3><p>The broad policy covered 70 GTest-linked targets. Many have one source and pay preparation without another file to amortize it. The targeted policy covered 15 multi-source targets.</p></div>
+        <div><h3>Parsing work moves into the fold</h3><p>For a representative GCC source, AST parsing dropped from 2.018s to 0.519s while matching rose from 0.287s to 0.587s. Deserializing cached declarations still costs time.</p></div>
+        <div><h3>First-file memory rises</h3><p>GCC peak RSS rose from 223 to 292 MiB on the first core file. The next file fell from 222 to 210 MiB. JSON showed the same tradeoff: more memory during preparation, less on later files.</p></div>
+        <div><h3>GCC’s application PCH has an ordering issue</h3><p>The existing integration puts generated reflection before the user PCH on instrumented targets. GCC then parses the wrapper normally. Moving reflection after the PCH made GCC actually consume it, confirmed with <code>-H</code>; the general fix remains separate.</p></div>
+      </div>
+    </section>
+
+    <section id="method">
+      <h2>Method and limits</h2>
+      <ul>
+        <li>The master-based clean builds have one run per configuration. The disabled-path probe and earlier small existing-source comparisons used three alternating rounds. Build-only results and earlier configure/build/CTest totals are separate experiments.</li>
+        <li>Instrumentation times come from all reported tool phases. Native compile times come from the first invocation in each <code>.ninja_log</code>, matched through <code>compile_commands.json</code>. Later CTest-triggered rebuilds are excluded from the per-file distribution.</li>
+        <li>Per-file distributions match every selected configuration against master by source and target/standard variant. Only matching repository C++ sources are included; fetched dependencies, links, and standalone PCH-generation commands are excluded from the per-file table. PCH-generation and link costs remain in the clean-build wall times.</li>
+        <li>Cold-prefix costs are charged to the source that incurred them. Scheduler order can change which file prepares a prefix. Per-file stage durations include contention and waiting; they are not CPU times.</li>
+        <li>GCC 15.2 and Clang 21.1 were checked in Linux Docker; MSVC 19.44 was checked using <code>docker.exe --context windows</code>. Every package uses embedded LLVM 22.1.8. The master-based package comparison is GCC only. The earlier Clang and MSVC checks compare prototype cache settings.</li>
+        <li>Direct/transitive header changes, touch-only invalidation, truncated manifests, parallel generation, and unchanged rebuilds were checked. The experimental cache still needs hardening before production use.</li>
+      </ul>
+      <p><a id="download-data" download="instrumentation-pch-data.json">Download measured data</a></p>
+    </section>
+    <footer><a href="/research/">All research</a><a href="/">Project overview</a><span>Investigation retained; production adoption deferred.</span></footer>
+    <noscript><p>This report’s result tables and percentile controls require JavaScript.</p></noscript>
+  </main>
+</body>
+</html>

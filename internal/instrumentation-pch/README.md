@@ -1,15 +1,46 @@
 # Instrumentation header reuse
 
-A tool-owned Clang PCH makes the first instrumentation of a different `.cpp`
-faster when it shares a suitable header prefix. The complete GCC package
-workflow measured a 3.2% improvement with a multi-source-only policy in one
-comparison; broad enablement was 13.5% slower than stock CI. The prototype
-reuses the existing `CompilerInvocation -> ASTUnit` pipeline.
+A tool-owned Clang PCH reuses parsed headers across instrumentation calls.
+The fresh GCC package comparison uses a separately built base-master tool:
+
+| Package / configuration | Clean build (s) | Change from master |
+| --- | --- | --- |
+| Master `1d72e76` | 382.1 | Baseline |
+| Prototype `f1e1c78`, PCH/cache off | 381.5 | 0.16% faster |
+| Prototype, PCH/cache on multi-source targets | 392.7 | 2.77% slower |
+
+These are build-only wall times from one clean run per configuration.
+Configuration and CTest are excluded. Master and disabled builds ran
+consecutively in the same GCC container with eight jobs. Both tools were built
+as RelWithDebInfo against LLVM 22.1.8; consumers use Release and C++11–23.
+All three builds use the same tracked extras sources and cached dependencies.
+
+The summed instrumentation phases differ by only 0.15% with PCH disabled:
+956.8s for master and 958.2s for the prototype. These sums include concurrent
+work and waiting; they are separate from the build wall times above.
+
+An alternating same-command check over five existing C++20 metadata sources
+ran three rounds on one pinned CPU. Median sequence: master 19.314s;
+prototype, PCH disabled 18.626s (3.6% faster). Generated reflection contents
+matched. Neither check identifies a material disabled-path regression.
+
+The new comparison measures builds only. The earlier prototype-only CTest
+measurements below remain a separate experiment.
 
 Investigation: 2026-11-17, branch `investigate/instrumentation-pch`, based on
-master `1d72e76`. This branch is an experiment, not a release-ready cache.
+master `1d72e76`. This branch is an experiment. Adoption remains deferred.
+The disabled build shows no material regression in this pair; the targeted
+PCH build does not improve the package build in this run.
 
-## Results
+The [research page](../../site/research/instrumentation-pch/index.html) includes
+all 32 matched sources, their CMake targets, and 20% percentile bands. Its
+per-file data comes from initial-build instrumentation logs and Ninja object
+command durations, aggregated across matching target/standard variants.
+These stage durations are distinct from the full-workflow wall times.
+`export_page_data.py` reconstructs the page data from the archived logs,
+`.ninja_log`, and `compile_commands.json` for all four policies.
+
+## Earlier prefix-reuse checks
 
 Three rounds, alternating baseline/cache order. Each cache round starts with
 no tool PCH. Each source has a separate Omnirefl process. The second source
@@ -53,27 +84,30 @@ the tool's measured phases gives 7.142 -> 6.194 s for the full sequence and
 1.253 -> 0.835 s for the second file. Compare results within a platform;
 Windows and Linux use different standard-library headers and environments.
 
-## Complete package workload (GCC)
+## Earlier prototype-only package workflow (GCC)
 
-The full comparison follows the package CI workload: extracted tracked extras,
+The earlier prototype-only comparison follows the package CI workload: extracted tracked extras,
 source/build paths containing spaces, Release mode, examples and extensions
 included, benchmarks disabled, C++11/14/17/20/23, and eight build jobs. All 249
 enabled CTest cases run; 28 existing cases remain disabled. Dependency sources
 are already fetched. Tool compilation, extraction, and downloads are outside
 the timers; configuration is measured separately and included in totals.
 
+These earlier runs use the same prototype binary locally. The archived
+`ci-baseline` mode name identifies their PCH/cache-off configuration.
+
 Unlike the per-file medians above, these are single full runs per policy.
 
 | Policy | Build (s) | CTest (s) | Total (s) |
 | --- | --- | --- | --- |
-| Stock CI, no added PCH | 320.9 | 290.4 | 612.7 |
+| Prototype, PCH/cache off | 320.9 | 290.4 | 612.7 |
 | PCH on GTest-linked targets, cache off | 332.2 | 361.4 | 695.1 |
 | Same PCH policy, cache on | 315.8 | 378.3 | 695.6 |
 | PCH + cache on multi-source targets only | 311.9 | 279.5 | 592.9 |
 
 The isolated cache comparison saves 16.4 s during the build but adds 16.9 s to
 CTest: effectively no overall change. Broad cached-PCH enablement is 13.5%
-slower than the stock no-PCH workload. CTest includes deliberately forced
+slower than the local PCH/cache-off workload. CTest includes deliberately forced
 `.omni` regeneration and subsequent recompilation, not just test execution.
 
 The broad policy covers 70 GTest-linked targets, including one-source tests.
@@ -81,7 +115,7 @@ The initial cached build prepares 25 prefixes and reuses them 125 times.
 Targets with a single compatible source still pay preparation without a
 second source to amortize it. A configuration-only targeted policy limits PCH
 to targets with at least two C++ sources (15 targets). It finishes 19.8 s, or
-3.2%, faster than stock CI in this single comparison. That is a modest gain,
+3.2%, faster than the local PCH/cache-off configuration in this single comparison. That is a modest gain,
 not the 20–30% suggested by looking only at selected instrumentation calls.
 
 For the matched-PCH build, summed process wall times show where the gains go:
@@ -107,7 +141,7 @@ python3 internal/instrumentation-pch/full_suite.py \
   --dependencies /path/to/cached/_deps
 ```
 
-The script runs broad-PCH/cache-off, broad-PCH/cache-on, stock CI, and targeted
+The script runs broad-PCH/cache-off, broad-PCH/cache-on, PCH/cache-off, and targeted
 multi-source policies sequentially, with separate clean build directories.
 
 ### Per-file phase and memory costs

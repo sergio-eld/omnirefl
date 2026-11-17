@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Omnirefl implementation investigations, measurements, and decisions.">
+  <title>Research · Omnirefl</title>
+  <link rel="stylesheet" href="./research.css">
+</head>
+<body>
+  <nav class="research-nav" aria-label="Main navigation">
+    <a class="brand" href="/">Omnirefl</a>
+    <a href="/research/" aria-current="page">Research</a>
+    <a class="spacer" href="https://github.com/sergio-eld/omnirefl">Source ↗</a>
+  </nav>
+  <main>
+    <p class="eyebrow">Engineering notes</p>
+    <h1>Research</h1>
+    <p class="lead">Experiments behind implementation decisions: the workload, the measurements, and what was worth keeping.</p>
+    <ul class="research-list">
+      <li>
+        <p class="meta">17 November 2026 · Instrumentation · GCC, Clang, Windows MSVC</p>
+        <h2><a href="/research/instrumentation-pch/">Reusing instrumentation headers</a></h2>
+        <p>Tool-owned precompiled headers accelerate later translation units. Clean package builds use the base master commit as their baseline. Per-file quintiles and an alternating instrumentation check show the effect of disabled support separately from PCH reuse.</p>
+        <p class="meta">Decision: research only · 32 .cpp files · 153 matched builds</p>
+      </li>
+    </ul>
+    <footer><a href="/">Project overview</a><span>Omnirefl research</span></footer>
+  </main>
+</body>
+</html>

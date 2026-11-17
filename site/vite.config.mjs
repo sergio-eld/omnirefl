@@ -111,7 +111,10 @@ const readmePlugin = () => ({
   },
   transformIndexHtml: {
     order: 'pre',
-    async handler(html) {
+    async handler(html, context) {
+      if (context.path.startsWith('/research/'))
+        return html
+
       const placeholder = '<!-- omnirefl:readme -->'
       const highlightPlaceholder = '/* omnirefl:highlight */'
       const sloganPlaceholder = 'OMNIREFL_SLOGAN'
@@ -145,5 +148,15 @@ const readmePlugin = () => ({
 
 export default defineConfig({
   plugins: [readmePlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.join(site, 'index.html'),
+        research: path.join(site, 'research/index.html'),
+        instrumentationPch: path.join(site,
+          'research/instrumentation-pch/index.html'),
+      },
+    },
+  },
   server: {host: '0.0.0.0'},
 })
