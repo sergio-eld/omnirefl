@@ -26,6 +26,7 @@
  *   basics.discovering_dependencies - follow supported type discovery routes
  *
  * Advanced
+ *   advanced.constant_evaluation - constexpr results and instrumentation checks
  *   advanced.reflected_call_args - argument conversion and value categories
  *   advanced.binding_ownership - inspect ownership and constrain callables
  *   advanced.binding_as_metadata - inherited and unbound metadata
@@ -110,9 +111,18 @@ enum class status {
  * instrumentation, before generated metadata exists. Use a trailing return
  * type even for a visitor returning void: -> void.
  *
- * NOTE: `constexpr auto result = reflected_call(...)` is unsupported because
- * it forces visitor instantiation before generated metadata exists. The visitor
- * itself and its internal calculations can still be constexpr.
+ * WARNING: Constexpr reflected_call is intended only for static_assert
+ * validation checks, supported from C++11. Instrumentation substitutes a
+ * default-constructed result without invoking the visitor. The source is
+ * compiled twice: instrumentation sees that placeholder; final compilation
+ * invokes the visitor with generated metadata and sees the actual result.
+ * Using the result to select branches, types, or template arguments can make
+ * these phases compile different code, leaving the final version without the
+ * metadata it needs. Do not use constexpr results for such decisions.
+ * Assertions must account for types where static_cast<bool>(Result{}) is false,
+ * such as bool and empty optionals. fn::instrumented_validation supplies a
+ * successful placeholder while keeping the real validator defined. See
+ * advanced.constant_evaluation for its use and limitations.
  */
 TEST(basics, reflected_scope) {
   const auto name = omni::reflected_call(
@@ -667,6 +677,93 @@ TEST(basics, discovering_dependencies) {
 } // namespace basics
 
 /// Advanced examples ----------------------------------------------------------
+
+namespace advanced {
+namespace constant_evaluation {
+
+struct account { int id; };
+
+struct account_with_method {
+  int id;
+
+  int get_id() const { return this->id; }
+};
+
+struct has_only_data_fields {
+  template <typename Meta>
+  constexpr bool operator()(omni::record_meta_t<Meta> record) const {
+    return 0
+      == std::tuple_size<decltype(record.accessible_member_functions())>::value;
+  }
+};
+
+struct has_field_named {
+  std::string_view name;
+
+  template <typename Meta>
+  constexpr bool operator()(omni::record_meta_t<Meta> record) const {
+    return omni::fn::any_of([name = this->name](auto field) {
+      return name == field.name();
+    },
+      record.accessible_data_members());
+  }
+};
+
+} // namespace constant_evaluation
+} // namespace advanced
+
+/** Compile-time reflection results require a constexpr visitor and arguments.
+ * has_only_data_fields is C++11-compatible; has_field_named uses a constexpr
+ * lambda, available from C++17.
+ *
+ * Instrumentation substitutes Result{} without invoking the visitor. A type
+ * where static_cast<bool>(Result{}) yields false can reject a static_assert
+ * before metadata generation, even if the real check would succeed. This
+ * includes bool and empty optionals. fn::instrumented_validation is an ad hoc
+ * adapter: its result is std::true_type under OMNI_TOOL_RUN and the real check's
+ * Boolean result otherwise. The validator itself stays defined in both phases.
+ *
+ * The real check must support constant evaluation and static_cast<bool>.
+ * Without this adapter, the result also needs constexpr default construction
+ * for instrumentation; reference and non-default-constructible results remain
+ * available for runtime reflected_call calls.
+ *
+ * @warning Constexpr reflected_call is intended only for static_assert checks.
+ * Keep this bypass confined to isolated assertions. Do not feed a
+ * placeholder, particularly a non-Boolean result, into later compile-time
+ * logic: template arguments, array sizes, type selection, and if constexpr
+ * may then differ between instrumentation and final compilation. */
+TEST(advanced, constant_evaluation) {
+  using namespace std::string_view_literals;
+
+  constexpr bool valid = omni::reflected_call(
+    omni::fn::instrumented_validation(
+      advanced::constant_evaluation::has_only_data_fields{}),
+    omni::type<advanced::constant_evaluation::account>);
+
+  static_assert(valid, "Expected only data fields");
+  EXPECT_TRUE(valid);
+
+  // Negate the real check before adapting it; negating the instrumentation
+  // placeholder instead would defeat its successful default.
+  static_assert(omni::reflected_call(omni::fn::instrumented_validation(
+    omni::fn::not_(advanced::constant_evaluation::has_only_data_fields{})),
+    omni::type<advanced::constant_evaluation::account_with_method>),
+    "Expected a member function");
+
+  // Bind the required field name once; reuse the check for record schemas
+  // that must expose an identifier.
+  constexpr auto requires_id = omni::fn::instrumented_validation(
+    advanced::constant_evaluation::has_field_named{"id"sv});
+
+  static_assert(omni::reflected_call(requires_id,
+    omni::type<advanced::constant_evaluation::account>),
+    "Expected an id field");
+
+  static_assert(omni::reflected_call(requires_id,
+    omni::type<advanced::constant_evaluation::account_with_method>),
+    "Expected an id field");
+}
 
 namespace call_arguments {
 

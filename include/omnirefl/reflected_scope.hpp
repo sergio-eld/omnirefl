@@ -1179,6 +1179,14 @@ struct function_binding_t: function_meta_t<_M> {
   }
 };
 
+// Generated metadata is intentionally TU-local. GCC diagnoses this base when
+// constexpr evaluation instantiates an owned binding inside a visitor; keep
+// the warning exception on the binding definition, not on user call sites.
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wsubobject-linkage"
+#endif
+
 /** Reflected-scope-only record binding, inheriting record metadata. */
 template <typename T>
 struct binding_t<T, reflected_entity::record>:
@@ -1378,6 +1386,10 @@ struct binding_t<T, reflected_entity::record>:
       : _record(std::forward<U>(u)) {}
 };
 
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
+
 /** Reflected-scope-only enum binding, inheriting enum metadata. */
 template <typename T>
 struct binding_t<T, reflected_entity::enumeration>:
@@ -1575,10 +1587,9 @@ constexpr auto reflected(T &&t) noexcept(
 #endif
 
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
-// Ad hoc: this definition must remain visible when a callable has no linkage,
-// but pre-generation parsing never evaluates it and therefore it returns
-// nothing. The callable's declared result is still required by surrounding
-// source expressions.
+// Instrumentation needs definitions for callables and results without linkage.
+// Results without an available default value retain the unevaluated stand-in;
+// its missing return is never executed. Literal placeholders can be evaluated.
 #  if defined(__clang__)
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wreturn-type"
@@ -1605,28 +1616,61 @@ struct reflected_call_t {
     return binding_t<T &&>{std::forward<T>(t)};
   }
 
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+  template <typename Result>
+  static constexpr Result _instrumentation_result(std::true_type) {
+    return Result{};
+  }
+
+  // References and non-default-constructible results remain usable in parsed
+  // runtime calls, but have no value to evaluate before metadata generation.
+  template <typename Result>
+  static Result _instrumentation_result(std::false_type) {}
+
+  // C++11 constexpr bodies cannot declare a local result-type alias.
+  template <typename Result>
+  static constexpr Result _instrumentation_result() {
+    return _instrumentation_result<Result>(compat::disjunction<
+      std::is_void<Result>, std::is_default_constructible<Result>>{});
+  }
+#endif
+
   public:
-  /** Invoke the callable with reflected wrappers for every argument. */
+  /** Invoke the callable with reflected wrappers for every argument.
+   * Constant evaluation is available from C++11 when the visitor and reflected
+   * arguments permit it.
+   *
+   * @details During instrumentation the visitor is not invoked.
+   * Default-initializable results are placeholders; void has no result.
+   * Other result forms remain unevaluated.
+   * Compile-time checks must account for placeholder values before generation.
+   * Types where static_cast<bool>(Result{}) yields false, such as bool and
+   * empty optionals, can fail assertions during instrumentation. A validation
+   * visitor can use fn::instrumented_validation from functional.hpp to supply
+   * std::true_type under OMNI_TOOL_RUN and compute its real result otherwise.
+   * Keep reflected_call in both phases for metadata discovery.
+   * @warning Constexpr reflected_call is intended only for static_assert checks.
+   * Do not feed placeholder results, particularly non-Boolean values,
+   * into further compile-time decisions. Template arguments, array sizes, type
+   * selection, and if constexpr can differ between instrumentation and final
+   * compilation. Keep validation guards confined to isolated assertions.
+   */
   template <typename Impl, typename... Args>
-  auto operator()(Impl &&impl, Args &&...args) const
+  constexpr auto operator()(Impl &&impl, Args &&...args) const
     -> decltype(std::declval<Impl &&>()(
       _reflect_arg(std::declval<Args &&>())...)) {
-    (void)sizeof...(args);
-
-    (void)impl;
-
-#if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+#if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
+    // Discard unused inputs within the single return required by C++11.
+    return ((void)impl, (void)sizeof...(args),
+      _instrumentation_result<decltype(std::declval<Impl &&>()(
+        _reflect_arg(std::declval<Args &&>())...))>());
+#else
     return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
   }
 
   // TODO: Replace this callable implementation type with overloaded
   // `reflected_call` functions.
-
-  // TODO: Decide whether `reflected_call` should support constexpr
-  // evaluation. It currently cannot be constexpr as a whole: during the tool
-  // run the call is parsed and matched, but intentionally does not evaluate the
-  // callable before generated reflection exists.
 };
 
 #if defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
@@ -1672,6 +1716,20 @@ struct reflected_call_t {
  * it. Metadata for the argument roots and their declared dependencies is
  * available throughout that scope. `reflected_call` returns the callable's
  * result.
+ *
+ * Constant evaluation is supported from C++11 when the visitor and arguments
+ * permit it. During instrumentation the visitor is not invoked: available
+ * default-constructed results stand in for the real result. Types where
+ * static_cast<bool>(Result{}) yields false, including bool and empty optionals,
+ * need special care in assertions. fn::instrumented_validation from
+ * functional.hpp supplies std::true_type under OMNI_TOOL_RUN and performs the
+ * real Boolean check otherwise. Its validator stays defined in both phases.
+ * Keep reflected_call in both phases so metadata discovery still happens.
+ * @warning Constexpr reflected_call is intended only for static_assert checks.
+ * Placeholder results must not drive downstream compile-time logic.
+ * Non-Boolean results used for template arguments, array sizes, type selection,
+ * or if constexpr can make instrumentation compile different code from the
+ * final compilation. Confine validation guards to isolated assertions.
  *
  * ```cpp
  * struct account {

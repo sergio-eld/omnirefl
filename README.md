@@ -882,8 +882,21 @@ See [Limitations](#limitations) for the declaration restrictions.
   is unsupported; a nested call can work only when its reflected path was
   instantiated independently. Out-of-scope queries are reported as errors on a
   best-effort basis.
-- `constexpr auto result = reflected_call(...)` is unsupported: forcing
-  evaluation breaks the instrumentation boundary.
+- Constant evaluation is supported from C++11 when the visitor and arguments
+  permit it. During instrumentation the visitor is not invoked; a
+  default-constructible result is replaced with `Result{}`. Compile-time
+  assertions must accommodate that placeholder, particularly for types where
+  `static_cast<bool>(Result{})` yields false, such as `bool` and empty optionals.
+  `fn::instrumented_validation(check)` from `<omnirefl/functional.hpp>` supplies
+  `std::true_type` under `OMNI_TOOL_RUN` and evaluates the real Boolean check
+  otherwise. The validator and `reflected_call` remain present in both phases.
+  Apply transformations such as `fn::not_` to the check before wrapping it.
+  **Warning: constexpr reflected_call is intended only for static_assert checks.**
+  Do not propagate placeholder results into further compile-time logic.
+  In particular, a non-Boolean result used for template arguments, array sizes,
+  type selection, or `if constexpr` can make instrumentation compile different
+  code from the final compilation. Keep the validation guard confined to an
+  isolated assertion; it does not make downstream use of a stand-in safe.
 
 <details>
 <summary>Type declarations and dependency discovery</summary>
