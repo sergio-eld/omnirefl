@@ -181,8 +181,11 @@ TEST(compat_pair, preserves_all_access_categories) {
     decltype(omni::compat::get<0>(std::declval<const pair &>()))>::value));
   EXPECT_TRUE((std::is_same<long &&,
     decltype(omni::compat::get<1>(std::declval<pair &&>()))>::value));
+// The C++11 fallback supplies const-rvalue get missing in older libstdc++.
+#if 201402L > OMNI_CPLUSPLUS
   EXPECT_TRUE((std::is_same<const long &&,
     decltype(omni::compat::get<1>(std::declval<const pair &&>()))>::value));
+#endif
 }
 
 TEST(compat_pair, applies_a_callable_in_constant_evaluation) {
@@ -203,8 +206,11 @@ TEST(compat_pair, constrains_construction_to_supported_elements) {
     omni::compat::pair<non_default, int>>::value));
   EXPECT_FALSE((std::is_constructible<omni::compat::pair<int, int>,
     const char *, int>::value));
+// The C++11 fallback specifies noexcept; std::pair varies by toolchain.
+#if 201402L > OMNI_CPLUSPLUS
   EXPECT_TRUE((std::is_nothrow_constructible<omni::compat::pair<int, int>,
     int, int>::value));
+#endif
 }
 
 } // namespace
