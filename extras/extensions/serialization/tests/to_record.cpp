@@ -490,7 +490,7 @@ struct to_type_t<alias_models::endpoint> {
     State state) const -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
       reflected_scope::to_record_t<alias_models::endpoint_names>{})(
-      node, into, state);
+      node, into, std::move(state));
   }
 };
 
@@ -502,7 +502,7 @@ struct to_type_t<alias_models::endpoint_with_retries> {
     State state) const -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
       reflected_scope::to_record_t<alias_models::endpoint_names>{})(
-      node, into, state);
+      node, into, std::move(state));
   }
 };
 
@@ -514,7 +514,7 @@ struct to_type_t<alias_models::optional_endpoint> {
     State state) const -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
       reflected_scope::to_record_t<alias_models::endpoint_names>{})(
-      node, into, state);
+      node, into, std::move(state));
   }
 };
 

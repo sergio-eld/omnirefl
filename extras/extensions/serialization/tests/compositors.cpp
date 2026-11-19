@@ -138,7 +138,7 @@ struct omni::ryml::cp::to_type_t<counted_record> {
   auto operator()(::ryml::ConstNodeRef node, counted_record *into,
     State state) const -> omni::ryml::with_diagnostics_t<
       omni::compat::monostate> {
-    return to_record(count_properties)(node, into, state);
+    return to_record(count_properties)(node, into, std::move(state));
   }
 };
 #endif
@@ -182,6 +182,72 @@ INSTANTIATE_TEST_SUITE_P(objects,
       issue_code::out_of_range}),
 
   [](const testing::TestParamInfo<callback_case> &c) { return c.param.name; });
+
+TEST(record_callback, passes_owned_state_to_a_value_callback) {
+  const auto tree = omni::ryml::core::parse(R"({"first": 1})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto mapping = to_record([](::ryml::ConstNodeRef node, omni::type_t<counted_record>,
+      omni::ryml::read_state_t<> &&)
+    -> omni::compat::expected<counted_record, omni::ryml::issue> {
+    return count_properties(node);
+  });
+
+  const omni::ryml::config_t<> options{};
+  const auto result = mapping(tree->crootref(), omni::type_t<counted_record>{},
+    omni::ryml::read_state_t<>{options, {}, 0, 0});
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(1U, result.value->count);
+}
+
+TEST(record_callback, passes_owned_state_to_a_state_only_callback) {
+  const auto tree = omni::ryml::core::parse(R"({"first": 1})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto mapping = to_record([](::ryml::ConstNodeRef node, omni::ryml::read_state_t<> &&)
+    -> omni::compat::expected<counted_record, omni::ryml::issue> {
+    return count_properties(node);
+  });
+
+  const omni::ryml::config_t<> options{};
+  const auto result = mapping(tree->crootref(), omni::type_t<counted_record>{},
+    omni::ryml::read_state_t<>{options, {}, 0, 0});
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(1U, result.value->count);
+}
+
+TEST(record_callback, passes_owned_state_to_a_mutating_callback) {
+  const auto tree = omni::ryml::core::parse(R"({"first": 1})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto mapping = to_record([](::ryml::ConstNodeRef node, counted_record *into,
+      omni::ryml::read_state_t<> &&)
+    -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
+    into->count = node.num_children();
+    return omni::compat::monostate{};
+  });
+
+  const omni::ryml::config_t<> options{};
+  counted_record into{};
+  const auto result = mapping(tree->crootref(), &into,
+    omni::ryml::read_state_t<>{options, {}, 0, 0});
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(1U, into.count);
+}
 
 TEST(record_callback, preserves_the_nested_path_on_a_shape_mismatch) {
   const auto result = serialization_test::deserialize(

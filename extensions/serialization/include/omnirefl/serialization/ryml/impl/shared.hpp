@@ -446,17 +446,17 @@ struct node_accumulator {
 
 OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
 node_accumulator<State> make_node_accumulator(State state) {
-  return {
-    /*state=*/state,
-    /*result=*/{
-      /*value=*/compat::monostate{},
-      /*diagnostics=*/{
-        /*config=*/{state.config.error_policy, {}},
-        /*issues=*/{},
-        /*parse_error_message=*/{},
-      },
+  // Capture diagnostic policies before consuming the owned state.
+  with_diagnostics_t<compat::monostate> result{
+    /*value=*/compat::monostate{},
+    /*diagnostics=*/{
+      /*config=*/{state.config.error_policy, {}},
+      /*issues=*/{},
+      /*parse_error_message=*/{},
     },
   };
+
+  return {/*state=*/std::move(state), /*result=*/std::move(result)};
 }
 
 // C++11 overload ranking prefers value production when assignment is possible.
@@ -465,9 +465,9 @@ OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
   (std::is_assignable<T &, T &&>::value))
 auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
   State state, int)
-  -> decltype(mapping(node, omni::type_t<T>{}, state),
+  -> decltype(mapping(node, omni::type_t<T>{}, std::move(state)),
     with_diagnostics_t<compat::monostate>{}) {
-  auto result = mapping(node, omni::type_t<T>{}, state);
+  auto result = mapping(node, omni::type_t<T>{}, std::move(state));
   if (result.value)
     *into = std::move(*result.value);
 
@@ -480,8 +480,8 @@ auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
 
 template <typename Mapping, typename T, typename State>
 auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
-  State state, long) -> decltype(mapping(node, into, state)) {
-  return mapping(node, into, state);
+  State state, long) -> decltype(mapping(node, into, std::move(state))) {
+  return mapping(node, into, std::move(state));
 }
 
 inline issue make_issue(json::issue_code reason,
@@ -532,7 +532,8 @@ template <typename T, typename State>
 auto read_scalar(::ryml::ConstNodeRef node, omni::type_t<T>, State context,
   json::value_kind expected)
   -> with_diagnostics_t<T, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
+  auto result = omni::ryml::detail::make_node_accumulator(
+    std::move(context));
   const auto scalar = node.val();
   const auto converted = omni::ryml::detail::from_chars<compat::remove_cv_t<T>>(
     scalar);
@@ -542,7 +543,7 @@ auto read_scalar(::ryml::ConstNodeRef node, omni::type_t<T>, State context,
       converted.error(),
       expected,
       node,
-      context.path));
+      result.state.path));
 
     return {compat::nullopt, std::move(result.result.diagnostics)};
   }

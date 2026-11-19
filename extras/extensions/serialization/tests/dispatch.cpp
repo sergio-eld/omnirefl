@@ -74,7 +74,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
     return omni::ryml::default_to_integer(omni::type_t<unsigned short>{})(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
-      state);
+      std::move(state));
   }
 };
 
@@ -88,7 +88,7 @@ const auto omni::ryml::cp::to_type<my_string> =
     return omni::ryml::default_to_string_like(omni::type_t<my_string>{})(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
-      state);
+      std::move(state));
   };
 #else
 template <>
@@ -99,7 +99,7 @@ struct omni::ryml::cp::to_type_t<my_string> {
     return omni::ryml::default_to_string_like(omni::type_t<my_string>{})(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
-      state);
+      std::move(state));
   }
 };
 #endif

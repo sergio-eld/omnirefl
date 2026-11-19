@@ -28,8 +28,8 @@ struct node_call_priority<0> {};
 template <typename Function, typename Destination, typename State>
 auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
   Destination into, State state, node_call_priority<3>)
-  -> decltype(f(node, into, state)) {
-  return f(node, into, state);
+  -> decltype(f(node, into, std::move(state))) {
+  return f(node, into, std::move(state));
 }
 
 template <typename Function, typename Destination, typename State>
@@ -41,8 +41,8 @@ auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
 template <typename Function, typename T, typename State>
 auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
   omni::type_t<T>, State state, node_call_priority<1>)
-  -> decltype(f(node, state)) {
-  return f(node, state);
+  -> decltype(f(node, std::move(state))) {
+  return f(node, std::move(state));
 }
 
 template <typename Function, typename T, typename State>
@@ -54,9 +54,10 @@ auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
 template <typename Function, typename Destination, typename State>
 auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
   Destination into, State state)
-  -> decltype(invoke_expected_node(f, node, into, state,
+  -> decltype(invoke_expected_node(f, node, into, std::move(state),
     node_call_priority<3>{})) {
-  return invoke_expected_node(f, node, into, state, node_call_priority<3>{});
+  return invoke_expected_node(f, node, into, std::move(state),
+    node_call_priority<3>{});
 }
 
 inline issue node_function_error(issue error, ::ryml::ConstNodeRef node,
@@ -76,12 +77,12 @@ inline issue node_function_error(issue error, ::ryml::ConstNodeRef node,
 template <typename T, typename State>
 auto node_result(compat::expected<T, issue> mapped, ::ryml::ConstNodeRef node,
   State state) -> with_diagnostics_t<T> {
-  auto result = make_node_accumulator(state);
+  auto result = make_node_accumulator(std::move(state));
   if (mapped)
     return {std::move(*mapped), std::move(result.result.diagnostics)};
 
   result.report(node_function_error(std::move(mapped.error()), node,
-    state.path));
+    result.state.path));
 
   return {compat::nullopt, std::move(result.result.diagnostics)};
 }
@@ -91,12 +92,12 @@ OMNI_CONSTRAINED_TEMPLATE((typename T, typename Errors, typename State,
   (compat::is_input_range<Errors>::value && std::is_same<issue, Error>::value))
 auto node_result(compat::expected<T, Errors> mapped, ::ryml::ConstNodeRef node,
   State state) -> with_diagnostics_t<T> {
-  auto result = make_node_accumulator(state);
+  auto result = make_node_accumulator(std::move(state));
   if (mapped)
     return {std::move(*mapped), std::move(result.result.diagnostics)};
 
   for (auto &&error : mapped.error()) {
-    result.report(node_function_error(std::move(error), node, state.path));
+    result.report(node_function_error(std::move(error), node, result.state.path));
     if (result.stopped())
       break;
   }
@@ -129,9 +130,12 @@ struct lifted_node_function {
       && is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
     State state) const -> with_diagnostics_t<T> {
+    // The callback receives a snapshot; normalization still needs this state.
+    auto mapped = omni::ryml::detail::invoke_expected_node(
+      this->function, node, type, state);
+
     return omni::ryml::detail::node_result(
-      omni::ryml::detail::invoke_expected_node(
-        this->function, node, type, state), node, state);
+      std::move(mapped), node, std::move(state));
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State,
@@ -145,9 +149,12 @@ struct lifted_node_function {
   auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
     -> with_diagnostics_t<compat::monostate> {
     assert(into);
+    // The callback receives a snapshot; normalization still needs this state.
+    auto mapped = omni::ryml::detail::invoke_expected_node(
+      this->function, node, into, state);
+
     return omni::ryml::detail::node_result(
-      omni::ryml::detail::invoke_expected_node(
-        this->function, node, into, state), node, state);
+      std::move(mapped), node, std::move(state));
   }
 };
 

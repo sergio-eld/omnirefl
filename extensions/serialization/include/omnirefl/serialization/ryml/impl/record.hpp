@@ -19,10 +19,11 @@ template <typename Mapping, typename Field, typename State>
 auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
   Field field, State state, int)
   -> decltype(field.set_value(std::move(*mapping(node,
-      omni::type_t<typename Field::type>{}, state).value)),
+      omni::type_t<typename Field::type>{}, std::move(state)).value)),
     with_diagnostics_t<compat::monostate>{}) {
-  auto mapped = mapping(node, omni::type_t<typename Field::type>{}, state);
   auto result = omni::ryml::detail::make_node_accumulator(state);
+  auto mapped = mapping(node, omni::type_t<typename Field::type>{},
+    std::move(state));
   result.append({
     /*value=*/mapped.value
       ? compat::make_optional(compat::monostate{}) : compat::nullopt,
@@ -42,7 +43,7 @@ auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
   typename Field::type value = field.value();
   auto result = omni::ryml::detail::make_node_accumulator(state);
   result.append(omni::ryml::detail::read_into(
-    mapping, node, &value, state, /*priority=*/0));
+    mapping, node, &value, std::move(state), /*priority=*/0));
 
   if (result.result.value)
     field.set_value(std::move(value));
@@ -110,16 +111,16 @@ struct record_member_event {
       ? ::ryml::ConstNodeRef{} : entry->node;
 
     if (!this->check_presence && !node.invalid()) {
-      const auto child = state.child({
+      auto child = state.child({
         /*field=*/node.key(),
         /*index=*/compat::nullopt,
       });
 
       return reflected_scope::detail::map_node_to_field(
-        node, this->field, child);
+        node, this->field, std::move(child));
     }
 
-    auto result = make_node_accumulator(state);
+    auto result = make_node_accumulator(std::move(state));
     if (!this->check_presence || !node.invalid())
       return std::move(result).finish();
 
@@ -130,7 +131,7 @@ struct record_member_event {
       return std::move(result).finish();
     }
 
-    const auto child = state.child({
+    const auto child = result.state.child({
       /*field=*/c4::to_csubstr(this->field.name()),
       /*index=*/compat::nullopt,
     });
@@ -193,7 +194,8 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   T *into,
   State context) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
+  auto result = omni::ryml::detail::make_node_accumulator(
+    std::move(context));
   assert(into && node.is_map());
 
   // C++11 tuple forwarding constructors need not support constant evaluation.
@@ -248,13 +250,13 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
       continue;
     }
 
-    const auto duplicates = context.config.error_policy.duplicates;
+    const auto duplicates = result.state.config.error_policy.duplicates;
     if (duplicate
       && (duplicates & json::duplicate_policy::last)
         == json::duplicate_policy::last)
       entry->node = child;
 
-    const auto unknown = context.config.error_policy.unknown_fields;
+    const auto unknown = result.state.config.error_policy.unknown_fields;
     const bool allowed = duplicate
       ? (duplicates
           & (json::duplicate_policy::allow | json::duplicate_policy::last))
@@ -320,7 +322,7 @@ auto from_record_t::operator()(const T &value,
     | fn::filter(fn::is_non_static)
     | fn::each(omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
-      /*context=*/context,
+      /*context=*/std::move(context),
     });
 }
 

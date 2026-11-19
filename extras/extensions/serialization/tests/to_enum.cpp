@@ -52,7 +52,7 @@ struct to_type_t<enum_alias_models::state> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_string_node>(
         core::reflected_scope::map_node_to_enum_t<
-          enum_alias_models::state_names>{}))(node, into, state);
+          enum_alias_models::state_names>{}))(node, into, std::move(state));
   }
 };
 

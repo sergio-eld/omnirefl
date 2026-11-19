@@ -129,7 +129,7 @@ struct map_node_to_integer_t {
       ? json::value_kind::unsigned_integer : json::value_kind::integer;
 
     return omni::ryml::detail::read_scalar(
-      node, omni::type_t<T>{}, state, expected);
+      node, omni::type_t<T>{}, std::move(state), expected);
   }
 };
 
@@ -152,8 +152,8 @@ struct map_node_to_real_t {
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(!core::expect_number_node(node));
-    return omni::ryml::detail::read_scalar(node, omni::type_t<T>{}, state,
-      json::value_kind::number);
+    return omni::ryml::detail::read_scalar(node, omni::type_t<T>{},
+      std::move(state), json::value_kind::number);
   }
 };
 
@@ -182,7 +182,7 @@ struct map_node_to_arithmetic_t {
       traits::case_<std::is_integral<T>::value, core::map_node_to_integer_t>,
       core::map_node_to_real_t>::type{};
 
-    return read(node, omni::type_t<T>{}, state);
+    return read(node, omni::type_t<T>{}, std::move(state));
   }
 };
 
@@ -427,33 +427,42 @@ constexpr from_optional_like_t from_optional_like{};
 /** Customization points for C++ type mappings. */
 namespace cp {
 
-// Callable variable-template registration is available starting with C++14.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-/** C++14-compatible node-to-C++ callable registration.
- * The selected const object is copied when mapping a node. Register either
- * this variable template or to_type_t for a given type. For checked
- * node-to-type callbacks returning expected, see
- * \ref compose::lift_to_with_diagnostics.
- * Shape compositors in compose.hpp supply node checks.
- * Provide either or both signatures below. Mapping prefers type<T> when its
- * result can be assigned; T* is a fallback for unavailable value-producing
- * calls, not for mapping errors.
+/** C++14-compatible node-to-type customization point for map_by_schema.
  *
 ```
-cp::to_type<T> :: (node, type<T>, state) -> with_diagnostics<T>
-cp::to_type<T> :: (node, T*, state) -> with_diagnostics<monostate>
+cp::to_type<T> :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
 ```
  *
- * A scalar wrapper can delegate to a default mapping without repeating lookup:
+ * Provide either overload, or both. map_by_schema and deserialize prefer
+ * type<T> when its result can be assigned. T* is a fallback when value
+ * production is unavailable.
+ *
+ * Prefer this variable template over to_type_t for customization. Only one
+ * of the two may be specialized for a given type.
+ * Unregistered types use the built-in mapping. The selected const callable
+ * is copied for mapping.
+ *
+ * Example:
  *
 ```cpp
 struct counter { int value; };
 
 template <>
 const auto omni::ryml::cp::to_type<counter> =
-  [](::ryml::ConstNodeRef node, counter *into, auto state) {
-    return omni::ryml::default_to_integer(omni::type_t<int>{})(
-      node, &into->value, state);
+  [](::ryml::ConstNodeRef node, omni::type_t<counter>, auto state)
+    -> omni::ryml::with_diagnostics_t<counter> {
+    auto mapped = omni::ryml::default_to_integer(omni::type_t<int>{})(
+      node, omni::type_t<int>{}, std::move(state));
+
+    return {
+      mapped.value ? omni::compat::make_optional(counter{*mapped.value})
+                   : omni::compat::nullopt,
+      std::move(mapped.diagnostics),
+    };
   };
 ```
  *
@@ -464,16 +473,23 @@ template <typename T, typename Enable = void>
 constexpr traits::cp::unavailable to_type{};
 #endif
 
-/** C++11-compatible node-to-C++ customization. Unregistered types use the
- * built-in mapping. Register either this struct or the variable template.
- * Provide either or both signatures below. Mapping prefers type<T> when its
- * result can be assigned; T* is a fallback for unavailable value-producing
- * calls, not for mapping errors.
+/** C++11-compatible node-to-type customization point for map_by_schema.
  *
 ```
-cp::to_type_t<T>{} :: (node, type<T>, state) -> with_diagnostics<T>
-cp::to_type_t<T>{} :: (node, T*, state) -> with_diagnostics<monostate>
+cp::to_type_t<T>{} :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
 ```
+ *
+ * Provide either overload, or both. map_by_schema and deserialize prefer
+ * type<T> when its result can be assigned. T* is a fallback when value
+ * production is unavailable.
+ *
+ * Prefer the to_type variable template when C++14 or later is available.
+ * Only one of the two may be specialized for a given type.
+ * Unregistered types use the built-in mapping. The selected const callable
+ * is copied for mapping.
  *
 ```cpp
 struct counter { int value; };
@@ -482,11 +498,16 @@ template <>
 struct omni::ryml::cp::to_type_t<counter> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, counter *into,
-    State context) const
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integer(omni::type_t<int>{})(
-      node, &into->value, context);
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<counter>,
+    State state) const -> omni::ryml::with_diagnostics_t<counter> {
+    auto mapped = omni::ryml::default_to_integer(omni::type_t<int>{})(
+      node, omni::type_t<int>{}, std::move(state));
+
+    return {
+      mapped.value ? omni::compat::make_optional(counter{*mapped.value})
+                   : omni::compat::nullopt,
+      std::move(mapped.diagnostics),
+    };
   }
 };
 ```
@@ -497,7 +518,6 @@ struct omni::ryml::cp::to_type_t<counter> {
 template <typename T, typename Enable = void>
 struct to_type_t: traits::cp::unavailable {};
 
-// C++14 adds variable-template registration for serialization callables.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 /** C++14-compatible C++-to-node callable registration.
  * Register either this variable template or from_type_t for a given type;

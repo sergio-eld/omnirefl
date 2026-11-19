@@ -75,7 +75,7 @@ auto from_arithmetic_t::operator()(const T &value,
     traits::case_<std::is_integral<T>::value, from_integer_t>,
     from_real_t>::type{};
 
-  write(value, node, context);
+  write(value, node, std::move(context));
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -88,11 +88,12 @@ auto to_optional_like_t::operator()(::ryml::ConstNodeRef node,
     && (!node.has_val_tag()
       || ::ryml::TAG_NULL == ::ryml::to_tag(node.val_tag()))) {
     adapt::reset(into);
-    return omni::ryml::detail::make_node_accumulator(context).finish();
+    return omni::ryml::detail::make_node_accumulator(
+      std::move(context)).finish();
   }
 
   typename T::value_type value{};
-  auto result = core::read_node(node, &value, context);
+  auto result = core::read_node(node, &value, std::move(context));
   if (result.value)
     adapt::emplace(into, std::move(value));
 
@@ -106,7 +107,7 @@ auto from_optional_like_t::operator()(const T &value,
   State context) const
   -> void {
   if (adapt::has_value(value))
-    core::write_node(adapt::get_value(value), node, context);
+    core::write_node(adapt::get_value(value), node, std::move(context));
   else {
     node.set_val("null");
     node.set_val_style(::ryml::VAL_PLAIN);
@@ -127,7 +128,8 @@ auto map_node_to_field(::ryml::ConstNodeRef node, Field field, State state)
     };
 
   const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
-  return map_node_to_field_using(mapping, node, field, state, /*priority=*/0);
+  return map_node_to_field_using(mapping, node, field, std::move(state),
+    /*priority=*/0);
 }
 
 } // namespace detail

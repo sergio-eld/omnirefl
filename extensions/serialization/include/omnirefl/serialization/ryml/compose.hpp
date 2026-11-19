@@ -50,7 +50,8 @@ with_node_check<Check> :: Mapping -> Mapping
  *
  * Mapping may provide either or both destination overloads. A failed check
  * returns its issue at the current path without calling Mapping. An exceeded
- * diagnostic limit also skips Mapping.
+ * diagnostic limit also skips Mapping. The owned state is moved into Mapping
+ * after validation.
  *
  * Uses a generic lambda from C++17; earlier standards use a wrapper struct
  * to preserve constexpr factory construction.
@@ -64,7 +65,7 @@ constexpr auto with_node_check(Mapping &&mapping)
     [mapping = std::forward<Mapping>(mapping)](::ryml::ConstNodeRef node,
       auto into, auto state)
       -> decltype(std::declval<const compat::decay_t<Mapping> &>()(
-        node, into, state)) {
+        node, into, std::move(state))) {
       if (state.limit_exceeded())
         return {
           /*value=*/compat::nullopt,
@@ -85,7 +86,7 @@ constexpr auto with_node_check(Mapping &&mapping)
         };
       }
 
-      return mapping(node, into, state);
+      return mapping(node, into, std::move(state));
     };
 #else
   return detail::with_node_check_t<Check, compat::decay_t<Mapping>>{
@@ -145,7 +146,8 @@ lift_to_with_diagnostics(MutatingFunction) ::
  * Expected errors use paths relative to the input node; their order and
  * existing source nodes are kept. with_diagnostics results pass through with
  * complete paths and configuration; callbacks can use state to construct them.
- * Callbacks are invoked as const objects. The node is passed unchanged; this
+ * Callbacks are invoked as const objects and receive an owned state snapshot.
+ * The node is passed unchanged; this
  * adapter does not check its shape or select a registered type mapping.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
@@ -554,7 +556,8 @@ struct with_node_check_t {
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.
   template <typename Destination, typename State>
   auto operator()(::ryml::ConstNodeRef node, Destination into,
-    State state) const -> decltype(this->lifted_mapping(node, into, state)) {
+    State state) const
+    -> decltype(this->lifted_mapping(node, into, std::move(state))) {
     if (state.limit_exceeded())
       return {
         /*value=*/compat::nullopt,
@@ -575,7 +578,7 @@ struct with_node_check_t {
       };
     }
 
-    return this->lifted_mapping(node, into, state);
+    return this->lifted_mapping(node, into, std::move(state));
   }
 };
 
@@ -586,16 +589,16 @@ struct with_mutating_node_to_type_overload_t {
   // Overload ranking preserves a native pointer call before trying assignment.
   template <typename T, typename State>
   auto map_into(::ryml::ConstNodeRef node, T *into, State state, int) const
-    -> decltype(this->mapping(node, into, state)) {
-    return this->mapping(node, into, state);
+    -> decltype(this->mapping(node, into, std::move(state))) {
+    return this->mapping(node, into, std::move(state));
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_assignable<T &, T &&>::value))
   auto map_into(::ryml::ConstNodeRef node, T *into, State state, long) const
     -> with_diagnostics_t<compat::monostate, compat::decay_t<decltype(
-      this->mapping(node, omni::type_t<T>{}, state).diagnostics)>> {
-    auto result = this->mapping(node, omni::type_t<T>{}, state);
+      this->mapping(node, omni::type_t<T>{}, std::move(state)).diagnostics)>> {
+    auto result = this->mapping(node, omni::type_t<T>{}, std::move(state));
     if (result.value)
       *into = std::move(*result.value);
 
@@ -609,15 +612,16 @@ struct with_mutating_node_to_type_overload_t {
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.
   template <typename T, typename State>
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> decltype(this->mapping(node, type, state)) {
-    return this->mapping(node, type, state);
+    State state) const
+    -> decltype(this->mapping(node, type, std::move(state))) {
+    return this->mapping(node, type, std::move(state));
   }
 
   template <typename T, typename State>
   auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
-    -> decltype(this->map_into(node, into, state, 0)) {
+    -> decltype(this->map_into(node, into, std::move(state), 0)) {
     assert(into);
-    return this->map_into(node, into, state, 0);
+    return this->map_into(node, into, std::move(state), 0);
   }
 };
 

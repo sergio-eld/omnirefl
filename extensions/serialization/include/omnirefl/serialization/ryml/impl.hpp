@@ -89,7 +89,7 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
       omni::ryml::reflected_scope::mapping_to_type(omni::type_t<T>{});
 
     result.append(omni::ryml::detail::read_into(
-      mapping, node, into, context, /*priority=*/0));
+      mapping, node, into, std::move(context), /*priority=*/0));
   }
 
   return std::move(result).finish();
@@ -99,7 +99,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_write_state<State>::value))
 void write_node(const T &value, ::ryml::NodeRef node, State context) {
   omni::ryml::reflected_scope::mapping_from_type(omni::type_t<T>{})(
-    value, node, context);
+    value, node, std::move(context));
 }
 
 namespace detail {
@@ -137,7 +137,7 @@ struct map_registered_or {
       result.result.value.reset();
     else
       result.append(omni::ryml::detail::read_into(
-        mapping, node, into, context, /*priority=*/0));
+        mapping, node, into, std::move(context), /*priority=*/0));
 
     return std::move(result).finish();
   }
@@ -166,7 +166,8 @@ auto map_to_fundamental_t::operator()(::ryml::ConstNodeRef node, T *into,
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   return detail::map_registered_or<
-    decltype(default_to_arithmetic(omni::type_t<T>{}))>{}(node, into, context);
+    decltype(default_to_arithmetic(omni::type_t<T>{}))>{}(node, into,
+      std::move(context));
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -177,7 +178,8 @@ auto map_to_string_like_t::operator()(::ryml::ConstNodeRef node, T *into,
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   return detail::map_registered_or<
-    decltype(default_to_string_like(omni::type_t<T>{}))>{}(node, into, context);
+    decltype(default_to_string_like(omni::type_t<T>{}))>{}(node, into,
+      std::move(context));
 }
 
 namespace detail {
@@ -211,7 +213,7 @@ auto map_to_reflected_t::operator()(::ryml::ConstNodeRef node, T *into,
     detail::cpp11_lambda_read<T, State>{
       /*node=*/node,
       /*into=*/ *into,
-      /*context=*/context,
+      /*context=*/std::move(context),
     },
     omni::type_t<target>{});
 }
@@ -229,7 +231,7 @@ auto map_to_sequence_t::operator()(::ryml::ConstNodeRef node, T *into,
     detail::map_registered_or<
       decltype(default_to_range(omni::type_t<T>{}))>>::type{};
 
-  return map(node, into, context);
+  return map(node, into, std::move(context));
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -245,7 +247,7 @@ auto map_to_optional_t::operator()(::ryml::ConstNodeRef node, T *into,
     detail::map_registered_or<
       decltype(default_to_optional_like(omni::type_t<T>{}))>>::type{};
 
-  return map(node, into, context);
+  return map(node, into, std::move(context));
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
@@ -344,9 +346,7 @@ struct cpp11_lambda_write {
   template <typename _M, omni::reflected_entity Entity>
   ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
     ::ryml::Tree tree;
-    const State context{};
-
-    core::write_node(this->value, tree.rootref(), context);
+    core::write_node(this->value, tree.rootref(), State{});
     return tree;
   }
 };
@@ -361,9 +361,7 @@ struct tree_builder_case {
     (is_write_state<State>::value))
   static ::ryml::Tree build(T &value) {
     ::ryml::Tree tree;
-    const State context{};
-
-    write_node(value, tree.rootref(), context);
+    write_node(value, tree.rootref(), State{});
     return tree;
   }
 };

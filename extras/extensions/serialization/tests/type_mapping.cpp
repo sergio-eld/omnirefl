@@ -91,7 +91,7 @@ struct from_type_t<mapping_observation::number> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const mapping_observation::number &value,
     ::ryml::NodeRef node, State state) const {
-    from_arithmetic(value.value, node, state);
+    from_arithmetic(value.value, node, std::move(state));
   }
 };
 
@@ -100,7 +100,7 @@ struct from_type_t<mapping_observation::number> {
 template <typename T>
 const auto from_type<endpoint<T>> = [](const endpoint<T> &value,
   ::ryml::NodeRef node, auto state) {
-  core::write_node(value.port, node, state);
+  core::write_node(value.port, node, std::move(state));
 };
 
 template <typename T>
@@ -113,7 +113,7 @@ struct from_type_t<endpoint<T>> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const endpoint<T> &value,
     ::ryml::NodeRef node, State state) const {
-    core::write_node(value.port, node, state);
+    core::write_node(value.port, node, std::move(state));
   }
 };
 
@@ -131,7 +131,7 @@ const auto to_type<shifted_integer> =
   [bias = 7](::ryml::ConstNodeRef node, shifted_integer *into, auto state) {
     int decoded{};
     auto result = default_to_integer(omni::type_t<int>{})(
-      node, &decoded, state);
+      node, &decoded, std::move(state));
     if (result.value)
       into->value = decoded + bias;
 
@@ -141,7 +141,7 @@ const auto to_type<shifted_integer> =
 template <>
 const auto from_type<shifted_integer> =
   [bias = 11](const shifted_integer &value, ::ryml::NodeRef node, auto state) {
-    from_integer(value.value + bias, node, state);
+    from_integer(value.value + bias, node, std::move(state));
   };
 #else
 // C++11 uses named callable types instead of capturing generic lambdas.
@@ -155,7 +155,7 @@ struct to_type_t<shifted_integer> {
     State state) const -> with_diagnostics_t<compat::monostate> {
     int decoded{};
     auto result = default_to_integer(omni::type_t<int>{})(
-      node, &decoded, state);
+      node, &decoded, std::move(state));
     if (result.value)
       into->value = decoded + this->bias;
 
@@ -171,7 +171,7 @@ struct from_type_t<shifted_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const shifted_integer &value, ::ryml::NodeRef node,
     State state) const {
-    from_integer(value.value + this->bias, node, state);
+    from_integer(value.value + this->bias, node, std::move(state));
   }
 };
 #endif
@@ -182,7 +182,7 @@ struct from_type_t<const qualified_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const qualified_integer &value, ::ryml::NodeRef node,
     State state) const {
-    from_integer(value.value, node, state);
+    from_integer(value.value, node, std::move(state));
   }
 };
 

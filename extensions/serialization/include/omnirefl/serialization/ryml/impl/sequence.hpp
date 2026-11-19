@@ -164,7 +164,7 @@ struct read_range_case<false> {
       if (result->stopped())
         break;
 
-      const auto context = result->state.child({
+      auto context = result->state.child({
         /*field=*/{},
         /*index=*/index++,
       });
@@ -175,7 +175,7 @@ struct read_range_case<false> {
       result->append(std::move(mapped));
       if (success)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, context, result, std::move(element));
+          into, child, std::move(context), result, std::move(element));
     }
   }
 };
@@ -207,7 +207,7 @@ struct read_range_case<true> {
       if (result->stopped())
         break;
 
-      const auto context = result->state.child({
+      auto context = result->state.child({
         /*field=*/child.key(),
         /*index=*/compat::nullopt,
       });
@@ -221,7 +221,8 @@ struct read_range_case<true> {
       result->append(std::move(mapped));
       if (success)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, context, result, std::move(key), std::move(value));
+          into, child, std::move(context), result, std::move(key),
+          std::move(value));
     }
   }
 };
@@ -337,7 +338,8 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
   static_assert(omni::ryml::detail::supports_range_insertion<T>::value,
     "to_range requires emplace, or try_emplace and replace for unique keys");
 
-  auto result = omni::ryml::detail::make_node_accumulator(context);
+  auto result = omni::ryml::detail::make_node_accumulator(
+    std::move(context));
   assert(into);
   assert(traits::is_key_value<T>::value ? node.is_map() : node.is_seq());
 
@@ -367,7 +369,7 @@ void from_range_t::operator()(const T &value,
     "or converting-proxy iterators.");
 
   detail::write_range_case<traits::is_key_value<T>::value>::apply(
-    value, node, context);
+    value, node, std::move(context));
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.

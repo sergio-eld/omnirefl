@@ -77,7 +77,7 @@ struct read {
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>,
     State state) const -> omni::ryml::with_diagnostics_t<value> {
     auto result = omni::ryml::core::map_node_to_integer(
-      node, omni::type_t<int>{}, state);
+      node, omni::type_t<int>{}, std::move(state));
 
     return {
       /*value=*/result.value
@@ -386,7 +386,7 @@ struct read {
   template <typename State>
   auto operator()(::ryml::ConstNodeRef node, value *into, State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_range_t{}(node, &into->items, state);
+    return omni::ryml::to_range_t{}(node, &into->items, std::move(state));
   }
 };
 
@@ -448,7 +448,8 @@ struct read {
   template <typename State>
   auto operator()(::ryml::ConstNodeRef node, value *into, State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_optional_like_t{}(node, &into->item, state);
+    return omni::ryml::to_optional_like_t{}(node, &into->item,
+      std::move(state));
   }
 };
 
@@ -838,7 +839,7 @@ struct read {
   auto operator()(::ryml::ConstNodeRef node, State state) const
     -> omni::ryml::with_diagnostics_t<value> {
     auto result = omni::ryml::core::map_node_to_boolean(
-      node, omni::type_t<bool>{}, state);
+      node, omni::type_t<bool>{}, std::move(state));
 
     return {
       /*value=*/result.value
@@ -1018,6 +1019,56 @@ TEST(composed_move_only, assigns_produced_values_directly_to_record_fields) {
     EXPECT_TRUE(result.value->flag.enabled);
     EXPECT_EQ(5U, result.value->bits);
   }
+}
+
+namespace composed_rvalue_state {
+
+struct value { bool enabled; };
+struct envelope { value flag; };
+
+struct read {
+  template <typename Config>
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>,
+    omni::ryml::read_state_t<Config> &&) const
+    -> omni::compat::expected<value, omni::ryml::issue> {
+    const auto parsed = omni::ryml::core::parse_boolean(
+      {node.val().str, node.val().len});
+
+    return value{*parsed};
+  }
+};
+
+} // namespace composed_rvalue_state
+
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+template <>
+const auto omni::ryml::cp::to_type<composed_rvalue_state::value> =
+  omni::ryml::compose::to_boolean(composed_rvalue_state::read{});
+#else
+template <>
+struct omni::ryml::cp::to_type_t<composed_rvalue_state::value>:
+    decltype(omni::ryml::compose::to_boolean(
+      composed_rvalue_state::read{})) {};
+#endif
+
+TEST(composed_rvalue_state, deserializes_a_root_value) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<composed_rvalue_state::value>{}, "true");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_TRUE(result.value->enabled);
+}
+
+TEST(composed_rvalue_state, deserializes_a_nested_value) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<composed_rvalue_state::envelope>{}, R"({"flag": false})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_FALSE(result.value->flag.enabled);
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
