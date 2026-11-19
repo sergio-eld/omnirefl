@@ -44,7 +44,7 @@ struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
       is_read_state<State>>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   NameByAlias name_by_alias;
@@ -88,7 +88,7 @@ struct to_record_t {
  *
 ```
 default_to_record :: type<T> ->
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
 template <typename T>
@@ -103,7 +103,7 @@ constexpr auto default_to_record(omni::type_t<T>)
  * use it.
  *
 ```
-from_record :: (const T&, node, state) -> void
+from_record :: (state, const T&, node) -> void
 ```
  *
  * @pre Record metadata must be available in reflected scope. */
@@ -111,7 +111,7 @@ struct from_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
       is_write_state<State>>::value))
-  auto operator()(const T &value, ::ryml::NodeRef node, State context) const
+  auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
 };
 

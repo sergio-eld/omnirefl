@@ -47,12 +47,13 @@ template <>
 // TODO: [high] Move alias fixture configuration to the model API.
 struct to_type_t<enum_alias_models::state> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, enum_alias_models::state *into,
-    State state) const -> with_diagnostics_t<compat::monostate> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    enum_alias_models::state *into) const -> with_diagnostics_t<compat::monostate> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_string_node>(
         core::reflected_scope::map_node_to_enum_t<
-          enum_alias_models::state_names>{}))(node, into, std::move(state));
+          enum_alias_models::state_names>{}))(std::move(state), node, into);
   }
 };
 
@@ -111,7 +112,7 @@ struct cpp11_map_with_aliases {
   auto operator()(omni::enum_binding_t<_E> enumeration) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate,
       omni::ryml::diagnostics> {
-    return this->compositor(this->node, &enumeration.value(), this->context);
+    return this->compositor(this->context, this->node, &enumeration.value());
   }
 };
 

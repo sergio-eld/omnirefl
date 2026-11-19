@@ -334,7 +334,7 @@ struct cpp11_map_with_aliases {
   auto operator()(omni::record_binding_t<Record> record) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate,
       omni::ryml::diagnostics> {
-    return this->compositor(this->node, &record.value(), this->context);
+    return this->compositor(this->context, this->node, &record.value());
   }
 };
 
@@ -485,35 +485,45 @@ namespace cp {
 template <>
 struct to_type_t<alias_models::endpoint> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, alias_models::endpoint *into,
-    State state) const -> with_diagnostics_t<compat::monostate> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::endpoint *into) const
+    -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
       reflected_scope::to_record_t<alias_models::endpoint_names>{})(
-      node, into, std::move(state));
+        std::move(state),
+        node,
+        into);
   }
 };
 
 template <>
 struct to_type_t<alias_models::endpoint_with_retries> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node,
-    alias_models::endpoint_with_retries *into,
-    State state) const -> with_diagnostics_t<compat::monostate> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::endpoint_with_retries *into) const
+    -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
       reflected_scope::to_record_t<alias_models::endpoint_names>{})(
-      node, into, std::move(state));
+        std::move(state),
+        node,
+        into);
   }
 };
 
 template <>
 struct to_type_t<alias_models::optional_endpoint> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node,
-    alias_models::optional_endpoint *into,
-    State state) const -> with_diagnostics_t<compat::monostate> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::optional_endpoint *into) const
+    -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
       reflected_scope::to_record_t<alias_models::endpoint_names>{})(
-      node, into, std::move(state));
+        std::move(state),
+        node,
+        into);
   }
 };
 

@@ -43,8 +43,8 @@ struct lifted_node_function;
 Check :: node -> expected<node, issue>
 state :: read_state_like
 
-Mapping :: (node, type<T>, state) -> with_diagnostics<T>
-Mapping :: (node, T*, state) -> with_diagnostics<monostate>
+Mapping :: (state, node, type<T>) -> with_diagnostics<T>
+Mapping :: (state, node, T*) -> with_diagnostics<monostate>
 
 with_node_check<Check> :: Mapping -> Mapping
 ```
@@ -63,10 +63,13 @@ constexpr auto with_node_check(Mapping &&mapping)
     detail::with_node_check_t<Check, compat::decay_t<Mapping>>) {
 #if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
   return //
-    [mapping = std::forward<Mapping>(mapping)](::ryml::ConstNodeRef node,
-      auto into, auto state)
+    [mapping = std::forward<Mapping>(mapping)](auto state,
+      ::ryml::ConstNodeRef node,
+      auto into)
       -> decltype(std::declval<const compat::decay_t<Mapping> &>()(
-        node, into, std::move(state))) {
+        std::move(state),
+        node,
+        into)) {
       if (state.limit_exceeded())
         return {
           /*value=*/compat::nullopt,
@@ -85,7 +88,7 @@ constexpr auto with_node_check(Mapping &&mapping)
         };
       }
 
-      return mapping(*checked, into, std::move(state));
+      return mapping(std::move(state), *checked, into);
     };
 #else
   return detail::with_node_check_t<Check, compat::decay_t<Mapping>>{
@@ -101,11 +104,11 @@ constexpr auto with_node_check(Mapping &&mapping)
  * An empty result gives no guarantee about the destination's state.
  *
 ```
-Mapping :: (node, type<T>, state) -> with_diagnostics<T>
+Mapping :: (state, node, type<T>) -> with_diagnostics<T>
 
 with_mutating_node_to_type_overload :: Mapping -> {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
@@ -126,16 +129,16 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 lift_to_with_diagnostics(ValueFunction) ::
-  (node, type<T>, state) -> with_diagnostics<T>
+  (state, node, type<T>) -> with_diagnostics<T>
 lift_to_with_diagnostics(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * Destination overloads come from the callback. No value is default-constructed
@@ -165,18 +168,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_record(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_record(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -207,18 +210,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_range(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_range(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -250,18 +253,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_enum(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_enum(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -293,18 +296,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_string_like(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_string_like(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -336,18 +339,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_boolean(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_boolean(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -378,18 +381,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_integral(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_integral(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -420,18 +423,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_floating_point(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_floating_point(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -462,18 +465,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_arithmetic(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_arithmetic(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -504,18 +507,18 @@ Result<T> :: expected<T, Error> | with_diagnostics<T>
 state :: read_state_like
 
 ValueFunction :: node -> Result<T>
-ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (state, node) -> Result<T>
 ValueFunction :: (node, type<T>) -> Result<T>
-ValueFunction :: (node, type<T>, state) -> Result<T>
+ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (node, T*, state) -> Result<monostate>
+MutatingFunction :: (state, node, T*) -> Result<monostate>
 
 to_optional_like(ValueFunction) :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 to_optional_like(MutatingFunction) ::
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
@@ -544,7 +547,7 @@ namespace detail {
  *
 ```
 Check :: node -> expected<node, issue>
-Mapping :: (node, destination, state) -> with_diagnostics<T>
+Mapping :: (state, node, destination) -> with_diagnostics<T>
 
 with_node_check<Check> :: Mapping -> Mapping
 ```
@@ -563,9 +566,10 @@ struct with_node_check_t {
 
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.
   template <typename Destination, typename State>
-  auto operator()(::ryml::ConstNodeRef node, Destination into,
-    State state) const
-    -> decltype(this->lifted_mapping(node, into, std::move(state))) {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    Destination into) const
+    -> decltype(this->lifted_mapping(std::move(state), node, into)) {
     if (state.limit_exceeded())
       return {
         /*value=*/compat::nullopt,
@@ -584,7 +588,7 @@ struct with_node_check_t {
       };
     }
 
-    return this->lifted_mapping(*checked, into, std::move(state));
+    return this->lifted_mapping(std::move(state), *checked, into);
   }
 };
 
@@ -594,17 +598,17 @@ struct with_mutating_node_to_type_overload_t {
 
   // Overload ranking preserves a native pointer call before trying assignment.
   template <typename T, typename State>
-  auto map_into(::ryml::ConstNodeRef node, T *into, State state, int) const
-    -> decltype(this->mapping(node, into, std::move(state))) {
-    return this->mapping(node, into, std::move(state));
+  auto map_into(State state, ::ryml::ConstNodeRef node, T *into, int) const
+    -> decltype(this->mapping(std::move(state), node, into)) {
+    return this->mapping(std::move(state), node, into);
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_assignable<T &, T &&>::value))
-  auto map_into(::ryml::ConstNodeRef node, T *into, State state, long) const
+  auto map_into(State state, ::ryml::ConstNodeRef node, T *into, long) const
     -> with_diagnostics_t<compat::monostate, compat::decay_t<decltype(
-      this->mapping(node, omni::type_t<T>{}, std::move(state)).diagnostics)>> {
-    return this->mapping(node, omni::type_t<T>{}, std::move(state))
+      this->mapping(std::move(state), node, omni::type_t<T>{}).diagnostics)>> {
+    return this->mapping(std::move(state), node, omni::type_t<T>{})
       .transform([into](T &&value) -> compat::monostate {
         *into = std::move(value);
         return {};
@@ -613,17 +617,18 @@ struct with_mutating_node_to_type_overload_t {
 
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.
   template <typename T, typename State>
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const
-    -> decltype(this->mapping(node, type, std::move(state))) {
-    return this->mapping(node, type, std::move(state));
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> decltype(this->mapping(std::move(state), node, type)) {
+    return this->mapping(std::move(state), node, type);
   }
 
   template <typename T, typename State>
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
-    -> decltype(this->map_into(node, into, std::move(state), 0)) {
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> decltype(this->map_into(std::move(state), node, into, 0)) {
     assert(into);
-    return this->map_into(node, into, std::move(state), 0);
+    return this->map_into(std::move(state), node, into, 0);
   }
 };
 

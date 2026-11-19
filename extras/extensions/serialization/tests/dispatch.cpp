@@ -75,11 +75,13 @@ struct omni::traits::cp::from_string<my_string> {
 template <>
 struct omni::ryml::cp::to_type_t<immutable_number> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node,
-    omni::type_t<immutable_number>, State state) const
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<immutable_number>) const
     -> omni::ryml::with_diagnostics_t<immutable_number> {
-    return omni::ryml::default_to_integral(
-      node, omni::type_t<int>{}, std::move(state))
+    return omni::ryml::default_to_integral(std::move(state),
+      node,
+      omni::type_t<int>{})
       .transform([](int value) -> immutable_number {
         return immutable_number{value};
       });
@@ -89,13 +91,13 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
 template <>
 struct omni::ryml::cp::to_type_t<unsigned short> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, unsigned short *into,
-    State state) const
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    unsigned short *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integral(
+    return omni::ryml::default_to_integral(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
-      into,
-      std::move(state));
+      into);
   }
 };
 
@@ -105,22 +107,20 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <>
 const auto omni::ryml::cp::to_type<my_string> =
-  [](::ryml::ConstNodeRef node, my_string *into, auto state) {
-    return omni::ryml::default_to_string_like(
+  [](auto state, ::ryml::ConstNodeRef node, my_string *into) {
+    return omni::ryml::default_to_string_like(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
-      into,
-      std::move(state));
+      into);
   };
 #else
 template <>
 struct omni::ryml::cp::to_type_t<my_string> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, my_string *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, my_string *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_string_like(
+    return omni::ryml::default_to_string_like(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
-      into,
-      std::move(state));
+      into);
   }
 };
 #endif

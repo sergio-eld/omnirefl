@@ -34,7 +34,7 @@ struct to_range_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<detail::is_mapped_range<T>,
       is_read_state<State>>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   // TODO: [high] Define the representation of non-string object keys before
@@ -48,7 +48,7 @@ struct to_range_t {
  *
 ```
 default_to_range :: type<T> ->
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
 template <typename T>
@@ -66,7 +66,7 @@ constexpr auto default_to_range(omni::type_t<T>)
  * element mappings still use it.
  *
 ```
-from_range :: (const T&, node, state) -> void
+from_range :: (state, const T&, node) -> void
 ```
  *
  * Empty optional array elements are omitted. Optional object values remain.
@@ -76,7 +76,7 @@ struct from_range_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
-  void operator()(const T &value, ::ryml::NodeRef node, State context) const;
+  void operator()(State context, const T &value, ::ryml::NodeRef node) const;
 };
 
 constexpr from_range_t from_range{};

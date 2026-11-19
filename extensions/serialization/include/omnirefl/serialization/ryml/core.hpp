@@ -192,7 +192,7 @@ inline auto expect_string_node(::ryml::ConstNodeRef node)
  * Its callable object can be passed by value for C++11 composition.
  *
 ```
-map_node_to_string_like :: (node, type<T>, state) -> with_diagnostics<T>
+map_node_to_string_like :: (state, node, type<T>) -> with_diagnostics<T>
 ```
  *
  * @pre Caller validates the node shape. node must refer to a scalar in a
@@ -203,7 +203,7 @@ struct map_node_to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_string_like<T>,
       is_read_state<State>>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(node.has_val() && !node.is_container());
     const auto scalar = node.val();
@@ -248,7 +248,7 @@ inline auto expect_boolean_node(::ryml::ConstNodeRef node)
 /** Boolean scalar-to-value mapping.
  *
 ```
-map_node_to_boolean :: (node, type<bool>, state) -> with_diagnostics<bool>
+map_node_to_boolean :: (state, node, type<bool>) -> with_diagnostics<bool>
 ```
  *
  * @pre node refers to an unquoted true/false scalar in a valid tree.
@@ -261,7 +261,7 @@ struct map_node_to_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && !std::is_const<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(node.has_val() && !node.is_container() && !node.is_val_quoted());
     const auto scalar = node.val();
@@ -302,7 +302,7 @@ inline auto expect_integer_node(::ryml::ConstNodeRef node)
  * Reports overflow through mapping diagnostics.
  *
 ```
-map_node_to_integral :: (node, type<T>, state) -> with_diagnostics<T>
+map_node_to_integral :: (state, node, type<T>) -> with_diagnostics<T>
 ```
  *
  * @pre Caller validates integer input in a valid tree; a debug assertion
@@ -314,14 +314,16 @@ struct map_node_to_integral_t {
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(core::expect_integer_node(node));
     const auto expected = std::is_unsigned<T>::value
       ? json::value_kind::unsigned_integer : json::value_kind::integer;
 
-    return omni::ryml::detail::read_scalar(
-      node, omni::type_t<T>{}, std::move(state), expected);
+    return omni::ryml::detail::read_scalar(std::move(state),
+      node,
+      omni::type_t<T>{},
+      expected);
   }
 };
 
@@ -343,7 +345,7 @@ inline auto expect_number_node(::ryml::ConstNodeRef node)
  * Reports failed conversions through mapping diagnostics.
  *
 ```
-map_node_to_floating_point :: (node, type<T>, state) -> with_diagnostics<T>
+map_node_to_floating_point :: (state, node, type<T>) -> with_diagnostics<T>
 ```
  *
  * @pre Caller validates numeric input in a valid tree; a debug assertion
@@ -353,11 +355,13 @@ struct map_node_to_floating_point_t {
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(core::expect_number_node(node));
-    return omni::ryml::detail::read_scalar(node, omni::type_t<T>{},
-      std::move(state), json::value_kind::number);
+    return omni::ryml::detail::read_scalar(std::move(state),
+      node,
+      omni::type_t<T>{},
+      json::value_kind::number);
   }
 };
 
@@ -378,7 +382,7 @@ inline auto expect_arithmetic_node(::ryml::ConstNodeRef node)
  * Provides a common entry point for Boolean, integer, and real mappings.
  *
 ```
-map_node_to_arithmetic :: (node, type<T>, state) -> with_diagnostics<T>
+map_node_to_arithmetic :: (state, node, type<T>) -> with_diagnostics<T>
 ```
  *
  * @pre Caller validates the node shape. node must refer to a scalar in a
@@ -388,7 +392,7 @@ struct map_node_to_arithmetic_t {
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(node.has_val() && !node.is_container());
     constexpr auto read = typename traits::select<
@@ -397,7 +401,7 @@ struct map_node_to_arithmetic_t {
       traits::case_<std::is_integral<T>::value, core::map_node_to_integral_t>,
       core::map_node_to_floating_point_t>::type{};
 
-    return read(node, omni::type_t<T>{}, std::move(state));
+    return read(std::move(state), node, omni::type_t<T>{});
   }
 };
 

@@ -39,7 +39,7 @@ struct map_node_to_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_read_state<State>>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
 
   ValueByAlias value_by_alias;
@@ -81,8 +81,8 @@ namespace reflected_scope {
  *
 ```
 default_to_enum :: type<T> -> {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
@@ -98,7 +98,7 @@ constexpr auto default_to_enum(omni::type_t<T>)
  * Does not call \ref omni::ryml::reflected_scope::mapping_from_type.
  *
 ```
-from_enum :: (T, node, state) -> void
+from_enum :: (state, T, node) -> void
 ```
  *
  * @pre Metadata for T must be available in reflected scope. */
@@ -106,7 +106,7 @@ struct from_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_write_state<State>>::value))
-  auto operator()(T value, ::ryml::NodeRef node, State) const -> void;
+  auto operator()(State, T value, ::ryml::NodeRef node) const -> void;
 };
 
 constexpr from_enum_t from_enum{};

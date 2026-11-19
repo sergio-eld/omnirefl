@@ -72,7 +72,7 @@ namespace core {
  * fallback to another overload. */
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
-auto read_node(::ryml::ConstNodeRef node, T *into, State context)
+auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 // REFACTORME: [high] This only forwards to mapping_from_type(...)(...).
@@ -80,7 +80,7 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
 /** Dispatch one value through its serialization customization or default. */
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_write_state<State>::value))
-void write_node(const T &value, ::ryml::NodeRef node, State context);
+void write_node(State context, const T &value, ::ryml::NodeRef node);
 
 /** (Ad hoc: see detail) Map Boolean, integer, or real JSON/YAML nodes
  * into corresponding fundamental C++ types.
@@ -92,14 +92,15 @@ struct map_to_fundamental_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
     -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -114,14 +115,15 @@ struct map_to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
     -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -138,14 +140,15 @@ struct map_to_reflected_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_object<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
     -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_object<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -162,14 +165,15 @@ struct map_to_sequence_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
     -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -185,14 +189,15 @@ struct map_to_optional_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_optional<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
     -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_optional<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -223,11 +228,14 @@ OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
     && !std::is_const<T>::value))
 auto map_by_schema(const Config &options, omni::type_t<T> type,
   ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
-  return detail::map_by_schema_dispatch_t<T>{}(node, type, read_state_t<Config>{
+  return detail::map_by_schema_dispatch_t<T>{}(read_state_t<Config>{
     /*config=*/options,
     /*error_count=*/0,
     /*warning_count=*/0,
-  });
+  },
+
+    node,
+    type);
 }
 
 /** Map a node into *into, traversing the C++ schema over the node.
@@ -242,11 +250,14 @@ OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
     && !std::is_const<T>::value))
 auto map_by_schema(const Config &options, T *into, ::ryml::ConstNodeRef node)
   -> with_diagnostics_t<compat::monostate> {
-  return detail::map_by_schema_dispatch_t<T>{}(node, into, read_state_t<Config>{
+  return detail::map_by_schema_dispatch_t<T>{}(read_state_t<Config>{
     /*config=*/options,
     /*error_count=*/0,
     /*warning_count=*/0,
-  });
+  },
+
+    node,
+    into);
 }
 
 /** (QoL) Map a whole tree without explicitly extracting its root node. */

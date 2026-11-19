@@ -66,8 +66,9 @@ namespace cp {
 template <>
 struct to_type_t<mapping_observation::number> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node,
-    mapping_observation::number *into, State state) const
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    mapping_observation::number *into) const
     -> with_diagnostics_t<compat::monostate> {
     auto &trace = *state.config.transform_diagnostics.observed;
     trace.paths.push_back(detail::render_path(core::node_path(node)));
@@ -75,7 +76,7 @@ struct to_type_t<mapping_observation::number> {
     trace.warnings.push_back(state.warning_count);
     trace.configurations.push_back(&state.config);
 
-    auto result = core::read_node(node, &into->value, state);
+    auto result = core::read_node(state, node, &into->value);
     if (result.value && into->value < 0) {
       result.diagnostics.issues.push_back(core::make_issue(
         json::issue_code::out_of_range, json::value_kind::integer,
@@ -89,18 +90,20 @@ struct to_type_t<mapping_observation::number> {
 template <>
 struct from_type_t<mapping_observation::number> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(const mapping_observation::number &value,
-    ::ryml::NodeRef node, State state) const {
-    from_arithmetic(value.value, node, std::move(state));
+  void operator()(State state,
+    const mapping_observation::number &value,
+    ::ryml::NodeRef node) const {
+    from_arithmetic(std::move(state), value.value, node);
   }
 };
 
 // C++14 supports variable-template registration and partial specialization.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
-const auto from_type<endpoint<T>> = [](const endpoint<T> &value,
-  ::ryml::NodeRef node, auto state) {
-  core::write_node(value.port, node, std::move(state));
+const auto from_type<endpoint<T>> = [](auto state,
+  const endpoint<T> &value,
+  ::ryml::NodeRef node) {
+  core::write_node(std::move(state), value.port, node);
 };
 
 template <typename T>
@@ -111,9 +114,10 @@ const auto to_type<endpoint<T>> =
 template <typename T>
 struct from_type_t<endpoint<T>> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(const endpoint<T> &value,
-    ::ryml::NodeRef node, State state) const {
-    core::write_node(value.port, node, std::move(state));
+  void operator()(State state,
+    const endpoint<T> &value,
+    ::ryml::NodeRef node) const {
+    core::write_node(std::move(state), value.port, node);
   }
 };
 
@@ -128,10 +132,9 @@ struct to_type_t<endpoint<T>>:
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <>
 const auto to_type<shifted_integer> =
-  [bias = 7](::ryml::ConstNodeRef node, shifted_integer *into, auto state) {
+  [bias = 7](auto state, ::ryml::ConstNodeRef node, shifted_integer *into) {
     int decoded{};
-    auto result = default_to_integral(
-      node, &decoded, std::move(state));
+    auto result = default_to_integral(std::move(state), node, &decoded);
     if (result.value)
       into->value = decoded + bias;
 
@@ -140,8 +143,8 @@ const auto to_type<shifted_integer> =
 
 template <>
 const auto from_type<shifted_integer> =
-  [bias = 11](const shifted_integer &value, ::ryml::NodeRef node, auto state) {
-    from_integral(value.value + bias, node, std::move(state));
+  [bias = 11](auto state, const shifted_integer &value, ::ryml::NodeRef node) {
+    from_integral(std::move(state), value.value + bias, node);
   };
 #else
 // C++11 uses named callable types instead of capturing generic lambdas.
@@ -151,11 +154,11 @@ struct to_type_t<shifted_integer> {
   constexpr to_type_t(): bias(7) {}
 
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, shifted_integer *into,
-    State state) const -> with_diagnostics_t<compat::monostate> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    shifted_integer *into) const -> with_diagnostics_t<compat::monostate> {
     int decoded{};
-    auto result = default_to_integral(
-      node, &decoded, std::move(state));
+    auto result = default_to_integral(std::move(state), node, &decoded);
     if (result.value)
       into->value = decoded + this->bias;
 
@@ -169,9 +172,10 @@ struct from_type_t<shifted_integer> {
   constexpr from_type_t(): bias(11) {}
 
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(const shifted_integer &value, ::ryml::NodeRef node,
-    State state) const {
-    from_integral(value.value + this->bias, node, std::move(state));
+  void operator()(State state,
+    const shifted_integer &value,
+    ::ryml::NodeRef node) const {
+    from_integral(std::move(state), value.value + this->bias, node);
   }
 };
 #endif
@@ -180,9 +184,10 @@ struct from_type_t<shifted_integer> {
 template <>
 struct from_type_t<const qualified_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(const qualified_integer &value, ::ryml::NodeRef node,
-    State state) const {
-    from_integral(value.value, node, std::move(state));
+  void operator()(State state,
+    const qualified_integer &value,
+    ::ryml::NodeRef node) const {
+    from_integral(std::move(state), value.value, node);
   }
 };
 
@@ -463,15 +468,19 @@ TEST(type_mapping, writes_cv_qualified_boolean_tags) {
   ::ryml::Tree tree;
 
   omni::ryml::reflected_scope::mapping_from_type(omni::type_t<const bool>{})(
-    enabled, tree.rootref(), state);
+    state,
+    enabled,
+    tree.rootref());
   EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(tree));
 
   omni::ryml::reflected_scope::mapping_from_type(omni::type_t<volatile bool>{})(
-    disabled, tree.rootref(), state);
+    state,
+    disabled,
+    tree.rootref());
   EXPECT_EQ("false", ::ryml::emitrs_json<std::string>(tree));
 
   omni::ryml::reflected_scope::mapping_from_type(
-    omni::type_t<const volatile bool>{})(fixed, tree.rootref(), state);
+    omni::type_t<const volatile bool>{})(state, fixed, tree.rootref());
   EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(tree));
 }
 
@@ -490,7 +499,7 @@ TEST(type_mapping, preserves_qualified_registration) {
   ::ryml::Tree tree;
 
   omni::ryml::reflected_scope::mapping_from_type(
-    omni::type_t<const qualified_integer>{})(value, tree.rootref(), state);
+    omni::type_t<const qualified_integer>{})(state, value, tree.rootref());
   EXPECT_EQ("23", ::ryml::emitrs_json<std::string>(tree));
 }
 

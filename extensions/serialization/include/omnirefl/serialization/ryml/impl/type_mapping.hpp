@@ -12,9 +12,9 @@ namespace ryml {
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_string_like<T>,
     is_write_state<State>>::value))
-auto from_string_like_t::operator()(const T &value,
-  ::ryml::NodeRef node,
-  State context) const
+auto from_string_like_t::operator()(State context,
+  const T &value,
+  ::ryml::NodeRef node) const
   -> void {
   const auto &text = adapt::as_string(value);
   using storage_type = decltype(adapt::as_string(value));
@@ -41,8 +41,9 @@ auto from_string_like_t::operator()(const T &value,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_boolean_t::operator()(const T &value, ::ryml::NodeRef node,
-  State) const {
+void from_boolean_t::operator()(State,
+  const T &value,
+  ::ryml::NodeRef node) const {
   // C4's plain bool conversion emits 0/1 rather than document booleans.
   node.set_serialized(c4::fmt::boolalpha(value));
 }
@@ -51,15 +52,17 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_integral<T>::value
     && !std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_integral_t::operator()(const T &value, ::ryml::NodeRef node,
-  State) const {
+void from_integral_t::operator()(State,
+  const T &value,
+  ::ryml::NodeRef node) const {
   node.set_serialized(value);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_write_state<State>::value))
-void from_floating_point_t::operator()(const T &value, ::ryml::NodeRef node,
-  State) const {
+void from_floating_point_t::operator()(State,
+  const T &value,
+  ::ryml::NodeRef node) const {
   // Preserve enough significant digits to recover the original value.
   node.set_serialized(c4::fmt::real(value,
     std::numeric_limits<T>::max_digits10, c4::FTOA_FLEX));
@@ -67,22 +70,23 @@ void from_floating_point_t::operator()(const T &value, ::ryml::NodeRef node,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && is_write_state<State>::value))
-auto from_arithmetic_t::operator()(const T &value,
-  ::ryml::NodeRef node, State context) const -> void {
+auto from_arithmetic_t::operator()(State context,
+  const T &value,
+  ::ryml::NodeRef node) const -> void {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
       from_boolean_t>,
     traits::case_<std::is_integral<T>::value, from_integral_t>,
     from_floating_point_t>::type{};
 
-  write(value, node, std::move(context));
+  write(std::move(context), value, node);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_optional<T>, is_read_state<State>>::value))
-auto to_optional_like_t::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  State context) const
+auto to_optional_like_t::operator()(State context,
+  ::ryml::ConstNodeRef node,
+  T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   if (!node.is_container() && node.val_is_null()
     && (!node.has_val_tag()
@@ -93,7 +97,7 @@ auto to_optional_like_t::operator()(::ryml::ConstNodeRef node,
   }
 
   typename T::value_type value{};
-  auto result = core::read_node(node, &value, std::move(context));
+  auto result = core::read_node(std::move(context), node, &value);
   if (result.value)
     adapt::emplace(into, std::move(value));
 
@@ -102,12 +106,12 @@ auto to_optional_like_t::operator()(::ryml::ConstNodeRef node,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
-auto from_optional_like_t::operator()(const T &value,
-  ::ryml::NodeRef node,
-  State context) const
+auto from_optional_like_t::operator()(State context,
+  const T &value,
+  ::ryml::NodeRef node) const
   -> void {
   if (adapt::has_value(value))
-    core::write_node(adapt::get_value(value), node, std::move(context));
+    core::write_node(std::move(context), adapt::get_value(value), node);
   else {
     node.set_val("null");
     node.set_val_style(::ryml::VAL_PLAIN);
@@ -119,7 +123,7 @@ namespace detail {
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Field, typename State),
   (is_read_state<State>::value))
-auto map_node_to_field(::ryml::ConstNodeRef node, Field field, State state)
+auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
   -> with_diagnostics_t<compat::monostate> {
   if (state.limit_exceeded())
     return {
@@ -128,7 +132,10 @@ auto map_node_to_field(::ryml::ConstNodeRef node, Field field, State state)
     };
 
   const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
-  return map_node_to_field_using(mapping, node, field, std::move(state),
+  return map_node_to_field_using(std::move(state),
+    mapping,
+    node,
+    field,
     /*priority=*/0);
 }
 

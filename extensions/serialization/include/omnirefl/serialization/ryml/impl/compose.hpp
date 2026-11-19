@@ -26,37 +26,57 @@ template <>
 struct node_call_priority<0> {};
 
 template <typename Function, typename Destination, typename State>
-auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
-  Destination into, State state, node_call_priority<3>)
-  -> decltype(f(node, into, std::move(state))) {
-  return f(node, into, std::move(state));
+auto invoke_expected_node(State state,
+  const Function &f,
+  ::ryml::ConstNodeRef node,
+  Destination into,
+  node_call_priority<3>)
+  -> decltype(f(std::move(state), node, into)) {
+  return f(std::move(state), node, into);
 }
 
 template <typename Function, typename Destination, typename State>
-auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
-  Destination into, State, node_call_priority<2>) -> decltype(f(node, into)) {
+auto invoke_expected_node(State,
+  const Function &f,
+  ::ryml::ConstNodeRef node,
+  Destination into,
+  node_call_priority<2>) -> decltype(f(node, into)) {
   return f(node, into);
 }
 
 template <typename Function, typename T, typename State>
-auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
-  omni::type_t<T>, State state, node_call_priority<1>)
-  -> decltype(f(node, std::move(state))) {
-  return f(node, std::move(state));
+auto invoke_expected_node(State state,
+  const Function &f,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T>,
+  node_call_priority<1>)
+  -> decltype(f(std::move(state), node)) {
+  return f(std::move(state), node);
 }
 
 template <typename Function, typename T, typename State>
-auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
-  omni::type_t<T>, State, node_call_priority<0>) -> decltype(f(node)) {
+auto invoke_expected_node(State,
+  const Function &f,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T>,
+  node_call_priority<0>) -> decltype(f(node)) {
   return f(node);
 }
 
 template <typename Function, typename Destination, typename State>
-auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
-  Destination into, State state)
-  -> decltype(invoke_expected_node(f, node, into, std::move(state),
+auto invoke_expected_node(State state,
+  const Function &f,
+  ::ryml::ConstNodeRef node,
+  Destination into)
+  -> decltype(invoke_expected_node(std::move(state),
+    f,
+    node,
+    into,
     node_call_priority<3>{})) {
-  return invoke_expected_node(f, node, into, std::move(state),
+  return invoke_expected_node(std::move(state),
+    f,
+    node,
+    into,
     node_call_priority<3>{});
 }
 
@@ -79,8 +99,9 @@ inline issue node_function_error(issue error, ::ryml::ConstNodeRef node) {
 }
 
 template <typename T, typename State>
-auto node_result(compat::expected<T, issue> mapped, ::ryml::ConstNodeRef node,
-  State state) -> with_diagnostics_t<T> {
+auto node_result(State state,
+  compat::expected<T, issue> mapped,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
   auto result = make_node_accumulator(std::move(state));
   if (mapped)
     return {std::move(*mapped), std::move(result.result.diagnostics)};
@@ -93,8 +114,9 @@ auto node_result(compat::expected<T, issue> mapped, ::ryml::ConstNodeRef node,
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename Errors, typename State,
   typename Error = compat::remove_cvref_t<compat::range_reference_t<Errors>>),
   (compat::is_input_range<Errors>::value && std::is_same<issue, Error>::value))
-auto node_result(compat::expected<T, Errors> mapped, ::ryml::ConstNodeRef node,
-  State state) -> with_diagnostics_t<T> {
+auto node_result(State state,
+  compat::expected<T, Errors> mapped,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
   auto result = make_node_accumulator(std::move(state));
   if (mapped)
     return {std::move(*mapped), std::move(result.result.diagnostics)};
@@ -109,7 +131,7 @@ auto node_result(compat::expected<T, Errors> mapped, ::ryml::ConstNodeRef node,
 }
 
 template <typename T, typename State>
-auto node_result(with_diagnostics_t<T> mapped, ::ryml::ConstNodeRef, State)
+auto node_result(State, with_diagnostics_t<T> mapped, ::ryml::ConstNodeRef)
   -> with_diagnostics_t<T> {
   return mapped;
 }
@@ -125,39 +147,52 @@ struct lifted_node_function {
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State,
     typename Result = decltype(omni::ryml::detail::invoke_expected_node(
-      std::declval<const Function &>(), std::declval<::ryml::ConstNodeRef>(),
-      omni::type_t<T>{}, std::declval<State>()))),
+      std::declval<State>(),
+      std::declval<const Function &>(),
+      std::declval<::ryml::ConstNodeRef>(),
+      omni::type_t<T>{}))),
     (std::is_same<with_diagnostics_t<T>, decltype(
-      omni::ryml::detail::node_result(std::declval<Result>(),
-        std::declval<::ryml::ConstNodeRef>(), std::declval<State>()))>::value
+      omni::ryml::detail::node_result(std::declval<State>(),
+        std::declval<Result>(),
+        std::declval<::ryml::ConstNodeRef>()))>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> with_diagnostics_t<T> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
     // The callback receives a snapshot; normalization still needs this state.
-    auto mapped = omni::ryml::detail::invoke_expected_node(
-      this->function, node, type, state);
+    auto mapped = omni::ryml::detail::invoke_expected_node(state,
+      this->function,
+      node,
+      type);
 
-    return omni::ryml::detail::node_result(
-      std::move(mapped), node, std::move(state));
+    return omni::ryml::detail::node_result(std::move(state),
+      std::move(mapped),
+      node);
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State,
     typename Result = decltype(omni::ryml::detail::invoke_expected_node(
-      std::declval<const Function &>(), std::declval<::ryml::ConstNodeRef>(),
-      std::declval<T *>(), std::declval<State>()))),
+      std::declval<State>(),
+      std::declval<const Function &>(),
+      std::declval<::ryml::ConstNodeRef>(),
+      std::declval<T *>()))),
     (std::is_same<with_diagnostics_t<compat::monostate>, decltype(
-      omni::ryml::detail::node_result(std::declval<Result>(),
-        std::declval<::ryml::ConstNodeRef>(), std::declval<State>()))>::value
+      omni::ryml::detail::node_result(std::declval<State>(),
+        std::declval<Result>(),
+        std::declval<::ryml::ConstNodeRef>()))>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
     assert(into);
     // The callback receives a snapshot; normalization still needs this state.
-    auto mapped = omni::ryml::detail::invoke_expected_node(
-      this->function, node, into, state);
+    auto mapped = omni::ryml::detail::invoke_expected_node(state,
+      this->function,
+      node,
+      into);
 
-    return omni::ryml::detail::node_result(
-      std::move(mapped), node, std::move(state));
+    return omni::ryml::detail::node_result(std::move(state),
+      std::move(mapped),
+      node);
   }
 };
 

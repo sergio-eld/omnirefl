@@ -23,20 +23,25 @@ TEST(mapping_core, parses_and_converts_without_reflection_or_composition) {
   const omni::ryml::config_t<> options{};
   const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto root = tree->crootref();
-  const auto boolean = omni::ryml::core::map_node_to_boolean(
-    root["flag"], omni::type_t<bool>{}, state);
+  const auto boolean = omni::ryml::core::map_node_to_boolean(state,
+    root["flag"],
+    omni::type_t<bool>{});
 
-  const auto integer = omni::ryml::core::map_node_to_integral(
-    root["count"], omni::type_t<std::int16_t>{}, state);
+  const auto integer = omni::ryml::core::map_node_to_integral(state,
+    root["count"],
+    omni::type_t<std::int16_t>{});
 
-  const auto real = omni::ryml::core::map_node_to_floating_point(
-    root["ratio"], omni::type_t<float>{}, state);
+  const auto real = omni::ryml::core::map_node_to_floating_point(state,
+    root["ratio"],
+    omni::type_t<float>{});
 
-  const auto arithmetic = omni::ryml::core::map_node_to_arithmetic(
-    root["count"], omni::type_t<std::int32_t>{}, state);
+  const auto arithmetic = omni::ryml::core::map_node_to_arithmetic(state,
+    root["count"],
+    omni::type_t<std::int32_t>{});
 
-  const auto text = omni::ryml::core::map_node_to_string_like(
-    root["text"], omni::type_t<std::string>{}, state);
+  const auto text = omni::ryml::core::map_node_to_string_like(state,
+    root["text"],
+    omni::type_t<std::string>{});
 
   EXPECT_EQ(true, boolean.value);
   EXPECT_EQ(42, integer.value);
@@ -66,9 +71,8 @@ TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
   const omni::ryml::config_t<> options{};
   const omni::ryml::read_state_t<> root{options, 0, 0};
   const auto node = tree->crootref()["count"];
-  const auto result = omni::ryml::core::map_node_to_integral(node,
-    omni::type_t<std::int8_t>{},
-    root);
+  const auto result = omni::ryml::core::map_node_to_integral(
+    root, node, omni::type_t<std::int8_t>{});
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());

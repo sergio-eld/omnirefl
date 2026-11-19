@@ -11,9 +11,9 @@ template <typename ValueByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_read_state<State>>::value))
-auto map_node_to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
-  omni::type_t<T>,
-  State context) const
+auto map_node_to_enum_t<ValueByAlias>::operator()(State context,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
   assert(core::expect_string_node(node));
 
@@ -72,7 +72,9 @@ namespace reflected_scope {
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
-auto from_enum_t::operator()(T value, ::ryml::NodeRef node, State) const -> void {
+auto from_enum_t::operator()(State,
+  T value,
+  ::ryml::NodeRef node) const -> void {
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
   for (const auto &enumerator : enumerators)
     if (value == enumerator.first) {

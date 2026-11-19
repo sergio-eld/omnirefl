@@ -35,18 +35,19 @@ namespace cp {
 template <>
 struct to_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, my_int *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, my_int *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return core::read_node(node, &into->value, std::move(context));
+    return core::read_node(std::move(context), node, &into->value);
   }
 };
 
 template <>
 struct from_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(const my_int &value, ::ryml::NodeRef node,
-    State context) const {
-    core::write_node(value.value, node, std::move(context));
+  void operator()(State context,
+    const my_int &value,
+    ::ryml::NodeRef node) const {
+    core::write_node(std::move(context), value.value, node);
   }
 };
 
@@ -55,11 +56,11 @@ struct from_type_t<my_int> {
 template <>
 struct to_type_t<compatible_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node,
-    compatible_integer *into,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    compatible_integer *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    auto result = core::read_node(node, &into->value, context);
+    auto result = core::read_node(context, node, &into->value);
     if (!result.value)
       return result;
 

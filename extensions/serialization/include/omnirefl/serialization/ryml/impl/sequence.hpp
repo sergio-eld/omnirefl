@@ -154,7 +154,7 @@ struct read_range_case<false> {
         break;
 
       compat::range_value_t<T> element{};
-      auto mapped = core::read_node(child, &element, result->state);
+      auto mapped = core::read_node(result->state, child, &element);
       const bool success = bool(mapped.value);
       result->append(std::move(mapped));
       if (success)
@@ -195,7 +195,7 @@ struct read_range_case<true> {
       auto key = adapt::from_string(omni::type_t<key_type>{},
         view_type{name.str, name.len});
       traits::mapped_type_t<T> value{};
-      auto mapped = core::read_node(child, &value, result->state);
+      auto mapped = core::read_node(result->state, child, &value);
       const bool success = bool(mapped.value);
       result->append(std::move(mapped));
       if (success)
@@ -239,8 +239,7 @@ template <>
 struct write_range_case<false> {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_write_state<State>::value))
-  static void apply(const T &value, ::ryml::NodeRef node,
-    State context) {
+  static void apply(State context, const T &value, ::ryml::NodeRef node) {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
     // Separate iterator/sentinel declarations also support non-common ranges
@@ -252,7 +251,7 @@ struct write_range_case<false> {
     for (; current != last; ++current) {
       const element_type &element = *current;
       if (!is_null(element)) {
-        core::write_node(element, node.append_child(), context);
+        core::write_node(context, element, node.append_child());
       }
     }
   }
@@ -262,8 +261,7 @@ template <>
 struct write_range_case<true> {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_write_state<State>::value))
-  static void apply(const T &value, ::ryml::NodeRef node,
-    State context) {
+  static void apply(State context, const T &value, ::ryml::NodeRef node) {
     static_assert(traits::is_string_like<traits::key_type_t<T>>::value,
       "from_range requires string-adaptable keys for JSON/YAML objects");
 
@@ -297,7 +295,7 @@ struct write_range_case<true> {
         child.set_key_serialized(text);
 
       child.set_key_style(::ryml::KEY_DQUO);
-      core::write_node(entry.second, child, context);
+      core::write_node(context, entry.second, child);
     }
   }
 };
@@ -307,9 +305,9 @@ struct write_range_case<true> {
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<detail::is_mapped_range<T>,
     is_read_state<State>>::value))
-auto to_range_t::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  State context) const
+auto to_range_t::operator()(State context,
+  ::ryml::ConstNodeRef node,
+  T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   static_assert(compat::is_invocable<const traits::cp::clear<T> &, T *>::value,
     "to_range requires an adapted clear operation");
@@ -332,9 +330,9 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-void from_range_t::operator()(const T &value,
-  ::ryml::NodeRef node,
-  State context) const {
+void from_range_t::operator()(State context,
+  const T &value,
+  ::ryml::NodeRef node) const {
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 
@@ -348,7 +346,9 @@ void from_range_t::operator()(const T &value,
     "or converting-proxy iterators.");
 
   detail::write_range_case<traits::is_key_value<T>::value>::apply(
-    value, node, std::move(context));
+    std::move(context),
+    value,
+    node);
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.

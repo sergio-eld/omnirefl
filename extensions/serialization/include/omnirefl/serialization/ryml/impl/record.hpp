@@ -16,14 +16,19 @@ namespace detail {
 // C++11 overload ranking selects direct field assignment for value mappings.
 // The trailing decltype requires both a type-tag call and a usable setter.
 template <typename Mapping, typename Field, typename State>
-auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
-  Field field, State state, int)
-  -> decltype(field.set_value(std::move(*mapping(node,
-      omni::type_t<typename Field::type>{}, std::move(state)).value)),
+auto map_node_to_field_using(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  Field field,
+  int)
+  -> decltype(field.set_value(std::move(*mapping(std::move(state),
+    node,
+    omni::type_t<typename Field::type>{}).value)),
     with_diagnostics_t<compat::monostate>{}) {
   auto result = omni::ryml::detail::make_node_accumulator(state);
-  auto mapped = mapping(node, omni::type_t<typename Field::type>{},
-    std::move(state));
+  auto mapped = mapping(std::move(state),
+    node,
+    omni::type_t<typename Field::type>{});
   result.append({
     /*value=*/mapped.value
       ? compat::make_optional(compat::monostate{}) : compat::nullopt,
@@ -37,13 +42,19 @@ auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
 }
 
 template <typename Mapping, typename Field, typename State>
-auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
-  Field field, State state, long) -> with_diagnostics_t<compat::monostate> {
+auto map_node_to_field_using(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  Field field,
+  long) -> with_diagnostics_t<compat::monostate> {
   // Mutation-only mappings need a temporary for bitfields and packed fields.
   typename Field::type value = field.value();
   auto result = omni::ryml::detail::make_node_accumulator(state);
-  result.append(omni::ryml::detail::read_into(
-    mapping, node, &value, std::move(state), /*priority=*/0));
+  result.append(omni::ryml::detail::read_into(std::move(state),
+    mapping,
+    node,
+    &value,
+    /*priority=*/0));
 
   if (result.result.value)
     field.set_value(std::move(value));
@@ -112,8 +123,9 @@ struct record_member_event {
       ? ::ryml::ConstNodeRef{} : entry->node;
 
     if (!this->check_presence && !node.invalid())
-      return reflected_scope::detail::map_node_to_field(
-        node, this->field, std::move(state));
+      return reflected_scope::detail::map_node_to_field(std::move(state),
+        node,
+        this->field);
 
     auto result = make_node_accumulator(std::move(state));
     if (!this->check_presence || !node.invalid())
@@ -176,7 +188,7 @@ struct cpp11_write_member {
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    core::write_node(field.value(), child, this->context);
+    core::write_node(this->context, field.value(), child);
   }
 };
 
@@ -188,9 +200,9 @@ template <typename NameByAlias>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_read_state<State>>::value))
-auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  State context) const
+auto to_record_t<NameByAlias>::operator()(State context,
+  ::ryml::ConstNodeRef node,
+  T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(
     std::move(context));
@@ -306,9 +318,9 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto from_record_t::operator()(const T &value,
-  ::ryml::NodeRef node,
-  State context) const
+auto from_record_t::operator()(State context,
+  const T &value,
+  ::ryml::NodeRef node) const
   -> void {
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);

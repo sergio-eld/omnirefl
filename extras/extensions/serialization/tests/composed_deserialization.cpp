@@ -74,10 +74,12 @@ struct value { int count; };
 
 struct read {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>,
-    State state) const -> omni::ryml::with_diagnostics_t<value> {
-    auto result = omni::ryml::core::map_node_to_integral(
-      node, omni::type_t<int>{}, std::move(state));
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<value>) const -> omni::ryml::with_diagnostics_t<value> {
+    auto result = omni::ryml::core::map_node_to_integral(std::move(state),
+      node,
+      omni::type_t<int>{});
 
     return {
       /*value=*/result.value
@@ -384,9 +386,9 @@ struct value { std::vector<int> items; };
 
 struct read {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, value *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, value *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_range_t{}(node, &into->items, std::move(state));
+    return omni::ryml::to_range_t{}(std::move(state), node, &into->items);
   }
 };
 
@@ -446,10 +448,11 @@ struct value { omni::compat::optional<composed_integer::value> item; };
 
 struct read {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, value *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, value *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_optional_like_t{}(node, &into->item,
-      std::move(state));
+    return omni::ryml::to_optional_like_t{}(std::move(state),
+      node,
+      &into->item);
   }
 };
 
@@ -515,10 +518,11 @@ struct envelope {
 
 struct read {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, value *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, value *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    auto result = omni::ryml::reflected_scope::to_record_t<>{}(
-      node, into, state);
+    auto result = omni::ryml::reflected_scope::to_record_t<>{}(state,
+      node,
+      into);
 
     if (result.value && (into->x < 0 || into->y < 0)) {
       result.value.reset();
@@ -796,7 +800,7 @@ struct value { bool enabled; };
 struct read {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, State) const
+  auto operator()(State, ::ryml::ConstNodeRef node) const
     -> omni::compat::expected<value, omni::ryml::issue> {
     const auto parsed = omni::ryml::core::parse_boolean(
       {node.val().str, node.val().len});
@@ -836,10 +840,11 @@ struct envelope { value flag; };
 struct read {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node) const
     -> omni::ryml::with_diagnostics_t<value> {
-    auto result = omni::ryml::core::map_node_to_boolean(
-      node, omni::type_t<bool>{}, std::move(state));
+    auto result = omni::ryml::core::map_node_to_boolean(std::move(state),
+      node,
+      omni::type_t<bool>{});
 
     return {
       /*value=*/result.value
@@ -1028,8 +1033,9 @@ struct envelope { value flag; };
 
 struct read {
   template <typename Config>
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>,
-    omni::ryml::read_state_t<Config> &&) const
+  auto operator()(omni::ryml::read_state_t<Config> &&,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<value>) const
     -> omni::compat::expected<value, omni::ryml::issue> {
     const auto parsed = omni::ryml::core::parse_boolean(
       {node.val().str, node.val().len});

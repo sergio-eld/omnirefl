@@ -35,8 +35,8 @@ namespace ryml {
  *
 ```
 default_to_string_like :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  *
@@ -45,21 +45,22 @@ default_to_string_like :: {
 struct default_to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> with_diagnostics_t<T> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
     return compose::with_node_check<core::expect_string_node>(
-      core::map_node_to_string_like)(node, type, std::move(state));
+      core::map_node_to_string_like)(std::move(state), node, type);
   }
 
   /** (QoL) Mutating adapter for the value-producing overload. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && is_read_state<State>::value
       && std::is_assignable<T &, T &&>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_string_node>(
-        core::map_node_to_string_like))(node, into, std::move(state));
+        core::map_node_to_string_like))(std::move(state), node, into);
   }
 };
 
@@ -71,14 +72,14 @@ constexpr default_to_string_like_t default_to_string_like{};
  * Converted text is copied; reference-tree writing may borrow source views.
  *
 ```
-from_string_like :: (const T&, node, state) -> void
+from_string_like :: (state, const T&, node) -> void
 ```
  */
 struct from_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_string_like<T>,
       is_write_state<State>>::value))
-  auto operator()(const T &value, ::ryml::NodeRef node, State) const -> void;
+  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
 };
 
 constexpr from_string_like_t from_string_like{};
@@ -89,8 +90,8 @@ constexpr from_string_like_t from_string_like{};
  *
 ```
 default_to_boolean :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
@@ -98,10 +99,11 @@ struct default_to_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && !std::is_const<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> with_diagnostics_t<T> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
     return compose::with_node_check<core::expect_boolean_node>(
-      core::map_node_to_boolean)(node, type, std::move(state));
+      core::map_node_to_boolean)(std::move(state), node, type);
   }
 
   /** (QoL) Mutating adapter for the value-producing overload. */
@@ -109,11 +111,11 @@ struct default_to_boolean_t {
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && !std::is_const<T>::value && is_read_state<State>::value
       && std::is_assignable<T &, T &&>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_boolean_node>(
-        core::map_node_to_boolean))(node, into, std::move(state));
+        core::map_node_to_boolean))(std::move(state), node, into);
   }
 };
 
@@ -123,14 +125,14 @@ constexpr default_to_boolean_t default_to_boolean{};
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_boolean :: (T, node, state) -> void
+from_boolean :: (state, T, node) -> void
 ```
  */
 struct from_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
-  void operator()(const T &value, ::ryml::NodeRef node, State) const;
+  void operator()(State, const T &value, ::ryml::NodeRef node) const;
 };
 
 constexpr from_boolean_t from_boolean{};
@@ -141,8 +143,8 @@ constexpr from_boolean_t from_boolean{};
  *
 ```
 default_to_integral :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
@@ -151,10 +153,11 @@ struct default_to_integral_t {
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> with_diagnostics_t<T> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
     return compose::with_node_check<core::expect_integer_node>(
-      core::map_node_to_integral)(node, type, std::move(state));
+      core::map_node_to_integral)(std::move(state), node, type);
   }
 
   /** (QoL) Mutating adapter for the value-producing overload. */
@@ -163,11 +166,11 @@ struct default_to_integral_t {
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_read_state<State>::value
       && std::is_assignable<T &, T &&>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_integer_node>(
-        core::map_node_to_integral))(node, into, std::move(state));
+        core::map_node_to_integral))(std::move(state), node, into);
   }
 };
 
@@ -177,7 +180,7 @@ constexpr default_to_integral_t default_to_integral{};
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_integral :: (const T&, node, state) -> void
+from_integral :: (state, const T&, node) -> void
 ```
  */
 struct from_integral_t {
@@ -185,7 +188,7 @@ struct from_integral_t {
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
-  void operator()(const T &value, ::ryml::NodeRef node, State) const;
+  void operator()(State, const T &value, ::ryml::NodeRef node) const;
 };
 
 constexpr from_integral_t from_integral{};
@@ -196,29 +199,30 @@ constexpr from_integral_t from_integral{};
  *
 ```
 default_to_floating_point :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
 struct default_to_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> with_diagnostics_t<T> {
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
     return compose::with_node_check<core::expect_number_node>(
-      core::map_node_to_floating_point)(node, type, std::move(state));
+      core::map_node_to_floating_point)(std::move(state), node, type);
   }
 
   /** (QoL) Mutating adapter for the value-producing overload. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_read_state<State>::value
       && std::is_assignable<T &, T &&>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_number_node>(
-        core::map_node_to_floating_point))(node, into, std::move(state));
+        core::map_node_to_floating_point))(std::move(state), node, into);
   }
 };
 
@@ -229,13 +233,13 @@ constexpr default_to_floating_point_t default_to_floating_point{};
  * Preserves enough significant digits for round-trip conversion.
  *
 ```
-from_floating_point :: (const T&, node, state) -> void
+from_floating_point :: (state, const T&, node) -> void
 ```
  */
 struct from_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
-  void operator()(const T &value, ::ryml::NodeRef node, State) const;
+  void operator()(State, const T &value, ::ryml::NodeRef node) const;
 };
 
 constexpr from_floating_point_t from_floating_point{};
@@ -246,8 +250,8 @@ constexpr from_floating_point_t from_floating_point{};
  *
 ```
 default_to_arithmetic :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
@@ -262,16 +266,17 @@ struct default_to_arithmetic_t {
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> with_diagnostics_t<T> {
-    return mapping_type<T>{}(node, type, std::move(state));
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
+    return mapping_type<T>{}(std::move(state), node, type);
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
-    return mapping_type<T>{}(node, into, std::move(state));
+    return mapping_type<T>{}(std::move(state), node, into);
   }
 };
 
@@ -281,13 +286,13 @@ constexpr default_to_arithmetic_t default_to_arithmetic{};
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_arithmetic :: (const T&, node, state) -> void
+from_arithmetic :: (state, const T&, node) -> void
 ```
  */
 struct from_arithmetic_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_write_state<State>::value))
-  auto operator()(const T &value, ::ryml::NodeRef node, State) const -> void;
+  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
 };
 
 constexpr from_arithmetic_t from_arithmetic{};
@@ -302,7 +307,7 @@ constexpr from_arithmetic_t from_arithmetic{};
 struct to_optional_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_read_state<State>>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
@@ -312,7 +317,7 @@ struct to_optional_like_t {
  *
 ```
 default_to_optional_like :: type<T> ->
-  (node, T*, state) -> with_diagnostics<monostate>
+  (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
 template <typename T>
@@ -326,13 +331,13 @@ constexpr auto default_to_optional_like(omni::type_t<T>)
  * Contained values use \ref reflected_scope::mapping_from_type.
  *
 ```
-from_optional_like :: (const T&, node, state) -> void
+from_optional_like :: (state, const T&, node) -> void
 ```
  */
 struct from_optional_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
-  auto operator()(const T &value, ::ryml::NodeRef node, State context) const
+  auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
 };
 
@@ -346,8 +351,8 @@ namespace cp {
  *
 ```
 cp::to_type<T> :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  *
@@ -367,10 +372,11 @@ struct counter { int value; };
 
 template <>
 const auto omni::ryml::cp::to_type<counter> =
-  [](::ryml::ConstNodeRef node, omni::type_t<counter>, auto state)
+  [](auto state, ::ryml::ConstNodeRef node, omni::type_t<counter>)
     -> omni::ryml::with_diagnostics_t<counter> {
-    return omni::ryml::default_to_integral(node,
-      omni::type<decltype(counter::value)>, std::move(state))
+    return omni::ryml::default_to_integral(std::move(state),
+      node,
+      omni::type<decltype(counter::value)>)
       .transform([](auto value) -> counter { return {value}; });
   };
 ```
@@ -386,8 +392,8 @@ constexpr traits::cp::unavailable to_type{};
  *
 ```
 cp::to_type_t<T>{} :: {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  *
@@ -407,10 +413,12 @@ template <>
 struct omni::ryml::cp::to_type_t<counter> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<counter>,
-    State state) const -> omni::ryml::with_diagnostics_t<counter> {
-    return omni::ryml::default_to_integral(node,
-      omni::type_t<decltype(counter::value)>{}, std::move(state))
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<counter>) const -> omni::ryml::with_diagnostics_t<counter> {
+    return omni::ryml::default_to_integral(std::move(state),
+      node,
+      omni::type_t<decltype(counter::value)>{})
       .transform([](decltype(counter::value) value) -> counter {
         return {value};
       });
@@ -430,7 +438,7 @@ struct to_type_t: traits::cp::unavailable {};
  * the dispatcher selects a default otherwise.
  *
 ```
-cp::from_type<T> :: (const T&, node, state) -> void
+cp::from_type<T> :: (state, const T&, node) -> void
 ```
  *
  * @warning Keep specializations narrow: concrete types or specific template
@@ -451,9 +459,10 @@ template <>
 struct omni::ryml::cp::from_type_t<counter> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_write_state<State>::value))
-  void operator()(const counter &value, ::ryml::NodeRef node,
-    State context) const {
-    omni::ryml::from_integral(value.value, node, context);
+  void operator()(State context,
+    const counter &value,
+    ::ryml::NodeRef node) const {
+    omni::ryml::from_integral(context, value.value, node);
   }
 };
 ```
@@ -545,8 +554,8 @@ using default_mapping_from_type = typename traits::select<
  *
 ```
 mapping_to_type :: type<T> -> {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  *
@@ -594,7 +603,7 @@ OMNI_CPP14_CONSTEXPR auto mapping_to_type(omni::type_t<T>)
  * and missing mappings are diagnosed before invoking the mapping function.
  *
 ```
-mapping_from_type :: type<T> -> ((const T&, node, state) -> void)
+mapping_from_type :: type<T> -> ((state, const T&, node) -> void)
 ```
  *
  * @pre Metadata required by the selected mapping is available in reflected
