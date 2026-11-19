@@ -267,9 +267,9 @@ struct invoke_selected {
 struct assign_shared {
   template <typename Field, typename Constant>
   std::pair<int, int *> operator()(Field field, Constant constant) const {
-    static_assert(Field::is_static(), "shared must be static");
-    static_assert(Constant::is_static(), "constant must be static");
-    static_assert(Constant::is_const(), "constant must retain constness");
+    static_assert(field.is_static(), "shared must be static");
+    static_assert(constant.is_static(), "constant must be static");
+    static_assert(constant.is_const(), "constant must retain constness");
     field.set_value(constant.value());
     return {field.value(), &field.ref()};
   }
@@ -336,7 +336,7 @@ struct check_constant_function_binding {
 struct invoke_function {
   template <typename Function>
   int operator()(Function function) const {
-    static_assert(Function::is_static(), "selected function must be static");
+    static_assert(function.is_static(), "selected function must be static");
     return function(5);
   }
 };

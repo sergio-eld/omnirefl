@@ -15,8 +15,6 @@
 
 namespace {
 
-using omni::ryml::reflected_scope::to_record;
-
 using string_view = omni::compat::string_view;
 
 namespace examples {
@@ -49,7 +47,7 @@ namespace tests {
 // TODO: [high] Bind alias fixtures through the model API when available.
 
 TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
-  const auto names = omni::ryml::alias_dict(
+  const auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port", "listen_port"),
     std::make_tuple("host", "hostname"));
 
@@ -77,7 +75,8 @@ TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
 TEST(alias_lookup, accepts_tuple_like_groups_and_canonical_only_groups) {
   const std::array<string_view, 3> host{{"host", "hostname", "server"}};
   const std::pair<string_view, string_view> port{"port", "service_port"};
-  const auto names = omni::ryml::alias_dict(host, port, std::make_tuple("tls"));
+  const auto names = omni::ryml::aliases_dict(
+    host, port, std::make_tuple("tls"));
 
   const auto hostname = names("hostname");
   EXPECT_TRUE(hostname);
@@ -98,8 +97,8 @@ TEST(alias_lookup, accepts_tuple_like_groups_and_canonical_only_groups) {
 }
 
 TEST(alias_lookup, returns_no_name_for_an_empty_dictionary) {
-  const auto empty = omni::ryml::alias_dict();
-  const auto canonical_only = omni::ryml::alias_dict(std::make_tuple("host"));
+  const auto empty = omni::ryml::aliases_dict();
+  const auto canonical_only = omni::ryml::aliases_dict(std::make_tuple("host"));
 
   EXPECT_FALSE(empty("hostname"));
   EXPECT_FALSE(canonical_only("hostname"));
@@ -189,7 +188,7 @@ TEST(alias_lookup, orders_empty_prefix_and_non_ascii_keys) {
 // is tested independently above; full factory evaluation starts with C++14.
 #if 201402L <= OMNI_CPLUSPLUS
 TEST(alias_lookup, prepares_an_inverse_dictionary_in_constant_evaluation) {
-  constexpr auto names = omni::ryml::alias_dict(
+  constexpr auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port", "port_number"),
     std::make_tuple("host", "hostname", "server", "host_name"),
     std::make_tuple("tls", "secure", "ssl"));
@@ -234,7 +233,7 @@ TEST(alias_lookup, prepares_an_inverse_dictionary_in_constant_evaluation) {
 // C++14 tuple helpers allow retaining the prepared table in a constexpr object.
 #if 201402L <= OMNI_CPLUSPLUS
 TEST(alias_lookup, prepares_and_queries_a_persistent_constexpr_dictionary) {
-  constexpr auto names = omni::ryml::alias_dict(
+  constexpr auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port"),
     std::make_tuple("host", "hostname", "server"));
 
@@ -272,7 +271,7 @@ TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
   const auto original =
     to_record.tdm_name_by_alias(
       [](const decltype(to_record.name_by_alias) &) {
-        return omni::ryml::alias_dict(std::make_tuple("host", "hostname"));
+        return omni::ryml::aliases_dict(std::make_tuple("host", "hostname"));
       });
 
   const auto retained = original.tdm_name_by_alias(omni::fn::identity{});
@@ -281,7 +280,7 @@ TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
 
   const auto replacement = original.tdm_name_by_alias(
     [](const decltype(original.name_by_alias) &) {
-      return omni::ryml::alias_dict(std::make_tuple("port", "service_port"));
+      return omni::ryml::aliases_dict(std::make_tuple("port", "service_port"));
     });
 
   const auto hostname = original.name_by_alias("hostname");
@@ -326,7 +325,8 @@ TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
 
 // C++11 lambda equivalent: apply this compositor inside the reflected scope.
 struct cpp11_map_with_aliases {
-  omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases> compositor;
+  omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases>
+    compositor;
   ::ryml::ConstNodeRef node;
   omni::ryml::read_state_t<> context;
 
@@ -468,7 +468,7 @@ struct cluster {
 
 struct endpoint_names {
   omni::compat::optional<string_view> operator()(string_view alias) const {
-    static const auto names = omni::ryml::alias_dict(
+    static const auto names = omni::ryml::aliases_dict(
       std::make_tuple("port", "service_port", "listen_port", "legacy/port"),
       std::make_tuple("absent", "not_a_member"));
 
@@ -484,25 +484,39 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type_t<alias_models::endpoint>:
-    decltype(omni::ryml::compose::with_node_check<
-      omni::ryml::core::expect_object_node>(
-      omni::ryml::reflected_scope::to_record_t<
-        alias_models::endpoint_names>{})) {};
+struct to_type_t<alias_models::endpoint> {
+  template <typename State>
+  auto operator()(::ryml::ConstNodeRef node, alias_models::endpoint *into,
+    State state) const -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+      node, into, state);
+  }
+};
 
 template <>
-struct to_type_t<alias_models::endpoint_with_retries>:
-    decltype(omni::ryml::compose::with_node_check<
-      omni::ryml::core::expect_object_node>(
-      omni::ryml::reflected_scope::to_record_t<
-        alias_models::endpoint_names>{})) {};
+struct to_type_t<alias_models::endpoint_with_retries> {
+  template <typename State>
+  auto operator()(::ryml::ConstNodeRef node,
+    alias_models::endpoint_with_retries *into,
+    State state) const -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+      node, into, state);
+  }
+};
 
 template <>
-struct to_type_t<alias_models::optional_endpoint>:
-    decltype(omni::ryml::compose::with_node_check<
-      omni::ryml::core::expect_object_node>(
-      omni::ryml::reflected_scope::to_record_t<
-        alias_models::endpoint_names>{})) {};
+struct to_type_t<alias_models::optional_endpoint> {
+  template <typename State>
+  auto operator()(::ryml::ConstNodeRef node,
+    alias_models::optional_endpoint *into,
+    State state) const -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+      node, into, state);
+  }
+};
 
 } // namespace cp
 } // namespace ryml

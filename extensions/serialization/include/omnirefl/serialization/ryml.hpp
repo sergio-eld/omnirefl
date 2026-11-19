@@ -83,7 +83,10 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 
 // REFACTORME: [high] Review responsibility for diagnostic accumulation and
 // limit checks between this dispatcher and the node mappers.
-/** Dispatch one node through the selected to_type callable with diagnostics. */
+/** Dispatch one node through the selected to_type callable with diagnostics.
+ * Prefers its type<T> overload when the produced value can be assigned to
+ * *into; otherwise uses its T* overload. A mapping error does not trigger
+ * fallback to another overload. */
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(::ryml::ConstNodeRef node, T *into, State context)

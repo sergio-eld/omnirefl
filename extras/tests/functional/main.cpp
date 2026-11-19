@@ -44,10 +44,14 @@ struct inspect_constexpr_enum_pairs {
   }
 };
 
+// REFACTORME: [high] Let metadata filters use a plain constexpr bool predicate
+// without bool_constant return-type boilerplate.
 struct without_internal_name {
-  template <typename Field>
-  constexpr bool operator()() const {
-    return '_' != omni::compat::remove_cvref_t<Field>::name()[0];
+  template <typename _F>
+  constexpr auto operator()(omni::data_member_meta_t<_F> field) const
+    OMNI_CPP11_TRAILING_RETURN(omni::compat::bool_constant<
+      '_' != omni::data_member_meta_t<_F>{}.name()[0]>) {
+    return omni::compat::bool_constant<'_' != field.name()[0]>{};
   }
 };
 

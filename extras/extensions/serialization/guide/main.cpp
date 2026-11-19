@@ -612,19 +612,19 @@ TEST(basics, fundamental_mapping_results) {
   };
 
   const auto node = tree->crootref();
-  const auto boolean = omni::ryml::to_boolean(omni::type<bool>)(
+  const auto boolean = omni::ryml::default_to_boolean(omni::type<bool>)(
     node["boolean"], omni::type<bool>, state);
-  const auto integer = omni::ryml::to_integer(omni::type<int>)(
+  const auto integer = omni::ryml::default_to_integer(omni::type<int>)(
     node["integer"], omni::type<int>, state);
-  const auto natural = omni::ryml::to_integer(omni::type<unsigned>)(
+  const auto natural = omni::ryml::default_to_integer(omni::type<unsigned>)(
     node["integer"], omni::type<unsigned>, state);
-  const auto real = omni::ryml::to_real(omni::type<double>)(
+  const auto real = omni::ryml::default_to_real(omni::type<double>)(
     node["real"], omni::type<double>, state);
-  const auto arithmetic = omni::ryml::to_arithmetic(omni::type<int>)(
+  const auto arithmetic = omni::ryml::default_to_arithmetic(omni::type<int>)(
     node["integer"], omni::type<int>, state);
-  const auto text = omni::ryml::to_string_like(omni::type<std::string>)(
+  const auto text = omni::ryml::default_to_string_like(omni::type<std::string>)(
     node["text"], omni::type<std::string>, state);
-  const auto view = omni::ryml::to_string_like(
+  const auto view = omni::ryml::default_to_string_like(
     omni::type<omni::compat::string_view>)(
     node["text"], omni::type<omni::compat::string_view>, state);
 
@@ -636,7 +636,7 @@ TEST(basics, fundamental_mapping_results) {
   EXPECT_EQ("hello", text.value);
   EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
 
-  const auto invalid = omni::ryml::to_integer(omni::type<int>)(
+  const auto invalid = omni::ryml::default_to_integer(omni::type<int>)(
     node["text"], omni::type<int>, state);
 
   EXPECT_FALSE(invalid.value);
@@ -658,7 +658,7 @@ const auto omni::ryml::cp::to_type<basic_customization::my_integer> =
   [](::ryml::ConstNodeRef node, basic_customization::my_integer *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_integer(omni::type_t<int>{})(
+    return omni::ryml::default_to_integer(omni::type_t<int>{})(
       node, &into->value, state);
   };
 
@@ -674,9 +674,9 @@ namespace {
 
 /** A wrapper need not map to an object. to_type and from_type select its
  * representation globally; only one registration form is used per direction.
- * These callables delegate integer checks and diagnostics to to_integer
- * and from_integer. write_state_like and read_state_like identify each
- * direction's state without spelling its implementation parameters. The
+ * These callables use default_to_integer for integer checks and diagnostics
+ * and from_integer for writing. write_state_like and read_state_like identify
+ * each direction's state without spelling its implementation parameters. The
  * generic signatures delay instantiation until called within reflected scope.
  * `basics.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
 TEST(basics, custom_scalar_mapping) {
@@ -708,7 +708,7 @@ struct omni::ryml::cp::to_type_t<basic_customization::my_cpp11_integer> {
     basic_customization::my_cpp11_integer *into,
     State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_integer(omni::type_t<int>{})(
+    return omni::ryml::default_to_integer(omni::type_t<int>{})(
       node, &into->value, state);
   }
 };
@@ -753,7 +753,7 @@ const auto omni::ryml::cp::to_type<basic_customization::my_container> =
   [](::ryml::ConstNodeRef node, basic_customization::my_container *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_range(omni::type<decltype(into->values)>)(
+    return omni::ryml::default_to_range(omni::type<decltype(into->values)>)(
       node, &into->values, state);
   };
 
@@ -767,8 +767,8 @@ const auto omni::ryml::cp::from_type<basic_customization::my_container> =
 
 namespace {
 
-/** A container wrapper can reuse to_range and from_range for its elements.
- * The default range mappers handle insertion, element mapping, and diagnostics;
+/** A wrapper can use default_to_range and from_range for its container.
+ * The built-in mappings handle insertion, element mapping, and diagnostics;
  * the specialization only exposes the wrapped container. */
 TEST(basics, custom_container_mapping) {
   const auto result = omni::ryml::deserialize(
@@ -796,7 +796,7 @@ const auto omni::ryml::cp::to_type<basic_customization::my_string> =
   [](::ryml::ConstNodeRef node, basic_customization::my_string *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_string_like(omni::type_t<std::string>{})(
+    return omni::ryml::default_to_string_like(omni::type_t<std::string>{})(
       node, &into->value, state);
   };
 
@@ -810,7 +810,8 @@ const auto omni::ryml::cp::from_type<basic_customization::my_string> =
 
 namespace {
 
-/** to_string_like and from_string_like provide the default string mapping.
+/** default_to_string_like and from_string_like provide the built-in string
+ * mapping.
  * A wrapper can delegate to them using its stored string; custom string APIs
  * can instead adapt the shared string operations. */
 TEST(basics, custom_string_mapping) {
@@ -839,14 +840,15 @@ struct my_record {
 // Reader signature: (ConstNodeRef, T *, read_state_like)
 //   -> with_diagnostics_t<monostate>.
 // Exposition: spell out state forwarding; direct registration can reuse
-// to_record itself. The generic destination delays metadata queries.
+// default_to_record itself. The generic destination delays metadata queries.
 template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_record> =
   []<typename T>(::ryml::ConstNodeRef node, T *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
     // Same-node delegation forwards path, counters, and config unchanged.
-    return omni::ryml::reflected_scope::to_record(omni::type<T>)(node, into, state);
+    return omni::ryml::reflected_scope::default_to_record(omni::type<T>)(
+      node, into, state);
   };
 
 template <>
@@ -855,10 +857,10 @@ const auto omni::ryml::cp::from_type<basic_customization::my_record> =
 
 namespace {
 
-/** to_record and from_record map accessible non-static members. They already
- * supply the default reflected-record mapping, and remain available for custom
- * registrations. The reader receives the node, destination pointer, and mapping
- * state; it returns success or failure with diagnostics. A custom mapper passes
+/** default_to_record and from_record map accessible non-static members.
+ * They remain available for custom registrations. The reader receives the
+ * node, destination pointer, and mapping state. It returns success or failure
+ * with diagnostics. A custom mapper passes
  * state unchanged when delegating the same node, as above. When descending to
  * a child, it supplies state.child(...) instead; see the extended-container
  * example for accumulated diagnostics.
@@ -1170,7 +1172,9 @@ namespace cp {
 template <>
 const auto to_type<customization_mapping::record> =
   reflected_scope::to_record.tdm_name_by_alias(
-    [](const auto &) { return alias_dict(std::tuple{"count", "legacy_count"}); });
+    [](const auto &) {
+      return aliases_dict(std::tuple{"count", "legacy_count"});
+    });
 #endif
 
 template <>
@@ -1182,7 +1186,7 @@ const auto from_type<customization_mapping::record> =
 template <>
 const auto to_type<customization_mapping::status> =
   reflected_scope::to_enum.tdm_value_by_alias(
-    [](const auto &) { return alias_dict(std::tuple{"busy", "working"}); });
+    [](const auto &) { return aliases_dict(std::tuple{"busy", "working"}); });
 #endif
 
 template <>
@@ -1205,7 +1209,7 @@ struct to_type_t<customization_mapping::extended_values> {
     State context) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     T values;
-    auto result = to_range(omni::type<T>)(node, &values, context);
+    auto result = default_to_range(omni::type<T>)(node, &values, context);
     if (!result.value)
       return result;
 
@@ -1353,8 +1357,9 @@ TEST(customization_mapping, standard_range_insertion) {
 }
 
 /** Field aliases accept legacy documents while serialization keeps canonical
- * member names. alias_dict groups a canonical name with its aliases. A present
- * canonical name takes precedence; otherwise normal duplicate policies apply.
+ * member names. aliases_dict groups a canonical name with its aliases.
+ * A present canonical name takes precedence; duplicate policies apply
+ * among aliases when the canonical name is absent.
  * Alias sets must not overlap other members' names or aliases. The dictionary
  * borrows its names; these literals have static storage. */
 #if 0

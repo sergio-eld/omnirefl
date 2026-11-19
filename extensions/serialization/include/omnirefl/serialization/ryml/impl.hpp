@@ -84,9 +84,13 @@ auto read_node(::ryml::ConstNodeRef node, T *into, State context)
   auto result = omni::ryml::detail::make_node_accumulator(context);
   if (context.limit_exceeded())
     result.result.value.reset();
-  else
-    result.append(omni::ryml::reflected_scope::mapping_to_type(omni::type_t<T>{})(
-      node, into, context));
+  else {
+    const auto mapping =
+      omni::ryml::reflected_scope::mapping_to_type(omni::type_t<T>{});
+
+    result.append(omni::ryml::detail::read_into(
+      mapping, node, into, context, /*priority=*/0));
+  }
 
   return std::move(result).finish();
 }
@@ -132,7 +136,8 @@ struct map_registered_or {
     if (context.limit_exceeded())
       result.result.value.reset();
     else
-      result.append(mapping(node, into, context));
+      result.append(omni::ryml::detail::read_into(
+        mapping, node, into, context, /*priority=*/0));
 
     return std::move(result).finish();
   }
@@ -161,7 +166,7 @@ auto map_to_fundamental_t::operator()(::ryml::ConstNodeRef node, T *into,
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   return detail::map_registered_or<
-    decltype(to_arithmetic(omni::type_t<T>{}))>{}(node, into, context);
+    decltype(default_to_arithmetic(omni::type_t<T>{}))>{}(node, into, context);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -172,7 +177,7 @@ auto map_to_string_like_t::operator()(::ryml::ConstNodeRef node, T *into,
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   return detail::map_registered_or<
-    decltype(to_string_like(omni::type_t<T>{}))>{}(node, into, context);
+    decltype(default_to_string_like(omni::type_t<T>{}))>{}(node, into, context);
 }
 
 namespace detail {
@@ -221,7 +226,8 @@ auto map_to_sequence_t::operator()(::ryml::ConstNodeRef node, T *into,
   using target = typename detail::reflection_target<T>::type;
   const auto map = typename traits::select<
     traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_registered_or<decltype(to_range(omni::type_t<T>{}))>>::type{};
+    detail::map_registered_or<
+      decltype(default_to_range(omni::type_t<T>{}))>>::type{};
 
   return map(node, into, context);
 }
@@ -237,7 +243,7 @@ auto map_to_optional_t::operator()(::ryml::ConstNodeRef node, T *into,
   const auto map = typename traits::select<
     traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
     detail::map_registered_or<
-      decltype(to_optional_like(omni::type_t<T>{}))>>::type{};
+      decltype(default_to_optional_like(omni::type_t<T>{}))>>::type{};
 
   return map(node, into, context);
 }

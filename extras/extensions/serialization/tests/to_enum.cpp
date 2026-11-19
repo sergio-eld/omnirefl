@@ -12,8 +12,6 @@
 
 namespace {
 
-using omni::ryml::reflected_scope::to_enum;
-
 using string_view = omni::compat::string_view;
 
 namespace enum_alias_models {
@@ -28,7 +26,7 @@ struct service {
 // C++11 callable: prepare the default alias dictionary once.
 struct state_names {
   omni::compat::optional<string_view> operator()(string_view alias) const {
-    static const auto names = omni::ryml::alias_dict(
+    static const auto names = omni::ryml::aliases_dict(
       std::make_tuple("idle", "available", ""),
       std::make_tuple("active", "running", "working", "7", "true"),
       std::make_tuple("null", "nil"),
@@ -47,11 +45,16 @@ namespace cp {
 
 template <>
 // TODO: [high] Move alias fixture configuration to the model API.
-struct to_type_t<enum_alias_models::state>:
-    decltype(compose::with_mutating_node_to_type_overload(
+struct to_type_t<enum_alias_models::state> {
+  template <typename State>
+  auto operator()(::ryml::ConstNodeRef node, enum_alias_models::state *into,
+    State state) const -> with_diagnostics_t<compat::monostate> {
+    return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_string_node>(
         core::reflected_scope::map_node_to_enum_t<
-          enum_alias_models::state_names>{}))) {};
+          enum_alias_models::state_names>{}))(node, into, state);
+  }
+};
 
 } // namespace cp
 } // namespace ryml
@@ -68,7 +71,7 @@ TEST(to_enum_aliases, dictionary_replaces_the_previous_resolver) {
   const auto original =
     to_enum.tdm_value_by_alias(
       [](const decltype(to_enum.value_by_alias) &) {
-        return omni::ryml::alias_dict(std::make_tuple("idle", "available"));
+        return omni::ryml::aliases_dict(std::make_tuple("idle", "available"));
       });
 
   const auto retained = original.tdm_value_by_alias(omni::fn::identity{});
@@ -77,7 +80,7 @@ TEST(to_enum_aliases, dictionary_replaces_the_previous_resolver) {
 
   const auto replacement = original.tdm_value_by_alias(
     [](const decltype(original.value_by_alias) &) {
-      return omni::ryml::alias_dict(std::make_tuple("active", "working"));
+      return omni::ryml::aliases_dict(std::make_tuple("active", "working"));
     });
 
   const auto idle = original.value_by_alias("available");

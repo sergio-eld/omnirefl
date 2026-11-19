@@ -79,27 +79,25 @@ namespace reflected_scope {
  * Checks for string input before looking up enumerators.
  * Does not call \ref omni::ryml::reflected_scope::mapping_to_type.
  *
-```text
-to_enum :: type<T> -> {
+```
+default_to_enum :: type<T> -> {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
 ```
  */
 template <typename T>
-constexpr auto to_enum(omni::type_t<T>)
+constexpr auto default_to_enum(omni::type_t<T>)
   -> decltype(compose::with_mutating_node_to_type_overload(
-    compose::with_node_check<core::expect_string_node>(
-      core::reflected_scope::map_node_to_enum))) {
-  return compose::with_mutating_node_to_type_overload(
-    compose::with_node_check<core::expect_string_node>(
-      core::reflected_scope::map_node_to_enum));
+    compose::detail::with_node_check_t<core::expect_string_node,
+      core::reflected_scope::map_node_to_enum_t<>>{})) {
+  return {};
 }
 
 /** Maps a reflected enum value to its declared name as a quoted scalar.
  * Does not call \ref omni::ryml::reflected_scope::mapping_from_type.
  *
-```text
+```
 from_enum :: (T, node, state) -> void
 ```
  *

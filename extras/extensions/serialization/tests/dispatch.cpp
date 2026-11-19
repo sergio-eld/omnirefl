@@ -71,7 +71,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
   auto operator()(::ryml::ConstNodeRef node, unsigned short *into,
     State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_integer(omni::type_t<unsigned short>{})(
+    return omni::ryml::default_to_integer(omni::type_t<unsigned short>{})(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
       state);
@@ -85,7 +85,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
 template <>
 const auto omni::ryml::cp::to_type<my_string> =
   [](::ryml::ConstNodeRef node, my_string *into, auto state) {
-    return omni::ryml::to_string_like(omni::type_t<my_string>{})(
+    return omni::ryml::default_to_string_like(omni::type_t<my_string>{})(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
       state);
@@ -96,7 +96,7 @@ struct omni::ryml::cp::to_type_t<my_string> {
   template <typename State>
   auto operator()(::ryml::ConstNodeRef node, my_string *into, State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_string_like(omni::type_t<my_string>{})(
+    return omni::ryml::default_to_string_like(omni::type_t<my_string>{})(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
       state);

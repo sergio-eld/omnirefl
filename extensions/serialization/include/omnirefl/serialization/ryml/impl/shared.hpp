@@ -1,10 +1,11 @@
 #pragma once
 
-// TODO: [medium] Validate alias_dict against other aliases and reflected
+// TODO: [medium] Validate aliases_dict against other aliases and reflected
 // canonical names, possibly inline when constructing a dictionary.
 
 #include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/functional.hpp>
 
 #include <c4/format.hpp>
 #include <c4/std/string.hpp>
@@ -33,6 +34,19 @@ struct omni::traits::cp::assign_string<c4::csubstr> {
 
 namespace omni {
 namespace ryml {
+namespace reflected_scope {
+namespace detail {
+
+// Defined after type-mapping selection is available; record headers use this
+// declaration without depending on the later customization-point definitions.
+OMNI_CONSTRAINED_TEMPLATE((typename Field, typename State),
+  (is_read_state<State>::value))
+auto map_node_to_field(::ryml::ConstNodeRef node, Field field, State state)
+  -> with_diagnostics_t<compat::monostate>;
+
+} // namespace detail
+} // namespace reflected_scope
+
 namespace core {
 
 // Mapper bodies delegate recursively through these dispatchers, whose
@@ -146,10 +160,10 @@ constexpr bool alias_less(compat::string_view left, compat::string_view right) {
   return alias_less(left.data(), left.size(), right.data(), right.size());
 }
 
-// Views borrow the strings supplied to alias_dict; keep their storage alive.
+// Views borrow the strings supplied to aliases_dict; keep their storage alive.
 template <std::size_t Size>
 struct name_by_alias_lookup {
-  // alias_dict sorts these entries; users must not modify them afterward.
+  // aliases_dict sorts these entries; users must not modify them afterward.
   std::array<alias_entry, Size> _entries;
 
   compat::optional<compat::string_view> operator()(
@@ -282,7 +296,7 @@ struct is_alias_resolver<F,
  * outlive use of the resolver.
  *
 ```text
-alias_dict :: (group, ...) -> (string_view -> optional<string_view>)
+aliases_dict :: (group, ...) -> (string_view -> optional<string_view>)
 ```
  *
  * Full constexpr factory evaluation requires C++14: std::make_tuple,
@@ -290,7 +304,7 @@ alias_dict :: (group, ...) -> (string_view -> optional<string_view>)
  * The sorting implementation itself supports C++11 constant evaluation.
  */
 template <typename... Groups>
-OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
+OMNI_CPP14_CONSTEXPR auto aliases_dict(const Groups &...groups)
   -> decltype(compat::apply(detail::cpp11_sorted_aliases{},
     std::tuple_cat(compat::apply(
       detail::cpp11_invert_alias_group{}, groups)...))) {
@@ -443,6 +457,31 @@ node_accumulator<State> make_node_accumulator(State state) {
       },
     },
   };
+}
+
+// C++11 overload ranking prefers value production when assignment is possible.
+// The trailing decltype excludes mappings without the type-tag overload.
+OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
+  (std::is_assignable<T &, T &&>::value))
+auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
+  State state, int)
+  -> decltype(mapping(node, omni::type_t<T>{}, state),
+    with_diagnostics_t<compat::monostate>{}) {
+  auto result = mapping(node, omni::type_t<T>{}, state);
+  if (result.value)
+    *into = std::move(*result.value);
+
+  return {
+    /*value=*/result.value
+      ? compat::make_optional(compat::monostate{}) : compat::nullopt,
+    /*diagnostics=*/std::move(result.diagnostics),
+  };
+}
+
+template <typename Mapping, typename T, typename State>
+auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
+  State state, long) -> decltype(mapping(node, into, state)) {
+  return mapping(node, into, state);
 }
 
 inline issue make_issue(json::issue_code reason,

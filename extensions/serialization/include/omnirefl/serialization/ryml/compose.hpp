@@ -1,8 +1,10 @@
 #pragma once
 
-/** Composition of node-to-type mapping functions. */
+/** Composition of node-to-type mappings without generated metadata.
+ * Callbacks may use `omni::type_t<T>` to select the destination. */
 
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/functional.hpp>
 #include <omnirefl/serialization/ryml/node_checks.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 
@@ -15,189 +17,90 @@
 
 namespace omni {
 namespace ryml {
+namespace compose {
+
+/** A node check returning one issue on mismatch, or nullopt on success.
+ * For example, core::expect_object_node. */
+using node_check = compat::optional<issue> (*)(::ryml::ConstNodeRef);
+
 namespace detail {
 
-// Expected callbacks can return an issue or a standard mapping error code.
-// The two forms need different construction, not different public overloads.
-template <typename Error>
-struct node_function_error_case {
-  static issue make(Error error, ::ryml::ConstNodeRef node, mapping_path path) {
-    auto prefix = path.materialize();
-    prefix.insert(prefix.end(), error.path.begin(), error.path.end());
-    error.path = std::move(prefix);
-    if (error.node_id == ::ryml::NONE)
-      error.node_id = node.id();
+template <node_check Check, typename Mapping>
+struct with_node_check_t;
 
-    if (error.actual == json::value_kind::unknown)
-      error.actual = node_kind(node);
+template <typename Mapping>
+struct with_mutating_node_to_type_overload_t;
 
-    return error;
-  }
-};
-
-template <>
-struct node_function_error_case<json::issue_code> {
-  static issue make(json::issue_code error, ::ryml::ConstNodeRef node,
-    mapping_path path) {
-    return make_issue(error, json::value_kind::unknown, node, path);
-  }
-};
+template <typename Function>
+struct lifted_node_function;
 
 } // namespace detail
 
-namespace compose {
-
-/** Calls a node check before the mapping function, preserving its overloads.
- * Check diagnostics receive the current path and policy configuration.
- * The mapping function is skipped on failure or an exceeded diagnostic limit.
+/** C++11-compatible higher-order function composing a node check and mapping.
  *
-```text
-Check :: node -> with_diagnostics<monostate>
-Mapping :: (node, destination, state) -> with_diagnostics<T>
+```
+Check :: node -> optional<issue>
+state :: read_state_like
+
+Mapping :: (node, type<T>, state) -> with_diagnostics<T>
+Mapping :: (node, T*, state) -> with_diagnostics<monostate>
 
 with_node_check<Check> :: Mapping -> Mapping
 ```
  *
- * Check is retained in the callable type: default selection constructs the
- * factory's result type, which must preserve its configured check. */
-template <with_diagnostics_t<compat::monostate> (*Check)(::ryml::ConstNodeRef),
-  typename Mapping>
-struct with_node_check_t {
-  Mapping mapping;
-
-  // The trailing decltype excludes unsupported wrapped calls through SFINAE.
-  template <typename Destination, typename State>
-  auto operator()(::ryml::ConstNodeRef node, Destination into,
-    State state) const -> decltype(this->mapping(node, into, state)) {
-    auto checked = Check(node);
-    auto result = omni::ryml::detail::make_node_accumulator(state);
-    for (auto &entry : checked.diagnostics.issues) {
-      auto path = state.path.materialize();
-      path.insert(path.end(), entry.path.begin(), entry.path.end());
-      entry.path = std::move(path);
-      result.report(std::move(entry));
-    }
-
-    if (!checked.value || !result.result.value || result.stopped())
-      return {compat::nullopt, std::move(result.result.diagnostics)};
-
-    auto mapped = this->mapping(node, into, result.state);
-    result.append({
-      /*value=*/mapped.value
-        ? compat::make_optional(compat::monostate{}) : compat::nullopt,
-      /*diagnostics=*/std::move(mapped.diagnostics),
-    });
-
-    if (!result.result.value)
-      mapped.value.reset();
-
-    return {std::move(mapped.value), std::move(result.result.diagnostics)};
-  }
-};
-
-/** Composes a node-only check with a mapping function.
- * Check is a non-overloaded free function and can be named without &. */
-template <with_diagnostics_t<compat::monostate> (*Check)(::ryml::ConstNodeRef),
-  typename Mapping>
-constexpr auto with_node_check(Mapping &&mapping)
-  -> with_node_check_t<Check, compat::decay_t<Mapping>> {
-  return {/*mapping=*/std::forward<Mapping>(mapping)};
-}
-
-/** Adapts a node-only expected function to the type/state mapping contract.
- * Error is issue or json::issue_code. Issue paths are relative to this node;
- * composition prefixes the current path and retains the source node identity.
+ * Mapping may provide either or both destination overloads. A failed check
+ * returns its issue at the current path without calling Mapping. An exceeded
+ * diagnostic limit also skips Mapping.
  *
-```text
-Function :: node -> expected<T, Error>
-from_expected_node_function :: Function ->
-  ((node, type<T>, state) -> with_diagnostics<T>)
-```
- */
-template <typename Function>
-struct from_expected_node_function_t {
-  Function function;
+ * Uses a generic lambda from C++17; earlier standards use a wrapper struct
+ * to preserve constexpr factory construction.
+ * @pre The node belongs to a valid tree; Mapping's other preconditions apply. */
+template <node_check Check, typename Mapping>
+constexpr auto with_node_check(Mapping &&mapping)
+  OMNI_CPP11_TRAILING_RETURN(
+    detail::with_node_check_t<Check, compat::decay_t<Mapping>>) {
+#if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
+  return //
+    [mapping = std::forward<Mapping>(mapping)](::ryml::ConstNodeRef node,
+      auto into, auto state)
+      -> decltype(std::declval<const compat::decay_t<Mapping> &>()(
+        node, into, state)) {
+      if (state.limit_exceeded())
+        return {
+          /*value=*/compat::nullopt,
+          /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
+        };
 
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
-    -> with_diagnostics_t<T> {
-    using expected_type = compat::invoke_result_t<const Function &,
-      ::ryml::ConstNodeRef>;
-    static_assert(std::is_same<T, typename expected_type::value_type>::value,
-      "Node function must return expected<T, Error> for the destination T");
+      if (auto check = Check(node)) {
+        auto path = state.path.materialize();
+        path.insert(path.end(), check->path.begin(), check->path.end());
+        check->path = std::move(path);
+        return {
+          /*value=*/compat::nullopt,
+          /*diagnostics=*/{
+            /*config=*/{state.config.error_policy, {}},
+            /*issues=*/{std::move(*check)},
+            /*parse_error_message=*/{},
+          },
+        };
+      }
 
-    auto mapped = this->function(node);
-    auto result = omni::ryml::detail::make_node_accumulator(state);
-    if (mapped)
-      return {std::move(*mapped), std::move(result.result.diagnostics)};
-
-    result.report(omni::ryml::detail::node_function_error_case<
-      typename expected_type::error_type>::make(
-        std::move(mapped.error()), node, state.path));
-
-    return {compat::nullopt, std::move(result.result.diagnostics)};
-  }
-};
-
-/** Adds type/state arguments and diagnostics to a node-only expected
- * function. */
-OMNI_CONSTRAINED_TEMPLATE((typename Function),
-  (compat::is_invocable<const compat::decay_t<Function> &,
-    ::ryml::ConstNodeRef>::value))
-constexpr auto from_expected_node_function(Function &&function)
-  -> from_expected_node_function_t<compat::decay_t<Function>> {
-  using expected_type = compat::invoke_result_t<
-    const compat::decay_t<Function> &, ::ryml::ConstNodeRef>;
-  static_assert(compat::disjunction<
-      std::is_same<typename expected_type::error_type, issue>,
-      std::is_same<typename expected_type::error_type,
-        json::issue_code>>::value,
-    "Node function error must be issue or json::issue_code");
-
-  return {/*function=*/std::forward<Function>(function)};
+      return mapping(node, into, state);
+    };
+#else
+  return detail::with_node_check_t<Check, compat::decay_t<Mapping>>{
+    /*lifted_mapping=*/std::forward<Mapping>(mapping)};
+#endif
 }
 
 /** (QoL) Adds a mutating overload to a value-producing mapping function.
- * Preserves the value-producing overload. The mutating overload assigns
- * successfully mapped values and retains the mapping diagnostics.
+ * An existing mutating overload takes precedence. Otherwise the adapter
+ * assigns successfully mapped values and retains the mapping diagnostics.
  * @pre The destination pointer must be non-null. Wrapped mapping
  * preconditions still apply.
  * An empty result gives no guarantee about the destination's state.
- */
-template <typename Mapping>
-struct with_mutating_node_to_type_overload_t {
-  Mapping mapping;
-
-  // The trailing decltype also constrains this overload through SFINAE:
-  // if the wrapped call is invalid, this overload is excluded from selection.
-  template <typename T, typename State>
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
-    State state) const -> decltype(this->mapping(node, type, state)) {
-    return this->mapping(node, type, state);
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_assignable<T &, T &&>::value))
-  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
-    -> with_diagnostics_t<compat::monostate, compat::decay_t<decltype(
-      this->mapping(node, omni::type_t<T>{}, state).diagnostics)>> {
-    assert(into);
-    auto result = this->mapping(node, omni::type_t<T>{}, state);
-    if (result.value)
-      *into = std::move(*result.value);
-
-    return {
-      /*value=*/result.value
-        ? compat::make_optional(compat::monostate{}) : compat::nullopt,
-      /*diagnostics=*/std::move(result.diagnostics),
-    };
-  }
-};
-
-/** (QoL) Adds a mutating overload to a value-producing mapping function.
  *
-```text
+```
 Mapping :: (node, type<T>, state) -> with_diagnostics<T>
 
 with_mutating_node_to_type_overload :: Mapping -> {
@@ -208,10 +111,519 @@ with_mutating_node_to_type_overload :: Mapping -> {
  */
 template <typename Mapping>
 constexpr auto with_mutating_node_to_type_overload(Mapping &&mapping)
-  -> with_mutating_node_to_type_overload_t<compat::decay_t<Mapping>> {
+  -> detail::with_mutating_node_to_type_overload_t<compat::decay_t<Mapping>> {
   return {/*mapping=*/std::forward<Mapping>(mapping)};
 }
 
+/** (QoL) Higher-order function lifting node callbacks to with_diagnostics
+ * mappings.
+ * Expected errors become diagnostics; existing with_diagnostics results pass
+ * through. Optional type-tag and state arguments are supplied when accepted.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+lift_to_with_diagnostics(ValueFunction) ::
+  (node, type<T>, state) -> with_diagnostics<T>
+lift_to_with_diagnostics(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * Destination overloads come from the callback. No value is default-constructed
+ * or assigned by this adapter. A pointer-only callback provides no type<T>
+ * overload; a value-producing callback provides no generated T* overload.
+ *
+ * Expected errors use paths relative to the input node; their order and
+ * existing source nodes are kept. with_diagnostics results pass through with
+ * complete paths and configuration; callbacks can use state to construct them.
+ * Callbacks are invoked as const objects. The node is passed unchanged; this
+ * adapter does not check its shape or select a registered type mapping.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto lift_to_with_diagnostics(Function &&f)
+  -> detail::lifted_node_function<compat::decay_t<Function>> {
+  return {/*function=*/std::forward<Function>(f)};
+}
+
+/** (QoL) Higher-order function for mapping JSON/YAML objects through f.
+ * Object input reaches f; other node shapes return an expected-object
+ * diagnostic without calling f.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_record(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_record(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Field conversion and alias handling belong to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_record(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_object_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_object_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for mapping JSON/YAML arrays through f.
+ * Array input reaches f; other node shapes return an expected-array
+ * diagnostic without calling f.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_range(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_range(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Element conversion belongs to f. Object-shaped ranges use to_record.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_range(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_array_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_array_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for enum mappings from JSON/YAML strings.
+ * String input reaches f; other node shapes return an expected-string
+ * diagnostic without calling f. Quotes and explicit YAML string tags are
+ * honored.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_enum(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_enum(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Enumerator lookup and aliases belong to f; no enum metadata is queried.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_enum(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_string_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_string_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for string-like mappings from JSON/YAML strings.
+ * String input reaches f; other node shapes return an expected-string
+ * diagnostic without calling f. Quotes and explicit YAML string tags are
+ * honored.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_string_like(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_string_like(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Text conversion, ownership, and destination assignment belong to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_string_like(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_string_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_string_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for mappings from JSON/YAML Boolean nodes.
+ * Unquoted true/false text reaches f; other input returns an
+ * expected-Boolean diagnostic without calling f. Lowercase, title case, and
+ * uppercase spellings and explicit YAML Boolean tags are accepted.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_boolean(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_boolean(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Conversion to the destination value belongs to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_boolean(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_boolean_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_boolean_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for mappings from JSON/YAML integer nodes.
+ * Unquoted integer text reaches f; quoted numbers, real numbers, and
+ * other input return an expected-integer diagnostic without calling f.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_integer(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_integer(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Conversion and destination range checks belong to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_integer(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_integer_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_integer_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for mappings from JSON/YAML numeric nodes.
+ * Unquoted integer or real text reaches f; other input returns an
+ * expected-number diagnostic without calling f.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_real(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_real(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Conversion and destination range checks belong to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_real(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_number_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_number_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for mappings from Boolean or numeric nodes.
+ * JSON/YAML Boolean, integer, or real input reaches f; other input
+ * returns an expected-scalar diagnostic without calling f.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_arithmetic(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_arithmetic(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Selection of the conversion and destination range checks belong to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_arithmetic(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_arithmetic_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_arithmetic_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+/** (QoL) Higher-order function for mappings from nullable JSON/YAML values.
+ * Scalar, object, and array nodes reach f, including explicit null.
+ * A node without a value or container returns a diagnostic without calling f.
+ *
+```
+Error :: issue | input_range<issue>
+Result<T> :: expected<T, Error> | with_diagnostics<T>
+state :: read_state_like
+
+ValueFunction :: node -> Result<T>
+ValueFunction :: (node, state) -> Result<T>
+ValueFunction :: (node, type<T>) -> Result<T>
+ValueFunction :: (node, type<T>, state) -> Result<T>
+MutatingFunction :: (node, T*) -> Result<monostate>
+MutatingFunction :: (node, T*, state) -> Result<monostate>
+
+to_optional_like(ValueFunction) :: {
+  (node, type<T>, state) -> with_diagnostics<T>,
+  (node, T*, state)      -> with_diagnostics<monostate>
+}
+to_optional_like(MutatingFunction) ::
+  (node, T*, state) -> with_diagnostics<monostate>
+```
+ *
+ * A value-producing callback's T* adapter requires assignment from its result.
+ * A pointer-only callback provides no type<T> overload. Callbacks may return
+ * with_diagnostics instead of expected. Expected errors use node-relative
+ * paths; with_diagnostics carries complete paths and configuration.
+ * Null handling and conversion of present values belong to f.
+ * The compositor does not call reflected_scope::mapping_to_type.
+ * @pre The node belongs to a valid tree; destination pointers are non-null. */
+template <typename Function>
+constexpr auto to_optional_like(Function &&f)
+  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
+    with_node_check<core::expect_value_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
+  return with_mutating_node_to_type_overload(
+    with_node_check<core::expect_value_node>(
+      lift_to_with_diagnostics(std::forward<Function>(f))));
+}
+
+namespace detail {
+
+/** Calls a node check before the mapping function, preserving its overloads.
+ * A failed check returns one hard error at the current path.
+ * The mapping function is skipped on failure or an exceeded diagnostic limit.
+ *
+```
+Check :: node -> optional<issue>
+Mapping :: (node, destination, state) -> with_diagnostics<T>
+
+with_node_check<Check> :: Mapping -> Mapping
+```
+ *
+ * Check is retained in the callable type: default selection constructs the
+ * factory's result type, which must preserve its configured check. */
+// Ad hoc: built-in selection default-constructs callable types, which captured
+// lambdas cannot support. This wrapper also provides the C++11/14
+// implementation.
+// REFACTORME: [medium] Consider selecting factory-produced default values.
+template <node_check Check, typename Mapping>
+struct with_node_check_t {
+  // Keeping the check in the type preserves it under default construction.
+  static constexpr auto expect_node = Check;
+  Mapping lifted_mapping;
+
+  // The trailing decltype excludes unsupported wrapped calls through SFINAE.
+  template <typename Destination, typename State>
+  auto operator()(::ryml::ConstNodeRef node, Destination into,
+    State state) const -> decltype(this->lifted_mapping(node, into, state)) {
+    if (state.limit_exceeded())
+      return {
+        /*value=*/compat::nullopt,
+        /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
+      };
+
+    if (auto check = this->expect_node(node)) {
+      auto path = state.path.materialize();
+      path.insert(path.end(), check->path.begin(), check->path.end());
+      check->path = std::move(path);
+      return {
+        /*value=*/compat::nullopt,
+        /*diagnostics=*/{
+          /*config=*/{state.config.error_policy, {}},
+          /*issues=*/{std::move(*check)},
+          /*parse_error_message=*/{},
+        },
+      };
+    }
+
+    return this->lifted_mapping(node, into, state);
+  }
+};
+
+template <typename Mapping>
+struct with_mutating_node_to_type_overload_t {
+  Mapping mapping;
+
+  // Overload ranking preserves a native pointer call before trying assignment.
+  template <typename T, typename State>
+  auto map_into(::ryml::ConstNodeRef node, T *into, State state, int) const
+    -> decltype(this->mapping(node, into, state)) {
+    return this->mapping(node, into, state);
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_assignable<T &, T &&>::value))
+  auto map_into(::ryml::ConstNodeRef node, T *into, State state, long) const
+    -> with_diagnostics_t<compat::monostate, compat::decay_t<decltype(
+      this->mapping(node, omni::type_t<T>{}, state).diagnostics)>> {
+    auto result = this->mapping(node, omni::type_t<T>{}, state);
+    if (result.value)
+      *into = std::move(*result.value);
+
+    return {
+      /*value=*/result.value
+        ? compat::make_optional(compat::monostate{}) : compat::nullopt,
+      /*diagnostics=*/std::move(result.diagnostics),
+    };
+  }
+
+  // The trailing decltype excludes unsupported wrapped calls through SFINAE.
+  template <typename T, typename State>
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State state) const -> decltype(this->mapping(node, type, state)) {
+    return this->mapping(node, type, state);
+  }
+
+  template <typename T, typename State>
+  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+    -> decltype(this->map_into(node, into, state, 0)) {
+    assert(into);
+    return this->map_into(node, into, state, 0);
+  }
+};
+
+} // namespace detail
 } // namespace compose
 } // namespace ryml
 } // namespace omni
+
+#include <omnirefl/serialization/ryml/impl/compose.hpp>

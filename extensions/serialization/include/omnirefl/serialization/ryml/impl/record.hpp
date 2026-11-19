@@ -10,6 +10,49 @@
 
 namespace omni {
 namespace ryml {
+namespace reflected_scope {
+namespace detail {
+
+// C++11 overload ranking selects direct field assignment for value mappings.
+// The trailing decltype requires both a type-tag call and a usable setter.
+template <typename Mapping, typename Field, typename State>
+auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
+  Field field, State state, int)
+  -> decltype(field.set_value(std::move(*mapping(node,
+      omni::type_t<typename Field::type>{}, state).value)),
+    with_diagnostics_t<compat::monostate>{}) {
+  auto mapped = mapping(node, omni::type_t<typename Field::type>{}, state);
+  auto result = omni::ryml::detail::make_node_accumulator(state);
+  result.append({
+    /*value=*/mapped.value
+      ? compat::make_optional(compat::monostate{}) : compat::nullopt,
+    /*diagnostics=*/std::move(mapped.diagnostics),
+  });
+
+  if (result.result.value)
+    field.set_value(std::move(*mapped.value));
+
+  return std::move(result).finish();
+}
+
+template <typename Mapping, typename Field, typename State>
+auto map_node_to_field_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
+  Field field, State state, long) -> with_diagnostics_t<compat::monostate> {
+  // Mutation-only mappings need a temporary for bitfields and packed fields.
+  typename Field::type value = field.value();
+  auto result = omni::ryml::detail::make_node_accumulator(state);
+  result.append(omni::ryml::detail::read_into(
+    mapping, node, &value, state, /*priority=*/0));
+
+  if (result.result.value)
+    field.set_value(std::move(value));
+
+  return std::move(result).finish();
+}
+
+} // namespace detail
+} // namespace reflected_scope
+
 namespace detail {
 
 // Pending members retain their selected input node. Canonical presence is
@@ -72,16 +115,8 @@ struct record_member_event {
         /*index=*/compat::nullopt,
       });
 
-      // A temporary also supports bitfields, which cannot expose references.
-      typename omni::data_member_meta_t<_F>::type value = this->field.value();
-      auto mapped = core::read_node(node, &value, child);
-      if (mapped.value) {
-        // Setters need a mutable binding; its copy refers to the same record.
-        auto field = this->field;
-        field.set_value(std::move(value));
-      }
-
-      return mapped;
+      return reflected_scope::detail::map_node_to_field(
+        node, this->field, child);
     }
 
     auto result = make_node_accumulator(state);

@@ -113,5 +113,24 @@ auto from_optional_like_t::operator()(const T &value,
   }
 }
 
+namespace reflected_scope {
+namespace detail {
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Field, typename State),
+  (is_read_state<State>::value))
+auto map_node_to_field(::ryml::ConstNodeRef node, Field field, State state)
+  -> with_diagnostics_t<compat::monostate> {
+  if (state.limit_exceeded())
+    return {
+      /*value=*/compat::nullopt,
+      /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
+    };
+
+  const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
+  return map_node_to_field_using(mapping, node, field, state, /*priority=*/0);
+}
+
+} // namespace detail
+} // namespace reflected_scope
 } // namespace ryml
 } // namespace omni

@@ -34,11 +34,15 @@ reserved for template parameters, such as `Value` or `BufferSize`.
 Functional-composition annotations may use signature pseudocode when C++
 template boilerplate obscures the callable contract, or a short composition
 does not make its resulting interface apparent. The notation describes the
-observable arguments, results, and overloads.
+observable arguments, results, overloads, and data shapes.
 
 | Notation | Meaning or C++ equivalent |
 | --- | --- |
 | `f :: (A, B) -> R` | Callable signature: `auto f(A a, B b) -> R;` |
+| `(A, B)` | Components passed or stored together. |
+| `[T]` | Ordered sequence; `T` describes each element's contract. |
+| `{K: V}` | Key-value collection with unique keys. |
+| `A \| B` | Either result form or alternative. |
 | `{ signature₁, signature₂ }` | Overloads of one callable. |
 | `factory :: A -> { … }` | Returns a callable with the listed overloads. |
 | `x \|> f` | Forward application: `f(x)`. |
@@ -50,6 +54,11 @@ observable arguments, results, and overloads.
 `->` shows the transformation of inputs into the result. Callables may themselves be arguments
 or results. This is documentation pseudocode using familiar signature and
 pipeline notation, rather than executable C++, Jai, or Haskell.
+
+Data notation describes the contract rather than C++ storage. A heterogeneous
+`std::tuple` can represent `[T]` when its elements satisfy the same contract;
+there is no separate sequence notation for tuples, arrays, and vectors.
+`{K: [V]}` describes unique keys whose values are ordered sequences.
 
 ### Names and macros
 

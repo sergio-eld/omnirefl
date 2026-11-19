@@ -248,7 +248,7 @@ TEST(inplace_deserialization, reports_mapping_errors) {
     &into, R"({"first": 42, "second": "bad"})");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/second: \"bad\" is not an integer", result.diagnostics);
+  EXPECT_EQ("/second: expected integer, found scalar", result.diagnostics);
 }
 
 struct lvalue_renderer {

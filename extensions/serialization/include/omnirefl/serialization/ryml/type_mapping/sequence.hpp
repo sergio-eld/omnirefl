@@ -21,8 +21,9 @@ namespace ryml {
  * \ref traits::has_unique_key selects try_emplace instead of emplace.
  * Unique destinations apply duplicate policies and require replace for
  * last-wins; non-unique ranges retain every occurrence. Exact repeated
- * document names are selected before value decoding. Destination-specific key equivalence is checked
- * during insertion; earlier conversion errors are retained.
+ * document names are selected before value decoding. Destination-specific
+ * key equivalence is checked during insertion; earlier conversion errors are
+ * retained.
  * Key/value ranges require string-adaptable keys and adapted key/mapped-value
  * types. All destinations require adapted clear and insertion operations.
  * @pre The destination pointer must be non-null and node must belong to a
@@ -45,19 +46,18 @@ struct to_range_t {
  * Does not call \ref reflected_scope::mapping_to_type for the range;
  * element mappings still use it.
  *
-```text
-to_range :: type<T> ->
+```
+default_to_range :: type<T> ->
   (node, T*, state) -> with_diagnostics<monostate>
 ```
  */
 template <typename T>
-constexpr auto to_range(omni::type_t<T>)
+constexpr auto default_to_range(omni::type_t<T>)
   -> typename traits::select<
     traits::case_<traits::is_key_value<T>::value,
-      decltype(compose::with_node_check<core::expect_object_node>(
-        to_range_t{}))>,
-    decltype(compose::with_node_check<core::expect_array_node>(
-      to_range_t{}))>::type {
+      compose::detail::with_node_check_t<core::expect_object_node, to_range_t>>,
+    compose::detail::with_node_check_t<core::expect_array_node,
+      to_range_t>>::type {
   return {};
 }
 
@@ -65,7 +65,7 @@ constexpr auto to_range(omni::type_t<T>)
  * Does not call \ref reflected_scope::mapping_from_type for the range;
  * element mappings still use it.
  *
-```text
+```
 from_range :: (const T&, node, state) -> void
 ```
  *

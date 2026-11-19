@@ -1,6 +1,6 @@
 #pragma once
 
-/** Reflected record mappings and node-to-type composition. */
+/** Built-in reflected record mappings. */
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
@@ -23,6 +23,8 @@ namespace reflected_scope {
  * use it.
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
+ * Value-producing member mappings pass their result directly to set_value.
+ * Mutation-only member mappings use a temporary and assign it on success.
  *
  * A canonical name takes precedence over its aliases, even when its value is
  * invalid. Duplicate policies select among canonical occurrences when present,
@@ -48,8 +50,7 @@ struct to_record_t {
   NameByAlias name_by_alias;
 
 #if 0
-  // TODO: [high] Restore this functional update on the model interface;
-  // alias configuration does not belong to the mapping implementation.
+  // TODO: [high] Revisit expression-based configuration of record aliases.
   /** (QoL) Transforms data member `.name_by_alias` inplace in an expression.
    * Returns a new mapping function with f(current resolver).
    * The returned resolver must be copy-constructible and const-invocable as
@@ -70,8 +71,7 @@ struct to_record_t {
   }
 #endif
 
-  // TODO: [medium] Define model-configured per-field validation for to_record.
-  // Alias and validation configuration belong to the model interface.
+  // TODO: [medium] Define per-field validation for the built-in record mapping.
   // Explore T -> expected<T, error> and T -> with_diagnostics_t<T> for decoded
   // values, such as email strings or numeric ranges, before field assignment.
   // Retain the source node's diagnostic path and apply normal error policies.
@@ -86,45 +86,23 @@ struct to_record_t {
  * Does not call \ref mapping_to_type for the record; member mappings still
  * use it.
  *
-```text
-to_record :: type<T> ->
+```
+default_to_record :: type<T> ->
   (node, T*, state) -> with_diagnostics<monostate>
 ```
  */
 template <typename T>
-constexpr auto to_record(omni::type_t<T>)
-  -> decltype(compose::with_node_check<core::expect_object_node>(
-    to_record_t<>{})) {
-  return compose::with_node_check<core::expect_object_node>(to_record_t<>{});
-}
-
-/** Creates a record mapping from a node-only expected function.
- * Object-node validation runs before f. Error is issue or json::issue_code.
- *
-```text
-to_record :: (node -> expected<T, Error>) -> {
-  (node, type<T>, state) -> with_diagnostics<T>,
-  (node, T*, state)      -> with_diagnostics<monostate>
-}
-```
- */
-OMNI_CONSTRAINED_TEMPLATE((typename Function),
-  (compat::is_invocable<const compat::decay_t<Function> &,
-    ::ryml::ConstNodeRef>::value))
-constexpr auto to_record(Function &&f)
-  -> decltype(compose::with_mutating_node_to_type_overload(
-    compose::with_node_check<core::expect_object_node>(
-      compose::from_expected_node_function(std::forward<Function>(f))))) {
-  return compose::with_mutating_node_to_type_overload(
-    compose::with_node_check<core::expect_object_node>(
-      compose::from_expected_node_function(std::forward<Function>(f))));
+constexpr auto default_to_record(omni::type_t<T>)
+  -> compose::detail::with_node_check_t<core::expect_object_node,
+    to_record_t<>> {
+  return {};
 }
 
 /** Maps accessible non-static record fields to object entries.
  * Does not call \ref mapping_from_type for the record; member mappings still
  * use it.
  *
-```text
+```
 from_record :: (const T&, node, state) -> void
 ```
  *
