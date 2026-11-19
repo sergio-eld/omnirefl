@@ -24,7 +24,12 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         container_discovery.cpp optional_mapping.cpp type_mapping.cpp
         compositors.cpp composed_deserialization.cpp
         diagnostics.cpp inplace.cpp)
-    set_target_properties(${_test_target} PROPERTIES
+    # Keep these tests free of forced generated headers and instrumentation.
+    set(_core_target "cpp_${_standard}.json_ryml.test.core")
+    add_executable(${_core_target} core.cpp with_diagnostics.cpp)
+    set_target_properties(${_core_target} PROPERTIES
+        OUTPUT_NAME "json_ryml_test_core_cpp_${_standard}")
+    set_target_properties(${_test_target} ${_core_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO)
@@ -39,12 +44,15 @@ foreach(_standard IN LISTS _supported_cpp_standards)
             AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 6
             AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7))
         target_compile_options(${_test_target} PRIVATE -fno-exceptions)
+        target_compile_options(${_core_target} PRIVATE -fno-exceptions)
     endif()
     target_link_libraries(${_test_target} PRIVATE
         gtest_main omni::serialization json_model)
+    target_link_libraries(${_core_target} PRIVATE gtest_main omni::serialization)
     omni_reflected_target(${_test_target})
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
         add_test(NAME ${_test_target} COMMAND ${_test_target})
+        add_test(NAME ${_core_target} COMMAND ${_core_target})
     endif()
 
 endforeach()

@@ -2,9 +2,16 @@
 
 #include <gtest/gtest.h>
 
+#include <map>
 #include <string>
 #include <type_traits>
 #include <vector>
+
+#if defined(__GNUC__) && !defined(__clang__)
+// GCC warns about GTest's internal conditionals in unbraced assertion guards.
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdangling-else"
+#endif
 
 namespace {
 namespace string_mapping {
@@ -18,6 +25,16 @@ struct basic_text {
 };
 
 struct converted_text { std::string contents; };
+
+// Standard string construction without default construction or assignment.
+struct constructed_text: std::string {
+  using std::string::string;
+  constructed_text() = delete;
+  constructed_text(const constructed_text &) = delete;
+  constructed_text(constructed_text &&) = default;
+  constructed_text &operator=(const constructed_text &) = delete;
+  constructed_text &operator=(constructed_text &&) = delete;
+};
 
 } // namespace string_mapping
 } // namespace
@@ -37,11 +54,12 @@ struct as_string<string_mapping::basic_text<Char, Traits>,
 };
 
 template <typename Char, typename Traits>
-struct assign_string<string_mapping::basic_text<Char, Traits>,
+struct from_string<string_mapping::basic_text<Char, Traits>,
   compat::enable_if_t<std::is_same<char, Char>::value>> {
-  void operator()(string_mapping::basic_text<Char, Traits> *into,
-    compat::basic_string_view<Char, Traits> text) const {
-    into->contents.assign(text.empty() ? "" : text.data(), text.size());
+  auto operator()(compat::basic_string_view<Char, Traits> text) const
+    -> string_mapping::basic_text<Char, Traits> {
+    return {adapt::from_string(omni::type_t<std::basic_string<Char, Traits>>{},
+      text)};
   }
 };
 
@@ -53,10 +71,9 @@ struct as_string<string_mapping::converted_text> {
 };
 
 template <>
-struct assign_string<string_mapping::converted_text> {
-  void operator()(string_mapping::converted_text *into,
-    compat::string_view text) const {
-    into->contents.assign(text.empty() ? "" : text.data(), text.size());
+struct from_string<string_mapping::converted_text> {
+  string_mapping::converted_text operator()(compat::string_view text) const {
+    return {adapt::from_string(omni::type_t<std::string>{}, text)};
   }
 };
 
@@ -69,8 +86,7 @@ namespace {
 TEST(string_mapping, requires_both_operations) {
   EXPECT_TRUE(omni::traits::is_string_like<
     string_mapping::basic_text<char>>::value);
-  // Reading const strings is valid; assigning to them is not.
-  EXPECT_FALSE(omni::traits::is_string_like<const std::string>::value);
+  EXPECT_TRUE(omni::traits::is_string_like<const std::string>::value);
   EXPECT_FALSE(omni::traits::is_string_like<std::vector<char>>::value);
   EXPECT_FALSE(omni::traits::is_string_like<int>::value);
   EXPECT_FALSE(omni::traits::is_string_like<int *>::value);
@@ -144,6 +160,47 @@ TEST(string_mapping, deserializes_through_owning_conversion_adapter) {
   }
 }
 
+TEST(string_mapping, constructs_without_default_construction_or_assignment) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<string_mapping::constructed_text>{}, R"("constructed text")");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(std::string{"constructed text"}, *result.value);
+}
+
+TEST(string_mapping, constructs_empty_text_from_a_null_view) {
+  const auto owned = omni::adapt::from_string(omni::type_t<std::string>{},
+    omni::compat::string_view{});
+
+  const auto constructed = omni::adapt::from_string(
+    omni::type_t<string_mapping::constructed_text>{},
+    omni::compat::string_view{});
+
+  const auto borrowed = omni::adapt::from_string(
+    omni::type_t<omni::compat::string_view>{},
+    omni::compat::string_view{});
+
+  EXPECT_TRUE(owned.empty());
+  EXPECT_TRUE(constructed.empty());
+  EXPECT_TRUE(borrowed.empty());
+}
+
+TEST(string_mapping, constructs_non_default_string_keys) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::map<string_mapping::constructed_text, int>>{},
+    R"({"": 3, "label": 7})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ(2U, result.value->size());
+    EXPECT_EQ(3, result.value->at(string_mapping::constructed_text{""}));
+    EXPECT_EQ(7, result.value->at(string_mapping::constructed_text{"label"}));
+  }
+}
+
 #if 0
 // FIXME: [high] Wide strings are strings, but Ryml needs char text. This case
 // cannot compile until encoding conversion can be supplied in both directions
@@ -163,3 +220,7 @@ TEST(string_mapping, converts_wide_text) {
 #endif
 
 } // namespace
+
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif

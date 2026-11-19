@@ -132,7 +132,6 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
     const omni::ryml::config_t<> options{};
     const omni::ryml::read_state_t<> context{
       /*config=*/options,
-      /*path=*/{},
       /*error_count=*/0,
       /*warning_count=*/0,
       };

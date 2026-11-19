@@ -360,7 +360,6 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
     const omni::ryml::config_t<> options{};
     const omni::ryml::read_state_t<> context{
       /*config=*/options,
-      /*path=*/{},
       /*error_count=*/0,
       /*warning_count=*/0,
       };

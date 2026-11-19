@@ -6,8 +6,10 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
+#include <omnirefl/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/compose.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/enum.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/sequence.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/record.hpp>
@@ -15,180 +17,11 @@
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
-#include <cassert>
 #include <type_traits>
 #include <utility>
 
 namespace omni {
 namespace ryml {
-namespace core {
-
-/** Maps a scalar node's text to a string-like value.
- * Custom string APIs are supported through \ref adapt::assign_string.
- * Its callable object can be passed by value for C++11 composition.
- *
-```
-map_node_to_string_like :: (node, type<T>, state) -> with_diagnostics<T>
-```
- *
- * @pre Caller validates the node shape. node must refer to a scalar in a
- * valid tree; only a debug assertion checks the scalar-node precondition. */
-struct map_node_to_string_like_t {
-  // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
-  // input; node validation belongs to composition.
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<traits::is_string_like<T>,
-      is_read_state<State>>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
-    -> with_diagnostics_t<T, diagnostics> {
-    assert(node.has_val() && !node.is_container());
-    const auto scalar = node.val();
-    using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
-      std::declval<const T &>()))>;
-
-    static_assert(std::is_same<char, typename storage_type::value_type>::value,
-      "Ryml string mapping currently supports only char text.");
-
-    // TODO: [medium] Define UTF-8 conversion for non-char strings and handling
-    // of invalid UTF-8 through the shared operation customization points.
-    // See the disabled wide-string case in tests/string_mapping.cpp.
-
-    using view_type = compat::basic_string_view<
-      typename storage_type::value_type, typename storage_type::traits_type>;
-
-    T value{};
-    adapt::assign_string(&value, view_type{scalar.str, scalar.len});
-    return {
-      /*value=*/std::move(value),
-      /*diagnostics=*/{
-        /*config=*/{state.config.error_policy, {}},
-        /*issues=*/{},
-        /*parse_error_message=*/{},
-      },
-    };
-  }
-};
-
-constexpr map_node_to_string_like_t map_node_to_string_like{};
-
-/** Boolean scalar-to-value mapping.
- *
-```
-map_node_to_boolean :: (node, type<bool>, state) -> with_diagnostics<bool>
-```
- *
- * @pre node refers to an unquoted true/false scalar in a valid tree.
- *
- * @details Uses \ref parse_boolean for conversion. The caller validates the
- * input; debug assertions check the precondition. */
-struct map_node_to_boolean_t {
-  // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
-  // input; node validation belongs to composition.
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_same<bool, compat::remove_cv_t<T>>::value
-      && !std::is_const<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
-    -> with_diagnostics_t<T, diagnostics> {
-    assert(node.has_val() && !node.is_container() && !node.is_val_quoted());
-    const auto scalar = node.val();
-    const auto result = parse_boolean({scalar.str, scalar.len});
-    assert(result.has_value());
-    return {
-      /*value=*/ *result,
-      /*diagnostics=*/{
-        /*config=*/{state.config.error_policy, {}},
-        /*issues=*/{},
-        /*parse_error_message=*/{},
-      },
-    };
-  }
-};
-
-constexpr map_node_to_boolean_t map_node_to_boolean{};
-
-/** Maps a scalar node's text to an integer value.
- * Reports overflow through mapping diagnostics.
- *
-```
-map_node_to_integer :: (node, type<T>, state) -> with_diagnostics<T>
-```
- *
- * @pre Caller validates integer input in a valid tree; a debug assertion
- * checks this precondition. Destination range is checked during conversion. */
-struct map_node_to_integer_t {
-  // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
-  // input; node validation belongs to composition.
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_integral<T>::value
-      && !std::is_same<bool, compat::remove_cv_t<T>>::value
-      && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
-    -> with_diagnostics_t<T, diagnostics> {
-    assert(!core::expect_integer_node(node));
-    const auto expected = std::is_unsigned<T>::value
-      ? json::value_kind::unsigned_integer : json::value_kind::integer;
-
-    return omni::ryml::detail::read_scalar(
-      node, omni::type_t<T>{}, std::move(state), expected);
-  }
-};
-
-constexpr map_node_to_integer_t map_node_to_integer{};
-
-/** Maps a scalar node's text to a real-number value.
- * Reports failed conversions through mapping diagnostics.
- *
-```
-map_node_to_real :: (node, type<T>, state) -> with_diagnostics<T>
-```
- *
- * @pre Caller validates numeric input in a valid tree; a debug assertion
- * checks this precondition. */
-struct map_node_to_real_t {
-  // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
-  // input; node validation belongs to composition.
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_floating_point<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
-    -> with_diagnostics_t<T, diagnostics> {
-    assert(!core::expect_number_node(node));
-    return omni::ryml::detail::read_scalar(node, omni::type_t<T>{},
-      std::move(state), json::value_kind::number);
-  }
-};
-
-constexpr map_node_to_real_t map_node_to_real{};
-
-/** Maps a scalar node's text to the requested arithmetic type.
- * Provides a common entry point for Boolean, integer, and real mappings.
- *
-```
-map_node_to_arithmetic :: (node, type<T>, state) -> with_diagnostics<T>
-```
- *
- * @pre Caller validates the node shape. node must refer to a scalar in a
- * valid tree; only a debug assertion checks the scalar-node precondition. */
-struct map_node_to_arithmetic_t {
-  // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
-  // input; node validation belongs to composition.
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T>, State state) const
-    -> with_diagnostics_t<T, diagnostics> {
-    assert(node.has_val() && !node.is_container());
-    const auto read = typename traits::select<
-      traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-        core::map_node_to_boolean_t>,
-      traits::case_<std::is_integral<T>::value, core::map_node_to_integer_t>,
-      core::map_node_to_real_t>::type{};
-
-    return read(node, omni::type_t<T>{}, std::move(state));
-  }
-};
-
-constexpr map_node_to_arithmetic_t map_node_to_arithmetic{};
-
-} // namespace core
 
 /** Non-recursive fundamental type mappings may be used inside custom
  * cp::to_type and cp::from_type implementations. They call neither
@@ -196,12 +29,12 @@ constexpr map_node_to_arithmetic_t map_node_to_arithmetic{};
  * \ref reflected_scope::mapping_from_type, avoiding recursive selection of
  * the same customization. Optional mappings below dispatch contained values. */
 
-/** Creates a string-like node-to-type mapping function.
+/** Checked string-like node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_string_like :: type<T> -> {
+default_to_string_like :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
@@ -209,13 +42,28 @@ default_to_string_like :: type<T> -> {
  *
  * @details String-view destinations borrow the tree's character storage.
  * The tree and its character storage must remain valid while views are used. */
-template <typename T>
-constexpr auto default_to_string_like(omni::type_t<T>)
-  -> decltype(compose::with_mutating_node_to_type_overload(
-    compose::detail::with_node_check_t<core::expect_string_node,
-      core::map_node_to_string_like_t>{})) {
-  return {};
-}
+struct default_to_string_like_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State state) const -> with_diagnostics_t<T> {
+    return compose::with_node_check<core::expect_string_node>(
+      core::map_node_to_string_like)(node, type, std::move(state));
+  }
+
+  /** (QoL) Mutating adapter for the value-producing overload. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && is_read_state<State>::value
+      && std::is_assignable<T &, T &&>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_mutating_node_to_type_overload(
+      compose::with_node_check<core::expect_string_node>(
+        core::map_node_to_string_like))(node, into, std::move(state));
+  }
+};
+
+constexpr default_to_string_like_t default_to_string_like{};
 
 /** Maps a string-like value to a quoted JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -235,24 +83,41 @@ struct from_string_like_t {
 
 constexpr from_string_like_t from_string_like{};
 
-/** Creates a boolean node-to-type mapping function.
+/** Checked Boolean node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_boolean :: type<T> -> {
+default_to_boolean :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
 ```
  */
-template <typename T>
-constexpr auto default_to_boolean(omni::type_t<T>)
-  -> decltype(compose::with_mutating_node_to_type_overload(
-    compose::detail::with_node_check_t<core::expect_boolean_node,
-      core::map_node_to_boolean_t>{})) {
-  return {};
-}
+struct default_to_boolean_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_same<bool, compat::remove_cv_t<T>>::value
+      && !std::is_const<T>::value && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State state) const -> with_diagnostics_t<T> {
+    return compose::with_node_check<core::expect_boolean_node>(
+      core::map_node_to_boolean)(node, type, std::move(state));
+  }
+
+  /** (QoL) Mutating adapter for the value-producing overload. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_same<bool, compat::remove_cv_t<T>>::value
+      && !std::is_const<T>::value && is_read_state<State>::value
+      && std::is_assignable<T &, T &&>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_mutating_node_to_type_overload(
+      compose::with_node_check<core::expect_boolean_node>(
+        core::map_node_to_boolean))(node, into, std::move(state));
+  }
+};
+
+constexpr default_to_boolean_t default_to_boolean{};
 
 /** Maps a Boolean value to a JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -270,33 +135,52 @@ struct from_boolean_t {
 
 constexpr from_boolean_t from_boolean{};
 
-/** Creates an integer node-to-type mapping function.
+/** Checked integer node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_integer :: type<T> -> {
+default_to_integral :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
 ```
  */
-template <typename T>
-constexpr auto default_to_integer(omni::type_t<T>)
-  -> decltype(compose::with_mutating_node_to_type_overload(
-    compose::detail::with_node_check_t<core::expect_integer_node,
-      core::map_node_to_integer_t>{})) {
-  return {};
-}
+struct default_to_integral_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_integral<T>::value
+      && !std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State state) const -> with_diagnostics_t<T> {
+    return compose::with_node_check<core::expect_integer_node>(
+      core::map_node_to_integral)(node, type, std::move(state));
+  }
 
-/** Maps a integer value to a JSON/YAML scalar.
+  /** (QoL) Mutating adapter for the value-producing overload. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_integral<T>::value
+      && !std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_read_state<State>::value
+      && std::is_assignable<T &, T &&>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_mutating_node_to_type_overload(
+      compose::with_node_check<core::expect_integer_node>(
+        core::map_node_to_integral))(node, into, std::move(state));
+  }
+};
+
+constexpr default_to_integral_t default_to_integral{};
+
+/** Maps an integral value to a JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_integer :: (const T&, node, state) -> void
+from_integral :: (const T&, node, state) -> void
 ```
  */
-struct from_integer_t {
+struct from_integral_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
@@ -304,64 +188,94 @@ struct from_integer_t {
   void operator()(const T &value, ::ryml::NodeRef node, State) const;
 };
 
-constexpr from_integer_t from_integer{};
+constexpr from_integral_t from_integral{};
 
-/** Creates a real-number node-to-type mapping function.
+/** Checked floating-point node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_real :: type<T> -> {
+default_to_floating_point :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
 ```
  */
-template <typename T>
-constexpr auto default_to_real(omni::type_t<T>)
-  -> decltype(compose::with_mutating_node_to_type_overload(
-    compose::detail::with_node_check_t<core::expect_number_node,
-      core::map_node_to_real_t>{})) {
-  return {};
-}
+struct default_to_floating_point_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_floating_point<T>::value && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State state) const -> with_diagnostics_t<T> {
+    return compose::with_node_check<core::expect_number_node>(
+      core::map_node_to_floating_point)(node, type, std::move(state));
+  }
 
-/** Maps a real-number value to a JSON/YAML scalar.
+  /** (QoL) Mutating adapter for the value-producing overload. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_floating_point<T>::value && is_read_state<State>::value
+      && std::is_assignable<T &, T &&>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_mutating_node_to_type_overload(
+      compose::with_node_check<core::expect_number_node>(
+        core::map_node_to_floating_point))(node, into, std::move(state));
+  }
+};
+
+constexpr default_to_floating_point_t default_to_floating_point{};
+
+/** Maps a floating-point value to a JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
  * Preserves enough significant digits for round-trip conversion.
  *
 ```
-from_real :: (const T&, node, state) -> void
+from_floating_point :: (const T&, node, state) -> void
 ```
  */
-struct from_real_t {
+struct from_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
   void operator()(const T &value, ::ryml::NodeRef node, State) const;
 };
 
-constexpr from_real_t from_real{};
+constexpr from_floating_point_t from_floating_point{};
 
-/** Creates an arithmetic node-to-type mapping function.
+/** Checked arithmetic node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_arithmetic :: type<T> -> {
+default_to_arithmetic :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
 ```
  */
-template <typename T>
-constexpr auto default_to_arithmetic(omni::type_t<T>)
-  -> typename traits::select<
+struct default_to_arithmetic_t {
+  // Validate the category required by T, rather than accepting every scalar.
+  template <typename T>
+  using mapping_type = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      decltype(default_to_boolean(omni::type_t<T>{}))>,
-    traits::case_<std::is_integral<T>::value,
-      decltype(default_to_integer(omni::type_t<T>{}))>,
-    decltype(default_to_real(omni::type_t<T>{}))>::type {
-  return {};
-}
+      default_to_boolean_t>,
+    traits::case_<std::is_integral<T>::value, default_to_integral_t>,
+    default_to_floating_point_t>::type;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State state) const -> with_diagnostics_t<T> {
+    return mapping_type<T>{}(node, type, std::move(state));
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, T *into, State state) const
+    -> with_diagnostics_t<compat::monostate> {
+    return mapping_type<T>{}(node, into, std::move(state));
+  }
+};
+
+constexpr default_to_arithmetic_t default_to_arithmetic{};
 
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -455,14 +369,9 @@ template <>
 const auto omni::ryml::cp::to_type<counter> =
   [](::ryml::ConstNodeRef node, omni::type_t<counter>, auto state)
     -> omni::ryml::with_diagnostics_t<counter> {
-    auto mapped = omni::ryml::default_to_integer(omni::type_t<int>{})(
-      node, omni::type_t<int>{}, std::move(state));
-
-    return {
-      mapped.value ? omni::compat::make_optional(counter{*mapped.value})
-                   : omni::compat::nullopt,
-      std::move(mapped.diagnostics),
-    };
+    return omni::ryml::default_to_integral(node,
+      omni::type<decltype(counter::value)>, std::move(state))
+      .transform([](auto value) -> counter { return {value}; });
   };
 ```
  *
@@ -500,14 +409,11 @@ struct omni::ryml::cp::to_type_t<counter> {
     (omni::ryml::is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<counter>,
     State state) const -> omni::ryml::with_diagnostics_t<counter> {
-    auto mapped = omni::ryml::default_to_integer(omni::type_t<int>{})(
-      node, omni::type_t<int>{}, std::move(state));
-
-    return {
-      mapped.value ? omni::compat::make_optional(counter{*mapped.value})
-                   : omni::compat::nullopt,
-      std::move(mapped.diagnostics),
-    };
+    return omni::ryml::default_to_integral(node,
+      omni::type_t<decltype(counter::value)>{}, std::move(state))
+      .transform([](decltype(counter::value) value) -> counter {
+        return {value};
+      });
   }
 };
 ```
@@ -547,7 +453,7 @@ struct omni::ryml::cp::from_type_t<counter> {
     (omni::ryml::is_write_state<State>::value))
   void operator()(const counter &value, ::ryml::NodeRef node,
     State context) const {
-    omni::ryml::from_integer(value.value, node, context);
+    omni::ryml::from_integral(value.value, node, context);
   }
 };
 ```
@@ -589,13 +495,13 @@ namespace detail {
 template <typename _T, typename T = compat::remove_cv_t<_T>>
 using default_mapping_to_type = typename traits::select<
   traits::case_<traits::is_string_like<T>::value,
-    decltype(default_to_string_like(omni::type_t<T>{}))>,
+    default_to_string_like_t>,
   traits::case_<std::is_same<bool, T>::value,
-    decltype(default_to_boolean(omni::type_t<T>{}))>,
+    default_to_boolean_t>,
   traits::case_<std::is_integral<T>::value,
-    decltype(default_to_integer(omni::type_t<T>{}))>,
+    default_to_integral_t>,
   traits::case_<std::is_floating_point<T>::value,
-    decltype(default_to_real(omni::type_t<T>{}))>,
+    default_to_floating_point_t>,
   traits::case_<traits::is_optional<T>::value,
     decltype(default_to_optional_like(omni::type_t<T>{}))>,
   traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
@@ -619,8 +525,8 @@ template <typename _T, typename T = compat::remove_cv_t<_T>>
 using default_mapping_from_type = typename traits::select<
   traits::case_<traits::is_string_like<T>::value, from_string_like_t>,
   traits::case_<std::is_same<bool, T>::value, from_boolean_t>,
-  traits::case_<std::is_integral<T>::value, from_integer_t>,
-  traits::case_<std::is_floating_point<T>::value, from_real_t>,
+  traits::case_<std::is_integral<T>::value, from_integral_t>,
+  traits::case_<std::is_floating_point<T>::value, from_floating_point_t>,
   traits::case_<traits::is_optional<T>::value, from_optional_like_t>,
   traits::case_<omni::ryml::detail::is_mapped_range<const T>::value,
     from_range_t>,

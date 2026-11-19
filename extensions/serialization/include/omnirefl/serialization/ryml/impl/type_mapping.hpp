@@ -51,14 +51,14 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_integral<T>::value
     && !std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_integer_t::operator()(const T &value, ::ryml::NodeRef node,
+void from_integral_t::operator()(const T &value, ::ryml::NodeRef node,
   State) const {
   node.set_serialized(value);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_write_state<State>::value))
-void from_real_t::operator()(const T &value, ::ryml::NodeRef node,
+void from_floating_point_t::operator()(const T &value, ::ryml::NodeRef node,
   State) const {
   // Preserve enough significant digits to recover the original value.
   node.set_serialized(c4::fmt::real(value,
@@ -72,8 +72,8 @@ auto from_arithmetic_t::operator()(const T &value,
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
       from_boolean_t>,
-    traits::case_<std::is_integral<T>::value, from_integer_t>,
-    from_real_t>::type{};
+    traits::case_<std::is_integral<T>::value, from_integral_t>,
+    from_floating_point_t>::type{};
 
   write(value, node, std::move(context));
 }

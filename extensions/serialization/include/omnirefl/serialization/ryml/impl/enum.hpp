@@ -15,7 +15,7 @@ auto map_node_to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
   omni::type_t<T>,
   State context) const
   -> with_diagnostics_t<T, diagnostics> {
-  assert(!core::expect_string_node(node));
+  assert(core::expect_string_node(node));
 
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
   const auto find_name = [enumerators](compat::string_view name)
@@ -55,11 +55,10 @@ auto map_node_to_enum_t<ValueByAlias>::operator()(::ryml::ConstNodeRef node,
     /*value=*/compat::nullopt,
     /*diagnostics=*/{
       /*config=*/{context.config.error_policy, {}},
-      /*issues=*/{omni::ryml::detail::make_issue(
+      /*issues=*/{omni::ryml::core::make_issue(
         json::issue_code::invalid_scalar,
         json::value_kind::string,
-        node,
-        context.path)},
+        node)},
       /*parse_error_message=*/{},
     },
   };

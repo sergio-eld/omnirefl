@@ -5,7 +5,7 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
-#include <omnirefl/serialization/ryml/node_checks.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -19,9 +19,10 @@ namespace omni {
 namespace ryml {
 namespace compose {
 
-/** A node check returning one issue on mismatch, or nullopt on success.
+/** A node check returning the input node, or an issue on mismatch.
  * For example, core::expect_object_node. */
-using node_check = compat::optional<issue> (*)(::ryml::ConstNodeRef);
+using node_check = compat::expected<::ryml::ConstNodeRef, issue> (*)(
+  ::ryml::ConstNodeRef);
 
 namespace detail {
 
@@ -39,7 +40,7 @@ struct lifted_node_function;
 /** C++11-compatible higher-order function composing a node check and mapping.
  *
 ```
-Check :: node -> optional<issue>
+Check :: node -> expected<node, issue>
 state :: read_state_like
 
 Mapping :: (node, type<T>, state) -> with_diagnostics<T>
@@ -49,7 +50,7 @@ with_node_check<Check> :: Mapping -> Mapping
 ```
  *
  * Mapping may provide either or both destination overloads. A failed check
- * returns its issue at the current path without calling Mapping. An exceeded
+ * returns its issue at the source node without calling Mapping. An exceeded
  * diagnostic limit also skips Mapping. The owned state is moved into Mapping
  * after validation.
  *
@@ -72,21 +73,19 @@ constexpr auto with_node_check(Mapping &&mapping)
           /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
         };
 
-      if (auto check = Check(node)) {
-        auto path = state.path.materialize();
-        path.insert(path.end(), check->path.begin(), check->path.end());
-        check->path = std::move(path);
+      auto checked = Check(node);
+      if (!checked) {
         return {
           /*value=*/compat::nullopt,
           /*diagnostics=*/{
             /*config=*/{state.config.error_policy, {}},
-            /*issues=*/{std::move(*check)},
+            /*issues=*/{std::move(checked.error())},
             /*parse_error_message=*/{},
           },
         };
       }
 
-      return mapping(node, into, std::move(state));
+      return mapping(*checked, into, std::move(state));
     };
 #else
   return detail::with_node_check_t<Check, compat::decay_t<Mapping>>{
@@ -143,9 +142,9 @@ lift_to_with_diagnostics(MutatingFunction) ::
  * or assigned by this adapter. A pointer-only callback provides no type<T>
  * overload; a value-producing callback provides no generated T* overload.
  *
- * Expected errors use paths relative to the input node; their order and
- * existing source nodes are kept. with_diagnostics results pass through with
- * complete paths and configuration; callbacks can use state to construct them.
+ * Errors with a source node ID retain their complete document paths. Errors
+ * without a source ID use paths relative to the input node. Issue order is
+ * retained. with_diagnostics results pass through with complete diagnostics.
  * Callbacks are invoked as const objects and receive an owned state snapshot.
  * The node is passed unchanged; this
  * adapter does not check its shape or select a registered type mapping.
@@ -182,8 +181,9 @@ to_record(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Field conversion and alias handling belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -223,8 +223,9 @@ to_range(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Element conversion belongs to f. Object-shaped ranges use to_record.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -265,8 +266,9 @@ to_enum(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Enumerator lookup and aliases belong to f; no enum metadata is queried.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -307,8 +309,9 @@ to_string_like(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Text conversion, ownership, and destination assignment belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -349,8 +352,9 @@ to_boolean(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Conversion to the destination value belongs to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -380,23 +384,24 @@ ValueFunction :: (node, type<T>, state) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (node, T*, state) -> Result<monostate>
 
-to_integer(ValueFunction) :: {
+to_integral(ValueFunction) :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
-to_integer(MutatingFunction) ::
+to_integral(MutatingFunction) ::
   (node, T*, state) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Conversion and destination range checks belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_integer(Function &&f)
+constexpr auto to_integral(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_integer_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -421,23 +426,24 @@ ValueFunction :: (node, type<T>, state) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (node, T*, state) -> Result<monostate>
 
-to_real(ValueFunction) :: {
+to_floating_point(ValueFunction) :: {
   (node, type<T>, state) -> with_diagnostics<T>,
   (node, T*, state)      -> with_diagnostics<monostate>
 }
-to_real(MutatingFunction) ::
+to_floating_point(MutatingFunction) ::
   (node, T*, state) -> with_diagnostics<monostate>
 ```
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Conversion and destination range checks belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_real(Function &&f)
+constexpr auto to_floating_point(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_number_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -472,8 +478,9 @@ to_arithmetic(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Selection of the conversion and destination range checks belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -513,8 +520,9 @@ to_optional_like(MutatingFunction) ::
  *
  * A value-producing callback's T* adapter requires assignment from its result.
  * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Expected errors use node-relative
- * paths; with_diagnostics carries complete paths and configuration.
+ * with_diagnostics instead of expected. Errors with a source node ID keep
+ * document paths; otherwise paths are relative to the input node.
+ * with_diagnostics carries complete paths and configuration.
  * Null handling and conversion of present values belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -531,11 +539,11 @@ constexpr auto to_optional_like(Function &&f)
 namespace detail {
 
 /** Calls a node check before the mapping function, preserving its overloads.
- * A failed check returns one hard error at the current path.
+ * A failed check returns one hard error at the source node's document path.
  * The mapping function is skipped on failure or an exceeded diagnostic limit.
  *
 ```
-Check :: node -> optional<issue>
+Check :: node -> expected<node, issue>
 Mapping :: (node, destination, state) -> with_diagnostics<T>
 
 with_node_check<Check> :: Mapping -> Mapping
@@ -564,21 +572,19 @@ struct with_node_check_t {
         /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
       };
 
-    if (auto check = this->expect_node(node)) {
-      auto path = state.path.materialize();
-      path.insert(path.end(), check->path.begin(), check->path.end());
-      check->path = std::move(path);
+    auto checked = this->expect_node(node);
+    if (!checked) {
       return {
         /*value=*/compat::nullopt,
         /*diagnostics=*/{
           /*config=*/{state.config.error_policy, {}},
-          /*issues=*/{std::move(*check)},
+          /*issues=*/{std::move(checked.error())},
           /*parse_error_message=*/{},
         },
       };
     }
 
-    return this->lifted_mapping(node, into, std::move(state));
+    return this->lifted_mapping(*checked, into, std::move(state));
   }
 };
 
@@ -598,15 +604,11 @@ struct with_mutating_node_to_type_overload_t {
   auto map_into(::ryml::ConstNodeRef node, T *into, State state, long) const
     -> with_diagnostics_t<compat::monostate, compat::decay_t<decltype(
       this->mapping(node, omni::type_t<T>{}, std::move(state)).diagnostics)>> {
-    auto result = this->mapping(node, omni::type_t<T>{}, std::move(state));
-    if (result.value)
-      *into = std::move(*result.value);
-
-    return {
-      /*value=*/result.value
-        ? compat::make_optional(compat::monostate{}) : compat::nullopt,
-      /*diagnostics=*/std::move(result.diagnostics),
-    };
+    return this->mapping(node, omni::type_t<T>{}, std::move(state))
+      .transform([into](T &&value) -> compat::monostate {
+        *into = std::move(value);
+        return {};
+      });
   }
 
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.

@@ -21,6 +21,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/serialization/ryml/type_mapping.hpp>
 #include <omnirefl/traits.hpp>
@@ -63,24 +64,6 @@ struct reflect_as_root:
 
 namespace core {
 
-/**
- * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
- * owning tree and returns syntax errors through expected.
- * ParserOptions are passed directly to ryml. Location tracking, if enabled,
- * ends with this call; the returned tree does not retain the parser.
- *
-```cpp
-// Supply a reflected person, config, and an owning std::string source.
-auto parsed = core::parse(std::move(source));
-if (parsed) {
-  auto result = core::map_by_schema(options, omni::type_t<person>{}, *parsed);
-  // Use result while parsed keeps its tree and character storage alive.
-}
-// Syntax errors use expected; mapping returns optional person and diagnostics.
-``` */
-inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
-  ::ryml::ParserOptions options = {});
-
 // REFACTORME: [high] Review responsibility for diagnostic accumulation and
 // limit checks between this dispatcher and the node mappers.
 /** Dispatch one node through the selected to_type callable with diagnostics.
@@ -102,12 +85,17 @@ void write_node(const T &value, ::ryml::NodeRef node, State context);
 /** (Ad hoc: see detail) Map Boolean, integer, or real JSON/YAML nodes
  * into corresponding fundamental C++ types.
  *
- * @details These routes sanitize compound destination types before
- * reflected_call. Arithmetic values bypass reflection. Registered readers
- * take precedence; otherwise to_boolean, to_integer, and to_real perform
- * the format checks and conversion.
- * @pre node must be valid and into must be non-null. */
+ * @details reflected_call requires a metadata-bearing target. This route
+ * handles arithmetic destinations without reflection.
+ * @pre node must be valid; destination pointers must be non-null. */
 struct map_to_fundamental_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State context) const
+    -> with_diagnostics_t<T, diagnostics>;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
@@ -119,12 +107,17 @@ constexpr map_to_fundamental_t map_to_fundamental{};
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into string-like C++ types.
  *
- * @details These routes sanitize compound destination types before
- * reflected_call. String registrations and adapters require no metadata,
- * including for instrumentation-disabled types. Registered readers take
- * precedence over to_string_like without making the string a reflection target.
- * @pre node must be valid and into must be non-null. */
+ * @details String-like destinations may be instrumentation-disabled. This
+ * route keeps them outside reflected_call.
+ * @pre node must be valid; destination pointers must be non-null. */
 struct map_to_string_like_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State context) const
+    -> with_diagnostics_t<T, diagnostics>;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
@@ -140,8 +133,15 @@ constexpr map_to_string_like_t map_to_string_like{};
  * @details reflected_call needs a metadata-bearing type, not an arbitrary
  * compound destination. Range and optional wrappers are unwrapped to obtain
  * that reflection target while mapping retains the original destination.
- * @pre node must be valid and into must be non-null. */
+ * @pre node must be valid; destination pointers must be non-null. */
 struct map_to_reflected_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_object<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State context) const
+    -> with_diagnostics_t<T, diagnostics>;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_object<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
@@ -157,8 +157,15 @@ constexpr map_to_reflected_t map_to_reflected{};
  * target. Discovery follows element or mapped-value types before establishing
  * scope, preserving the original range as the destination. Fundamental and
  * string-like elements require no reflected scope, including empty ranges.
- * @pre node must be valid and into must be non-null. */
+ * @pre node must be valid; destination pointers must be non-null. */
 struct map_to_sequence_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State context) const
+    -> with_diagnostics_t<T, diagnostics>;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
@@ -173,8 +180,15 @@ constexpr map_to_sequence_t map_to_sequence{};
  * @details reflected_call requires sanitizing this compound destination to
  * its contained type. Discovery establishes scope only when needed and keeps
  * the optional as the mapping destination, including when it is empty.
- * @pre node must be valid and into must be non-null. */
+ * @pre node must be valid; destination pointers must be non-null. */
 struct map_to_optional_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_optional<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(::ryml::ConstNodeRef node, omni::type_t<T> type,
+    State context) const
+    -> with_diagnostics_t<T, diagnostics>;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_optional<T>::value && !std::is_const<T>::value
       && is_read_state<State>::value))
@@ -184,51 +198,55 @@ struct map_to_optional_t {
 
 constexpr map_to_optional_t map_to_optional{};
 
-/** Map document nodes into *into, traversing its schema over the document.
- * Successfully mapped ranges replace their existing contents. Mapping errors
- * leave the destination state unspecified and may produce partial updates.
- * value holds monostate only when mapping succeeds.
- * @pre into must be non-null and node must be valid. The caller retains the
- * tree and character storage while using borrowed values or diagnostics.
- * The diagnostics transformation in config is not applied. */
+namespace detail {
+
+template <typename T>
+using map_by_schema_dispatch_t = typename traits::select<
+  traits::case_<cp::reflect_as_root<T>::value, map_to_reflected_t>,
+  traits::case_<traits::is_string_like<T>::value, map_to_string_like_t>,
+  traits::case_<std::is_arithmetic<T>::value, map_to_fundamental_t>,
+  traits::case_<traits::is_optional<T>::value, map_to_optional_t>,
+  traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
+    map_to_sequence_t>,
+  map_to_reflected_t>::type;
+
+} // namespace detail
+
+/** Map a node into a C++ value, traversing the C++ schema over the node.
+ * Value-producing mappings construct the result directly. Mutating-only
+ * mappings require a default-constructible destination.
+ * The configured diagnostics transformation is not applied.
+ * @pre node must be valid. The caller retains the tree and character storage
+ * while using borrowed values or diagnostics. */
 OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
   (is_config<Config>::value && std::is_object<T>::value
     && !std::is_const<T>::value))
-auto map_by_schema(const Config &options, T *into, ::ryml::ConstNodeRef node)
-  -> with_diagnostics_t<compat::monostate> {
-  const auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<T>::value, map_to_reflected_t>,
-    traits::case_<traits::is_string_like<T>::value, map_to_string_like_t>,
-    traits::case_<std::is_arithmetic<T>::value, map_to_fundamental_t>,
-    traits::case_<traits::is_optional<T>::value, map_to_optional_t>,
-    traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
-      map_to_sequence_t>,
-    map_to_reflected_t>::type{};
-
-  return map(node, into, read_state_t<Config>{
+auto map_by_schema(const Config &options, omni::type_t<T> type,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
+  return detail::map_by_schema_dispatch_t<T>{}(node, type, read_state_t<Config>{
     /*config=*/options,
-    /*path=*/{},
     /*error_count=*/0,
     /*warning_count=*/0,
   });
 }
 
-/** Map document nodes into a C++ value, traversing its schema over the
- * document through the selected customization points.
- * @pre node must be valid. The caller retains its tree and character storage
- * while using borrowed values or rendering the returned diagnostics.
- * The diagnostics transformation in config is not applied by map_by_schema. */
-OMNI_CONSTRAINED_TEMPLATE((typename Config, typename Record),
-  (is_config<Config>::value && std::is_object<Record>::value
-    && !std::is_const<Record>::value))
-auto map_by_schema(const Config &options, omni::type_t<Record>,
-  ::ryml::ConstNodeRef node) -> with_diagnostics_t<Record> {
-  auto value = compat::make_optional<Record>();
-  auto mapped = map_by_schema(options, &*value, node);
-  return {
-    /*value=*/mapped.value ? std::move(value) : compat::nullopt,
-    /*diagnostics=*/std::move(mapped.diagnostics),
-  };
+/** Map a node into *into, traversing the C++ schema over the node.
+ * Successfully mapped ranges replace their existing contents. Mapping errors
+ * leave the destination state unspecified and may produce partial updates.
+ * value holds monostate only when mapping succeeds.
+ * The configured diagnostics transformation is not applied.
+ * @pre node must be valid and into must be non-null. The caller retains the
+ * tree and character storage while using borrowed values or diagnostics. */
+OMNI_CONSTRAINED_TEMPLATE((typename Config, typename T),
+  (is_config<Config>::value && std::is_object<T>::value
+    && !std::is_const<T>::value))
+auto map_by_schema(const Config &options, T *into, ::ryml::ConstNodeRef node)
+  -> with_diagnostics_t<compat::monostate> {
+  return detail::map_by_schema_dispatch_t<T>{}(node, into, read_state_t<Config>{
+    /*config=*/options,
+    /*error_count=*/0,
+    /*warning_count=*/0,
+  });
 }
 
 /** (QoL) Map a whole tree without explicitly extracting its root node. */

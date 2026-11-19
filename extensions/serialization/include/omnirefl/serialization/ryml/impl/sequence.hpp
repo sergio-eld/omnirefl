@@ -40,7 +40,6 @@ struct supports_range_insertion<T, true>:
 
 template <typename State>
 void report_range_duplicate(::ryml::ConstNodeRef node,
-  mapping_path path,
   bool key_value,
   node_accumulator<State> *result) {
   const auto policy = result->state.config.error_policy.duplicates;
@@ -52,11 +51,10 @@ void report_range_duplicate(::ryml::ConstNodeRef node,
     && (policy & json::duplicate_policy::warn) != json::duplicate_policy::warn)
     return;
 
-  result->report(make_issue(key_value ? json::issue_code::duplicate_field
-                                     : json::issue_code::duplicate_element,
+  result->report(core::make_issue(key_value ? json::issue_code::duplicate_field
+                                        : json::issue_code::duplicate_element,
     json::value_kind::unknown,
     node,
-    path,
     /*warning=*/allowed));
 }
 
@@ -67,8 +65,7 @@ template <>
 struct insert_range_value_case<false> {
   template <typename T, typename State, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef,
-    State, node_accumulator<State> *,
-    Args &&...args) {
+    node_accumulator<State> *, Args &&...args) {
     adapt::emplace(into, std::forward<Args>(args)...);
   }
 };
@@ -77,19 +74,17 @@ template <>
 struct insert_range_value_case<true> {
   template <typename T, typename State, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef node,
-    State context, node_accumulator<State> *result,
-    Args &&...args) {
+    node_accumulator<State> *result, Args &&...args) {
     const auto inserted = adapt::try_emplace(into, std::forward<Args>(args)...);
     if (inserted.second)
       return;
 
-    const auto policy = context.config.error_policy.duplicates;
+    const auto policy = result->state.config.error_policy.duplicates;
     if ((policy & json::duplicate_policy::last)
         == json::duplicate_policy::last)
       adapt::replace(into, inserted.first, std::forward<Args>(args)...);
 
-    report_range_duplicate(node, context.path, traits::is_key_value<T>::value,
-      result);
+    report_range_duplicate(node, traits::is_key_value<T>::value, result);
   }
 };
 
@@ -130,12 +125,7 @@ struct range_mapping_nodes_case<true> {
         == json::duplicate_policy::last)
         inserted.first->second = child;
 
-      const auto context = result->state.child({
-        /*field=*/name,
-        /*index=*/compat::nullopt,
-      });
-
-      report_range_duplicate(child, context.path, /*key_value=*/true, result);
+      report_range_duplicate(child, /*key_value=*/true, result);
     }
 
     std::vector<::ryml::ConstNodeRef> nodes;
@@ -159,23 +149,17 @@ struct read_range_case<false> {
   template <typename T, typename State>
   static void apply(::ryml::ConstNodeRef node, T *into,
     node_accumulator<State> *result) {
-    std::size_t index = 0;
     for (const auto child : node.children()) {
       if (result->stopped())
         break;
 
-      auto context = result->state.child({
-        /*field=*/{},
-        /*index=*/index++,
-      });
-
       compat::range_value_t<T> element{};
-      auto mapped = core::read_node(child, &element, context);
+      auto mapped = core::read_node(child, &element, result->state);
       const bool success = bool(mapped.value);
       result->append(std::move(mapped));
       if (success)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, std::move(context), result, std::move(element));
+          into, child, result, std::move(element));
     }
   }
 };
@@ -207,21 +191,16 @@ struct read_range_case<true> {
       if (result->stopped())
         break;
 
-      auto context = result->state.child({
-        /*field=*/child.key(),
-        /*index=*/compat::nullopt,
-      });
-
-      traits::key_type_t<T> key{};
       const auto name = child.key();
-      adapt::assign_string(&key, view_type{name.str, name.len});
+      auto key = adapt::from_string(omni::type_t<key_type>{},
+        view_type{name.str, name.len});
       traits::mapped_type_t<T> value{};
-      auto mapped = core::read_node(child, &value, context);
+      auto mapped = core::read_node(child, &value, result->state);
       const bool success = bool(mapped.value);
       result->append(std::move(mapped));
       if (success)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, std::move(context), result, std::move(key),
+          into, child, result, std::move(key),
           std::move(value));
     }
   }

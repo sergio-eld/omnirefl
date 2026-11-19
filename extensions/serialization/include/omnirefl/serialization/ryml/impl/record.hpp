@@ -98,6 +98,7 @@ template <typename Record, typename _F>
 struct record_member_event {
   omni::data_member_binding_t<Record, _F> field;
   const std::vector<record_entry> &pending;
+  ::ryml::ConstNodeRef object;
   bool check_presence;
 
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
@@ -110,15 +111,9 @@ struct record_member_event {
     const auto node = entry == this->pending.end()
       ? ::ryml::ConstNodeRef{} : entry->node;
 
-    if (!this->check_presence && !node.invalid()) {
-      auto child = state.child({
-        /*field=*/node.key(),
-        /*index=*/compat::nullopt,
-      });
-
+    if (!this->check_presence && !node.invalid())
       return reflected_scope::detail::map_node_to_field(
-        node, this->field, std::move(child));
-    }
+        node, this->field, std::move(state));
 
     auto result = make_node_accumulator(std::move(state));
     if (!this->check_presence || !node.invalid())
@@ -131,13 +126,14 @@ struct record_member_event {
       return std::move(result).finish();
     }
 
-    const auto child = result.state.child({
-      /*field=*/c4::to_csubstr(this->field.name()),
-      /*index=*/compat::nullopt,
-    });
+    // The absent field has no node; derive its path from the containing object.
+    auto missing = core::make_issue(json::issue_code::missing_field,
+      json::value_kind::unknown, ::ryml::ConstNodeRef{});
 
-    result.report(make_issue(json::issue_code::missing_field,
-      json::value_kind::unknown, ::ryml::ConstNodeRef{}, child.path));
+    missing.path = core::node_path(this->object);
+    missing.path.push_back({c4::to_csubstr(this->field.name()),
+      compat::nullopt});
+    result.report(std::move(missing));
     return std::move(result).finish();
   }
 };
@@ -145,6 +141,7 @@ struct record_member_event {
 // C++11 lambda equivalent: defer node selection until the fold runs the event.
 struct cpp11_defer_member {
   const std::vector<record_entry> &pending;
+  ::ryml::ConstNodeRef object;
   bool check_presence;
 
   template <typename Record, typename _F>
@@ -153,6 +150,7 @@ struct cpp11_defer_member {
     return {
       /*field=*/field,
       /*pending=*/this->pending,
+      /*object=*/this->object,
       /*check_presence=*/this->check_presence,
     };
   }
@@ -271,17 +269,11 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
     if (allowed && !warn)
       continue;
 
-    const auto child_context = result.state.child({
-      /*field=*/name,
-      /*index=*/compat::nullopt,
-    });
-
-    result.report(omni::ryml::detail::make_issue(
+    result.report(omni::ryml::core::make_issue(
       duplicate ? json::issue_code::duplicate_field
                 : json::issue_code::unknown_field,
       json::value_kind::unknown,
       child,
-      child_context.path,
       /*warning=*/allowed));
   }
 
@@ -295,11 +287,13 @@ auto to_record_t<NameByAlias>::operator()(::ryml::ConstNodeRef node,
   const auto events = fn::concat(
     members | fn::map(omni::ryml::detail::cpp11_defer_member{
       /*pending=*/pending,
+      /*object=*/node,
       /*check_presence=*/true,
     }),
 
     members | fn::map(omni::ryml::detail::cpp11_defer_member{
       /*pending=*/pending,
+      /*object=*/node,
       /*check_presence=*/false,
     }));
 

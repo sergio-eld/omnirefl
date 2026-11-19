@@ -70,16 +70,16 @@ struct to_type_t<mapping_observation::number> {
     mapping_observation::number *into, State state) const
     -> with_diagnostics_t<compat::monostate> {
     auto &trace = *state.config.transform_diagnostics.observed;
-    trace.paths.push_back(detail::render_path(state.path.materialize()));
+    trace.paths.push_back(detail::render_path(core::node_path(node)));
     trace.errors.push_back(state.error_count);
     trace.warnings.push_back(state.warning_count);
     trace.configurations.push_back(&state.config);
 
     auto result = core::read_node(node, &into->value, state);
     if (result.value && into->value < 0) {
-      result.diagnostics.issues.push_back(detail::make_issue(
+      result.diagnostics.issues.push_back(core::make_issue(
         json::issue_code::out_of_range, json::value_kind::integer,
-        node, state.path, /*warning=*/true));
+        node, /*warning=*/true));
     }
 
     return result;
@@ -130,7 +130,7 @@ template <>
 const auto to_type<shifted_integer> =
   [bias = 7](::ryml::ConstNodeRef node, shifted_integer *into, auto state) {
     int decoded{};
-    auto result = default_to_integer(omni::type_t<int>{})(
+    auto result = default_to_integral(
       node, &decoded, std::move(state));
     if (result.value)
       into->value = decoded + bias;
@@ -141,7 +141,7 @@ const auto to_type<shifted_integer> =
 template <>
 const auto from_type<shifted_integer> =
   [bias = 11](const shifted_integer &value, ::ryml::NodeRef node, auto state) {
-    from_integer(value.value + bias, node, std::move(state));
+    from_integral(value.value + bias, node, std::move(state));
   };
 #else
 // C++11 uses named callable types instead of capturing generic lambdas.
@@ -154,7 +154,7 @@ struct to_type_t<shifted_integer> {
   auto operator()(::ryml::ConstNodeRef node, shifted_integer *into,
     State state) const -> with_diagnostics_t<compat::monostate> {
     int decoded{};
-    auto result = default_to_integer(omni::type_t<int>{})(
+    auto result = default_to_integral(
       node, &decoded, std::move(state));
     if (result.value)
       into->value = decoded + this->bias;
@@ -171,7 +171,7 @@ struct from_type_t<shifted_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const shifted_integer &value, ::ryml::NodeRef node,
     State state) const {
-    from_integer(value.value + this->bias, node, std::move(state));
+    from_integral(value.value + this->bias, node, std::move(state));
   }
 };
 #endif
@@ -182,7 +182,7 @@ struct from_type_t<const qualified_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(const qualified_integer &value, ::ryml::NodeRef node,
     State state) const {
-    from_integer(value.value, node, std::move(state));
+    from_integral(value.value, node, std::move(state));
   }
 };
 
@@ -202,25 +202,25 @@ static_assert(omni::traits::cp::unavailable{}
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<bool>{})),
-    decltype(omni::ryml::default_to_boolean(omni::type_t<bool>{}))>::value,
+    omni::ryml::default_to_boolean_t>::value,
   "Boolean precedes the integral mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<int>{})),
-    decltype(omni::ryml::default_to_integer(omni::type_t<int>{}))>::value,
+    omni::ryml::default_to_integral_t>::value,
   "Signed integers use the integer mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<unsigned>{})),
-    decltype(omni::ryml::default_to_integer(omni::type_t<int>{}))>::value,
+    omni::ryml::default_to_integral_t>::value,
   "Unsigned integers use the integer mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<double>{})),
-    decltype(omni::ryml::default_to_real(omni::type_t<double>{}))>::value,
+    omni::ryml::default_to_floating_point_t>::value,
   "Floating-point values use the real mapping");
 
 static_assert(std::is_same<
@@ -232,25 +232,25 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<int>{})),
-    omni::ryml::from_integer_t>::value,
+    omni::ryml::from_integral_t>::value,
   "Signed integers use the integer writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<unsigned>{})),
-    omni::ryml::from_integer_t>::value,
+    omni::ryml::from_integral_t>::value,
   "Unsigned integers use the integer writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<double>{})),
-    omni::ryml::from_real_t>::value,
+    omni::ryml::from_floating_point_t>::value,
   "Floating-point values use the real writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<std::string>{})),
-    decltype(omni::ryml::default_to_string_like(omni::type_t<std::string>{}))
+    omni::ryml::default_to_string_like_t
     >::value,
   "String to-type selection");
 
@@ -301,7 +301,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const bool>{})),
-    decltype(omni::ryml::default_to_boolean(omni::type_t<bool>{}))>::value,
+    omni::ryml::default_to_boolean_t>::value,
   "const bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
@@ -313,7 +313,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<volatile bool>{})),
-    decltype(omni::ryml::default_to_boolean(omni::type_t<bool>{}))>::value,
+    omni::ryml::default_to_boolean_t>::value,
   "volatile bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
@@ -325,7 +325,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const volatile bool>{})),
-    decltype(omni::ryml::default_to_boolean(omni::type_t<bool>{}))>::value,
+    omni::ryml::default_to_boolean_t>::value,
   "const volatile bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
@@ -337,7 +337,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const std::string>{})),
-    decltype(omni::ryml::default_to_string_like(omni::type_t<std::string>{}))
+    omni::ryml::default_to_string_like_t
     >::value,
   "Qualified string to-type selection");
 

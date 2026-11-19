@@ -45,6 +45,13 @@ struct my_string {
   }
 };
 
+struct immutable_number {
+  const int value;
+
+  immutable_number() = delete;
+  explicit immutable_number(int value): value(value) {}
+};
+
 } // namespace
 
 #if defined(OMNI_TOOL_RUN)
@@ -59,9 +66,23 @@ struct omni::traits::cp::as_string<my_string> {
 };
 
 template <>
-struct omni::traits::cp::assign_string<my_string> {
-  void operator()(my_string *into, omni::compat::string_view text) const {
-    into->text.assign(text.empty() ? "" : text.data(), text.size());
+struct omni::traits::cp::from_string<my_string> {
+  my_string operator()(omni::compat::string_view text) const {
+    return {omni::adapt::from_string(omni::type_t<std::string>{}, text)};
+  }
+};
+
+template <>
+struct omni::ryml::cp::to_type_t<immutable_number> {
+  template <typename State>
+  auto operator()(::ryml::ConstNodeRef node,
+    omni::type_t<immutable_number>, State state) const
+    -> omni::ryml::with_diagnostics_t<immutable_number> {
+    return omni::ryml::default_to_integral(
+      node, omni::type_t<int>{}, std::move(state))
+      .transform([](int value) -> immutable_number {
+        return immutable_number{value};
+      });
   }
 };
 
@@ -71,7 +92,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
   auto operator()(::ryml::ConstNodeRef node, unsigned short *into,
     State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integer(omni::type_t<unsigned short>{})(
+    return omni::ryml::default_to_integral(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
       std::move(state));
@@ -85,7 +106,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
 template <>
 const auto omni::ryml::cp::to_type<my_string> =
   [](::ryml::ConstNodeRef node, my_string *into, auto state) {
-    return omni::ryml::default_to_string_like(omni::type_t<my_string>{})(
+    return omni::ryml::default_to_string_like(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
       std::move(state));
@@ -96,7 +117,7 @@ struct omni::ryml::cp::to_type_t<my_string> {
   template <typename State>
   auto operator()(::ryml::ConstNodeRef node, my_string *into, State state) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_string_like(omni::type_t<my_string>{})(
+    return omni::ryml::default_to_string_like(
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into,
       std::move(state));
@@ -105,6 +126,33 @@ struct omni::ryml::cp::to_type_t<my_string> {
 #endif
 
 namespace {
+
+TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {
+  const auto parsed = omni::ryml::core::parse("42");
+
+  EXPECT_TRUE(parsed);
+  if (parsed) {
+    const auto result = omni::ryml::map_by_schema(
+      omni::type_t<immutable_number>{}, *parsed);
+
+    EXPECT_TRUE(result.value);
+    if (result.value)
+      EXPECT_EQ(42, result.value->value);
+
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+  }
+}
+
+TEST(mapping_dispatch, deserializes_an_immutable_value) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<immutable_number>{}, "42");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(42, result.value->value);
+
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
 
 TEST(mapping_dispatch, fundamental_registration_applies_at_the_root) {
   const auto result = serialization_test::deserialize(

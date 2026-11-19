@@ -590,7 +590,7 @@ TEST(basics, key_value_ranges) {
  *
  * Custom readers return this result to the enclosing mapper, which collects
  * its issues and applies the error/warning limits. Reading state supplies the
- * config, current path, and accumulated counts; it is passed down explicitly,
+ * config and accumulated counts; it is passed down explicitly,
  * rather than used as a mutable output for diagnostics.
  * See `diagnostics.structured_issues` for individual issue fields. */
 TEST(basics, mapping_result) {
@@ -619,26 +619,24 @@ TEST(basics, fundamental_mapping_results) {
   const omni::ryml::config_t options{};
   const omni::ryml::read_state_t state{
     .config = options,
-    .path = {},
     .error_count = 0,
     .warning_count = 0,
   };
 
   const auto node = tree->crootref();
-  const auto boolean = omni::ryml::default_to_boolean(omni::type<bool>)(
+  const auto boolean = omni::ryml::default_to_boolean(
     node["boolean"], omni::type<bool>, state);
-  const auto integer = omni::ryml::default_to_integer(omni::type<int>)(
+  const auto integer = omni::ryml::default_to_integral(
     node["integer"], omni::type<int>, state);
-  const auto natural = omni::ryml::default_to_integer(omni::type<unsigned>)(
+  const auto natural = omni::ryml::default_to_integral(
     node["integer"], omni::type<unsigned>, state);
-  const auto real = omni::ryml::default_to_real(omni::type<double>)(
+  const auto real = omni::ryml::default_to_floating_point(
     node["real"], omni::type<double>, state);
-  const auto arithmetic = omni::ryml::default_to_arithmetic(omni::type<int>)(
+  const auto arithmetic = omni::ryml::default_to_arithmetic(
     node["integer"], omni::type<int>, state);
-  const auto text = omni::ryml::default_to_string_like(omni::type<std::string>)(
+  const auto text = omni::ryml::default_to_string_like(
     node["text"], omni::type<std::string>, state);
   const auto view = omni::ryml::default_to_string_like(
-    omni::type<omni::compat::string_view>)(
     node["text"], omni::type<omni::compat::string_view>, state);
 
   EXPECT_EQ(true, boolean.value);
@@ -649,7 +647,7 @@ TEST(basics, fundamental_mapping_results) {
   EXPECT_EQ("hello", text.value);
   EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
 
-  const auto invalid = omni::ryml::default_to_integer(omni::type<int>)(
+  const auto invalid = omni::ryml::default_to_integral(
     node["text"], omni::type<int>, state);
 
   EXPECT_FALSE(invalid.value);
@@ -668,11 +666,16 @@ struct my_integer { int value; };
 // since C++14; the struct form below is its C++11 equivalent.
 template <>
 const auto omni::ryml::cp::to_type<basic_customization::my_integer> =
-  [](::ryml::ConstNodeRef node, basic_customization::my_integer *into,
+  [](::ryml::ConstNodeRef node,
+    omni::type_t<basic_customization::my_integer>,
     omni::ryml::read_state_like auto state)
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integer(omni::type_t<int>{})(
-      node, &into->value, std::move(state));
+    -> omni::ryml::with_diagnostics_t<basic_customization::my_integer> {
+    return omni::ryml::default_to_integral(node,
+      omni::type<decltype(basic_customization::my_integer::value)>,
+      std::move(state))
+      .transform([](auto value) -> basic_customization::my_integer {
+        return {value};
+      });
   };
 
 template <>
@@ -680,17 +683,16 @@ const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
   [](const basic_customization::my_integer &value,
     ::ryml::NodeRef node,
     omni::ryml::write_state_like auto state) -> void {
-    omni::ryml::from_integer(value.value, node, std::move(state));
+    omni::ryml::from_integral(value.value, node, std::move(state));
   };
 
 namespace {
 
-/** See advanced.composed_integer_mapping for a value-producing conversion
- * composed with a node check, without a destination pointer.
- * A wrapper need not map to an object. to_type and from_type select its
+/** A wrapper need not map to an object. to_type and from_type select its
  * representation globally; only one registration form is used per direction.
- * These callables use default_to_integer for integer checks and diagnostics
- * and from_integer for writing. write_state_like and read_state_like identify
+ * transform wraps the decoded integer and keeps its diagnostics.
+ * These callables use default_to_integral for integer checks and diagnostics
+ * and from_integral for writing. write_state_like and read_state_like identify
  * each direction's state without spelling its implementation parameters. The
  * generic signatures delay instantiation until called within reflected scope.
  * `basics.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
@@ -720,11 +722,15 @@ struct omni::ryml::cp::to_type_t<basic_customization::my_cpp11_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_read_state<State>::value))
   auto operator()(::ryml::ConstNodeRef node,
-    basic_customization::my_cpp11_integer *into,
+    omni::type_t<basic_customization::my_cpp11_integer>,
     State state) const
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integer(omni::type_t<int>{})(
-      node, &into->value, std::move(state));
+    -> omni::ryml::with_diagnostics_t<basic_customization::my_cpp11_integer> {
+    return omni::ryml::default_to_integral(node,
+      omni::type_t<decltype(basic_customization::my_cpp11_integer::value)>{},
+      std::move(state))
+      .transform(
+        [](decltype(basic_customization::my_cpp11_integer::value) value)
+          -> basic_customization::my_cpp11_integer { return {value}; });
   }
 };
 
@@ -735,7 +741,7 @@ struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
   void operator()(const basic_customization::my_cpp11_integer &value,
     ::ryml::NodeRef node,
     State state) const {
-    omni::ryml::from_integer(value.value, node, std::move(state));
+    omni::ryml::from_integral(value.value, node, std::move(state));
   }
 };
 
@@ -811,7 +817,7 @@ const auto omni::ryml::cp::to_type<basic_customization::my_string> =
   [](::ryml::ConstNodeRef node, basic_customization::my_string *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_string_like(omni::type_t<std::string>{})(
+    return omni::ryml::default_to_string_like(
       node, &into->value, std::move(state));
   };
 
@@ -861,7 +867,7 @@ const auto omni::ryml::cp::to_type<basic_customization::my_record> =
   []<typename T>(::ryml::ConstNodeRef node, T *into,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    // Same-node delegation forwards path, counters, and config unchanged.
+    // Delegate with the current configuration and diagnostic counters.
     return omni::ryml::reflected_scope::default_to_record(omni::type<T>)(
       node, into, std::move(state));
   };
@@ -875,10 +881,10 @@ namespace {
 /** default_to_record and from_record map accessible non-static members.
  * They remain available for custom registrations. The reader receives the
  * node, destination pointer, and mapping state. It returns success or failure
- * with diagnostics. A custom mapper passes
- * state unchanged when delegating the same node, as above. When descending to
- * a child, it supplies state.child(...) instead; see the extended-container
- * example for accumulated diagnostics.
+ * with diagnostics. A custom mapping passes the current state when
+ * delegating, including to child nodes. Paths are derived from the source
+ * tree when issues are reported. See the extended-container example for
+ * accumulated diagnostics.
  * Member mappings still use their own customization points: my_record::reading
  * uses the scalar representation of my_integer. */
 TEST(basics, custom_record_mapping) {
@@ -1008,8 +1014,8 @@ TEST(diagnostics, valid_values_with_warnings) {
 
 /** Shape compositors validate the node before invoking a custom conversion.
  * A callback can return expected<T, issue>, expected<T, input_range<issue>>,
- * or with_diagnostics_t<T>. expected errors use paths relative to the input
- * node; the compositor supplies the enclosing path and source information.
+ * or with_diagnostics_t<T>. Errors with an explicit source node retain their
+ * document path. Otherwise, paths are relative to the callback input node.
  * The resulting callable registers through cp::to_type, map_by_schema's
  * customization point; deserialize uses the same lookup.
  * Value-producing callbacks are preferred. The exceptional pointer-only
@@ -1043,9 +1049,9 @@ auto parse(::ryml::ConstNodeRef node)
 
 template <>
 const auto omni::ryml::cp::to_type<composed_integer::my_int> =
-  omni::ryml::compose::to_integer(composed_integer::parse);
+  omni::ryml::compose::to_integral(composed_integer::parse);
 
-/** A node-only conversion constructs my_int; to_integer checks the input
+/** A node-only conversion constructs my_int; to_integral checks the input
  * shape and adapts expected to the mapping result. Compare the direct
  * registration in basics.custom_scalar_mapping. */
 TEST(advanced, composed_integer_mapping) {
@@ -1100,11 +1106,11 @@ struct temperature { double celsius; };
 
 template <>
 const auto omni::ryml::cp::to_type<composed_real::temperature> =
-  omni::ryml::compose::to_real([](::ryml::ConstNodeRef node,
+  omni::ryml::compose::to_floating_point([](::ryml::ConstNodeRef node,
     omni::ryml::read_state_like auto state)
     -> omni::compat::expected<composed_real::temperature,
       omni::ryml::issue> {
-    auto decoded = omni::ryml::core::map_node_to_real(
+    auto decoded = omni::ryml::core::map_node_to_floating_point(
       node, omni::type<double>, std::move(state));
 
     if (!decoded.value)
@@ -1120,7 +1126,8 @@ const auto omni::ryml::cp::to_type<composed_real::temperature> =
   });
 
 /** A (node, state) callback reuses numeric conversion and returns expected.
- * The state carries the caller's policies; to_real supplies the shape check. */
+ * The state carries the caller's policies; to_floating_point supplies the
+ * shape check. */
 TEST(advanced, composed_real_mapping) {
   const auto result = omni::ryml::deserialize(
     omni::type<composed_real::temperature>, "21.5");
@@ -1147,15 +1154,14 @@ const auto omni::ryml::cp::to_type<composed_string::label<Text>> =
     omni::type_t<composed_string::label<Text>>)
     -> omni::compat::expected<composed_string::label<Text>,
       omni::ryml::issue> {
-    Text value{};
-    omni::adapt::assign_string(&value,
-      omni::compat::string_view{node.val().str, node.val().len});
-    return composed_string::label<Text>{std::move(value)};
+    return composed_string::label<Text>{omni::adapt::from_string(
+      omni::type<Text>,
+      omni::compat::string_view{node.val().str, node.val().len})};
   });
 
 /** A template family uses a type tag to select its result type.
- * to_string_like checks the node before the callback assigns its text through
- * the shared string adapter. This example uses owning std::string storage. */
+ * to_string_like checks the node before the callback constructs its value
+ * through the shared string adapter. This example uses owning std::string storage. */
 TEST(advanced, composed_string_mapping) {
   const auto result = omni::ryml::deserialize(
     omni::type<composed_string::label<std::string>>, R"("gateway")");
@@ -1180,16 +1186,12 @@ const auto omni::ryml::cp::to_type<composed_arithmetic::number<T>> =
     omni::type_t<composed_arithmetic::number<T>>,
     omni::ryml::read_state_like auto state)
     -> omni::ryml::with_diagnostics_t<composed_arithmetic::number<T>> {
-    auto decoded = omni::ryml::core::map_node_to_arithmetic(
-      node, omni::type<T>, std::move(state));
-
-    return {
-      .value = decoded.value
-        ? omni::compat::make_optional(
-            composed_arithmetic::number<T>{*decoded.value})
-        : omni::compat::nullopt,
-      .diagnostics = std::move(decoded.diagnostics),
-    };
+    return omni::ryml::core::map_node_to_arithmetic(node,
+      omni::type<decltype(composed_arithmetic::number<T>::value)>,
+      std::move(state))
+      .transform([](auto value) -> composed_arithmetic::number<T> {
+        return {value};
+      });
   });
 
 /** (node, type<T>, state) supports numeric template families.
@@ -1401,7 +1403,7 @@ struct descriptor {
 
 template <>
 const auto omni::ryml::cp::to_type<mutating_scalar::descriptor> =
-  omni::ryml::compose::to_integer([](::ryml::ConstNodeRef node,
+  omni::ryml::compose::to_integral([](::ryml::ConstNodeRef node,
     mutating_scalar::descriptor *into)
     -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
     auto decoded = composed_integer::parse(node);
@@ -1447,8 +1449,8 @@ const auto omni::ryml::cp::to_type<mutating_record::settings> =
       node, into, std::move(state));
   });
 
-/** (node, T*, state) delegates field conversion with the current path and
- * counters. Mutation is useful here because settings has no default
+/** (node, T*, state) delegates field conversion with the current configuration
+ * and counters. Mutation is useful here because settings has no default
  * constructor; it does not promise to append sequences or preserve nested
  * record state. Value-producing callbacks remain the preferred interface. */
 TEST(advanced, mutating_record_mapping) {
@@ -1492,9 +1494,9 @@ TEST(advanced, tree_ownership) {
 }
 
 /** map_by_schema borrows its input; the caller keeps the tree and character
- * storage
- * alive while using borrowed values or rendering diagnostics. A subtree can
- * be mapped independently, with paths relative to that subtree.
+ * storage alive while using borrowed values or rendering diagnostics.
+ * A subtree can be mapped independently; diagnostic paths retain its
+ * position in the document.
  */
 TEST(advanced, borrowed_input) {
   const auto tree = omni::ryml::core::parse(R"({"entry": {"value": "bad"}})");
@@ -1506,7 +1508,7 @@ TEST(advanced, borrowed_input) {
     omni::type<policy_examples::measurement>, tree->crootref()["entry"]);
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/value: expected integer, found scalar",
+  EXPECT_EQ("/entry/value: expected integer, found scalar",
     omni::ryml::render_diagnostics(*tree, result.diagnostics));
 }
 
@@ -1705,10 +1707,9 @@ struct to_type_t<customization_mapping::extended_values> {
     if (values.size() < count) {
       auto failure = detail::make_node_accumulator(context);
       failure.append(std::move(result));
-      failure.report(detail::make_issue(json::issue_code::out_of_range,
+      failure.report(core::make_issue(json::issue_code::out_of_range,
         json::value_kind::sequence,
-        node,
-        context.path));
+        node));
 
       return std::move(failure).finish();
     }
@@ -1757,10 +1758,9 @@ struct to_type_t<customization_mapping::integer> {
     if (converted < 4 || 8 < converted) {
       auto failure = detail::make_node_accumulator(context);
       failure.append(std::move(result));
-      failure.report(detail::make_issue(json::issue_code::out_of_range,
+      failure.report(core::make_issue(json::issue_code::out_of_range,
         json::value_kind::integer,
-        node,
-        context.path));
+        node));
 
       return std::move(failure).finish();
     }
@@ -1967,7 +1967,6 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   const omni::ryml::config_t options{};
   const omni::ryml::read_state_t context{
     .config = options,
-    .path = {},
     .error_count = 0,
     .warning_count = 0,
   };
@@ -2093,7 +2092,6 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   const omni::ryml::config_t options{};
   const omni::ryml::read_state_t context{
     .config = options,
-    .path = {},
     .error_count = 0,
     .warning_count = 0,
   };

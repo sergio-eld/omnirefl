@@ -1,6 +1,16 @@
 #pragma once
 
+// TODO: [medium] Consider allocator-aware string construction or a mutating
+// adapter for existing strings with a bound allocator. Assess allocation
+// costs before introducing a T* overload.
+
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/functional.hpp>
+
+#include <cstddef>
+#include <string>
+#include <type_traits>
+#include <utility>
 
 namespace omni {
 namespace traits {
@@ -23,21 +33,27 @@ struct default_as_string<String,
   }
 };
 
+// Static storage keeps empty constructed views valid when input.data() is
+// null, without requiring default construction of the destination.
+template <typename Char>
+struct string_terminator { static constexpr Char value{}; };
+
+template <typename Char>
+constexpr Char string_terminator<Char>::value;
+
 template <typename String, typename = void>
-struct default_assign_string {};
+struct default_from_string {};
 
 template <typename String>
-struct default_assign_string<String,
+struct default_from_string<String,
   compat::void_t<typename String::traits_type,
-    decltype(String{}),
-    decltype(std::declval<String &>() = String{
-      std::declval<const typename String::value_type *>(),
+    decltype(String{std::declval<const typename String::value_type *>(),
       std::declval<std::size_t>()})>> {
-  void operator()(String *into,
+  OMNI_CPP14_CONSTEXPR String operator()(
     compat::basic_string_view<typename String::value_type,
       typename String::traits_type> text) const {
-    // Owning constructors need not accept an empty view's null data pointer.
-    *into = text.empty() ? String{} : String{text.data(), text.size()};
+    return String{text.data() ? text.data()
+      : &string_terminator<typename String::value_type>::value, text.size()};
   }
 };
 
@@ -145,9 +161,11 @@ struct unavailable {
 template <typename String, typename = void>
 struct as_string: detail::default_as_string<String> {};
 
-/** Assign normalized text. Owning strings copy; views borrow its storage. */
+/** Construct a string-like value from normalized text.
+ * Owning strings copy; views borrow its storage. Specialize operator()(text)
+ * for other string representations, returning String by value. */
 template <typename String, typename = void>
-struct assign_string: detail::default_assign_string<String> {};
+struct from_string: detail::default_from_string<String> {};
 
 /** Check engagement; defaults to the type's has_value() member. */
 template <typename Optional, typename = void>
@@ -249,11 +267,18 @@ constexpr auto as_string(const String &value)
   return traits::cp::as_string<String>{}(value);
 }
 
-/** Deduce the destination type and invoke its text-assignment adapter. */
+/** Construct the selected string-like type from normalized text.
+ * Owning strings copy; views borrow the input character storage.
+ *
+```
+from_string :: (type<T>, string_view) -> T
+```
+ */
 template <typename String, typename Char, typename Traits>
-auto assign_string(String *into, compat::basic_string_view<Char, Traits> text)
-  -> decltype(traits::cp::assign_string<String>{}(into, text)) {
-  return traits::cp::assign_string<String>{}(into, text);
+OMNI_CPP14_CONSTEXPR auto from_string(omni::type_t<String>,
+  compat::basic_string_view<Char, Traits> text)
+  -> decltype(traits::cp::from_string<String>{}(text)) {
+  return traits::cp::from_string<String>{}(text);
 }
 
 /** Deduce the optional type and invoke its engagement check. */
@@ -371,9 +396,12 @@ struct is_string_like: std::false_type {};
 template <typename T>
 struct is_string_like<T,
   compat::void_t<detail::string_storage_t<T>,
-    decltype(adapt::assign_string(std::declval<T *>(),
+    decltype(adapt::from_string(omni::type_t<T>{},
       std::declval<detail::string_view_t<T>>()))>>:
-    detail::is_core_compatible_string<detail::string_storage_t<T>> {};
+    compat::conjunction<
+      detail::is_core_compatible_string<detail::string_storage_t<T>>,
+      std::is_same<T, decltype(adapt::from_string(omni::type_t<T>{},
+        std::declval<detail::string_view_t<T>>()))>> {};
 
 /** Whether the adapted optional operations are available, with value_type
  * describing the contained type. get_value() borrows it by const reference.

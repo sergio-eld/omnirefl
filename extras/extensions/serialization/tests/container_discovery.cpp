@@ -64,20 +64,18 @@ struct to_type_t<compatible_integer> {
       return result;
 
     if (node.is_val_quoted())
-      result.diagnostics.issues.push_back(detail::make_issue(
+      result.diagnostics.issues.push_back(core::make_issue(
         json::issue_code::unexpected_kind,
         json::value_kind::integer,
         node,
-        context.path,
         /*warning=*/true));
 
     if (into->value < 0) {
       into->value = 0;
-      result.diagnostics.issues.push_back(detail::make_issue(
+      result.diagnostics.issues.push_back(core::make_issue(
         json::issue_code::out_of_range,
         json::value_kind::integer,
         node,
-        context.path,
         /*warning=*/true));
     }
 

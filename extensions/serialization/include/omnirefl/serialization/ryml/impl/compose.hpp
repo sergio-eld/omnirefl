@@ -60,16 +60,20 @@ auto invoke_expected_node(const Function &f, ::ryml::ConstNodeRef node,
     node_call_priority<3>{});
 }
 
-inline issue node_function_error(issue error, ::ryml::ConstNodeRef node,
-  mapping_path path) {
-  auto prefix = path.materialize();
-  prefix.insert(prefix.end(), error.path.begin(), error.path.end());
-  error.path = std::move(prefix);
-  if (error.node_id == ::ryml::NONE)
+inline issue node_function_error(issue error, ::ryml::ConstNodeRef node) {
+  if (error.node_id == ::ryml::NONE) {
+    auto prefix = core::node_path(node);
+    prefix.insert(prefix.end(), error.path.begin(), error.path.end());
+    error.path = std::move(prefix);
     error.node_id = node.id();
+  }
+
+  const ::ryml::ConstNodeRef source{node.tree(), error.node_id};
+  if (error.path.empty())
+    error.path = core::node_path(source);
 
   if (error.actual == json::value_kind::unknown)
-    error.actual = node_kind(node);
+    error.actual = node_kind(source);
 
   return error;
 }
@@ -81,8 +85,7 @@ auto node_result(compat::expected<T, issue> mapped, ::ryml::ConstNodeRef node,
   if (mapped)
     return {std::move(*mapped), std::move(result.result.diagnostics)};
 
-  result.report(node_function_error(std::move(mapped.error()), node,
-    result.state.path));
+  result.report(node_function_error(std::move(mapped.error()), node));
 
   return {compat::nullopt, std::move(result.result.diagnostics)};
 }
@@ -97,7 +100,7 @@ auto node_result(compat::expected<T, Errors> mapped, ::ryml::ConstNodeRef node,
     return {std::move(*mapped), std::move(result.result.diagnostics)};
 
   for (auto &&error : mapped.error()) {
-    result.report(node_function_error(std::move(error), node, result.state.path));
+    result.report(node_function_error(std::move(error), node));
     if (result.stopped())
       break;
   }

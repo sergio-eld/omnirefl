@@ -26,42 +26,42 @@ TEST(write_state, identifies_write_state_specializations) {
   EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::config_t<>>::value);
 }
 
-TEST(read_state, copies_borrow_config_and_keep_independent_paths) {
+TEST(read_state, copies_borrow_config_and_keep_independent_counters) {
   const omni::ryml::config_t<> options{};
   using state_type = omni::ryml::read_state_t<>;
-  const state_type root{
+  const state_type original{
     /*config=*/options,
-    /*path=*/{},
     /*error_count=*/2,
     /*warning_count=*/3,
   };
 
-  const auto first = root.child({
-    /*field=*/c4::to_csubstr("first"),
-    /*index=*/omni::compat::nullopt,
-  });
-
-  const auto indexed = first.child({/*field=*/{}, /*index=*/3});
-  const auto sibling = root.child({
-    /*field=*/c4::to_csubstr("second"),
-    /*index=*/omni::compat::nullopt,
-  });
-
-  auto copied = first;
+  auto copied = original;
   ++copied.error_count;
 
   EXPECT_TRUE(std::is_trivially_copyable<state_type>::value);
   EXPECT_EQ(&options, &copied.config);
-  EXPECT_EQ(&root.path, copied.path.parent);
-  EXPECT_EQ(2U, first.error_count);
+  EXPECT_EQ(2U, original.error_count);
   EXPECT_EQ(3U, copied.error_count);
   EXPECT_EQ(3U, copied.warning_count);
-  EXPECT_TRUE(root.path.materialize().empty());
-  EXPECT_EQ("/first/3",
-    omni::ryml::detail::render_path(indexed.path.materialize()));
+}
 
-  EXPECT_EQ("/second",
-    omni::ryml::detail::render_path(sibling.path.materialize()));
+TEST(mapping_diagnostics, retains_the_document_path_when_mapping_a_subtree) {
+  const auto tree = omni::ryml::core::parse(
+    R"({"outer": {"reading": "bad"}})");
+
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto node = tree->crootref()["outer"]["reading"];
+  const auto result = omni::ryml::map_by_schema(omni::type_t<int>{}, node);
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  for (const auto &entry : result.diagnostics.issues) {
+    EXPECT_EQ(node.id(), entry.node_id);
+    EXPECT_EQ("/outer/reading", omni::ryml::detail::render_path(entry.path));
+  }
 }
 
 struct lvalue_renderer {
@@ -307,10 +307,9 @@ TEST(diagnostics_transform, renders_a_scalar_kind_mismatch) {
   const omni::ryml::diagnostics report{
     /*config=*/{},
     /*issues=*/{
-      omni::ryml::detail::make_issue(omni::json::issue_code::unexpected_kind,
+      omni::ryml::core::make_issue(omni::json::issue_code::unexpected_kind,
         omni::json::value_kind::scalar,
-        tree->crootref(),
-        /*path=*/{}),
+        tree->crootref()),
     },
     /*parse_error_message=*/{},
   };

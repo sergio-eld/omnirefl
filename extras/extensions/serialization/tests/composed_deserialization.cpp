@@ -76,7 +76,7 @@ struct read {
   template <typename State>
   auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>,
     State state) const -> omni::ryml::with_diagnostics_t<value> {
-    auto result = omni::ryml::core::map_node_to_integer(
+    auto result = omni::ryml::core::map_node_to_integral(
       node, omni::type_t<int>{}, std::move(state));
 
     return {
@@ -93,11 +93,11 @@ struct read {
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <>
 const auto omni::ryml::cp::to_type<composed_integer::value> =
-  omni::ryml::compose::to_integer(composed_integer::read{});
+  omni::ryml::compose::to_integral(composed_integer::read{});
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_integer::value>:
-    decltype(omni::ryml::compose::to_integer(composed_integer::read{})) {};
+    decltype(omni::ryml::compose::to_integral(composed_integer::read{})) {};
 #endif
 
 TEST(composed_integer, deserializes_an_integer_wrapper) {
@@ -146,8 +146,8 @@ struct read {
       return omni::compat::monostate{};
 
     return omni::compat::unexpected<omni::ryml::issue>{
-      omni::ryml::detail::make_issue(omni::json::issue_code::out_of_range,
-        omni::json::value_kind::number, node, {})};
+      omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+        omni::json::value_kind::number, node)};
   }
 };
 
@@ -156,11 +156,11 @@ struct read {
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <>
 const auto omni::ryml::cp::to_type<composed_real::value> =
-  omni::ryml::compose::to_real(composed_real::read{});
+  omni::ryml::compose::to_floating_point(composed_real::read{});
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_real::value>:
-    decltype(omni::ryml::compose::to_real(composed_real::read{})) {};
+    decltype(omni::ryml::compose::to_floating_point(composed_real::read{})) {};
 #endif
 
 TEST(composed_real, deserializes_a_real_wrapper_through_a_pointer_callback) {
@@ -249,8 +249,8 @@ struct read {
       return value::active;
 
     return omni::compat::unexpected<std::vector<omni::ryml::issue>>{{
-      omni::ryml::detail::make_issue(omni::json::issue_code::invalid_scalar,
-        omni::json::value_kind::string, node, {})}};
+      omni::ryml::core::make_issue(omni::json::issue_code::invalid_scalar,
+        omni::json::value_kind::string, node)}};
   }
 };
 
@@ -315,8 +315,8 @@ struct read {
       return value{amount};
 
     return omni::compat::unexpected<omni::ryml::issue>{
-      omni::ryml::detail::make_issue(omni::json::issue_code::out_of_range,
-        omni::json::value_kind::number, node, {})};
+      omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+        omni::json::value_kind::number, node)};
   }
 };
 
@@ -522,9 +522,9 @@ struct read {
 
     if (result.value && (into->x < 0 || into->y < 0)) {
       result.value.reset();
-      result.diagnostics.issues.push_back(omni::ryml::detail::make_issue(
+      result.diagnostics.issues.push_back(omni::ryml::core::make_issue(
         omni::json::issue_code::out_of_range,
-        omni::json::value_kind::mapping, node, state.path));
+        omni::json::value_kind::mapping, node));
     }
 
     return result;
@@ -900,8 +900,8 @@ struct read {
 
     if (!*parsed)
       return omni::compat::unexpected<omni::ryml::issue>{
-        omni::ryml::detail::make_issue(omni::json::issue_code::out_of_range,
-          omni::json::value_kind::boolean, node, {})};
+        omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+          omni::json::value_kind::boolean, node)};
 
     return value{*parsed};
   }
@@ -909,8 +909,8 @@ struct read {
   auto operator()(::ryml::ConstNodeRef node, value *) const
     -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
     return omni::compat::unexpected<omni::ryml::issue>{
-      omni::ryml::detail::make_issue(omni::json::issue_code::invalid_scalar,
-        omni::json::value_kind::boolean, node, {})};
+      omni::ryml::core::make_issue(omni::json::issue_code::invalid_scalar,
+        omni::json::value_kind::boolean, node)};
   }
 };
 

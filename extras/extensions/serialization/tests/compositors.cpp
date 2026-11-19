@@ -37,12 +37,36 @@ TEST_P(node_checks, reports_the_required_category) {
     return;
 
   const auto result = c.check(tree->crootref());
-  EXPECT_EQ(bool(c.expected), bool(result));
-  if (c.expected && result) {
-    EXPECT_EQ(issue_code::unexpected_kind, result->reason);
-    EXPECT_EQ(*c.expected, result->expected);
-    EXPECT_EQ(tree->crootref().id(), result->node_id);
-    EXPECT_TRUE(result->path.empty());
+  EXPECT_EQ(!bool(c.expected), bool(result));
+  if (c.expected && !result) {
+    EXPECT_EQ(issue_code::unexpected_kind, result.error().reason);
+    EXPECT_EQ(*c.expected, result.error().expected);
+    EXPECT_EQ(tree->crootref().id(), result.error().node_id);
+    EXPECT_TRUE(result.error().path.empty());
+  }
+}
+
+TEST_P(node_checks, reports_the_nodes_document_path) {
+  const auto &c = GetParam();
+  const auto tree = omni::ryml::core::parse(
+    "records:\n  - payload: " + c.source + "\n");
+
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto node = tree->crootref()["records"][0]["payload"];
+  const auto result = c.check(node);
+
+  EXPECT_EQ(!bool(c.expected), bool(result));
+  if (result) {
+    EXPECT_EQ(node.id(), result->id());
+    EXPECT_EQ(node.tree(), result->tree());
+  } else {
+    EXPECT_EQ("/records/0/payload",
+      omni::ryml::detail::render_path(result.error().path));
+
+    EXPECT_EQ(node.id(), result.error().node_id);
   }
 }
 
@@ -104,8 +128,8 @@ omni::compat::expected<counted_record, omni::ryml::issue> count_properties(
   const auto count = node.num_children();
   if (count > 2)
     return omni::compat::unexpected<omni::ryml::issue>{
-      omni::ryml::detail::make_issue(issue_code::out_of_range,
-        value_kind::unknown, node, {})};
+      omni::ryml::core::make_issue(issue_code::out_of_range,
+        value_kind::unknown, node)};
 
   return counted_record{count};
 }
@@ -113,12 +137,9 @@ omni::compat::expected<counted_record, omni::ryml::issue> count_properties(
 omni::compat::expected<counted_record, omni::ryml::issue> reject_count(
   ::ryml::ConstNodeRef node) {
   const auto field = node["count"];
-  omni::ryml::issue error{};
-  error.reason = issue_code::out_of_range;
-  error.expected = value_kind::integer;
-  error.actual = value_kind::integer;
-  error.path.push_back({field.key(), omni::compat::nullopt});
-  error.node_id = field.id();
+  auto error = omni::ryml::core::make_issue(issue_code::out_of_range,
+    value_kind::integer, field);
+
   return omni::compat::unexpected<omni::ryml::issue>{std::move(error)};
 }
 
@@ -197,7 +218,7 @@ TEST(record_callback, passes_owned_state_to_a_value_callback) {
 
   const omni::ryml::config_t<> options{};
   const auto result = mapping(tree->crootref(), omni::type_t<counted_record>{},
-    omni::ryml::read_state_t<>{options, {}, 0, 0});
+    omni::ryml::read_state_t<>{options, 0, 0});
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -218,7 +239,7 @@ TEST(record_callback, passes_owned_state_to_a_state_only_callback) {
 
   const omni::ryml::config_t<> options{};
   const auto result = mapping(tree->crootref(), omni::type_t<counted_record>{},
-    omni::ryml::read_state_t<>{options, {}, 0, 0});
+    omni::ryml::read_state_t<>{options, 0, 0});
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -242,7 +263,7 @@ TEST(record_callback, passes_owned_state_to_a_mutating_callback) {
   const omni::ryml::config_t<> options{};
   counted_record into{};
   const auto result = mapping(tree->crootref(), &into,
-    omni::ryml::read_state_t<>{options, {}, 0, 0});
+    omni::ryml::read_state_t<>{options, 0, 0});
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -269,7 +290,7 @@ TEST(record_callback, supports_value_and_existing_destination_overloads) {
     return;
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto mapping = to_record(count_properties);
   const auto value = mapping(tree->crootref(), omni::type_t<counted_record>{},
     state);
@@ -291,7 +312,7 @@ TEST(record_callback, lifts_the_callback_without_explicit_adaptation) {
     return;
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto mapping = to_record(count_properties);
   const auto value = mapping(tree->crootref(), omni::type_t<counted_record>{},
     state);
@@ -318,7 +339,7 @@ TEST(record_callback,
   omni::ryml::config_t<> options{};
   options.error_policy.error_limit = 0;
   const omni::ryml::read_state_t<> state{
-    options, {}, std::size_t{options.error_policy.error_limit} + 1, 0};
+    options, std::size_t{options.error_policy.error_limit} + 1, 0};
   const auto mapping = to_record(count_properties);
   const auto result = mapping(tree->crootref(), omni::type_t<counted_record>{},
     state);
@@ -327,16 +348,16 @@ TEST(record_callback,
   EXPECT_TRUE(result.diagnostics.issues.empty());
 }
 
-TEST(record_callback, prefixes_relative_issue_paths_and_retains_source_nodes) {
+TEST(record_callback, retains_document_paths_and_source_nodes) {
   const auto tree = omni::ryml::core::parse(R"({"outer": {"count": 999}})");
   EXPECT_TRUE(tree);
   if (!tree)
     return;
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> parent{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> parent{options, 0, 0};
   const auto outer = tree->crootref()["outer"];
-  const auto state = parent.child({outer.key(), omni::compat::nullopt});
+  const auto state = parent;
   const auto mapping = to_record(reject_count);
   const auto result = mapping(outer, omni::type_t<counted_record>{}, state);
 
@@ -349,7 +370,7 @@ TEST(record_callback, prefixes_relative_issue_paths_and_retains_source_nodes) {
   }
 }
 
-TEST(record_callback, preserves_multiple_issues_and_their_relative_paths) {
+TEST(record_callback, preserves_multiple_issues_and_their_document_paths) {
   const auto tree = omni::ryml::core::parse(
     R"({"outer": {"count": 999, "extra": 1}})");
   EXPECT_TRUE(tree);
@@ -359,21 +380,19 @@ TEST(record_callback, preserves_multiple_issues_and_their_relative_paths) {
   const auto mapping = to_record([](::ryml::ConstNodeRef node)
     -> omni::compat::expected<counted_record,
       std::vector<omni::ryml::issue>> {
-    auto count = omni::ryml::detail::make_issue(issue_code::out_of_range,
-      value_kind::integer, node["count"], {});
-    count.path.push_back({node["count"].key(), omni::compat::nullopt});
-    auto extra = omni::ryml::detail::make_issue(issue_code::unknown_field,
-      value_kind::unknown, node["extra"], {});
-    extra.path.push_back({node["extra"].key(), omni::compat::nullopt});
+    auto count = omni::ryml::core::make_issue(issue_code::out_of_range,
+      value_kind::integer, node["count"]);
+    auto extra = omni::ryml::core::make_issue(issue_code::unknown_field,
+      value_kind::unknown, node["extra"]);
     return omni::compat::unexpected<std::vector<omni::ryml::issue>>{
       {std::move(count), std::move(extra)}};
   });
 
   omni::ryml::config_t<> options{};
   options.error_policy.error_limit = 1;
-  const omni::ryml::read_state_t<> parent{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> parent{options, 0, 0};
   const auto outer = tree->crootref()["outer"];
-  const auto state = parent.child({outer.key(), omni::compat::nullopt});
+  const auto state = parent;
   const auto result = mapping(outer, omni::type_t<counted_record>{}, state);
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
@@ -413,8 +432,8 @@ TEST_P(callback_issue_limits, limits_issues_returned_by_a_callback) {
   const auto mapping = to_record([warnings](::ryml::ConstNodeRef node)
     -> omni::compat::expected<counted_record,
       std::vector<omni::ryml::issue>> {
-    const auto issue = omni::ryml::detail::make_issue(
-      issue_code::out_of_range, value_kind::integer, node, {}, warnings);
+    const auto issue = omni::ryml::core::make_issue(
+      issue_code::out_of_range, value_kind::integer, node, warnings);
 
     return omni::compat::unexpected<std::vector<omni::ryml::issue>>{
       {issue, issue, issue}};
@@ -423,7 +442,7 @@ TEST_P(callback_issue_limits, limits_issues_returned_by_a_callback) {
   omni::ryml::config_t<> options{};
   options.error_policy.error_limit = c.error_limit;
   options.error_policy.warning_limit = c.warning_limit;
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto result = mapping(tree->crootref(),
     omni::type_t<counted_record>{}, state);
 
@@ -473,7 +492,7 @@ TEST(shape_callback, adapts_a_value_callback_without_adding_assignment) {
     count_properties);
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto result = mapping(tree->crootref(),
     omni::type_t<counted_record>{}, state);
 
@@ -494,7 +513,7 @@ TEST(shape_callback, maps_integer_input_with_a_destination_tag) {
   if (!tree)
     return;
 
-  const auto mapping = omni::ryml::compose::to_integer(
+  const auto mapping = omni::ryml::compose::to_integral(
     [](::ryml::ConstNodeRef node, omni::type_t<int>)
       -> omni::compat::expected<int, omni::ryml::issue> {
       int value{};
@@ -502,12 +521,12 @@ TEST(shape_callback, maps_integer_input_with_a_destination_tag) {
         return value;
 
       return omni::compat::unexpected<omni::ryml::issue>{
-        omni::ryml::detail::make_issue(issue_code::out_of_range,
-          value_kind::unknown, node, {})};
+        omni::ryml::core::make_issue(issue_code::out_of_range,
+          value_kind::unknown, node)};
     });
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto node = tree->crootref();
   const auto number = mapping(node["number"], omni::type_t<int>{}, state);
   const auto text = mapping(node["text"], omni::type_t<int>{}, state);
@@ -542,8 +561,8 @@ TEST(record_callback, maps_into_a_nonassignable_destination) {
           == omni::json::unknown_policy::reject
         && node.has_child("name"))
         return omni::compat::unexpected<omni::ryml::issue>{
-          omni::ryml::detail::make_issue(issue_code::unknown_field,
-            value_kind::unknown, node, {})};
+          omni::ryml::core::make_issue(issue_code::unknown_field,
+            value_kind::unknown, node)};
 
       into->fields = node.num_children();
       return omni::compat::monostate{};
@@ -551,7 +570,7 @@ TEST(record_callback, maps_into_a_nonassignable_destination) {
 
   omni::ryml::config_t<> options{};
   options.error_policy.unknown_fields = omni::json::unknown_policy::allow;
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto root = tree->crootref();
   account into{7, 0};
   const auto mapped = map(root["record"], &into, state);
@@ -568,7 +587,7 @@ TEST(record_callback, maps_into_a_nonassignable_destination) {
 
   const omni::ryml::config_t<> strict{};
   const auto unknown = map(root["record"], &into,
-    omni::ryml::read_state_t<>{strict, {}, 0, 0});
+    omni::ryml::read_state_t<>{strict, 0, 0});
 
   EXPECT_FALSE(unknown.value);
   EXPECT_EQ(1U, unknown.diagnostics.issues.size());
@@ -592,7 +611,7 @@ TEST(record_callback, accepts_a_mapping_that_already_returns_diagnostics) {
   });
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   const auto mapped = mapping(
     tree->crootref(), omni::type_t<counted_record>{}, state);
 
@@ -648,7 +667,7 @@ TEST(record_callback,
   });
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, {}, 0, 0};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
   record into{0};
   const auto assigned = mapping(tree->crootref(), &into, state);
   EXPECT_TRUE(assigned.value);

@@ -26,9 +26,9 @@ struct omni::traits::cp::as_string<c4::csubstr> {
 };
 
 template <>
-struct omni::traits::cp::assign_string<c4::csubstr> {
-  void operator()(c4::csubstr *into, omni::compat::string_view text) const {
-    *into = {text.data(), text.size()};
+struct omni::traits::cp::from_string<c4::csubstr> {
+  c4::csubstr operator()(omni::compat::string_view text) const {
+    return {text.data(), text.size()};
   }
 };
 
@@ -48,6 +48,10 @@ auto map_node_to_field(::ryml::ConstNodeRef node, Field field, State state)
 } // namespace reflected_scope
 
 namespace core {
+
+// Numeric conversion reports issues before core.hpp supplies the definition.
+inline issue make_issue(json::issue_code reason, json::value_kind expected,
+  ::ryml::ConstNodeRef node, bool warning);
 
 // Mapper bodies delegate recursively through these dispatchers, whose
 // definitions live in the umbrella's implementation header. The first
@@ -459,6 +463,52 @@ node_accumulator<State> make_node_accumulator(State state) {
   return {/*state=*/std::move(state), /*result=*/std::move(result)};
 }
 
+// Overload ranking selects direct construction before adapting a pointer-only
+// mapping. Its fallback alone requires a default-constructible destination.
+template <typename Mapping, typename T, typename State>
+auto map_node_to_value_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
+  omni::type_t<T> type, State state, int)
+  -> decltype(mapping(node, type, std::move(state))) {
+  return mapping(node, type, std::move(state));
+}
+
+OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
+  (std::is_default_constructible<T>::value))
+auto map_node_to_value_using(const Mapping &mapping, ::ryml::ConstNodeRef node,
+  omni::type_t<T>, State state, long)
+  -> decltype(mapping(node, static_cast<T *>(nullptr), std::move(state)),
+    with_diagnostics_t<T>{}) {
+  T value{};
+  return mapping(node, &value, std::move(state))
+    .transform([&value](compat::monostate) -> T {
+      return std::move(value);
+    });
+}
+
+// Apply the same diagnostic limits to native and adapted value results,
+// including custom mappings which return warnings with an available value.
+template <typename Mapping, typename T, typename State>
+auto map_node_to_value(const Mapping &mapping, ::ryml::ConstNodeRef node,
+  omni::type_t<T> type, State state) -> with_diagnostics_t<T> {
+  auto result = make_node_accumulator(state);
+  if (result.stopped())
+    return {compat::nullopt, std::move(result.result.diagnostics)};
+
+  auto mapped = map_node_to_value_using(mapping, node, type, std::move(state),
+    /*priority=*/0);
+
+  result.append({
+    /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+      : compat::nullopt,
+    /*diagnostics=*/std::move(mapped.diagnostics),
+  });
+
+  return {
+    /*value=*/result.result.value ? std::move(mapped.value) : compat::nullopt,
+    /*diagnostics=*/std::move(result.result.diagnostics),
+  };
+}
+
 // C++11 overload ranking prefers value production when assignment is possible.
 // The trailing decltype excludes mappings without the type-tag overload.
 OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
@@ -467,40 +517,17 @@ auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
   State state, int)
   -> decltype(mapping(node, omni::type_t<T>{}, std::move(state)),
     with_diagnostics_t<compat::monostate>{}) {
-  auto result = mapping(node, omni::type_t<T>{}, std::move(state));
-  if (result.value)
-    *into = std::move(*result.value);
-
-  return {
-    /*value=*/result.value
-      ? compat::make_optional(compat::monostate{}) : compat::nullopt,
-    /*diagnostics=*/std::move(result.diagnostics),
-  };
+  return mapping(node, omni::type_t<T>{}, std::move(state))
+    .transform([into](T &&value) -> compat::monostate {
+      *into = std::move(value);
+      return {};
+    });
 }
 
 template <typename Mapping, typename T, typename State>
 auto read_into(const Mapping &mapping, ::ryml::ConstNodeRef node, T *into,
   State state, long) -> decltype(mapping(node, into, std::move(state))) {
   return mapping(node, into, std::move(state));
-}
-
-inline issue make_issue(json::issue_code reason,
-  json::value_kind expected,
-  ::ryml::ConstNodeRef node,
-  mapping_path path,
-  bool warning = false) {
-  // C++11 cannot aggregate-initialize issue because it has member defaults.
-  issue result{};
-  result.reason = reason;
-  result.path = path.materialize();
-  result.expected = expected;
-  result.actual = node_kind(node);
-  result.warning = warning;
-
-  if (!node.invalid())
-    result.node_id = node.id();
-
-  return result;
 }
 
 // Format validation precedes conversion; failure here means out of range.
@@ -539,11 +566,11 @@ auto read_scalar(::ryml::ConstNodeRef node, omni::type_t<T>, State context,
     scalar);
 
   if (!converted) {
-    result.report(omni::ryml::detail::make_issue(
+    result.report(core::make_issue(
       converted.error(),
       expected,
       node,
-      result.state.path));
+      /*warning=*/false));
 
     return {compat::nullopt, std::move(result.result.diagnostics)};
   }
@@ -555,6 +582,5 @@ auto read_scalar(::ryml::ConstNodeRef node, omni::type_t<T>, State context,
 }
 
 } // namespace detail
-
 } // namespace ryml
 } // namespace omni
