@@ -716,6 +716,24 @@ struct nttp_unary_predicate {
 };
 #endif
 
+// Ad hoc: inspect the predicate's result type because record bindings need an
+// existing record and cannot be constructed for filtering. The dual predicate
+// protocols require a lazy nullary fallback: probing both can instantiate
+// invalid metadata wrappers inside a value predicate's operator template.
+// REFACTORME: [high] Reassess predicate filtering to replace this result-type
+// probing and dual-protocol fallback without constructing bound elements.
+template <typename Predicate, typename Element, typename = void>
+struct filter_constant:
+    compat::bool_constant<invoke_type<Element>(Predicate{})> {};
+
+template <typename Predicate, typename Element>
+struct filter_constant<Predicate,
+  Element,
+  compat::void_t<decltype(decltype(std::declval<const Predicate &>()(
+    std::declval<Element>()))::value)>>:
+    compat::bool_constant<bool(decltype(std::declval<const Predicate &>()(
+      std::declval<Element>()))::value)> {};
+
 template <typename Predicate,
   typename Tuple,
   typename Remaining,
@@ -734,8 +752,9 @@ struct filtered_indices<Predicate,
     filtered_indices<Predicate,
       Tuple,
       compat::index_sequence<Remaining...>,
-      compat::conditional_t<invoke_type<decltype(
-        compat::detail::tuple_get<Index>(std::declval<Tuple>()))>(Predicate{}),
+      compat::conditional_t<filter_constant<Predicate,
+        decltype(compat::detail::tuple_get<Index>(
+          std::declval<Tuple>()))>::value,
         compat::index_sequence<Selected..., Index>,
         compat::index_sequence<Selected...>>> {};
 
@@ -1312,9 +1331,11 @@ constexpr auto diff_by(Key, Left &&left, Right &&right)
 /**
  * Select tuple elements whose access types satisfy `Predicate`.
  *
- * `Predicate` must be an empty, default-constructible type with a constexpr
- * `operator()<Element>()`. `Element` preserves the cv/ref category produced by
- * accessing the forwarded tuple. Selected values retain their order and are
+ * Predicate is empty and default-constructible. Its value call returns a
+ * Boolean constant type, such as bool_constant; the selection does not construct
+ * or inspect tuple elements. A constexpr operator()<Element>() is also accepted.
+ * Element preserves the cv/ref category produced by accessing the forwarded
+ * tuple. Selected values retain their order and are
  * forwarded into an owning tuple. Use `filter<Trait>()` for a standard unary
  * type trait, or `filter<Predicate>()` for a C++20 structural predicate value.
  */
@@ -1829,7 +1850,10 @@ constexpr each_closure<Visit> each(Visit visit) {
   return each_closure<Visit>{std::move(visit)};
 }
 
-/** Store `predicate` for later call or pipe application to a tuple-like object. */
+/** Store a stateless, default-constructible predicate for tuple filtering.
+ * Its value call returns a Boolean constant type; constexpr
+ * operator()<Element>() is also supported. Selected values retain their order
+ * and are forwarded into an owning tuple on call or pipe application. */
 template <typename Predicate>
 constexpr filter_closure<Predicate> filter(Predicate predicate) {
   return filter_closure<Predicate>{std::move(predicate)};

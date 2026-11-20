@@ -40,7 +40,6 @@ struct supports_range_insertion<T, true>:
 
 template <typename State>
 void report_range_duplicate(::ryml::ConstNodeRef node,
-  mapping_path path,
   bool key_value,
   node_accumulator<State> *result) {
   const auto policy = result->state.config.error_policy.duplicates;
@@ -52,11 +51,10 @@ void report_range_duplicate(::ryml::ConstNodeRef node,
     && (policy & json::duplicate_policy::warn) != json::duplicate_policy::warn)
     return;
 
-  result->report(make_issue(key_value ? json::issue_code::duplicate_field
-                                     : json::issue_code::duplicate_element,
+  result->report(core::make_issue(key_value ? json::issue_code::duplicate_field
+                                        : json::issue_code::duplicate_element,
     json::value_kind::unknown,
     node,
-    path,
     /*warning=*/allowed));
 }
 
@@ -67,8 +65,7 @@ template <>
 struct insert_range_value_case<false> {
   template <typename T, typename State, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef,
-    State, node_accumulator<State> *,
-    Args &&...args) {
+    node_accumulator<State> *, Args &&...args) {
     adapt::emplace(into, std::forward<Args>(args)...);
   }
 };
@@ -77,19 +74,17 @@ template <>
 struct insert_range_value_case<true> {
   template <typename T, typename State, typename... Args>
   static void apply(T *into, ::ryml::ConstNodeRef node,
-    State context, node_accumulator<State> *result,
-    Args &&...args) {
+    node_accumulator<State> *result, Args &&...args) {
     const auto inserted = adapt::try_emplace(into, std::forward<Args>(args)...);
     if (inserted.second)
       return;
 
-    const auto policy = context.config.error_policy.duplicates;
+    const auto policy = result->state.config.error_policy.duplicates;
     if ((policy & json::duplicate_policy::last)
         == json::duplicate_policy::last)
       adapt::replace(into, inserted.first, std::forward<Args>(args)...);
 
-    report_range_duplicate(node, context.path, traits::is_key_value<T>::value,
-      result);
+    report_range_duplicate(node, traits::is_key_value<T>::value, result);
   }
 };
 
@@ -130,12 +125,7 @@ struct range_mapping_nodes_case<true> {
         == json::duplicate_policy::last)
         inserted.first->second = child;
 
-      const auto context = result->state.child({
-        /*field=*/name,
-        /*index=*/compat::nullopt,
-      });
-
-      report_range_duplicate(child, context.path, /*key_value=*/true, result);
+      report_range_duplicate(child, /*key_value=*/true, result);
     }
 
     std::vector<::ryml::ConstNodeRef> nodes;
@@ -159,23 +149,20 @@ struct read_range_case<false> {
   template <typename T, typename State>
   static void apply(::ryml::ConstNodeRef node, T *into,
     node_accumulator<State> *result) {
-    std::size_t index = 0;
     for (const auto child : node.children()) {
       if (result->stopped())
         break;
 
-      const auto context = result->state.child({
-        /*field=*/{},
-        /*index=*/index++,
+      auto mapped = core::read_node(result->state, child,
+        omni::type_t<compat::range_value_t<T>>{});
+      result->append({
+        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
       });
-
-      compat::range_value_t<T> element{};
-      auto mapped = core::read_node(child, &element, context);
-      const bool success = bool(mapped.value);
-      result->append(std::move(mapped));
-      if (success)
+      if (mapped.value)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, context, result, std::move(element));
+          into, child, result, std::move(*mapped.value));
     }
   }
 };
@@ -207,21 +194,19 @@ struct read_range_case<true> {
       if (result->stopped())
         break;
 
-      const auto context = result->state.child({
-        /*field=*/child.key(),
-        /*index=*/compat::nullopt,
-      });
-
-      traits::key_type_t<T> key{};
       const auto name = child.key();
-      adapt::assign_string(&key, view_type{name.str, name.len});
-      traits::mapped_type_t<T> value{};
-      auto mapped = core::read_node(child, &value, context);
-      const bool success = bool(mapped.value);
-      result->append(std::move(mapped));
-      if (success)
+      auto key = adapt::from_string(omni::type_t<key_type>{},
+        view_type{name.str, name.len});
+      auto mapped = core::read_node(result->state, child,
+        omni::type_t<traits::mapped_type_t<T>>{});
+      result->append({
+        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
+      });
+      if (mapped.value)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, context, result, std::move(key), std::move(value));
+          into, child, result, std::move(key), std::move(*mapped.value));
     }
   }
 };
@@ -259,8 +244,7 @@ template <>
 struct write_range_case<false> {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_write_state<State>::value))
-  static void apply(const T &value, ::ryml::NodeRef node,
-    State context) {
+  static void apply(State context, const T &value, ::ryml::NodeRef node) {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
     // Separate iterator/sentinel declarations also support non-common ranges
@@ -272,7 +256,7 @@ struct write_range_case<false> {
     for (; current != last; ++current) {
       const element_type &element = *current;
       if (!is_null(element)) {
-        core::write_node(element, node.append_child(), context);
+        core::write_node(context, element, node.append_child());
       }
     }
   }
@@ -282,8 +266,7 @@ template <>
 struct write_range_case<true> {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_write_state<State>::value))
-  static void apply(const T &value, ::ryml::NodeRef node,
-    State context) {
+  static void apply(State context, const T &value, ::ryml::NodeRef node) {
     static_assert(traits::is_string_like<traits::key_type_t<T>>::value,
       "from_range requires string-adaptable keys for JSON/YAML objects");
 
@@ -317,7 +300,7 @@ struct write_range_case<true> {
         child.set_key_serialized(text);
 
       child.set_key_style(::ryml::KEY_DQUO);
-      core::write_node(entry.second, child, context);
+      core::write_node(context, entry.second, child);
     }
   }
 };
@@ -327,9 +310,9 @@ struct write_range_case<true> {
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<detail::is_mapped_range<T>,
     is_read_state<State>>::value))
-auto to_range_t::operator()(::ryml::ConstNodeRef node,
-  T *into,
-  State context) const
+auto to_range_t::operator()(State context,
+  ::ryml::ConstNodeRef node,
+  T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   static_assert(compat::is_invocable<const traits::cp::clear<T> &, T *>::value,
     "to_range requires an adapted clear operation");
@@ -337,17 +320,10 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
   static_assert(omni::ryml::detail::supports_range_insertion<T>::value,
     "to_range requires emplace, or try_emplace and replace for unique keys");
 
-  auto result = omni::ryml::detail::make_node_accumulator(context);
-  constexpr bool key_value = traits::is_key_value<T>::value;
-  if (key_value ? !node.is_map() : !node.is_seq()) {
-    result.report(omni::ryml::detail::make_issue(
-      json::issue_code::unexpected_kind,
-      key_value ? json::value_kind::mapping : json::value_kind::sequence,
-      node,
-      context.path));
-
-    return std::move(result).finish();
-  }
+  auto result = omni::ryml::detail::make_node_accumulator(
+    std::move(context));
+  assert(into);
+  assert(traits::is_key_value<T>::value ? node.is_map() : node.is_seq());
 
   adapt::clear(into);
   omni::ryml::detail::read_range_case<traits::is_key_value<T>::value>::apply(
@@ -359,9 +335,9 @@ auto to_range_t::operator()(::ryml::ConstNodeRef node,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-void from_range_t::operator()(const T &value,
-  ::ryml::NodeRef node,
-  State context) const {
+void from_range_t::operator()(State context,
+  const T &value,
+  ::ryml::NodeRef node) const {
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 
@@ -375,7 +351,9 @@ void from_range_t::operator()(const T &value,
     "or converting-proxy iterators.");
 
   detail::write_range_case<traits::is_key_value<T>::value>::apply(
-    value, node, context);
+    std::move(context),
+    value,
+    node);
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.

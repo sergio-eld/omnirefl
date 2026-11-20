@@ -332,8 +332,8 @@ void update_fields(Records *...values) {
       const auto update = [](omni::record_binding auto r) {
         r.accessible_data_members()
           | fn::filter(fn::is_non_static)
-          | fn::filter([]<typename Member> {
-              return std::remove_cvref_t<Member>::is_mutable();
+          | fn::filter([]<typename _F>(omni::data_member_meta_t<_F> field) {
+              return std::bool_constant<field.is_mutable()>{};
             })
           | fn::each([](omni::data_member_binding auto field) {
               constexpr std::string_view name = field.name();

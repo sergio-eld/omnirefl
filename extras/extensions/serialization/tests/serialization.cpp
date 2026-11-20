@@ -110,7 +110,7 @@ TEST(serialization_composition, renders_mapping_errors_after_successful_parse) {
   EXPECT_TRUE(result);
   if (result) {
     EXPECT_FALSE(result->value);
-    EXPECT_EQ("/code: \"bad\" is not an integer", result->diagnostics);
+    EXPECT_EQ("/code: expected integer, found scalar", result->diagnostics);
   }
 }
 
@@ -159,7 +159,7 @@ TEST(deserialization_config,
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
     R"({"name": "Ada", "code": "bad", "extra": 1})");
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
@@ -177,7 +177,7 @@ TEST(tree_mapping, default_returns_borrowed_diagnostics) {
   if (result.value)
     return;
 
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     omni::ryml::render_diagnostics(tree, result.diagnostics));
 }
 
@@ -194,7 +194,7 @@ TEST(tree_mapping, rendered_diagnostics_outlive_the_tree) {
   }
 
   EXPECT_FALSE(retained.value);
-  EXPECT_EQ("/code: \"bad\" is not an integer", retained.diagnostics);
+  EXPECT_EQ("/code: expected integer, found scalar", retained.diagnostics);
 }
 
 #if defined(__cpp_designated_initializers) \
@@ -473,7 +473,7 @@ TEST(deserialization, renders_default_diagnostics) {
   if (result.value)
     return;
 
-  EXPECT_EQ("/age: \"bad\" is not an integer", result.diagnostics.message);
+  EXPECT_EQ("/age: expected integer, found scalar", result.diagnostics.message);
 }
 
 TEST(deserialization_diagnostics,
@@ -492,7 +492,8 @@ TEST(deserialization_diagnostics,
     EXPECT_EQ("ok", result.value->name);
     EXPECT_EQ(0, result.value->code);
   }
-  EXPECT_EQ("/code: \"bad\" is not an integer", result.diagnostics.message);
+  EXPECT_EQ("/code: expected integer, found scalar",
+    result.diagnostics.message);
 }
 
 TEST(deserialization, partially_applies_config_and_type) {
@@ -534,7 +535,7 @@ TEST(tree_mapping, composes_public_parse_with_a_constant_configuration) {
   if (!result)
     return;
 
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     result->diagnostics);
   if (result->value) {
     EXPECT_EQ("ok", result->value->name);
@@ -586,7 +587,7 @@ TEST(deserialization_warnings,
     SCOPED_TRACE(e.node_id);
     EXPECT_FALSE(e.warning);
   }
-  EXPECT_EQ("/values/1: \"bad\" is not an integer",
+  EXPECT_EQ("/values/1: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
@@ -734,7 +735,8 @@ TEST(deserialization, reports_the_schema_scalar_expected_by_a_field) {
       std::string{serialization_data::invalid_nested_integer_json});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/data/code: \"invalid\" is not an integer", result.diagnostics.message);
+  EXPECT_EQ("/data/code: expected integer, found scalar",
+    result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_numeric_boolean_values) {
@@ -743,7 +745,8 @@ TEST(deserialization, rejects_numeric_boolean_values) {
       std::string{R"({"code": 815, "enabled": 108})"});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/enabled: \"108\" is not a boolean", result.diagnostics.message);
+  EXPECT_EQ("/enabled: expected boolean, found scalar",
+    result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_quoted_boolean_values) {
@@ -752,7 +755,8 @@ TEST(deserialization, rejects_quoted_boolean_values) {
       std::string{R"({"code": 815, "enabled": "true"})"});
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/enabled: \"true\" is not a boolean", result.diagnostics.message);
+  EXPECT_EQ("/enabled: expected boolean, found scalar",
+    result.diagnostics.message);
 }
 
 TEST(deserialization, rejects_unknown_input_fields_by_default) {
@@ -861,7 +865,7 @@ INSTANTIATE_TEST_SUITE_P(configuration,
     mapping_case{"invalid_integer",
       R"({"name": "oceanic", "code": "invalid"})",
       omni::compat::unexpected<std::string>{
-        "/code: \"invalid\" is not an integer"}},
+        "/code: expected integer, found scalar"}},
     mapping_case{"missing_field",
       R"({"name": "oceanic"})",
       omni::compat::unexpected<std::string>{"/code: missing field"}},
@@ -1002,7 +1006,7 @@ INSTANTIATE_TEST_SUITE_P(documents,
     mapping_case{"invalid_model_scalar",
       R"({"extra": {}, "name": "Ada", "code": "bad"})",
       omni::compat::unexpected<std::string>{
-        "/code: \"bad\" is not an integer"}},
+        "/code: expected integer, found scalar"}},
     mapping_case{"wrong_root",
       "[]",
       omni::compat::unexpected<std::string>{
@@ -1258,7 +1262,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
       false,
       2,
       "/name: expected string, found object\n"
-      "/code: \"bad\" is not an integer",
+      "/code: expected integer, found scalar",
       "",
       0},
     diagnostics_case{"invalid_second_member",
@@ -1266,7 +1270,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
       R"({"name": "ok", "code": "bad"})",
       false,
       1,
-      "/code: \"bad\" is not an integer",
+      "/code: expected integer, found scalar",
       "ok",
       0},
     diagnostics_case{"two_errors_exhaust_budget",
@@ -1275,7 +1279,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
       false,
       2,
       "/name: expected string, found object\n"
-      "/code: \"bad\" is not an integer",
+      "/code: expected integer, found scalar",
       "",
       0},
     diagnostics_case{"two_errors_leave_budget",
@@ -1284,7 +1288,7 @@ INSTANTIATE_TEST_SUITE_P(policies,
       false,
       2,
       "/name: expected string, found object\n"
-      "/code: \"bad\" is not an integer",
+      "/code: expected integer, found scalar",
       "",
       0},
     diagnostics_case{"unknown_field",
@@ -1347,7 +1351,7 @@ data:
     return;
 
   const auto &d = result.diagnostics.issues.front();
-  EXPECT_EQ(omni::json::issue_code::invalid_scalar, d.reason);
+  EXPECT_EQ(omni::json::issue_code::unexpected_kind, d.reason);
   EXPECT_EQ(omni::json::value_kind::integer, d.expected);
   EXPECT_EQ(omni::json::value_kind::scalar, d.actual);
   EXPECT_EQ(2U, d.path.size());
@@ -1356,7 +1360,7 @@ data:
   EXPECT_EQ("data", omni::ryml::detail::to_string_view(d.path[0].field));
   EXPECT_EQ("code", omni::ryml::detail::to_string_view(d.path[1].field));
   EXPECT_EQ(omni::compat::nullopt, d.path[1].index);
-  EXPECT_EQ("/data/code: \"bad\" is not an integer",
+  EXPECT_EQ("/data/code: expected integer, found scalar",
     result.diagnostics.message);
 }
 
@@ -1383,8 +1387,8 @@ TEST(deserialization_diagnostics, nested_container_errors_share_the_budget) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
   EXPECT_EQ(
-    "/values/1: \"bad\" is not an integer\n"
-    "/records/0/code: \"bad\" is not an integer",
+    "/values/1: expected integer, found scalar\n"
+    "/records/0/code: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
   if (2U != result.diagnostics.issues.size())
     return;
@@ -1439,7 +1443,7 @@ TEST(deserialization_diagnostics,
   }
 
   EXPECT_FALSE(retained.value);
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     serialization_test::render_diagnostics(retained.diagnostics));
 }
 
@@ -1519,14 +1523,14 @@ INSTANTIATE_TEST_SUITE_P(documents,
   testing::Values( //
     rendering_case{"json_scalar",
       R"({"name": "ok", "code": "bad"})",
-      "/code: \"bad\" is not an integer",
+      "/code: expected integer, found scalar",
       false},
     rendering_case{"yaml_scalar",
       R"(
 name: ok
 code: bad
 )",
-      "/code: \"bad\" is not an integer",
+      "/code: expected integer, found scalar",
       false},
     rendering_case{"escaped_field",
       R"({"name": "ok", "code": 7, "a/~1": 0})",
@@ -1542,7 +1546,8 @@ code: bad
       false},
     rendering_case{"multiple_errors",
       R"({"name": {}, "code": "bad"})",
-      "/name: expected string, found object\n/code: \"bad\" is not an integer",
+      "/name: expected string, found object\n"
+      "/code: expected integer, found scalar",
       false},
     rendering_case{"root", "[]", "<root>: expected object, found array", false},
     rendering_case{"syntax",
@@ -1569,7 +1574,8 @@ TEST(diagnostic_rendering, renders_array_positions_in_nested_paths) {
 )");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/records/1/code: \"x\" is not an integer", result.diagnostics.message);
+  EXPECT_EQ("/records/1/code: expected integer, found scalar",
+    result.diagnostics.message);
 }
 
 TEST(diagnostic_rendering, no_issues_render_as_an_empty_string) {
@@ -1811,7 +1817,8 @@ TEST_P(configured_deserialization, public_mapper_accepts_an_independent_tree) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
     EXPECT_EQ("", omni::ryml::render_diagnostics(tree, result.diagnostics));
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), omni::ryml::render_diagnostics(tree, result.diagnostics));
+    EXPECT_EQ(GetParam().expected_code.error(), omni::ryml::render_diagnostics(tree,
+      result.diagnostics));
   }
 }
 
@@ -1877,7 +1884,8 @@ TEST_P(configured_deserialization, borrows_mutable_node_refs_and_renders) {
     EXPECT_EQ(*GetParam().expected_code, result.value->code);
     EXPECT_EQ("", omni::ryml::render_diagnostics(tree, result.diagnostics));
   } else if (!GetParam().expected_code) {
-    EXPECT_EQ(GetParam().expected_code.error(), omni::ryml::render_diagnostics(tree, result.diagnostics));
+    EXPECT_EQ(GetParam().expected_code.error(), omni::ryml::render_diagnostics(tree,
+      result.diagnostics));
   }
 }
 
@@ -1889,7 +1897,7 @@ TEST(tree_mapping, borrows_lvalue_trees_without_modifying_them) {
   EXPECT_TRUE(serialization_test::matches_node(
     R"({"name": "ok", "code": "bad"})", tree.crootref()));
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     omni::ryml::render_diagnostics(tree, result.diagnostics));
 }
 
@@ -1908,7 +1916,7 @@ TEST(tree_mapping, accepts_const_lvalue_trees) {
   EXPECT_EQ("", omni::ryml::render_diagnostics(tree, result.diagnostics));
 }
 
-TEST(tree_mapping, borrows_subtrees_and_retains_relative_paths) {
+TEST(tree_mapping, borrows_subtrees_and_retains_document_paths) {
   const auto tree = ::ryml::parse_in_arena(
     R"({"payload": {"name": "ok", "code": "bad"}, "other": 1})");
   const auto subtree = tree.crootref()["payload"];
@@ -1916,7 +1924,7 @@ TEST(tree_mapping, borrows_subtrees_and_retains_relative_paths) {
     strict_map_by_schema(omni::type_t<serialization_data::payload>{}, subtree);
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/payload/code: expected integer, found scalar",
     omni::ryml::render_diagnostics(tree, result.diagnostics));
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (1U == result.diagnostics.issues.size()) {
@@ -1945,7 +1953,7 @@ code: bad
   }
 
   EXPECT_FALSE(retained.value);
-  EXPECT_EQ("/code: \"bad\" is not an integer", retained.diagnostics);
+  EXPECT_EQ("/code: expected integer, found scalar", retained.diagnostics);
 }
 
 TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
@@ -1972,8 +1980,8 @@ TEST(tree_mapping, borrowed_container_errors_share_the_budget) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
   EXPECT_EQ(
-    "/values/1: \"bad\" is not an integer\n"
-    "/records/0/code: \"bad\" is not an integer",
+    "/values/1: expected integer, found scalar\n"
+    "/records/0/code: expected integer, found scalar",
     omni::ryml::render_diagnostics(tree, result.diagnostics));
 }
 
@@ -1984,7 +1992,7 @@ TEST(tree_mapping, defaults_to_strict_borrowed_mapping) {
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(0U, result.diagnostics.config.error_policy.error_limit);
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     omni::ryml::render_diagnostics(tree, result.diagnostics));
 }
 
@@ -2027,7 +2035,7 @@ TEST(tree_mapping, supports_designated_configuration) {
     omni::type_t<serialization_data::payload>{}, tree);
 
   EXPECT_EQ(2U, result.diagnostics.config.error_policy.error_limit);
-  EXPECT_EQ("/code: \"bad\" is not an integer",
+  EXPECT_EQ("/code: expected integer, found scalar",
     omni::ryml::render_diagnostics(tree, result.diagnostics));
 }
 #endif
@@ -2211,7 +2219,7 @@ TEST(deserialization, default_rejects_invalid_optional_records_as_errors) {
   if (1U == result.diagnostics.issues.size()) {
     EXPECT_FALSE(result.diagnostics.issues.front().warning);
   }
-  EXPECT_EQ("/field/code: \"bad\" is not an integer",
+  EXPECT_EQ("/field/code: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
@@ -2239,7 +2247,7 @@ TEST(deserialization_warnings, invalid_optional_records_remain_errors) {
       R"({"field": {"name": "ok", "code": "bad"}, "following": 7})");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/field/code: \"bad\" is not an integer",
+  EXPECT_EQ("/field/code: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
@@ -2257,7 +2265,7 @@ TEST(deserialization_warnings, containers_reject_invalid_optional_elements) {
 )");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/values/2: \"bad\" is not an integer",
+  EXPECT_EQ("/values/2: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
@@ -2283,7 +2291,7 @@ TEST(deserialization_warnings,
   if (!result.diagnostics.issues.empty()) {
     EXPECT_FALSE(result.diagnostics.issues.front().warning);
   }
-  EXPECT_EQ("/values/0: \"bad\" is not an integer",
+  EXPECT_EQ("/values/0: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
@@ -2319,8 +2327,8 @@ TEST(deserialization_warnings, required_records_share_the_hard_error_budget) {
     EXPECT_FALSE(e.warning);
   }
   EXPECT_EQ(
-    "/first: \"bad\" is not an integer\n"
-    "/nested/code: \"bad\" is not an integer",
+    "/first: expected integer, found scalar\n"
+    "/nested/code: expected integer, found scalar",
     serialization_test::render_diagnostics(result.diagnostics));
 }
 

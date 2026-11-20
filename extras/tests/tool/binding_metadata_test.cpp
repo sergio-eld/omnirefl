@@ -351,12 +351,14 @@ TEST(binding_metadata, inherits_callable_metadata_queries) {
     omni::reflected_call(inspect_callable_record{}, command_record{}));
 }
 
-#if defined(__cpp_concepts)
-template <omni::data_member_meta Field>
-#else
-template <typename Field>
-#endif
-struct mutable_member: omni::compat::bool_constant<Field::is_mutable()> {};
+struct mutable_member {
+  template <typename _F>
+  constexpr auto operator()(omni::data_member_meta_t<_F> field) const
+    OMNI_CPP11_TRAILING_RETURN(omni::compat::bool_constant<
+      omni::data_member_meta_t<_F>{}.is_mutable()>) {
+    return omni::compat::bool_constant<field.is_mutable()>{};
+  }
+};
 
 struct inspect_mutable_members {
 #if defined(__cpp_concepts)
@@ -366,7 +368,7 @@ struct inspect_mutable_members {
 #endif
   std::vector<std::string> operator()(T r) const {
     return omni::compat::apply(member_names{},
-      r.accessible_data_members() | omni::fn::filter<mutable_member>());
+      r.accessible_data_members() | omni::fn::filter(mutable_member{}));
   }
 };
 

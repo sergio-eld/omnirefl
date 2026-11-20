@@ -44,10 +44,14 @@ struct inspect_constexpr_enum_pairs {
   }
 };
 
+// REFACTORME: [high] Let metadata filters use a plain constexpr bool predicate
+// without bool_constant return-type boilerplate.
 struct without_internal_name {
-  template <typename Field>
-  constexpr bool operator()() const {
-    return '_' != omni::compat::remove_cvref_t<Field>::name()[0];
+  template <typename _F>
+  constexpr auto operator()(omni::data_member_meta_t<_F> field) const
+    OMNI_CPP11_TRAILING_RETURN(omni::compat::bool_constant<
+      '_' != omni::data_member_meta_t<_F>{}.name()[0]>) {
+    return omni::compat::bool_constant<'_' != field.name()[0]>{};
   }
 };
 
@@ -1822,6 +1826,36 @@ TEST(fn_filter, defers_call_and_pipe_application) {
 
   EXPECT_EQ(std::make_tuple(1), called);
   EXPECT_EQ(std::make_tuple(1), piped);
+}
+
+namespace value_filter {
+
+template <typename Selected>
+struct element {
+  using type = typename Selected::type;
+  int value;
+  static constexpr bool is_selected() { return Selected::value; }
+};
+
+struct selected {
+  template <typename Selected>
+  constexpr auto operator()(element<Selected>) const
+    -> omni::compat::bool_constant<element<Selected>::is_selected()> {
+    return {};
+  }
+};
+
+} // namespace value_filter
+
+TEST(fn_filter, selects_wrapped_values_with_a_value_predicate) {
+  const auto values = std::make_tuple(
+    value_filter::element<std::true_type>{7},
+    value_filter::element<std::false_type>{8});
+
+  const auto selected = values | omni::fn::filter(value_filter::selected{});
+
+  EXPECT_EQ(1U, std::tuple_size<decltype(selected)>::value);
+  EXPECT_EQ(7, std::get<0>(selected).value);
 }
 
 TEST(fn_filter, preserves_tuple_access_categories) {

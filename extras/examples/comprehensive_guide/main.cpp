@@ -1107,10 +1107,7 @@ struct commands {
 TEST(advanced, function_tags) {
   const auto invoke = [](omni::record_meta auto record) -> std::vector<int> {
     constexpr auto callable = record.accessible_data_members()
-      | omni::fn::filter([]<omni::data_member_meta Member>() {
-          using Meta = omni::compat::remove_cvref_t<Member>;
-          return Meta::has_callable_metadata();
-        });
+      | omni::fn::filter(omni::fn::has_callable_metadata);
 
     return std::apply(
       [](auto... v) { return std::vector<int>{v...}; },
@@ -2146,12 +2143,15 @@ To convert(From &&from, omni::type_t<To> target_type) {
       // Bind the existing destination without moving its storage.
       auto destination = target.bind(result);
       source.accessible_data_members()
-        | omni::fn::each([&destination](omni::data_member_binding auto from) {
+        | omni::fn::each([&destination]<typename Record, typename _F>(
+            omni::data_member_binding_t<Record, _F> from) {
             const auto matching = destination.accessible_data_members()
-              | omni::fn::filter([]<omni::data_member_binding Member>() {
-                  using Target = omni::compat::remove_cvref_t<Member>;
-                  return std::string_view(decltype(from)::name())
-                    == std::string_view(Target::name());
+              | omni::fn::filter([]<typename _T>(
+                  omni::data_member_meta_t<_T> target) {
+                  // Selection uses metadata without binding a record object.
+                  return std::bool_constant<
+                    std::string_view{omni::data_member_meta_t<_F>{}.name()}
+                      == std::string_view{target.name()}>{};
                 });
 
             static_assert(0 != std::tuple_size<decltype(matching)>::value,

@@ -6,7 +6,10 @@ testing conventions used in Omnirefl.
 ## Contents
 
 - [Code style](#code-style)
+  - [Functional composition notation](#functional-composition-notation)
+  - [Names and macros](#names-and-macros)
 - [Types, objects, traits, and concepts](#types-objects-traits-and-concepts)
+- [Reflected scope](#reflected-scope)
 - [`tdm_` prefix: functional data-member updates][tdm-updates]
 - [Constraints](#constraints)
 - [Customization points](#customization-points)
@@ -25,6 +28,39 @@ testing conventions used in Omnirefl.
 Names use `snake_case`, following the standard library: namespaces, types,
 concepts, functions, data members, variables, and enumerators. `CamelCase` is
 reserved for template parameters, such as `Value` or `BufferSize`.
+
+### Functional composition notation
+
+Functional-composition annotations may use signature pseudocode when C++
+template boilerplate obscures the callable contract, or a short composition
+does not make its resulting interface apparent. The notation describes the
+observable arguments, results, overloads, and data shapes.
+
+| Notation | Meaning or C++ equivalent |
+| --- | --- |
+| `f :: (A, B) -> R` | Callable signature: `auto f(A a, B b) -> R;` |
+| `(A, B)` | Components passed or stored together. |
+| `[T]` | Ordered sequence; `T` describes each element's contract. |
+| `{K: V}` | Key-value collection with unique keys. |
+| `A \| B` | Either result form or alternative. |
+| `{ signature₁, signature₂ }` | Overloads of one callable. |
+| `factory :: A -> { … }` | Returns a callable with the listed overloads. |
+| `x \|> f` | Forward application: `f(x)`. |
+| `x \|> f \|> g` | Forward application chain: `g(f(x))`. |
+| `compose(f, g)` | `[=](auto x) { return f(g(x)); }` |
+| `pipe(f, g)` | `[=](auto x) { return g(f(x)); }` |
+
+`::` introduces a signature, `(A, B)` lists arguments passed together, and
+`->` shows the transformation of inputs into the result. Callables may themselves be arguments
+or results. This is documentation pseudocode using familiar signature and
+pipeline notation, rather than executable C++, Jai, or Haskell.
+
+Data notation describes the contract rather than C++ storage. A heterogeneous
+`std::tuple` can represent `[T]` when its elements satisfy the same contract;
+there is no separate sequence notation for tuples, arrays, and vectors.
+`{K: [V]}` describes unique keys whose values are ordered sequences.
+
+### Names and macros
 
 Macros use `OMNI_UPPER_SNAKE_CASE`.
 
@@ -96,6 +132,13 @@ using selected = omni::compat::conjunction<
 constexpr auto predicate = omni::fn::is_non_static
   && omni::fn::not_(omni::fn::has_callable_metadata);
 ```
+
+## Reflected scope
+
+Types that depend on metadata queries belong in a `reflected_scope` namespace
+or subnamespace. This includes queries deferred until a member template is
+instantiated. The qualified name makes that dependency visible, as in
+`codec::reflected_scope::to_record_t`.
 
 ## `tdm_` prefix: functional data-member updates
 

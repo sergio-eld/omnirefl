@@ -216,7 +216,7 @@ struct has_callable_accessor: std::false_type {};
 
 template <typename Field>
 struct has_callable_accessor<Field,
-  omni::compat::void_t<decltype(Field::callable_metadata())>>:
+  omni::compat::void_t<decltype(std::declval<Field>().callable_metadata())>>:
     std::true_type {};
 
 struct callable_field_queries {
@@ -316,16 +316,17 @@ struct parameter_observation {
 
 struct inspect_parameters {
   template <typename First, typename Second, typename Third>
-  parameter_observation operator()(First, Second, Third) const {
+  parameter_observation operator()(First first, Second second,
+    Third third) const {
     return {
-      /*first_name=*/First::name(),
-      /*first_documentation=*/First::documentation(),
-      /*first_type=*/First::spelled_type_name(),
-      /*first_qualified_type=*/First::spelled_qualified_type_name(),
-      /*second_name=*/Second::name(),
-      /*second_documentation=*/Second::documentation(),
-      /*third_name=*/Third::name(),
-      /*third_documentation=*/Third::documentation(),
+      /*first_name=*/first.name(),
+      /*first_documentation=*/first.documentation(),
+      /*first_type=*/first.spelled_type_name(),
+      /*first_qualified_type=*/first.spelled_qualified_type_name(),
+      /*second_name=*/second.name(),
+      /*second_documentation=*/second.documentation(),
+      /*third_name=*/third.name(),
+      /*third_documentation=*/third.documentation(),
       /*first_actual_type=*/
       std::is_same<const request &, typename First::type>::value,
       /*second_actual_type=*/std::is_same<bool, typename Second::type>::value,
@@ -350,24 +351,24 @@ struct observation {
 
 struct inspect_function_field {
   template <typename Field>
-  observation operator()(Field) const {
-    using meta = decltype(Field::callable_metadata());
-    static_assert(Field::has_callable_metadata(),
+  observation operator()(Field field) const {
+    constexpr auto metadata = field.callable_metadata();
+    static_assert(field.has_callable_metadata(),
       "fixed function tags must expose callable metadata");
-    static_assert(omni::traits::is<omni::function_meta_t, meta>(),
+    static_assert(omni::traits::is<omni::function_meta_t, decltype(metadata)>(),
       "callable_metadata must return function metadata");
 
     return {
-      /*documentation=*/meta::documentation(),
-      /*arity=*/meta::arity(),
+      /*documentation=*/metadata.documentation(),
+      /*arity=*/metadata.arity(),
       /*parameters=*/
-      omni::compat::apply(inspect_parameters{}, meta::parameters()),
-      /*return_documentation=*/meta::returns().documentation(),
-      /*return_type=*/meta::returns().spelled_type_name(),
+      omni::compat::apply(inspect_parameters{}, metadata.parameters()),
+      /*return_documentation=*/metadata.returns().documentation(),
+      /*return_type=*/metadata.returns().spelled_type_name(),
       /*return_qualified_type=*/
-      meta::returns().spelled_qualified_type_name(),
+      metadata.returns().spelled_qualified_type_name(),
       /*return_actual_type=*/
-      std::is_same<response, typename meta::return_type>::value,
+      std::is_same<response, typename decltype(metadata)::return_type>::value,
       // Test-only ad hoc: concrete request/response queries are non-dependent.
 #if defined(OMNI_TOOL_RUN)
       // Generated dependency metadata is available only after discovery.
@@ -378,7 +379,7 @@ struct inspect_function_field {
       /*response_reflected=*/omni::is_reflected<response>::value,
 #endif
       /*invoked_id=*/
-      omni::compat::invoke(meta::pointer(), request{815}, true, nullptr).id,
+      omni::compat::invoke(metadata.pointer(), request{815}, true, nullptr).id,
     };
   }
 };
@@ -410,31 +411,31 @@ struct parameter_documentation {
 
 struct inspect_parameter_documentation {
   template <typename Parameter>
-  parameter_documentation operator()(Parameter) const {
+  parameter_documentation operator()(Parameter parameter) const {
     return {
-      /*name=*/Parameter::name(),
-      /*documentation=*/Parameter::documentation(),
+      /*name=*/parameter.name(),
+      /*documentation=*/parameter.documentation(),
     };
   }
 };
 
 struct inspect_documentation_field {
   template <typename Field>
-  documentation_observation operator()(Field) const {
-    using meta = decltype(Field::callable_metadata());
-    static_assert(Field::has_callable_metadata(),
+  documentation_observation operator()(Field field) const {
+    constexpr auto metadata = field.callable_metadata();
+    static_assert(field.has_callable_metadata(),
       "fixed function tags must expose callable metadata");
-    static_assert(omni::traits::is<omni::function_meta_t, meta>(),
+    static_assert(omni::traits::is<omni::function_meta_t, decltype(metadata)>(),
       "callable_metadata must return function metadata");
     const parameter_documentation parameter = omni::compat::apply(
       inspect_parameter_documentation{},
-      meta::parameters());
+      metadata.parameters());
 
     return {
-      /*function=*/meta::documentation(),
+      /*function=*/metadata.documentation(),
       /*parameter_name=*/parameter.name,
       /*parameter=*/parameter.documentation,
-      /*result=*/meta::returns().documentation(),
+      /*result=*/metadata.returns().documentation(),
     };
   }
 };
@@ -455,13 +456,10 @@ struct inspect_documentation_routes {
 
 struct inspect_specialized_fields {
   template <typename First, typename Second>
-  std::pair<int, int> operator()(First, Second) const {
-    using first = decltype(First::callable_metadata());
-    using second = decltype(Second::callable_metadata());
-
+  std::pair<int, int> operator()(First first, Second second) const {
     return {
-      omni::compat::invoke(first::pointer()),
-      omni::compat::invoke(second::pointer()),
+      omni::compat::invoke(first.callable_metadata().pointer()),
+      omni::compat::invoke(second.callable_metadata().pointer()),
     };
   }
 };
@@ -481,8 +479,8 @@ struct inspect_specialized_routes {
 
 struct inspect_nested_function {
   template <typename Function>
-  int operator()(Function) const {
-    return omni::compat::invoke(Function::callable_metadata().pointer());
+  int operator()(Function function) const {
+    return omni::compat::invoke(function.callable_metadata().pointer());
   }
 };
 
@@ -521,13 +519,13 @@ struct method_observation {
 
 struct inspect_method_parameters {
   template <typename First, typename Second>
-  std::string operator()(First, Second) const {
+  std::string operator()(First first, Second) const {
     static_assert(std::is_same<const request &, typename First::type>::value,
       "the first method parameter type must be preserved");
     static_assert(std::is_same<bool, typename Second::type>::value,
       "the second method parameter type must be preserved");
 
-    return First::name();
+    return first.name();
   }
 };
 
@@ -535,12 +533,12 @@ struct inspect_method {
   template <typename Method>
   method_observation operator()(Method method) const {
     return {
-      /*name=*/Method::name(),
-      /*documentation=*/Method::documentation(),
+      /*name=*/method.name(),
+      /*documentation=*/method.documentation(),
       /*first_parameter=*/omni::compat::apply(inspect_method_parameters{},
-        Method::parameters()),
-      /*return_documentation=*/Method::returns().documentation(),
-      /*arity=*/Method::arity(),
+        method.parameters()),
+      /*return_documentation=*/method.returns().documentation(),
+      /*arity=*/method.arity(),
       /*member_pointer=*/
       std::is_member_function_pointer<typename Method::pointer_type>::value,
       /*invoked_id=*/method(request{800}, true).id,
@@ -560,7 +558,7 @@ struct inspect_methods {
 struct inspect_inherited_method {
   template <typename Method>
   std::pair<std::string, int> operator()(Method method) const {
-    return {Method::name(), method()};
+    return {method.name(), method()};
   }
 };
 

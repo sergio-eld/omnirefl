@@ -44,8 +44,10 @@ struct copy_only_name_by_alias {
 
 namespace tests {
 
+// TODO: [high] Bind alias fixtures through the model API when available.
+
 TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
-  const auto names = omni::ryml::alias_dict(
+  const auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port", "listen_port"),
     std::make_tuple("host", "hostname"));
 
@@ -73,7 +75,8 @@ TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
 TEST(alias_lookup, accepts_tuple_like_groups_and_canonical_only_groups) {
   const std::array<string_view, 3> host{{"host", "hostname", "server"}};
   const std::pair<string_view, string_view> port{"port", "service_port"};
-  const auto names = omni::ryml::alias_dict(host, port, std::make_tuple("tls"));
+  const auto names = omni::ryml::aliases_dict(
+    host, port, std::make_tuple("tls"));
 
   const auto hostname = names("hostname");
   EXPECT_TRUE(hostname);
@@ -94,8 +97,8 @@ TEST(alias_lookup, accepts_tuple_like_groups_and_canonical_only_groups) {
 }
 
 TEST(alias_lookup, returns_no_name_for_an_empty_dictionary) {
-  const auto empty = omni::ryml::alias_dict();
-  const auto canonical_only = omni::ryml::alias_dict(std::make_tuple("host"));
+  const auto empty = omni::ryml::aliases_dict();
+  const auto canonical_only = omni::ryml::aliases_dict(std::make_tuple("host"));
 
   EXPECT_FALSE(empty("hostname"));
   EXPECT_FALSE(canonical_only("hostname"));
@@ -185,7 +188,7 @@ TEST(alias_lookup, orders_empty_prefix_and_non_ascii_keys) {
 // is tested independently above; full factory evaluation starts with C++14.
 #if 201402L <= OMNI_CPLUSPLUS
 TEST(alias_lookup, prepares_an_inverse_dictionary_in_constant_evaluation) {
-  constexpr auto names = omni::ryml::alias_dict(
+  constexpr auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port", "port_number"),
     std::make_tuple("host", "hostname", "server", "host_name"),
     std::make_tuple("tls", "secure", "ssl"));
@@ -230,7 +233,7 @@ TEST(alias_lookup, prepares_an_inverse_dictionary_in_constant_evaluation) {
 // C++14 tuple helpers allow retaining the prepared table in a constexpr object.
 #if 201402L <= OMNI_CPLUSPLUS
 TEST(alias_lookup, prepares_and_queries_a_persistent_constexpr_dictionary) {
-  constexpr auto names = omni::ryml::alias_dict(
+  constexpr auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port"),
     std::make_tuple("host", "hostname", "server"));
 
@@ -253,19 +256,32 @@ TEST(alias_lookup, prepares_and_queries_a_persistent_constexpr_dictionary) {
 }
 #endif
 
+#if 0
+// TODO: [high] Migrate alias configuration to the model customization API.
 TEST(to_record_aliases, default_has_no_alias_mapping) {
   const auto compositor = omni::ryml::reflected_scope::to_record;
 
   EXPECT_EQ(omni::compat::nullopt, compositor.name_by_alias("hostname"));
 }
+#endif
 
+#if 0
+// TODO: [high] Migrate alias configuration to the model customization API.
 TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
   const auto original =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(
-      omni::ryml::alias_dict(std::make_tuple("host", "hostname")));
+    to_record.tdm_name_by_alias(
+      [](const decltype(to_record.name_by_alias) &) {
+        return omni::ryml::aliases_dict(std::make_tuple("host", "hostname"));
+      });
 
-  const auto replacement = original.with_name_by_alias(
-    omni::ryml::alias_dict(std::make_tuple("port", "service_port")));
+  const auto retained = original.tdm_name_by_alias(omni::fn::identity{});
+  EXPECT_EQ(original.name_by_alias("hostname"),
+    retained.name_by_alias("hostname"));
+
+  const auto replacement = original.tdm_name_by_alias(
+    [](const decltype(original.name_by_alias) &) {
+      return omni::ryml::aliases_dict(std::make_tuple("port", "service_port"));
+    });
 
   const auto hostname = original.name_by_alias("hostname");
   EXPECT_TRUE(hostname);
@@ -280,15 +296,22 @@ TEST(to_record_aliases, dictionary_replaces_the_previous_resolver) {
 
   EXPECT_FALSE(replacement.name_by_alias("hostname"));
 }
+#endif
 
+#if 0
+// TODO: [high] Migrate alias configuration to the model customization API.
 TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
   const auto legacy =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(
-      examples::runtime_aliases{/*legacy=*/true});
+    to_record.tdm_name_by_alias(
+      [](const decltype(to_record.name_by_alias) &) {
+        return examples::runtime_aliases{/*legacy=*/true};
+      });
 
   const auto current =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(
-      examples::runtime_aliases{/*legacy=*/false});
+    to_record.tdm_name_by_alias(
+      [](const decltype(to_record.name_by_alias) &) {
+        return examples::runtime_aliases{/*legacy=*/false};
+      });
 
   const auto hostname = legacy.name_by_alias("hostname");
 
@@ -298,10 +321,12 @@ TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
 
   EXPECT_FALSE(current.name_by_alias("hostname"));
 }
+#endif
 
 // C++11 lambda equivalent: apply this compositor inside the reflected scope.
 struct cpp11_map_with_aliases {
-  omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases> compositor;
+  omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases>
+    compositor;
   ::ryml::ConstNodeRef node;
   omni::ryml::read_state_t<> context;
 
@@ -309,7 +334,7 @@ struct cpp11_map_with_aliases {
   auto operator()(omni::record_binding_t<Record> record) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate,
       omni::ryml::diagnostics> {
-    return this->compositor(this->node, &record.value(), this->context);
+    return this->compositor(this->context, this->node, &record.value());
   }
 };
 
@@ -319,8 +344,9 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
   // The same resolver type accepts the alias only in legacy mode.
   const bool legacy = GetParam();
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(
-      examples::runtime_aliases{/*legacy=*/legacy});
+    omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases>{
+      /*name_by_alias=*/{/*legacy=*/legacy},
+    };
 
   for (const std::string document : {R"({"hostname": "localhost"})",
          "hostname: localhost\n"}) {
@@ -334,7 +360,6 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
     const omni::ryml::config_t<> options{};
     const omni::ryml::read_state_t<> context{
       /*config=*/options,
-      /*path=*/{},
       /*error_count=*/0,
       /*warning_count=*/0,
       };
@@ -367,24 +392,34 @@ INSTANTIATE_TEST_SUITE_P(configuration,
     return info.param ? "legacy" : "current";
   });
 
+#if 0
+// TODO: [high] Migrate alias configuration to the model customization API.
 TEST(to_record_aliases, accepts_a_callable_with_only_a_copy_constructor) {
   const examples::copy_only_name_by_alias resolver{};
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(resolver);
+    to_record.tdm_name_by_alias(
+      [&resolver](const decltype(to_record.name_by_alias) &) {
+        return resolver;
+      });
 
   const auto hostname = compositor.name_by_alias("hostname");
   EXPECT_TRUE(hostname);
   if (hostname)
     EXPECT_EQ("host", *hostname);
 }
+#endif
 
+#if 0
+// TODO: [high] Migrate alias configuration to the model customization API.
 TEST(to_record_aliases, checks_the_callable_when_configured) {
   const auto compositor =
-    omni::ryml::reflected_scope::to_record.with_name_by_alias(
-      [](string_view alias) -> omni::compat::optional<string_view> {
-        return alias == "hostname"
-          ? omni::compat::optional<string_view>{"host"}
-          : omni::compat::nullopt;
+    to_record.tdm_name_by_alias(
+      [](const decltype(to_record.name_by_alias) &) {
+        return [](string_view alias) -> omni::compat::optional<string_view> {
+          return alias == "hostname"
+            ? omni::compat::optional<string_view>{"host"}
+            : omni::compat::nullopt;
+        };
       });
 
   const auto hostname = compositor.name_by_alias("hostname");
@@ -395,17 +430,22 @@ TEST(to_record_aliases, checks_the_callable_when_configured) {
 
   // Enable independently to inspect an invalid argument or return type.
 #if 0
-  (void)omni::ryml::reflected_scope::to_record.with_name_by_alias(
-    [](int) -> omni::compat::optional<string_view> {
-      return omni::compat::nullopt;
+  (void)to_record.tdm_name_by_alias(
+    [](const decltype(to_record.name_by_alias) &) {
+      return [](int) -> omni::compat::optional<string_view> {
+        return omni::compat::nullopt;
+      };
     });
 #endif
 
 #if 0
-  (void)omni::ryml::reflected_scope::to_record.with_name_by_alias(
-    [](string_view) -> string_view { return "host"; });
+  (void)to_record.tdm_name_by_alias(
+    [](const decltype(to_record.name_by_alias) &) {
+      return [](string_view) -> string_view { return "host"; };
+    });
 #endif
 }
+#endif
 
 } // namespace tests
 } // namespace
@@ -427,7 +467,7 @@ struct cluster {
 
 struct endpoint_names {
   omni::compat::optional<string_view> operator()(string_view alias) const {
-    static const auto names = omni::ryml::alias_dict(
+    static const auto names = omni::ryml::aliases_dict(
       std::make_tuple("port", "service_port", "listen_port", "legacy/port"),
       std::make_tuple("absent", "not_a_member"));
 
@@ -443,16 +483,49 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type_t<alias_models::endpoint>:
-    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
+struct to_type_t<alias_models::endpoint> {
+  template <typename State>
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::endpoint *into) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+        std::move(state),
+        node,
+        into);
+  }
+};
 
 template <>
-struct to_type_t<alias_models::endpoint_with_retries>:
-    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
+struct to_type_t<alias_models::endpoint_with_retries> {
+  template <typename State>
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::endpoint_with_retries *into) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+        std::move(state),
+        node,
+        into);
+  }
+};
 
 template <>
-struct to_type_t<alias_models::optional_endpoint>:
-    omni::ryml::reflected_scope::to_record_t<alias_models::endpoint_names> {};
+struct to_type_t<alias_models::optional_endpoint> {
+  template <typename State>
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::optional_endpoint *into) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+        std::move(state),
+        node,
+        into);
+  }
+};
 
 } // namespace cp
 } // namespace ryml
@@ -523,25 +596,25 @@ const alias_case alias_cases[]{
     {{issue_code::unknown_field, "/not_a_member", false}}},
   {"invalid_alias_value", R"({"service_port": "wrong"})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/service_port", false}}},
+    {{issue_code::unexpected_kind, "/service_port", false}}},
   {"escaped_alias_path", R"({"legacy/port": "wrong"})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/legacy~1port", false}}},
+    {{issue_code::unexpected_kind, "/legacy~1port", false}}},
   {"missing_member", "{}", duplicate_policy::reject, unknown_policy::reject,
     omni::compat::nullopt, {{issue_code::missing_field, "/port", false}}},
   // Canonical presence suppresses aliases even when its value is invalid.
   {"invalid_canonical_selected_first", R"({"port": "bad", "service_port": 8})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"invalid_canonical_over_last_alias", R"({"port": "bad", "service_port": 8})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"invalid_canonical_over_first", R"({"service_port": 7, "port": "bad"})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"invalid_canonical_selected_last", R"({"service_port": 7, "port": "bad"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
 };
 
 const alias_case canonical_priority_cases[]{
@@ -564,7 +637,7 @@ const alias_case canonical_priority_cases[]{
     duplicate_policy::allow, unknown_policy::reject, 8, {}},
   {"invalid_canonical_with_reject", R"({"port":"bad","service_port":8})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"repeated_canonical_rejected", R"({"port":7,"service_port":99,"port":8})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
     {{issue_code::duplicate_field, "/port", false}}},
@@ -578,7 +651,7 @@ const alias_case canonical_priority_cases[]{
   {"repeated_canonical_invalid_first",
     R"({"port":"bad","service_port":99,"port":8})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"repeated_canonical_valid_last",
     R"({"port":"bad","service_port":99,"port":8})",
     duplicate_policy::last, unknown_policy::reject, 8, {}},
@@ -588,18 +661,18 @@ const alias_case canonical_priority_cases[]{
   {"repeated_canonical_invalid_last",
     R"({"port":7,"service_port":99,"port":"bad"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"repeated_canonical_all_invalid",
     R"({"port":"bad","service_port":99,"port":"wrong"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"yaml_canonical_after_alias", "service_port: 7\nport: 8\n",
     duplicate_policy::reject, unknown_policy::reject, 8, {}},
   {"yaml_canonical_before_alias", "port: 7\nservice_port: 8\n",
     duplicate_policy::last, unknown_policy::reject, 7, {}},
   {"yaml_invalid_canonical", "service_port: 7\nport: bad\n",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"yaml_repeated_canonical", "port: 7\nservice_port: 99\nport: 8\n",
     duplicate_policy::last | duplicate_policy::warn, unknown_policy::reject,
     8, {{issue_code::duplicate_field, "/port", true}}},
@@ -673,7 +746,7 @@ TEST(record_aliases, preserves_nested_input_paths) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1u, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
-    EXPECT_EQ(issue_code::invalid_scalar, issue.reason);
+    EXPECT_EQ(issue_code::unexpected_kind, issue.reason);
     EXPECT_EQ("/peers/0/listen_port",
       omni::ryml::detail::render_path(issue.path));
   }

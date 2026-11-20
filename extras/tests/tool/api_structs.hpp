@@ -199,23 +199,26 @@ namespace fields {
 
 // `auto` in lambda support only since C++14.
 struct fields_visitor {
-  template <typename... Field>
-  std::vector<std::string> operator()(const Field &...) const {
-    return std::vector<std::string>{Field::name()...};
+  template <typename... _F>
+  std::vector<std::string> operator()(
+    omni::data_member_meta_t<_F>... fields) const {
+    return std::vector<std::string>{fields.name()...};
   }
 };
 
 struct spelled_field_type_names_visitor {
-  template <typename... Field>
-  std::vector<std::string> operator()(const Field &...) const {
-    return std::vector<std::string>{Field::spelled_type_name()...};
+  template <typename... _F>
+  std::vector<std::string> operator()(
+    omni::data_member_meta_t<_F>... fields) const {
+    return std::vector<std::string>{fields.spelled_type_name()...};
   }
 };
 
 struct spelled_qualified_field_type_names_visitor {
-  template <typename... Field>
-  std::vector<std::string> operator()(const Field &...) const {
-    return std::vector<std::string>{Field::spelled_qualified_type_name()...};
+  template <typename... _F>
+  std::vector<std::string> operator()(
+    omni::data_member_meta_t<_F>... fields) const {
+    return std::vector<std::string>{fields.spelled_qualified_type_name()...};
   }
 };
 
@@ -301,7 +304,8 @@ template <typename Field, typename Owner, typename V>
 struct can_set_meta {
   template <typename F>
   static auto test(int)
-    -> decltype(F::set_value(std::declval<Owner>(), std::declval<V>()),
+    -> decltype(std::declval<F>().set_value(
+      std::declval<Owner>(), std::declval<V>()),
       std::true_type{});
 
   template <typename>
@@ -327,48 +331,49 @@ inline std::string bool_name(bool value) {
   return value ? "true" : "false";
 }
 
-template <typename Field>
-std::string flags_for() {
-  return std::string{Field::name()} //
-  + ":const=" + bool_name(Field::is_const()) //
-    + ":mutable=" + bool_name(Field::is_mutable()) //
-    + ":volatile=" + bool_name(Field::is_volatile());
+template <typename _F>
+std::string flags_for(omni::data_member_meta_t<_F> field) {
+  return std::string{field.name()} //
+  + ":const=" + bool_name(field.is_const()) //
+    + ":mutable=" + bool_name(field.is_mutable()) //
+    + ":volatile=" + bool_name(field.is_volatile());
 }
 
-template <typename Field>
-std::string meta_write_for() {
-  return std::string{Field::name()} //
+template <typename _F>
+std::string meta_write_for(omni::data_member_meta_t<_F> field) {
+  return std::string{field.name()} //
   + ":mutable_record="
-    + bool_name(can_set_meta<Field, field_qualification_record_t &, int>::value)
+    + bool_name(can_set_meta<omni::data_member_meta_t<_F>,
+      field_qualification_record_t &, int>::value)
     + ":const_record="
-    + bool_name(
-      can_set_meta<Field, const field_qualification_record_t &, int>::value);
+    + bool_name(can_set_meta<omni::data_member_meta_t<_F>,
+      const field_qualification_record_t &, int>::value);
 }
 
 template <typename Binding>
-std::string binding_write_for() {
-  return std::string{Binding::name()} //
+std::string binding_write_for(Binding binding) {
+  return std::string{binding.name()} //
   + ":set_value=" + bool_name(can_set_binding<Binding, int>::value);
 }
 
 struct field_flags_visitor {
   template <typename... Field>
-  std::vector<std::string> operator()(Field...) const {
-    return std::vector<std::string>{flags_for<Field>()...};
+  std::vector<std::string> operator()(Field... fields) const {
+    return std::vector<std::string>{flags_for(fields)...};
   }
 };
 
 struct meta_write_visitor {
   template <typename... Field>
-  std::vector<std::string> operator()(Field...) const {
-    return std::vector<std::string>{meta_write_for<Field>()...};
+  std::vector<std::string> operator()(Field... fields) const {
+    return std::vector<std::string>{meta_write_for(fields)...};
   }
 };
 
 struct binding_write_visitor {
   template <typename... Binding>
-  std::vector<std::string> operator()(Binding...) const {
-    return std::vector<std::string>{binding_write_for<Binding>()...};
+  std::vector<std::string> operator()(Binding... bindings) const {
+    return std::vector<std::string>{binding_write_for(bindings)...};
   }
 };
 

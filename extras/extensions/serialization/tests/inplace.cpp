@@ -126,6 +126,21 @@ TEST(inplace_mapping, replaces_a_populated_map_from_a_subtree) {
   EXPECT_EQ(expected, into);
 }
 
+TEST(mapping_diagnostics, reports_missing_fields_inside_sequence_records) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<inplace_models::readings>>{},
+    R"([{"first": 7}])");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  for (const auto &entry : result.diagnostics.issues) {
+    EXPECT_EQ(omni::json::issue_code::missing_field, entry.reason);
+    EXPECT_EQ(omni::json::value_kind::unknown, entry.actual);
+    EXPECT_EQ(::ryml::NONE, entry.node_id);
+    EXPECT_EQ("/0/second", omni::ryml::detail::render_path(entry.path));
+  }
+}
+
 TEST(inplace_mapping, constrains_destination_mutability_and_tree_lifetime) {
   using binding_type = omni::ryml::map_by_schema_t<>;
 
@@ -248,7 +263,7 @@ TEST(inplace_deserialization, reports_mapping_errors) {
     &into, R"({"first": 42, "second": "bad"})");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("/second: \"bad\" is not an integer", result.diagnostics);
+  EXPECT_EQ("/second: expected integer, found scalar", result.diagnostics);
 }
 
 struct lvalue_renderer {

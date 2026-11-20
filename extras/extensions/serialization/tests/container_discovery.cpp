@@ -1,5 +1,6 @@
 #include "json_match.hpp"
 
+#include <c4/charconv.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -35,18 +36,19 @@ namespace cp {
 template <>
 struct to_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node, my_int *into, State context) const
+  auto operator()(State context, ::ryml::ConstNodeRef node, my_int *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return core::read_node(node, &into->value, context);
+    return core::read_node(std::move(context), node, &into->value);
   }
 };
 
 template <>
 struct from_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(const my_int &value, ::ryml::NodeRef node,
-    State context) const {
-    core::write_node(value.value, node, context);
+  void operator()(State context,
+    const my_int &value,
+    ::ryml::NodeRef node) const {
+    core::write_node(std::move(context), value.value, node);
   }
 };
 
@@ -55,29 +57,45 @@ struct from_type_t<my_int> {
 template <>
 struct to_type_t<compatible_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(::ryml::ConstNodeRef node,
-    compatible_integer *into,
-    State context) const
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    compatible_integer *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    auto result = core::read_node(node, &into->value, context);
-    if (!result.value)
-      return result;
+    // Parse text directly: the default integer mapping rejects quoted input.
+    if (!node.has_val() || node.is_container()
+      || !c4::from_chars(node.val(), &into->value))
+      return {
+        /*value=*/compat::nullopt,
+        /*diagnostics=*/{
+          /*config=*/{context.config.error_policy, {}},
+          /*issues=*/{core::make_issue(json::issue_code::invalid_scalar,
+            json::value_kind::integer, node)},
+          /*parse_error_message=*/{},
+        },
+      };
+
+    auto result = with_diagnostics_t<compat::monostate>{
+      /*value=*/compat::monostate{},
+      /*diagnostics=*/{
+        /*config=*/{context.config.error_policy, {}},
+        /*issues=*/{},
+        /*parse_error_message=*/{},
+      },
+    };
 
     if (node.is_val_quoted())
-      result.diagnostics.issues.push_back(detail::make_issue(
+      result.diagnostics.issues.push_back(core::make_issue(
         json::issue_code::unexpected_kind,
         json::value_kind::integer,
         node,
-        context.path,
         /*warning=*/true));
 
     if (into->value < 0) {
       into->value = 0;
-      result.diagnostics.issues.push_back(detail::make_issue(
+      result.diagnostics.issues.push_back(core::make_issue(
         json::issue_code::out_of_range,
         json::value_kind::integer,
         node,
-        context.path,
         /*warning=*/true));
     }
 

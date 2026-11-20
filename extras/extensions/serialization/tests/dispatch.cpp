@@ -45,6 +45,13 @@ struct my_string {
   }
 };
 
+struct immutable_number {
+  const int value;
+
+  immutable_number() = delete;
+  explicit immutable_number(int value): value(value) {}
+};
+
 } // namespace
 
 #if defined(OMNI_TOOL_RUN)
@@ -59,22 +66,38 @@ struct omni::traits::cp::as_string<my_string> {
 };
 
 template <>
-struct omni::traits::cp::assign_string<my_string> {
-  void operator()(my_string *into, omni::compat::string_view text) const {
-    into->text.assign(text.empty() ? "" : text.data(), text.size());
+struct omni::traits::cp::from_string<my_string> {
+  my_string operator()(omni::compat::string_view text) const {
+    return {omni::adapt::from_string(omni::type_t<std::string>{}, text)};
+  }
+};
+
+template <>
+struct omni::ryml::cp::to_type_t<immutable_number> {
+  template <typename State>
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<immutable_number>) const
+    -> omni::ryml::with_diagnostics_t<immutable_number> {
+    return omni::ryml::default_to_integral(std::move(state),
+      node,
+      omni::type_t<int>{})
+      .transform([](int value) -> immutable_number {
+        return immutable_number{value};
+      });
   }
 };
 
 template <>
 struct omni::ryml::cp::to_type_t<unsigned short> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, unsigned short *into,
-    State state) const
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    unsigned short *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_integer(
+    return omni::ryml::default_to_integral(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
-      into,
-      state);
+      into);
   }
 };
 
@@ -84,27 +107,52 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <>
 const auto omni::ryml::cp::to_type<my_string> =
-  [](::ryml::ConstNodeRef node, my_string *into, auto state) {
-    return omni::ryml::to_string_like(
+  [](auto state, ::ryml::ConstNodeRef node, my_string *into) {
+    return omni::ryml::default_to_string_like(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
-      into,
-      state);
+      into);
   };
 #else
 template <>
 struct omni::ryml::cp::to_type_t<my_string> {
   template <typename State>
-  auto operator()(::ryml::ConstNodeRef node, my_string *into, State state) const
+  auto operator()(State state, ::ryml::ConstNodeRef node, my_string *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::to_string_like(
+    return omni::ryml::default_to_string_like(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
-      into,
-      state);
+      into);
   }
 };
 #endif
 
 namespace {
+
+TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {
+  const auto parsed = omni::ryml::core::parse("42");
+
+  EXPECT_TRUE(parsed);
+  if (parsed) {
+    const auto result = omni::ryml::map_by_schema(
+      omni::type_t<immutable_number>{}, *parsed);
+
+    EXPECT_TRUE(result.value);
+    if (result.value)
+      EXPECT_EQ(42, result.value->value);
+
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+  }
+}
+
+TEST(mapping_dispatch, deserializes_an_immutable_value) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<immutable_number>{}, "42");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(42, result.value->value);
+
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
 
 TEST(mapping_dispatch, fundamental_registration_applies_at_the_root) {
   const auto result = serialization_test::deserialize(
@@ -217,7 +265,7 @@ TEST(mapping_dispatch, nested_errors_retain_the_document_path) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &entry : result.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::invalid_scalar, entry.reason);
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, entry.reason);
     EXPECT_EQ("/0/west/value", omni::ryml::detail::render_path(entry.path));
   }
 }

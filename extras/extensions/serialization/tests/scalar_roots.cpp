@@ -197,7 +197,7 @@ TEST(deserialization_scalar_roots, reports_invalid_root_values) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::invalid_scalar, issue.reason);
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
     EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
     EXPECT_TRUE(issue.path.empty());
   }
@@ -278,7 +278,9 @@ TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
-  EXPECT_EQ("/0: \"bad\" is not an integer\n/1: \"also bad\" is not an integer",
+  EXPECT_EQ("/0: expected integer, found scalar\n"
+    "/1: expected integer, found scalar",
+
     serialization_test::render_diagnostics(result.diagnostics));
 }
 

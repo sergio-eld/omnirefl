@@ -1,38 +1,33 @@
 #pragma once
 
-// TODO: [medium] Validate alias_dict against other aliases and reflected
+// TODO: [medium] Validate aliases_dict against other aliases and reflected
 // canonical names, possibly inline when constructing a dictionary.
 
-#include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
 #include <omnirefl/extensions/traits.hpp>
-
-#include <c4/format.hpp>
-#include <c4/std/string.hpp>
+#include <omnirefl/functional.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
-// c4 views use the same operation customization points as user strings.
-template <>
-struct omni::traits::cp::as_string<c4::csubstr> {
-  constexpr omni::compat::string_view operator()(c4::csubstr value) const {
-    return {value.str, value.len};
-  }
-};
-
-template <>
-struct omni::traits::cp::assign_string<c4::csubstr> {
-  void operator()(c4::csubstr *into, omni::compat::string_view text) const {
-    *into = {text.data(), text.size()};
-  }
-};
-
 namespace omni {
 namespace ryml {
+namespace reflected_scope {
+namespace detail {
+
+// Defined after type-mapping selection is available; record headers use this
+// declaration without depending on the later customization-point definitions.
+OMNI_CONSTRAINED_TEMPLATE((typename Field, typename State),
+  (is_read_state<State>::value))
+auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
+  -> with_diagnostics_t<compat::monostate>;
+
+} // namespace detail
+} // namespace reflected_scope
+
 namespace core {
 
 // Mapper bodies delegate recursively through these dispatchers, whose
@@ -40,12 +35,17 @@ namespace core {
 // declaration supplies SFINAE defaults; later declarations omit them.
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_read_state<State>::value))
-auto read_node(::ryml::ConstNodeRef node, T *into, State state)
+auto read_node(State state, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+  -> with_diagnostics_t<T, diagnostics>;
+
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State state, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_write_state<State>::value))
-void write_node(const T &value, ::ryml::NodeRef node, State state);
+void write_node(State state, const T &value, ::ryml::NodeRef node);
 
 } // namespace core
 
@@ -146,10 +146,10 @@ constexpr bool alias_less(compat::string_view left, compat::string_view right) {
   return alias_less(left.data(), left.size(), right.data(), right.size());
 }
 
-// Views borrow the strings supplied to alias_dict; keep their storage alive.
+// Views borrow the strings supplied to aliases_dict; keep their storage alive.
 template <std::size_t Size>
 struct name_by_alias_lookup {
-  // alias_dict sorts these entries; users must not modify them afterward.
+  // aliases_dict sorts these entries; users must not modify them afterward.
   std::array<alias_entry, Size> _entries;
 
   compat::optional<compat::string_view> operator()(
@@ -273,19 +273,24 @@ struct is_alias_resolver<F,
 
 } // namespace detail
 
-/** Build an alias-to-name resolver from tuple-like string-view groups.
+/** Builds an alias-to-name resolver from tuple-like string-view groups.
  * Each group starts with the canonical name; remaining entries are aliases.
  * The caller must ensure aliases do not match another group's canonical
  * name or aliases; collisions are not validated. Mapping results are
  * unspecified for collisions. Canonical names are not implicitly added as
  * aliases. Returned views borrow the supplied strings, whose storage must
  * outlive use of the resolver.
+ *
+```text
+aliases_dict :: (group, ...) -> (string_view -> optional<string_view>)
+```
+ *
  * Full constexpr factory evaluation requires C++14: std::make_tuple,
  * std::tuple_cat, and std::get are not guaranteed constexpr in C++11.
  * The sorting implementation itself supports C++11 constant evaluation.
  */
 template <typename... Groups>
-OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
+OMNI_CPP14_CONSTEXPR auto aliases_dict(const Groups &...groups)
   -> decltype(compat::apply(detail::cpp11_sorted_aliases{},
     std::tuple_cat(compat::apply(
       detail::cpp11_invert_alias_group{}, groups)...))) {
@@ -296,194 +301,91 @@ OMNI_CPP14_CONSTEXPR auto alias_dict(const Groups &...groups)
 
 namespace detail {
 
-constexpr compat::string_view to_string_view(c4::csubstr s) {
-  // Keep empty views safe to append through C++11 string's pointer/size API.
-  return {s.len ? s.str : "", s.len};
+// Overload ranking selects direct construction before adapting a pointer-only
+// mapping. Its fallback alone requires a default-constructible destination.
+template <typename Mapping, typename T, typename State>
+auto map_node_to_value_using(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T> type,
+  int)
+  -> decltype(mapping(std::move(state), node, type)) {
+  return mapping(std::move(state), node, type);
 }
 
-inline json::value_kind node_kind(::ryml::ConstNodeRef n) {
-  if (n.invalid())
-    return json::value_kind::unknown;
-
-  if (n.is_map())
-    return json::value_kind::mapping;
-
-  if (n.is_seq())
-    return json::value_kind::sequence;
-
-  if (n.has_val())
-    return n.val_is_null() ? json::value_kind::null : json::value_kind::scalar;
-
-  return json::value_kind::unknown;
-}
-
-inline std::string render_path(
-  const std::vector<issue::path_segment> &segments) {
-  std::string path;
-  for (const auto &segment : segments) {
-    path += '/';
-    if (segment.index) {
-      path += std::to_string(*segment.index);
-      continue;
-    }
-
-    for (const char ch : segment.field) {
-      if ('~' == ch)
-        path += "~0";
-      else if ('/' == ch)
-        path += "~1";
-      else
-        path += ch;
-    }
-  }
-
-  return path;
-}
-
-OMNI_CPP14_CONSTEXPR inline compat::string_view kind_name(json::value_kind k) {
-  switch (k) {
-  case json::value_kind::mapping:
-    return "object";
-  case json::value_kind::sequence:
-    return "array";
-  case json::value_kind::string:
-    return "string";
-  case json::value_kind::boolean:
-    return "boolean";
-  case json::value_kind::integer:
-    return "integer";
-  case json::value_kind::unsigned_integer:
-    return "unsigned integer";
-  case json::value_kind::number:
-    return "real number";
-  case json::value_kind::null:
-    return "null";
-  default:
-    return "scalar";
-  }
-}
-
-// Local traversal output owns the accumulated diagnostics and limit counters.
-// Child states snapshot progress; diagnostics are returned separately.
-template <typename State>
-struct node_accumulator {
-  State state;
-  with_diagnostics_t<compat::monostate, diagnostics> result;
-
-  bool stopped() const { return this->state.limit_exceeded(); }
-
-  void report(issue entry) {
-    this->state.error_count += !entry.warning;
-    this->state.warning_count += entry.warning;
-    if (!entry.warning)
-      this->result.value.reset();
-
-    this->result.diagnostics.issues.push_back(std::move(entry));
-    if (this->result.diagnostics.issues.back().warning
-      && this->state.config.error_policy.warning_limit
-      && this->state.warning_count
-        == std::size_t{1} + *this->state.config.error_policy.warning_limit) {
-      auto exceeded = this->result.diagnostics.issues.back();
-      exceeded.reason = json::issue_code::warning_limit_exceeded;
-      exceeded.warning = false;
-      this->result.diagnostics.issues.push_back(std::move(exceeded));
-      ++this->state.error_count;
-      this->result.value.reset();
-    }
-  }
-
-  void append(with_diagnostics_t<compat::monostate, diagnostics> child) {
-    if (!child.value)
-      this->result.value.reset();
-
-    // A child may already have emitted the limit error. Preserve that report
-    // without generating the same warning-limit error again at each parent.
-    const bool has_limit_error = std::any_of(child.diagnostics.issues.begin(),
-      child.diagnostics.issues.end(),
-      [](const issue &entry) {
-        return entry.reason == json::issue_code::warning_limit_exceeded;
-      });
-
-    for (auto &entry : child.diagnostics.issues) {
-      if (has_limit_error) {
-        this->state.error_count += !entry.warning;
-        this->state.warning_count += entry.warning;
-        if (!entry.warning)
-          this->result.value.reset();
-
-        this->result.diagnostics.issues.push_back(std::move(entry));
-      } else {
-        this->report(std::move(entry));
-      }
-    }
-    if (this->stopped())
-      this->result.value.reset();
-  }
-
-  auto finish() && -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return std::move(this->result);
-  }
-};
-
-OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-node_accumulator<State> make_node_accumulator(State state) {
+OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
+  (std::is_default_constructible<T>::value))
+auto map_node_to_value_using(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T>,
+  long)
+  -> decltype(mapping(std::move(state), node, static_cast<T *>(nullptr)),
+    with_diagnostics_t<T>{}) {
+  auto value = compat::make_optional<T>();
+  auto mapped = mapping(std::move(state), node, &*value);
   return {
-    /*state=*/state,
-    /*result=*/{
-      /*value=*/compat::monostate{},
-      /*diagnostics=*/{
-        /*config=*/{state.config.error_policy, {}},
-        /*issues=*/{},
-        /*parse_error_message=*/{},
-      },
-    },
+    /*value=*/mapped.value ? std::move(value) : compat::nullopt,
+    /*diagnostics=*/std::move(mapped.diagnostics),
   };
 }
 
-inline issue make_issue(json::issue_code reason,
-  json::value_kind expected,
+// Apply the same diagnostic limits to native and adapted value results,
+// including custom mappings which return warnings with an available value.
+template <typename Mapping, typename T, typename State>
+auto map_node_to_value(State state,
+  const Mapping &mapping,
   ::ryml::ConstNodeRef node,
-  mapping_path path,
-  bool warning = false) {
-  // C++11 cannot aggregate-initialize issue because it has member defaults.
-  issue result{};
-  result.reason = reason;
-  result.path = path.materialize();
-  result.expected = expected;
-  result.actual = node_kind(node);
-  result.warning = warning;
+  omni::type_t<T> type) -> with_diagnostics_t<T> {
+  auto result = make_node_accumulator(state);
+  if (result.stopped())
+    return {compat::nullopt, std::move(result.result.diagnostics)};
 
-  if (!node.invalid())
-    result.node_id = node.id();
+  auto mapped = map_node_to_value_using(std::move(state),
+    mapping,
+    node,
+    type,
+    /*priority=*/0);
 
-  return result;
+  result.append({
+    /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+      : compat::nullopt,
+    /*diagnostics=*/std::move(mapped.diagnostics),
+  });
+
+  return {
+    /*value=*/result.result.value ? std::move(mapped.value) : compat::nullopt,
+    /*diagnostics=*/std::move(result.result.diagnostics),
+  };
 }
 
-// Format validation precedes conversion; failure here means out of range.
-OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_integral<T>::value))
-compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
-  T value{};
-  // C4 accepts a pointer to either the checked wrapper or the original value.
-  compat::conditional_t<std::is_same<bool, T>::value,
-    T &,
-    c4::fmt::overflow_checked_<T>> target{value};
-
-  if (!c4::from_chars(scalar, &target))
-    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
-
-  return value;
+// C++11 overload ranking prefers value production when assignment is possible.
+// The trailing decltype excludes mappings without the type-tag overload.
+OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
+  (std::is_assignable<T &, T &&>::value))
+auto read_into(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  T *into,
+  int)
+  -> decltype(mapping(std::move(state), node, omni::type_t<T>{}),
+    with_diagnostics_t<compat::monostate>{}) {
+  return mapping(std::move(state), node, omni::type_t<T>{})
+    .transform([into](T &&value) -> compat::monostate {
+      *into = std::move(value);
+      return {};
+    });
 }
 
-OMNI_CONSTRAINED_TEMPLATE((typename T), (!std::is_integral<T>::value))
-compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
-  T value{};
-  if (!c4::from_chars(scalar, &value))
-    return compat::unexpected<json::issue_code>{json::issue_code::out_of_range};
-
-  return value;
+template <typename Mapping, typename T, typename State>
+auto read_into(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  T *into,
+  long) -> decltype(mapping(std::move(state), node, into)) {
+  return mapping(std::move(state), node, into);
 }
 
 } // namespace detail
-
 } // namespace ryml
 } // namespace omni

@@ -1864,6 +1864,11 @@ T aggregate_into(Fields &&fields) {
 // TODO: [high] Consider a direct unavailable-metadata diagnostic for reflected()
 // only if it can avoid cascading errors from incomplete generated metadata.
 
+// TODO: [high] Return a dependency-free internal string view instead of
+// const char* from metadata text queries. Retain literal-backed storage and
+// provide C++11 constexpr operations such as starts_with for type-dependent
+// predicates, plus conversion to std::string_view when available.
+
 } // namespace omni
 
 #undef OMNI_DETAIL_UNGENERATED_REFLECTION
