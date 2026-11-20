@@ -278,8 +278,9 @@ TEST(deserialization_scalar_roots, reports_sequence_element_paths) {
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(2U, result.diagnostics.issues.size());
-  EXPECT_EQ("/0: expected integer, found scalar\n/1: expected integer,
-    found scalar",
+  EXPECT_EQ("/0: expected integer, found scalar\n"
+    "/1: expected integer, found scalar",
+
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
