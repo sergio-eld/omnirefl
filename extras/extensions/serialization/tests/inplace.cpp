@@ -117,8 +117,8 @@ TEST(inplace_mapping, replaces_a_populated_map_from_a_subtree) {
 
   std::map<std::string, int> into{{"api", 99}, {"stale", 1}};
   const omni::ryml::config_t<> options{};
-  const auto result = omni::ryml::core::map_by_schema(
-    options, &into, tree->crootref()["ports"]);
+  const auto result = omni::ryml::map_by_schema_t<decltype(options)>{options}(
+    &into, tree->crootref()["ports"]);
 
   const std::map<std::string, int> expected{{"api", 443}};
   EXPECT_TRUE(result.value);

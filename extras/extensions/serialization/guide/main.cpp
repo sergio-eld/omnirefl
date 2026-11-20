@@ -13,7 +13,7 @@
  *   basics.enum_mapping - declared enumerator names as strings
  *   basics.local_configuration - customize config for an individual call
  *   basics.diagnostics - value availability, errors, and warnings
- *   basics.explicit_configuration - pass config and input explicitly
+ *   basics.explicit_configuration - construct a configured deserializer
  *   basics.unknown_fields - reject, ignore, or warn about unknown fields
  *   basics.duplicate_fields - choose a repeated field occurrence
  *   basics.error_limit - collect errors before stopping
@@ -86,7 +86,7 @@
 
 #include <omnirefl/functional.hpp>
 
-// Mapping callables, explicit core functions, config, and diagnostics.
+// Mapping callables, parsing, config, and diagnostics.
 #include <omnirefl/serialization/ryml.hpp>
 
 #include <algorithm>
@@ -314,8 +314,7 @@ TEST(basics, diagnostics) {
   EXPECT_EQ("/value: expected integer, found scalar", result.diagnostics);
 }
 
-/** The core operation takes configuration explicitly instead of using a bound
- * callable. */
+/** An explicitly configured callable can be constructed in one expression. */
 TEST(basics, explicit_configuration) {
   // GCC 10 needs the nested policy type for aggregate deduction.
   const omni::ryml::config_t options{
@@ -323,7 +322,7 @@ TEST(basics, explicit_configuration) {
       .unknown_fields = omni::json::unknown_policy::allow,
     },
   };
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto result = omni::ryml::deserialize_t{.config = options}(
     omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
 
@@ -1508,18 +1507,18 @@ struct reading {
 
 } // namespace tree_ownership
 
-/** core::as_ref_tree borrows existing strings; keep their storage alive and
- * unchanged while using the tree. core::as_owning_tree copies strings into
+/** as_ref_tree borrows existing strings; keep their storage alive and
+ * unchanged while using the tree. as_owning_tree copies strings into
  * its arena so the tree can outlive the source. Both trees own their nodes
  * and generated scalar text. The returned trees can be edited before emission.
  */
 TEST(advanced, tree_ownership) {
   const tree_ownership::reading source{"sensor", omni::compat::nullopt};
-  const auto borrowed = omni::ryml::core::as_ref_tree(source);
+  const auto borrowed = omni::ryml::as_ref_tree(source);
   EXPECT_TRUE(same_document(R"({"label": "sensor", "value": null})",
     ::ryml::emitrs_json<std::string>(borrowed)));
 
-  auto owning = omni::ryml::core::as_owning_tree(source);
+  auto owning = omni::ryml::as_owning_tree(source);
   owning.rootref().remove_child("value");
   EXPECT_TRUE(same_document(R"({"label": "sensor"})",
     ::ryml::emitrs_json<std::string>(owning)));
@@ -2075,7 +2074,7 @@ TEST_P(customization_mapping_limits,
   if (!tree)
     return;
 
-  const auto result = omni::ryml::core::map_by_schema(options,
+  const auto result = omni::ryml::map_by_schema_t{.config = options}(
     omni::type<customization_mapping::record>, *tree);
 
   EXPECT_FALSE(result.value);

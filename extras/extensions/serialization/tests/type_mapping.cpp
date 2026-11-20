@@ -505,10 +505,10 @@ TEST(type_mapping, preserves_qualified_registration) {
 
 TEST(write_state, preserves_string_storage_through_custom_mapping) {
   std::vector<endpoint<std::string>> source{{"east"}, {"west"}};
-  const auto owning = omni::ryml::core::as_owning_tree(source);
+  const auto owning = omni::ryml::as_owning_tree(source);
 
   {
-    const auto borrowed = omni::ryml::core::as_ref_tree(source);
+    const auto borrowed = omni::ryml::as_ref_tree(source);
     EXPECT_TRUE(serialization_test::matches_node(
       R"(["east", "west"])", borrowed.crootref()));
 
@@ -529,7 +529,7 @@ TEST(read_state, passes_original_config_and_updated_counts_to_children) {
   };
 
   options.error_policy.error_limit = 1;
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto result = omni::ryml::deserialize_t<decltype(options) &>{options}(
     omni::type_t<mapping_observation::record>{},
     R"({"first":-7,"second":"bad","third":3})");
 
@@ -559,7 +559,7 @@ TEST_P(record_mapping_limits, stops_before_evaluating_later_members) {
   if (warnings)
     options.error_policy.warning_limit = 0;
 
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto result = omni::ryml::deserialize_t<decltype(options) &>{options}(
     omni::type_t<mapping_observation::record>{},
     warnings ? R"({"first":-7,"second":2,"third":3})"
              : R"({"first":"bad","second":2,"third":3})");
@@ -585,7 +585,7 @@ TEST(record_mapping_events, missing_members_stop_before_value_operations) {
     /*transform_diagnostics=*/{&trace},
   };
 
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto result = omni::ryml::deserialize_t<decltype(options) &>{options}(
     omni::type_t<mapping_observation::record>{},
     R"({"first":1,"third":3})");
 

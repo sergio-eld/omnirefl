@@ -31,7 +31,8 @@ namespace core {
 // Supply a reflected person, config, and an owning std::string source.
 auto parsed = core::parse(std::move(source));
 if (parsed) {
-  auto result = core::map_by_schema(options, omni::type_t<person>{}, *parsed);
+  auto result = map_by_schema_t<decltype(options)>{options}(
+    omni::type_t<person>{}, *parsed);
   // Use result while parsed keeps its tree and character storage alive.
 }
 // Syntax errors use expected; mapping returns optional person and diagnostics.

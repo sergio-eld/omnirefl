@@ -129,7 +129,7 @@ TEST(mapping_diagnostics, stops_after_the_warning_that_exceeds_the_limit) {
   options.error_policy.unknown_fields =
     omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
   options.error_policy.warning_limit = 1;
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto result = omni::ryml::deserialize_t<decltype(options)>{options}(
     omni::type_t<std::vector<diagnostic_inputs::empty_record>>{},
     R"([{"first": 1}, {"second": 2, "third": 3}])");
 
@@ -165,7 +165,7 @@ TEST(mapping_diagnostics, renders_each_nested_parse_error_once) {
 
   omni::ryml::config_t<> options{};
   options.error_policy.error_limit = 1;
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto result = omni::ryml::deserialize_t<decltype(options)>{options}(
     omni::type_t<std::vector<diagnostic_inputs::embedded_document>>{},
     R"(["[unterminated", "{unterminated"])");
 
@@ -221,28 +221,16 @@ struct rvalue_renderer {
     const omni::ryml::diagnostics &) && { return "rvalue"; }
 };
 
-template <typename Config, typename = void>
-struct is_core_deserializable: std::false_type {};
-
-template <typename Config>
-struct is_core_deserializable<Config,
-  omni::compat::void_t<decltype(omni::ryml::core::deserialize(
-    std::declval<Config>(), omni::type_t<int>{}, std::string{}))>>:
-    std::true_type {};
-
 TEST(deserialize_binding, preserves_lvalue_config_invocability) {
   using config_type = omni::ryml::config_t<lvalue_renderer>;
   using binding_type = omni::ryml::deserialize_t<config_type>;
 
-  EXPECT_TRUE(is_core_deserializable<config_type &>::value);
   EXPECT_TRUE((omni::compat::is_invocable<binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
   EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_FALSE(is_core_deserializable<config_type &&>::value);
   EXPECT_FALSE((omni::compat::is_invocable<binding_type &&,
     omni::type_t<int>, std::string>::value));
 }
@@ -251,15 +239,12 @@ TEST(deserialize_binding, preserves_rvalue_config_invocability) {
   using config_type = omni::ryml::config_t<rvalue_renderer>;
   using binding_type = omni::ryml::deserialize_t<config_type>;
 
-  EXPECT_FALSE(is_core_deserializable<config_type &>::value);
   EXPECT_FALSE((omni::compat::is_invocable<binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
   EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_TRUE(is_core_deserializable<config_type &&>::value);
   EXPECT_TRUE((omni::compat::is_invocable<binding_type &&,
     omni::type_t<int>, std::string>::value));
 }

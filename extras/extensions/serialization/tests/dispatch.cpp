@@ -52,6 +52,10 @@ struct immutable_number {
   explicit immutable_number(int value): value(value) {}
 };
 
+struct default_state_number {
+  int value;
+};
+
 } // namespace
 
 #if defined(OMNI_TOOL_RUN)
@@ -85,6 +89,19 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
       .transform([](int value) -> immutable_number {
         return immutable_number{value};
       });
+  }
+};
+
+template <>
+struct omni::ryml::cp::to_type_t<default_state_number> {
+  auto operator()(omni::ryml::read_state_t<> state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<default_state_number>) const
+    -> omni::ryml::with_diagnostics_t<default_state_number> {
+    return omni::ryml::default_to_integral(std::move(state),
+      node,
+      omni::type_t<int>{})
+      .transform([](int value) -> default_state_number { return {value}; });
   }
 };
 
@@ -126,6 +143,34 @@ struct omni::ryml::cp::to_type_t<my_string> {
 #endif
 
 namespace {
+
+TEST(mapping_dispatch, bound_config_preserves_the_default_state_type) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<default_state_number>{}, "42");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(42, result.value->value);
+
+  EXPECT_TRUE(result.diagnostics.empty());
+}
+
+TEST(tree_serialization, exposes_callable_tree_builders) {
+  const auto own = omni::ryml::as_owning_tree;
+  const auto borrow = omni::ryml::as_ref_tree;
+  const std::string source = "sensor";
+  const auto owned = own(std::string{"sensor"});
+  const auto borrowed = borrow(source);
+
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"("sensor")", owned.crootref()));
+
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"("sensor")", borrowed.crootref()));
+
+  EXPECT_FALSE((omni::compat::is_invocable<
+    omni::ryml::as_ref_tree_t, std::string &&>::value));
+}
 
 TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {
   const auto parsed = omni::ryml::core::parse("42");

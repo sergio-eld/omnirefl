@@ -313,34 +313,19 @@ auto map_to_optional_t::operator()(State context,
   return map(std::move(context), node, into);
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value && std::is_object<T>::value
-    && !std::is_const<T>::value))
-auto map_by_schema(const Config &options, omni::type_t<T> type,
-  const ::ryml::Tree &tree) -> with_diagnostics_t<T> {
-  return map_by_schema(options, type, tree.crootref());
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value && std::is_object<T>::value
-    && !std::is_const<T>::value))
-auto map_by_schema(const Config &options, T *into, const ::ryml::Tree &tree)
-  -> with_diagnostics_t<compat::monostate> {
-  return map_by_schema(options, into, tree.crootref());
-}
+} // namespace core
 
 namespace detail {
 
-// Both overloads transform syntax-error diagnostics while an empty tree
-// remains alive for the configured callback.
-OMNI_CONSTRAINED_TEMPLATE((typename Config), (is_config<Config>::value))
+// Syntax errors still reach the configured renderer while an empty tree lives.
+template <typename Config>
 auto parse_error_diagnostics(Config &&options, std::string message)
   -> diagnostics_result_t<Config> {
   const ::ryml::Tree tree{/*node_capacity=*/0, /*arena_capacity=*/0};
   diagnostics report{
     /*config=*/{options.error_policy, {}},
     /*issues=*/{
-      omni::ryml::core::make_issue(json::issue_code::parse_error,
+      core::make_issue(json::issue_code::parse_error,
         json::value_kind::unknown, ::ryml::ConstNodeRef{}),
     },
     /*parse_error_message=*/std::move(message),
@@ -350,56 +335,32 @@ auto parse_error_diagnostics(Config &&options, std::string message)
     tree, std::move(report));
 }
 
+template <typename T, typename Config, typename Destination>
+auto deserialize(Config &&options, Destination destination, std::string source)
+  -> with_diagnostics_t<T, diagnostics_result_t<Config>> {
+  auto parsed = core::parse(std::move(source));
+  if (!parsed)
+    return {
+      /*value=*/compat::nullopt,
+      /*diagnostics=*/parse_error_diagnostics(
+        std::forward<Config>(options), std::move(parsed.error())),
+    };
+
+  auto mapped = map_by_schema_t<Config &>{options}(
+    destination, parsed->crootref());
+
+  return {
+    /*value=*/std::move(mapped.value),
+    /*diagnostics=*/compat::invoke(
+      std::forward<Config>(options).transform_diagnostics,
+      static_cast<const ::ryml::Tree &>(*parsed),
+      std::move(mapped.diagnostics)),
+  };
+}
+
 } // namespace detail
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename Record),
-  (is_config<Config>::value && std::is_object<Record>::value
-    && !std::is_const<Record>::value))
-auto deserialize(Config &&options, omni::type_t<Record> record_type,
-  std::string source)
-  -> with_diagnostics_t<Record, diagnostics_result_t<Config>> {
-  auto parsed = omni::ryml::core::parse(std::move(source));
-  if (!parsed)
-    return {
-      /*value=*/compat::nullopt,
-      /*diagnostics=*/detail::parse_error_diagnostics(
-        std::forward<Config>(options), std::move(parsed.error())),
-    };
-
-  auto mapped = map_by_schema(options, record_type, parsed->crootref());
-  return {
-    /*value=*/std::move(mapped.value),
-    /*diagnostics=*/compat::invoke(
-      std::forward<Config>(options).transform_diagnostics,
-      static_cast<const ::ryml::Tree &>(*parsed),
-      std::move(mapped.diagnostics)),
-  };
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Config, typename T),
-  (is_config<Config>::value && std::is_object<T>::value
-    && !std::is_const<T>::value))
-auto deserialize(Config &&options, T *into, std::string source)
-  -> with_diagnostics_t<compat::monostate, diagnostics_result_t<Config>> {
-  assert(into);
-  auto parsed = omni::ryml::core::parse(std::move(source));
-  if (!parsed)
-    return {
-      /*value=*/compat::nullopt,
-      /*diagnostics=*/detail::parse_error_diagnostics(
-        std::forward<Config>(options), std::move(parsed.error())),
-    };
-
-  auto mapped = map_by_schema(options, into, parsed->crootref());
-  return {
-    /*value=*/std::move(mapped.value),
-    /*diagnostics=*/compat::invoke(
-      std::forward<Config>(options).transform_diagnostics,
-      static_cast<const ::ryml::Tree &>(*parsed),
-      std::move(mapped.diagnostics)),
-  };
-}
-
+namespace core {
 namespace detail {
 
 template <typename State, typename T>
@@ -452,25 +413,23 @@ struct tree_builder_case<Discovery, false, true> {
 };
 
 } // namespace detail
+} // namespace core
 
 template <typename T>
-::ryml::Tree as_owning_tree(const T &value) {
-  return detail::tree_builder_case<compat::remove_cvref_t<T>>
+::ryml::Tree as_owning_tree_t::operator()(const T &value) const {
+  return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::template build<write_state_t<false>>(value);
 }
 
 template <typename T>
-::ryml::Tree as_ref_tree(T &value) {
-  return detail::tree_builder_case<compat::remove_cvref_t<T>>
+::ryml::Tree as_ref_tree_t::operator()(T &value) const {
+  return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::template build<write_state_t<true>>(value);
 }
 
-} // namespace core
-
-
 template <typename Value>
 std::string serialize_t::operator()(const Value &value) const {
-  const auto tree = core::as_ref_tree(value);
+  const auto tree = as_ref_tree(value);
 
   // Reserve an initial estimate without a sizing traversal. Borrowed strings,
   // escaping, or deeper YAML indentation may require an emitter resize/retry.
