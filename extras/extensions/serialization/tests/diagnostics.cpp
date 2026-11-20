@@ -155,6 +155,24 @@ TEST(mapping_diagnostics, retains_a_nested_parse_error_message) {
   EXPECT_EQ(parsed.error(), result.diagnostics);
 }
 
+TEST(mapping_diagnostics, renders_each_nested_parse_error_once) {
+  const auto first = omni::ryml::core::parse("[unterminated");
+  const auto second = omni::ryml::core::parse("{unterminated");
+  EXPECT_FALSE(first);
+  EXPECT_FALSE(second);
+  if (first || second)
+    return;
+
+  omni::ryml::config_t<> options{};
+  options.error_policy.error_limit = 1;
+  const auto result = omni::ryml::core::deserialize(options,
+    omni::type_t<std::vector<diagnostic_inputs::embedded_document>>{},
+    R"(["[unterminated", "{unterminated"])");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(first.error() + '\n' + second.error(), result.diagnostics);
+}
+
 struct issue_view {
   omni::ryml::issue *first;
   omni::ryml::issue *last;

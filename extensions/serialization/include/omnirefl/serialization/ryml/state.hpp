@@ -696,5 +696,8 @@ template <typename T>
 concept write_state_like = is_write_state<T>::value;
 #endif
 
+// TODO: [high] Consider a std::size_t Depth template parameter for traversal
+// state.
+
 } // namespace ryml
 } // namespace omni

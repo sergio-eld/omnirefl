@@ -351,12 +351,19 @@ auto map_node_to_arithmetic_t::operator()(State state,
 inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
   const diagnostics &d) const {
   std::string message;
+  // Parse-error text is aggregated for the report, not stored per issue.
+  bool parse_errors_rendered = false;
   for (const auto &entry : d.issues) {
+    const bool parse_error = json::issue_code::parse_error == entry.reason;
+    if (parse_error && parse_errors_rendered)
+      continue;
+
     if (!message.empty())
       message += '\n';
 
-    if (json::issue_code::parse_error == entry.reason) {
+    if (parse_error) {
       message += d.parse_error_message;
+      parse_errors_rendered = true;
       continue;
     }
 
