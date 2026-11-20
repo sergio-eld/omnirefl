@@ -29,7 +29,7 @@ namespace ryml {
  * \ref reflected_scope::mapping_from_type, avoiding recursive selection of
  * the same customization. Optional mappings below dispatch contained values. */
 
-/** Checked string-like node-to-type mapping.
+/** Checked char-based string-like node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
  *

@@ -90,7 +90,7 @@ inline auto expect_value_node(::ryml::ConstNodeRef node)
 inline auto expect_string_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
 
-/** Maps a scalar node's text to a string-like value.
+/** Maps a scalar node's text to a char-based string-like value.
  * Custom string APIs are supported through \ref adapt::from_string.
  * Its callable object can be passed by value for C++11 composition.
  *
