@@ -40,6 +40,12 @@ inline issue make_issue(json::issue_code reason, json::value_kind expected,
 
 namespace detail {
 
+// Strings remain scalar mappings even though they also model input ranges.
+template <typename T>
+struct is_mapped_range:
+    compat::conjunction<compat::is_input_range<T>,
+      compat::negation<traits::is_string_like<compat::remove_cvref_t<T>>>> {};
+
 // C++11 overload ranking for callback signatures and field destinations.
 // REFACTORME: [medium] Simplify ranked dispatch for callback signatures and
 // field destinations while preserving overload precedence.

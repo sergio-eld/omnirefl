@@ -1,12 +1,14 @@
 #pragma once
 
-/** Parsing, node-shape checks, and metadata-independent value conversions.
- * Raw map_node_to_* functions require validated input. These operations do
- * not select custom type mappings or require composition. */
+/** Parsing, node-shape checks, value conversions, and schema dispatch.
+ * Raw map_node_to_* functions require validated input and do not select
+ * custom type mappings. Schema dispatch definitions are supplied by ryml.hpp.
+ */
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -281,6 +283,213 @@ inline constexpr map_node_to_arithmetic_t<> map_node_to_arithmetic{};
 #else
 static constexpr const map_node_to_arithmetic_t<> &map_node_to_arithmetic =
   map_node_to_arithmetic_t<>::_default;
+#endif
+
+/** Node-to-type mapping through a customization or its default.
+ * Pointer-only mappings are adapted when T is default-constructible.
+ * @pre Required metadata is available in reflected scope. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+  -> with_diagnostics_t<T, diagnostics>;
+
+// REFACTORME: [high] Review responsibility for diagnostic accumulation and
+// limit checks between this dispatcher and the node mappers.
+/** Dispatch one node through the selected to_type callable with diagnostics.
+ * Prefers its type<T> overload when the produced value can be assigned to
+ * *into; otherwise uses its T* overload. A mapping error does not trigger
+ * fallback to another overload. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
+  -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+// REFACTORME: [high] This only forwards to mapping_from_type(...)(...).
+// Reassess whether a separate writer dispatcher is needed.
+/** Dispatch one value through its serialization customization or default. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(State context, const T &value, ::ryml::NodeRef node);
+
+/** (Ad hoc: see detail) Map Boolean, integer, or real JSON/YAML nodes
+ * into corresponding fundamental C++ types.
+ *
+ * @details reflected_call requires a metadata-bearing target. This route
+ * handles arithmetic destinations without reflection.
+ * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
+struct map_to_fundamental_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_fundamental_t _default;
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_fundamental_t<> map_to_fundamental{};
+#else
+static constexpr const map_to_fundamental_t<> &map_to_fundamental =
+  map_to_fundamental_t<>::_default;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML nodes into string-like C++ types.
+ *
+ * @details String-like destinations may be instrumentation-disabled. This
+ * route keeps them outside reflected_call.
+ * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
+struct map_to_string_like_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_string_like_t _default;
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_string_like_t<> map_to_string_like{};
+#else
+static constexpr const map_to_string_like_t<> &map_to_string_like =
+  map_to_string_like_t<>::_default;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML nodes into C++ types requiring
+ * reflected scope.
+ *
+ * @details reflected_call needs a metadata-bearing type, not an arbitrary
+ * compound destination. Range and optional wrappers are unwrapped to obtain
+ * that reflection target while mapping retains the original destination.
+ * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
+struct map_to_reflected_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_object<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_object<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_reflected_t _default;
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_reflected_t<> map_to_reflected{};
+#else
+static constexpr const map_to_reflected_t<> &map_to_reflected =
+  map_to_reflected_t<>::_default;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML arrays or objects into C++ ranges.
+ *
+ * @details reflected_call cannot use the compound range as its reflection
+ * target. Discovery follows element or mapped-value types before establishing
+ * scope, preserving the original range as the destination. Fundamental and
+ * string-like elements require no reflected scope, including empty ranges.
+ * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
+struct map_to_sequence_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_sequence_t _default;
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_sequence_t<> map_to_sequence{};
+#else
+static constexpr const map_to_sequence_t<> &map_to_sequence =
+  map_to_sequence_t<>::_default;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML nodes into optional-like C++ types.
+ *
+ * @details reflected_call requires sanitizing this compound destination to
+ * its contained type. Discovery establishes scope only when needed and keeps
+ * the optional as the mapping destination, including when it is empty.
+ * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
+struct map_to_optional_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_optional<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_optional<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_optional_t _default;
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_optional_t<> map_to_optional{};
+#else
+static constexpr const map_to_optional_t<> &map_to_optional =
+  map_to_optional_t<>::_default;
 #endif
 
 } // namespace core

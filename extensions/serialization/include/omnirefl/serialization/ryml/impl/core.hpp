@@ -471,3 +471,28 @@ constexpr map_node_to_string_like_t<Default>
 } // namespace ryml
 } // namespace omni
 #endif
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+namespace core {
+
+template <typename Default>
+constexpr map_to_fundamental_t<Default> map_to_fundamental_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_optional_t<Default> map_to_optional_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_reflected_t<Default> map_to_reflected_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_sequence_t<Default> map_to_sequence_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_string_like_t<Default> map_to_string_like_t<Default>::_default{};
+
+} // namespace core
+} // namespace ryml
+} // namespace omni
+#endif
