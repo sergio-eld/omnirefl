@@ -1828,6 +1828,36 @@ TEST(fn_filter, defers_call_and_pipe_application) {
   EXPECT_EQ(std::make_tuple(1), piped);
 }
 
+namespace value_filter {
+
+template <typename Selected>
+struct element {
+  using type = typename Selected::type;
+  int value;
+  static constexpr bool is_selected() { return Selected::value; }
+};
+
+struct selected {
+  template <typename Selected>
+  constexpr auto operator()(element<Selected>) const
+    -> omni::compat::bool_constant<element<Selected>::is_selected()> {
+    return {};
+  }
+};
+
+} // namespace value_filter
+
+TEST(fn_filter, selects_wrapped_values_with_a_value_predicate) {
+  const auto values = std::make_tuple(
+    value_filter::element<std::true_type>{7},
+    value_filter::element<std::false_type>{8});
+
+  const auto selected = values | omni::fn::filter(value_filter::selected{});
+
+  EXPECT_EQ(1U, std::tuple_size<decltype(selected)>::value);
+  EXPECT_EQ(7, std::get<0>(selected).value);
+}
+
 TEST(fn_filter, preserves_tuple_access_categories) {
   auto mutable_lvalue_input = std::make_tuple(1, 1.5);
   const auto const_lvalue_input = std::make_tuple(2, 2.5);

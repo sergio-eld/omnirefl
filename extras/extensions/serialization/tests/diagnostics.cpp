@@ -148,7 +148,7 @@ TEST(diagnostics_transform, moves_retained_state_through_chained_updates) {
   const auto result = load(omni::type_t<int>{}, "bad");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("custom: updated: <root>: \"bad\" is not an integer",
+  EXPECT_EQ("custom: updated: <root>: expected integer, found scalar",
     result.diagnostics);
 }
 
@@ -159,7 +159,7 @@ TEST(diagnostics_transform, renders_by_default) {
   EXPECT_TRUE(valid.value);
   EXPECT_EQ("", valid.diagnostics);
   EXPECT_FALSE(invalid.value);
-  EXPECT_EQ("<root>: \"bad\" is not an integer", invalid.diagnostics);
+  EXPECT_EQ("<root>: expected integer, found scalar", invalid.diagnostics);
 }
 
 TEST(diagnostics_transform, decorates_the_current_callable) {
@@ -178,8 +178,9 @@ TEST(diagnostics_transform, decorates_the_current_callable) {
   const auto result = load(omni::type_t<int>{}, "bad");
 
   EXPECT_FALSE(result.value);
-  EXPECT_EQ("updated: <root>: \"bad\" is not an integer", result.diagnostics);
-  EXPECT_EQ("<root>: \"bad\" is not an integer",
+  EXPECT_EQ("updated: <root>: expected integer, found scalar",
+    result.diagnostics);
+  EXPECT_EQ("<root>: expected integer, found scalar",
     omni::ryml::deserialize(omni::type_t<int>{}, "bad").diagnostics);
 }
 
@@ -266,7 +267,7 @@ TEST(diagnostics_transform, preserves_policies_and_the_original_binding) {
   EXPECT_EQ(2, limited.config.error_policy.error_limit);
   EXPECT_EQ(0, omni::ryml::deserialize.config.error_policy.error_limit);
   EXPECT_EQ(1U, configured(omni::type_t<int>{}, "bad").diagnostics);
-  EXPECT_EQ("<root>: \"bad\" is not an integer",
+  EXPECT_EQ("<root>: expected integer, found scalar",
     limited(omni::type_t<int>{}, "bad").diagnostics);
 }
 
@@ -294,7 +295,7 @@ TEST(diagnostics_transform, renders_a_caller_owned_tree) {
 
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
-  EXPECT_EQ("<root>: \"bad\" is not an integer",
+  EXPECT_EQ("<root>: expected integer, found scalar",
     omni::ryml::render_diagnostics(*tree, result.diagnostics));
 }
 

@@ -718,15 +718,19 @@ struct nttp_unary_predicate {
 
 // Inspect a value predicate's Boolean constant without constructing tuple
 // elements: record bindings need an existing record. Keep the nullary protocol
-// as a fallback for type-based predicates.
-template <typename Predicate, typename Element,
-  typename Result = decltype(std::declval<const Predicate &>()(
-    std::declval<Element>()))>
-auto filter_constant(int) -> compat::bool_constant<bool(Result::value)>;
+// as a lazy fallback: probing both protocols can instantiate invalid metadata
+// wrappers inside a value predicate's operator template.
+template <typename Predicate, typename Element, typename = void>
+struct filter_constant:
+    compat::bool_constant<invoke_type<Element>(Predicate{})> {};
 
 template <typename Predicate, typename Element>
-auto filter_constant(long)
-  -> compat::bool_constant<invoke_type<Element>(Predicate{})>;
+struct filter_constant<Predicate,
+  Element,
+  compat::void_t<decltype(decltype(std::declval<const Predicate &>()(
+    std::declval<Element>()))::value)>>:
+    compat::bool_constant<bool(decltype(std::declval<const Predicate &>()(
+      std::declval<Element>()))::value)> {};
 
 template <typename Predicate,
   typename Tuple,
@@ -746,9 +750,9 @@ struct filtered_indices<Predicate,
     filtered_indices<Predicate,
       Tuple,
       compat::index_sequence<Remaining...>,
-      compat::conditional_t<decltype(filter_constant<Predicate,
-        decltype(compat::detail::tuple_get<Index>(std::declval<Tuple>()))>(
-        0))::value,
+      compat::conditional_t<filter_constant<Predicate,
+        decltype(compat::detail::tuple_get<Index>(
+          std::declval<Tuple>()))>::value,
         compat::index_sequence<Selected..., Index>,
         compat::index_sequence<Selected...>>> {};
 

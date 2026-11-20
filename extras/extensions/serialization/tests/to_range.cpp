@@ -292,7 +292,7 @@ const map_duplicate_case map_duplicate_cases[]{
     R"({"port":"bad","port":8})", 8, false},
   {"invalid_selected_last", duplicate_policy::last,
     R"({"port":7,"port":"bad"})",
-    omni::compat::unexpected<issue_code>{issue_code::invalid_scalar}, false},
+    omni::compat::unexpected<issue_code>{issue_code::unexpected_kind}, false},
 };
 
 class unique_map_duplicates:
@@ -491,7 +491,7 @@ TEST(range_mapping, preserves_original_map_key_paths) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
-    EXPECT_EQ(issue_code::invalid_scalar, issue.reason);
+    EXPECT_EQ(issue_code::unexpected_kind, issue.reason);
     EXPECT_EQ("/a~1b~0c", omni::ryml::detail::render_path(issue.path));
   }
 }

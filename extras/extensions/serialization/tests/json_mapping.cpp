@@ -181,7 +181,7 @@ const dsl::expected_issue Edup{
 };
 
 const dsl::expected_issue Etype{
-  omni::json::issue_code::invalid_scalar,
+  omni::json::issue_code::unexpected_kind,
   omni::json::value_kind::integer,
   "/value",
   false,
@@ -507,10 +507,10 @@ dsl::input<override_config> E(std::uint16_t limit,
 }
 
 const auto Efirst =
-  dsl::error(issue_code::invalid_scalar, "/first", value_kind::integer);
+  dsl::error(issue_code::unexpected_kind, "/first", value_kind::integer);
 
 const auto Esecond =
-  dsl::error(issue_code::invalid_scalar, "/second", value_kind::integer);
+  dsl::error(issue_code::unexpected_kind, "/second", value_kind::integer);
 
 // Axes: [pair_record][error limit][valid/invalid mapping input].
 const auto cases = std::make_tuple(
@@ -557,10 +557,10 @@ const auto cases = std::make_tuple(
 }
 )")
     >> expect<models::nested_records>(none,
-      {dsl::error(issue_code::invalid_scalar,
+      {dsl::error(issue_code::unexpected_kind,
         "/nested/value",
         value_kind::integer),
-        dsl::error(issue_code::invalid_scalar,
+        dsl::error(issue_code::unexpected_kind,
           "/items/0/value",
           value_kind::integer)}),
   E(2,
@@ -571,13 +571,13 @@ const auto cases = std::make_tuple(
 }
 )")
     >> expect<models::nested_records>(none,
-      {dsl::error(issue_code::invalid_scalar,
+      {dsl::error(issue_code::unexpected_kind,
         "/nested/value",
         value_kind::integer),
-        dsl::error(issue_code::invalid_scalar,
+        dsl::error(issue_code::unexpected_kind,
           "/items/0/value",
           value_kind::integer),
-        dsl::error(issue_code::invalid_scalar,
+        dsl::error(issue_code::unexpected_kind,
           "/items/1/value",
           value_kind::integer)}),
 
@@ -638,18 +638,18 @@ const auto cases = std::make_tuple(
   C(none, "{}") >> expect(models::optional_record{none}, {}),
   C(none, R"({"nested": {"value": "bad"}})")
     >> expect<models::optional_record>(none,
-      {dsl::error(issue_code::invalid_scalar,
+      {dsl::error(issue_code::unexpected_kind,
         "/nested/value",
         value_kind::integer)}),
 
   C(none, R"({"items": [{"value": 7}, {"value": "bad"}]})")
     >> expect<models::sequence_record>(none,
-      {dsl::error(issue_code::invalid_scalar,
+      {dsl::error(issue_code::unexpected_kind,
         "/items/1/value",
         value_kind::integer)}),
   C(none, R"({"items": [{"value": "bad"}]})")
     >> expect<models::sequence_record>(none,
-      {dsl::error(issue_code::invalid_scalar,
+      {dsl::error(issue_code::unexpected_kind,
         "/items/0/value",
         value_kind::integer)}));
 

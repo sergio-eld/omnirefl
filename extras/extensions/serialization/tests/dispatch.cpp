@@ -265,7 +265,7 @@ TEST(mapping_dispatch, nested_errors_retain_the_document_path) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   for (const auto &entry : result.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::invalid_scalar, entry.reason);
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, entry.reason);
     EXPECT_EQ("/0/west/value", omni::ryml::detail::render_path(entry.path));
   }
 }
