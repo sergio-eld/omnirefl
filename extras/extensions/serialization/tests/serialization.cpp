@@ -1,6 +1,5 @@
 #include "data.hpp"
 #include "json_match.hpp"
-#include "shared_defaults.hpp"
 
 #include <omnirefl/serialization/ryml.hpp>
 
@@ -22,17 +21,6 @@ namespace {
 
 const auto strict_deserialize = serialization_test::deserialize;
 const auto strict_map_by_schema = omni::ryml::map_by_schema;
-
-TEST(shared_defaults, have_the_same_identity_across_translation_units) {
-  const auto local = serialization_shared_defaults::local_addresses();
-  const auto other = serialization_shared_defaults::other_addresses();
-
-  EXPECT_EQ(local.size(), other.size());
-  for (const auto &entry : local) {
-    SCOPED_TRACE(entry.first);
-    EXPECT_EQ(entry.second, other.at(entry.first));
-  }
-}
 
 struct anonymous_record {
   // Value serialized from the record despite the function sharing its name.

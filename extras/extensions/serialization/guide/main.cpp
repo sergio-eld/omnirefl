@@ -11,7 +11,7 @@
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
  *   basics.enum_mapping - declared enumerator names as strings
- *   basics.local_configuration - customize config for an individual call
+ *   basics.local_configuration - customize config with tdm_config
  *   basics.diagnostics - value availability, errors, and warnings
  *   basics.explicit_configuration - construct a configured deserializer
  *   basics.unknown_fields - reject, ignore, or warn about unknown fields
@@ -274,7 +274,7 @@ struct two_readings {
 
 } // namespace policy_examples
 
-/** Local configuration customizes deserialization without changing defaults.
+/** tdm_config customizes a local deserializer without changing defaults.
  * This example allows unknown fields and sets an error limit captured from
  * the calling scope. */
 TEST(basics, local_configuration) {
@@ -317,7 +317,7 @@ TEST(basics, diagnostics) {
 /** An explicitly configured callable can be constructed in one expression. */
 TEST(basics, explicit_configuration) {
   // GCC 10 needs the nested policy type for aggregate deduction.
-  const auto load = omni::ryml::deserialize_t{
+  constexpr auto load = omni::ryml::deserialize_t{
     .config = omni::ryml::config_t{
       .error_policy = omni::json::error_policy{
         .unknown_fields = omni::json::unknown_policy::allow,

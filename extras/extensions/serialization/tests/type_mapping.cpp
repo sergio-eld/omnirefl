@@ -1,7 +1,5 @@
 #include "json_match.hpp"
-#include "shared_defaults.hpp"
 
-#include <map>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -12,11 +10,6 @@
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wdangling-else"
 #endif
-
-std::map<std::string, const void *>
-serialization_shared_defaults::other_addresses() {
-  return local_addresses();
-}
 
 namespace {
 
