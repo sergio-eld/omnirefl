@@ -42,7 +42,6 @@ default_to_string_like :: {
  *
  * @details String-view destinations borrow the tree's character storage.
  * The tree and its character storage must remain valid while views are used. */
-template <typename = void>
 struct default_to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && is_read_state<State>::value))
@@ -64,18 +63,13 @@ struct default_to_string_like_t {
         core::map_node_to_string_like))(std::move(state), node, into);
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const default_to_string_like_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_string_like_t<> default_to_string_like{};
+inline constexpr default_to_string_like_t default_to_string_like{};
 #else
-static constexpr const default_to_string_like_t<> &default_to_string_like =
-  default_to_string_like_t<>::_default;
+static constexpr const default_to_string_like_t &default_to_string_like =
+  compat::detail::shared_state<default_to_string_like_t>::value;
 #endif
 
 /** Maps a string-like value to a quoted JSON/YAML scalar.
@@ -87,25 +81,19 @@ static constexpr const default_to_string_like_t<> &default_to_string_like =
 from_string_like :: (state, const T&, node) -> void
 ```
  */
-template <typename = void>
 struct from_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_string_like<T>,
       is_write_state<State>>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_string_like_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_string_like_t<> from_string_like{};
+inline constexpr from_string_like_t from_string_like{};
 #else
-static constexpr const from_string_like_t<> &from_string_like =
-  from_string_like_t<>::_default;
+static constexpr const from_string_like_t &from_string_like =
+  compat::detail::shared_state<from_string_like_t>::value;
 #endif
 
 /** Checked Boolean node-to-type mapping.
@@ -119,7 +107,6 @@ default_to_boolean :: {
 }
 ```
  */
-template <typename = void>
 struct default_to_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
@@ -143,18 +130,13 @@ struct default_to_boolean_t {
         core::map_node_to_boolean))(std::move(state), node, into);
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const default_to_boolean_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_boolean_t<> default_to_boolean{};
+inline constexpr default_to_boolean_t default_to_boolean{};
 #else
-static constexpr const default_to_boolean_t<> &default_to_boolean =
-  default_to_boolean_t<>::_default;
+static constexpr const default_to_boolean_t &default_to_boolean =
+  compat::detail::shared_state<default_to_boolean_t>::value;
 #endif
 
 /** Maps a Boolean value to a JSON/YAML scalar.
@@ -164,25 +146,19 @@ static constexpr const default_to_boolean_t<> &default_to_boolean =
 from_boolean :: (state, T, node) -> void
 ```
  */
-template <typename = void>
 struct from_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_boolean_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_boolean_t<> from_boolean{};
+inline constexpr from_boolean_t from_boolean{};
 #else
-static constexpr const from_boolean_t<> &from_boolean =
-  from_boolean_t<>::_default;
+static constexpr const from_boolean_t &from_boolean =
+  compat::detail::shared_state<from_boolean_t>::value;
 #endif
 
 /** Checked integer node-to-type mapping.
@@ -196,7 +172,6 @@ default_to_integral :: {
 }
 ```
  */
-template <typename = void>
 struct default_to_integral_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
@@ -222,18 +197,13 @@ struct default_to_integral_t {
         core::map_node_to_integral))(std::move(state), node, into);
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const default_to_integral_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_integral_t<> default_to_integral{};
+inline constexpr default_to_integral_t default_to_integral{};
 #else
-static constexpr const default_to_integral_t<> &default_to_integral =
-  default_to_integral_t<>::_default;
+static constexpr const default_to_integral_t &default_to_integral =
+  compat::detail::shared_state<default_to_integral_t>::value;
 #endif
 
 /** Maps an integral value to a JSON/YAML scalar.
@@ -243,7 +213,6 @@ static constexpr const default_to_integral_t<> &default_to_integral =
 from_integral :: (state, const T&, node) -> void
 ```
  */
-template <typename = void>
 struct from_integral_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
@@ -251,18 +220,13 @@ struct from_integral_t {
       && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_integral_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_integral_t<> from_integral{};
+inline constexpr from_integral_t from_integral{};
 #else
-static constexpr const from_integral_t<> &from_integral =
-  from_integral_t<>::_default;
+static constexpr const from_integral_t &from_integral =
+  compat::detail::shared_state<from_integral_t>::value;
 #endif
 
 /** Checked floating-point node-to-type mapping.
@@ -276,7 +240,6 @@ default_to_floating_point :: {
 }
 ```
  */
-template <typename = void>
 struct default_to_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_read_state<State>::value))
@@ -298,18 +261,13 @@ struct default_to_floating_point_t {
         core::map_node_to_floating_point))(std::move(state), node, into);
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const default_to_floating_point_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_floating_point_t<> default_to_floating_point{};
+inline constexpr default_to_floating_point_t default_to_floating_point{};
 #else
-static constexpr const default_to_floating_point_t<> &default_to_floating_point =
-  default_to_floating_point_t<>::_default;
+static constexpr const default_to_floating_point_t &default_to_floating_point =
+  compat::detail::shared_state<default_to_floating_point_t>::value;
 #endif
 
 /** Maps a floating-point value to a JSON/YAML scalar.
@@ -320,24 +278,18 @@ static constexpr const default_to_floating_point_t<> &default_to_floating_point 
 from_floating_point :: (state, const T&, node) -> void
 ```
  */
-template <typename = void>
 struct from_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_floating_point_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_floating_point_t<> from_floating_point{};
+inline constexpr from_floating_point_t from_floating_point{};
 #else
-static constexpr const from_floating_point_t<> &from_floating_point =
-  from_floating_point_t<>::_default;
+static constexpr const from_floating_point_t &from_floating_point =
+  compat::detail::shared_state<from_floating_point_t>::value;
 #endif
 
 /** Checked arithmetic node-to-type mapping.
@@ -353,15 +305,14 @@ default_to_arithmetic :: {
 }
 ```
  */
-template <typename = void>
 struct default_to_arithmetic_t {
   // Validate the category required by T, rather than accepting every scalar.
   template <typename T>
   using mapping_type = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      default_to_boolean_t<>>,
-    traits::case_<std::is_integral<T>::value, default_to_integral_t<>>,
-    default_to_floating_point_t<>>::type;
+      default_to_boolean_t>,
+    traits::case_<std::is_integral<T>::value, default_to_integral_t>,
+    default_to_floating_point_t>::type;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_read_state<State>::value
@@ -381,18 +332,13 @@ struct default_to_arithmetic_t {
     return mapping_type<T>{}(std::move(state), node, into);
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const default_to_arithmetic_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_arithmetic_t<> default_to_arithmetic{};
+inline constexpr default_to_arithmetic_t default_to_arithmetic{};
 #else
-static constexpr const default_to_arithmetic_t<> &default_to_arithmetic =
-  default_to_arithmetic_t<>::_default;
+static constexpr const default_to_arithmetic_t &default_to_arithmetic =
+  compat::detail::shared_state<default_to_arithmetic_t>::value;
 #endif
 
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
@@ -402,24 +348,18 @@ static constexpr const default_to_arithmetic_t<> &default_to_arithmetic =
 from_arithmetic :: (state, const T&, node) -> void
 ```
  */
-template <typename = void>
 struct from_arithmetic_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_write_state<State>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_arithmetic_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_arithmetic_t<> from_arithmetic{};
+inline constexpr from_arithmetic_t from_arithmetic{};
 #else
-static constexpr const from_arithmetic_t<> &from_arithmetic =
-  from_arithmetic_t<>::_default;
+static constexpr const from_arithmetic_t &from_arithmetic =
+  compat::detail::shared_state<from_arithmetic_t>::value;
 #endif
 
 // FIXME: [high] Separate optional unwrapping from fundamental mappings:
@@ -459,25 +399,19 @@ constexpr auto default_to_optional_like(omni::type_t<T>)
 from_optional_like :: (state, const T&, node) -> void
 ```
  */
-template <typename = void>
 struct from_optional_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_optional_like_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_optional_like_t<> from_optional_like{};
+inline constexpr from_optional_like_t from_optional_like{};
 #else
-static constexpr const from_optional_like_t<> &from_optional_like =
-  from_optional_like_t<>::_default;
+static constexpr const from_optional_like_t &from_optional_like =
+  compat::detail::shared_state<from_optional_like_t>::value;
 #endif
 
 /** Customization points for C++ type mappings. */
@@ -641,13 +575,13 @@ namespace detail {
 template <typename _T, typename T = compat::remove_cv_t<_T>>
 using default_mapping_to_type = typename traits::select<
   traits::case_<traits::is_string_like<T>::value,
-    default_to_string_like_t<>>,
+    default_to_string_like_t>,
   traits::case_<std::is_same<bool, T>::value,
-    default_to_boolean_t<>>,
+    default_to_boolean_t>,
   traits::case_<std::is_integral<T>::value,
-    default_to_integral_t<>>,
+    default_to_integral_t>,
   traits::case_<std::is_floating_point<T>::value,
-    default_to_floating_point_t<>>,
+    default_to_floating_point_t>,
   traits::case_<traits::is_optional<T>::value,
     decltype(default_to_optional_like(omni::type_t<T>{}))>,
   traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
@@ -669,17 +603,17 @@ using default_mapping_to_type = typename traits::select<
  * scope. Without a default, this alias is traits::cp::unavailable. */
 template <typename _T, typename T = compat::remove_cv_t<_T>>
 using default_mapping_from_type = typename traits::select<
-  traits::case_<traits::is_string_like<T>::value, from_string_like_t<>>,
-  traits::case_<std::is_same<bool, T>::value, from_boolean_t<>>,
-  traits::case_<std::is_integral<T>::value, from_integral_t<>>,
-  traits::case_<std::is_floating_point<T>::value, from_floating_point_t<>>,
-  traits::case_<traits::is_optional<T>::value, from_optional_like_t<>>,
+  traits::case_<traits::is_string_like<T>::value, from_string_like_t>,
+  traits::case_<std::is_same<bool, T>::value, from_boolean_t>,
+  traits::case_<std::is_integral<T>::value, from_integral_t>,
+  traits::case_<std::is_floating_point<T>::value, from_floating_point_t>,
+  traits::case_<traits::is_optional<T>::value, from_optional_like_t>,
   traits::case_<omni::ryml::detail::is_mapped_range<const T>::value,
-    from_range_t<>>,
+    from_range_t>,
   traits::case_<omni::is_reflected_enum<T>::value,
-    reflected_scope::from_enum_t<>>,
+    reflected_scope::from_enum_t>,
   traits::case_<omni::is_reflected_record<T>::value,
-    reflected_scope::from_record_t<>>,
+    reflected_scope::from_record_t>,
   traits::cp::unavailable>::type;
 
 } // namespace detail

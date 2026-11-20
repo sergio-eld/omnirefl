@@ -108,7 +108,6 @@ from_record :: (state, const T&, node) -> void
 ```
  *
  * @pre Record metadata must be available in reflected scope. */
-template <typename = void>
 struct from_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
@@ -116,18 +115,13 @@ struct from_record_t {
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_record_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_record_t<> from_record{};
+inline constexpr from_record_t from_record{};
 #else
-static constexpr const from_record_t<> &from_record =
-  from_record_t<>::_default;
+static constexpr const from_record_t &from_record =
+  compat::detail::shared_state<from_record_t>::value;
 #endif
 
 } // namespace reflected_scope

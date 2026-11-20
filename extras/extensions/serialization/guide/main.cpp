@@ -981,7 +981,7 @@ TEST(diagnostics, custom_results) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t<> previous) {
+        [](omni::ryml::render_diagnostics_t previous) {
           return [previous](const ::ryml::Tree &tree,
             omni::ryml::diagnostics report) {
             return summary{

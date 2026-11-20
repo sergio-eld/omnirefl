@@ -9,11 +9,10 @@
 namespace omni {
 namespace ryml {
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_string_like<T>,
     is_write_state<State>>::value))
-auto from_string_like_t<Default>::operator()(State context,
+auto from_string_like_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {
@@ -39,32 +38,29 @@ auto from_string_like_t<Default>::operator()(State context,
   node.set_val_style(::ryml::VAL_DQUO);
 }
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_boolean_t<Default>::operator()(State,
+void from_boolean_t::operator()(State,
   const T &value,
   ::ryml::NodeRef node) const {
   // C4's plain bool conversion emits 0/1 rather than document booleans.
   node.set_serialized(c4::fmt::boolalpha(value));
 }
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_integral<T>::value
     && !std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_integral_t<Default>::operator()(State,
+void from_integral_t::operator()(State,
   const T &value,
   ::ryml::NodeRef node) const {
   node.set_serialized(value);
 }
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_write_state<State>::value))
-void from_floating_point_t<Default>::operator()(State,
+void from_floating_point_t::operator()(State,
   const T &value,
   ::ryml::NodeRef node) const {
   // Preserve enough significant digits to recover the original value.
@@ -72,17 +68,16 @@ void from_floating_point_t<Default>::operator()(State,
     std::numeric_limits<T>::max_digits10, c4::FTOA_FLEX));
 }
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && is_write_state<State>::value))
-auto from_arithmetic_t<Default>::operator()(State context,
+auto from_arithmetic_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const -> void {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      from_boolean_t<>>,
-    traits::case_<std::is_integral<T>::value, from_integral_t<>>,
-    from_floating_point_t<>>::type{};
+      from_boolean_t>,
+    traits::case_<std::is_integral<T>::value, from_integral_t>,
+    from_floating_point_t>::type{};
 
   write(std::move(context), value, node);
 }
@@ -109,10 +104,9 @@ auto to_optional_like_t::operator()(State context,
     });
 }
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
-auto from_optional_like_t<Default>::operator()(State context,
+auto from_optional_like_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {
@@ -149,49 +143,3 @@ auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
-
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-namespace omni {
-namespace ryml {
-
-template <typename Default>
-constexpr default_to_arithmetic_t<Default>
-  default_to_arithmetic_t<Default>::_default{};
-
-template <typename Default>
-constexpr default_to_boolean_t<Default> default_to_boolean_t<Default>::_default{};
-
-template <typename Default>
-constexpr default_to_floating_point_t<Default>
-  default_to_floating_point_t<Default>::_default{};
-
-template <typename Default>
-constexpr default_to_integral_t<Default>
-  default_to_integral_t<Default>::_default{};
-
-template <typename Default>
-constexpr default_to_string_like_t<Default>
-  default_to_string_like_t<Default>::_default{};
-
-template <typename Default>
-constexpr from_arithmetic_t<Default> from_arithmetic_t<Default>::_default{};
-
-template <typename Default>
-constexpr from_boolean_t<Default> from_boolean_t<Default>::_default{};
-
-template <typename Default>
-constexpr from_floating_point_t<Default>
-  from_floating_point_t<Default>::_default{};
-
-template <typename Default>
-constexpr from_integral_t<Default> from_integral_t<Default>::_default{};
-
-template <typename Default>
-constexpr from_optional_like_t<Default> from_optional_like_t<Default>::_default{};
-
-template <typename Default>
-constexpr from_string_like_t<Default> from_string_like_t<Default>::_default{};
-
-} // namespace ryml
-} // namespace omni
-#endif

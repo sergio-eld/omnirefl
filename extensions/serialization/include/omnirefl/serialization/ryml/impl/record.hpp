@@ -340,11 +340,10 @@ auto to_record_t<NameByAlias>::operator()(State context,
   return std::move(folded.value).finish();
 }
 
-template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto from_record_t<Default>::operator()(State context,
+auto from_record_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {
@@ -361,16 +360,3 @@ auto from_record_t<Default>::operator()(State context,
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
-
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-namespace omni {
-namespace ryml {
-namespace reflected_scope {
-
-template <typename Default>
-constexpr from_record_t<Default> from_record_t<Default>::_default{};
-
-} // namespace reflected_scope
-} // namespace ryml
-} // namespace omni
-#endif

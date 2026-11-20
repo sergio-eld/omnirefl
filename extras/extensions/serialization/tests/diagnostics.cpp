@@ -305,7 +305,7 @@ TEST(diagnostics_transform, renders_by_default) {
 TEST(diagnostics_transform, decorates_the_current_callable) {
   const omni::ryml::config_t<> original{};
   const auto options = original.tdm_transform_diagnostics(
-    [](omni::ryml::render_diagnostics_t<> previous) {
+    [](omni::ryml::render_diagnostics_t previous) {
       return [previous](const ::ryml::Tree &tree,
         omni::ryml::diagnostics report) {
         return "updated: " + previous(tree, report);
@@ -328,7 +328,7 @@ TEST(diagnostics_transform, receives_the_tree_before_it_is_released) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t<>) {
+        [](omni::ryml::render_diagnostics_t) {
           return [](const ::ryml::Tree &tree, omni::ryml::diagnostics report)
             -> std::vector<std::string> {
             std::vector<std::string> values;
@@ -352,7 +352,7 @@ TEST(diagnostics_transform, reports_parse_errors_without_a_valid_tree) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t<>) {
+        [](omni::ryml::render_diagnostics_t) {
           return [](const ::ryml::Tree &tree, omni::ryml::diagnostics report) {
             return tree.empty() ? report.parse_error_message : std::string{};
           };
@@ -370,7 +370,7 @@ TEST(diagnostics_transform, retains_mutable_renderer_state) {
     [](omni::ryml::config_t<> options) {
       int calls = 0;
       return options.tdm_transform_diagnostics(
-        [calls](omni::ryml::render_diagnostics_t<>) mutable {
+        [calls](omni::ryml::render_diagnostics_t) mutable {
           return [calls](const ::ryml::Tree &, omni::ryml::diagnostics) mutable {
             return ++calls;
           };
@@ -396,7 +396,7 @@ TEST(diagnostics_transform, preserves_policies_and_the_original_binding) {
   const auto configured = limited.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t<>) {
+        [](omni::ryml::render_diagnostics_t) {
           return [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
             return report.issues.size();
           };
@@ -463,7 +463,7 @@ TEST(diagnostics_transform, configures_a_diagnostics_result) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t<>) {
+        [](omni::ryml::render_diagnostics_t) {
           return [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
             return report.issues.size();
           };

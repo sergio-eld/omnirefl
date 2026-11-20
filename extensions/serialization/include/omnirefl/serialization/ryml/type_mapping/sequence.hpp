@@ -72,25 +72,19 @@ from_range :: (state, const T&, node) -> void
  * Empty optional array elements are omitted. Optional object values remain.
  * Non-scalar C++ elements must be exposed as lvalue references to value_type;
  * default mapping rejects temporary-producing iterators in both tree modes. */
-template <typename = void>
 struct from_range_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
   void operator()(State context, const T &value, ::ryml::NodeRef node) const;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_range_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_range_t<> from_range{};
+inline constexpr from_range_t from_range{};
 #else
-static constexpr const from_range_t<> &from_range =
-  from_range_t<>::_default;
+static constexpr const from_range_t &from_range =
+  compat::detail::shared_state<from_range_t>::value;
 #endif
 
 } // namespace ryml

@@ -67,18 +67,13 @@ struct map_node_to_enum_t {
   }
 #endif
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_node_to_enum_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr map_node_to_enum_t<> map_node_to_enum{};
 #else
 static constexpr const map_node_to_enum_t<> &map_node_to_enum =
-  map_node_to_enum_t<>::_default;
+  compat::detail::shared_state<map_node_to_enum_t<>>::value;
 #endif
 
 } // namespace reflected_scope
@@ -113,25 +108,19 @@ from_enum :: (state, T, node) -> void
 ```
  *
  * @pre Metadata for T must be available in reflected scope. */
-template <typename = void>
 struct from_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_write_state<State>>::value))
   auto operator()(State, T value, ::ryml::NodeRef node) const -> void;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const from_enum_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_enum_t<> from_enum{};
+inline constexpr from_enum_t from_enum{};
 #else
-static constexpr const from_enum_t<> &from_enum =
-  from_enum_t<>::_default;
+static constexpr const from_enum_t &from_enum =
+  compat::detail::shared_state<from_enum_t>::value;
 #endif
 
 } // namespace reflected_scope

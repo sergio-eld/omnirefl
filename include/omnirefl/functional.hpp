@@ -122,7 +122,6 @@ constexpr auto stop_with(Accumulator &&value)
   return {std::forward<Accumulator>(value), /*stopped=*/true};
 }
 
-
 namespace detail {
 
 template <typename WhenTrue, typename WhenFalse>
@@ -374,7 +373,6 @@ constexpr compile_time_predicate_t<Predicate> ct_pred(Predicate) {
 }
 
 /** C++11-compatible conditional invocation compositor. */
-template <typename = void>
 struct branch_t {
   /**
    * Immediately invoke a predicate and only its selected operation.
@@ -413,25 +411,20 @@ struct branch_t {
     return detail::select(Predicate{}, when_true, when_false, int{});
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const branch_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 /** Immediately invoke a predicate and only its selected operation. */
-inline constexpr branch_t<> branch{};
+inline constexpr branch_t branch{};
 #else
 /** Immediately invoke a predicate and only its selected operation. */
-static constexpr const branch_t<> &branch =
-  branch_t<>::_default;
+static constexpr const branch_t &branch =
+  compat::detail::shared_state<branch_t>::value;
 #endif
 
 /** Bind leading arguments to a callable. */
 OMNI_CONSTRAINED_TEMPLATE((typename Function, typename... Bound),
-  (!std::is_same<compat::decay_t<Function>, branch_t<>>::value || 2 !=
+  (!std::is_same<compat::decay_t<Function>, branch_t>::value || 2 !=
     sizeof...(Bound)))
 constexpr auto partial(Function &&function, Bound &&...bound)
   -> decltype(compat::bind_front(std::forward<Function>(function),
@@ -506,7 +499,7 @@ struct partial_branch {
 
 /** Bind a predicate and selected operation to `branch`. */
 template <typename Predicate, typename WhenTrue>
-constexpr auto partial(branch_t<>,
+constexpr auto partial(branch_t,
   Predicate &&predicate,
   WhenTrue &&when_true) //
   -> typename std::enable_if<
@@ -593,7 +586,6 @@ struct cond_tail<Current, Next, Rest...> {
 } // namespace detail
 
 /** Evaluate partially applied branches in order, ending with a fallback. */
-template <typename = void>
 struct cond_t {
   template <typename Otherwise>
   constexpr auto operator()(Otherwise &&otherwise) const
@@ -613,20 +605,15 @@ struct cond_t {
         std::forward<Rest>(rest)...});
   }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const cond_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 /** Evaluate partially applied branches in order, ending with a fallback. */
-inline constexpr cond_t<> cond{};
+inline constexpr cond_t cond{};
 #else
 /** Evaluate partially applied branches in order, ending with a fallback. */
-static constexpr const cond_t<> &cond =
-  cond_t<>::_default;
+static constexpr const cond_t &cond =
+  compat::detail::shared_state<cond_t>::value;
 #endif
 
 /**
@@ -1152,11 +1139,6 @@ struct predicate_t {
   template <typename T>
   constexpr Trait<compat::remove_cvref_t<T>> operator()() const { return {}; }
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const predicate_t _default;
-#endif
 };
 
 namespace detail {
@@ -1278,7 +1260,7 @@ using always_true_t = std::true_type;
 inline constexpr predicate_t<always_true_t> always_true{};
 #else
 static constexpr const predicate_t<always_true_t> &always_true =
-  predicate_t<always_true_t>::_default;
+  compat::detail::shared_state<predicate_t<always_true_t>>::value;
 #endif
 
 /// Reject every type or value in compile-time predicate composition.
@@ -1289,7 +1271,7 @@ using always_false_t = std::false_type;
 inline constexpr predicate_t<always_false_t> always_false{};
 #else
 static constexpr const predicate_t<always_false_t> &always_false =
-  predicate_t<always_false_t>::_default;
+  compat::detail::shared_state<predicate_t<always_false_t>>::value;
 #endif
 
 /// Whether field or function metadata describes a static member.
@@ -1301,7 +1283,7 @@ struct is_static_t:
 inline constexpr predicate_t<is_static_t> is_static{};
 #else
 static constexpr const predicate_t<is_static_t> &is_static =
-  predicate_t<is_static_t>::_default;
+  compat::detail::shared_state<predicate_t<is_static_t>>::value;
 #endif
 
 /// Whether field or function metadata describes a non-static member.
@@ -1312,7 +1294,7 @@ struct is_non_static_t: compat::negation<is_static_t<Member>> {};
 inline constexpr predicate_t<is_non_static_t> is_non_static{};
 #else
 static constexpr const predicate_t<is_non_static_t> &is_non_static =
-  predicate_t<is_non_static_t>::_default;
+  compat::detail::shared_state<predicate_t<is_non_static_t>>::value;
 #endif
 
 /** Whether data-member metadata or a binding exposes associated function
@@ -1327,7 +1309,7 @@ struct has_callable_metadata_t:
 inline constexpr predicate_t<has_callable_metadata_t> has_callable_metadata{};
 #else
 static constexpr const predicate_t<has_callable_metadata_t> &has_callable_metadata =
-  predicate_t<has_callable_metadata_t>::_default;
+  compat::detail::shared_state<predicate_t<has_callable_metadata_t>>::value;
 #endif
 
 /// Whether a data member has no associated function metadata.
@@ -1339,7 +1321,7 @@ struct is_non_functional_t:
 inline constexpr predicate_t<is_non_functional_t> is_non_functional{};
 #else
 static constexpr const predicate_t<is_non_functional_t> &is_non_functional =
-  predicate_t<is_non_functional_t>::_default;
+  compat::detail::shared_state<predicate_t<is_non_functional_t>>::value;
 #endif
 
 /** Whether the declared data-member type accepts an assigned value of that
@@ -1354,7 +1336,7 @@ struct is_assignable_t:
 inline constexpr predicate_t<is_assignable_t> is_assignable{};
 #else
 static constexpr const predicate_t<is_assignable_t> &is_assignable =
-  predicate_t<is_assignable_t>::_default;
+  compat::detail::shared_state<predicate_t<is_assignable_t>>::value;
 #endif
 
 /** QoL key projection for comparing reflected fields by name. */
@@ -2002,5 +1984,3 @@ constexpr diff_by_closure<Key, compat::decay_t<Right>> diff_by(Key key,
 
 } // namespace fn
 } // namespace omni
-
-#include <omnirefl/impl/functional.hpp>

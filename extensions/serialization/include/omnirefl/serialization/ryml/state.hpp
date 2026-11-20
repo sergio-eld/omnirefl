@@ -123,29 +123,23 @@ namespace ryml {
 struct diagnostics;
 
 /** Render issue records using their source tree while it is alive. */
-template <typename = void>
 struct render_diagnostics_t {
   std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const render_diagnostics_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr render_diagnostics_t<> render_diagnostics{};
+inline constexpr render_diagnostics_t render_diagnostics{};
 #else
-static constexpr const render_diagnostics_t<> &render_diagnostics =
-  render_diagnostics_t<>::_default;
+static constexpr const render_diagnostics_t &render_diagnostics =
+  compat::detail::shared_state<render_diagnostics_t>::value;
 #endif
 
 /** Deserialization configuration.
  * In C++20, aggregate deduction supports config_t{.transform_diagnostics = f}.
  * Earlier standards can use tdm_transform_diagnostics to change the callable
  * type without spelling the resulting config specialization. */
-template <typename TransformDiagnostics = render_diagnostics_t<>>
+template <typename TransformDiagnostics = render_diagnostics_t>
 struct config_t {
   json::error_policy error_policy OMNI_CPP14_DEFAULT_INIT();
 
@@ -162,7 +156,7 @@ struct config_t {
 const auto load = omni::ryml::deserialize.tdm_config(
   [](omni::ryml::config_t<> options) {
     return options.tdm_transform_diagnostics(
-      [](omni::ryml::render_diagnostics_t<> previous) {
+      [](omni::ryml::render_diagnostics_t previous) {
         return [previous](const ::ryml::Tree &tree,
           omni::ryml::diagnostics report) {
           return previous(tree, report).size();
@@ -713,5 +707,3 @@ concept write_state_like = is_write_state<T>::value;
 
 } // namespace ryml
 } // namespace omni
-
-#include <omnirefl/serialization/ryml/impl/state.hpp>

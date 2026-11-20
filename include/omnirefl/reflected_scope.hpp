@@ -812,7 +812,6 @@ struct meta_t<_M, reflected_entity::record> {
 
   private:
   // Only reflected entry points may construct metadata wrappers.
-  template <typename>
   friend struct reflected_call_t;
 
 #if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
@@ -980,7 +979,6 @@ struct meta_t<_M, reflected_entity::enumeration> {
 
   private:
   // Only reflected entry points may construct metadata wrappers.
-  template <typename>
   friend struct reflected_call_t;
 
 #if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
@@ -1377,7 +1375,6 @@ struct binding_t<T, reflected_entity::record>:
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
-  template <typename>
   friend struct reflected_call_t;
   friend meta;
 
@@ -1469,7 +1466,6 @@ struct binding_t<T, reflected_entity::enumeration>:
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
-  template <typename>
   friend struct reflected_call_t;
   friend meta;
 
@@ -1611,7 +1607,6 @@ constexpr auto reflected(T &&t) noexcept(
 #  endif
 #endif
 
-template <typename = void>
 struct reflected_call_t {
   private:
   // These factories need this class's friendship to construct public wrappers.
@@ -1678,12 +1673,6 @@ struct reflected_call_t {
     return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
   }
-
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const reflected_call_t _default;
-#endif
 
   // TODO: Replace this callable implementation type with overloaded
   // `reflected_call` functions.
@@ -1783,10 +1772,10 @@ struct reflected_call_t {
  * not supported.
  */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr reflected_call_t<> reflected_call{};
+inline constexpr reflected_call_t reflected_call{};
 #else
-static constexpr const reflected_call_t<> &reflected_call =
-  reflected_call_t<>::_default;
+static constexpr const reflected_call_t &reflected_call =
+  compat::detail::shared_state<reflected_call_t>::value;
 #endif
 
 /**
@@ -1893,5 +1882,3 @@ T aggregate_into(Fields &&fields) {
 } // namespace omni
 
 #undef OMNI_DETAIL_UNGENERATED_REFLECTION
-
-#include <omnirefl/impl/reflected_scope.hpp>

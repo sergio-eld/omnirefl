@@ -8,7 +8,6 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
-#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -19,6 +18,13 @@
 
 namespace omni {
 namespace ryml {
+namespace detail {
+
+template <typename T>
+struct is_mapped_range;
+
+} // namespace detail
+
 namespace core {
 
 /**
@@ -103,7 +109,6 @@ map_node_to_string_like :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates the node shape. node must refer to a scalar in a
  * valid tree; only a debug assertion checks the scalar-node precondition. */
-template <typename = void>
 struct map_node_to_string_like_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -113,18 +118,13 @@ struct map_node_to_string_like_t {
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_node_to_string_like_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_node_to_string_like_t<> map_node_to_string_like{};
+inline constexpr map_node_to_string_like_t map_node_to_string_like{};
 #else
-static constexpr const map_node_to_string_like_t<> &map_node_to_string_like =
-  map_node_to_string_like_t<>::_default;
+static constexpr const map_node_to_string_like_t &map_node_to_string_like =
+  compat::detail::shared_state<map_node_to_string_like_t>::value;
 #endif
 
 /** Checks for unquoted Boolean text, including an explicit YAML Boolean tag.
@@ -142,7 +142,6 @@ map_node_to_boolean :: (state, node, type<bool>) -> with_diagnostics<bool>
  *
  * @details Uses \ref parse_boolean for conversion. The caller validates the
  * input; debug assertions check the precondition. */
-template <typename = void>
 struct map_node_to_boolean_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -152,18 +151,13 @@ struct map_node_to_boolean_t {
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_node_to_boolean_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_node_to_boolean_t<> map_node_to_boolean{};
+inline constexpr map_node_to_boolean_t map_node_to_boolean{};
 #else
-static constexpr const map_node_to_boolean_t<> &map_node_to_boolean =
-  map_node_to_boolean_t<>::_default;
+static constexpr const map_node_to_boolean_t &map_node_to_boolean =
+  compat::detail::shared_state<map_node_to_boolean_t>::value;
 #endif
 
 /** Checks for unquoted integer text.
@@ -181,7 +175,6 @@ map_node_to_integral :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates integer input in a valid tree; a debug assertion
  * checks this precondition. Destination range is checked during conversion. */
-template <typename = void>
 struct map_node_to_integral_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -192,18 +185,13 @@ struct map_node_to_integral_t {
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_node_to_integral_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_node_to_integral_t<> map_node_to_integral{};
+inline constexpr map_node_to_integral_t map_node_to_integral{};
 #else
-static constexpr const map_node_to_integral_t<> &map_node_to_integral =
-  map_node_to_integral_t<>::_default;
+static constexpr const map_node_to_integral_t &map_node_to_integral =
+  compat::detail::shared_state<map_node_to_integral_t>::value;
 #endif
 
 /** Checks for unquoted numeric text.
@@ -221,7 +209,6 @@ map_node_to_floating_point :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates numeric input in a valid tree; a debug assertion
  * checks this precondition. */
-template <typename = void>
 struct map_node_to_floating_point_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -230,18 +217,13 @@ struct map_node_to_floating_point_t {
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_node_to_floating_point_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_node_to_floating_point_t<> map_node_to_floating_point{};
+inline constexpr map_node_to_floating_point_t map_node_to_floating_point{};
 #else
-static constexpr const map_node_to_floating_point_t<> &map_node_to_floating_point =
-  map_node_to_floating_point_t<>::_default;
+static constexpr const map_node_to_floating_point_t &map_node_to_floating_point =
+  compat::detail::shared_state<map_node_to_floating_point_t>::value;
 #endif
 
 /** Checks for a Boolean or numeric node.
@@ -260,7 +242,6 @@ map_node_to_arithmetic :: (state, node, type<T>) -> with_diagnostics<T>
  * @pre Caller validates Boolean input for bool, integer input for other
  * integral types, or numeric input for floating-point types, in a valid tree.
  * Only debug assertions check these preconditions. */
-template <typename = void>
 struct map_node_to_arithmetic_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -271,18 +252,13 @@ struct map_node_to_arithmetic_t {
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_node_to_arithmetic_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_node_to_arithmetic_t<> map_node_to_arithmetic{};
+inline constexpr map_node_to_arithmetic_t map_node_to_arithmetic{};
 #else
-static constexpr const map_node_to_arithmetic_t<> &map_node_to_arithmetic =
-  map_node_to_arithmetic_t<>::_default;
+static constexpr const map_node_to_arithmetic_t &map_node_to_arithmetic =
+  compat::detail::shared_state<map_node_to_arithmetic_t>::value;
 #endif
 
 /** Node-to-type mapping through a customization or its default.
@@ -317,7 +293,6 @@ void write_node(State context, const T &value, ::ryml::NodeRef node);
  * @details reflected_call requires a metadata-bearing target. This route
  * handles arithmetic destinations without reflection.
  * @pre node must be valid; destination pointers must be non-null. */
-template <typename = void>
 struct map_to_fundamental_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && !std::is_const<T>::value
@@ -333,18 +308,13 @@ struct map_to_fundamental_t {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_to_fundamental_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_to_fundamental_t<> map_to_fundamental{};
+inline constexpr map_to_fundamental_t map_to_fundamental{};
 #else
-static constexpr const map_to_fundamental_t<> &map_to_fundamental =
-  map_to_fundamental_t<>::_default;
+static constexpr const map_to_fundamental_t &map_to_fundamental =
+  compat::detail::shared_state<map_to_fundamental_t>::value;
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into string-like C++ types.
@@ -352,7 +322,6 @@ static constexpr const map_to_fundamental_t<> &map_to_fundamental =
  * @details String-like destinations may be instrumentation-disabled. This
  * route keeps them outside reflected_call.
  * @pre node must be valid; destination pointers must be non-null. */
-template <typename = void>
 struct map_to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && !std::is_const<T>::value
@@ -368,18 +337,13 @@ struct map_to_string_like_t {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_to_string_like_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_to_string_like_t<> map_to_string_like{};
+inline constexpr map_to_string_like_t map_to_string_like{};
 #else
-static constexpr const map_to_string_like_t<> &map_to_string_like =
-  map_to_string_like_t<>::_default;
+static constexpr const map_to_string_like_t &map_to_string_like =
+  compat::detail::shared_state<map_to_string_like_t>::value;
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into C++ types requiring
@@ -389,7 +353,6 @@ static constexpr const map_to_string_like_t<> &map_to_string_like =
  * compound destination. Range and optional wrappers are unwrapped to obtain
  * that reflection target while mapping retains the original destination.
  * @pre node must be valid; destination pointers must be non-null. */
-template <typename = void>
 struct map_to_reflected_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_object<T>::value && !std::is_const<T>::value
@@ -405,18 +368,13 @@ struct map_to_reflected_t {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_to_reflected_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_to_reflected_t<> map_to_reflected{};
+inline constexpr map_to_reflected_t map_to_reflected{};
 #else
-static constexpr const map_to_reflected_t<> &map_to_reflected =
-  map_to_reflected_t<>::_default;
+static constexpr const map_to_reflected_t &map_to_reflected =
+  compat::detail::shared_state<map_to_reflected_t>::value;
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML arrays or objects into C++ ranges.
@@ -426,7 +384,6 @@ static constexpr const map_to_reflected_t<> &map_to_reflected =
  * scope, preserving the original range as the destination. Fundamental and
  * string-like elements require no reflected scope, including empty ranges.
  * @pre node must be valid; destination pointers must be non-null. */
-template <typename = void>
 struct map_to_sequence_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
@@ -442,18 +399,13 @@ struct map_to_sequence_t {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_to_sequence_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_to_sequence_t<> map_to_sequence{};
+inline constexpr map_to_sequence_t map_to_sequence{};
 #else
-static constexpr const map_to_sequence_t<> &map_to_sequence =
-  map_to_sequence_t<>::_default;
+static constexpr const map_to_sequence_t &map_to_sequence =
+  compat::detail::shared_state<map_to_sequence_t>::value;
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into optional-like C++ types.
@@ -462,7 +414,6 @@ static constexpr const map_to_sequence_t<> &map_to_sequence =
  * its contained type. Discovery establishes scope only when needed and keeps
  * the optional as the mapping destination, including when it is empty.
  * @pre node must be valid; destination pointers must be non-null. */
-template <typename = void>
 struct map_to_optional_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_optional<T>::value && !std::is_const<T>::value
@@ -478,18 +429,13 @@ struct map_to_optional_t {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
-  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
-  // complete self-type and therefore belongs in the implementation header.
-  static const map_to_optional_t _default;
-#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_to_optional_t<> map_to_optional{};
+inline constexpr map_to_optional_t map_to_optional{};
 #else
-static constexpr const map_to_optional_t<> &map_to_optional =
-  map_to_optional_t<>::_default;
+static constexpr const map_to_optional_t &map_to_optional =
+  compat::detail::shared_state<map_to_optional_t>::value;
 #endif
 
 } // namespace core

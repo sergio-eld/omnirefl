@@ -202,6 +202,29 @@ struct index_sequence {};
 
 namespace detail {
 
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+// Ad hoc: template storage shares header-defined defaults before inline
+// variables. General state need only be default-constructible.
+template <typename T, typename Enable = void>
+struct shared_state {
+  static const T value;
+};
+
+template <typename T, typename Enable>
+const T shared_state<T, Enable>::value{};
+
+// Test T{} itself: a literal type can still have a runtime-only default ctor.
+template <typename T>
+struct shared_state<T,
+  typename std::enable_if<(static_cast<void>(T{}), true)>::type> {
+  static constexpr T value{};
+};
+
+template <typename T>
+constexpr T shared_state<T,
+  typename std::enable_if<(static_cast<void>(T{}), true)>::type>::value;
+#endif
+
 // generate index_sequence<0,1,2,...,N-1>
 template <class T, T I, T N, T... integers>
 struct _make_integer_sequence {

@@ -77,7 +77,6 @@ constexpr auto first_available(const First &first, const Second &second,
 #endif
 }
 
-
 template <typename T,
   bool Optional = traits::is_optional<T>::value,
   bool KeyValue = traits::is_key_value<T>::value>
