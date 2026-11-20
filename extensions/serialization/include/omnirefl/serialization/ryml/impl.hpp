@@ -342,7 +342,7 @@ auto deserialize(Config &&options, Destination destination, std::string source)
   if (!parsed)
     return {
       /*value=*/compat::nullopt,
-      /*diagnostics=*/parse_error_diagnostics(
+      /*diagnostics=*/detail::parse_error_diagnostics(
         std::forward<Config>(options), std::move(parsed.error())),
     };
 

@@ -358,6 +358,8 @@ auto deserialize(Config &&options, Destination destination, std::string source)
 /** JSON/YAML deserialization into C++ values with configurable diagnostics.
  * config.transform_diagnostics receives the live tree and collected issues;
  * its result accompanies the value. The default transformation renders text.
+ * The parsed tree is released before return; mapped values and transformed
+ * diagnostics must not retain views into it.
  * tdm_config returns a new callable with transformed configuration. */
 template <typename Config = omni::ryml::config_t<>>
 struct deserialize_t {
@@ -392,7 +394,11 @@ struct deserialize_t {
   /** Deserialize source text into Record, returning transformed diagnostics.
    * Uses the mutable config, including lvalue-only diagnostic callbacks.
    * Value mappings construct Record directly; pointer-only mappings require
-   * default construction. */
+   * default construction.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
   OMNI_CONSTRAINED_TEMPLATE((typename Record),
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) &
@@ -405,7 +411,11 @@ struct deserialize_t {
   /** Deserialize source text into Record, returning transformed diagnostics.
    * Uses const config; the diagnostics callback must accept a const call.
    * Value mappings construct Record directly; pointer-only mappings require
-   * default construction. */
+   * default construction.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
   OMNI_CONSTRAINED_TEMPLATE((typename Record),
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) const &
@@ -418,10 +428,31 @@ struct deserialize_t {
   /** Deserialize source text into Record, returning transformed diagnostics.
    * Passes config as an rvalue, supporting consuming diagnostic callbacks.
    * Value mappings construct Record directly; pointer-only mappings require
-   * default construction. */
+   * default construction.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
   OMNI_CONSTRAINED_TEMPLATE((typename Record),
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) &&
+    -> decltype(detail::deserialize<Record>(std::move(this->config),
+      record_type, std::move(source))) {
+    return detail::deserialize<Record>(std::move(this->config), record_type,
+      std::move(source));
+  }
+
+  /** Deserialize source text into Record with const-rvalue configuration.
+   * Returns transformed diagnostics, supporting const-rvalue-only callbacks.
+   * Value mappings construct Record directly; pointer-only mappings require
+   * default construction.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
+  OMNI_CONSTRAINED_TEMPLATE((typename Record),
+    (std::is_object<Record>::value && !std::is_const<Record>::value))
+  auto operator()(omni::type_t<Record> record_type, std::string source) const &&
     -> decltype(detail::deserialize<Record>(std::move(this->config),
       record_type, std::move(source))) {
     return detail::deserialize<Record>(std::move(this->config), record_type,
@@ -432,7 +463,11 @@ struct deserialize_t {
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
-   * @pre into must be non-null. */
+   * @pre into must be non-null.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
   OMNI_CONSTRAINED_TEMPLATE((typename T),
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) &
@@ -447,7 +482,11 @@ struct deserialize_t {
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
-   * @pre into must be non-null. */
+   * @pre into must be non-null.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
   OMNI_CONSTRAINED_TEMPLATE((typename T),
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) const &
@@ -462,10 +501,33 @@ struct deserialize_t {
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
-   * @pre into must be non-null. */
+   * @pre into must be non-null.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
   OMNI_CONSTRAINED_TEMPLATE((typename T),
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) &&
+    -> decltype(detail::deserialize<compat::monostate>(std::move(this->config),
+      into, std::move(source))) {
+    assert(into);
+    return detail::deserialize<compat::monostate>(std::move(this->config), into,
+      std::move(source));
+  }
+
+  /** Deserialize source text into *into with const-rvalue configuration.
+   * Returns monostate on success with transformed diagnostics. Ranges replace
+   * existing contents. Syntax errors leave *into unchanged; mapping errors
+   * leave its state unspecified and may produce partial updates.
+   * @pre into must be non-null.
+   *
+   * @warning Mapped values and transformed diagnostics must not retain views
+   * into the parsed tree. Use core::parse with map_by_schema for borrowed
+   * results. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T),
+    (std::is_object<T>::value && !std::is_const<T>::value))
+  auto operator()(T *into, std::string source) const &&
     -> decltype(detail::deserialize<compat::monostate>(std::move(this->config),
       into, std::move(source))) {
     assert(into);

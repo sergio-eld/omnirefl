@@ -2331,8 +2331,8 @@ INSTANTIATE_TEST_SUITE_P(strings,
 #  pragma GCC diagnostic pop
 #endif
 
-// TODO: Define global default-config customization. For now, bind local
-// configuration with tdm_config or pass it explicitly to core functions.
+// TODO: Define global default-config customization. For now, use tdm_config
+// or construct a callable with its config member initialized.
 
 // TODO: [high] Add cases for records with ryml::Tree data members, retaining
 // subtrees whose value types are not known at compile time.
