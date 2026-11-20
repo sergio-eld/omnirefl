@@ -812,6 +812,7 @@ struct meta_t<_M, reflected_entity::record> {
 
   private:
   // Only reflected entry points may construct metadata wrappers.
+  template <typename>
   friend struct reflected_call_t;
 
 #if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
@@ -979,6 +980,7 @@ struct meta_t<_M, reflected_entity::enumeration> {
 
   private:
   // Only reflected entry points may construct metadata wrappers.
+  template <typename>
   friend struct reflected_call_t;
 
 #if !defined(OMNI_DETAIL_UNGENERATED_REFLECTION)
@@ -1014,8 +1016,13 @@ struct type_t {
 
 // Variable templates require C++14.
 #if defined(__cpp_variable_templates)
+#  if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 template <typename T>
-constexpr type_t<T> type{};
+inline constexpr type_t<T> type{};
+#  else
+template <typename T>
+extern constexpr type_t<T> type{};
+#  endif
 #endif
 
 #if defined(__cpp_nontype_template_parameter_auto)
@@ -1031,7 +1038,7 @@ struct function_t {};
 #if defined(__cpp_nontype_template_parameter_auto)
 /** C++17 QoL value for `function_t`; usable without generated metadata. */
 template <auto Function>
-constexpr function_t<Function> function{};
+inline constexpr function_t<Function> function{};
 #endif
 
 #if defined(__cpp_nontype_template_parameter_auto)
@@ -1370,6 +1377,7 @@ struct binding_t<T, reflected_entity::record>:
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
+  template <typename>
   friend struct reflected_call_t;
   friend meta;
 
@@ -1461,6 +1469,7 @@ struct binding_t<T, reflected_entity::enumeration>:
   private:
   // Bindings are constructed only by reflected entry points and their matching
   // metadata factory.
+  template <typename>
   friend struct reflected_call_t;
   friend meta;
 
@@ -1602,6 +1611,7 @@ constexpr auto reflected(T &&t) noexcept(
 #  endif
 #endif
 
+template <typename = void>
 struct reflected_call_t {
   private:
   // These factories need this class's friendship to construct public wrappers.
@@ -1668,6 +1678,12 @@ struct reflected_call_t {
     return std::forward<Impl>(impl)(_reflect_arg(std::forward<Args>(args))...);
 #endif
   }
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const reflected_call_t _default;
+#endif
 
   // TODO: Replace this callable implementation type with overloaded
   // `reflected_call` functions.
@@ -1766,7 +1782,12 @@ struct reflected_call_t {
  * @warning Calling `reflected_call` again from the callable's `operator()` is
  * not supported.
  */
-constexpr reflected_call_t reflected_call{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr reflected_call_t<> reflected_call{};
+#else
+static constexpr const reflected_call_t<> &reflected_call =
+  reflected_call_t<>::_default;
+#endif
 
 /**
  * Reflected-scope-only QoL alias for metadata in dependent code.
@@ -1872,3 +1893,5 @@ T aggregate_into(Fields &&fields) {
 } // namespace omni
 
 #undef OMNI_DETAIL_UNGENERATED_REFLECTION
+
+#include <omnirefl/impl/reflected_scope.hpp>

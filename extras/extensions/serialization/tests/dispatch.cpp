@@ -203,7 +203,7 @@ TEST(deserialize_diagnostics, accepts_const_rvalue_only_callbacks) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::const_rvalue_only_renderer{};
         });
     });
@@ -238,7 +238,7 @@ TEST_P(deserialize_diagnostics, uses_the_configured_value_renderer) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::renderer{};
         });
     });
@@ -254,7 +254,7 @@ TEST_P(deserialize_diagnostics, uses_the_configured_mutating_renderer) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::renderer{};
         });
     });
@@ -275,7 +275,7 @@ TEST_P(deserialize_diagnostics, preserves_const_rvalues_for_values) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::const_category_renderer{};
         });
     });
@@ -294,7 +294,7 @@ TEST_P(deserialize_diagnostics, preserves_const_rvalues_for_mutation) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::const_category_renderer{};
         });
     });
@@ -315,7 +315,7 @@ TEST_P(deserialize_diagnostics, consumes_configuration_for_values) {
   auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::consuming_renderer{
             omni::compat::make_unique<std::string>("consumed/"),
           };
@@ -333,7 +333,7 @@ TEST_P(deserialize_diagnostics, consumes_configuration_for_mutation) {
   auto load = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
+        [](omni::ryml::render_diagnostics_t<>) {
           return diagnostic_callbacks::consuming_renderer{
             omni::compat::make_unique<std::string>("consumed/"),
           };
@@ -388,7 +388,7 @@ TEST(tree_serialization, exposes_callable_tree_builders) {
     R"("sensor")", borrowed.crootref()));
 
   EXPECT_FALSE((omni::compat::is_invocable<
-    omni::ryml::as_ref_tree_t, std::string &&>::value));
+    omni::ryml::as_ref_tree_t<>, std::string &&>::value));
 }
 
 TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {

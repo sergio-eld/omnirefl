@@ -16,7 +16,7 @@ if(ENABLE_PACKAGE)
     install(FILES serialization.cmake
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components")
     install(FILES dependencies.cmake patch_c4core_span.cmake
-        patch_tl_optional.cmake tl_optional-emplace.patch
+        patch_tl_optional.cmake tl_optional-emplace.patch tl_optional-constexpr.patch
         DESTINATION
             "${CMAKE_INSTALL_LIBDIR}/cmake/omnirefl/components/serialization")
 endif()

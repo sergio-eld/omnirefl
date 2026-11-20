@@ -2793,9 +2793,9 @@ TEST(fn_contract, exposes_lazy_closure_types) {
 }
 
 TEST(fn_contract, exposes_callable_compositor_types) {
-  EXPECT_TRUE((std::is_same<omni::fn::branch_t,
+  EXPECT_TRUE((std::is_same<omni::fn::branch_t<>,
     omni::compat::decay_t<decltype(omni::fn::branch)>>::value));
-  EXPECT_TRUE((std::is_same<omni::fn::cond_t,
+  EXPECT_TRUE((std::is_same<omni::fn::cond_t<>,
     omni::compat::decay_t<decltype(omni::fn::cond)>>::value));
 }
 

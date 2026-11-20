@@ -201,10 +201,11 @@ inline auto expect_string_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::string, node)};
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_string_like<T>,
     is_read_state<State>>::value))
-auto map_node_to_string_like_t::operator()(State state,
+auto map_node_to_string_like_t<Default>::operator()(State state,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -243,10 +244,11 @@ inline auto expect_boolean_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::boolean, node)};
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_same<bool, compat::remove_cv_t<T>>::value
     && !std::is_const<T>::value && is_read_state<State>::value))
-auto map_node_to_boolean_t::operator()(State state,
+auto map_node_to_boolean_t<Default>::operator()(State state,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -279,11 +281,12 @@ inline auto expect_integer_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::integer, node)};
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_integral<T>::value
     && !std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_read_state<State>::value))
-auto map_node_to_integral_t::operator()(State state,
+auto map_node_to_integral_t<Default>::operator()(State state,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -306,9 +309,10 @@ inline auto expect_number_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::number, node)};
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_read_state<State>::value))
-auto map_node_to_floating_point_t::operator()(State state,
+auto map_node_to_floating_point_t<Default>::operator()(State state,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -328,27 +332,29 @@ inline auto expect_arithmetic_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::scalar, node)};
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && is_read_state<State>::value
     && (!std::is_const<T>::value
       || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
-auto map_node_to_arithmetic_t::operator()(State state,
+auto map_node_to_arithmetic_t<Default>::operator()(State state,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
   assert(node.has_val() && !node.is_container());
   constexpr auto read = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      core::map_node_to_boolean_t>,
-    traits::case_<std::is_integral<T>::value, core::map_node_to_integral_t>,
-    core::map_node_to_floating_point_t>::type{};
+      core::map_node_to_boolean_t<>>,
+    traits::case_<std::is_integral<T>::value, core::map_node_to_integral_t<>>,
+    core::map_node_to_floating_point_t<>>::type{};
 
   return read(std::move(state), node, omni::type_t<T>{});
 }
 
 } // namespace core
 
-inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
+template <typename Default>
+inline std::string render_diagnostics_t<Default>::operator()(const ::ryml::Tree &tree,
   const diagnostics &d) const {
   std::string message;
   // Parse-error text is aggregated for the report, not stored per issue.
@@ -435,3 +441,33 @@ inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
 
 } // namespace ryml
 } // namespace omni
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+namespace core {
+
+template <typename Default>
+constexpr map_node_to_arithmetic_t<Default>
+  map_node_to_arithmetic_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_node_to_boolean_t<Default>
+  map_node_to_boolean_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_node_to_floating_point_t<Default>
+  map_node_to_floating_point_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_node_to_integral_t<Default>
+  map_node_to_integral_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_node_to_string_like_t<Default>
+  map_node_to_string_like_t<Default>::_default{};
+
+} // namespace core
+} // namespace ryml
+} // namespace omni
+#endif

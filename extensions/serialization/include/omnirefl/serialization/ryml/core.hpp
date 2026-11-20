@@ -101,6 +101,7 @@ map_node_to_string_like :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates the node shape. node must refer to a scalar in a
  * valid tree; only a debug assertion checks the scalar-node precondition. */
+template <typename = void>
 struct map_node_to_string_like_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -109,9 +110,20 @@ struct map_node_to_string_like_t {
       is_read_state<State>>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_node_to_string_like_t _default;
+#endif
 };
 
-constexpr map_node_to_string_like_t map_node_to_string_like{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_string_like_t<> map_node_to_string_like{};
+#else
+static constexpr const map_node_to_string_like_t<> &map_node_to_string_like =
+  map_node_to_string_like_t<>::_default;
+#endif
 
 /** Checks for unquoted Boolean text, including an explicit YAML Boolean tag.
  * @pre node must belong to a valid tree. */
@@ -128,6 +140,7 @@ map_node_to_boolean :: (state, node, type<bool>) -> with_diagnostics<bool>
  *
  * @details Uses \ref parse_boolean for conversion. The caller validates the
  * input; debug assertions check the precondition. */
+template <typename = void>
 struct map_node_to_boolean_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -136,9 +149,20 @@ struct map_node_to_boolean_t {
       && !std::is_const<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_node_to_boolean_t _default;
+#endif
 };
 
-constexpr map_node_to_boolean_t map_node_to_boolean{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_boolean_t<> map_node_to_boolean{};
+#else
+static constexpr const map_node_to_boolean_t<> &map_node_to_boolean =
+  map_node_to_boolean_t<>::_default;
+#endif
 
 /** Checks for unquoted integer text.
  * Destination range is checked on conversion.
@@ -155,6 +179,7 @@ map_node_to_integral :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates integer input in a valid tree; a debug assertion
  * checks this precondition. Destination range is checked during conversion. */
+template <typename = void>
 struct map_node_to_integral_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -164,9 +189,20 @@ struct map_node_to_integral_t {
       && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_node_to_integral_t _default;
+#endif
 };
 
-constexpr map_node_to_integral_t map_node_to_integral{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_integral_t<> map_node_to_integral{};
+#else
+static constexpr const map_node_to_integral_t<> &map_node_to_integral =
+  map_node_to_integral_t<>::_default;
+#endif
 
 /** Checks for unquoted numeric text.
  * Destination range is checked on conversion.
@@ -183,6 +219,7 @@ map_node_to_floating_point :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates numeric input in a valid tree; a debug assertion
  * checks this precondition. */
+template <typename = void>
 struct map_node_to_floating_point_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -190,9 +227,20 @@ struct map_node_to_floating_point_t {
     (std::is_floating_point<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_node_to_floating_point_t _default;
+#endif
 };
 
-constexpr map_node_to_floating_point_t map_node_to_floating_point{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_floating_point_t<> map_node_to_floating_point{};
+#else
+static constexpr const map_node_to_floating_point_t<> &map_node_to_floating_point =
+  map_node_to_floating_point_t<>::_default;
+#endif
 
 /** Checks for a Boolean or numeric node.
  * @pre node must belong to a valid tree. */
@@ -210,6 +258,7 @@ map_node_to_arithmetic :: (state, node, type<T>) -> with_diagnostics<T>
  * @pre Caller validates Boolean input for bool, integer input for other
  * integral types, or numeric input for floating-point types, in a valid tree.
  * Only debug assertions check these preconditions. */
+template <typename = void>
 struct map_node_to_arithmetic_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
@@ -219,9 +268,20 @@ struct map_node_to_arithmetic_t {
         || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_node_to_arithmetic_t _default;
+#endif
 };
 
-constexpr map_node_to_arithmetic_t map_node_to_arithmetic{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_arithmetic_t<> map_node_to_arithmetic{};
+#else
+static constexpr const map_node_to_arithmetic_t<> &map_node_to_arithmetic =
+  map_node_to_arithmetic_t<>::_default;
+#endif
 
 } // namespace core
 } // namespace ryml

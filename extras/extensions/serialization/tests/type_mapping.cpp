@@ -1,5 +1,7 @@
 #include "json_match.hpp"
+#include "shared_defaults.hpp"
 
+#include <map>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -10,6 +12,11 @@
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wdangling-else"
 #endif
+
+std::map<std::string, const void *>
+serialization_shared_defaults::other_addresses() {
+  return local_addresses();
+}
 
 namespace {
 
@@ -207,62 +214,62 @@ static_assert(omni::traits::cp::unavailable{}
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<bool>{})),
-    omni::ryml::default_to_boolean_t>::value,
+    omni::ryml::default_to_boolean_t<>>::value,
   "Boolean precedes the integral mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<int>{})),
-    omni::ryml::default_to_integral_t>::value,
+    omni::ryml::default_to_integral_t<>>::value,
   "Signed integers use the integer mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<unsigned>{})),
-    omni::ryml::default_to_integral_t>::value,
+    omni::ryml::default_to_integral_t<>>::value,
   "Unsigned integers use the integer mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<double>{})),
-    omni::ryml::default_to_floating_point_t>::value,
+    omni::ryml::default_to_floating_point_t<>>::value,
   "Floating-point values use the real mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::from_boolean_t<>>::value,
   "Boolean precedes the integral writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<int>{})),
-    omni::ryml::from_integral_t>::value,
+    omni::ryml::from_integral_t<>>::value,
   "Signed integers use the integer writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<unsigned>{})),
-    omni::ryml::from_integral_t>::value,
+    omni::ryml::from_integral_t<>>::value,
   "Unsigned integers use the integer writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<double>{})),
-    omni::ryml::from_floating_point_t>::value,
+    omni::ryml::from_floating_point_t<>>::value,
   "Floating-point values use the real writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<std::string>{})),
-    omni::ryml::default_to_string_like_t
+    omni::ryml::default_to_string_like_t<>
     >::value,
   "String to-type selection");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<std::string>{})),
-    omni::ryml::from_string_like_t>::value,
+    omni::ryml::from_string_like_t<>>::value,
   "String from-type selection");
 
 static_assert(std::is_same<
@@ -275,7 +282,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<std::vector<int>>{})),
-    omni::ryml::from_range_t>::value,
+    omni::ryml::from_range_t<>>::value,
   "Range from-type selection");
 
 static_assert(std::is_same<
@@ -288,7 +295,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<omni::compat::optional<int>>{})),
-    omni::ryml::from_optional_like_t>::value,
+    omni::ryml::from_optional_like_t<>>::value,
   "Optional from-type selection");
 
 static_assert(std::is_same<
@@ -306,50 +313,50 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const bool>{})),
-    omni::ryml::default_to_boolean_t>::value,
+    omni::ryml::default_to_boolean_t<>>::value,
   "const bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::from_boolean_t<>>::value,
   "const bool uses the Boolean from-type mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<volatile bool>{})),
-    omni::ryml::default_to_boolean_t>::value,
+    omni::ryml::default_to_boolean_t<>>::value,
   "volatile bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<volatile bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::from_boolean_t<>>::value,
   "volatile bool uses the Boolean from-type mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const volatile bool>{})),
-    omni::ryml::default_to_boolean_t>::value,
+    omni::ryml::default_to_boolean_t<>>::value,
   "const volatile bool uses the Boolean to-type mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const volatile bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::from_boolean_t<>>::value,
   "const volatile bool uses the Boolean from-type mapping");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
       omni::type_t<const std::string>{})),
-    omni::ryml::default_to_string_like_t
+    omni::ryml::default_to_string_like_t<>
     >::value,
   "Qualified string to-type selection");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const std::string>{})),
-    omni::ryml::from_string_like_t>::value,
+    omni::ryml::from_string_like_t<>>::value,
   "Qualified string from-type selection");
 
 static_assert(std::is_same<
@@ -362,7 +369,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const std::vector<int>>{})),
-    omni::ryml::from_range_t>::value,
+    omni::ryml::from_range_t<>>::value,
   "Qualified range from-type selection");
 
 static_assert(std::is_same<
@@ -375,7 +382,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const omni::compat::optional<int>>{})),
-    omni::ryml::from_optional_like_t>::value,
+    omni::ryml::from_optional_like_t<>>::value,
   "Qualified optional from-type selection");
 
 static_assert(std::is_same<
@@ -438,12 +445,12 @@ TEST(type_mapping, selects_reflected_defaults) {
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_record(
         omni::type_t<uncustomized_record>{})),
-      omni::ryml::reflected_scope::from_record_t>{},
+      omni::ryml::reflected_scope::from_record_t<>>{},
     omni::type_t<uncustomized_record>{});
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_enum(
         omni::type_t<uncustomized_enum>{})),
-      omni::ryml::reflected_scope::from_enum_t>{},
+      omni::ryml::reflected_scope::from_enum_t<>>{},
     omni::type_t<uncustomized_enum>{});
 }
 
@@ -527,7 +534,7 @@ TEST(read_state, passes_original_config_and_updated_counts_to_children) {
     [&trace](omni::ryml::config_t<> options) {
       options.error_policy.error_limit = 1;
       return options.tdm_transform_diagnostics(
-        [&trace](omni::ryml::render_diagnostics_t) {
+        [&trace](omni::ryml::render_diagnostics_t<>) {
           return mapping_observation::renderer{&trace};
         });
     });
@@ -559,7 +566,7 @@ TEST_P(record_mapping_limits, stops_before_evaluating_later_members) {
         options.error_policy.warning_limit = 0;
 
       return options.tdm_transform_diagnostics(
-        [&trace](omni::ryml::render_diagnostics_t) {
+        [&trace](omni::ryml::render_diagnostics_t<>) {
           return mapping_observation::renderer{&trace};
         });
     });
@@ -587,7 +594,7 @@ TEST(record_mapping_events, missing_members_stop_before_value_operations) {
   const auto load = omni::ryml::deserialize.tdm_config(
     [&trace](omni::ryml::config_t<> options) {
       return options.tdm_transform_diagnostics(
-        [&trace](omni::ryml::render_diagnostics_t) {
+        [&trace](omni::ryml::render_diagnostics_t<>) {
           return mapping_observation::renderer{&trace};
         });
     });

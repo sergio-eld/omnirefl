@@ -122,55 +122,59 @@ struct reflection_target<T,
 
 } // namespace detail
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_fundamental_t::operator()(State context,
+auto map_to_fundamental_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) const
   -> with_diagnostics_t<T, diagnostics> {
-  return detail::map_registered_or<default_to_arithmetic_t>{}(
+  return detail::map_registered_or<default_to_arithmetic_t<>>{}(
     std::move(context),
     node,
     type);
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_fundamental_t::operator()(State context,
+auto map_to_fundamental_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
-  return detail::map_registered_or<default_to_arithmetic_t>{}(
+  return detail::map_registered_or<default_to_arithmetic_t<>>{}(
     std::move(context),
     node,
     into);
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (traits::is_string_like<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_string_like_t::operator()(State context,
+auto map_to_string_like_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) const
   -> with_diagnostics_t<T, diagnostics> {
-  return detail::map_registered_or<default_to_string_like_t>{}(
+  return detail::map_registered_or<default_to_string_like_t<>>{}(
     std::move(context),
     node,
     type);
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (traits::is_string_like<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_string_like_t::operator()(State context,
+auto map_to_string_like_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
-  return detail::map_registered_or<default_to_string_like_t>{}(
+  return detail::map_registered_or<default_to_string_like_t<>>{}(
     std::move(context),
     node,
     into);
@@ -213,10 +217,11 @@ struct cpp11_lambda_read {
 
 } // namespace detail
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_object<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_reflected_t::operator()(State context,
+auto map_to_reflected_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -229,10 +234,11 @@ auto map_to_reflected_t::operator()(State context,
     omni::type_t<target>{});
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_object<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_reflected_t::operator()(State context,
+auto map_to_reflected_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
@@ -247,66 +253,70 @@ auto map_to_reflected_t::operator()(State context,
     omni::type_t<target>{});
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_sequence_t::operator()(State context,
+auto map_to_sequence_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) const
   -> with_diagnostics_t<T, diagnostics> {
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
+    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t<>>,
     detail::map_registered_or<
       decltype(default_to_range(omni::type_t<T>{}))>>::type{};
 
   return map(std::move(context), node, type);
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_sequence_t::operator()(State context,
+auto map_to_sequence_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
+    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t<>>,
     detail::map_registered_or<
       decltype(default_to_range(omni::type_t<T>{}))>>::type{};
 
   return map(std::move(context), node, into);
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (traits::is_optional<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_optional_t::operator()(State context,
+auto map_to_optional_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) const
   -> with_diagnostics_t<T, diagnostics> {
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
+    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t<>>,
     detail::map_registered_or<
       decltype(default_to_optional_like(omni::type_t<T>{}))>>::type{};
 
   return map(std::move(context), node, type);
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (traits::is_optional<T>::value && !std::is_const<T>::value
     && is_read_state<State>::value))
-auto map_to_optional_t::operator()(State context,
+auto map_to_optional_t<Default>::operator()(State context,
   ::ryml::ConstNodeRef node,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
+    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t<>>,
     detail::map_registered_or<
       decltype(default_to_optional_like(omni::type_t<T>{}))>>::type{};
 
@@ -415,20 +425,23 @@ struct tree_builder_case<Discovery, false, true> {
 } // namespace detail
 } // namespace core
 
+template <typename Default>
 template <typename T>
-::ryml::Tree as_owning_tree_t::operator()(const T &value) const {
+::ryml::Tree as_owning_tree_t<Default>::operator()(const T &value) const {
   return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::template build<write_state_t<false>>(value);
 }
 
+template <typename Default>
 template <typename T>
-::ryml::Tree as_ref_tree_t::operator()(T &value) const {
+::ryml::Tree as_ref_tree_t<Default>::operator()(T &value) const {
   return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::template build<write_state_t<true>>(value);
 }
 
+template <typename Default>
 template <typename Value>
-std::string serialize_t::operator()(const Value &value) const {
+std::string serialize_t<Default>::operator()(const Value &value) const {
   const auto tree = as_ref_tree(value);
 
   // Reserve an initial estimate without a sizing traversal. Borrowed strings,
@@ -487,3 +500,54 @@ std::string serialize_t::operator()(const Value &value) const {
 
 } // namespace ryml
 } // namespace omni
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+namespace core {
+
+template <typename Default>
+constexpr map_to_fundamental_t<Default> map_to_fundamental_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_optional_t<Default> map_to_optional_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_reflected_t<Default> map_to_reflected_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_sequence_t<Default> map_to_sequence_t<Default>::_default{};
+
+template <typename Default>
+constexpr map_to_string_like_t<Default> map_to_string_like_t<Default>::_default{};
+
+} // namespace core
+} // namespace ryml
+} // namespace omni
+#endif
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+
+template <typename Config>
+const map_by_schema_t<Config> map_by_schema_t<Config>::_default{};
+
+template <typename Config>
+const deserialize_t<Config> deserialize_t<Config>::_default{};
+
+template <typename Default>
+constexpr as_owning_tree_t<Default> as_owning_tree_t<Default>::_default{};
+
+template <typename Default>
+constexpr as_ref_tree_t<Default> as_ref_tree_t<Default>::_default{};
+
+template <typename Default>
+constexpr serialize_t<Default> serialize_t<Default>::_default_storage::yaml;
+
+template <typename Default>
+constexpr serialize_t<Default> serialize_t<Default>::_default_storage::json;
+
+} // namespace ryml
+} // namespace omni
+#endif

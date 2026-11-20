@@ -332,10 +332,11 @@ auto to_range_t::operator()(State context,
   return std::move(result).finish();
 }
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-void from_range_t::operator()(State context,
+void from_range_t<Default>::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const {
   using element_type = compat::range_value_t<T>;
@@ -361,3 +362,14 @@ void from_range_t::operator()(State context,
 
 } // namespace ryml
 } // namespace omni
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+
+template <typename Default>
+constexpr from_range_t<Default> from_range_t<Default>::_default{};
+
+} // namespace ryml
+} // namespace omni
+#endif

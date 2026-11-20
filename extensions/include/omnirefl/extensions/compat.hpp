@@ -88,5 +88,11 @@ using mpark::holds_alternative;
 // fixes signed-char ordering in its comparison fallback. Fetched copies are
 // patched so UTF-8/high-byte strings use the same ordering as std::string_view.
 
+// FIXME: [medium] [external] Remove tl_optional-constexpr.patch when upstream
+// preserves C++11 constexpr constructors for trivially destructible storage.
+// Its TL_OPTIONAL_11_CONSTEXPR guard also disables constructors, although
+// C++11's implicit const applies only to member functions. Fetched copies
+// are patched; caller-provided tl::optional packages remain unchanged.
+
 } // namespace compat
 } // namespace omni

@@ -38,6 +38,7 @@
 
 namespace omni {
 namespace ryml {
+
 namespace cp {
 
 /** Ad hoc discovery override for types inheriting standard-library containers.
@@ -99,6 +100,7 @@ void write_node(State context, const T &value, ::ryml::NodeRef node);
  * @details reflected_call requires a metadata-bearing target. This route
  * handles arithmetic destinations without reflection.
  * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
 struct map_to_fundamental_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && !std::is_const<T>::value
@@ -113,15 +115,27 @@ struct map_to_fundamental_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_fundamental_t _default;
+#endif
 };
 
-constexpr map_to_fundamental_t map_to_fundamental{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_fundamental_t<> map_to_fundamental{};
+#else
+static constexpr const map_to_fundamental_t<> &map_to_fundamental =
+  map_to_fundamental_t<>::_default;
+#endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into string-like C++ types.
  *
  * @details String-like destinations may be instrumentation-disabled. This
  * route keeps them outside reflected_call.
  * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
 struct map_to_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && !std::is_const<T>::value
@@ -136,9 +150,20 @@ struct map_to_string_like_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_string_like_t _default;
+#endif
 };
 
-constexpr map_to_string_like_t map_to_string_like{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_string_like_t<> map_to_string_like{};
+#else
+static constexpr const map_to_string_like_t<> &map_to_string_like =
+  map_to_string_like_t<>::_default;
+#endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into C++ types requiring
  * reflected scope.
@@ -147,6 +172,7 @@ constexpr map_to_string_like_t map_to_string_like{};
  * compound destination. Range and optional wrappers are unwrapped to obtain
  * that reflection target while mapping retains the original destination.
  * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
 struct map_to_reflected_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_object<T>::value && !std::is_const<T>::value
@@ -161,9 +187,20 @@ struct map_to_reflected_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_reflected_t _default;
+#endif
 };
 
-constexpr map_to_reflected_t map_to_reflected{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_reflected_t<> map_to_reflected{};
+#else
+static constexpr const map_to_reflected_t<> &map_to_reflected =
+  map_to_reflected_t<>::_default;
+#endif
 
 /** (Ad hoc: see detail) Map JSON/YAML arrays or objects into C++ ranges.
  *
@@ -172,6 +209,7 @@ constexpr map_to_reflected_t map_to_reflected{};
  * scope, preserving the original range as the destination. Fundamental and
  * string-like elements require no reflected scope, including empty ranges.
  * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
 struct map_to_sequence_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
@@ -186,9 +224,20 @@ struct map_to_sequence_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_sequence_t _default;
+#endif
 };
 
-constexpr map_to_sequence_t map_to_sequence{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_sequence_t<> map_to_sequence{};
+#else
+static constexpr const map_to_sequence_t<> &map_to_sequence =
+  map_to_sequence_t<>::_default;
+#endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into optional-like C++ types.
  *
@@ -196,6 +245,7 @@ constexpr map_to_sequence_t map_to_sequence{};
  * its contained type. Discovery establishes scope only when needed and keeps
  * the optional as the mapping destination, including when it is empty.
  * @pre node must be valid; destination pointers must be non-null. */
+template <typename = void>
 struct map_to_optional_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_optional<T>::value && !std::is_const<T>::value
@@ -210,21 +260,32 @@ struct map_to_optional_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const map_to_optional_t _default;
+#endif
 };
 
-constexpr map_to_optional_t map_to_optional{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_optional_t<> map_to_optional{};
+#else
+static constexpr const map_to_optional_t<> &map_to_optional =
+  map_to_optional_t<>::_default;
+#endif
 
 namespace detail {
 
 template <typename T>
 using map_by_schema_dispatch_t = typename traits::select<
-  traits::case_<cp::reflect_as_root<T>::value, map_to_reflected_t>,
-  traits::case_<traits::is_string_like<T>::value, map_to_string_like_t>,
-  traits::case_<std::is_arithmetic<T>::value, map_to_fundamental_t>,
-  traits::case_<traits::is_optional<T>::value, map_to_optional_t>,
+  traits::case_<cp::reflect_as_root<T>::value, map_to_reflected_t<>>,
+  traits::case_<traits::is_string_like<T>::value, map_to_string_like_t<>>,
+  traits::case_<std::is_arithmetic<T>::value, map_to_fundamental_t<>>,
+  traits::case_<traits::is_optional<T>::value, map_to_optional_t<>>,
   traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
-    map_to_sequence_t>,
-  map_to_reflected_t>::type;
+    map_to_sequence_t<>>,
+  map_to_reflected_t<>>::type;
 
 } // namespace detail
 } // namespace core
@@ -339,11 +400,21 @@ struct map_by_schema_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T),
     (std::is_object<T>::value && !std::is_const<T>::value))
   void operator()(T *, const ::ryml::Tree &&) const = delete;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: shared default identity before C++17 inline variables.
+  static const map_by_schema_t _default;
+#endif
 };
 
 /** Schema-driven node/tree mapping with default configuration.
  * Returns structured diagnostics borrowing the caller's tree. */
-const map_by_schema_t<> map_by_schema{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline const map_by_schema_t<> map_by_schema{};
+#else
+static constexpr const map_by_schema_t<> &map_by_schema =
+  map_by_schema_t<>::_default;
+#endif
 
 namespace detail {
 
@@ -534,30 +605,53 @@ struct deserialize_t {
     return detail::deserialize<compat::monostate>(std::move(this->config), into,
       std::move(source));
   }
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: shared default identity before C++17 inline variables.
+  static const deserialize_t _default;
+#endif
 };
 
 /** JSON/YAML deserialization with default config and text diagnostics. */
-const deserialize_t<> deserialize{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline const deserialize_t<> deserialize{};
+#else
+static constexpr const deserialize_t<> &deserialize =
+  deserialize_t<>::_default;
+#endif
 
-// REFACTORME: [high] Expose type-switch routing for as_owning_tree_t and
-// as_ref_tree_t, as map_by_schema_t does. A clean way to share the routing
+// REFACTORME: [high] Expose type-switch routing for as_owning_tree_t<> and
+// as_ref_tree_t<>, as map_by_schema_t does. A clean way to share the routing
 // between these builders and mapping remains to be designed.
 /** Owning RapidYAML tree serialization of supported C++ values.
  * Strings are copied into the tree's arena, so it can outlive the source. */
+template <typename = void>
 struct as_owning_tree_t {
   /** Serialize value into an owning tree. Empty optionals produce null;
    * empty optional sequence elements are omitted. The result can be modified
    * or passed to RapidYAML emitters. */
   template <typename T>
   ::ryml::Tree operator()(const T &value) const;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const as_owning_tree_t _default;
+#endif
 };
 
 /** Owning tree serialization; string storage is copied into the tree. */
-constexpr as_owning_tree_t as_owning_tree{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr as_owning_tree_t<> as_owning_tree{};
+#else
+static constexpr const as_owning_tree_t<> &as_owning_tree =
+  as_owning_tree_t<>::_default;
+#endif
 
 /** RapidYAML tree serialization borrowing the source's string storage.
  * The tree owns nodes and generated text. Source storage must remain alive
  * and unchanged while the tree is used. */
+template <typename = void>
 struct as_ref_tree_t {
   /** Serialize an lvalue into a tree borrowing its existing string storage.
    * Accepts const and mutable sources. Keep source storage alive and unchanged
@@ -569,12 +663,24 @@ struct as_ref_tree_t {
   // Deleted: a reference tree must not borrow from a temporary source.
   template <typename T>
   ::ryml::Tree operator()(const T &&) const = delete;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: pre-C++17 shared identity; constexpr definition needs a
+  // complete self-type and therefore belongs in the implementation header.
+  static const as_ref_tree_t _default;
+#endif
 };
 
 /** Borrowing tree serialization; source strings must outlive the tree. */
-constexpr as_ref_tree_t as_ref_tree{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr as_ref_tree_t<> as_ref_tree{};
+#else
+static constexpr const as_ref_tree_t<> &as_ref_tree =
+  as_ref_tree_t<>::_default;
+#endif
 
 /** JSON/YAML text serialization with the selected .format. */
+template <typename = void>
 struct serialize_t {
   // Output format; use as_yaml or as_json for the predefined configurations.
   ::ryml::EmitType_e format;
@@ -594,6 +700,16 @@ struct serialize_t {
    */
   template <typename Value>
   std::string operator()(const Value &value) const;
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+  // Ad hoc: defer constexpr self-type storage until this class is complete.
+  struct _default_storage {
+    // Ad hoc: shared YAML default before C++17 inline variables.
+    static constexpr serialize_t yaml{::ryml::EMIT_YAML};
+    // Ad hoc: shared JSON default before C++17 inline variables.
+    static constexpr serialize_t json{::ryml::EMIT_JSON};
+  };
+#endif
 };
 
 /**
@@ -605,9 +721,14 @@ struct serialize_t {
 ```cpp
 const auto yaml = as_yaml(value);
 ``` */
-constexpr serialize_t as_yaml{
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr serialize_t<> as_yaml{
   /*format=*/::ryml::EMIT_YAML,
 };
+#else
+static constexpr const serialize_t<> &as_yaml =
+  serialize_t<>::_default_storage::yaml;
+#endif
 
 /**
  * Serialize reflected records, supported scalars, or vectors to JSON text.
@@ -618,9 +739,14 @@ constexpr serialize_t as_yaml{
 ```cpp
 const auto json = as_json(value);
 ``` */
-constexpr serialize_t as_json{
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr serialize_t<> as_json{
   /*format=*/::ryml::EMIT_JSON,
 };
+#else
+static constexpr const serialize_t<> &as_json =
+  serialize_t<>::_default_storage::json;
+#endif
 
 } // namespace ryml
 } // namespace omni

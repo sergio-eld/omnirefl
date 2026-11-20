@@ -1,0 +1,26 @@
+Subject: [PATCH] Preserve C++11 constexpr construction for trivial storage
+
+TL_OPTIONAL_11_CONSTEXPR is empty in C++11 because constexpr member functions
+implicitly become const. Constructors have no such restriction. The storage
+specialization for trivially destructible values can keep its default and
+in-place constructors constexpr, as the public optional constructors expect.
+
+Empty construction initializes the dummy union member, not T; it does not
+require T to be default-constructible. Non-trivial storage is unchanged.
+---
+ include/tl/optional.hpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/tl/optional.hpp b/include/tl/optional.hpp
+--- a/include/tl/optional.hpp
++++ b/include/tl/optional.hpp
+@@ -383,3 +383,3 @@
+ template <class T> struct optional_storage_base<T, true> {
+-  TL_OPTIONAL_11_CONSTEXPR optional_storage_base() noexcept
++  constexpr optional_storage_base() noexcept
+       : m_dummy(), m_has_value(false) {}
+@@ -387,3 +387,3 @@
+   template <class... U>
+-  TL_OPTIONAL_11_CONSTEXPR optional_storage_base(in_place_t, U &&... u)
++  constexpr optional_storage_base(in_place_t, U &&... u)
+       : m_value(std::forward<U>(u)...), m_has_value(true) {}

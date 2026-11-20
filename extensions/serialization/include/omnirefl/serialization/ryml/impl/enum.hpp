@@ -69,10 +69,11 @@ auto map_node_to_enum_t<ValueByAlias>::operator()(State context,
 
 namespace reflected_scope {
 
+template <typename Default>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
-auto from_enum_t::operator()(State,
+auto from_enum_t<Default>::operator()(State,
   T value,
   ::ryml::NodeRef node) const -> void {
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
@@ -87,3 +88,32 @@ auto from_enum_t::operator()(State,
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+namespace core {
+namespace reflected_scope {
+
+template <typename ValueByAlias>
+constexpr map_node_to_enum_t<ValueByAlias>
+  map_node_to_enum_t<ValueByAlias>::_default{};
+
+} // namespace reflected_scope
+} // namespace core
+} // namespace ryml
+} // namespace omni
+#endif
+
+#if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
+namespace omni {
+namespace ryml {
+namespace reflected_scope {
+
+template <typename Default>
+constexpr from_enum_t<Default> from_enum_t<Default>::_default{};
+
+} // namespace reflected_scope
+} // namespace ryml
+} // namespace omni
+#endif
