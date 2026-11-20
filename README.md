@@ -428,7 +428,7 @@ documentation.
 
 <!-- TODO: Near Install, explain that the page tracks master and may include
 unreleased features; link to the README at the current release tag, currently
-https://github.com/sergio-eld/omnirefl/blob/v0.0.6/README.md. -->
+https://github.com/sergio-eld/omnirefl/blob/v0.0.7/README.md. -->
 <!-- pages:install:end -->
 
 ### Project integration
@@ -454,7 +454,7 @@ Before `find_package`, acquire Omnirefl with:
 include(FetchContent)
 FetchContent_Declare(omnirefl
     GIT_REPOSITORY https://github.com/sergio-eld/omnirefl.git
-    GIT_TAG v0.0.7
+    GIT_TAG v0.0.8
     SOURCE_SUBDIR cmake/integration)
 FetchContent_MakeAvailable(omnirefl)
 ```
