@@ -431,13 +431,11 @@ TEST(serialization_formats, emits_yaml_without_configuration) {
 }
 
 TEST(deserialization, accepts_extra_fields) {
-  const serialization_test::deserialize_type deserialize{
-    /*config=*/[] {
-      serialization_test::config s;
-      s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
-      return s;
-    }(),
-  };
+  const auto deserialize = serialization_test::deserialize.tdm_config(
+    [](serialization_test::config options) {
+      options.error_policy.unknown_fields = omni::json::unknown_policy::allow;
+      return options;
+    });
   const auto result = deserialize(omni::type_t<serialization_data::payload>{},
     R"({"name": "Ada", "code": 815, "extra": {"anything": [1, null, {}]}})");
 

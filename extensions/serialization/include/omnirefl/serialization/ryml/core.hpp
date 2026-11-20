@@ -28,11 +28,11 @@ namespace core {
 ```cpp
 #include <omnirefl/serialization/ryml.hpp>
 
-// Supply a reflected person, config, and an owning std::string source.
+// Supply a reflected person and an owning std::string source.
 auto parsed = core::parse(std::move(source));
 if (parsed) {
-  auto result = map_by_schema_t<decltype(options)>{options}(
-    omni::type_t<person>{}, *parsed);
+  auto result = map_by_schema(omni::type<person>, *parsed);
+  // Before C++14: omni::type_t<person>{}.
   // Use result while parsed keeps its tree and character storage alive.
 }
 // Syntax errors use expected; mapping returns optional person and diagnostics.

@@ -125,11 +125,15 @@ TEST(mapping_diagnostics, limits_errors_in_a_custom_report) {
 }
 
 TEST(mapping_diagnostics, stops_after_the_warning_that_exceeds_the_limit) {
-  omni::ryml::config_t<> options{};
-  options.error_policy.unknown_fields =
-    omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
-  options.error_policy.warning_limit = 1;
-  const auto result = omni::ryml::deserialize_t<decltype(options)>{options}(
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      options.error_policy.unknown_fields =
+        omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
+      options.error_policy.warning_limit = 1;
+      return options;
+    });
+
+  const auto result = load(
     omni::type_t<std::vector<diagnostic_inputs::empty_record>>{},
     R"([{"first": 1}, {"second": 2, "third": 3}])");
 
@@ -163,9 +167,13 @@ TEST(mapping_diagnostics, renders_each_nested_parse_error_once) {
   if (first || second)
     return;
 
-  omni::ryml::config_t<> options{};
-  options.error_policy.error_limit = 1;
-  const auto result = omni::ryml::deserialize_t<decltype(options)>{options}(
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      options.error_policy.error_limit = 1;
+      return options;
+    });
+
+  const auto result = load(
     omni::type_t<std::vector<diagnostic_inputs::embedded_document>>{},
     R"(["[unterminated", "{unterminated"])");
 
@@ -451,6 +459,21 @@ TEST(diagnostics_transform, renders_a_scalar_kind_mismatch) {
     omni::ryml::render_diagnostics(*tree, report));
 }
 
+TEST(diagnostics_transform, configures_a_diagnostics_result) {
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
+            return report.issues.size();
+          };
+        });
+    });
+
+  EXPECT_EQ(0U, load(omni::type_t<int>{}, "7").diagnostics);
+  EXPECT_EQ(1U, load(omni::type_t<int>{}, "bad").diagnostics);
+}
+
 // Designated config needs aggregate CTAD as well as designated initializers.
 // Clang 17 added aggregate CTAD; its shared feature macro also covers
 // alias CTAD.
@@ -460,7 +483,7 @@ TEST(diagnostics_transform, renders_a_scalar_kind_mismatch) {
     || (defined(__clang__) && 17 <= __clang_major__))
 TEST(diagnostics_transform, accepts_designated_callable_configuration) {
   const auto load = omni::ryml::deserialize_t{
-    omni::ryml::config_t{
+    .config = omni::ryml::config_t{
       .transform_diagnostics =
         [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
           return report.issues.size();

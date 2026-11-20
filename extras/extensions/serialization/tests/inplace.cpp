@@ -116,8 +116,7 @@ TEST(inplace_mapping, replaces_a_populated_map_from_a_subtree) {
     return;
 
   std::map<std::string, int> into{{"api", 99}, {"stale", 1}};
-  const omni::ryml::config_t<> options{};
-  const auto result = omni::ryml::map_by_schema_t<decltype(options)>{options}(
+  const auto result = omni::ryml::map_by_schema(
     &into, tree->crootref()["ports"]);
 
   const std::map<std::string, int> expected{{"api", 443}};
@@ -218,11 +217,12 @@ TEST(inplace_deserialization, reports_duplicates_from_the_document) {
 }
 
 TEST(inplace_deserialization, returns_success_alongside_duplicate_warnings) {
-  serialization_test::config options{};
-  options.error_policy.duplicates = omni::json::duplicate_policy::allow
-    | omni::json::duplicate_policy::warn;
-
-  const serialization_test::deserialize_type load{std::move(options)};
+  const auto load = serialization_test::deserialize.tdm_config(
+    [](serialization_test::config options) {
+      options.error_policy.duplicates = omni::json::duplicate_policy::allow
+        | omni::json::duplicate_policy::warn;
+      return options;
+    });
   std::map<std::string, int> into{{"api", 99}, {"stale", 1}};
   const auto result = load(&into, R"({"api": 7, "api": 9})");
 

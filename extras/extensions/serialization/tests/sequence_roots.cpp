@@ -24,8 +24,7 @@ TEST(deserialization_sequence_roots, reads_an_enum_vector_from_strings) {
   if (!tree)
     return;
 
-  const omni::ryml::config_t<> options{};
-  const auto result = omni::ryml::map_by_schema_t<decltype(options)>{options}(
+  const auto result = omni::ryml::map_by_schema(
     omni::type_t<std::vector<read_status>>{}, *tree);
 
   const std::vector<read_status> expected{

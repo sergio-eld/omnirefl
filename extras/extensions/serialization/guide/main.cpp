@@ -317,13 +317,15 @@ TEST(basics, diagnostics) {
 /** An explicitly configured callable can be constructed in one expression. */
 TEST(basics, explicit_configuration) {
   // GCC 10 needs the nested policy type for aggregate deduction.
-  const omni::ryml::config_t options{
-    .error_policy = omni::json::error_policy{
-      .unknown_fields = omni::json::unknown_policy::allow,
+  const auto load = omni::ryml::deserialize_t{
+    .config = omni::ryml::config_t{
+      .error_policy = omni::json::error_policy{
+        .unknown_fields = omni::json::unknown_policy::allow,
+      },
     },
   };
-  const auto result = omni::ryml::deserialize_t{.config = options}(
-    omni::type<policy_examples::measurement>,
+
+  const auto result = load(omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
@@ -2059,10 +2061,12 @@ class customization_mapping_limits:
 // Enclosing mappers accumulate custom readers' issues and apply limits.
 TEST_P(customization_mapping_limits,
   collects_default_and_custom_conversion_errors) {
-  // GCC 10 needs the nested policy type for aggregate deduction.
-  const omni::ryml::config_t options{
-    .error_policy = omni::json::error_policy{.error_limit = GetParam()},
-  };
+  const auto map = omni::ryml::map_by_schema.tdm_config(
+    [limit = GetParam()](omni::ryml::config_like auto options) {
+      options.error_policy.error_limit = limit;
+      return options;
+    });
+
   const auto tree = omni::ryml::core::parse(R"(
 {
   "count": 2,
@@ -2074,8 +2078,7 @@ TEST_P(customization_mapping_limits,
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_by_schema_t{.config = options}(
-    omni::type<customization_mapping::record>, *tree);
+  const auto result = map(omni::type<customization_mapping::record>, *tree);
 
   EXPECT_FALSE(result.value);
   const auto &issues = result.diagnostics.issues;
