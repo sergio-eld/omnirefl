@@ -125,6 +125,29 @@ TEST(mapping_core, constructs_warning_paths_from_the_source_node) {
     omni::ryml::detail::render_path(warning.path));
 }
 
+TEST(mapping_core, renders_diagnostics_without_the_umbrella_header) {
+  const auto tree = omni::ryml::core::parse(R"({"count": []})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto checked = omni::ryml::core::expect_integer_node(
+    tree->crootref()["count"]);
+
+  EXPECT_FALSE(checked);
+  if (checked)
+    return;
+
+  const omni::ryml::diagnostics report{
+    /*config=*/{},
+    /*issues=*/{checked.error()},
+    /*parse_error_message=*/{},
+  };
+
+  EXPECT_EQ("/count: expected integer, found array",
+    omni::ryml::render_diagnostics(*tree, report));
+}
+
 } // namespace
 
 #if defined(__GNUC__) && !defined(__clang__)

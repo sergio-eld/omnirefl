@@ -4,13 +4,14 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
-#include <omnirefl/serialization/ryml/impl/shared.hpp>
+#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
 #include <cassert>
+#include <iterator>
 #include <type_traits>
 #include <utility>
 
@@ -18,13 +19,7 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-// Prefer full arguments, then destination-only, state-only, and node-only.
-template <int Rank>
-struct node_call_priority: node_call_priority<Rank - 1> {};
-
-template <>
-struct node_call_priority<0> {};
-
+// Prefer full arguments, then pointer-only, state-only, and node-only.
 template <typename Function, typename Destination, typename State>
 auto invoke_expected_node(State state,
   const Function &f,
@@ -35,11 +30,11 @@ auto invoke_expected_node(State state,
   return f(std::move(state), node, into);
 }
 
-template <typename Function, typename Destination, typename State>
+template <typename Function, typename T, typename State>
 auto invoke_expected_node(State,
   const Function &f,
   ::ryml::ConstNodeRef node,
-  Destination into,
+  T *into,
   node_call_priority<2>) -> decltype(f(node, into)) {
   return f(node, into);
 }
@@ -121,8 +116,12 @@ auto node_result(State state,
   if (mapped)
     return {std::move(*mapped), std::move(result.result.diagnostics)};
 
-  for (auto &&error : mapped.error()) {
-    result.report(node_function_error(std::move(error), node));
+  using std::begin;
+  using std::end;
+  auto first = begin(mapped.error());
+  const auto last = end(mapped.error());
+  for (; first != last; ++first) {
+    result.report(node_function_error(std::move(*first), node));
     if (result.stopped())
       break;
   }

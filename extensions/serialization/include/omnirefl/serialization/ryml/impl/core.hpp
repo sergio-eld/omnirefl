@@ -79,5 +79,84 @@ inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
 }
 
 } // namespace core
+
+inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
+  const diagnostics &d) const {
+  std::string message;
+  for (const auto &entry : d.issues) {
+    if (!message.empty())
+      message += '\n';
+
+    if (json::issue_code::parse_error == entry.reason) {
+      message += d.parse_error_message;
+      continue;
+    }
+
+    const auto path = detail::render_path(entry.path);
+
+    message += path.empty() ? std::string{"<root>"} : path;
+    message += ": ";
+    if (entry.warning)
+      message += "warning: ";
+
+    switch (entry.reason) {
+    case json::issue_code::warning_limit_exceeded:
+      message += "warning limit exceeded";
+      break;
+
+    case json::issue_code::missing_field:
+      message += "missing field";
+      break;
+
+    case json::issue_code::unknown_field:
+      message += "unknown field";
+      break;
+
+    case json::issue_code::duplicate_field:
+      message += "duplicate field";
+      break;
+
+    case json::issue_code::duplicate_element:
+      message += "duplicate element";
+      break;
+
+    case json::issue_code::unexpected_kind: {
+      const auto expected = detail::kind_name(entry.expected);
+      const auto actual = detail::kind_name(entry.actual);
+      message += "expected ";
+      message.append(expected.data(), expected.size());
+      message += ", found ";
+      message.append(actual.data(), actual.size());
+      break;
+    }
+
+    default: {
+      const auto value = detail::to_string_view(
+        entry.node_id != ::ryml::NONE && tree.has_val(entry.node_id)
+          ? tree.val(entry.node_id) : c4::csubstr{});
+
+      message += '"';
+      message.append(value.data(), value.size());
+      message += "\" ";
+      if (json::issue_code::out_of_range == entry.reason)
+        message += "is out of range";
+      else {
+        message += "is not ";
+        message += json::value_kind::integer == entry.expected
+            || json::value_kind::unsigned_integer == entry.expected
+          ? "an " : "a ";
+
+        const auto expected = detail::kind_name(entry.expected);
+        message.append(expected.data(), expected.size());
+      }
+
+      break;
+    }
+    }
+  }
+
+  return message;
+}
+
 } // namespace ryml
 } // namespace omni

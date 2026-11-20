@@ -54,46 +54,15 @@ with_node_check<Check> :: Mapping -> Mapping
  * diagnostic limit also skips Mapping. The owned state is moved into Mapping
  * after validation.
  *
- * Uses a generic lambda from C++17; earlier standards use a wrapper struct
- * to preserve constexpr factory construction.
+ * An aggregate wrapper preserves constexpr factory construction and default
+ * construction for stateless callbacks in every supported standard.
  * @pre The node belongs to a valid tree; Mapping's other preconditions apply. */
 template <node_check Check, typename Mapping>
 constexpr auto with_node_check(Mapping &&mapping)
   OMNI_CPP11_TRAILING_RETURN(
     detail::with_node_check_t<Check, compat::decay_t<Mapping>>) {
-#if defined(__cpp_constexpr) && 201603L <= __cpp_constexpr
-  return //
-    [mapping = std::forward<Mapping>(mapping)](auto state,
-      ::ryml::ConstNodeRef node,
-      auto into)
-      -> decltype(std::declval<const compat::decay_t<Mapping> &>()(
-        std::move(state),
-        node,
-        into)) {
-      if (state.limit_exceeded())
-        return {
-          /*value=*/compat::nullopt,
-          /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
-        };
-
-      auto checked = Check(node);
-      if (!checked) {
-        return {
-          /*value=*/compat::nullopt,
-          /*diagnostics=*/{
-            /*config=*/{state.config.error_policy, {}},
-            /*issues=*/{std::move(checked.error())},
-            /*parse_error_message=*/{},
-          },
-        };
-      }
-
-      return mapping(std::move(state), *checked, into);
-    };
-#else
   return detail::with_node_check_t<Check, compat::decay_t<Mapping>>{
     /*lifted_mapping=*/std::forward<Mapping>(mapping)};
-#endif
 }
 
 /** (QoL) Adds a mutating overload to a value-producing mapping function.
@@ -130,7 +99,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -140,6 +108,10 @@ lift_to_with_diagnostics(ValueFunction) ::
 lift_to_with_diagnostics(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
+ *
+ * Type-tag callbacks receive state. For generic two-argument callbacks,
+ * spelling the node parameter as ConstNodeRef distinguishes (state, node)
+ * from the mutating (node, T*) form.
  *
  * Destination overloads come from the callback. No value is default-constructed
  * or assigned by this adapter. A pointer-only callback provides no type<T>
@@ -169,7 +141,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -211,7 +182,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -254,7 +224,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -297,7 +266,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -340,7 +308,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -382,7 +349,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -424,7 +390,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -466,7 +431,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
@@ -508,7 +472,6 @@ state :: read_state_like
 
 ValueFunction :: node -> Result<T>
 ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (node, type<T>) -> Result<T>
 ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>

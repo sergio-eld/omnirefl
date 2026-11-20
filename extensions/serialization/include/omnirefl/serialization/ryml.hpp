@@ -12,7 +12,7 @@
  *
  * Compatible with C++11 and later; examples use C++20 syntax for brevity.
  * Guide: extras/extensions/serialization/guide/main.cpp.
- * C++11 examples: extras/extensions/serialization/tests/main.cpp.
+ * C++11 examples: extras/extensions/serialization/tests/serialization.cpp.
  */
 
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
@@ -63,6 +63,14 @@ struct reflect_as_root:
 } // namespace cp
 
 namespace core {
+
+/** Node-to-type mapping through a customization or its default.
+ * Pointer-only mappings are adapted when T is default-constructible.
+ * @pre Required metadata is available in reflected scope. */
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+  -> with_diagnostics_t<T, diagnostics>;
 
 // REFACTORME: [high] Review responsibility for diagnostic accumulation and
 // limit checks between this dispatcher and the node mappers.

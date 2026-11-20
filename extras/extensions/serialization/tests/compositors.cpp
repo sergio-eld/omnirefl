@@ -526,7 +526,8 @@ TEST(shape_callback, maps_integer_input_with_a_destination_tag) {
     return;
 
   const auto mapping = omni::ryml::compose::to_integral(
-    [](::ryml::ConstNodeRef node, omni::type_t<int>)
+    [](omni::ryml::read_state_t<>, ::ryml::ConstNodeRef node,
+      omni::type_t<int>)
       -> omni::compat::expected<int, omni::ryml::issue> {
       int value{};
       if (c4::from_chars(node.val(), &value))
@@ -694,6 +695,95 @@ TEST(record_callback,
 
   // Creating a value requires a value-producing callback for this record.
   (void)mapping(state, tree->crootref(), omni::type_t<record>{});
+}
+#endif
+
+struct issue_sentinel { omni::ryml::issue *last; };
+
+constexpr bool operator==(omni::ryml::issue *first, issue_sentinel last) {
+  return first == last.last;
+}
+
+constexpr bool operator==(issue_sentinel last, omni::ryml::issue *first) {
+  return first == last;
+}
+
+constexpr bool operator!=(omni::ryml::issue *first, issue_sentinel last) {
+  return !(first == last);
+}
+
+constexpr bool operator!=(issue_sentinel last, omni::ryml::issue *first) {
+  return !(first == last);
+}
+
+struct issue_range {
+  omni::ryml::issue entries[2];
+
+  omni::ryml::issue *begin() { return entries; }
+  issue_sentinel end() { return {entries + 2}; }
+};
+
+TEST(shape_callback, accepts_errors_with_a_distinct_sentinel) {
+  const auto tree = omni::ryml::core::parse("7");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto mapping = omni::ryml::compose::to_integral(
+    [](::ryml::ConstNodeRef node)
+      -> omni::compat::expected<int, issue_range> {
+      return omni::compat::unexpected<issue_range>{issue_range{{
+        omni::ryml::core::make_issue(issue_code::out_of_range,
+          value_kind::integer, node),
+        omni::ryml::core::make_issue(issue_code::invalid_scalar,
+          value_kind::integer, node),
+      }}};
+    });
+
+  omni::ryml::config_t<> options{};
+  options.error_policy.error_limit = 1;
+  const auto result = mapping(omni::ryml::read_state_t<>{options, 0, 0},
+    tree->crootref(),
+    omni::type_t<int>{});
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(2U, result.diagnostics.issues.size());
+  if (result.diagnostics.issues.size() == 2) {
+    EXPECT_EQ(issue_code::out_of_range, result.diagnostics.issues[0].reason);
+    EXPECT_EQ(issue_code::invalid_scalar, result.diagnostics.issues[1].reason);
+  }
+}
+
+TEST(shape_callback, requires_state_for_type_tag_callbacks) {
+  const auto mapping = omni::ryml::compose::lift_to_with_diagnostics(
+    [](::ryml::ConstNodeRef, omni::type_t<int>)
+      -> omni::compat::expected<int, omni::ryml::issue> { return 42; });
+
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(mapping),
+    omni::ryml::read_state_t<>, ::ryml::ConstNodeRef,
+    omni::type_t<int>>::value));
+}
+
+#if defined(__cpp_generic_lambdas) && 201304L <= __cpp_generic_lambdas
+TEST(shape_callback, accepts_a_generic_state_and_node_callback) {
+  const auto tree = omni::ryml::core::parse("42");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto mapping = omni::ryml::compose::lift_to_with_diagnostics(
+    [](auto state, auto node) {
+      return omni::ryml::core::map_node_to_integral(
+        std::move(state), node, omni::type_t<int>{});
+    });
+
+  const omni::ryml::config_t<> options{};
+  const auto result = mapping(omni::ryml::read_state_t<>{options, 0, 0},
+    tree->crootref(),
+    omni::type_t<int>{});
+
+  EXPECT_EQ(42, result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
 }
 #endif
 

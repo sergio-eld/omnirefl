@@ -96,12 +96,12 @@ auto to_optional_like_t::operator()(State context,
       std::move(context)).finish();
   }
 
-  typename T::value_type value{};
-  auto result = core::read_node(std::move(context), node, &value);
-  if (result.value)
-    adapt::emplace(into, std::move(value));
-
-  return result;
+  return core::read_node(std::move(context), node,
+    omni::type_t<typename T::value_type>{})
+    .transform([into](typename T::value_type &&value) -> compat::monostate {
+      adapt::emplace(into, std::move(value));
+      return {};
+    });
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -136,7 +136,7 @@ auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
     mapping,
     node,
     field,
-    /*priority=*/0);
+    omni::ryml::detail::node_call_priority<2>{});
 }
 
 } // namespace detail

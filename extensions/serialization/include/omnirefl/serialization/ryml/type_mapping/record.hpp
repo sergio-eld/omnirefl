@@ -24,7 +24,8 @@ namespace reflected_scope {
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
  * Value-producing member mappings pass their result directly to set_value.
- * Mutation-only member mappings use a temporary and assign it on success.
+ * Mutation-only member mappings use a direct reference when available;
+ * otherwise they use a temporary and assign it on success.
  *
  * A canonical name takes precedence over its aliases, even when its value is
  * invalid. Duplicate policies select among canonical occurrences when present,

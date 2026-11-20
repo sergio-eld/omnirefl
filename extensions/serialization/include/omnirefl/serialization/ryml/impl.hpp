@@ -13,6 +13,14 @@ namespace core {
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+  -> with_diagnostics_t<T, diagnostics> {
+  return omni::ryml::detail::map_node_to_value(std::move(context),
+    omni::ryml::reflected_scope::mapping_to_type(type), node, type);
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (is_read_state<State>::value))
 auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   auto result = omni::ryml::detail::make_node_accumulator(context);
@@ -43,9 +51,34 @@ void write_node(State context, const T &value, ::ryml::NodeRef node) {
 
 namespace detail {
 
-// A callable defers registration lookup until the non-reflected branch is
-// selected, including in C++11. Its explicit default needs no metadata, unlike
-// reflected_scope::mapping_to_type's built-in classification.
+// An explicit default keeps non-reflected entry routes independent of metadata.
+template <typename T, typename Default>
+OMNI_CPP14_CONSTEXPR auto registered_mapping(omni::type_t<T>,
+  const Default &mapping_default)
+  OMNI_CPP11_TRAILING_RETURN(decltype(omni::ryml::detail::first_available(
+    cp::to_type_t<T>{}, traits::cp::unavailable{}, mapping_default))) {
+  const cp::to_type_t<T> mapping_t{};
+  const auto mapping_var =
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+    cp::to_type<T>;
+#else
+    traits::cp::unavailable{};
+#endif
+
+  static_assert(traits::cp::unavailable{} == mapping_t
+      || traits::cp::unavailable{} == mapping_var,
+    "Specialize either cp::to_type_t or cp::to_type, not both");
+
+  const auto mapping = omni::ryml::detail::first_available(
+    mapping_t, mapping_var, mapping_default);
+
+  static_assert(std::is_trivially_copyable<decltype(mapping)>::value
+      && std::is_copy_constructible<decltype(mapping)>::value,
+    "Node mapping callables must be trivially copyable and copy-constructible");
+
+  return mapping;
+}
+
 template <typename Default>
 struct map_registered_or {
   template <typename T, typename State>
@@ -53,61 +86,19 @@ struct map_registered_or {
     ::ryml::ConstNodeRef node,
     omni::type_t<T> type) const
     -> with_diagnostics_t<T, diagnostics> {
-    const cp::to_type_t<T> mapping_t{};
-    const auto mapping_var =
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-      cp::to_type<T>;
-#else
-      traits::cp::unavailable{};
-#endif
-
-    static_assert(traits::cp::unavailable{} == mapping_t
-        || traits::cp::unavailable{} == mapping_var,
-      "Specialize either cp::to_type_t or cp::to_type, not both");
-
-    const auto mapping = omni::ryml::detail::first_available(
-      mapping_t, mapping_var, Default{});
-
-    static_assert(std::is_trivially_copyable<decltype(mapping)>::value
-        && std::is_copy_constructible<decltype(mapping)>::value,
-      "Node mapping callables must be trivially copyable "
-      "and copy-constructible");
-
     return omni::ryml::detail::map_node_to_value(std::move(context),
-      mapping,
-      node,
-      type);
+      registered_mapping(type, Default{}), node, type);
   }
 
   template <typename T, typename State>
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    const cp::to_type_t<T> mapping_t{};
-    const auto mapping_var =
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-      cp::to_type<T>;
-#else
-      traits::cp::unavailable{};
-#endif
-
-    static_assert(traits::cp::unavailable{} == mapping_t
-        || traits::cp::unavailable{} == mapping_var,
-      "Specialize either cp::to_type_t or cp::to_type, not both");
-
-    const auto mapping = omni::ryml::detail::first_available(
-      mapping_t, mapping_var, Default{});
-
-    static_assert(std::is_trivially_copyable<decltype(mapping)>::value
-        && std::is_copy_constructible<decltype(mapping)>::value,
-      "Node mapping callables must be trivially copyable "
-      "and copy-constructible");
-
     auto result = omni::ryml::detail::make_node_accumulator(context);
     if (context.limit_exceeded())
       result.result.value.reset();
     else
       result.append(omni::ryml::detail::read_into(std::move(context),
-        mapping,
+        registered_mapping(omni::type_t<T>{}, Default{}),
         node,
         into,
         /*priority=*/0));
@@ -476,83 +467,6 @@ template <typename T>
 
 } // namespace core
 
-inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
-  const diagnostics &d) const {
-  std::string message;
-  for (const auto &entry : d.issues) {
-    if (!message.empty())
-      message += '\n';
-
-    if (json::issue_code::parse_error == entry.reason) {
-      message += d.parse_error_message;
-      continue;
-    }
-
-    const auto path = detail::render_path(entry.path);
-
-    message += path.empty() ? std::string{"<root>"} : path;
-    message += ": ";
-    if (entry.warning)
-      message += "warning: ";
-
-    switch (entry.reason) {
-    case json::issue_code::warning_limit_exceeded:
-      message += "warning limit exceeded";
-      break;
-
-    case json::issue_code::missing_field:
-      message += "missing field";
-      break;
-
-    case json::issue_code::unknown_field:
-      message += "unknown field";
-      break;
-
-    case json::issue_code::duplicate_field:
-      message += "duplicate field";
-      break;
-
-    case json::issue_code::duplicate_element:
-      message += "duplicate element";
-      break;
-
-    case json::issue_code::unexpected_kind: {
-      const auto expected = detail::kind_name(entry.expected);
-      const auto actual = detail::kind_name(entry.actual);
-      message += "expected ";
-      message.append(expected.data(), expected.size());
-      message += ", found ";
-      message.append(actual.data(), actual.size());
-      break;
-    }
-
-    default: {
-      const auto value = detail::to_string_view(
-        entry.node_id != ::ryml::NONE && tree.has_val(entry.node_id)
-          ? tree.val(entry.node_id) : c4::csubstr{});
-
-      message += '"';
-      message.append(value.data(), value.size());
-      message += "\" ";
-      if (json::issue_code::out_of_range == entry.reason)
-        message += "is out of range";
-      else {
-        message += "is not ";
-        message += json::value_kind::integer == entry.expected
-            || json::value_kind::unsigned_integer == entry.expected
-          ? "an " : "a ";
-
-        const auto expected = detail::kind_name(entry.expected);
-        message.append(expected.data(), expected.size());
-      }
-
-      break;
-    }
-    }
-  }
-
-  return message;
-}
 
 template <typename Value>
 std::string serialize_t::operator()(const Value &value) const {

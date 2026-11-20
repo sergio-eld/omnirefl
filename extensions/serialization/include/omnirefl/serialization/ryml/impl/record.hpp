@@ -3,6 +3,7 @@
 #include <omnirefl/functional.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -13,22 +14,22 @@ namespace ryml {
 namespace reflected_scope {
 namespace detail {
 
-// C++11 overload ranking selects direct field assignment for value mappings.
-// The trailing decltype requires both a type-tag call and a usable setter.
+using omni::ryml::detail::node_call_priority;
+
+// Prefer value production and field assignment. The trailing decltype
+// requires both a native type-tag call and a usable setter.
 template <typename Mapping, typename Field, typename State>
 auto map_node_to_field_using(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   Field field,
-  int)
+  node_call_priority<2>)
   -> decltype(field.set_value(std::move(*mapping(std::move(state),
-    node,
-    omni::type_t<typename Field::type>{}).value)),
+    node, omni::type_t<typename Field::type>{}).value)),
     with_diagnostics_t<compat::monostate>{}) {
   auto result = omni::ryml::detail::make_node_accumulator(state);
   auto mapped = mapping(std::move(state),
-    node,
-    omni::type_t<typename Field::type>{});
+    node, omni::type_t<typename Field::type>{});
   result.append({
     /*value=*/mapped.value
       ? compat::make_optional(compat::monostate{}) : compat::nullopt,
@@ -41,13 +42,27 @@ auto map_node_to_field_using(State state,
   return std::move(result).finish();
 }
 
+// Pointer-only mappings use the existing member when it has a safe reference.
+// This avoids copying containers and retains inputs bound in custom members.
 template <typename Mapping, typename Field, typename State>
 auto map_node_to_field_using(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   Field field,
-  long) -> with_diagnostics_t<compat::monostate> {
-  // Mutation-only mappings need a temporary for bitfields and packed fields.
+  node_call_priority<1>)
+  -> decltype(mapping(std::move(state), node, std::addressof(field.ref()))) {
+  auto result = omni::ryml::detail::make_node_accumulator(state);
+  result.append(mapping(std::move(state), node, std::addressof(field.ref())));
+  return std::move(result).finish();
+}
+
+template <typename Mapping, typename Field, typename State>
+auto map_node_to_field_using(State state,
+  const Mapping &mapping,
+  ::ryml::ConstNodeRef node,
+  Field field,
+  node_call_priority<0>) -> with_diagnostics_t<compat::monostate> {
+  // Bitfields and unaligned packed fields cannot supply a reference.
   typename Field::type value = field.value();
   auto result = omni::ryml::detail::make_node_accumulator(state);
   result.append(omni::ryml::detail::read_into(std::move(state),

@@ -7,7 +7,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/traits.hpp>
-#include <omnirefl/serialization/ryml/impl/shared.hpp>
+#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -31,6 +31,8 @@ namespace core {
  * ends with this call; the returned tree does not retain the parser.
  *
 ```cpp
+#include <omnirefl/serialization/ryml.hpp>
+
 // Supply a reflected person, config, and an owning std::string source.
 auto parsed = core::parse(std::move(source));
 if (parsed) {
@@ -385,8 +387,9 @@ inline auto expect_arithmetic_node(::ryml::ConstNodeRef node)
 map_node_to_arithmetic :: (state, node, type<T>) -> with_diagnostics<T>
 ```
  *
- * @pre Caller validates the node shape. node must refer to a scalar in a
- * valid tree; only a debug assertion checks the scalar-node precondition. */
+ * @pre Caller validates Boolean input for bool, integer input for other
+ * integral types, or numeric input for floating-point types, in a valid tree.
+ * Only debug assertions check these preconditions. */
 struct map_node_to_arithmetic_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.

@@ -153,13 +153,16 @@ struct read_range_case<false> {
       if (result->stopped())
         break;
 
-      compat::range_value_t<T> element{};
-      auto mapped = core::read_node(result->state, child, &element);
-      const bool success = bool(mapped.value);
-      result->append(std::move(mapped));
-      if (success)
+      auto mapped = core::read_node(result->state, child,
+        omni::type_t<compat::range_value_t<T>>{});
+      result->append({
+        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
+      });
+      if (mapped.value)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, result, std::move(element));
+          into, child, result, std::move(*mapped.value));
     }
   }
 };
@@ -194,14 +197,16 @@ struct read_range_case<true> {
       const auto name = child.key();
       auto key = adapt::from_string(omni::type_t<key_type>{},
         view_type{name.str, name.len});
-      traits::mapped_type_t<T> value{};
-      auto mapped = core::read_node(result->state, child, &value);
-      const bool success = bool(mapped.value);
-      result->append(std::move(mapped));
-      if (success)
+      auto mapped = core::read_node(result->state, child,
+        omni::type_t<traits::mapped_type_t<T>>{});
+      result->append({
+        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
+      });
+      if (mapped.value)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
-          into, child, result, std::move(key),
-          std::move(value));
+          into, child, result, std::move(key), std::move(*mapped.value));
     }
   }
 };

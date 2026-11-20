@@ -1,5 +1,6 @@
 #include "json_match.hpp"
 
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -194,7 +195,8 @@ namespace composed_string {
 struct value { std::string text; };
 
 struct read {
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>) const
+  template <typename State>
+  auto operator()(State, ::ryml::ConstNodeRef node, omni::type_t<value>) const
     -> omni::compat::expected<value, omni::ryml::issue> {
     return value{node.val().empty()
       ? std::string{} : std::string{node.val().str, node.val().len}};
@@ -898,7 +900,8 @@ struct value { bool enabled; };
 struct envelope { value flag; };
 
 struct read {
-  auto operator()(::ryml::ConstNodeRef node, omni::type_t<value>) const
+  template <typename State>
+  auto operator()(State, ::ryml::ConstNodeRef node, omni::type_t<value>) const
     -> omni::compat::expected<value, omni::ryml::issue> {
     const auto parsed = omni::ryml::core::parse_boolean(
       {node.val().str, node.val().len});
@@ -1075,6 +1078,136 @@ TEST(composed_rvalue_state, deserializes_a_nested_value) {
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value)
     EXPECT_FALSE(result.value->flag.enabled);
+}
+
+namespace composed_constructed {
+
+struct value {
+  int number;
+
+  explicit value(int number): number(number) {}
+  value(const value &) = delete;
+  value(value &&) = default;
+  value &operator=(value &&) = default;
+};
+
+struct read {
+  auto operator()(::ryml::ConstNodeRef node) const
+    -> omni::compat::expected<value, omni::ryml::issue> {
+    int number{};
+    if (c4::from_chars(node.val(), &number))
+      return value{number};
+
+    return omni::compat::unexpected<omni::ryml::issue>{
+      omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+        omni::json::value_kind::integer, node)};
+  }
+};
+
+struct envelope {
+  std::vector<value> values;
+  std::map<std::string, value> indexed;
+  omni::compat::optional<value> item;
+};
+
+} // namespace composed_constructed
+
+// The C++11 registration form remains usable in every supported standard.
+template <>
+struct omni::ryml::cp::to_type_t<composed_constructed::value>:
+    decltype(omni::ryml::compose::to_integral(composed_constructed::read{})) {};
+
+TEST(composed_constructed, constructs_values_inside_ranges_and_optionals) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<composed_constructed::envelope>{},
+    R"({"values": [7, 8], "indexed": {"port": 9}, "item": 10})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (!result.value)
+    return;
+
+  EXPECT_EQ(2U, result.value->values.size());
+  if (result.value->values.size() == 2) {
+    EXPECT_EQ(7, result.value->values[0].number);
+    EXPECT_EQ(8, result.value->values[1].number);
+  }
+
+  EXPECT_EQ(1U, result.value->indexed.size());
+  if (result.value->indexed.size() == 1)
+    EXPECT_EQ(9, result.value->indexed.begin()->second.number);
+
+  EXPECT_TRUE(result.value->item);
+  if (result.value->item)
+    EXPECT_EQ(10, result.value->item->number);
+}
+
+TEST(composed_constructed, discovers_values_through_root_compounds) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<std::map<std::string,
+      omni::compat::optional<composed_constructed::value>>>>{},
+    R"([{"present": 7, "empty": null}])");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (!result.value)
+    return;
+
+  EXPECT_EQ(1U, result.value->size());
+  if (result.value->size() != 1)
+    return;
+
+  const auto &values = result.value->front();
+  EXPECT_EQ(2U, values.size());
+  const auto present = values.find("present");
+  EXPECT_NE(values.end(), present);
+  if (present != values.end()) {
+    EXPECT_TRUE(present->second);
+    if (present->second)
+      EXPECT_EQ(7, present->second->number);
+  }
+
+  const auto empty = values.find("empty");
+  EXPECT_NE(values.end(), empty);
+  if (empty != values.end())
+    EXPECT_FALSE(empty->second);
+}
+
+namespace composed_bound_input {
+
+struct value {
+  int bias;
+  int number;
+};
+
+struct envelope { value entry; };
+
+struct read {
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node, value *into) const
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+      omni::type_t<int>{})
+      .transform([into](int number) -> omni::compat::monostate {
+        into->number = number + into->bias;
+        return {};
+      });
+  }
+};
+
+} // namespace composed_bound_input
+
+template <>
+struct omni::ryml::cp::to_type_t<composed_bound_input::value>:
+    decltype(omni::ryml::compose::to_integral(composed_bound_input::read{})) {};
+
+TEST(composed_bound_input, supplies_existing_member_data_to_a_pointer_mapping) {
+  composed_bound_input::envelope into{{42, 1}};
+  const auto result = serialization_test::deserialize(&into, R"({"entry": 7})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(49, into.entry.number);
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

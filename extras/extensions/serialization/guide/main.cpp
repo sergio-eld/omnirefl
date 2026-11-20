@@ -49,6 +49,7 @@
  *   advanced.composed_real_mapping - pass state to a value conversion
  *   advanced.composed_string_mapping - select a template result by type tag
  *   advanced.composed_arithmetic_mapping - numeric templates and diagnostics
+ *   advanced.composed_arithmetic_shape_errors - incompatible numeric categories
  *   advanced.composed_enum_mapping - choose custom protocol names
  *   advanced.composed_range_mapping - construct a wrapper around a sequence
  *   advanced.composed_optional_mapping - construct nullable wrappers
@@ -63,8 +64,6 @@
  *     select scalar, container, record, and custom mappings
  *   customization_mapping.standard_range_insertion
  *     reuse insertion adapters without another mapping adapter
- *   customization_mapping.field_aliases - legacy names and canonical output
- *   customization_mapping.enum_aliases - accept alternative enumerator text
  *   extended_container_mapping.appends_members_and_restores_them
  *     combine an inherited container with appended record members
  *   invalid_extended_container_mapping.rejects_invalid_contents
@@ -1171,7 +1170,8 @@ struct label { Text value; };
 template <typename Text>
   requires omni::traits::is_string_like<Text>::value
 const auto omni::ryml::cp::to_type<composed_string::label<Text>> =
-  omni::ryml::compose::to_string_like([](::ryml::ConstNodeRef node,
+  omni::ryml::compose::to_string_like([](omni::ryml::read_state_like auto,
+    ::ryml::ConstNodeRef node,
     omni::type_t<composed_string::label<Text>>)
     -> omni::compat::expected<composed_string::label<Text>,
       omni::ryml::issue> {
@@ -1207,7 +1207,7 @@ const auto omni::ryml::cp::to_type<composed_arithmetic::number<T>> =
     ::ryml::ConstNodeRef node,
     omni::type_t<composed_arithmetic::number<T>>)
     -> omni::ryml::with_diagnostics_t<composed_arithmetic::number<T>> {
-    return omni::ryml::core::map_node_to_arithmetic(std::move(state),
+    return omni::ryml::default_to_arithmetic(std::move(state),
       node,
       omni::type<decltype(composed_arithmetic::number<T>::value)>)
       .transform([](auto value) -> composed_arithmetic::number<T> {
@@ -1234,6 +1234,15 @@ TEST(advanced, composed_arithmetic_mapping) {
   EXPECT_TRUE(real.diagnostics.empty());
   if (real.value)
     EXPECT_DOUBLE_EQ(2.5, real.value->value);
+}
+
+/** A numeric template still validates the category required by its member. */
+TEST(advanced, composed_arithmetic_shape_errors) {
+  const auto result = omni::ryml::deserialize(
+    omni::type<composed_arithmetic::number<int>>, "1.5");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("<root>: expected integer, found scalar", result.diagnostics);
 }
 
 namespace composed_enum {
