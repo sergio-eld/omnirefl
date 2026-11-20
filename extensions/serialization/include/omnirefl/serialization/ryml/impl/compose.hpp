@@ -121,7 +121,7 @@ auto node_result(State state,
   auto first = begin(mapped.error());
   const auto last = end(mapped.error());
   for (; first != last; ++first) {
-    result.report(node_function_error(std::move(*first), node));
+    result.report(node_function_error(*first, node));
     if (result.stopped())
       break;
   }

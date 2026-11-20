@@ -8,6 +8,57 @@
 #include <utility>
 #include <vector>
 
+namespace diagnostic_inputs {
+
+struct empty_record {};
+struct embedded_document {};
+
+} // namespace diagnostic_inputs
+
+template <>
+struct omni::ryml::cp::to_type_t<diagnostic_inputs::empty_record> {
+  template <typename Config>
+  auto operator()(omni::ryml::read_state_t<Config> state,
+    ::ryml::ConstNodeRef node, omni::type_t<diagnostic_inputs::empty_record>)
+    const -> omni::ryml::with_diagnostics_t<diagnostic_inputs::empty_record> {
+    omni::ryml::diagnostics report{{state.config.error_policy, {}}, {}, {}};
+    const bool warnings = state.config.error_policy.unknown_fields
+      == (omni::json::unknown_policy::allow | omni::json::unknown_policy::warn);
+    for (const auto child : node.children())
+      report.issues.push_back(omni::ryml::core::make_issue(
+        omni::json::issue_code::unknown_field,
+        omni::json::value_kind::unknown, child, warnings));
+
+    return {
+      /*value=*/warnings
+        ? omni::compat::make_optional(diagnostic_inputs::empty_record{})
+        : omni::compat::nullopt,
+      /*diagnostics=*/std::move(report),
+    };
+  }
+};
+
+template <>
+struct omni::ryml::cp::to_type_t<diagnostic_inputs::embedded_document> {
+  template <typename Config>
+  auto operator()(omni::ryml::read_state_t<Config> state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<diagnostic_inputs::embedded_document>) const
+    -> omni::ryml::with_diagnostics_t<diagnostic_inputs::embedded_document> {
+    const auto text = node.val();
+    auto parsed = omni::ryml::core::parse(std::string{text.str, text.len});
+    if (parsed)
+      return {
+        /*value=*/diagnostic_inputs::embedded_document{},
+        /*diagnostics=*/{{state.config.error_policy, {}}, {}, {}},
+      };
+
+    return {omni::compat::nullopt, {{state.config.error_policy, {}},
+      {omni::ryml::core::make_issue(omni::json::issue_code::parse_error,
+        omni::json::value_kind::unknown, node)}, std::move(parsed.error())}};
+  }
+};
+
 namespace {
 
 TEST(read_state, identifies_read_state_specializations) {
@@ -61,6 +112,84 @@ TEST(mapping_diagnostics, retains_the_document_path_when_mapping_a_subtree) {
   for (const auto &entry : result.diagnostics.issues) {
     EXPECT_EQ(node.id(), entry.node_id);
     EXPECT_EQ("/outer/reading", omni::ryml::detail::render_path(entry.path));
+  }
+}
+
+TEST(mapping_diagnostics, limits_errors_in_a_custom_report) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<std::vector<diagnostic_inputs::empty_record>>{},
+    R"([{"first": 1, "second": 2, "third": 3}])");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("/0/first: unknown field", result.diagnostics);
+}
+
+TEST(mapping_diagnostics, stops_after_the_warning_that_exceeds_the_limit) {
+  omni::ryml::config_t<> options{};
+  options.error_policy.unknown_fields =
+    omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
+  options.error_policy.warning_limit = 1;
+  const auto result = omni::ryml::core::deserialize(options,
+    omni::type_t<std::vector<diagnostic_inputs::empty_record>>{},
+    R"([{"first": 1}, {"second": 2, "third": 3}])");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("/0/first: warning: unknown field\n"
+            "/1/second: warning: unknown field\n"
+            "/1/second: warning limit exceeded",
+
+    result.diagnostics);
+}
+
+TEST(mapping_diagnostics, retains_a_nested_parse_error_message) {
+  const auto parsed = omni::ryml::core::parse("[unterminated");
+  EXPECT_FALSE(parsed);
+  if (parsed)
+    return;
+
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<std::vector<diagnostic_inputs::embedded_document>>{},
+    R"(["[unterminated"])");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(parsed.error(), result.diagnostics);
+}
+
+struct issue_view {
+  omni::ryml::issue *first;
+  omni::ryml::issue *last;
+
+  omni::ryml::issue *begin() const { return this->first; }
+  omni::ryml::issue *end() const { return this->last; }
+};
+
+TEST(mapping_diagnostics, reuses_relative_paths_from_a_borrowed_issue_range) {
+  const auto tree = omni::ryml::core::parse(R"({"outer": {}})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  auto missing = omni::ryml::core::make_issue(
+    omni::json::issue_code::missing_field,
+    omni::json::value_kind::unknown, ::ryml::ConstNodeRef{});
+  missing.path.push_back({"child", omni::compat::nullopt});
+  const issue_view errors{&missing, &missing + 1};
+  const auto mapping = omni::ryml::compose::to_record(
+    [errors](::ryml::ConstNodeRef) -> omni::compat::expected<int, issue_view> {
+      return omni::compat::unexpected<issue_view>{errors};
+    });
+
+  const omni::ryml::config_t<> options{};
+  const omni::ryml::read_state_t<> state{options, 0, 0};
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    SCOPED_TRACE(attempt);
+    const auto result = mapping(state,
+      tree->crootref()["outer"],
+      omni::type_t<int>{});
+
+    EXPECT_FALSE(result.value);
+    EXPECT_EQ("/outer/child: missing field",
+      omni::ryml::render_diagnostics(*tree, result.diagnostics));
   }
 }
 

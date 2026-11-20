@@ -1142,7 +1142,7 @@ TEST(composed_constructed, constructs_values_inside_ranges_and_optionals) {
     EXPECT_EQ(10, result.value->item->number);
 }
 
-// FIXME: [high] External: MSVC STL cannot grow vector<map<string,
+// FIXME: [medium] External: MSVC STL cannot grow vector<map<string,
 // optional<move-only>>>: vector attempts to copy the map during relocation.
 // A standard-only reproduction is vector<map<string, unique_ptr<int>>>;
 // v.emplace_back(). https://github.com/microsoft/STL/issues/5552
@@ -1214,6 +1214,139 @@ TEST(composed_bound_input, supplies_existing_member_data_to_a_pointer_mapping) {
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   EXPECT_EQ(49, into.entry.number);
+}
+
+namespace composed_nonassignable {
+
+struct constructed {
+  int number;
+
+  explicit constructed(int number): number(number) {}
+  constructed(constructed &&) = default;
+  constructed &operator=(constructed &&) = delete;
+};
+
+struct defaulted {
+  int number{};
+
+  defaulted() = default;
+  defaulted(defaulted &&) = default;
+  defaulted &operator=(defaulted &&) = delete;
+};
+
+struct envelope { constructed entry; };
+struct default_envelope { defaulted entry; };
+struct optional_envelope { omni::compat::optional<constructed> entry; };
+
+struct read {
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<constructed>) const
+    -> omni::ryml::with_diagnostics_t<constructed> {
+    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+      omni::type_t<int>{})
+      .transform([](int number) -> constructed { return constructed{number}; });
+  }
+
+  template <typename State, typename T>
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+      omni::type_t<int>{})
+      .transform([into](int number) -> omni::compat::monostate {
+        into->number = number;
+        return {};
+      });
+  }
+};
+
+} // namespace composed_nonassignable
+
+template <>
+struct omni::ryml::cp::to_type_t<composed_nonassignable::constructed>:
+    decltype(omni::ryml::compose::to_integral(
+      composed_nonassignable::read{})) {};
+
+template <>
+struct omni::ryml::cp::to_type_t<composed_nonassignable::defaulted>:
+    decltype(omni::ryml::compose::to_integral(
+      composed_nonassignable::read{})) {};
+
+TEST(composed_nonassignable, mutates_a_field_when_assignment_is_unavailable) {
+  composed_nonassignable::envelope into{composed_nonassignable::constructed{1}};
+  const auto result = serialization_test::deserialize(&into, R"({"entry": 7})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(7, into.entry.number);
+}
+
+TEST(composed_nonassignable, accepts_a_default_constructible_pointer_field) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<composed_nonassignable::default_envelope>{},
+    R"({"entry": 8})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(8, result.value->entry.number);
+}
+
+TEST(composed_nonassignable, clears_an_absent_nonassignable_optional) {
+  composed_nonassignable::optional_envelope into{};
+  into.entry.emplace(1);
+  const auto result = serialization_test::deserialize(&into, "{}");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_FALSE(into.entry);
+}
+
+namespace composed_bitfield {
+
+enum class digit: unsigned { zero = 0, two = 2, five = 5 };
+struct envelope { digit value: 3; };
+
+struct add {
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node, digit *into) const
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+      omni::type_t<unsigned>{})
+      .transform([into](unsigned number) -> omni::compat::monostate {
+        *into = static_cast<digit>(static_cast<unsigned>(*into) + number);
+        return {};
+      });
+  }
+};
+
+} // namespace composed_bitfield
+
+template <>
+struct omni::ryml::cp::to_type_t<composed_bitfield::digit>:
+    decltype(omni::ryml::compose::to_integral(composed_bitfield::add{})) {};
+
+TEST(composed_bitfield, applies_a_pointer_mapping_to_a_nonreferencable_field) {
+  composed_bitfield::envelope into{composed_bitfield::digit::two};
+  const auto result = serialization_test::deserialize(&into, R"({"value": 3})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(composed_bitfield::digit::five, into.value);
+}
+
+TEST(composed_bitfield, reports_a_pointer_mapping_error_at_the_field) {
+  composed_bitfield::envelope into{composed_bitfield::digit::two};
+  const auto result = serialization_test::deserialize(&into,
+    R"({"value": 99999999999999999999999})");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (result.diagnostics.issues.size() == 1) {
+    const auto &entry = result.diagnostics.issues.front();
+    EXPECT_EQ(omni::json::issue_code::out_of_range, entry.reason);
+    EXPECT_EQ("/value", omni::ryml::detail::render_path(entry.path));
+  }
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

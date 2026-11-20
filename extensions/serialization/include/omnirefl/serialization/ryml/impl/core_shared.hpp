@@ -7,7 +7,6 @@
 
 #include <c4/format.hpp>
 
-#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <type_traits>
@@ -148,26 +147,20 @@ struct node_accumulator {
     if (!child.value)
       this->result.value.reset();
 
-    // A child may already have emitted the limit error. Preserve that report
-    // without generating the same warning-limit error again at each parent.
-    const bool has_limit_error = std::any_of(child.diagnostics.issues.begin(),
-      child.diagnostics.issues.end(),
-      [](const issue &entry) {
-        return entry.reason == json::issue_code::warning_limit_exceeded;
-      });
-
+    // report() includes the warning-limit error at the crossing warning.
+    // Stopping there also skips a marker already included by the child.
     for (auto &entry : child.diagnostics.issues) {
-      if (has_limit_error) {
-        this->state.error_count += !entry.warning;
-        this->state.warning_count += entry.warning;
-        if (!entry.warning)
-          this->result.value.reset();
+      if (this->stopped())
+        break;
 
-        this->result.diagnostics.issues.push_back(std::move(entry));
-      } else {
-        this->report(std::move(entry));
-      }
+      this->report(std::move(entry));
     }
+
+    if (!child.diagnostics.parse_error_message.empty())
+      this->result.diagnostics.parse_error_message = append_diagnostics_t{}(
+        std::move(this->result.diagnostics.parse_error_message),
+        std::move(child.diagnostics.parse_error_message));
+
     if (this->stopped())
       this->result.value.reset();
   }

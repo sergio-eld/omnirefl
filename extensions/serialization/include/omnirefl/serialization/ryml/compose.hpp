@@ -50,13 +50,14 @@ with_node_check<Check> :: Mapping -> Mapping
 ```
  *
  * Mapping may provide either or both destination overloads. A failed check
- * returns its issue at the source node without calling Mapping. An exceeded
- * diagnostic limit also skips Mapping. The owned state is moved into Mapping
- * after validation.
+ * returns its issue without calling Mapping. Issues with a source node ID
+ * use document paths. Issues without an ID use paths relative to the input
+ * node and are attributed to that node. An exceeded diagnostic limit also
+ * skips Mapping. The owned state is moved into Mapping after validation.
  *
  * An aggregate wrapper preserves constexpr factory construction and default
  * construction for stateless callbacks in every supported standard.
- * @pre The node belongs to a valid tree; Mapping's other preconditions apply. */
+ * @pre The node belongs to a valid tree. Mapping's preconditions apply. */
 template <node_check Check, typename Mapping>
 constexpr auto with_node_check(Mapping &&mapping)
   OMNI_CPP11_TRAILING_RETURN(
@@ -65,21 +66,28 @@ constexpr auto with_node_check(Mapping &&mapping)
     /*lifted_mapping=*/std::forward<Mapping>(mapping)};
 }
 
-/** (QoL) Adds a mutating overload to a value-producing mapping function.
- * An existing mutating overload takes precedence. Otherwise the adapter
- * assigns successfully mapped values and retains the mapping diagnostics.
- * @pre The destination pointer must be non-null. Wrapped mapping
- * preconditions still apply.
- * An empty result gives no guarantee about the destination's state.
+/** (QoL) Adds assignment support to a value-producing node mapping.
  *
 ```
-Mapping :: (state, node, type<T>) -> with_diagnostics<T>
+Mapping :: (state, node, type<T>) -> with_diagnostics<T, Diagnostics>
+Mapping :: (state, node, T*) -> with_diagnostics<monostate, Diagnostics>
 
 with_mutating_node_to_type_overload :: Mapping -> {
-  (state, node, type<T>) -> with_diagnostics<T>,
-  (state, node, T*)      -> with_diagnostics<monostate>
+  (state, node, type<T>) -> with_diagnostics<T, Diagnostics>,
+  (state, node, T*)      -> with_diagnostics<monostate, Diagnostics>
 }
 ```
+ *
+ * Mapping may provide either overload or both. The adapter forwards any
+ * existing overload and moves state into it. A T* call uses the existing
+ * mutating overload when available. Otherwise it assigns the available result
+ * of a value-producing call and retains its diagnostics. This assignment
+ * requires T & to be assignable from T &&. A pointer-only mapping exposes
+ * only the T* overload.
+ *
+ * @pre The destination pointer must be non-null. Wrapped mapping
+ * preconditions apply. An empty result gives no guarantee about the
+ * destination's state.
  */
 template <typename Mapping>
 constexpr auto with_mutating_node_to_type_overload(Mapping &&mapping)
@@ -109,9 +117,9 @@ lift_to_with_diagnostics(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
- * Type-tag callbacks receive state. For generic two-argument callbacks,
- * spelling the node parameter as ConstNodeRef distinguishes (state, node)
- * from the mutating (node, T*) form.
+ * Type-tag callbacks receive state. For generic (state, node) callbacks,
+ * declare the node parameter as ::ryml::ConstNodeRef or constrain the state
+ * parameter to distinguish the callback from the mutating (node, T*) form.
  *
  * Destination overloads come from the callback. No value is default-constructed
  * or assigned by this adapter. A pointer-only callback provides no type<T>
@@ -158,6 +166,11 @@ to_record(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Field conversion and alias handling belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -199,6 +212,11 @@ to_range(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Element conversion belongs to f. Object-shaped ranges use to_record.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -241,6 +259,11 @@ to_enum(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Enumerator lookup and aliases belong to f; no enum metadata is queried.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -283,7 +306,12 @@ to_string_like(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
- * Text conversion, ownership, and destination assignment belong to f.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
+ * Text conversion and ownership belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
@@ -325,6 +353,11 @@ to_boolean(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Conversion to the destination value belongs to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -366,6 +399,11 @@ to_integral(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Conversion and destination range checks belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -407,6 +445,11 @@ to_floating_point(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Conversion and destination range checks belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -448,6 +491,11 @@ to_arithmetic(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Selection of the conversion and destination range checks belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -489,6 +537,11 @@ to_optional_like(MutatingFunction) ::
  * with_diagnostics instead of expected. Errors with a source node ID keep
  * document paths; otherwise paths are relative to the input node.
  * with_diagnostics carries complete paths and configuration.
+ *
+ * Callbacks are invoked through a const object. For generic (state, node)
+ * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
+ * the state parameter to distinguish the callback from (node, T*).
+ *
  * Null handling and conversion of present values belong to f.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
@@ -502,10 +555,19 @@ constexpr auto to_optional_like(Function &&f)
       lift_to_with_diagnostics(std::forward<Function>(f))));
 }
 
+} // namespace compose
+
+namespace detail {
+
+inline issue node_function_error(issue error, ::ryml::ConstNodeRef node);
+
+} // namespace detail
+
+namespace compose {
 namespace detail {
 
 /** Calls a node check before the mapping function, preserving its overloads.
- * A failed check returns one hard error at the source node's document path.
+ * A failed check returns its issue with the source node and document path.
  * The mapping function is skipped on failure or an exceeded diagnostic limit.
  *
 ```
@@ -528,7 +590,8 @@ struct with_node_check_t {
   Mapping lifted_mapping;
 
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.
-  template <typename Destination, typename State>
+  OMNI_CONSTRAINED_TEMPLATE((typename Destination, typename State),
+    (is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
     Destination into) const
@@ -545,7 +608,8 @@ struct with_node_check_t {
         /*value=*/compat::nullopt,
         /*diagnostics=*/{
           /*config=*/{state.config.error_policy, {}},
-          /*issues=*/{std::move(checked.error())},
+          /*issues=*/{omni::ryml::detail::node_function_error(
+            std::move(checked.error()), node)},
           /*parse_error_message=*/{},
         },
       };

@@ -18,6 +18,7 @@ using omni::json::issue_code;
 using omni::json::value_kind;
 using omni::ryml::compose::node_check;
 using omni::ryml::compose::to_record;
+using omni::ryml::compose::with_node_check;
 
 struct node_check_case {
   std::string name;
@@ -122,6 +123,13 @@ INSTANTIATE_TEST_SUITE_P(shapes,
 
 struct counted_record { std::size_t count; };
 struct counted_envelope { counted_record inner; };
+struct copy_only_record {
+  int value;
+
+  copy_only_record() = default;
+  copy_only_record(const copy_only_record &) = default;
+  copy_only_record(copy_only_record &&) = delete;
+};
 
 omni::compat::expected<counted_record, omni::ryml::issue> count_properties(
   ::ryml::ConstNodeRef node) {
@@ -166,6 +174,87 @@ struct omni::ryml::cp::to_type_t<counted_record> {
 #endif
 
 namespace {
+
+TEST(record_mapping, constructs_a_copy_only_value_with_the_default_mapping) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<copy_only_record>{}, R"({"value": 42})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(42, result.value->value);
+}
+
+TEST(arithmetic_mapping, constrains_value_and_mutating_destinations) {
+  using omni::ryml::default_to_arithmetic;
+  using state = omni::ryml::read_state_t<>;
+  using node = ::ryml::ConstNodeRef;
+
+  EXPECT_TRUE((omni::compat::is_invocable<decltype(map_node_to_arithmetic),
+    state, node, omni::type_t<bool>>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(map_node_to_arithmetic),
+    state, node, omni::type_t<const bool>>::value));
+  EXPECT_TRUE((omni::compat::is_invocable<decltype(default_to_arithmetic),
+    state, node, int *>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(default_to_arithmetic),
+    state, node, const int *>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(default_to_arithmetic),
+    state, node, omni::type_t<const bool>>::value));
+}
+
+TEST(node_check_adapter, requires_a_read_state) {
+  struct constant_mapping {
+    auto operator()(omni::ryml::read_state_t<>, ::ryml::ConstNodeRef,
+      omni::type_t<int>) const -> omni::ryml::with_diagnostics_t<int>;
+
+    auto operator()(int, ::ryml::ConstNodeRef, omni::type_t<int>) const
+      -> omni::ryml::with_diagnostics_t<int>;
+  };
+
+  const auto mapping = with_node_check<expect_object_node>(constant_mapping{});
+
+  EXPECT_TRUE((omni::compat::is_invocable<decltype(mapping),
+    omni::ryml::read_state_t<>, ::ryml::ConstNodeRef,
+    omni::type_t<int>>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(mapping),
+    int, ::ryml::ConstNodeRef, omni::type_t<int>>::value));
+}
+
+auto expect_nonempty_object(::ryml::ConstNodeRef node)
+  -> omni::compat::expected<::ryml::ConstNodeRef, omni::ryml::issue> {
+  if (node.is_map() && node.num_children())
+    return node;
+
+  omni::ryml::issue error{};
+  error.reason = issue_code::out_of_range;
+  error.expected = value_kind::mapping;
+  error.actual = value_kind::unknown;
+  return omni::compat::unexpected<omni::ryml::issue>{std::move(error)};
+}
+
+TEST(node_check_adapter, attributes_a_custom_check_failure_to_the_input_node) {
+  const auto tree = omni::ryml::core::parse(R"({"payload": {}})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::config_t<> options{};
+  const auto node = tree->crootref()["payload"];
+  const auto mapping = with_node_check<expect_nonempty_object>(
+    omni::ryml::compose::lift_to_with_diagnostics(count_properties));
+
+  const auto result = mapping(omni::ryml::read_state_t<>{options, 0, 0},
+    node, omni::type_t<counted_record>{});
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  for (const auto &entry : result.diagnostics.issues) {
+    EXPECT_EQ(issue_code::out_of_range, entry.reason);
+    EXPECT_EQ(node.id(), entry.node_id);
+    EXPECT_EQ("/payload", omni::ryml::detail::render_path(entry.path));
+    EXPECT_EQ(value_kind::mapping, entry.actual);
+  }
+}
 
 struct callback_case {
   std::string name;
@@ -784,6 +873,29 @@ TEST(shape_callback, accepts_a_generic_state_and_node_callback) {
 
   EXPECT_EQ(42, result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
+}
+
+TEST(shape_callback, assigns_from_a_generic_state_and_explicit_node_callback) {
+  const auto tree = omni::ryml::core::parse("42");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto mapping = omni::ryml::compose::to_integral(
+    [](auto state, ::ryml::ConstNodeRef node) {
+      return omni::ryml::core::map_node_to_integral(
+        std::move(state), node, omni::type_t<int>{});
+    });
+
+  const omni::ryml::config_t<> options{};
+  int into{};
+  const auto result = mapping(omni::ryml::read_state_t<>{options, 0, 0},
+    tree->crootref(),
+    &into);
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(42, into);
 }
 #endif
 

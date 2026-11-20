@@ -382,6 +382,7 @@ inline auto expect_arithmetic_node(::ryml::ConstNodeRef node)
 
 /** Maps a scalar node's text to the requested arithmetic type.
  * Provides a common entry point for Boolean, integer, and real mappings.
+ * Boolean destinations require a non-const type.
  *
 ```
 map_node_to_arithmetic :: (state, node, type<T>) -> with_diagnostics<T>
@@ -394,7 +395,9 @@ struct map_node_to_arithmetic_t {
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_read_state<State>::value))
+    (std::is_arithmetic<T>::value && is_read_state<State>::value
+      && (!std::is_const<T>::value
+        || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics> {
     assert(node.has_val() && !node.is_container());

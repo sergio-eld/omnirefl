@@ -322,11 +322,12 @@ auto map_node_to_value_using(State state,
   long)
   -> decltype(mapping(std::move(state), node, static_cast<T *>(nullptr)),
     with_diagnostics_t<T>{}) {
-  T value{};
-  return mapping(std::move(state), node, &value)
-    .transform([&value](compat::monostate) -> T {
-      return std::move(value);
-    });
+  auto value = compat::make_optional<T>();
+  auto mapped = mapping(std::move(state), node, &*value);
+  return {
+    /*value=*/mapped.value ? std::move(value) : compat::nullopt,
+    /*diagnostics=*/std::move(mapped.diagnostics),
+  };
 }
 
 // Apply the same diagnostic limits to native and adapted value results,

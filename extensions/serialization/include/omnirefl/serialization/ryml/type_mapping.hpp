@@ -247,6 +247,8 @@ constexpr from_floating_point_t from_floating_point{};
 /** Checked arithmetic node-to-type mapping.
  * Checks the node type before calling the core mapping function.
  * Does not call \ref reflected_scope::mapping_to_type.
+ * Boolean destinations require a non-const type. Pointer destinations must
+ * be assignable from the mapped value.
  *
 ```
 default_to_arithmetic :: {
@@ -265,7 +267,9 @@ struct default_to_arithmetic_t {
     default_to_floating_point_t>::type;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_read_state<State>::value))
+    (std::is_arithmetic<T>::value && is_read_state<State>::value
+      && (!std::is_const<T>::value
+        || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<T> type) const -> with_diagnostics_t<T> {
@@ -273,7 +277,8 @@ struct default_to_arithmetic_t {
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_read_state<State>::value))
+    (std::is_arithmetic<T>::value && is_read_state<State>::value
+      && std::is_assignable<T &, T &&>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate> {
     return mapping_type<T>{}(std::move(state), node, into);

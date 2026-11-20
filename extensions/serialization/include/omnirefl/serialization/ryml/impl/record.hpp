@@ -17,8 +17,10 @@ namespace detail {
 using omni::ryml::detail::node_call_priority;
 
 // Prefer value production and field assignment. The trailing decltype
-// requires both a native type-tag call and a usable setter.
-template <typename Mapping, typename Field, typename State>
+// requires a native type-tag call; assignment also needs a writable value.
+OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename Field, typename State),
+  (std::is_assignable<typename Field::type &,
+    typename Field::type &&>::value))
 auto map_node_to_field_using(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
@@ -106,18 +108,26 @@ struct cpp11_collect_members {
   }
 };
 
-// SFINAE keeps T{} out of instantiations for non-default-constructible fields.
-OMNI_CONSTRAINED_TEMPLATE((typename Record, typename _F),
-  (std::is_default_constructible<
-    typename omni::data_member_meta_t<_F>::type>::value))
-void initialize_missing(omni::data_member_binding_t<Record, _F> field) {
-  field.set_value(typename omni::data_member_meta_t<_F>::type{});
+// Only absent optional fields are initialized here. Other field types must
+// not instantiate assignment just because the runtime presence check fails.
+OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
+  (traits::is_optional<T>::value && std::is_default_constructible<T>::value
+    && std::is_assignable<T &, T &&>::value))
+void initialize_missing(Field field) {
+  field.set_value(T{});
 }
 
-OMNI_CONSTRAINED_TEMPLATE((typename Record, typename _F),
-  (!std::is_default_constructible<
-    typename omni::data_member_meta_t<_F>::type>::value))
-void initialize_missing(omni::data_member_binding_t<Record, _F>) {}
+// Nonassignable optionals can still be emptied through their reset adapter.
+OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
+  (traits::is_optional<T>::value && std::is_default_constructible<T>::value
+    && !std::is_assignable<T &, T &&>::value))
+void initialize_missing(Field field) {
+  adapt::reset(std::addressof(field.ref()));
+}
+
+OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
+  (!traits::is_optional<T>::value || !std::is_default_constructible<T>::value))
+void initialize_missing(Field) {}
 
 // A bound member operation is inert until the fold supplies its current state.
 template <typename Record, typename _F>
