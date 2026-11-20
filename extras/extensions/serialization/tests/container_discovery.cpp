@@ -1,5 +1,6 @@
 #include "json_match.hpp"
 
+#include <c4/charconv.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -60,9 +61,27 @@ struct to_type_t<compatible_integer> {
     ::ryml::ConstNodeRef node,
     compatible_integer *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    auto result = core::read_node(context, node, &into->value);
-    if (!result.value)
-      return result;
+    // Parse text directly: the default integer mapping rejects quoted input.
+    if (!node.has_val() || node.is_container()
+      || !c4::from_chars(node.val(), &into->value))
+      return {
+        /*value=*/compat::nullopt,
+        /*diagnostics=*/{
+          /*config=*/{context.config.error_policy, {}},
+          /*issues=*/{core::make_issue(json::issue_code::invalid_scalar,
+            json::value_kind::integer, node)},
+          /*parse_error_message=*/{},
+        },
+      };
+
+    auto result = with_diagnostics_t<compat::monostate>{
+      /*value=*/compat::monostate{},
+      /*diagnostics=*/{
+        /*config=*/{context.config.error_policy, {}},
+        /*issues=*/{},
+        /*parse_error_message=*/{},
+      },
+    };
 
     if (node.is_val_quoted())
       result.diagnostics.issues.push_back(core::make_issue(

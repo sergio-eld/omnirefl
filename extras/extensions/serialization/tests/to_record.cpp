@@ -596,25 +596,25 @@ const alias_case alias_cases[]{
     {{issue_code::unknown_field, "/not_a_member", false}}},
   {"invalid_alias_value", R"({"service_port": "wrong"})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/service_port", false}}},
+    {{issue_code::unexpected_kind, "/service_port", false}}},
   {"escaped_alias_path", R"({"legacy/port": "wrong"})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/legacy~1port", false}}},
+    {{issue_code::unexpected_kind, "/legacy~1port", false}}},
   {"missing_member", "{}", duplicate_policy::reject, unknown_policy::reject,
     omni::compat::nullopt, {{issue_code::missing_field, "/port", false}}},
   // Canonical presence suppresses aliases even when its value is invalid.
   {"invalid_canonical_selected_first", R"({"port": "bad", "service_port": 8})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"invalid_canonical_over_last_alias", R"({"port": "bad", "service_port": 8})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"invalid_canonical_over_first", R"({"service_port": 7, "port": "bad"})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"invalid_canonical_selected_last", R"({"service_port": 7, "port": "bad"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
 };
 
 const alias_case canonical_priority_cases[]{
@@ -637,7 +637,7 @@ const alias_case canonical_priority_cases[]{
     duplicate_policy::allow, unknown_policy::reject, 8, {}},
   {"invalid_canonical_with_reject", R"({"port":"bad","service_port":8})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"repeated_canonical_rejected", R"({"port":7,"service_port":99,"port":8})",
     duplicate_policy::reject, unknown_policy::reject, omni::compat::nullopt,
     {{issue_code::duplicate_field, "/port", false}}},
@@ -651,7 +651,7 @@ const alias_case canonical_priority_cases[]{
   {"repeated_canonical_invalid_first",
     R"({"port":"bad","service_port":99,"port":8})",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"repeated_canonical_valid_last",
     R"({"port":"bad","service_port":99,"port":8})",
     duplicate_policy::last, unknown_policy::reject, 8, {}},
@@ -661,18 +661,18 @@ const alias_case canonical_priority_cases[]{
   {"repeated_canonical_invalid_last",
     R"({"port":7,"service_port":99,"port":"bad"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"repeated_canonical_all_invalid",
     R"({"port":"bad","service_port":99,"port":"wrong"})",
     duplicate_policy::last, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"yaml_canonical_after_alias", "service_port: 7\nport: 8\n",
     duplicate_policy::reject, unknown_policy::reject, 8, {}},
   {"yaml_canonical_before_alias", "port: 7\nservice_port: 8\n",
     duplicate_policy::last, unknown_policy::reject, 7, {}},
   {"yaml_invalid_canonical", "service_port: 7\nport: bad\n",
     duplicate_policy::allow, unknown_policy::reject, omni::compat::nullopt,
-    {{issue_code::invalid_scalar, "/port", false}}},
+    {{issue_code::unexpected_kind, "/port", false}}},
   {"yaml_repeated_canonical", "port: 7\nservice_port: 99\nport: 8\n",
     duplicate_policy::last | duplicate_policy::warn, unknown_policy::reject,
     8, {{issue_code::duplicate_field, "/port", true}}},
@@ -746,7 +746,7 @@ TEST(record_aliases, preserves_nested_input_paths) {
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1u, result.diagnostics.issues.size());
   for (const auto &issue : result.diagnostics.issues) {
-    EXPECT_EQ(issue_code::invalid_scalar, issue.reason);
+    EXPECT_EQ(issue_code::unexpected_kind, issue.reason);
     EXPECT_EQ("/peers/0/listen_port",
       omni::ryml::detail::render_path(issue.path));
   }
