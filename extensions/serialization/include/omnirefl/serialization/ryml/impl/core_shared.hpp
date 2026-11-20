@@ -41,6 +41,8 @@ inline issue make_issue(json::issue_code reason, json::value_kind expected,
 namespace detail {
 
 // C++11 overload ranking for callback signatures and field destinations.
+// REFACTORME: [medium] Simplify ranked dispatch for callback signatures and
+// field destinations while preserving overload precedence.
 template <int Rank>
 struct node_call_priority: node_call_priority<Rank - 1> {};
 

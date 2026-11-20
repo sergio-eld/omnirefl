@@ -716,10 +716,12 @@ struct nttp_unary_predicate {
 };
 #endif
 
-// Inspect a value predicate's Boolean constant without constructing tuple
-// elements: record bindings need an existing record. Keep the nullary protocol
-// as a lazy fallback: probing both protocols can instantiate invalid metadata
-// wrappers inside a value predicate's operator template.
+// Ad hoc: inspect the predicate's result type because record bindings need an
+// existing record and cannot be constructed for filtering. The dual predicate
+// protocols require a lazy nullary fallback: probing both can instantiate
+// invalid metadata wrappers inside a value predicate's operator template.
+// REFACTORME: [high] Reassess predicate filtering to replace this result-type
+// probing and dual-protocol fallback without constructing bound elements.
 template <typename Predicate, typename Element, typename = void>
 struct filter_constant:
     compat::bool_constant<invoke_type<Element>(Predicate{})> {};
