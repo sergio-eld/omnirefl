@@ -1142,6 +1142,11 @@ TEST(composed_constructed, constructs_values_inside_ranges_and_optionals) {
     EXPECT_EQ(10, result.value->item->number);
 }
 
+// FIXME: [high] External: MSVC STL cannot grow vector<map<string,
+// optional<move-only>>>: vector attempts to copy the map during relocation.
+// A standard-only reproduction is vector<map<string, unique_ptr<int>>>;
+// v.emplace_back(). https://github.com/microsoft/STL/issues/5552
+#if !defined(_MSVC_STL_VERSION)
 TEST(composed_constructed, discovers_values_through_root_compounds) {
   const auto result = serialization_test::deserialize(
     omni::type_t<std::vector<std::map<std::string,
@@ -1172,6 +1177,7 @@ TEST(composed_constructed, discovers_values_through_root_compounds) {
   if (empty != values.end())
     EXPECT_FALSE(empty->second);
 }
+#endif
 
 namespace composed_bound_input {
 
