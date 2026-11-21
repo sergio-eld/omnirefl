@@ -113,33 +113,6 @@ void process_node_to_field_using(
 
 namespace detail {
 
-// Literal comparisons return the first schema index, or the field count.
-template <std::size_t Index>
-std::size_t find_record_member_index(compat::string_view) { return Index; }
-
-template <std::size_t Index, typename Field, typename... Rest>
-std::size_t find_record_member_index(compat::string_view name,
-  Field field, Rest... rest) {
-  return name == compat::string_view{field.name()} ? Index
-    : find_record_member_index<Index + 1>(name, rest...);
-}
-
-// C++11 tuple unpacking uses a named callable instead of a generic lambda.
-struct cpp11_find_record_member {
-  compat::string_view name;
-
-  template <typename... Field>
-  std::size_t operator()(Field... field) const {
-    return find_record_member_index<0>(this->name, field...);
-  }
-};
-
-template <typename Fields>
-std::size_t record_member_index(const Fields &fields,
-  compat::string_view name) {
-  return compat::apply(cpp11_find_record_member{name}, fields);
-}
-
 OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
   (traits::is_optional<T>::value && std::is_default_constructible<T>::value
     && std::is_assignable<T &, T &&>::value))
@@ -274,13 +247,15 @@ auto to_record_t<NameByAlias>::operator()(State context,
     std::move(context));
   assert(into && node.is_map());
 
-  // C++11 tuple forwarding constructors need not support constant evaluation.
+  // C++11 tuple operations need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter(fn::is_non_static);
+  constexpr auto table = fn::lookup_table(fields);
 #else
   const auto fields = omni::meta_for<T>::accessible_data_members()
     | fn::filter(fn::is_non_static);
+  const auto table = fn::lookup_table(fields);
 #endif
 
   // Selected children share this object's tree; only IDs need storage.
@@ -300,12 +275,14 @@ auto to_record_t<NameByAlias>::operator()(State context,
 
     const auto name = child.key();
     const compat::string_view input_name{name.str, name.len};
-    auto index = omni::ryml::detail::record_member_index(fields, input_name);
+    const auto mapped_name = table.lookup(input_name);
+    auto index = mapped_name ? mapped_name.value().index : pending.size();
 
     if (index == pending.size()) {
       if (const auto canonical =
         compat::invoke(this->name_by_alias, input_name)) {
-        index = omni::ryml::detail::record_member_index(fields, *canonical);
+        const auto mapped_alias = table.lookup(*canonical);
+        index = mapped_alias ? mapped_alias.value().index : pending.size();
         if (index != pending.size()) {
           auto &presence = canonical_presence[index];
           if (!presence)
