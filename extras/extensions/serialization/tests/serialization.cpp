@@ -2587,7 +2587,9 @@ INSTANTIATE_TEST_SUITE_P(values,
   });
 
 #if defined(__cpp_designated_initializers) \
-  && 201707L <= __cpp_designated_initializers
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
 TEST(serialization_formats, supports_designated_configuration) {
   const auto output =
     designated_serializer(serialization_data::payload{"Ada", 815});

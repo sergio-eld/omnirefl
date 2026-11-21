@@ -93,7 +93,6 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <iterator>
 #include <map>
 #include <set>
@@ -608,58 +607,34 @@ TEST(basics, mapping_result) {
     EXPECT_EQ(42, *result.value);
 }
 
-/** Fundamental readers return a decoded value and structured diagnostics
- * when given a type tag. */
+/** Fundamental values and string views use type tags and return structured
+ * diagnostics. */
 TEST(basics, fundamental_mapping_results) {
+  using omni::ryml::map_by_schema;
+
   const auto tree = omni::ryml::core::parse(
     R"({"boolean": true, "integer": 7, "real": 2.5, "text": "hello"})");
   EXPECT_TRUE(tree);
   if (!tree)
     return;
 
-  const omni::ryml::config_t options{};
-  const omni::ryml::read_state_t state{
-    .config = options,
-    .error_count = 0,
-    .warning_count = 0,
-  };
-
   const auto node = tree->crootref();
-  const auto boolean = omni::ryml::default_to_boolean(state,
-    node["boolean"],
-    omni::type<bool>);
-
-  // C++20 partial application; earlier standards can pass state explicitly.
-  const auto read_integral = std::bind_front(omni::ryml::default_to_integral,
-    state);
-
-  const auto integer = read_integral(node["integer"], omni::type<int>);
-  const auto natural = read_integral(node["integer"], omni::type<unsigned>);
-  const auto real = omni::ryml::default_to_floating_point(state,
-    node["real"],
-    omni::type<double>);
-
-  const auto arithmetic = omni::ryml::default_to_arithmetic(state,
-    node["integer"],
-    omni::type<int>);
-
-  const auto text = omni::ryml::default_to_string_like(state,
-    node["text"],
-    omni::type<std::string>);
-
-  const auto view = omni::ryml::default_to_string_like(state,
-    node["text"],
-    omni::type<omni::compat::string_view>);
+  const auto boolean = map_by_schema(omni::type<bool>, node["boolean"]);
+  const auto integer = map_by_schema(omni::type<int>, node["integer"]);
+  const auto natural = map_by_schema(omni::type<unsigned>, node["integer"]);
+  const auto real = map_by_schema(omni::type<double>, node["real"]);
+  const auto text = map_by_schema(omni::type<std::string>, node["text"]);
+  const auto view = map_by_schema(omni::type<omni::compat::string_view>,
+    node["text"]);
 
   EXPECT_EQ(true, boolean.value);
   EXPECT_EQ(7, integer.value);
   EXPECT_EQ(7U, natural.value);
   EXPECT_EQ(2.5, real.value);
-  EXPECT_EQ(7, arithmetic.value);
   EXPECT_EQ("hello", text.value);
   EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
 
-  const auto invalid = read_integral(node["text"], omni::type<int>);
+  const auto invalid = map_by_schema(omni::type<int>, node["text"]);
 
   EXPECT_FALSE(invalid.value);
   EXPECT_FALSE(invalid.diagnostics.issues.empty());
@@ -1996,20 +1971,8 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
   if (!parsed)
     return;
 
-  const omni::ryml::config_t options{};
-  const omni::ryml::read_state_t context{
-    .config = options,
-    .error_count = 0,
-    .warning_count = 0,
-  };
-
   auto into = c.initial;
-  const auto mapped = omni::reflected_call(
-    [node = parsed->crootref(), context](omni::record_binding auto record)
-      -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-      return omni::ryml::core::read_node(context, node, &record.value());
-    },
-    into);
+  const auto mapped = omni::ryml::map_by_schema(&into, *parsed);
 
   EXPECT_FALSE(mapped.value);
   EXPECT_EQ(static_cast<const std::vector<int> &>(c.initial),
@@ -2123,17 +2086,8 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
   if (!parsed)
     return;
 
-  const omni::ryml::config_t options{};
-  const omni::ryml::read_state_t context{
-    .config = options,
-    .error_count = 0,
-    .warning_count = 0,
-  };
-
   auto into = c.initial;
-  const auto mapped = omni::ryml::core::read_node(context,
-    parsed->crootref(),
-    &into);
+  const auto mapped = omni::ryml::map_by_schema(&into, *parsed);
 
   EXPECT_EQ(bool(c.expected), bool(mapped.value));
   if (c.expected) {
