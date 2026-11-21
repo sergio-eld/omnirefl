@@ -101,27 +101,6 @@ constexpr auto instrumented_validation(Check &&check)
   return {/*check=*/std::forward<Check>(check)};
 }
 
-/** Accumulator and a decision to stop before the next operation. */
-template <typename Accumulator>
-struct fold_control {
-  Accumulator value;
-  bool stopped;
-};
-
-/** Continue a short-circuiting fold with the supplied accumulator. */
-template <typename Accumulator>
-constexpr auto continue_with(Accumulator &&value)
-  -> fold_control<compat::decay_t<Accumulator>> {
-  return {std::forward<Accumulator>(value), /*stopped=*/false};
-}
-
-/** Finish a short-circuiting fold with the supplied accumulator. */
-template <typename Accumulator>
-constexpr auto stop_with(Accumulator &&value)
-  -> fold_control<compat::decay_t<Accumulator>> {
-  return {std::forward<Accumulator>(value), /*stopped=*/true};
-}
-
 namespace detail {
 
 template <typename WhenTrue, typename WhenFalse>
@@ -988,46 +967,54 @@ struct cpp11_foldl_visit {
 };
 #endif
 
-// Recursion exits without moving stopped accumulators through the remaining
-// elements, and supports C++11 constant evaluation without assignment.
-template <typename Visit, typename Accumulator>
-constexpr fold_control<Accumulator> try_fold_values(Visit &,
-  fold_control<Accumulator> state) { return state; }
+template <typename Visit, typename Result>
+constexpr Result try_fold_values(Visit &, Result state) { return state; }
+
+// A named continuation preserves C++11 support without generic lambdas.
+// References keep tuple elements stationary and retain their call categories.
+template <typename Visit, typename Result, typename Element, typename... Rest>
+struct cpp11_try_fold_step;
 
 template <typename Visit,
-  typename Accumulator,
+  typename Result,
   typename Element,
   typename... Rest>
-constexpr fold_control<Accumulator> try_fold_values(Visit &visit,
-  fold_control<Accumulator> state, Element &&element, Rest &&...rest) {
-// C++14 permits branches in constexpr functions. Separate returns avoid an
-// extra move through the conditional expression on MSVC.
-#if defined(__cpp_constexpr) && 201304L <= __cpp_constexpr
-  if (state.stopped)
-    return state;
-
-  return try_fold_values(visit,
-    compat::invoke(visit, std::move(state.value),
-      std::forward<Element>(element)),
-
-    std::forward<Rest>(rest)...);
-#else
-  return state.stopped ? std::move(state)
-    : try_fold_values(visit,
-        compat::invoke(visit, std::move(state.value),
-          std::forward<Element>(element)),
-
-        std::forward<Rest>(rest)...);
-#endif
+constexpr Result try_fold_values(Visit &visit,
+  Result state, Element &&element, Rest &&...rest) {
+  return std::move(state).and_then(
+    cpp11_try_fold_step<Visit, Result, Element, Rest...>{
+      visit, element, std::forward_as_tuple(rest...)});
 }
 
-template <typename Visit, typename Accumulator>
+template <typename Visit, typename Result, typename Element, typename... Rest>
+struct cpp11_try_fold_step {
+  Visit &visit;
+  Element &element;
+  std::tuple<Rest &...> rest;
+
+  template <typename Value, std::size_t... Index>
+  constexpr Result call(Value &&value, compat::index_sequence<Index...>) const {
+    return try_fold_values(this->visit,
+      compat::invoke(this->visit, std::forward<Value>(value),
+        std::forward<Element>(this->element)),
+
+      std::forward<Rest>(std::get<Index>(this->rest))...);
+  }
+
+  template <typename Value>
+  constexpr Result operator()(Value &&value) const {
+    return this->call(std::forward<Value>(value),
+      compat::make_index_sequence<sizeof...(Rest)>{});
+  }
+};
+
+template <typename Visit, typename Result>
 struct cpp11_try_fold_visit {
   Visit &visit;
-  fold_control<Accumulator> &initial;
+  Result &initial;
 
   template <typename... Element>
-  constexpr fold_control<Accumulator> operator()(Element &&...element) const {
+  constexpr Result operator()(Element &&...element) const {
     return try_fold_values(this->visit, std::move(this->initial),
       std::forward<Element>(element)...);
   }
@@ -1474,17 +1461,23 @@ constexpr Accumulator
 #endif
 }
 
-/** Fold tuple operations left-to-right until a step returns stop_with(value).
- * A stopped initial control invokes no steps. Empty input returns initial.
- * Steps receive the accumulator as an rvalue and preserve element categories.
- * Accumulators need construction, not assignment. */
+/** Left fold with an expected-like accumulator and early failure return.
+ * Result satisfies traits::is_expected_like, including rvalue and_then, and
+ * has a non-void value_type.
+ * visit :: (value&&, element) -> Result.
+ * A failed result is returned unchanged, without visiting later elements.
+ * Failed initial input invokes no steps; an empty tuple returns initial.
+ * Element categories are preserved. Result needs construction, not assignment.
+ * No expected implementation is required by this header.
+ */
 OMNI_CONSTRAINED_TEMPLATE(
-  (typename Visit, typename Accumulator, typename Tuple),
-  (detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value))
-constexpr fold_control<Accumulator> try_fold(Visit visit,
-  fold_control<Accumulator> initial, Tuple &&tuple) {
+  (typename Visit, typename Result, typename Tuple),
+  (traits::is_expected_like<Result>::value
+    && !std::is_void<typename Result::value_type>::value
+    && detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value))
+constexpr Result try_fold(Visit visit, Result initial, Tuple &&tuple) {
   return compat::apply(
-    detail::cpp11_try_fold_visit<Visit, Accumulator>{visit, initial},
+    detail::cpp11_try_fold_visit<Visit, Result>{visit, initial},
     std::forward<Tuple>(tuple));
 }
 
@@ -1791,11 +1784,11 @@ struct foldl_closure {
   }
 };
 
-/** Store a visitor and initial control for deferred try_fold application. */
-template <typename Visit, typename Accumulator>
+/** Store a visitor and initial result for deferred try_fold application. */
+template <typename Visit, typename Result>
 struct try_fold_closure {
   Visit visit;
-  fold_control<Accumulator> initial;
+  Result initial;
 
   template <typename Tuple>
   constexpr auto operator()(Tuple &&tuple) const &
@@ -1814,7 +1807,7 @@ struct try_fold_closure {
   template <typename Tuple>
   friend constexpr auto operator|(Tuple &&tuple, try_fold_closure closure)
     -> decltype(try_fold(std::declval<Visit &&>(),
-      std::declval<fold_control<Accumulator> &&>(),
+      std::declval<Result &&>(),
       std::forward<Tuple>(tuple))) {
     return try_fold(std::move(closure.visit), std::move(closure.initial),
       std::forward<Tuple>(tuple));
@@ -1928,10 +1921,12 @@ constexpr foldl_closure<Visit, Accumulator> foldl(Visit visit,
   };
 }
 
-/** Bind a visitor and initial control for a later call or pipe. */
-template <typename Visit, typename Accumulator>
-constexpr try_fold_closure<Visit, Accumulator> try_fold(Visit visit,
-  fold_control<Accumulator> initial) {
+/** Bind a visitor and initial result for a later call or pipe. */
+OMNI_CONSTRAINED_TEMPLATE((typename Visit, typename Result),
+  (traits::is_expected_like<Result>::value
+    && !std::is_void<typename Result::value_type>::value))
+constexpr try_fold_closure<Visit, Result> try_fold(Visit visit,
+  Result initial) {
   return {std::move(visit), std::move(initial)};
 }
 

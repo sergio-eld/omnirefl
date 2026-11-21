@@ -84,7 +84,7 @@ inline issue node_function_error(issue error, ::ryml::ConstNodeRef node) {
   }
 
   const ::ryml::ConstNodeRef source{node.tree(), error.node_id};
-  if (error.path.empty())
+  if (error.path.empty() && source.has_parent())
     error.path = core::node_path(source);
 
   if (error.actual == json::value_kind::unknown)

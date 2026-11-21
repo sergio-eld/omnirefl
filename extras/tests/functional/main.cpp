@@ -3,6 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#if 202002L < OMNI_CPLUSPLUS && defined(__has_include)
+#  if __has_include(<expected>)
+#    include <expected>
+#  endif
+#endif
+
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -21,6 +27,51 @@
 #endif
 
 namespace fn_test {
+
+// Core tests retain their C++11 baseline without fetching an expected library.
+// This same-type sum exercises the public expected-like protocol.
+template <typename T>
+struct fold_result {
+  using value_type = T;
+  using error_type = T;
+
+  T accumulated;
+  bool available;
+
+  constexpr bool has_value() const { return this->available; }
+  template <typename F>
+  OMNI_CPP14_CONSTEXPR fold_result and_then(F &&f) && {
+    if (this->available)
+      return std::forward<F>(f)(std::move(this->accumulated));
+
+    return std::move(*this);
+  }
+  OMNI_CPP14_CONSTEXPR T &operator*() & { return this->accumulated; }
+  OMNI_CPP14_CONSTEXPR T &&operator*() && {
+    return std::move(this->accumulated);
+  }
+  OMNI_CPP14_CONSTEXPR T &value() & { return this->accumulated; }
+  constexpr const T &value() const & { return this->accumulated; }
+  OMNI_CPP14_CONSTEXPR T &&value() && {
+    return std::move(this->accumulated);
+  }
+  OMNI_CPP14_CONSTEXPR T &error() & { return this->accumulated; }
+  constexpr const T &error() const & { return this->accumulated; }
+  OMNI_CPP14_CONSTEXPR T &&error() && {
+    return std::move(this->accumulated);
+  }
+};
+
+static_assert(omni::traits::is_expected_like<fold_result<int>>::value,
+  "Expected-like traits recognize a value/error carrier");
+static_assert(!omni::traits::is_expected_like<bool>::value,
+  "A Boolean is not an expected-like result");
+static_assert(!omni::traits::is_expected_like<std::unique_ptr<int>>::value,
+  "Boolean testing and dereference alone are not the expected protocol");
+#if defined(__cpp_lib_expected) && 202211L <= __cpp_lib_expected
+static_assert(omni::traits::is_expected_like<std::expected<void, int>>::value,
+  "Expected-like recognition includes void values");
+#endif
 
 struct record {
   int count;
@@ -2412,16 +2463,15 @@ TEST(fn_try_fold, stops_before_evaluating_later_events) {
     event{2, &evaluated}, event{99, &evaluated});
 
   const auto result = omni::fn::try_fold(
-    [](int total, const event &next) {
+    [](int total, const event &next) -> fn_test::fold_result<int> {
       const int value = next();
-      return 2 == value ? omni::fn::stop_with(total + value)
-                        : omni::fn::continue_with(total + value);
+      return {total + value, 2 != value};
     },
-    omni::fn::continue_with(0),
+    fn_test::fold_result<int>{0, true},
     events);
 
-  EXPECT_TRUE(result.stopped);
-  EXPECT_EQ(3, result.value);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(3, result.error());
   EXPECT_EQ((std::vector<int>{1, 2}), evaluated);
 }
 
@@ -2433,84 +2483,137 @@ TEST(fn_try_fold, stopped_accumulators_do_not_move_through_remaining_elements) {
     tracked(tracked &&other) : moves(other.moves) { ++*moves; }
   };
 
-  const auto stop = [](tracked value, int) {
-    return omni::fn::stop_with(std::move(value));
+  const auto stop = [](tracked value, int) -> fn_test::fold_result<tracked> {
+    return {std::move(value), false};
   };
 
   int short_moves = 0;
   const auto short_result = omni::fn::try_fold(stop,
-    omni::fn::continue_with(tracked{&short_moves}),
+    fn_test::fold_result<tracked>{tracked{&short_moves}, true},
     std::make_tuple(1));
 
   int long_moves = 0;
   const auto long_result = omni::fn::try_fold(stop,
-    omni::fn::continue_with(tracked{&long_moves}),
+    fn_test::fold_result<tracked>{tracked{&long_moves}, true},
     std::make_tuple(1, 2, 3));
 
-  EXPECT_TRUE(short_result.stopped);
-  EXPECT_TRUE(long_result.stopped);
+  EXPECT_FALSE(short_result.has_value());
+  EXPECT_FALSE(long_result.has_value());
   EXPECT_EQ(short_moves, long_moves);
 }
 
 TEST(fn_try_fold, supports_nonassignable_accumulators) {
   struct total { const int value; };
   const auto result = omni::fn::try_fold(
-    [](total accumulated, int value) {
-      return omni::fn::continue_with(total{accumulated.value + value});
+    [](total accumulated, int value) -> fn_test::fold_result<total> {
+      return {total{accumulated.value + value}, true};
     },
-    omni::fn::continue_with(total{0}),
+    fn_test::fold_result<total>{total{0}, true},
     std::make_tuple(1, 2, 3));
 
-  EXPECT_FALSE(result.stopped);
-  EXPECT_EQ(6, result.value.value);
+  EXPECT_TRUE(result.has_value());
+  EXPECT_EQ(6, result.value().value);
 }
 
 TEST(fn_try_fold, moves_the_accumulator_through_a_lazy_closure) {
   auto reduce = omni::fn::try_fold(
-    [](std::unique_ptr<int> total, int value) {
+    [](std::unique_ptr<int> total, int value)
+      -> fn_test::fold_result<std::unique_ptr<int>> {
       *total += value;
-      return omni::fn::continue_with(std::move(total));
+      return {std::move(total), true};
     },
-    omni::fn::continue_with(omni::compat::make_unique<int>(0)));
+    fn_test::fold_result<std::unique_ptr<int>>{
+      omni::compat::make_unique<int>(0), true});
 
   auto result = std::make_tuple(1, 2, 3) | std::move(reduce);
 
-  EXPECT_FALSE(result.stopped);
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(6, *result.value);
+  EXPECT_TRUE(result.has_value());
+  EXPECT_TRUE(result.value());
+  if (result.value())
+    EXPECT_EQ(6, *result.value());
 }
 
 TEST(fn_try_fold, preserves_an_initial_stop) {
   int calls = 0;
   const auto result = omni::fn::try_fold(
-    [&calls](int total, int value) {
+    [&calls](int total, int value) -> fn_test::fold_result<int> {
       ++calls;
-      return omni::fn::continue_with(total + value);
+      return {total + value, true};
     },
-    omni::fn::stop_with(7),
+    fn_test::fold_result<int>{7, false},
     std::make_tuple(1, 2));
 
-  EXPECT_TRUE(result.stopped);
-  EXPECT_EQ(7, result.value);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(7, result.error());
   EXPECT_EQ(0, calls);
 }
 
 TEST(fn_try_fold, returns_initial_control_for_an_empty_tuple) {
   const auto reduce = omni::fn::try_fold(
-    [](int total, int value) {
-      return omni::fn::continue_with(total + value);
+    [](int total, int value) -> fn_test::fold_result<int> {
+      return {total + value, true};
     },
-    omni::fn::continue_with(7));
+    fn_test::fold_result<int>{7, true});
 
   const auto called = reduce(std::tuple<>{});
   const auto piped = std::tuple<>{} | reduce;
 
-  EXPECT_FALSE(called.stopped);
-  EXPECT_EQ(7, called.value);
-  EXPECT_FALSE(piped.stopped);
-  EXPECT_EQ(7, piped.value);
+  EXPECT_TRUE(called.has_value());
+  EXPECT_EQ(7, called.value());
+  EXPECT_TRUE(piped.has_value());
+  EXPECT_EQ(7, piped.value());
 }
+
+#if defined(__cpp_lib_expected) && 202211L <= __cpp_lib_expected
+TEST(fn_try_fold, preserves_the_standard_expected_error) {
+  const auto result = omni::fn::try_fold(
+    [](int total, int value) -> std::expected<int, std::string> {
+      if (value < 0)
+        return std::unexpected{std::string{"negative value"}};
+
+      return total + value;
+    },
+    std::expected<int, std::string>{0},
+    std::make_tuple(1, 2, -1, 99));
+
+  EXPECT_FALSE(result.has_value());
+  if (!result.has_value())
+    EXPECT_EQ("negative value", result.error());
+}
+
+TEST(fn_try_fold, supports_a_local_expected_value_type) {
+  struct total { const int value; };
+  const auto result = omni::fn::try_fold(
+    [](total accumulated, int value) -> std::expected<total, std::string> {
+      return total{accumulated.value + value};
+    },
+    std::expected<total, std::string>{total{0}},
+    std::make_tuple(1, 2, 3));
+
+  EXPECT_TRUE(result.has_value());
+  if (result.has_value())
+    EXPECT_EQ(6, result->value);
+}
+
+TEST(fn_try_fold, preserves_a_move_only_error) {
+  const auto result = omni::fn::try_fold(
+    [](int total, int value) -> std::expected<int, std::unique_ptr<int>> {
+      if (value < 0)
+        return std::unexpected{omni::compat::make_unique<int>(value)};
+
+      return total + value;
+    },
+    std::expected<int, std::unique_ptr<int>>{0},
+    std::make_tuple(1, -7, 99));
+
+  EXPECT_FALSE(result.has_value());
+  if (!result.has_value()) {
+    EXPECT_TRUE(result.error());
+    if (result.error())
+      EXPECT_EQ(-7, *result.error());
+  }
+}
+#endif
 
 TEST(fn_foldr, reduces_from_right_to_left) {
   const auto tuple = std::make_tuple(
