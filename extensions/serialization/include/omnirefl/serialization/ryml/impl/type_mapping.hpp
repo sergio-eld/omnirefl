@@ -119,29 +119,5 @@ auto from_optional_like_t::operator()(State context,
   }
 }
 
-namespace reflected_scope {
-namespace detail {
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Field, typename State),
-  (is_read_state<State>::value))
-void map_node_to_field(omni::ryml::detail::node_accumulator<State> *result,
-  ::ryml::ConstNodeRef node, Field field) {
-  // The record event fold stops before invoking any later field.
-  assert(!result->stopped());
-  const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
-  constexpr auto map = typename traits::select<
-    traits::case_<compat::conjunction<
-      std::is_assignable<typename Field::type &, typename Field::type &&>,
-      compat::is_invocable<decltype((mapping)), State, ::ryml::ConstNodeRef,
-        omni::type_t<typename Field::type>>>::value,
-      map_field_value>,
-    traits::case_<Field::has_reference_access(), map_field_reference>,
-    map_field_copy>::type{};
-
-  map(result, mapping, node, field);
-}
-
-} // namespace detail
-} // namespace reflected_scope
 } // namespace ryml
 } // namespace omni

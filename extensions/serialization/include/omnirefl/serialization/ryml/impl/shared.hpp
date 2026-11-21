@@ -15,19 +15,6 @@
 
 namespace omni {
 namespace ryml {
-namespace reflected_scope {
-namespace detail {
-
-// Defined after type-mapping selection is available; record headers use this
-// declaration without depending on the later customization-point definitions.
-OMNI_CONSTRAINED_TEMPLATE((typename Field, typename State),
-  (is_read_state<State>::value))
-void map_node_to_field(omni::ryml::detail::node_accumulator<State> *result,
-  ::ryml::ConstNodeRef node, Field field);
-
-} // namespace detail
-} // namespace reflected_scope
-
 namespace detail {
 
 // Before constexpr if, tag dispatch selects among different result types.

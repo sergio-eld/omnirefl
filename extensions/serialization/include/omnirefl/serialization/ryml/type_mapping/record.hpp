@@ -23,9 +23,8 @@ namespace reflected_scope {
  * use it.
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
- * Value-producing member mappings pass their result directly to set_value.
- * Mutation-only member mappings use a direct reference when available;
- * otherwise they use a temporary and assign it on success.
+ * Aggregatable records are constructed from mapped field values. Other
+ * records receive those values through their field bindings and set_value.
  *
  * A canonical name takes precedence over its aliases, even when its value is
  * invalid. Duplicate policies select among canonical occurrences when present,
@@ -42,6 +41,13 @@ namespace reflected_scope {
 template <typename NameByAlias = fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_record_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<omni::is_reflected_record<T>,
+      compat::disjunction<std::is_default_constructible<T>,
+        omni::refl::is_aggregatable<T>>, is_read_state<State>>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node,
+    omni::type_t<T>) const -> with_diagnostics_t<T, diagnostics>;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
       is_read_state<State>>::value))
@@ -88,8 +94,10 @@ struct to_record_t {
  * use it.
  *
 ```
-default_to_record :: type<T> ->
-  (state, node, T*) -> with_diagnostics<monostate>
+default_to_record :: type<T> -> {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
 ```
  */
 template <typename T>

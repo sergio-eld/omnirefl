@@ -948,6 +948,52 @@ TEST(record_aliases, ignored_aliases_do_not_exhaust_warning_limit) {
 
 } // namespace
 
+namespace aggregate_record_mapping {
+
+struct constructed_value {
+  int value;
+
+  explicit constructed_value(int value): value(value) {}
+  constructed_value(constructed_value &&) = default;
+  constructed_value &operator=(constructed_value &&) = delete;
+};
+
+struct request {
+  constructed_value item;
+  int count;
+};
+
+} // namespace aggregate_record_mapping
+
+template <>
+struct omni::ryml::cp::to_type_t<aggregate_record_mapping::constructed_value> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<aggregate_record_mapping::constructed_value>) const
+    -> omni::ryml::with_diagnostics_t<
+      aggregate_record_mapping::constructed_value> {
+    return omni::ryml::core::read_node(std::move(state), node,
+      omni::type_t<int>{})
+      .transform([](int value) -> aggregate_record_mapping::constructed_value {
+        return aggregate_record_mapping::constructed_value{value};
+      });
+  }
+};
+
+TEST(record_mapping, constructs_aggregate_with_nonassignable_custom_field) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<aggregate_record_mapping::request>{},
+    R"({"item": 7, "count": 2})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(7, result.value->item.value);
+    EXPECT_EQ(2, result.value->count);
+  }
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
+
 #if defined(__GNUC__) && !defined(__clang__)
 #  pragma GCC diagnostic pop
 #endif

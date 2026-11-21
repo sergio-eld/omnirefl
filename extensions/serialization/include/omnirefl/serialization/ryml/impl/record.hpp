@@ -21,72 +21,91 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
   return omni::data_member_binding_t<Record, _F>{*into};
 }
 
-struct map_field_value {
-  template <typename Mapping, typename Field, typename State>
-  void operator()(omni::ryml::detail::node_accumulator<State> *result,
-    const Mapping &mapping, ::ryml::ConstNodeRef node, Field field) const {
-    const auto error_policy = result->state.config.error_policy;
-    auto state = result->state;
-    auto mapped = mapping(std::move(state),
-      node, omni::type_t<typename Field::type>{});
+// Optional storage does not default-construct field values before mapping.
+// Inheriting the metadata wrapper supplies aggregate_into's named-field protocol.
+template <typename Field>
+struct record_value_slot: Field {
+  compat::optional<typename Field::type> stored;
 
-    if (mapped.diagnostics.issues.empty()) {
-      const bool succeeded = mapped.value && !result->stopped();
-      if (succeeded)
-        field.set_value(std::move(*mapped.value));
+  typename Field::type &&value() && { return std::move(*this->stored); }
+};
 
-      if (!succeeded || !mapped.diagnostics.parse_error_message.empty())
-        result->append({
-          /*value=*/succeeded ? compat::make_optional(compat::monostate{})
-            : compat::nullopt,
-          /*diagnostics=*/std::move(mapped.diagnostics),
-        });
-      return;
-    }
+template <typename... Field>
+auto record_value_slots(const std::tuple<Field...> &)
+  -> std::tuple<record_value_slot<Field>...> {
+  return {};
+}
 
-    auto checked = omni::ryml::detail::make_node_accumulator(result->state);
-    checked.result.diagnostics.config.error_policy = error_policy;
-    checked.append({
-      /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
-        : compat::nullopt,
-      /*diagnostics=*/std::move(mapped.diagnostics),
-    });
-    if (checked.result.value)
-      field.set_value(std::move(*mapped.value));
+template <typename T>
+struct assign_record_fields {
+  T *into;
 
-    result->append(std::move(checked).finish());
+  template <typename Field>
+  void operator()(record_value_slot<Field> &field) const {
+    bind_record_member(this->into, static_cast<Field>(field))
+      .set_value(std::move(field).value());
   }
 };
 
-struct map_field_reference {
-  template <typename Mapping, typename Field, typename State>
-  void operator()(omni::ryml::detail::node_accumulator<State> *result,
-    const Mapping &mapping, ::ryml::ConstNodeRef node, Field field) const {
-    auto state = result->state;
-    auto mapped = mapping(std::move(state), node, std::addressof(field.ref()));
-    if (!mapped.value || !mapped.diagnostics.issues.empty()
-      || !mapped.diagnostics.parse_error_message.empty() || result->stopped())
-      result->append(std::move(mapped));
+template <typename T>
+struct aggregate_record_value {
+  using result_type = with_diagnostics_t<T>;
+
+  template <typename Frame>
+  result_type operator()(Frame *frame) const {
+    if (!frame->result->result.value)
+      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
+
+    return {
+      compat::make_optional(omni::refl::aggregate_into<T>(frame->values)),
+      std::move(frame->result->result.diagnostics),
+    };
   }
 };
 
-struct map_field_copy {
-  template <typename Mapping, typename Field, typename State>
-  void operator()(omni::ryml::detail::node_accumulator<State> *result,
-    const Mapping &mapping, ::ryml::ConstNodeRef node, Field field) const {
-    auto state = result->state;
-    typename Field::type value = field.value();
-    auto checked = omni::ryml::detail::make_node_accumulator(state);
-    checked.append(omni::ryml::detail::read_into(std::move(state),
-      mapping,
-      node,
-      &value,
-      /*priority=*/0));
+template <typename T>
+struct bind_record_value {
+  using result_type = with_diagnostics_t<T>;
 
-    if (checked.result.value)
-      field.set_value(std::move(value));
+  template <typename Frame>
+  result_type operator()(Frame *frame) const {
+    if (!frame->result->result.value)
+      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
 
-    result->append(std::move(checked).finish());
+    auto value = compat::make_optional<T>();
+    frame->values | fn::each(assign_record_fields<T>{&*value});
+    return {std::move(value),
+      std::move(frame->result->result.diagnostics)};
+  }
+};
+
+template <typename T>
+struct aggregate_record_into {
+  using result_type = with_diagnostics_t<compat::monostate>;
+  T *into;
+
+  template <typename Frame>
+  result_type operator()(Frame *frame) const {
+    if (!frame->result->result.value)
+      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
+
+    *this->into = omni::refl::aggregate_into<T>(frame->values);
+    return {compat::monostate{}, std::move(frame->result->result.diagnostics)};
+  }
+};
+
+template <typename T>
+struct bind_record_into {
+  using result_type = with_diagnostics_t<compat::monostate>;
+  T *into;
+
+  template <typename Frame>
+  result_type operator()(Frame *frame) const {
+    if (!frame->result->result.value)
+      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
+
+    frame->values | fn::each(assign_record_fields<T>{this->into});
+    return {compat::monostate{}, std::move(frame->result->result.diagnostics)};
   }
 };
 
@@ -95,55 +114,44 @@ struct map_field_copy {
 
 namespace detail {
 
-OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
-  (traits::is_optional<T>::value && std::is_default_constructible<T>::value
-    && std::is_assignable<T &, T &&>::value))
-void initialize_missing(Field field) {
-  field.set_value(T{});
+template <typename Slot>
+void initialize_missing_record_slot(Slot *slot, std::true_type) {
+  slot->stored.emplace();
 }
 
-// Nonassignable optionals can still be emptied through their reset adapter.
-OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
-  (traits::is_optional<T>::value && std::is_default_constructible<T>::value
-    && !std::is_assignable<T &, T &&>::value))
-void initialize_missing(Field field) {
-  adapt::reset(std::addressof(field.ref()));
-}
+template <typename Slot>
+void initialize_missing_record_slot(Slot *, std::false_type) {}
 
-OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
-  (!traits::is_optional<T>::value || !std::is_default_constructible<T>::value))
-void initialize_missing(Field) {}
-
-template <typename State, typename Field>
+template <typename State, typename Slot>
 bool process_record_presence(node_accumulator<State> *result,
-  ::ryml::ConstNodeRef object, ::ryml::id_type node_id, Field field) {
+  ::ryml::ConstNodeRef object, ::ryml::id_type node_id, Slot *slot) {
   if (node_id != ::ryml::NONE)
     return true;
 
-  using member_type = typename Field::type;
-  if (traits::is_optional<member_type>::value
-    && std::is_default_constructible<member_type>::value) {
-    initialize_missing(field);
+  using member_type = typename Slot::type;
+  using absent_optional = compat::conjunction<traits::is_optional<member_type>,
+    std::is_default_constructible<member_type>>;
+  if (absent_optional::value) {
+    initialize_missing_record_slot(slot, absent_optional{});
     return !result->stopped();
   }
 
   // The absent field has no node; derive its path from the object.
   auto missing = core::make_issue(json::issue_code::missing_field,
     json::value_kind::unknown, ::ryml::ConstNodeRef{});
-
   missing.path = core::node_path(object);
-  missing.path.push_back({c4::to_csubstr(field.name()), compat::nullopt});
+  missing.path.push_back({c4::to_csubstr(slot->name()), compat::nullopt});
   result->report(std::move(missing));
   return !result->stopped();
 }
 
-// Only continuation crosses the fold; diagnostics stay in the local frame.
+// Only a frame pointer crosses the fold; diagnostics and field values stay put.
 struct cpp11_process_record_event {
-  template <typename Event>
-  auto operator()(compat::monostate, const Event &event) const
-    -> compat::expected<compat::monostate, compat::monostate> {
+  template <typename Frame, typename Event>
+  auto operator()(Frame *frame, const Event &event) const
+    -> compat::expected<Frame *, compat::monostate> {
     if (event())
-      return {};
+      return frame;
 
     return compat::unexpected<compat::monostate>{compat::monostate{}};
   }
@@ -156,48 +164,52 @@ struct cpp11_record_member_event {
   Frame &frame;
 
   bool operator()() const {
+    auto &slot = std::get<Index>(this->frame.values);
     if (CheckPresence)
       return process_record_presence(this->frame.result, this->frame.object,
-        this->frame.pending[Index], reflected_scope::detail::bind_record_member(
-          this->frame.into, std::get<Index>(this->frame.fields)));
+        this->frame.pending[Index], &slot);
 
-    if (this->frame.pending[Index] != ::ryml::NONE)
-      reflected_scope::detail::map_node_to_field(this->frame.result,
+    if (this->frame.pending[Index] != ::ryml::NONE) {
+      auto mapped = core::read_node(this->frame.result->state,
         {this->frame.object.tree(), this->frame.pending[Index]},
-        reflected_scope::detail::bind_record_member(
-          this->frame.into, std::get<Index>(this->frame.fields)));
-
+        omni::type_t<typename compat::remove_cvref_t<decltype(slot)>::type>{});
+      if (mapped.value)
+        slot.stored.emplace(std::move(*mapped.value));
+      this->frame.result->append(std::move(mapped).transform(
+        fn::default_value<compat::monostate>{}));
+    }
     return !this->frame.result->stopped();
   }
 };
 
-// Tuple indices keep bindings and selected nodes paired without another search.
-template <typename State, typename Record, typename Fields, std::size_t... Index>
-void process_record_members(node_accumulator<State> *result,
-  ::ryml::ConstNodeRef object, Record *into, const Fields &fields,
+// Tuple indices keep field values and selected nodes paired without a search.
+template <typename State, typename Values, typename Finalizer,
+  std::size_t... Index>
+auto process_record_members(node_accumulator<State> *result,
+  ::ryml::ConstNodeRef object, Values *values,
   const std::array<::ryml::id_type, sizeof...(Index)> &pending,
-  compat::index_sequence<Index...>) {
-  // Each event references one shared frame instead of repeating its captures.
-  // This also keeps empty-record instantiations warning-free.
+  Finalizer finalizer, compat::index_sequence<Index...>)
+  -> typename Finalizer::result_type {
   struct {
     node_accumulator<State> *result;
     ::ryml::ConstNodeRef object;
-    Record *into;
-    const Fields &fields;
+    Values &values;
     const std::array<::ryml::id_type, sizeof...(Index)> &pending;
-  } frame{result, object, into, fields, pending};
-  (void)frame;
+  } frame{result, object, *values, pending};
 
   const auto events = std::tuple_cat(
     std::make_tuple(
       cpp11_record_member_event<Index, true, decltype(frame)>{frame}...),
-
     std::make_tuple(
       cpp11_record_member_event<Index, false, decltype(frame)>{frame}...));
 
-  // The frame retains failures; this result only controls further traversal.
-  static_cast<void>(events | fn::try_fold(cpp11_process_record_event{},
-    compat::expected<compat::monostate, compat::monostate>{}));
+  auto finalized = std::move(events | fn::try_fold(cpp11_process_record_event{},
+    compat::expected<decltype(frame) *, compat::monostate>{&frame}))
+      .transform(std::move(finalizer));
+  if (finalized)
+    return std::move(*finalized);
+
+  return {compat::nullopt, std::move(result->result.diagnostics)};
 }
 
 template <typename State>
@@ -216,18 +228,15 @@ struct cpp11_write_member {
 } // namespace detail
 
 namespace reflected_scope {
+namespace detail {
 
-template <typename NameByAlias>
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_record<T>,
-    is_read_state<State>>::value))
-auto to_record_t<NameByAlias>::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  T *into) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
+template <typename T, typename State, typename NameByAlias, typename Finalizer>
+auto map_record(State context, ::ryml::ConstNodeRef node,
+  const NameByAlias &name_by_alias, Finalizer finalizer)
+  -> typename Finalizer::result_type {
   auto result = omni::ryml::detail::make_node_accumulator(
     std::move(context));
-  assert(into && node.is_map());
+  assert(node.is_map());
 
   // C++11 tuple operations need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
@@ -259,9 +268,8 @@ auto to_record_t<NameByAlias>::operator()(State context,
     const compat::string_view input_name{name.str, name.len};
     auto direct = table.lookup(input_name);
     const auto canonical = direct
-      ? compat::decay_t<decltype(
-          compat::invoke(this->name_by_alias, input_name))>{}
-      : compat::invoke(this->name_by_alias, input_name);
+      ? compat::decay_t<decltype(compat::invoke(name_by_alias, input_name))>{}
+      : compat::invoke(name_by_alias, input_name);
     const auto field = std::move(direct).or_else([&table, &canonical](
       fn::not_found_t<compat::string_view> missing) {
       if (canonical)
@@ -321,12 +329,50 @@ auto to_record_t<NameByAlias>::operator()(State context,
   }
 
   if (result.stopped())
-    return std::move(result).finish();
+    return {compat::nullopt, std::move(result.result.diagnostics)};
 
-  omni::ryml::detail::process_record_members(&result, node, into, fields, pending,
+  auto values = record_value_slots(fields);
+  return omni::ryml::detail::process_record_members(&result, node, &values,
+    pending, std::move(finalizer),
     compat::make_index_sequence<std::tuple_size<decltype(fields)>::value>{});
+}
 
-  return std::move(result).finish();
+} // namespace detail
+
+template <typename NameByAlias>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<omni::is_reflected_record<T>,
+    compat::disjunction<std::is_default_constructible<T>,
+      omni::refl::is_aggregatable<T>>, is_read_state<State>>::value))
+auto to_record_t<NameByAlias>::operator()(State context,
+  ::ryml::ConstNodeRef node, omni::type_t<T>) const
+  -> with_diagnostics_t<T, diagnostics> {
+  // Before C++17, aggregate_into's return requires a usable move constructor.
+  const auto finalize = typename traits::select<
+    traits::case_<omni::refl::is_aggregatable<T>::value
+        && std::is_move_constructible<T>::value,
+      detail::aggregate_record_value<T>>,
+    detail::bind_record_value<T>>::type{};
+  return detail::map_record<T>(std::move(context), node, this->name_by_alias,
+    finalize);
+}
+
+template <typename NameByAlias>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (compat::conjunction<omni::is_reflected_record<T>,
+    is_read_state<State>>::value))
+auto to_record_t<NameByAlias>::operator()(State context,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate, diagnostics> {
+  assert(into);
+  // Before C++17, aggregate_into's return requires a usable move constructor.
+  const auto finalize = typename traits::select<
+    traits::case_<omni::refl::is_aggregatable<T>::value
+        && std::is_move_constructible<T>::value,
+      detail::aggregate_record_into<T>>,
+    detail::bind_record_into<T>>::type{into};
+  return detail::map_record<T>(std::move(context), node, this->name_by_alias,
+    finalize);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
