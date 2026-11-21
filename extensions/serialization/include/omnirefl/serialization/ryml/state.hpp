@@ -873,9 +873,10 @@ private:
  * Root states are created by the tree builders; custom mappings copy the
  * supplied state or derive children. BorrowStrings permits borrowing
  * source-backed strings; temporary owning conversions are still copied.
- * The mapping selector is borrowed. Mapping callbacks take a generic State constrained by is_write_state, preserving
- * the child path and local selector when forwarding it. enclosing_root and
- * enclosing_record follow the same rules as read_state_t. Path-aware selectors
+ * The mapping selector is borrowed. Mapping callbacks take a generic State
+ * constrained by is_write_state, preserving the child path and local selector
+ * when forwarding it. enclosing_root and enclosing_record follow the same
+ * rules as read_state_t. Path-aware selectors
  * take State by value for C++17/20 constant evaluation. */
 template <bool BorrowStrings,
   typename MapNode = reflected_scope::mapping_from_type_t,

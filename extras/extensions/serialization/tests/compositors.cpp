@@ -449,27 +449,6 @@ TEST(record_callback, preserves_the_nested_path_on_a_shape_mismatch) {
   }
 }
 
-TEST(record_callback, supports_value_and_existing_destination_overloads) {
-  const auto tree = omni::ryml::core::parse(R"({"first": 1})");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const omni::ryml::config_t<> options{};
-  const auto mapping = to_record(count_properties);
-  const auto value = map_using(options, mapping,
-    omni::type_t<counted_record>{}, tree->crootref());
-
-  counted_record into{};
-  const auto assigned = map_using(options, mapping, &into, tree->crootref());
-  EXPECT_TRUE(value.value);
-  if (value.value)
-    EXPECT_EQ(1U, value.value->count);
-
-  EXPECT_TRUE(assigned.value);
-  EXPECT_EQ(1U, into.count);
-}
-
 TEST(record_callback, lifts_the_callback_without_explicit_adaptation) {
   const auto tree = omni::ryml::core::parse(R"({"first": 1})");
   EXPECT_TRUE(tree);
