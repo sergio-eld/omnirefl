@@ -33,7 +33,7 @@ namespace reflected_scope {
  * checks this precondition. Metadata for T must be available in reflected
  * scope.
  */
-template <typename ValueByAlias = fn::default_value<
+template <typename ValueByAlias = omni::fn::default_value<
   compat::optional<compat::string_view>>>
 struct map_node_to_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),

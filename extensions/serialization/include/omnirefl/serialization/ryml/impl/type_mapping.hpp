@@ -145,7 +145,7 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
     if (!mapped.value || !mapped.diagnostics.issues.empty()
       || !mapped.diagnostics.parse_error_message.empty())
       this->frame.result->append(std::move(mapped).transform(
-        fn::default_value<compat::monostate>{}));
+        omni::fn::default_value<compat::monostate>{}));
   }
   return !this->frame.result->stopped();
 }

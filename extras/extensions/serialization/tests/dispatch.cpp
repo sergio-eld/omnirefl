@@ -631,7 +631,11 @@ TEST(mapping_dispatch, local_map_node_customization) {
   if (mapped.value)
     EXPECT_EQ(12, mapped.value->value);
 
-#if 202002L <= OMNI_CPLUSPLUS
+// Aggregate deduction requires more than the C++20 language mode.
+#if defined(__cpp_designated_initializers) \
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
   constexpr auto designated = omni::ryml::deserialize_t{
     .map_node = local_mapping::select_mapping{5},
   };
@@ -680,7 +684,7 @@ struct read_address {
 
 struct select_reader {
   template <typename State, typename T>
-  auto operator()(const State &state, omni::type_t<T> type) const {
+  auto operator()(State state, omni::type_t<T> type) const {
     if constexpr (state.path().ends_with("root.work_address"))
       return read_address{};
     else if constexpr (state.path().ends_with("root.offices[].number"))
@@ -713,7 +717,7 @@ struct write_integer {
 
 struct select_writer {
   template <typename State, typename T>
-  auto operator()(const State &state, omni::type_t<T> type) const {
+  auto operator()(State state, omni::type_t<T> type) const {
     if constexpr (state.path().ends_with("root.work_address"))
       return write_address{};
     else if constexpr (state.path().ends_with("root.offices[].number"))
@@ -731,7 +735,7 @@ struct root {
 
 struct select_context_reader {
   template <typename State, typename T>
-  auto operator()(const State &state, omni::type_t<T> type) const {
+  auto operator()(State state, omni::type_t<T> type) const {
     if constexpr (std::is_same<typename State::enclosing_root, root>::value
       && std::is_same<typename State::enclosing_record, address>::value
       && std::is_same<T, int>::value
@@ -744,7 +748,7 @@ struct select_context_reader {
 
 struct select_context_writer {
   template <typename State, typename T>
-  auto operator()(const State &state, omni::type_t<T> type) const {
+  auto operator()(State state, omni::type_t<T> type) const {
     if constexpr (std::is_same<typename State::enclosing_root, root>::value
       && std::is_same<typename State::enclosing_record, address>::value
       && std::is_same<T, int>::value
@@ -786,7 +790,11 @@ TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
     "locations": {"remote": {"number": 24}}
   })", as_json(value)));
 
-#if 202002L <= OMNI_CPLUSPLUS
+// Aggregate deduction requires more than the C++20 language mode.
+#if defined(__cpp_designated_initializers) \
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
   constexpr auto designated = omni::ryml::as_owning_tree_t{
     .map_node = schema_paths::select_writer{},
   };

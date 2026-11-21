@@ -74,7 +74,7 @@ struct bind_record_value {
 
   template <typename Frame>
   void operator()(Frame *frame) const {
-    frame->values | fn::each(assign_record_fields<T>{
+    frame->values | omni::fn::each(assign_record_fields<T>{
       std::addressof(frame->value->emplace())});
   }
 };
@@ -98,7 +98,7 @@ struct bind_record_into {
 
   template <typename Frame>
   void operator()(Frame *frame) const {
-    frame->values | fn::each(assign_record_fields<T>{this->into});
+    frame->values | omni::fn::each(assign_record_fields<T>{this->into});
     frame->value->emplace();
   }
 };
@@ -186,7 +186,7 @@ auto process_record_members(node_accumulator<State> *result,
       cpp11_record_member_event<Record, Index, false,
         decltype(frame)>{frame}...));
 
-  auto folded = events | fn::try_fold(cpp11_process_record_event{},
+  auto folded = events | omni::fn::try_fold(cpp11_process_record_event{},
     compat::expected<compat::monostate, compat::monostate>{
       compat::monostate{}});
   if (!result->result.value)
@@ -233,12 +233,12 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
   // C++11 tuple operations need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr auto fields = omni::meta_for<T>::accessible_data_members()
-    | fn::filter(fn::is_non_static);
-  constexpr auto table = fn::lookup_table(fields);
+    | omni::fn::filter(omni::fn::is_non_static);
+  constexpr auto table = omni::fn::lookup_table(fields);
 #else
   const auto fields = omni::meta_for<T>::accessible_data_members()
-    | fn::filter(fn::is_non_static);
-  const auto table = fn::lookup_table(fields);
+    | omni::fn::filter(omni::fn::is_non_static);
+  const auto table = omni::fn::lookup_table(fields);
 #endif
 
   // Selected children share this object's tree; only IDs need storage.
@@ -263,7 +263,7 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
       ? compat::decay_t<decltype(compat::invoke(name_by_alias, input_name))>{}
       : compat::invoke(name_by_alias, input_name);
     const auto field = std::move(direct).or_else([&table, &canonical](
-      fn::not_found_t<compat::string_view> missing) {
+      omni::fn::not_found_t<compat::string_view> missing) {
       if (canonical)
         return table.lookup(compat::string_view{*canonical});
 
@@ -378,8 +378,8 @@ auto from_record_t::operator()(State context,
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
-    | fn::filter(fn::is_non_static)
-    | fn::each(omni::ryml::detail::cpp11_write_member<State>{
+    | omni::fn::filter(omni::fn::is_non_static)
+    | omni::fn::each(omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/std::move(context),
     });

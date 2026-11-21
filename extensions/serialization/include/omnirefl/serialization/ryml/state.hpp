@@ -785,6 +785,8 @@ struct schema_path {
  * schema, independently of input keys.
  * Mapping callbacks take a generic State, constrained by is_read_state,
  * because child paths and local selectors produce different state types.
+ * Path-aware selectors take State by value so path() remains a constant
+ * expression in C++17/20; config and the selector are still borrowed.
  * Custom mappings retain it by passing state onward; custom field traversal
  * extends it with child(OMNI_META_STRING("field")) and element() for containers.
  *
@@ -869,7 +871,8 @@ struct read_state_t {
  * conversions are still copied. The mapping selector is borrowed. Mapping
  * callbacks take a generic State constrained by is_write_state, preserving
  * the child path and local selector when forwarding it. enclosing_root and
- * enclosing_record follow the same rules as read_state_t. */
+ * enclosing_record follow the same rules as read_state_t. Path-aware selectors
+ * take State by value for C++17/20 constant evaluation. */
 template <bool BorrowStrings,
   typename MapNode = reflected_scope::mapping_from_type_t,
   typename Root = void, typename EnclosingRecord = void,

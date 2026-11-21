@@ -38,7 +38,7 @@ namespace reflected_scope {
  * valid tree and be an object. Record metadata must be available in reflected
  * scope; node shape is checked only by a debug assertion.
  */
-template <typename NameByAlias = fn::default_value<
+template <typename NameByAlias = omni::fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),

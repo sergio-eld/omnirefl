@@ -409,3 +409,7 @@ static_assert(path.ends_with("city"), "");
       return ::omni::cpp11_static_string<omni_string_source>{}; \
     })
 #endif
+
+// REFACTORME: [high] Move generic compile-time strings and name-matching
+// operations into Omnirefl core: field-name filtering is useful across
+// extensions, independently of serialization.
