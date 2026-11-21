@@ -100,22 +100,6 @@ TEST(to_enum_aliases, dictionary_replaces_the_previous_resolver) {
 }
 #endif
 
-// C++11 lambda equivalent: apply a local mapper inside the reflected scope.
-// The explicit return type delays the body until metadata is generated.
-template <typename Compositor>
-struct cpp11_map_with_aliases {
-  Compositor compositor;
-  ::ryml::ConstNodeRef node;
-  omni::ryml::read_state_t<> context;
-
-  template <typename _E>
-  auto operator()(omni::enum_binding_t<_E> enumeration) const
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate,
-      omni::ryml::diagnostics> {
-    return this->compositor(this->context, this->node, &enumeration.value());
-  }
-};
-
 TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   const auto resolver = [](string_view)
     -> omni::compat::optional<string_view> { return string_view{"idle"}; };
@@ -131,21 +115,9 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   EXPECT_TRUE(tree);
   if (tree) {
     const omni::ryml::config_t<> options{};
-    const omni::ryml::read_state_t<> context{
-      /*config=*/options,
-      /*error_count=*/0,
-      /*warning_count=*/0,
-      };
-
     state into = state::idle;
-    const auto result = omni::reflected_call(
-      cpp11_map_with_aliases<decltype(compositor)>{
-        /*compositor=*/compositor,
-        /*node=*/tree->crootref(),
-        /*context=*/context,
-      },
-
-      into);
+    const auto result = serialization_test::map_using(options, compositor,
+      &into, tree->crootref());
 
     EXPECT_TRUE(result.value);
     EXPECT_EQ(state::active, into);

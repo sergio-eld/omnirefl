@@ -598,8 +598,9 @@ struct select_mapping {
   }
 
   template <typename State>
-  add_integer operator()(const State &, omni::type_t<int>) const {
-    return {this->increment};
+  add_integer operator()(State state, omni::type_t<int>) const {
+    constexpr bool selected = state.path().equals("root.value");
+    return {selected ? this->increment : 0};
   }
 };
 
@@ -648,11 +649,6 @@ TEST(mapping_dispatch, local_map_node_customization) {
 }
 
 TEST(mapping_dispatch, value_initialization_preserves_defaults) {
-  const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options};
-  EXPECT_EQ(0u, state.error_count);
-  EXPECT_EQ(0u, state.warning_count);
-
   constexpr omni::ryml::serialize_t<> serialize{};
   static_assert(::ryml::EmitType_e{} == serialize.format,
     "Value initialization preserves the default format");

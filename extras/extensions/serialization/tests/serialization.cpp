@@ -2341,7 +2341,9 @@ static_assert(::ryml::EMIT_JSON == json_serializer.format,
   "serializer configuration must support C++11 constant expressions");
 
 #if defined(__cpp_designated_initializers) \
-  && 201707L <= __cpp_designated_initializers
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
 constexpr omni::ryml::serialize_t designated_serializer{
   .format = ::ryml::EMIT_JSON,
 };

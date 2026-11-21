@@ -1,10 +1,9 @@
-#include <omnirefl/serialization/ryml.hpp>
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 
 #include <memory>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -77,25 +76,6 @@ TEST(write_state, identifies_write_state_specializations) {
     const omni::ryml::write_state_t<true> &>::value);
   EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::read_state_t<>>::value);
   EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::config_t<>>::value);
-}
-
-TEST(read_state, copies_borrow_config_and_keep_independent_counters) {
-  const omni::ryml::config_t<> options{};
-  using state_type = omni::ryml::read_state_t<>;
-  const state_type original{
-    /*config=*/options,
-    /*error_count=*/2,
-    /*warning_count=*/3,
-  };
-
-  auto copied = original;
-  ++copied.error_count;
-
-  EXPECT_TRUE(std::is_trivially_copyable<state_type>::value);
-  EXPECT_EQ(&options, &copied.config);
-  EXPECT_EQ(2U, original.error_count);
-  EXPECT_EQ(3U, copied.error_count);
-  EXPECT_EQ(3U, copied.warning_count);
 }
 
 TEST(mapping_diagnostics, retains_the_document_path_when_mapping_a_subtree) {
@@ -208,12 +188,10 @@ TEST(mapping_diagnostics, reuses_relative_paths_from_a_borrowed_issue_range) {
     });
 
   const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, 0, 0};
   for (int attempt = 0; attempt < 2; ++attempt) {
     SCOPED_TRACE(attempt);
-    const auto result = mapping(state,
-      tree->crootref()["outer"],
-      omni::type_t<int>{});
+    const auto result = serialization_test::map_using(options, mapping,
+      omni::type_t<int>{}, tree->crootref()["outer"]);
 
     EXPECT_FALSE(result.value);
     EXPECT_EQ("/outer/child: missing field",

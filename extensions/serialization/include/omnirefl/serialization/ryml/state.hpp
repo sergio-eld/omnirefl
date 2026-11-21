@@ -126,6 +126,15 @@ namespace ryml {
 
 struct diagnostics;
 
+template <typename Config, typename MapNode>
+struct map_by_schema_t;
+
+template <typename MapNode>
+struct as_owning_tree_t;
+
+template <typename MapNode>
+struct as_ref_tree_t;
+
 /** Render issue records using their source tree while it is alive. */
 struct render_diagnostics_t {
   std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
@@ -696,18 +705,6 @@ struct mapping_from_type_t {
 
 namespace detail {
 
-// Default states can be constructed without including type_mapping.hpp.
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr reflected_scope::mapping_to_type_t mapping_to_type{};
-inline constexpr reflected_scope::mapping_from_type_t mapping_from_type{};
-#else
-static constexpr const reflected_scope::mapping_to_type_t &mapping_to_type =
-  compat::detail::shared_state<reflected_scope::mapping_to_type_t>::value;
-static constexpr const reflected_scope::mapping_from_type_t
-  &mapping_from_type =
-    compat::detail::shared_state<reflected_scope::mapping_from_type_t>::value;
-#endif
-
 // String providers keep the path independent of runtime traversal state.
 struct root_path_name {
   static constexpr const char *str() { return "root"; }
@@ -776,8 +773,9 @@ struct schema_path {
 } // namespace detail
 
 /** Deserialization configuration and traversal progress passed to readers.
- * Config and the mapping selector are borrowed. Copies do not copy their
- * contents or allocate storage.
+ * Root states are created by map_by_schema; custom mappings copy the supplied
+ * state or derive children. Config and the selector are borrowed, so copies
+ * do not copy their contents or allocate storage.
  * Counters include issues reported by preceding operations in the enclosing
  * traversal. enclosing_root is the original root type; enclosing_record is
  * the immediate containing record, or void at the root. Containers and
@@ -806,21 +804,14 @@ struct read_state_t {
   using enclosing_record = EnclosingRecord;
 
   const Config &config;
-  std::size_t error_count OMNI_CPP14_DEFAULT_INIT();
-  std::size_t warning_count OMNI_CPP14_DEFAULT_INIT();
+  std::size_t error_count;
+  std::size_t warning_count;
 
   // (state, type<T>) -> mapping callable; borrowed throughout traversal.
-  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(
-    detail::mapping_to_type);
+  const MapNode &map_node;
 
-#if 201402L > OMNI_CPLUSPLUS
-  // C++11 aggregates cannot provide the default for this reference member.
-  constexpr read_state_t(const Config &options, std::size_t errors = 0,
-    std::size_t warnings = 0, const MapNode &mapping =
-      detail::mapping_to_type)
-    : config(options), error_count(errors), warning_count(warnings),
-      map_node(mapping) {}
-#endif
+  // Rvalue propagation copies this borrowed traversal token as well.
+  constexpr read_state_t(const read_state_t &) = default;
 
   /** Canonical schema path: root.field, with [] for container values.
    * Independent of runtime keys, indices, and input aliases. Recursive schema
@@ -864,12 +855,25 @@ struct read_state_t {
       || (this->config.error_policy.warning_limit
         && *this->config.error_policy.warning_limit < this->warning_count);
   }
+
+private:
+  template <typename, typename, typename, typename, typename>
+  friend struct read_state_t;
+
+  template <typename, typename>
+  friend struct map_by_schema_t;
+
+  constexpr read_state_t(const Config &options, std::size_t errors,
+    std::size_t warnings, const MapNode &mapping)
+    : config(options), error_count(errors), warning_count(warnings),
+      map_node(mapping) {}
 };
 
 /** Serialization policy, local mapping selection, and schema position.
- * BorrowStrings permits borrowing source-backed strings; temporary owning
- * conversions are still copied. The mapping selector is borrowed. Mapping
- * callbacks take a generic State constrained by is_write_state, preserving
+ * Root states are created by the tree builders; custom mappings copy the
+ * supplied state or derive children. BorrowStrings permits borrowing
+ * source-backed strings; temporary owning conversions are still copied.
+ * The mapping selector is borrowed. Mapping callbacks take a generic State constrained by is_write_state, preserving
  * the child path and local selector when forwarding it. enclosing_root and
  * enclosing_record follow the same rules as read_state_t. Path-aware selectors
  * take State by value for C++17/20 constant evaluation. */
@@ -882,13 +886,10 @@ struct write_state_t {
   using enclosing_record = EnclosingRecord;
 
   static constexpr bool borrow_strings = BorrowStrings;
-  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(detail::mapping_from_type);
+  const MapNode &map_node;
 
-#if 201402L > OMNI_CPLUSPLUS
-  // C++11 aggregates cannot default-initialize a reference member.
-  constexpr write_state_t(const MapNode &mapping = detail::mapping_from_type)
-    : map_node(mapping) {}
-#endif
+  // Rvalue propagation copies this borrowed traversal token as well.
+  constexpr write_state_t(const write_state_t &) = default;
 
   /** Canonical schema path; see read_state_t::path. */
   static constexpr auto path() OMNI_CPP11_TRAILING_RETURN(typename Path::text) {
@@ -920,6 +921,18 @@ struct write_state_t {
       typename Path::element> {
     return {this->map_node};
   }
+
+private:
+  template <bool, typename, typename, typename, typename>
+  friend struct write_state_t;
+
+  template <typename>
+  friend struct as_owning_tree_t;
+
+  template <typename>
+  friend struct as_ref_tree_t;
+
+  constexpr write_state_t(const MapNode &mapping): map_node(mapping) {}
 };
 
 namespace detail {

@@ -1,8 +1,10 @@
 #include "json_match.hpp"
 
+#include <cstdint>
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -434,6 +436,69 @@ struct cpp11_check_mapping_types {
   }
 };
 
+TEST(mapping_core, parses_and_converts_through_explicit_core_mappings) {
+  const auto tree = omni::ryml::core::parse(
+    R"({"flag": true, "count": 42, "ratio": 2.5, "text": "reading"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::config_t<> options{};
+  const auto root = tree->crootref();
+  const auto boolean = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_boolean,
+    omni::type_t<bool>{}, root["flag"]);
+
+  const auto integer = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_integral,
+    omni::type_t<std::int16_t>{}, root["count"]);
+
+  const auto real = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_floating_point,
+    omni::type_t<float>{}, root["ratio"]);
+
+  const auto arithmetic = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_arithmetic,
+    omni::type_t<std::int32_t>{}, root["count"]);
+
+  const auto text = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_string_like,
+    omni::type_t<std::string>{}, root["text"]);
+
+  EXPECT_EQ(true, boolean.value);
+  EXPECT_EQ(42, integer.value);
+  EXPECT_EQ(2.5F, real.value);
+  EXPECT_EQ(42, arithmetic.value);
+  EXPECT_EQ(std::string{"reading"}, text.value);
+  EXPECT_TRUE(boolean.diagnostics.issues.empty());
+  EXPECT_TRUE(integer.diagnostics.issues.empty());
+  EXPECT_TRUE(real.diagnostics.issues.empty());
+  EXPECT_TRUE(arithmetic.diagnostics.issues.empty());
+  EXPECT_TRUE(text.diagnostics.issues.empty());
+}
+
+TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
+  const auto tree = omni::ryml::core::parse(R"({"count": 128})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::config_t<> options{};
+  const auto node = tree->crootref()["count"];
+  const auto result = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_integral, omni::type_t<std::int8_t>{}, node);
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (result.diagnostics.issues.size() == 1) {
+    EXPECT_EQ(omni::json::issue_code::out_of_range,
+      result.diagnostics.issues[0].reason);
+
+    EXPECT_EQ("/count", omni::ryml::detail::render_path(
+      result.diagnostics.issues[0].path));
+  }
+}
+
 TEST(type_mapping, selects_reflected_defaults) {
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_record(
@@ -460,28 +525,41 @@ TEST(type_mapping, preserves_initialized_writer_state) {
   EXPECT_EQ("16", omni::ryml::as_json(shifted_integer{5}));
 }
 
+// C++11 needs a named generic selector to retain the explicitly queried tag.
+template <typename Qualified>
+struct select_qualified_writer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+    (omni::ryml::is_write_state<State>::value))
+  auto operator()(State, omni::type_t<T>) const
+    -> decltype(omni::ryml::reflected_scope::mapping_from_type(
+      omni::type_t<Qualified>{})) {
+    return omni::ryml::reflected_scope::mapping_from_type(
+      omni::type_t<Qualified>{});
+  }
+};
+
 TEST(type_mapping, writes_cv_qualified_boolean_tags) {
   const bool enabled = true;
   volatile bool disabled = false;
   const volatile bool fixed = true;
-  const omni::ryml::write_state_t<false> state{};
-  ::ryml::Tree tree;
+  const auto write_const = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<const bool>{};
+    });
+  const auto write_volatile = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<volatile bool>{};
+    });
+  const auto write_const_volatile = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<const volatile bool>{};
+    });
 
-  omni::ryml::reflected_scope::mapping_from_type(omni::type_t<const bool>{})(
-    state,
-    enabled,
-    tree.rootref());
-  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(tree));
-
-  omni::ryml::reflected_scope::mapping_from_type(omni::type_t<volatile bool>{})(
-    state,
-    disabled,
-    tree.rootref());
-  EXPECT_EQ("false", ::ryml::emitrs_json<std::string>(tree));
-
-  omni::ryml::reflected_scope::mapping_from_type(
-    omni::type_t<const volatile bool>{})(state, fixed, tree.rootref());
-  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(tree));
+  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(write_const(enabled)));
+  EXPECT_EQ("false",
+    ::ryml::emitrs_json<std::string>(write_volatile(disabled)));
+  EXPECT_EQ("true",
+    ::ryml::emitrs_json<std::string>(write_const_volatile(fixed)));
 }
 
 TEST(type_mapping, reads_a_volatile_boolean) {
@@ -495,12 +573,12 @@ TEST(type_mapping, reads_a_volatile_boolean) {
 
 TEST(type_mapping, preserves_qualified_registration) {
   const qualified_integer value{23};
-  const omni::ryml::write_state_t<false> state{};
-  ::ryml::Tree tree;
+  const auto as_owning_tree = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<const qualified_integer>{};
+    });
 
-  omni::ryml::reflected_scope::mapping_from_type(
-    omni::type_t<const qualified_integer>{})(state, value, tree.rootref());
-  EXPECT_EQ("23", ::ryml::emitrs_json<std::string>(tree));
+  EXPECT_EQ("23", ::ryml::emitrs_json<std::string>(as_owning_tree(value)));
 }
 
 TEST(write_state, preserves_string_storage_through_custom_mapping) {
