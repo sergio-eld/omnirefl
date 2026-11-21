@@ -10,6 +10,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <type_traits>
 
 /** Whether nttp_string is available in the current compiler mode (0 or 1). */
 // Clang's macro covers more than class arguments; class support starts at 12.

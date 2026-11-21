@@ -160,7 +160,7 @@ struct map_by_schema_t {
     // Borrowing config must not change the state type accepted by mappings.
     return detail::map_by_schema_dispatch_t<T>{}(
       read_state_t<compat::remove_cvref_t<Config>,
-        compat::remove_cvref_t<MapNode>>{
+        compat::remove_cvref_t<MapNode>, T>{
         /*config=*/this->config,
         /*error_count=*/0,
         /*warning_count=*/0,
@@ -201,7 +201,7 @@ struct map_by_schema_t {
     -> with_diagnostics_t<compat::monostate> {
     return detail::map_by_schema_dispatch_t<T>{}(
       read_state_t<compat::remove_cvref_t<Config>,
-        compat::remove_cvref_t<MapNode>>{
+        compat::remove_cvref_t<MapNode>, T>{
         /*config=*/this->config,
         /*error_count=*/0,
         /*warning_count=*/0,

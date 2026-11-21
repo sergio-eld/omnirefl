@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -149,7 +150,9 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
 
 template <>
 struct omni::ryml::cp::to_type_t<default_state_number> {
-  auto operator()(omni::ryml::read_state_t<> state,
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<default_state_number>) const
     -> omni::ryml::with_diagnostics_t<default_state_number> {
@@ -363,7 +366,7 @@ INSTANTIATE_TEST_SUITE_P(documents,
     return info.param.name;
   });
 
-TEST(mapping_dispatch, bound_config_preserves_the_default_state_type) {
+TEST(mapping_dispatch, bound_config_passes_a_read_state) {
   const auto result = omni::ryml::deserialize(
     omni::type_t<default_state_number>{}, "42");
 
@@ -722,6 +725,37 @@ struct select_writer {
   }
 };
 
+
+struct root {
+  omni::compat::optional<std::vector<record>> records;
+};
+
+struct select_context_reader {
+  template <typename State, typename T>
+  auto operator()(const State &state, omni::type_t<T> type) const {
+    if constexpr (std::is_same<typename State::enclosing_root, root>::value
+      && std::is_same<typename State::enclosing_record, address>::value
+      && std::is_same<T, int>::value
+      && state.path().ends_with("root.records[].work_address.number"))
+      return local_mapping::add_integer{10};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+struct select_context_writer {
+  template <typename State, typename T>
+  auto operator()(const State &state, omni::type_t<T> type) const {
+    if constexpr (std::is_same<typename State::enclosing_root, root>::value
+      && std::is_same<typename State::enclosing_record, address>::value
+      && std::is_same<T, int>::value
+      && state.path().ends_with("root.records[].work_address.number"))
+      return write_integer{10};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
 } // namespace schema_paths
 
 TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
@@ -761,6 +795,42 @@ TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
   EXPECT_EQ("102", tree["work_address"]["number"].val());
 #endif
 }
+
+TEST(mapping_dispatch, reads_and_writes_use_parent_root_and_schema_location) {
+  const std::string source = R"({"records": [{
+    "address": {"number": 1},
+    "work_address": {"number": 2},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  }]})";
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_map_node([](auto) { return schema_paths::select_context_reader{}; });
+  const auto mapped = deserialize(omni::type_t<schema_paths::root>{}, source);
+  ASSERT_TRUE(mapped.value) << mapped.diagnostics;
+  ASSERT_TRUE(mapped.value->records);
+  ASSERT_EQ(1U, mapped.value->records->size());
+  const auto &record = mapped.value->records->at(0);
+  EXPECT_EQ(1, record.address.number);
+  EXPECT_EQ(12, record.work_address.number);
+  EXPECT_EQ(3, record.offices.at(0).number);
+  EXPECT_EQ(4, record.locations.at("remote").number);
+
+  constexpr auto as_json = omni::ryml::as_json
+    .tdm_map_node([](auto) { return schema_paths::select_context_writer{}; });
+  EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
+    "address": {"number": 1},
+    "work_address": {"number": 22},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  }]})", as_json(*mapped.value)));
+
+  // The same nested record is a different root when mapped by itself.
+  const auto independent = deserialize(omni::type_t<schema_paths::record>{},
+    as_json(record));
+  ASSERT_TRUE(independent.value) << independent.diagnostics;
+  EXPECT_EQ(12, independent.value->work_address.number);
+}
+
 #endif
 
 } // namespace

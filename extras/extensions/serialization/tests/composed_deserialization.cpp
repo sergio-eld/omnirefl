@@ -2,6 +2,7 @@
 
 #include <map>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1014,8 +1015,10 @@ struct value { bool enabled; };
 struct envelope { value flag; };
 
 struct read {
-  template <typename Config>
-  auto operator()(omni::ryml::read_state_t<Config> &&,
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value
+      && !std::is_lvalue_reference<State>::value))
+  auto operator()(State &&,
     ::ryml::ConstNodeRef node,
     omni::type_t<value>) const
     -> omni::compat::expected<value, omni::ryml::issue> {

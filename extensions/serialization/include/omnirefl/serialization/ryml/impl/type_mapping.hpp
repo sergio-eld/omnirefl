@@ -121,8 +121,10 @@ auto from_optional_like_t::operator()(State context,
 
 namespace detail {
 
-template <std::size_t Index, bool CheckPresence, typename Frame>
-bool cpp11_record_member_event<Index, CheckPresence, Frame>::operator()() const {
+template <typename Record, std::size_t Index, bool CheckPresence,
+  typename Frame>
+bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
+  ::operator()() const {
   auto &slot = std::get<Index>(this->frame.values);
   if (CheckPresence)
     return process_record_presence(this->frame.result, this->frame.object,
@@ -131,7 +133,7 @@ bool cpp11_record_member_event<Index, CheckPresence, Frame>::operator()() const 
   if (this->frame.pending[Index] != ::ryml::NONE) {
     const auto type = omni::type_t<
       typename compat::remove_cvref_t<decltype(slot)>::type>{};
-    const auto state = this->frame.result->state.field(
+    const auto state = this->frame.result->state.template field<Record>(
       typename compat::remove_cvref_t<decltype(slot)>::field_type{});
     const auto mapping = compat::invoke(state.map_node, state, type);
     // The record frame applies diagnostic limits when appending this report.

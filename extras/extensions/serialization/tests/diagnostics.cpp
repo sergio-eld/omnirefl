@@ -17,8 +17,9 @@ struct embedded_document {};
 
 template <>
 struct omni::ryml::cp::to_type_t<diagnostic_inputs::empty_record> {
-  template <typename Config>
-  auto operator()(omni::ryml::read_state_t<Config> state,
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state,
     ::ryml::ConstNodeRef node, omni::type_t<diagnostic_inputs::empty_record>)
     const -> omni::ryml::with_diagnostics_t<diagnostic_inputs::empty_record> {
     omni::ryml::diagnostics report{{state.config.error_policy, {}}, {}, {}};
@@ -40,8 +41,9 @@ struct omni::ryml::cp::to_type_t<diagnostic_inputs::empty_record> {
 
 template <>
 struct omni::ryml::cp::to_type_t<diagnostic_inputs::embedded_document> {
-  template <typename Config>
-  auto operator()(omni::ryml::read_state_t<Config> state,
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<diagnostic_inputs::embedded_document>) const
     -> omni::ryml::with_diagnostics_t<diagnostic_inputs::embedded_document> {

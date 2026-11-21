@@ -779,7 +779,10 @@ struct schema_path {
  * Config and the mapping selector are borrowed. Copies do not copy their
  * contents or allocate storage.
  * Counters include issues reported by preceding operations in the enclosing
- * traversal. The path describes the C++ schema, independently of input keys.
+ * traversal. enclosing_root is the original root type; enclosing_record is
+ * the immediate containing record, or void at the root. Containers and
+ * optionals retain their containing record. The path describes the C++
+ * schema, independently of input keys.
  * Mapping callbacks take a generic State, constrained by is_read_state,
  * because child paths and local selectors produce different state types.
  * Custom mappings retain it by passing state onward; custom field traversal
@@ -794,8 +797,12 @@ if constexpr (state.path().ends_with("root.work_address")) {
  */
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t,
+  typename Root = void, typename EnclosingRecord = void,
   typename Path = detail::schema_path<detail::root_path_name>>
 struct read_state_t {
+  using enclosing_root = Root;
+  using enclosing_record = EnclosingRecord;
+
   const Config &config;
   std::size_t error_count OMNI_CPP14_DEFAULT_INIT();
   std::size_t warning_count OMNI_CPP14_DEFAULT_INIT();
@@ -821,25 +828,30 @@ struct read_state_t {
   }
 
   /** Child state for custom traversal into a named field.
-   * Appends text; field(meta) additionally recognizes recursive schema edges. */
-  template <typename Name>
+   * Appends text; field(meta) additionally recognizes recursive schema edges.
+   * Supply child<Record>(name) when entering a different containing record. */
+  template <typename Record = EnclosingRecord, typename Name>
   constexpr auto child(Name) const
-    -> read_state_t<Config, MapNode, typename Path::template child<Name>> {
+    -> read_state_t<Config, MapNode, Root, Record,
+      typename Path::template child<Name>> {
     return {this->config, this->error_count, this->warning_count,
       this->map_node};
   }
 
-  /** Child state for a reflected field, retaining recursive schema identity. */
-  template <typename Field>
+  /** Child state for a reflected field, retaining recursive schema identity.
+   * Supply field<Record>(meta) to set the immediate containing record. */
+  template <typename Record = EnclosingRecord, typename Field>
   constexpr auto field(Field) const
-    -> read_state_t<Config, MapNode, typename Path::template field<Field>> {
+    -> read_state_t<Config, MapNode, Root, Record,
+      typename Path::template field<Field>> {
     return {this->config, this->error_count, this->warning_count,
       this->map_node};
   }
 
   /** Container-value state; runtime positions and keys share the [] marker. */
   constexpr auto element() const
-    -> read_state_t<Config, MapNode, typename Path::element> {
+    -> read_state_t<Config, MapNode, Root, EnclosingRecord,
+      typename Path::element> {
     return {this->config, this->error_count, this->warning_count,
       this->map_node};
   }
@@ -856,11 +868,16 @@ struct read_state_t {
  * BorrowStrings permits borrowing source-backed strings; temporary owning
  * conversions are still copied. The mapping selector is borrowed. Mapping
  * callbacks take a generic State constrained by is_write_state, preserving
- * the child path and local selector when forwarding it. */
+ * the child path and local selector when forwarding it. enclosing_root and
+ * enclosing_record follow the same rules as read_state_t. */
 template <bool BorrowStrings,
   typename MapNode = reflected_scope::mapping_from_type_t,
+  typename Root = void, typename EnclosingRecord = void,
   typename Path = detail::schema_path<detail::root_path_name>>
 struct write_state_t {
+  using enclosing_root = Root;
+  using enclosing_record = EnclosingRecord;
+
   static constexpr bool borrow_strings = BorrowStrings;
   const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(detail::mapping_from_type);
 
@@ -876,25 +893,28 @@ struct write_state_t {
   }
 
   /** Child state for custom traversal into a named field.
-   * Appends text; field(meta) additionally recognizes recursive schema edges. */
-  template <typename Name>
+   * Appends text; field(meta) additionally recognizes recursive schema edges.
+   * Supply child<Record>(name) when entering a different containing record. */
+  template <typename Record = EnclosingRecord, typename Name>
   constexpr auto child(Name) const
-    -> write_state_t<BorrowStrings, MapNode,
+    -> write_state_t<BorrowStrings, MapNode, Root, Record,
       typename Path::template child<Name>> {
     return {this->map_node};
   }
 
-  /** Child state retaining a reflected field's recursive schema identity. */
-  template <typename Field>
+  /** Child state retaining a reflected field's recursive schema identity.
+   * Supply field<Record>(meta) to set the immediate containing record. */
+  template <typename Record = EnclosingRecord, typename Field>
   constexpr auto field(Field) const
-    -> write_state_t<BorrowStrings, MapNode,
+    -> write_state_t<BorrowStrings, MapNode, Root, Record,
       typename Path::template field<Field>> {
     return {this->map_node};
   }
 
   /** Container-value state; runtime positions and keys share the [] marker. */
   constexpr auto element() const
-    -> write_state_t<BorrowStrings, MapNode, typename Path::element> {
+    -> write_state_t<BorrowStrings, MapNode, Root, EnclosingRecord,
+      typename Path::element> {
     return {this->map_node};
   }
 };
@@ -904,8 +924,10 @@ namespace detail {
 template <typename T>
 struct is_write_state: std::false_type {};
 
-template <bool BorrowStrings, typename MapNode, typename Path>
-struct is_write_state<write_state_t<BorrowStrings, MapNode, Path>>:
+template <bool BorrowStrings, typename MapNode, typename Root,
+  typename EnclosingRecord, typename Path>
+struct is_write_state<
+    write_state_t<BorrowStrings, MapNode, Root, EnclosingRecord, Path>>:
     std::true_type {};
 
 } // namespace detail
@@ -943,9 +965,6 @@ concept write_state_like = is_write_state<T>::value;
 
 } // namespace ryml
 } // namespace omni
-
-// TODO: [high] Expose enclosing_record as a type alias on traversal state,
-// keeping record type information separate from the schema path string.
 
 // TODO: [medium] Reduce state instantiations for records with several recursive
 // fields: edge canonicalization retains each permutation of distinct fields

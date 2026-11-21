@@ -153,7 +153,8 @@ struct cpp11_process_record_event {
 
 // GCC 7 rejects pack expansions found only inside lambda bodies. Indexed
 // callables retain the same reference capture without that expansion.
-template <std::size_t Index, bool CheckPresence, typename Frame>
+template <typename Record, std::size_t Index, bool CheckPresence,
+  typename Frame>
 struct cpp11_record_member_event {
   Frame &frame;
 
@@ -162,8 +163,8 @@ struct cpp11_record_member_event {
 };
 
 // Tuple indices keep field values and selected nodes paired without a search.
-template <typename State, typename Values, typename Finalizer,
-  std::size_t... Index>
+template <typename Record, typename State, typename Values,
+  typename Finalizer, std::size_t... Index>
 auto process_record_members(node_accumulator<State> *result,
   ::ryml::ConstNodeRef object, Values *values,
   const std::array<::ryml::id_type, sizeof...(Index)> &pending,
@@ -179,9 +180,11 @@ auto process_record_members(node_accumulator<State> *result,
 
   const auto events = std::tuple_cat(
     std::make_tuple(
-      cpp11_record_member_event<Index, true, decltype(frame)>{frame}...),
+      cpp11_record_member_event<Record, Index, true,
+        decltype(frame)>{frame}...),
     std::make_tuple(
-      cpp11_record_member_event<Index, false, decltype(frame)>{frame}...));
+      cpp11_record_member_event<Record, Index, false,
+        decltype(frame)>{frame}...));
 
   auto folded = events | fn::try_fold(cpp11_process_record_event{},
     compat::expected<compat::monostate, compat::monostate>{
@@ -206,8 +209,11 @@ struct cpp11_write_member {
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    core::write_node(this->context.field(omni::data_member_meta_t<_F>{}),
-      field.value(), child);
+    core::write_node(
+      this->context.template field<compat::remove_cvref_t<Record>>(
+        omni::data_member_meta_t<_F>{}),
+      field.value(),
+      child);
   }
 };
 
@@ -318,7 +324,7 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
     return {compat::nullopt, std::move(result.result.diagnostics)};
 
   auto values = record_value_slots(fields);
-  return omni::ryml::detail::process_record_members(&result, node, &values,
+  return omni::ryml::detail::process_record_members<T>(&result, node, &values,
     pending, std::move(finalizer),
     compat::make_index_sequence<std::tuple_size<decltype(fields)>::value>{});
 }
