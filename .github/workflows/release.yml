@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      checks: read
       contents: read
     outputs:
       reuse_artifacts: ${{ steps.reuse.outputs.reuse_artifacts }}
@@ -89,8 +90,9 @@ jobs:
             exit 1
           fi
 
-      - name: Import Reusable CI Artifacts
+      - name: Wait for Commit CI and Import Artifacts
         id: reusable_ci
+        timeout-minutes: 180
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -203,15 +205,19 @@ jobs:
             "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
             -f branch=master \
             -f event=push \
-            -f status=success \
             -f head_sha="$GITHUB_SHA" \
             -F per_page=100 \
             --jq '.workflow_runs[0].id // empty'); then
-            echo "failed to find reusable CI run; running full validation"
-            run_id=
+            echo "failed to find CI for the release commit" >&2
+            exit 1
+          fi
+          if [ -n "$run_id" ]; then
+            echo "waiting for CI run $run_id at $GITHUB_SHA"
+            gh run watch "$run_id" \
+              --repo "$GITHUB_REPOSITORY" --interval 30 --exit-status
           fi
           if [ -n "$run_id" ] && ! source_run_is_valid; then
-            run_id=
+            exit 1
           fi
 
           if [ -n "$run_id" ]; then
@@ -233,7 +239,7 @@ jobs:
             done
           fi
           if [ -n "$run_id" ] && ! source_run_is_valid; then
-            run_id=
+            exit 1
           fi
 
           if [ -n "$run_id" ]; then
@@ -271,7 +277,7 @@ jobs:
             fi
           fi
           if [ -n "$run_id" ] && ! source_run_is_valid; then
-            run_id=
+            exit 1
           fi
 
           if [ -n "$run_id" ]; then
