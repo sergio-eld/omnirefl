@@ -62,9 +62,15 @@ struct default_to_string_like_t {
       compose::with_node_check<core::expect_string_node>(
         core::map_node_to_string_like))(std::move(state), node, into);
   }
+
 };
 
-constexpr default_to_string_like_t default_to_string_like{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr default_to_string_like_t default_to_string_like{};
+#else
+static constexpr const default_to_string_like_t &default_to_string_like =
+  compat::detail::shared_state<default_to_string_like_t>::value;
+#endif
 
 /** Maps a string-like value to a quoted JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -80,9 +86,15 @@ struct from_string_like_t {
     (compat::conjunction<traits::is_string_like<T>,
       is_write_state<State>>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
+
 };
 
-constexpr from_string_like_t from_string_like{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_string_like_t from_string_like{};
+#else
+static constexpr const from_string_like_t &from_string_like =
+  compat::detail::shared_state<from_string_like_t>::value;
+#endif
 
 /** Checked Boolean node-to-type mapping.
  * Checks the node type before calling the core mapping function.
@@ -117,9 +129,15 @@ struct default_to_boolean_t {
       compose::with_node_check<core::expect_boolean_node>(
         core::map_node_to_boolean))(std::move(state), node, into);
   }
+
 };
 
-constexpr default_to_boolean_t default_to_boolean{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr default_to_boolean_t default_to_boolean{};
+#else
+static constexpr const default_to_boolean_t &default_to_boolean =
+  compat::detail::shared_state<default_to_boolean_t>::value;
+#endif
 
 /** Maps a Boolean value to a JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -133,9 +151,15 @@ struct from_boolean_t {
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
+
 };
 
-constexpr from_boolean_t from_boolean{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_boolean_t from_boolean{};
+#else
+static constexpr const from_boolean_t &from_boolean =
+  compat::detail::shared_state<from_boolean_t>::value;
+#endif
 
 /** Checked integer node-to-type mapping.
  * Checks the node type before calling the core mapping function.
@@ -172,9 +196,15 @@ struct default_to_integral_t {
       compose::with_node_check<core::expect_integer_node>(
         core::map_node_to_integral))(std::move(state), node, into);
   }
+
 };
 
-constexpr default_to_integral_t default_to_integral{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr default_to_integral_t default_to_integral{};
+#else
+static constexpr const default_to_integral_t &default_to_integral =
+  compat::detail::shared_state<default_to_integral_t>::value;
+#endif
 
 /** Maps an integral value to a JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -189,9 +219,15 @@ struct from_integral_t {
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
+
 };
 
-constexpr from_integral_t from_integral{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_integral_t from_integral{};
+#else
+static constexpr const from_integral_t &from_integral =
+  compat::detail::shared_state<from_integral_t>::value;
+#endif
 
 /** Checked floating-point node-to-type mapping.
  * Checks the node type before calling the core mapping function.
@@ -224,9 +260,15 @@ struct default_to_floating_point_t {
       compose::with_node_check<core::expect_number_node>(
         core::map_node_to_floating_point))(std::move(state), node, into);
   }
+
 };
 
-constexpr default_to_floating_point_t default_to_floating_point{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr default_to_floating_point_t default_to_floating_point{};
+#else
+static constexpr const default_to_floating_point_t &default_to_floating_point =
+  compat::detail::shared_state<default_to_floating_point_t>::value;
+#endif
 
 /** Maps a floating-point value to a JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -240,9 +282,15 @@ struct from_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
+
 };
 
-constexpr from_floating_point_t from_floating_point{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_floating_point_t from_floating_point{};
+#else
+static constexpr const from_floating_point_t &from_floating_point =
+  compat::detail::shared_state<from_floating_point_t>::value;
+#endif
 
 /** Checked arithmetic node-to-type mapping.
  * Checks the node type before calling the core mapping function.
@@ -283,9 +331,15 @@ struct default_to_arithmetic_t {
     -> with_diagnostics_t<compat::monostate> {
     return mapping_type<T>{}(std::move(state), node, into);
   }
+
 };
 
-constexpr default_to_arithmetic_t default_to_arithmetic{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr default_to_arithmetic_t default_to_arithmetic{};
+#else
+static constexpr const default_to_arithmetic_t &default_to_arithmetic =
+  compat::detail::shared_state<default_to_arithmetic_t>::value;
+#endif
 
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
  * Does not call \ref reflected_scope::mapping_from_type.
@@ -298,9 +352,15 @@ struct from_arithmetic_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_write_state<State>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
+
 };
 
-constexpr from_arithmetic_t from_arithmetic{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_arithmetic_t from_arithmetic{};
+#else
+static constexpr const from_arithmetic_t &from_arithmetic =
+  compat::detail::shared_state<from_arithmetic_t>::value;
+#endif
 
 // FIXME: [high] Separate optional unwrapping from fundamental mappings:
 // these optional-like mappings recursively invoke the type-mapping
@@ -344,9 +404,15 @@ struct from_optional_like_t {
     (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
+
 };
 
-constexpr from_optional_like_t from_optional_like{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_optional_like_t from_optional_like{};
+#else
+static constexpr const from_optional_like_t &from_optional_like =
+  compat::detail::shared_state<from_optional_like_t>::value;
+#endif
 
 /** Customization points for C++ type mappings. */
 namespace cp {

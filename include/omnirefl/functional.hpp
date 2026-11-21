@@ -122,7 +122,6 @@ constexpr auto stop_with(Accumulator &&value)
   return {std::forward<Accumulator>(value), /*stopped=*/true};
 }
 
-
 namespace detail {
 
 template <typename WhenTrue, typename WhenFalse>
@@ -411,6 +410,7 @@ struct branch_t {
     -> decltype(detail::select(Predicate{}, when_true, when_false, int{})) {
     return detail::select(Predicate{}, when_true, when_false, int{});
   }
+
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -418,7 +418,8 @@ struct branch_t {
 inline constexpr branch_t branch{};
 #else
 /** Immediately invoke a predicate and only its selected operation. */
-constexpr branch_t branch{};
+static constexpr const branch_t &branch =
+  compat::detail::shared_state<branch_t>::value;
 #endif
 
 /** Bind leading arguments to a callable. */
@@ -603,6 +604,7 @@ struct cond_t {
       detail::cond_tail<Next &&, Rest &&...>{std::forward<Next>(next),
         std::forward<Rest>(rest)...});
   }
+
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -610,7 +612,8 @@ struct cond_t {
 inline constexpr cond_t cond{};
 #else
 /** Evaluate partially applied branches in order, ending with a fallback. */
-constexpr cond_t cond{};
+static constexpr const cond_t &cond =
+  compat::detail::shared_state<cond_t>::value;
 #endif
 
 /**
@@ -1135,6 +1138,7 @@ struct predicate_t {
 
   template <typename T>
   constexpr Trait<compat::remove_cvref_t<T>> operator()() const { return {}; }
+
 };
 
 namespace detail {
@@ -1252,26 +1256,46 @@ constexpr not_predicate_t<Predicate> not_(Predicate) {
 template <typename>
 using always_true_t = std::true_type;
 
-constexpr predicate_t<always_true_t> always_true{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<always_true_t> always_true{};
+#else
+static constexpr const predicate_t<always_true_t> &always_true =
+  compat::detail::shared_state<predicate_t<always_true_t>>::value;
+#endif
 
 /// Reject every type or value in compile-time predicate composition.
 template <typename>
 using always_false_t = std::false_type;
 
-constexpr predicate_t<always_false_t> always_false{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<always_false_t> always_false{};
+#else
+static constexpr const predicate_t<always_false_t> &always_false =
+  compat::detail::shared_state<predicate_t<always_false_t>>::value;
+#endif
 
 /// Whether field or function metadata describes a static member.
 template <typename Member>
 struct is_static_t:
     compat::bool_constant<compat::remove_cvref_t<Member>::is_static()> {};
 
-constexpr predicate_t<is_static_t> is_static{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<is_static_t> is_static{};
+#else
+static constexpr const predicate_t<is_static_t> &is_static =
+  compat::detail::shared_state<predicate_t<is_static_t>>::value;
+#endif
 
 /// Whether field or function metadata describes a non-static member.
 template <typename Member>
 struct is_non_static_t: compat::negation<is_static_t<Member>> {};
 
-constexpr predicate_t<is_non_static_t> is_non_static{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<is_non_static_t> is_non_static{};
+#else
+static constexpr const predicate_t<is_non_static_t> &is_non_static =
+  compat::detail::shared_state<predicate_t<is_non_static_t>>::value;
+#endif
 
 /** Whether data-member metadata or a binding exposes associated function
  * metadata. Recognizes fixed function_t tags, rather than arbitrary callable
@@ -1281,14 +1305,24 @@ struct has_callable_metadata_t:
     compat::bool_constant<
       compat::remove_cvref_t<Member>::has_callable_metadata()> {};
 
-constexpr predicate_t<has_callable_metadata_t> has_callable_metadata{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<has_callable_metadata_t> has_callable_metadata{};
+#else
+static constexpr const predicate_t<has_callable_metadata_t> &has_callable_metadata =
+  compat::detail::shared_state<predicate_t<has_callable_metadata_t>>::value;
+#endif
 
 /// Whether a data member has no associated function metadata.
 template <typename Member>
 struct is_non_functional_t:
     compat::negation<has_callable_metadata_t<Member>> {};
 
-constexpr predicate_t<is_non_functional_t> is_non_functional{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<is_non_functional_t> is_non_functional{};
+#else
+static constexpr const predicate_t<is_non_functional_t> &is_non_functional =
+  compat::detail::shared_state<predicate_t<is_non_functional_t>>::value;
+#endif
 
 /** Whether the declared data-member type accepts an assigned value of that
  * type. This checks type assignability, not accessibility of a particular
@@ -1298,7 +1332,12 @@ struct is_assignable_t:
     std::is_assignable<typename compat::remove_cvref_t<Member>::type &,
       typename compat::remove_cvref_t<Member>::type> {};
 
-constexpr predicate_t<is_assignable_t> is_assignable{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr predicate_t<is_assignable_t> is_assignable{};
+#else
+static constexpr const predicate_t<is_assignable_t> &is_assignable =
+  compat::detail::shared_state<predicate_t<is_assignable_t>>::value;
+#endif
 
 /** QoL key projection for comparing reflected fields by name. */
 // TODO: Constrain Field to reflected field metadata or field bindings.

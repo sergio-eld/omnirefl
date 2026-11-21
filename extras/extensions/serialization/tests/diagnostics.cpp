@@ -125,11 +125,15 @@ TEST(mapping_diagnostics, limits_errors_in_a_custom_report) {
 }
 
 TEST(mapping_diagnostics, stops_after_the_warning_that_exceeds_the_limit) {
-  omni::ryml::config_t<> options{};
-  options.error_policy.unknown_fields =
-    omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
-  options.error_policy.warning_limit = 1;
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      options.error_policy.unknown_fields =
+        omni::json::unknown_policy::allow | omni::json::unknown_policy::warn;
+      options.error_policy.warning_limit = 1;
+      return options;
+    });
+
+  const auto result = load(
     omni::type_t<std::vector<diagnostic_inputs::empty_record>>{},
     R"([{"first": 1}, {"second": 2, "third": 3}])");
 
@@ -163,9 +167,13 @@ TEST(mapping_diagnostics, renders_each_nested_parse_error_once) {
   if (first || second)
     return;
 
-  omni::ryml::config_t<> options{};
-  options.error_policy.error_limit = 1;
-  const auto result = omni::ryml::core::deserialize(options,
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      options.error_policy.error_limit = 1;
+      return options;
+    });
+
+  const auto result = load(
     omni::type_t<std::vector<diagnostic_inputs::embedded_document>>{},
     R"(["[unterminated", "{unterminated"])");
 
@@ -221,28 +229,16 @@ struct rvalue_renderer {
     const omni::ryml::diagnostics &) && { return "rvalue"; }
 };
 
-template <typename Config, typename = void>
-struct is_core_deserializable: std::false_type {};
-
-template <typename Config>
-struct is_core_deserializable<Config,
-  omni::compat::void_t<decltype(omni::ryml::core::deserialize(
-    std::declval<Config>(), omni::type_t<int>{}, std::string{}))>>:
-    std::true_type {};
-
 TEST(deserialize_binding, preserves_lvalue_config_invocability) {
   using config_type = omni::ryml::config_t<lvalue_renderer>;
   using binding_type = omni::ryml::deserialize_t<config_type>;
 
-  EXPECT_TRUE(is_core_deserializable<config_type &>::value);
   EXPECT_TRUE((omni::compat::is_invocable<binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
   EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_FALSE(is_core_deserializable<config_type &&>::value);
   EXPECT_FALSE((omni::compat::is_invocable<binding_type &&,
     omni::type_t<int>, std::string>::value));
 }
@@ -251,15 +247,12 @@ TEST(deserialize_binding, preserves_rvalue_config_invocability) {
   using config_type = omni::ryml::config_t<rvalue_renderer>;
   using binding_type = omni::ryml::deserialize_t<config_type>;
 
-  EXPECT_FALSE(is_core_deserializable<config_type &>::value);
   EXPECT_FALSE((omni::compat::is_invocable<binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_FALSE(is_core_deserializable<const config_type &>::value);
   EXPECT_FALSE((omni::compat::is_invocable<const binding_type &,
     omni::type_t<int>, std::string>::value));
 
-  EXPECT_TRUE(is_core_deserializable<config_type &&>::value);
   EXPECT_TRUE((omni::compat::is_invocable<binding_type &&,
     omni::type_t<int>, std::string>::value));
 }
@@ -466,6 +459,21 @@ TEST(diagnostics_transform, renders_a_scalar_kind_mismatch) {
     omni::ryml::render_diagnostics(*tree, report));
 }
 
+TEST(diagnostics_transform, configures_a_diagnostics_result) {
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
+            return report.issues.size();
+          };
+        });
+    });
+
+  EXPECT_EQ(0U, load(omni::type_t<int>{}, "7").diagnostics);
+  EXPECT_EQ(1U, load(omni::type_t<int>{}, "bad").diagnostics);
+}
+
 // Designated config needs aggregate CTAD as well as designated initializers.
 // Clang 17 added aggregate CTAD; its shared feature macro also covers
 // alias CTAD.
@@ -475,7 +483,7 @@ TEST(diagnostics_transform, renders_a_scalar_kind_mismatch) {
     || (defined(__clang__) && 17 <= __clang_major__))
 TEST(diagnostics_transform, accepts_designated_callable_configuration) {
   const auto load = omni::ryml::deserialize_t{
-    omni::ryml::config_t{
+    .config = omni::ryml::config_t{
       .transform_diagnostics =
         [](const ::ryml::Tree &, omni::ryml::diagnostics report) {
           return report.issues.size();

@@ -1014,8 +1014,13 @@ struct type_t {
 
 // Variable templates require C++14.
 #if defined(__cpp_variable_templates)
+#  if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 template <typename T>
-constexpr type_t<T> type{};
+inline constexpr type_t<T> type{};
+#  else
+template <typename T>
+extern constexpr type_t<T> type{};
+#  endif
 #endif
 
 #if defined(__cpp_nontype_template_parameter_auto)
@@ -1031,7 +1036,7 @@ struct function_t {};
 #if defined(__cpp_nontype_template_parameter_auto)
 /** C++17 QoL value for `function_t`; usable without generated metadata. */
 template <auto Function>
-constexpr function_t<Function> function{};
+inline constexpr function_t<Function> function{};
 #endif
 
 #if defined(__cpp_nontype_template_parameter_auto)
@@ -1766,7 +1771,12 @@ struct reflected_call_t {
  * @warning Calling `reflected_call` again from the callable's `operator()` is
  * not supported.
  */
-constexpr reflected_call_t reflected_call{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr reflected_call_t reflected_call{};
+#else
+static constexpr const reflected_call_t &reflected_call =
+  compat::detail::shared_state<reflected_call_t>::value;
+#endif
 
 /**
  * Reflected-scope-only QoL alias for metadata in dependent code.

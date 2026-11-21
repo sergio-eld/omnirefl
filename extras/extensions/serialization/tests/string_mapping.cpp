@@ -128,21 +128,21 @@ TYPED_TEST(custom_string_mapping, accepts_empty_text) {
 
 TYPED_TEST(custom_string_mapping, borrows_the_custom_string_storage) {
   const TypeParam source{{"hello"}};
-  const auto tree = omni::ryml::core::as_ref_tree(source);
+  const auto tree = omni::ryml::as_ref_tree(source);
   EXPECT_EQ(source.contents.data(), tree.crootref().val().str);
   EXPECT_EQ(c4::csubstr{"hello"}, tree.crootref().val());
 }
 
 TYPED_TEST(custom_string_mapping, owning_tree_retains_a_copy) {
   TypeParam source{{"hello"}};
-  const auto tree = omni::ryml::core::as_owning_tree(source);
+  const auto tree = omni::ryml::as_owning_tree(source);
   source.contents[0] = 'x';
   EXPECT_EQ(c4::csubstr{"hello"}, tree.crootref().val());
 }
 
 TEST(string_mapping, retains_owning_conversion_in_reference_tree) {
   string_mapping::converted_text source{"converted text"};
-  const auto tree = omni::ryml::core::as_ref_tree(source);
+  const auto tree = omni::ryml::as_ref_tree(source);
   source.contents.clear();
 
   EXPECT_TRUE(tree.in_arena(tree.crootref().val()));

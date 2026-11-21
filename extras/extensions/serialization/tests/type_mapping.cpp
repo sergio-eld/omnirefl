@@ -505,10 +505,10 @@ TEST(type_mapping, preserves_qualified_registration) {
 
 TEST(write_state, preserves_string_storage_through_custom_mapping) {
   std::vector<endpoint<std::string>> source{{"east"}, {"west"}};
-  const auto owning = omni::ryml::core::as_owning_tree(source);
+  const auto owning = omni::ryml::as_owning_tree(source);
 
   {
-    const auto borrowed = omni::ryml::core::as_ref_tree(source);
+    const auto borrowed = omni::ryml::as_ref_tree(source);
     EXPECT_TRUE(serialization_test::matches_node(
       R"(["east", "west"])", borrowed.crootref()));
 
@@ -523,14 +523,16 @@ TEST(write_state, preserves_string_storage_through_custom_mapping) {
 
 TEST(read_state, passes_original_config_and_updated_counts_to_children) {
   mapping_observation::trace trace;
-  omni::ryml::config_t<mapping_observation::renderer> options{
-    /*error_policy=*/{},
-    /*transform_diagnostics=*/{&trace},
-  };
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [&trace](omni::ryml::config_t<> options) {
+      options.error_policy.error_limit = 1;
+      return options.tdm_transform_diagnostics(
+        [&trace](omni::ryml::render_diagnostics_t) {
+          return mapping_observation::renderer{&trace};
+        });
+    });
 
-  options.error_policy.error_limit = 1;
-  const auto result = omni::ryml::core::deserialize(options,
-    omni::type_t<mapping_observation::record>{},
+  const auto result = load(omni::type_t<mapping_observation::record>{},
     R"({"first":-7,"second":"bad","third":3})");
 
   EXPECT_FALSE(result.value);
@@ -542,7 +544,7 @@ TEST(read_state, passes_original_config_and_updated_counts_to_children) {
   EXPECT_EQ((std::vector<std::size_t>{0, 1, 1}), trace.warnings);
   EXPECT_EQ(trace.paths.size(), trace.configurations.size());
   for (const auto address : trace.configurations)
-    EXPECT_EQ(static_cast<const void *>(&options), address);
+    EXPECT_EQ(static_cast<const void *>(&load.config), address);
 }
 
 class record_mapping_limits: public testing::TestWithParam<bool> {};
@@ -550,17 +552,19 @@ class record_mapping_limits: public testing::TestWithParam<bool> {};
 TEST_P(record_mapping_limits, stops_before_evaluating_later_members) {
   const bool warnings = GetParam();
   mapping_observation::trace trace;
-  omni::ryml::config_t<mapping_observation::renderer> options{
-    /*error_policy=*/{},
-    /*transform_diagnostics=*/{&trace},
-  };
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [&trace, warnings](omni::ryml::config_t<> options) {
+      options.error_policy.error_limit = 0;
+      if (warnings)
+        options.error_policy.warning_limit = 0;
 
-  options.error_policy.error_limit = 0;
-  if (warnings)
-    options.error_policy.warning_limit = 0;
+      return options.tdm_transform_diagnostics(
+        [&trace](omni::ryml::render_diagnostics_t) {
+          return mapping_observation::renderer{&trace};
+        });
+    });
 
-  const auto result = omni::ryml::core::deserialize(options,
-    omni::type_t<mapping_observation::record>{},
+  const auto result = load(omni::type_t<mapping_observation::record>{},
     warnings ? R"({"first":-7,"second":2,"third":3})"
              : R"({"first":"bad","second":2,"third":3})");
 
@@ -580,13 +584,15 @@ INSTANTIATE_TEST_SUITE_P(budgets,
 
 TEST(record_mapping_events, missing_members_stop_before_value_operations) {
   mapping_observation::trace trace;
-  const omni::ryml::config_t<mapping_observation::renderer> options{
-    /*error_policy=*/{},
-    /*transform_diagnostics=*/{&trace},
-  };
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [&trace](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [&trace](omni::ryml::render_diagnostics_t) {
+          return mapping_observation::renderer{&trace};
+        });
+    });
 
-  const auto result = omni::ryml::core::deserialize(options,
-    omni::type_t<mapping_observation::record>{},
+  const auto result = load(omni::type_t<mapping_observation::record>{},
     R"({"first":1,"third":3})");
 
   EXPECT_FALSE(result.value);

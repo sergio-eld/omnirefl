@@ -3,7 +3,9 @@
 #include <gtest/gtest.h>
 
 #include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -52,6 +54,63 @@ struct immutable_number {
   explicit immutable_number(int value): value(value) {}
 };
 
+struct default_state_number {
+  int value;
+};
+
+namespace diagnostic_callbacks {
+
+std::string classification(const omni::ryml::diagnostics &report) {
+  if (report.issues.empty())
+    return "success";
+
+  return omni::json::issue_code::parse_error == report.issues.front().reason
+    ? "syntax_error" : "mapping_error";
+}
+
+struct renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &report) const {
+    return "configured/" + classification(report);
+  }
+};
+
+// An unrelated application helper must not intercept deserialization errors.
+inline std::string parse_error_diagnostics(
+  const omni::ryml::config_t<renderer> &, std::string) {
+  return "application helper";
+}
+
+struct const_category_renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &report) const & {
+    return "const_lvalue/" + classification(report);
+  }
+
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &report) const && {
+    return "const_rvalue/" + classification(report);
+  }
+};
+
+struct consuming_renderer {
+  std::unique_ptr<std::string> prefix;
+
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &report) && {
+    return *this->prefix + classification(report);
+  }
+};
+
+struct const_rvalue_only_renderer {
+  std::string operator()(const ::ryml::Tree &,
+    const omni::ryml::diagnostics &report) const && {
+    return "const_rvalue/" + classification(report);
+  }
+};
+
+} // namespace diagnostic_callbacks
+
 } // namespace
 
 #if defined(OMNI_TOOL_RUN)
@@ -85,6 +144,19 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
       .transform([](int value) -> immutable_number {
         return immutable_number{value};
       });
+  }
+};
+
+template <>
+struct omni::ryml::cp::to_type_t<default_state_number> {
+  auto operator()(omni::ryml::read_state_t<> state,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<default_state_number>) const
+    -> omni::ryml::with_diagnostics_t<default_state_number> {
+    return omni::ryml::default_to_integral(std::move(state),
+      node,
+      omni::type_t<int>{})
+      .transform([](int value) -> default_state_number { return {value}; });
   }
 };
 
@@ -126,6 +198,198 @@ struct omni::ryml::cp::to_type_t<my_string> {
 #endif
 
 namespace {
+
+TEST(deserialize_diagnostics, accepts_const_rvalue_only_callbacks) {
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::const_rvalue_only_renderer{};
+        });
+    });
+
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(load) &,
+    omni::type_t<int>, std::string>::value));
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(load) &,
+    int *, std::string>::value));
+
+  const auto value = std::move(load)(omni::type_t<int>{}, "42");
+  EXPECT_EQ(42, value.value);
+  EXPECT_EQ("const_rvalue/success", value.diagnostics);
+
+  int into = 7;
+  const auto result = std::move(load)(&into, "42");
+  EXPECT_TRUE(result.value);
+  EXPECT_EQ(42, into);
+  EXPECT_EQ("const_rvalue/success", result.diagnostics);
+}
+
+struct diagnostics_case {
+  std::string name;
+  std::string document;
+  omni::compat::optional<int> expected;
+};
+
+class deserialize_diagnostics:
+    public testing::TestWithParam<diagnostics_case> {};
+
+TEST_P(deserialize_diagnostics, uses_the_configured_value_renderer) {
+  const auto &c = GetParam();
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::renderer{};
+        });
+    });
+
+  const auto result = load(omni::type_t<int>{}, c.document);
+
+  EXPECT_EQ(c.expected, result.value);
+  EXPECT_EQ("configured/" + c.name, result.diagnostics);
+}
+
+TEST_P(deserialize_diagnostics, uses_the_configured_mutating_renderer) {
+  const auto &c = GetParam();
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::renderer{};
+        });
+    });
+
+  int into = 7;
+  const auto result = load(&into, c.document);
+
+  EXPECT_EQ(bool(c.expected), bool(result.value));
+  EXPECT_EQ("configured/" + c.name, result.diagnostics);
+  if (c.expected)
+    EXPECT_EQ(*c.expected, into);
+  else if ("syntax_error" == c.name)
+    EXPECT_EQ(7, into);
+}
+
+TEST_P(deserialize_diagnostics, preserves_const_rvalues_for_values) {
+  const auto &c = GetParam();
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::const_category_renderer{};
+        });
+    });
+
+  const auto lvalue = load(omni::type_t<int>{}, c.document);
+  const auto rvalue = std::move(load)(omni::type_t<int>{}, c.document);
+
+  EXPECT_EQ(c.expected, lvalue.value);
+  EXPECT_EQ("const_lvalue/" + c.name, lvalue.diagnostics);
+  EXPECT_EQ(c.expected, rvalue.value);
+  EXPECT_EQ("const_rvalue/" + c.name, rvalue.diagnostics);
+}
+
+TEST_P(deserialize_diagnostics, preserves_const_rvalues_for_mutation) {
+  const auto &c = GetParam();
+  const auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::const_category_renderer{};
+        });
+    });
+
+  int into = 7;
+  const auto result = std::move(load)(&into, c.document);
+
+  EXPECT_EQ(bool(c.expected), bool(result.value));
+  EXPECT_EQ("const_rvalue/" + c.name, result.diagnostics);
+  if (c.expected)
+    EXPECT_EQ(*c.expected, into);
+  else if ("syntax_error" == c.name)
+    EXPECT_EQ(7, into);
+}
+
+TEST_P(deserialize_diagnostics, consumes_configuration_for_values) {
+  const auto &c = GetParam();
+  auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::consuming_renderer{
+            omni::compat::make_unique<std::string>("consumed/"),
+          };
+        });
+    });
+
+  const auto result = std::move(load)(omni::type_t<int>{}, c.document);
+
+  EXPECT_EQ(c.expected, result.value);
+  EXPECT_EQ("consumed/" + c.name, result.diagnostics);
+}
+
+TEST_P(deserialize_diagnostics, consumes_configuration_for_mutation) {
+  const auto &c = GetParam();
+  auto load = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_t<> options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t) {
+          return diagnostic_callbacks::consuming_renderer{
+            omni::compat::make_unique<std::string>("consumed/"),
+          };
+        });
+    });
+
+  int into = 7;
+  const auto result = std::move(load)(&into, c.document);
+
+  EXPECT_EQ(bool(c.expected), bool(result.value));
+  EXPECT_EQ("consumed/" + c.name, result.diagnostics);
+  if (c.expected)
+    EXPECT_EQ(*c.expected, into);
+  else if ("syntax_error" == c.name)
+    EXPECT_EQ(7, into);
+}
+
+INSTANTIATE_TEST_SUITE_P(documents,
+  deserialize_diagnostics,
+  testing::ValuesIn(std::vector<diagnostics_case>{
+    {"success", "42", 42},
+    {"mapping_error", R"("bad")", omni::compat::nullopt},
+    {"syntax_error", "[", omni::compat::nullopt},
+  }),
+
+  [](const testing::TestParamInfo<diagnostics_case> &info) {
+    return info.param.name;
+  });
+
+TEST(mapping_dispatch, bound_config_preserves_the_default_state_type) {
+  const auto result = omni::ryml::deserialize(
+    omni::type_t<default_state_number>{}, "42");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(42, result.value->value);
+
+  EXPECT_TRUE(result.diagnostics.empty());
+}
+
+TEST(tree_serialization, exposes_callable_tree_builders) {
+  const auto own = omni::ryml::as_owning_tree;
+  const auto borrow = omni::ryml::as_ref_tree;
+  const std::string source = "sensor";
+  const auto owned = own(std::string{"sensor"});
+  const auto borrowed = borrow(source);
+
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"("sensor")", owned.crootref()));
+
+  EXPECT_TRUE(serialization_test::matches_node(
+    R"("sensor")", borrowed.crootref()));
+
+  EXPECT_FALSE((omni::compat::is_invocable<
+    omni::ryml::as_ref_tree_t, std::string &&>::value));
+}
 
 TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {
   const auto parsed = omni::ryml::core::parse("42");

@@ -66,9 +66,15 @@ struct map_node_to_enum_t {
       std::forward<F>(f), this->value_by_alias)};
   }
 #endif
+
 };
 
-constexpr map_node_to_enum_t<> map_node_to_enum{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_enum_t<> map_node_to_enum{};
+#else
+static constexpr const map_node_to_enum_t<> &map_node_to_enum =
+  compat::detail::shared_state<map_node_to_enum_t<>>::value;
+#endif
 
 } // namespace reflected_scope
 } // namespace core
@@ -107,9 +113,15 @@ struct from_enum_t {
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_write_state<State>>::value))
   auto operator()(State, T value, ::ryml::NodeRef node) const -> void;
+
 };
 
-constexpr from_enum_t from_enum{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_enum_t from_enum{};
+#else
+static constexpr const from_enum_t &from_enum =
+  compat::detail::shared_state<from_enum_t>::value;
+#endif
 
 } // namespace reflected_scope
 } // namespace ryml

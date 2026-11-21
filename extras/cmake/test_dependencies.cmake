@@ -33,10 +33,16 @@ else()
         "${CMAKE_CURRENT_LIST_DIR}/../../extensions/serialization/patch_tl_optional.cmake")
 endif()
 FetchContent_Declare(tl_optional
+    # Older Makefile generators do not notice changed patch commands.
+    STAMP_DIR "${FETCHCONTENT_BASE_DIR}/tl_optional-constexpr-stamp"
     URL https://github.com/TartanLlama/optional/archive/refs/tags/v1.1.0.tar.gz
     URL_HASH SHA256=88ece79f3de5ccaec4191951a222f95cc80c4381dafd3163bdb1ff87cedf3118
-    # Avoid instantiating value()'s throw after successful emplacement.
+    # Keep C++11 constexpr construction and exception-free emplacement.
     PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+        -DPATCH_NAME=tl_optional-emplace.patch
+        -P "${_dependencies_optional_patch}"
+    COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+        -DPATCH_NAME=tl_optional-constexpr.patch
         -P "${_dependencies_optional_patch}")
 
 set(MPARK_VARIANT_INCLUDE_TESTS "" CACHE STRING "" FORCE)

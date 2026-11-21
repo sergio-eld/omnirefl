@@ -346,23 +346,23 @@ INSTANTIATE_TEST_SUITE_P(formats,
   testing::Values(::ryml::EMIT_JSON, ::ryml::EMIT_YAML));
 
 TEST(serialization_trees, builds_scalar_and_optional_sequence_roots) {
-  const auto scalar = omni::ryml::core::as_owning_tree(42);
+  const auto scalar = omni::ryml::as_owning_tree(42);
   EXPECT_TRUE(serialization_test::matches_node("42", scalar.crootref()));
 
   const std::vector<omni::compat::optional<int>> values{
     omni::compat::nullopt, 0, 7};
 
-  const auto sequence = omni::ryml::core::as_owning_tree(values);
+  const auto sequence = omni::ryml::as_owning_tree(values);
   EXPECT_TRUE(serialization_test::matches_node("[0, 7]", sequence.crootref()));
 
   const auto empty =
-    omni::ryml::core::as_owning_tree(omni::compat::optional<int>{});
+    omni::ryml::as_owning_tree(omni::compat::optional<int>{});
   EXPECT_TRUE(serialization_test::matches_node("null", empty.crootref()));
 }
 
 TEST(serialization_trees, copies_borrowed_string_data_into_the_arena) {
   std::string source{"original text"};
-  const auto tree = omni::ryml::core::as_owning_tree(
+  const auto tree = omni::ryml::as_owning_tree(
     c4::csubstr{source.data(), source.size()});
 
   source.front() = 'x';
@@ -375,12 +375,12 @@ struct can_make_ref_tree: std::false_type {};
 
 template <typename Value>
 struct can_make_ref_tree<Value,
-  omni::compat::void_t<decltype(omni::ryml::core::as_ref_tree(
+  omni::compat::void_t<decltype(omni::ryml::as_ref_tree(
     std::declval<Value>()))>>: std::true_type {};
 
 TEST(serialization_trees, borrows_string_storage_from_const_lvalues) {
   const std::string source{"borrowed text"};
-  const auto tree = omni::ryml::core::as_ref_tree(source);
+  const auto tree = omni::ryml::as_ref_tree(source);
   EXPECT_EQ(static_cast<const void *>(source.data()),
     static_cast<const void *>(tree.crootref().val().str));
   EXPECT_TRUE(serialization_test::matches_node(
@@ -397,7 +397,7 @@ TEST(serialization_trees, borrows_optional_sequence_strings_and_owns_numbers) {
   const std::vector<omni::compat::optional<std::string>> source{
     std::string{"first"}, omni::compat::nullopt, std::string{"last"}};
 
-  const auto tree = omni::ryml::core::as_ref_tree(source);
+  const auto tree = omni::ryml::as_ref_tree(source);
   EXPECT_TRUE(serialization_test::matches_node(
     R"(["first", "last"])", tree.crootref()));
   EXPECT_EQ(static_cast<const void *>(source.front()->data()),
@@ -406,7 +406,7 @@ TEST(serialization_trees, borrows_optional_sequence_strings_and_owns_numbers) {
     static_cast<const void *>(tree.crootref()[1].val().str));
 
   const int number = 42;
-  const auto scalar = omni::ryml::core::as_ref_tree(number);
+  const auto scalar = omni::ryml::as_ref_tree(number);
   EXPECT_TRUE(scalar.in_arena(scalar.crootref().val()));
   EXPECT_TRUE(serialization_test::matches_node("42", scalar.crootref()));
 

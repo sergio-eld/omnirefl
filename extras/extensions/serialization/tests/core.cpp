@@ -13,6 +13,17 @@
 
 namespace {
 
+// FIXME: [medium] [external] Remove this patch-specific check once the
+// supported tl::optional release includes the constexpr-storage fix and
+// tl_optional-constexpr.patch is no longer needed.
+TEST(optional_compat, constructs_values_in_constant_expressions) {
+  constexpr omni::compat::optional<std::uint16_t> empty{};
+  constexpr omni::compat::optional<std::uint16_t> integer{42};
+
+  static_assert(!empty.has_value(), "Default construction is empty");
+  static_assert(*integer == 42, "Value construction preserves the integer");
+}
+
 TEST(mapping_core, parses_and_converts_without_reflection_or_composition) {
   const auto tree = omni::ryml::core::parse(
     R"({"flag": true, "count": 42, "ratio": 2.5, "text": "reading"})");

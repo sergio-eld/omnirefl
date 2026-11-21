@@ -1,8 +1,9 @@
 #pragma once
 
-/** Parsing, node-shape checks, and metadata-independent value conversions.
- * Raw map_node_to_* functions require validated input. These operations do
- * not select custom type mappings or require composition. */
+/** Parsing, node-shape checks, value conversions, and schema dispatch.
+ * Raw map_node_to_* functions require validated input and do not select
+ * custom type mappings. Schema dispatch definitions are supplied by ryml.hpp.
+ */
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
@@ -17,6 +18,13 @@
 
 namespace omni {
 namespace ryml {
+namespace detail {
+
+template <typename T>
+struct is_mapped_range;
+
+} // namespace detail
+
 namespace core {
 
 /**
@@ -28,10 +36,11 @@ namespace core {
 ```cpp
 #include <omnirefl/serialization/ryml.hpp>
 
-// Supply a reflected person, config, and an owning std::string source.
+// Supply a reflected person and an owning std::string source.
 auto parsed = core::parse(std::move(source));
 if (parsed) {
-  auto result = core::map_by_schema(options, omni::type_t<person>{}, *parsed);
+  auto result = map_by_schema(omni::type<person>, *parsed);
+  // Before C++14: omni::type_t<person>{}.
   // Use result while parsed keeps its tree and character storage alive.
 }
 // Syntax errors use expected; mapping returns optional person and diagnostics.
@@ -108,9 +117,15 @@ struct map_node_to_string_like_t {
       is_read_state<State>>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
 };
 
-constexpr map_node_to_string_like_t map_node_to_string_like{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_string_like_t map_node_to_string_like{};
+#else
+static constexpr const map_node_to_string_like_t &map_node_to_string_like =
+  compat::detail::shared_state<map_node_to_string_like_t>::value;
+#endif
 
 /** Checks for unquoted Boolean text, including an explicit YAML Boolean tag.
  * @pre node must belong to a valid tree. */
@@ -135,9 +150,15 @@ struct map_node_to_boolean_t {
       && !std::is_const<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
 };
 
-constexpr map_node_to_boolean_t map_node_to_boolean{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_boolean_t map_node_to_boolean{};
+#else
+static constexpr const map_node_to_boolean_t &map_node_to_boolean =
+  compat::detail::shared_state<map_node_to_boolean_t>::value;
+#endif
 
 /** Checks for unquoted integer text.
  * Destination range is checked on conversion.
@@ -163,9 +184,15 @@ struct map_node_to_integral_t {
       && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
 };
 
-constexpr map_node_to_integral_t map_node_to_integral{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_integral_t map_node_to_integral{};
+#else
+static constexpr const map_node_to_integral_t &map_node_to_integral =
+  compat::detail::shared_state<map_node_to_integral_t>::value;
+#endif
 
 /** Checks for unquoted numeric text.
  * Destination range is checked on conversion.
@@ -189,9 +216,15 @@ struct map_node_to_floating_point_t {
     (std::is_floating_point<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
 };
 
-constexpr map_node_to_floating_point_t map_node_to_floating_point{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_floating_point_t map_node_to_floating_point{};
+#else
+static constexpr const map_node_to_floating_point_t &map_node_to_floating_point =
+  compat::detail::shared_state<map_node_to_floating_point_t>::value;
+#endif
 
 /** Checks for a Boolean or numeric node.
  * @pre node must belong to a valid tree. */
@@ -218,9 +251,192 @@ struct map_node_to_arithmetic_t {
         || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
+
 };
 
-constexpr map_node_to_arithmetic_t map_node_to_arithmetic{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_arithmetic_t map_node_to_arithmetic{};
+#else
+static constexpr const map_node_to_arithmetic_t &map_node_to_arithmetic =
+  compat::detail::shared_state<map_node_to_arithmetic_t>::value;
+#endif
+
+/** Node-to-type mapping through a customization or its default.
+ * Pointer-only mappings are adapted when T is default-constructible.
+ * @pre Required metadata is available in reflected scope. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+  -> with_diagnostics_t<T, diagnostics>;
+
+// REFACTORME: [high] Review responsibility for diagnostic accumulation and
+// limit checks between this dispatcher and the node mappers.
+/** Dispatch one node through the selected to_type callable with diagnostics.
+ * Prefers its type<T> overload when the produced value can be assigned to
+ * *into; otherwise uses its T* overload. A mapping error does not trigger
+ * fallback to another overload. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
+  -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+// REFACTORME: [high] This only forwards to mapping_from_type(...)(...).
+// Reassess whether a separate writer dispatcher is needed.
+/** Dispatch one value through its serialization customization or default. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_write_state<State>::value))
+void write_node(State context, const T &value, ::ryml::NodeRef node);
+
+/** (Ad hoc: see detail) Map Boolean, integer, or real JSON/YAML nodes
+ * into corresponding fundamental C++ types.
+ *
+ * @details reflected_call requires a metadata-bearing target. This route
+ * handles arithmetic destinations without reflection.
+ * @pre node must be valid; destination pointers must be non-null. */
+struct map_to_fundamental_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_fundamental_t map_to_fundamental{};
+#else
+static constexpr const map_to_fundamental_t &map_to_fundamental =
+  compat::detail::shared_state<map_to_fundamental_t>::value;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML nodes into string-like C++ types.
+ *
+ * @details String-like destinations may be instrumentation-disabled. This
+ * route keeps them outside reflected_call.
+ * @pre node must be valid; destination pointers must be non-null. */
+struct map_to_string_like_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_string_like<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_string_like_t map_to_string_like{};
+#else
+static constexpr const map_to_string_like_t &map_to_string_like =
+  compat::detail::shared_state<map_to_string_like_t>::value;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML nodes into C++ types requiring
+ * reflected scope.
+ *
+ * @details reflected_call needs a metadata-bearing type, not an arbitrary
+ * compound destination. Range and optional wrappers are unwrapped to obtain
+ * that reflection target while mapping retains the original destination.
+ * @pre node must be valid; destination pointers must be non-null. */
+struct map_to_reflected_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_object<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_object<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_reflected_t map_to_reflected{};
+#else
+static constexpr const map_to_reflected_t &map_to_reflected =
+  compat::detail::shared_state<map_to_reflected_t>::value;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML arrays or objects into C++ ranges.
+ *
+ * @details reflected_call cannot use the compound range as its reflection
+ * target. Discovery follows element or mapped-value types before establishing
+ * scope, preserving the original range as the destination. Fundamental and
+ * string-like elements require no reflected scope, including empty ranges.
+ * @pre node must be valid; destination pointers must be non-null. */
+struct map_to_sequence_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_sequence_t map_to_sequence{};
+#else
+static constexpr const map_to_sequence_t &map_to_sequence =
+  compat::detail::shared_state<map_to_sequence_t>::value;
+#endif
+
+/** (Ad hoc: see detail) Map JSON/YAML nodes into optional-like C++ types.
+ *
+ * @details reflected_call requires sanitizing this compound destination to
+ * its contained type. Discovery establishes scope only when needed and keeps
+ * the optional as the mapping destination, including when it is empty.
+ * @pre node must be valid; destination pointers must be non-null. */
+struct map_to_optional_t {
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_optional<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context,
+    ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_optional<T>::value && !std::is_const<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_to_optional_t map_to_optional{};
+#else
+static constexpr const map_to_optional_t &map_to_optional =
+  compat::detail::shared_state<map_to_optional_t>::value;
+#endif
 
 } // namespace core
 } // namespace ryml

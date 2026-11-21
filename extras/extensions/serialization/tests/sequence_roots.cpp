@@ -24,8 +24,7 @@ TEST(deserialization_sequence_roots, reads_an_enum_vector_from_strings) {
   if (!tree)
     return;
 
-  const omni::ryml::config_t<> options{};
-  const auto result = omni::ryml::core::map_by_schema(options,
+  const auto result = omni::ryml::map_by_schema(
     omni::type_t<std::vector<read_status>>{}, *tree);
 
   const std::vector<read_status> expected{
@@ -45,7 +44,7 @@ TEST(serialization_sequence_roots, writes_an_enum_vector_as_strings) {
     write_status::ready,
   };
 
-  const auto tree = omni::ryml::core::as_owning_tree(value);
+  const auto tree = omni::ryml::as_owning_tree(value);
 
   EXPECT_TRUE(serialization_test::matches_node(
     R"(["ready", "busy", "ready"])", tree.crootref()));
@@ -121,7 +120,7 @@ TEST(serialization_trees, discovers_records_inside_optional_sequences) {
   const std::vector<omni::compat::optional<tree_payload>> source{
     omni::compat::nullopt, tree_payload{"west"}};
 
-  auto tree = omni::ryml::core::as_owning_tree(source);
+  auto tree = omni::ryml::as_owning_tree(source);
   EXPECT_TRUE(serialization_test::matches_node(
     R"([{"label": "west"}])", tree.crootref()));
 
@@ -136,7 +135,7 @@ TEST(serialization_trees, discovers_records_inside_optional_sequences) {
 
 TEST(serialization_trees, borrows_record_string_members) {
   const tree_payload source{"west"};
-  const auto tree = omni::ryml::core::as_ref_tree(source);
+  const auto tree = omni::ryml::as_ref_tree(source);
   EXPECT_TRUE(serialization_test::matches_node(
     R"({"label": "west"})", tree.crootref()));
   EXPECT_EQ(static_cast<const void *>(source.label.data()),

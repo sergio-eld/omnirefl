@@ -114,9 +114,15 @@ struct from_record_t {
       is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
+
 };
 
-constexpr from_record_t from_record{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_record_t from_record{};
+#else
+static constexpr const from_record_t &from_record =
+  compat::detail::shared_state<from_record_t>::value;
+#endif
 
 } // namespace reflected_scope
 } // namespace ryml

@@ -4,7 +4,7 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/functional.hpp>
-#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.

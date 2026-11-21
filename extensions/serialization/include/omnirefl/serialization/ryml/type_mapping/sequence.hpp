@@ -77,9 +77,15 @@ struct from_range_t {
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
   void operator()(State context, const T &value, ::ryml::NodeRef node) const;
+
 };
 
-constexpr from_range_t from_range{};
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr from_range_t from_range{};
+#else
+static constexpr const from_range_t &from_range =
+  compat::detail::shared_state<from_range_t>::value;
+#endif
 
 } // namespace ryml
 } // namespace omni

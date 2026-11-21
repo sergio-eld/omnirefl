@@ -562,7 +562,7 @@ TEST(range_mapping, map_duplicate_warnings_observe_the_warning_limit) {
 
 TEST(range_mapping, reference_trees_borrow_map_key_characters) {
   const std::map<std::string, int> source{{"port", 7}};
-  const auto tree = omni::ryml::core::as_ref_tree(source);
+  const auto tree = omni::ryml::as_ref_tree(source);
   EXPECT_EQ(source.begin()->first.data(),
     tree.crootref().first_child().key().str);
 }
@@ -571,7 +571,7 @@ TEST(range_mapping, owning_trees_retain_map_keys_after_source_destruction) {
   ::ryml::Tree tree;
   {
     const std::map<std::string, int> source{{"port", 7}};
-    tree = omni::ryml::core::as_owning_tree(source);
+    tree = omni::ryml::as_owning_tree(source);
     EXPECT_NE(source.begin()->first.data(),
       tree.crootref().first_child().key().str);
   }

@@ -11,9 +11,9 @@
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
  *   basics.enum_mapping - declared enumerator names as strings
- *   basics.local_configuration - customize config for an individual call
+ *   basics.local_configuration - customize config with tdm_config
  *   basics.diagnostics - value availability, errors, and warnings
- *   basics.explicit_configuration - pass config and input explicitly
+ *   basics.explicit_configuration - construct a configured deserializer
  *   basics.unknown_fields - reject, ignore, or warn about unknown fields
  *   basics.duplicate_fields - choose a repeated field occurrence
  *   basics.error_limit - collect errors before stopping
@@ -86,7 +86,7 @@
 
 #include <omnirefl/functional.hpp>
 
-// Mapping callables, explicit core functions, config, and diagnostics.
+// Mapping callables, parsing, config, and diagnostics.
 #include <omnirefl/serialization/ryml.hpp>
 
 #include <algorithm>
@@ -274,20 +274,20 @@ struct two_readings {
 
 } // namespace policy_examples
 
-/** Local configuration customizes deserialization without changing defaults.
+/** tdm_config customizes a local deserializer without changing defaults.
  * This example allows unknown fields and sets an error limit captured from
  * the calling scope. */
 TEST(basics, local_configuration) {
   const std::uint16_t limit = 2;
   // C++11: spell the parameter type as omni::ryml::config_t<>.
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [limit](omni::ryml::config_like auto s) {
       s.error_policy.error_limit = limit;
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
       return s;
     });
 
-  const auto result = load(omni::type<policy_examples::measurement>,
+  const auto result = deserialize(omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
@@ -295,7 +295,7 @@ TEST(basics, local_configuration) {
     EXPECT_EQ(7, result.value->value);
 
   EXPECT_TRUE(result.diagnostics.empty());
-  EXPECT_EQ(2, load.config.error_policy.error_limit);
+  EXPECT_EQ(2, deserialize.config.error_policy.error_limit);
   EXPECT_EQ(0, omni::ryml::deserialize.config.error_policy.error_limit);
   EXPECT_EQ(omni::json::unknown_policy::reject,
     omni::ryml::deserialize.config.error_policy.unknown_fields);
@@ -314,17 +314,18 @@ TEST(basics, diagnostics) {
   EXPECT_EQ("/value: expected integer, found scalar", result.diagnostics);
 }
 
-/** The core operation takes configuration explicitly instead of using a bound
- * callable. */
+/** An explicitly configured callable can be constructed in one expression. */
 TEST(basics, explicit_configuration) {
   // GCC 10 needs the nested policy type for aggregate deduction.
-  const omni::ryml::config_t options{
-    .error_policy = omni::json::error_policy{
-      .unknown_fields = omni::json::unknown_policy::allow,
+  constexpr auto deserialize = omni::ryml::deserialize_t{
+    .config = omni::ryml::config_t{
+      .error_policy = omni::json::error_policy{
+        .unknown_fields = omni::json::unknown_policy::allow,
+      },
     },
   };
-  const auto result = omni::ryml::core::deserialize(options,
-    omni::type<policy_examples::measurement>,
+
+  const auto result = deserialize(omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
@@ -339,14 +340,14 @@ TEST(basics, explicit_configuration) {
  */
 TEST(basics, unknown_fields) {
   using omni::json::unknown_policy;
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.unknown_fields =
         unknown_policy::allow | unknown_policy::warn;
       return s;
     });
 
-  const auto result = load(omni::type<policy_examples::measurement>,
+  const auto result = deserialize(omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
 
   EXPECT_TRUE(result.value);
@@ -363,14 +364,14 @@ TEST(basics, unknown_fields) {
  */
 TEST(basics, duplicate_fields) {
   using omni::json::duplicate_policy;
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.duplicates =
         duplicate_policy::last | duplicate_policy::warn;
       return s;
     });
 
-  const auto result = load(omni::type<policy_examples::measurement>,
+  const auto result = deserialize(omni::type<policy_examples::measurement>,
     R"({"value": 7, "value": 42})");
 
   EXPECT_TRUE(result.value);
@@ -385,13 +386,13 @@ TEST(basics, duplicate_fields) {
  * consume this budget, and increasing it never exposes an invalid value.
  */
 TEST(basics, error_limit) {
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.error_limit = 1;
       return s;
     });
 
-  const auto result = load(omni::type<policy_examples::two_readings>,
+  const auto result = deserialize(omni::type<policy_examples::two_readings>,
     R"({"first": "bad", "second": "bad"})");
 
   EXPECT_FALSE(result.value);
@@ -404,7 +405,7 @@ TEST(basics, error_limit) {
  * warning. Exceeding it adds an error and prevents returning a value.
  */
 TEST(basics, warning_limit) {
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.unknown_fields = omni::json::unknown_policy::allow
         | omni::json::unknown_policy::warn;
@@ -412,7 +413,7 @@ TEST(basics, warning_limit) {
       return s;
     });
 
-  const auto result = load(omni::type<policy_examples::measurement>,
+  const auto result = deserialize(omni::type<policy_examples::measurement>,
     R"({"value": 7, "trace": true})");
 
   EXPECT_FALSE(result.value);
@@ -431,7 +432,7 @@ TEST(basics, missing_fields) {
 
 // Invalid scalar values and explicit null are errors for an integer member.
 TEST(basics, invalid_fields) {
-  const auto load = omni::ryml::deserialize;
+  const auto deserialize = omni::ryml::deserialize;
 
   const std::vector<std::string> documents{
     R"({"value": "bad"})",
@@ -440,7 +441,7 @@ TEST(basics, invalid_fields) {
 
   for (const auto &document : documents) {
     SCOPED_TRACE(document);
-    const auto result = load(
+    const auto result = deserialize(
       omni::type<policy_examples::measurement>, document);
 
     EXPECT_FALSE(result.value);
@@ -977,7 +978,7 @@ TEST(diagnostics, custom_results) {
     std::string message;
   };
 
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto options) {
       return options.tdm_transform_diagnostics(
         [](omni::ryml::render_diagnostics_t previous) {
@@ -991,7 +992,7 @@ TEST(diagnostics, custom_results) {
         });
     });
 
-  const auto success = load(
+  const auto success = deserialize(
     omni::type<policy_examples::measurement>, R"({"value": 7})");
 
   EXPECT_TRUE(success.value);
@@ -1001,7 +1002,7 @@ TEST(diagnostics, custom_results) {
   EXPECT_EQ(0U, success.diagnostics.issue_count);
   EXPECT_TRUE(success.diagnostics.message.empty());
 
-  const auto failure = load(
+  const auto failure = deserialize(
     omni::type<policy_examples::measurement>, R"({"value": "bad"})");
 
   EXPECT_FALSE(failure.value);
@@ -1011,14 +1012,14 @@ TEST(diagnostics, custom_results) {
 
 // Accepted input conditions can produce warnings alongside a valid value.
 TEST(diagnostics, valid_values_with_warnings) {
-  const auto load = omni::ryml::deserialize.tdm_config(
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_like auto s) {
       s.error_policy.duplicates = omni::json::duplicate_policy::allow
         | omni::json::duplicate_policy::warn;
       return s;
     });
 
-  const auto result = load(omni::type<policy_examples::measurement>,
+  const auto result = deserialize(omni::type<policy_examples::measurement>,
     R"({"value": 7, "value": 42})");
 
   EXPECT_TRUE(result.value);
@@ -1508,18 +1509,18 @@ struct reading {
 
 } // namespace tree_ownership
 
-/** core::as_ref_tree borrows existing strings; keep their storage alive and
- * unchanged while using the tree. core::as_owning_tree copies strings into
+/** as_ref_tree borrows existing strings; keep their storage alive and
+ * unchanged while using the tree. as_owning_tree copies strings into
  * its arena so the tree can outlive the source. Both trees own their nodes
  * and generated scalar text. The returned trees can be edited before emission.
  */
 TEST(advanced, tree_ownership) {
   const tree_ownership::reading source{"sensor", omni::compat::nullopt};
-  const auto borrowed = omni::ryml::core::as_ref_tree(source);
+  const auto borrowed = omni::ryml::as_ref_tree(source);
   EXPECT_TRUE(same_document(R"({"label": "sensor", "value": null})",
     ::ryml::emitrs_json<std::string>(borrowed)));
 
-  auto owning = omni::ryml::core::as_owning_tree(source);
+  auto owning = omni::ryml::as_owning_tree(source);
   owning.rootref().remove_child("value");
   EXPECT_TRUE(same_document(R"({"label": "sensor"})",
     ::ryml::emitrs_json<std::string>(owning)));
@@ -2060,10 +2061,12 @@ class customization_mapping_limits:
 // Enclosing mappers accumulate custom readers' issues and apply limits.
 TEST_P(customization_mapping_limits,
   collects_default_and_custom_conversion_errors) {
-  // GCC 10 needs the nested policy type for aggregate deduction.
-  const omni::ryml::config_t options{
-    .error_policy = omni::json::error_policy{.error_limit = GetParam()},
-  };
+  const auto map_by_schema = omni::ryml::map_by_schema.tdm_config(
+    [limit = GetParam()](omni::ryml::config_like auto options) {
+      options.error_policy.error_limit = limit;
+      return options;
+    });
+
   const auto tree = omni::ryml::core::parse(R"(
 {
   "count": 2,
@@ -2075,7 +2078,7 @@ TEST_P(customization_mapping_limits,
   if (!tree)
     return;
 
-  const auto result = omni::ryml::core::map_by_schema(options,
+  const auto result = map_by_schema(
     omni::type<customization_mapping::record>, *tree);
 
   EXPECT_FALSE(result.value);
@@ -2329,8 +2332,8 @@ INSTANTIATE_TEST_SUITE_P(strings,
 #  pragma GCC diagnostic pop
 #endif
 
-// TODO: Define global default-config customization. For now, bind local
-// configuration with tdm_config or pass it explicitly to core functions.
+// TODO: Define global default-config customization. For now, use tdm_config
+// or construct a callable with its config member initialized.
 
 // TODO: [high] Add cases for records with ryml::Tree data members, retaining
 // subtrees whose value types are not known at compile time.

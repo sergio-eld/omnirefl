@@ -3,7 +3,7 @@
 // TODO: [medium] Validate aliases_dict against other aliases and reflected
 // canonical names, possibly inline when constructing a dictionary.
 
-#include <omnirefl/serialization/ryml/impl/core_shared.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/functional.hpp>
 
@@ -27,27 +27,6 @@ auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
 
 } // namespace detail
 } // namespace reflected_scope
-
-namespace core {
-
-// Mapper bodies delegate recursively through these dispatchers, whose
-// definitions live in the umbrella's implementation header. The first
-// declaration supplies SFINAE defaults; later declarations omit them.
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(State state, ::ryml::ConstNodeRef node, omni::type_t<T> type)
-  -> with_diagnostics_t<T, diagnostics>;
-
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(State state, ::ryml::ConstNodeRef node, T *into)
-  -> with_diagnostics_t<compat::monostate, diagnostics>;
-
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-  (is_write_state<State>::value))
-void write_node(State state, const T &value, ::ryml::NodeRef node);
-
-} // namespace core
 
 namespace detail {
 
@@ -97,12 +76,6 @@ constexpr auto first_available(const First &first, const Second &second,
       ::get(first, second, third);
 #endif
 }
-
-// Strings remain scalar mappings even though they also model input ranges.
-template <typename T>
-struct is_mapped_range:
-    compat::conjunction<compat::is_input_range<T>,
-      compat::negation<traits::is_string_like<compat::remove_cvref_t<T>>>> {};
 
 template <typename T,
   bool Optional = traits::is_optional<T>::value,
