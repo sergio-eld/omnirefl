@@ -579,6 +579,9 @@ static constexpr const as_ref_tree_t<> &as_ref_tree =
   compat::detail::shared_state<as_ref_tree_t<>>::value;
 #endif
 
+// REFACTORME: [high] Provide a configurable serialize object so format-selected
+// calls can use a bound object instead of constructing serialize_t each time.
+// Default to JSON; tdm_format can select YAML.
 /** JSON/YAML text serialization with the selected .format. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
 struct serialize_t {
