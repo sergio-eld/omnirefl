@@ -167,7 +167,7 @@ struct read_range_case<false> {
       if (result->stopped())
         break;
 
-      auto mapped = core::read_node(result->state, child,
+      auto mapped = core::read_node(result->state.element(), child,
         omni::type_t<compat::range_value_t<T>>{});
       if (!mapped.value || !mapped.diagnostics.issues.empty()
         || !mapped.diagnostics.parse_error_message.empty())
@@ -220,7 +220,7 @@ struct read_range_case<true> {
       const auto name = child.key();
       auto key = adapt::from_string(omni::type_t<key_type>{},
         view_type{name.str, name.len});
-      auto mapped = core::read_node(result->state, child,
+      auto mapped = core::read_node(result->state.element(), child,
         omni::type_t<traits::mapped_type_t<T>>{});
       result->append({
         /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
@@ -279,7 +279,7 @@ struct write_range_case<false> {
     for (; current != last; ++current) {
       const element_type &element = *current;
       if (!is_null(element)) {
-        core::write_node(context, element, node.append_child());
+        core::write_node(context.element(), element, node.append_child());
       }
     }
   }
@@ -323,7 +323,7 @@ struct write_range_case<true> {
         child.set_key_serialized(text);
 
       child.set_key_style(::ryml::KEY_DQUO);
-      core::write_node(context, entry.second, child);
+      core::write_node(context.element(), entry.second, child);
     }
   }
 };

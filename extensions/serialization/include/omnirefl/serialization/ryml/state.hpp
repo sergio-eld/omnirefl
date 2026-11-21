@@ -4,6 +4,7 @@
 
 #include <omnirefl/traits.hpp>
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/extensions/static_string.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -17,6 +18,9 @@
 #include <vector>
 
 namespace omni {
+
+template <typename T>
+struct type_t;
 
 // Only backend-independent JSON/YAML mapping contracts belong here.
 namespace json {
@@ -648,15 +652,187 @@ transform_diagnostics :: (Diagnostics -> Report) -> with_diagnostics<T, Report>
   }
 };
 
+namespace detail {
+
+// The C++11 result is defined after the built-in mapping types are complete.
+template <typename T>
+struct to_type_cpp11_trailing_return;
+
+template <typename T>
+struct from_type_cpp11_trailing_return;
+
+} // namespace detail
+
+namespace reflected_scope {
+
+/** Callable form of the node-to-type customization lookup.
+ *
+```
+mapping_to_type :: (state, type<T>) -> Mapping
+```
+ * State is accepted for compatibility with local mapping selectors.
+ * The default selection depends only on T. */
+struct mapping_to_type_t {
+  template <typename State, typename T>
+  OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
+    OMNI_CPP11_TRAILING_RETURN(
+      typename omni::ryml::detail::to_type_cpp11_trailing_return<T>::type);
+};
+
+/** Callable form of the type-to-node customization lookup.
+ *
+```
+mapping_from_type :: (state, type<T>) -> Mapping
+```
+ * The default selection depends only on T. */
+struct mapping_from_type_t {
+  template <typename State, typename T>
+  OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
+    OMNI_CPP11_TRAILING_RETURN(
+      typename omni::ryml::detail::from_type_cpp11_trailing_return<T>::type);
+};
+
+} // namespace reflected_scope
+
+namespace detail {
+
+// Default states can be constructed without including type_mapping.hpp.
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr reflected_scope::mapping_to_type_t default_map_node{};
+inline constexpr reflected_scope::mapping_from_type_t default_write_node{};
+#else
+static constexpr const reflected_scope::mapping_to_type_t &default_map_node =
+  compat::detail::shared_state<reflected_scope::mapping_to_type_t>::value;
+static constexpr const reflected_scope::mapping_from_type_t
+  &default_write_node =
+    compat::detail::shared_state<reflected_scope::mapping_from_type_t>::value;
+#endif
+
+// String providers keep the path independent of runtime traversal state.
+struct root_path_name {
+  static constexpr const char *str() { return "root"; }
+};
+struct path_dot {
+  static constexpr const char *str() { return "."; }
+};
+struct path_element {
+  static constexpr const char *str() { return "[]"; }
+};
+
+template <typename Field>
+struct name_as_string {
+  static constexpr const char *str() { return Field::name(); }
+};
+
+template <typename Name>
+struct field_path_name: cpp11_static_string<path_dot, Name> {};
+
+template <typename... Segments>
+struct schema_path;
+
+// Re-entering the same reflected field revisits a recursive schema edge.
+// Reuse its first schema path rather than instantiate unbounded state types.
+template <typename Prefix, typename Segment, typename... Remaining>
+struct schema_field_path;
+
+template <typename... Prefix, typename Segment>
+struct schema_field_path<schema_path<Prefix...>, Segment> {
+  using type = schema_path<Prefix..., Segment>;
+};
+
+template <typename... Prefix, typename Segment, typename Head, typename... Tail>
+struct schema_field_path<schema_path<Prefix...>, Segment, Head, Tail...>:
+    compat::conditional_t<std::is_same<Segment, Head>::value,
+      compat::type_identity<schema_path<Prefix..., Segment>>,
+      schema_field_path<schema_path<Prefix..., Head>, Segment, Tail...>> {};
+
+template <typename... Segments>
+struct schema_path {
+  template <typename Name>
+  using child = schema_path<Segments..., field_path_name<Name>>;
+
+  template <typename Field>
+  using field = typename schema_field_path<schema_path<>,
+    field_path_name<name_as_string<Field>>, Segments...>::type;
+
+  using element = schema_path<Segments..., path_element>;
+  using text = cpp11_static_string<Segments...>;
+#if 202002L <= OMNI_CPLUSPLUS
+  using string_type = nttp_string<omni::detail::static_string_literal<
+    text::size() + 1>{text::view()}>;
+#else
+  using string_type = text;
+#endif
+};
+
+} // namespace detail
+
 /** Deserialization configuration and traversal progress passed to readers.
- * Config is borrowed. Copies do not copy configuration or allocate storage.
+ * Config and the mapping selector are borrowed. Copies do not copy their
+ * contents or allocate storage.
  * Counters include issues reported by preceding operations in the enclosing
- * traversal. */
-template <typename Config = omni::ryml::config_t<>>
+ * traversal. The path describes the C++ schema, independently of input keys.
+ * Mapping callbacks take a generic State, constrained by is_read_state,
+ * because child paths and local selectors produce different state types.
+ * Custom mappings retain it by passing state onward; custom field traversal
+ * extends it with child(OMNI_META_STRING("field")) and element() for containers.
+ *
+```cpp
+// Inside a generic mapping selector, from C++17:
+if constexpr (state.path().ends_with("root.work_address")) {
+  // Select the work-address mapping; other address fields keep their defaults.
+}
+```
+ */
+template <typename Config = omni::ryml::config_t<>,
+  typename MapNode = reflected_scope::mapping_to_type_t,
+  typename Path = detail::schema_path<detail::root_path_name>>
 struct read_state_t {
   const Config &config;
-  std::size_t error_count;
-  std::size_t warning_count;
+  std::size_t error_count OMNI_CPP14_DEFAULT_INIT();
+  std::size_t warning_count OMNI_CPP14_DEFAULT_INIT();
+
+  // (state, type<T>) -> mapping callable; borrowed throughout traversal.
+  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(
+    detail::default_map_node);
+
+#if 201402L > OMNI_CPLUSPLUS
+  // C++11 aggregates cannot provide the default for this reference member.
+  constexpr read_state_t(const Config &options, std::size_t errors = 0,
+    std::size_t warnings = 0, const MapNode &mapping =
+      detail::default_map_node)
+    : config(options), error_count(errors), warning_count(warnings),
+      map_node(mapping) {}
+#endif
+
+  /** Canonical schema path: root.field, with [] for container values.
+   * Independent of runtime keys, indices, and input aliases. Recursive schema
+   * edges reuse their first path; this is not a runtime ancestry trace. */
+  static constexpr auto path() -> typename Path::string_type { return {}; }
+
+  /** Child state for custom traversal into a named field.
+   * Appends text; field(meta) additionally recognizes recursive schema edges. */
+  template <typename Name>
+  constexpr auto child(Name) const
+    -> read_state_t<Config, MapNode, typename Path::template child<Name>> {
+    return {this->config, this->error_count, this->warning_count,
+      this->map_node};
+  }
+
+  /** Child state for a reflected field, retaining recursive schema identity. */
+  template <typename Field>
+  constexpr auto field(Field) const
+    -> read_state_t<Config, MapNode, typename Path::template field<Field>> {
+    return {this->config, this->error_count, this->warning_count,
+      this->map_node};
+  }
+
+  /** Container-value state; runtime positions and keys share the [] marker. */
+  constexpr auto element() const
+    -> read_state_t<Config, MapNode, typename Path::element> {
+    return {this->config, this->error_count, this->warning_count,
+      this->map_node};
+  }
 
   /** Whether an error or warning budget has been exceeded. */
   constexpr bool limit_exceeded() const {
@@ -666,13 +842,61 @@ struct read_state_t {
   }
 };
 
-/** Serialization string-storage policy passed to writers.
+/** Serialization policy, local mapping selection, and schema position.
  * BorrowStrings permits borrowing source-backed strings; temporary owning
- * string conversions are still copied. This state has no runtime data. */
-template <bool BorrowStrings>
+ * conversions are still copied. The mapping selector is borrowed. Mapping
+ * callbacks take a generic State constrained by is_write_state, preserving
+ * the child path and local selector when forwarding it. */
+template <bool BorrowStrings,
+  typename MapNode = reflected_scope::mapping_from_type_t,
+  typename Path = detail::schema_path<detail::root_path_name>>
 struct write_state_t {
   static constexpr bool borrow_strings = BorrowStrings;
+  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(detail::default_write_node);
+
+#if 201402L > OMNI_CPLUSPLUS
+  // C++11 aggregates cannot default-initialize a reference member.
+  constexpr write_state_t(const MapNode &mapping = detail::default_write_node)
+    : map_node(mapping) {}
+#endif
+
+  /** Canonical schema path; see read_state_t::path. */
+  static constexpr auto path() -> typename Path::string_type { return {}; }
+
+  /** Child state for custom traversal into a named field.
+   * Appends text; field(meta) additionally recognizes recursive schema edges. */
+  template <typename Name>
+  constexpr auto child(Name) const
+    -> write_state_t<BorrowStrings, MapNode,
+      typename Path::template child<Name>> {
+    return {this->map_node};
+  }
+
+  /** Child state retaining a reflected field's recursive schema identity. */
+  template <typename Field>
+  constexpr auto field(Field) const
+    -> write_state_t<BorrowStrings, MapNode,
+      typename Path::template field<Field>> {
+    return {this->map_node};
+  }
+
+  /** Container-value state; runtime positions and keys share the [] marker. */
+  constexpr auto element() const
+    -> write_state_t<BorrowStrings, MapNode, typename Path::element> {
+    return {this->map_node};
+  }
 };
+
+namespace detail {
+
+template <typename T>
+struct is_write_state: std::false_type {};
+
+template <bool BorrowStrings, typename MapNode, typename Path>
+struct is_write_state<write_state_t<BorrowStrings, MapNode, Path>>:
+    std::true_type {};
+
+} // namespace detail
 
 /** Whether T is a read_state_t specialization, ignoring cv/ref qualifiers. */
 template <typename T>
@@ -682,7 +906,7 @@ struct is_read_state:
 /** Whether T is a write_state_t specialization, ignoring cv/ref qualifiers. */
 template <typename T>
 struct is_write_state:
-    compat::bool_constant<traits::is_specialization_of<write_state_t, T>()> {};
+    detail::is_write_state<compat::remove_cvref_t<T>> {};
 
 // C++14 adds variable templates for trait values.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
@@ -707,3 +931,10 @@ concept write_state_like = is_write_state<T>::value;
 
 } // namespace ryml
 } // namespace omni
+
+// TODO: [high] Expose enclosing_record as a type alias on traversal state,
+// keeping record type information separate from the schema path string.
+
+// TODO: [medium] Reduce state instantiations for records with several recursive
+// fields: edge canonicalization retains each permutation of distinct fields
+// before a repeated edge reuses its path.

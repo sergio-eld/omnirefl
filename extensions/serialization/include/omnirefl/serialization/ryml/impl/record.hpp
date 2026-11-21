@@ -25,6 +25,7 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
 // Inheriting the metadata wrapper supplies aggregate_into's named-field protocol.
 template <typename Field>
 struct record_value_slot: Field {
+  using field_type = Field;
   compat::optional<typename Field::type> stored;
 
   typename Field::type &&value() && { return std::move(*this->stored); }
@@ -204,7 +205,8 @@ struct cpp11_write_member {
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    core::write_node(this->context, field.value(), child);
+    core::write_node(this->context.field(omni::data_member_meta_t<_F>{}),
+      field.value(), child);
   }
 };
 
