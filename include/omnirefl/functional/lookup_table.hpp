@@ -816,23 +816,35 @@ struct lookup_table_data {
     make_lookup_name<Meta>(compat::make_index_sequence<width>{})...,
   }};
 
+  template <std::size_t... Index>
+  static constexpr lookup_array<std::uint64_t, count> make_hashes(
+    compat::index_sequence<Index...>) {
+    return {{lookup_static_hash(names[Index])...}};
+  }
+
+  // Compare cached hashes before complete names in pairwise uniqueness checks;
+  // older constexpr evaluators otherwise retain repeated full-name comparisons.
+  static constexpr lookup_array<std::uint64_t, count> hashes =
+    make_hashes(compat::make_index_sequence<count>{});
+
   // Divide the pair range to bound C++11 constant-evaluation recursion depth.
   static constexpr bool unique(std::size_t begin = 0,
     std::size_t size = count * count) {
     return size == 0 ? true
       : size == 1 ? (begin / count >= begin % count
+        || hashes[begin / count] != hashes[begin % count]
         || !lookup_names_equal(names[begin / count], names[begin % count]))
       : unique(begin, size / 2) && unique(begin + size / 2, size - size / 2);
   }
 
   static constexpr std::size_t head(std::size_t bucket, std::size_t index = 0) {
     return index == count ? count
-      : (lookup_static_hash(names[index]) & (bucket_count - 1)) == bucket
+      : (hashes[index] & (bucket_count - 1)) == bucket
         ? index : head(bucket, index + 1);
   }
 
   static constexpr std::size_t next(std::size_t index) {
-    return head(lookup_static_hash(names[index]) & (bucket_count - 1),
+    return head(hashes[index] & (bucket_count - 1),
       index + 1);
   }
 
@@ -876,6 +888,10 @@ constexpr typename lookup_table_data<Meta...>::names_type
   lookup_table_data<Meta...>::names;
 
 template <typename... Meta>
+constexpr lookup_array<std::uint64_t, lookup_table_data<Meta...>::count>
+  lookup_table_data<Meta...>::hashes;
+
+template <typename... Meta>
 constexpr lookup_array<std::size_t, lookup_table_data<Meta...>::bucket_count>
   lookup_table_data<Meta...>::heads;
 
@@ -910,12 +926,24 @@ struct lookup_mask_row {
   using mask = lookup_mask<Data>;
   using row = lookup_array<mask, 256>;
 
+  // Keep the recursive evaluator's input narrow: indexing the complete name
+  // table for each byte retains excessive constexpr state in older compilers.
+  // Character 256 excludes names that have no byte at this position.
+  template <std::size_t... Index>
+  static constexpr lookup_array<unsigned short, Data::count> make_characters(
+    compat::index_sequence<Index...>) {
+    return {{static_cast<unsigned short>(Position < Data::names[Index].size
+      ? static_cast<unsigned char>(Data::names[Index].bytes[Position])
+      : 256)...}};
+  }
+
+  static constexpr lookup_array<unsigned short, Data::count> characters =
+    make_characters(compat::make_index_sequence<Data::count>{});
+
   static constexpr mask bits(unsigned byte, std::size_t index = 0) {
     return index == Data::count ? mask{}
-      : static_cast<mask>(((Position < Data::names[index].size
-          && static_cast<unsigned char>(Data::names[index].bytes[Position])
-            == byte) ? (UINT64_C(1) << index) : 0)
-        | bits(byte, index + 1));
+      : static_cast<mask>((characters[index] == byte
+          ? (UINT64_C(1) << index) : 0) | bits(byte, index + 1));
   }
 
   template <std::size_t... Byte>
@@ -925,6 +953,10 @@ struct lookup_mask_row {
 
   static constexpr row value = make(compat::make_index_sequence<256>{});
 };
+
+template <typename Data, std::size_t Position>
+constexpr lookup_array<unsigned short, Data::count>
+  lookup_mask_row<Data, Position>::characters;
 
 template <typename Data, std::size_t Position>
 constexpr typename lookup_mask_row<Data, Position>::row
@@ -1013,19 +1045,35 @@ struct lookup_sampled_search<Data, true> {
     std::size_t collisions;
   };
 
+  using signatures = lookup_array<unsigned short, Data::count>;
+
+  // Cache only the selected bytes while scoring pairs, rather than retaining
+  // the complete names in every C++11 constant-evaluation recursion frame.
+  template <std::size_t... Index>
+  static constexpr signatures make_signatures(std::size_t position,
+    std::size_t prior, compat::index_sequence<Index...>) {
+    return {{static_cast<unsigned short>(
+      static_cast<unsigned char>(Data::names[Index].bytes[position])
+        | (prior == Data::width ? 0u
+          : 256u * static_cast<unsigned char>(
+            Data::names[Index].bytes[prior])))...}};
+  }
+
   // Balanced pair traversal bounds C++11 constant-evaluation recursion depth.
-  static constexpr std::size_t collisions(std::size_t position,
-    std::size_t prior, std::size_t begin = 0,
-    std::size_t size = Data::count * Data::count) {
+  static constexpr std::size_t count_collisions(const signatures &bytes,
+    std::size_t begin, std::size_t size) {
     return size == 0 ? 0
       : size == 1 ? (begin / Data::count < begin % Data::count
-          && Data::names[begin / Data::count].bytes[position]
-            == Data::names[begin % Data::count].bytes[position]
-          && (prior == Data::width
-            || Data::names[begin / Data::count].bytes[prior]
-              == Data::names[begin % Data::count].bytes[prior]))
-      : collisions(position, prior, begin, size / 2)
-        + collisions(position, prior, begin + size / 2, size - size / 2);
+          && bytes[begin / Data::count] == bytes[begin % Data::count])
+      : count_collisions(bytes, begin, size / 2)
+        + count_collisions(bytes, begin + size / 2, size - size / 2);
+  }
+
+  static constexpr std::size_t collisions(std::size_t position,
+    std::size_t prior) {
+    return count_collisions(make_signatures(position, prior,
+      compat::make_index_sequence<Data::count>{}), 0,
+      Data::count * Data::count);
   }
 
   static constexpr choice better(choice left, choice right) {
