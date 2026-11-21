@@ -69,7 +69,7 @@ struct static_string_interface {
   }
 
   static constexpr bool starts_with(char prefix) noexcept {
-    return starts_with(compat::string_view{&prefix, 1});
+    return !empty() && data()[0] == prefix;
   }
 
   static constexpr bool ends_with(compat::string_view suffix) noexcept {
@@ -83,7 +83,7 @@ struct static_string_interface {
   }
 
   static constexpr bool ends_with(char suffix) noexcept {
-    return ends_with(compat::string_view{&suffix, 1});
+    return !empty() && data()[size() - 1] == suffix;
   }
 
   static constexpr size_type find(compat::string_view needle,

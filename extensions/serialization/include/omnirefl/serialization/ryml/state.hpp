@@ -698,13 +698,13 @@ namespace detail {
 
 // Default states can be constructed without including type_mapping.hpp.
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr reflected_scope::mapping_to_type_t default_map_node{};
-inline constexpr reflected_scope::mapping_from_type_t default_write_node{};
+inline constexpr reflected_scope::mapping_to_type_t mapping_to_type{};
+inline constexpr reflected_scope::mapping_from_type_t mapping_from_type{};
 #else
-static constexpr const reflected_scope::mapping_to_type_t &default_map_node =
+static constexpr const reflected_scope::mapping_to_type_t &mapping_to_type =
   compat::detail::shared_state<reflected_scope::mapping_to_type_t>::value;
 static constexpr const reflected_scope::mapping_from_type_t
-  &default_write_node =
+  &mapping_from_type =
     compat::detail::shared_state<reflected_scope::mapping_from_type_t>::value;
 #endif
 
@@ -740,11 +740,14 @@ struct schema_field_path<schema_path<Prefix...>, Segment> {
   using type = schema_path<Prefix..., Segment>;
 };
 
+template <typename... Prefix, typename Segment, typename... Tail>
+struct schema_field_path<schema_path<Prefix...>, Segment, Segment, Tail...> {
+  using type = schema_path<Prefix..., Segment>;
+};
+
 template <typename... Prefix, typename Segment, typename Head, typename... Tail>
 struct schema_field_path<schema_path<Prefix...>, Segment, Head, Tail...>:
-    compat::conditional_t<std::is_same<Segment, Head>::value,
-      compat::type_identity<schema_path<Prefix..., Segment>>,
-      schema_field_path<schema_path<Prefix..., Head>, Segment, Tail...>> {};
+    schema_field_path<schema_path<Prefix..., Head>, Segment, Tail...> {};
 
 template <typename... Segments>
 struct schema_path {
@@ -757,12 +760,17 @@ struct schema_path {
 
   using element = schema_path<Segments..., path_element>;
   using text = cpp11_static_string<Segments...>;
+
+  // Default traversal needs segment identity only. Render characters when a
+  // callback queries path(), rather than while forming every child state.
+  static constexpr auto string() OMNI_CPP11_TRAILING_RETURN(text) {
 #if 202002L <= OMNI_CPLUSPLUS
-  using string_type = nttp_string<omni::detail::static_string_literal<
-    text::size() + 1>{text::view()}>;
+    return nttp_string<omni::detail::static_string_literal<
+      text::size() + 1>{text::view()}>{};
 #else
-  using string_type = text;
+    return text{};
 #endif
+  }
 };
 
 } // namespace detail
@@ -794,13 +802,13 @@ struct read_state_t {
 
   // (state, type<T>) -> mapping callable; borrowed throughout traversal.
   const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(
-    detail::default_map_node);
+    detail::mapping_to_type);
 
 #if 201402L > OMNI_CPLUSPLUS
   // C++11 aggregates cannot provide the default for this reference member.
   constexpr read_state_t(const Config &options, std::size_t errors = 0,
     std::size_t warnings = 0, const MapNode &mapping =
-      detail::default_map_node)
+      detail::mapping_to_type)
     : config(options), error_count(errors), warning_count(warnings),
       map_node(mapping) {}
 #endif
@@ -808,7 +816,9 @@ struct read_state_t {
   /** Canonical schema path: root.field, with [] for container values.
    * Independent of runtime keys, indices, and input aliases. Recursive schema
    * edges reuse their first path; this is not a runtime ancestry trace. */
-  static constexpr auto path() -> typename Path::string_type { return {}; }
+  static constexpr auto path() OMNI_CPP11_TRAILING_RETURN(typename Path::text) {
+    return Path::string();
+  }
 
   /** Child state for custom traversal into a named field.
    * Appends text; field(meta) additionally recognizes recursive schema edges. */
@@ -852,16 +862,18 @@ template <bool BorrowStrings,
   typename Path = detail::schema_path<detail::root_path_name>>
 struct write_state_t {
   static constexpr bool borrow_strings = BorrowStrings;
-  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(detail::default_write_node);
+  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(detail::mapping_from_type);
 
 #if 201402L > OMNI_CPLUSPLUS
   // C++11 aggregates cannot default-initialize a reference member.
-  constexpr write_state_t(const MapNode &mapping = detail::default_write_node)
+  constexpr write_state_t(const MapNode &mapping = detail::mapping_from_type)
     : map_node(mapping) {}
 #endif
 
   /** Canonical schema path; see read_state_t::path. */
-  static constexpr auto path() -> typename Path::string_type { return {}; }
+  static constexpr auto path() OMNI_CPP11_TRAILING_RETURN(typename Path::text) {
+    return Path::string();
+  }
 
   /** Child state for custom traversal into a named field.
    * Appends text; field(meta) additionally recognizes recursive schema edges. */

@@ -769,20 +769,11 @@ OMNI_CPP14_CONSTEXPR auto mapping_from_type_t::operator()(const State &,
 namespace fn {
 
 /** Default local mapping selector; see reflected_scope::mapping_to_type. */
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr mapping_to_type_t mapping_to_type{};
-#else
-static constexpr const mapping_to_type_t &mapping_to_type =
-  compat::detail::shared_state<mapping_to_type_t>::value;
-#endif
+using omni::ryml::detail::mapping_to_type;
 
-/** Default local write-mapping selector; see mapping_from_type. */
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr mapping_from_type_t mapping_from_type{};
-#else
-static constexpr const mapping_from_type_t &mapping_from_type =
-  compat::detail::shared_state<mapping_from_type_t>::value;
-#endif
+/** Default local write-mapping selector; see
+ * reflected_scope::mapping_from_type. */
+using omni::ryml::detail::mapping_from_type;
 
 } // namespace fn
 } // namespace reflected_scope

@@ -25,6 +25,7 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
 // Inheriting the metadata wrapper supplies aggregate_into's named-field protocol.
 template <typename Field>
 struct record_value_slot: Field {
+  // Match the metadata identity used by explicit state.field(meta) traversal.
   using field_type = Field;
   compat::optional<typename Field::type> stored;
 

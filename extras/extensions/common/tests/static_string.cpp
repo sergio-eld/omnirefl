@@ -35,6 +35,8 @@ static_assert(omni::cpp11_static_string<high_byte>::compare("\x7f") > 0,
 static_assert(no_text::empty() && no_text::contains(""), "Empty text");
 static_assert(no_text::starts_with(""), "Empty prefix");
 static_assert(no_text::ends_with(""), "Empty suffix");
+static_assert(!no_text::starts_with('x'), "Empty text has no character prefix");
+static_assert(!no_text::ends_with('x'), "Empty text has no character suffix");
 static_assert(no_text::find('x') == no_text::npos, "Empty character search");
 static_assert(omni::cpp11_static_string<empty, work, empty>::equals("work"),
   "Empty providers do not change concatenation");

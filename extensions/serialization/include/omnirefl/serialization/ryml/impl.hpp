@@ -53,16 +53,11 @@ namespace detail {
 
 // A callable alternative for non-reflected routes in the discovery switch.
 struct map_selected {
-  template <typename T, typename State>
+  template <typename State, typename Destination>
   auto operator()(State context, ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const -> with_diagnostics_t<T> {
-    return read_node(std::move(context), node, type);
-  }
-
-  template <typename T, typename State>
-  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return read_node(std::move(context), node, into);
+    Destination destination) const
+    -> decltype(read_node(std::move(context), node, destination)) {
+    return read_node(std::move(context), node, destination);
   }
 };
 
@@ -135,14 +130,7 @@ struct cpp11_lambda_read_value {
   template <typename _M, omni::reflected_entity Entity>
   auto operator()(omni::meta_t<_M, Entity>) const
     -> with_diagnostics_t<T> {
-    const auto mapping =
-      compat::invoke(this->context.map_node, this->context,
-        omni::type_t<T>{});
-
-    return omni::ryml::detail::map_node_to_value(this->context,
-      mapping,
-      this->node,
-      omni::type_t<T>{});
+    return core::read_node(this->context, this->node, omni::type_t<T>{});
   }
 };
 
@@ -355,7 +343,7 @@ struct tree_builder_case<Discovery, false, true> {
   static ::ryml::Tree build(State context, T &value) {
     return tree_builder_case<
       typename omni::ryml::detail::discovered_range_type<Discovery>::type>
-        ::template build<State>(std::move(context), value);
+        ::build(std::move(context), value);
   }
 };
 
