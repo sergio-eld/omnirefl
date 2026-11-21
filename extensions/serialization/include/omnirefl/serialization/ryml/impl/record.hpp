@@ -14,8 +14,6 @@ namespace ryml {
 namespace reflected_scope {
 namespace detail {
 
-using omni::ryml::detail::node_call_priority;
-
 // Deduce the opaque field tag through its public metadata wrapper.
 template <typename Record, typename _F>
 constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
@@ -23,90 +21,74 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
   return omni::data_member_binding_t<Record, _F>{*into};
 }
 
-// Prefer value production and field assignment. The trailing decltype
-// requires a native type-tag call; assignment also needs a writable value.
-OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename Field, typename State),
-  (std::is_assignable<typename Field::type &,
-    typename Field::type &&>::value))
-auto process_node_to_field_using(
-  omni::ryml::detail::node_accumulator<State> *result,
-  const Mapping &mapping,
-  ::ryml::ConstNodeRef node,
-  Field field,
-  node_call_priority<2>)
-  -> decltype(field.set_value(std::move(*mapping(std::declval<State>(),
-    node, omni::type_t<typename Field::type>{}).value))) {
-  const auto error_policy = result->state.config.error_policy;
-  auto state = result->state;
-  auto mapped = mapping(std::move(state),
-    node, omni::type_t<typename Field::type>{});
+struct map_field_value {
+  template <typename Mapping, typename Field, typename State>
+  void operator()(omni::ryml::detail::node_accumulator<State> *result,
+    const Mapping &mapping, ::ryml::ConstNodeRef node, Field field) const {
+    const auto error_policy = result->state.config.error_policy;
+    auto state = result->state;
+    auto mapped = mapping(std::move(state),
+      node, omni::type_t<typename Field::type>{});
 
-  if (mapped.diagnostics.issues.empty()) {
-    const bool succeeded = mapped.value && !result->stopped();
-    if (succeeded)
+    if (mapped.diagnostics.issues.empty()) {
+      const bool succeeded = mapped.value && !result->stopped();
+      if (succeeded)
+        field.set_value(std::move(*mapped.value));
+
+      if (!succeeded || !mapped.diagnostics.parse_error_message.empty())
+        result->append({
+          /*value=*/succeeded ? compat::make_optional(compat::monostate{})
+            : compat::nullopt,
+          /*diagnostics=*/std::move(mapped.diagnostics),
+        });
+      return;
+    }
+
+    auto checked = omni::ryml::detail::make_node_accumulator(result->state);
+    checked.result.diagnostics.config.error_policy = error_policy;
+    checked.append({
+      /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+        : compat::nullopt,
+      /*diagnostics=*/std::move(mapped.diagnostics),
+    });
+    if (checked.result.value)
       field.set_value(std::move(*mapped.value));
 
-    if (!succeeded || !mapped.diagnostics.parse_error_message.empty())
-      result->append({
-        /*value=*/succeeded ? compat::make_optional(compat::monostate{})
-          : compat::nullopt,
-        /*diagnostics=*/std::move(mapped.diagnostics),
-      });
-    return;
+    result->append(std::move(checked).finish());
   }
+};
 
-  auto checked = omni::ryml::detail::make_node_accumulator(result->state);
-  checked.result.diagnostics.config.error_policy = error_policy;
-  checked.append({
-    /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
-      : compat::nullopt,
-    /*diagnostics=*/std::move(mapped.diagnostics),
-  });
-  if (checked.result.value)
-    field.set_value(std::move(*mapped.value));
+struct map_field_reference {
+  template <typename Mapping, typename Field, typename State>
+  void operator()(omni::ryml::detail::node_accumulator<State> *result,
+    const Mapping &mapping, ::ryml::ConstNodeRef node, Field field) const {
+    auto state = result->state;
+    auto mapped = mapping(std::move(state), node, std::addressof(field.ref()));
+    if (!mapped.value || !mapped.diagnostics.issues.empty()
+      || !mapped.diagnostics.parse_error_message.empty() || result->stopped())
+      result->append(std::move(mapped));
+  }
+};
 
-  result->append(std::move(checked).finish());
-}
+struct map_field_copy {
+  template <typename Mapping, typename Field, typename State>
+  void operator()(omni::ryml::detail::node_accumulator<State> *result,
+    const Mapping &mapping, ::ryml::ConstNodeRef node, Field field) const {
+    auto state = result->state;
+    typename Field::type value = field.value();
+    auto checked = omni::ryml::detail::make_node_accumulator(state);
+    checked.append(omni::ryml::detail::read_into(std::move(state),
+      mapping,
+      node,
+      &value,
+      /*priority=*/0));
 
-// Reference mutations need no subsequent setter, so the parent can normalize
-// their report directly rather than repeating it in an intermediate frame.
-template <typename Mapping, typename Field, typename State>
-auto process_node_to_field_using(
-  omni::ryml::detail::node_accumulator<State> *result,
-  const Mapping &mapping,
-  ::ryml::ConstNodeRef node,
-  Field field,
-  node_call_priority<1>)
-  -> decltype(result->append(mapping(std::declval<State>(), node,
-    std::addressof(field.ref())))) {
-  auto state = result->state;
-  auto mapped = mapping(std::move(state), node, std::addressof(field.ref()));
-  if (!mapped.value || !mapped.diagnostics.issues.empty()
-    || !mapped.diagnostics.parse_error_message.empty() || result->stopped())
-    result->append(std::move(mapped));
-}
+    if (checked.result.value)
+      field.set_value(std::move(value));
 
-// Bitfields and unaligned packed fields cannot supply a safe reference.
-// Normalize before the setter so warnings and errors still control assignment.
-template <typename Mapping, typename Field, typename State>
-void process_node_to_field_using(
-  omni::ryml::detail::node_accumulator<State> *result,
-  const Mapping &mapping, ::ryml::ConstNodeRef node, Field field,
-  node_call_priority<0>) {
-  auto state = result->state;
-  typename Field::type value = field.value();
-  auto checked = omni::ryml::detail::make_node_accumulator(state);
-  checked.append(omni::ryml::detail::read_into(std::move(state),
-    mapping,
-    node,
-    &value,
-    /*priority=*/0));
-
-  if (checked.result.value)
-    field.set_value(std::move(value));
-
-  result->append(std::move(checked).finish());
-}
+    result->append(std::move(checked).finish());
+  }
+};
 
 } // namespace detail
 } // namespace reflected_scope

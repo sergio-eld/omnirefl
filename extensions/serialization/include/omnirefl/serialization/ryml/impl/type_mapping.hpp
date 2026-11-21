@@ -129,11 +129,16 @@ void map_node_to_field(omni::ryml::detail::node_accumulator<State> *result,
   // The record event fold stops before invoking any later field.
   assert(!result->stopped());
   const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
-  process_node_to_field_using(result,
-    mapping,
-    node,
-    field,
-    omni::ryml::detail::node_call_priority<2>{});
+  constexpr auto map = typename traits::select<
+    traits::case_<compat::conjunction<
+      std::is_assignable<typename Field::type &, typename Field::type &&>,
+      compat::is_invocable<decltype((mapping)), State, ::ryml::ConstNodeRef,
+        omni::type_t<typename Field::type>>>::value,
+      map_field_value>,
+    traits::case_<Field::has_reference_access(), map_field_reference>,
+    map_field_copy>::type{};
+
+  map(result, mapping, node, field);
 }
 
 } // namespace detail
