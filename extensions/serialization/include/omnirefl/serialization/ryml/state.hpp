@@ -764,7 +764,7 @@ struct schema_path {
   // Default traversal needs segment identity only. Render characters when a
   // callback queries path(), rather than while forming every child state.
   static constexpr auto string() OMNI_CPP11_TRAILING_RETURN(text) {
-#if 202002L <= OMNI_CPLUSPLUS
+#if OMNI_HAS_NTTP_STRING
     return nttp_string<omni::detail::static_string_literal<
       text::size() + 1>{text::view()}>{};
 #else
