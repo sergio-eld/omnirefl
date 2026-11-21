@@ -280,7 +280,7 @@ OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
 auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-// REFACTORME: [high] This only forwards to mapping_from_type(...)(...).
+// REFACTORME: [high] This selects and invokes a mapping via state.map_node.
 // Reassess whether a separate writer dispatcher is needed.
 /** Dispatch one value through its serialization customization or default. */
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),

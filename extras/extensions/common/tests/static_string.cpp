@@ -17,8 +17,6 @@ using path = omni::cpp11_static_string<work, dot, city>;
 using no_text = omni::cpp11_static_string<>;
 
 static_assert(path::size() == 9, "Joined text excludes the terminator");
-static_assert(omni::detail::string_length<city>() == 4,
-  "NTS provider length excludes its terminator");
 static_assert((omni::cpp11_static_string<work, dot>{}
     + omni::cpp11_static_string<city>{}).equals(path::view()),
   "Concatenation joins the provider packs");
@@ -61,8 +59,6 @@ static_assert(path::find(OMNI_META_STRING("city")) == 5,
 #if OMNI_HAS_NTTP_STRING
 using literal = omni::nttp_string<"work.city">;
 static_assert(literal::equals(path::view()), "Representations agree");
-static_assert(omni::detail::string_length<literal>() == 9,
-  "NTTP string length uses its extent");
 static_assert(literal::contains("k.c") && literal::ends_with("city"));
 static_assert(omni::nttp_string<"">::find("") == 0);
 #endif

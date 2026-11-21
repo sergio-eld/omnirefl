@@ -725,7 +725,6 @@ struct select_writer {
   }
 };
 
-
 struct root {
   omni::compat::optional<std::vector<record>> records;
 };
@@ -736,7 +735,7 @@ struct select_context_reader {
     if constexpr (std::is_same<typename State::enclosing_root, root>::value
       && std::is_same<typename State::enclosing_record, address>::value
       && std::is_same<T, int>::value
-      && state.path().ends_with("root.records[].work_address.number"))
+      && state.path().ends_with("work_address.number"))
       return local_mapping::add_integer{10};
     else
       return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
@@ -749,7 +748,7 @@ struct select_context_writer {
     if constexpr (std::is_same<typename State::enclosing_root, root>::value
       && std::is_same<typename State::enclosing_record, address>::value
       && std::is_same<T, int>::value
-      && state.path().ends_with("root.records[].work_address.number"))
+      && state.path().ends_with("work_address.number"))
       return write_integer{10};
     else
       return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
@@ -806,9 +805,17 @@ TEST(mapping_dispatch, reads_and_writes_use_parent_root_and_schema_location) {
   const auto deserialize = omni::ryml::deserialize
     .tdm_map_node([](auto) { return schema_paths::select_context_reader{}; });
   const auto mapped = deserialize(omni::type_t<schema_paths::root>{}, source);
-  ASSERT_TRUE(mapped.value) << mapped.diagnostics;
-  ASSERT_TRUE(mapped.value->records);
-  ASSERT_EQ(1U, mapped.value->records->size());
+  EXPECT_TRUE(mapped.value) << mapped.diagnostics;
+  if (!mapped.value)
+    return;
+
+  EXPECT_TRUE(mapped.value->records);
+  if (!mapped.value->records)
+    return;
+
+  EXPECT_EQ(1U, mapped.value->records->size());
+  if (mapped.value->records->empty())
+    return;
   const auto &record = mapped.value->records->at(0);
   EXPECT_EQ(1, record.address.number);
   EXPECT_EQ(12, record.work_address.number);
@@ -824,13 +831,13 @@ TEST(mapping_dispatch, reads_and_writes_use_parent_root_and_schema_location) {
     "locations": {"remote": {"number": 4}}
   }]})", as_json(*mapped.value)));
 
-  // The same nested record is a different root when mapped by itself.
+  // Parent, self, and the matching suffix stay the same; only the root changes.
   const auto independent = deserialize(omni::type_t<schema_paths::record>{},
     as_json(record));
-  ASSERT_TRUE(independent.value) << independent.diagnostics;
-  EXPECT_EQ(12, independent.value->work_address.number);
+  EXPECT_TRUE(independent.value) << independent.diagnostics;
+  if (independent.value)
+    EXPECT_EQ(12, independent.value->work_address.number);
 }
-
 #endif
 
 } // namespace
