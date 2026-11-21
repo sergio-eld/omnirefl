@@ -41,9 +41,10 @@ struct fold_result {
   constexpr bool has_value() const { return this->available; }
   template <typename F>
   OMNI_CPP14_CONSTEXPR fold_result and_then(F &&f) && {
-    return this->available
-      ? std::forward<F>(f)(std::move(this->accumulated))
-      : fold_result{std::move(this->accumulated), false};
+    if (this->available)
+      return std::forward<F>(f)(std::move(this->accumulated));
+
+    return std::move(*this);
   }
   OMNI_CPP14_CONSTEXPR T &operator*() & { return this->accumulated; }
   OMNI_CPP14_CONSTEXPR T &&operator*() && {
@@ -67,6 +68,10 @@ static_assert(!omni::traits::is_expected_like<bool>::value,
   "A Boolean is not an expected-like result");
 static_assert(!omni::traits::is_expected_like<std::unique_ptr<int>>::value,
   "Boolean testing and dereference alone are not the expected protocol");
+#if defined(__cpp_lib_expected) && 202211L <= __cpp_lib_expected
+static_assert(omni::traits::is_expected_like<std::expected<void, int>>::value,
+  "Expected-like recognition includes void values");
+#endif
 
 struct record {
   int count;
@@ -2574,6 +2579,20 @@ TEST(fn_try_fold, preserves_the_standard_expected_error) {
   EXPECT_FALSE(result.has_value());
   if (!result.has_value())
     EXPECT_EQ("negative value", result.error());
+}
+
+TEST(fn_try_fold, supports_a_local_expected_value_type) {
+  struct total { const int value; };
+  const auto result = omni::fn::try_fold(
+    [](total accumulated, int value) -> std::expected<total, std::string> {
+      return total{accumulated.value + value};
+    },
+    std::expected<total, std::string>{total{0}},
+    std::make_tuple(1, 2, 3));
+
+  EXPECT_TRUE(result.has_value());
+  if (result.has_value())
+    EXPECT_EQ(6, result->value);
 }
 
 TEST(fn_try_fold, preserves_a_move_only_error) {

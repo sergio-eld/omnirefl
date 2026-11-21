@@ -66,11 +66,16 @@ struct select<case_<Condition, Operation>, Case...> {
 
 namespace detail {
 
-// Unevaluated callback for probing and_then without an expected dependency.
-template <typename Result>
+// A function-pointer probe avoids MSVC C5046 for declaration-only callables
+// whose result contains a local type. Void expected values take no argument.
+template <typename Result, typename Value = typename Result::value_type>
 struct expected_continuation {
-  template <typename... Value>
-  Result operator()(Value &&...) const;
+  using type = Result (*)(Value &&);
+};
+
+template <typename Result>
+struct expected_continuation<Result, void> {
+  using type = Result (*)();
 };
 
 template <typename T, typename = void>
@@ -83,10 +88,11 @@ struct expected_like_impl<T, compat::void_t<typename T::value_type,
   decltype(std::declval<T &&>().value()),
   decltype(*std::declval<T &&>()),
   decltype(std::declval<T &&>().error()),
-  decltype(std::declval<T &&>().and_then(expected_continuation<T>{}))>>:
+  decltype(std::declval<T &&>().and_then(
+    std::declval<typename expected_continuation<T>::type>()))>>:
     compat::conjunction<
       std::is_same<T, decltype(std::declval<T &&>().and_then(
-        expected_continuation<T>{}))>,
+        std::declval<typename expected_continuation<T>::type>()))>,
       std::is_convertible<decltype(std::declval<const T &>().has_value()), bool>,
       std::is_same<compat::remove_cvref_t<decltype(
         std::declval<T &&>().value())>,
