@@ -212,9 +212,7 @@ public:
     return assert(position < size()), data()[position];
   }
 
-  constexpr operator compat::string_view() const noexcept {
-    return view();
-  }
+  constexpr operator compat::string_view() const noexcept { return view(); }
 
   static constexpr bool starts_with(compat::string_view prefix) noexcept {
 #if 202002L <= OMNI_CPLUSPLUS
@@ -257,9 +255,7 @@ public:
 
 #if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
   static constexpr size_type find(compat::string_view needle,
-    size_type position = 0) noexcept {
-    return view().find(needle, position);
-  }
+    size_type position = 0) noexcept { return view().find(needle, position); }
 #endif
 
   static constexpr size_type find(char needle,
@@ -275,9 +271,7 @@ public:
   // The trailing return constrains What to tokens with a static view().
   template <typename What>
   static constexpr auto contains(What needle)
-    -> decltype(What::view(), bool{}) {
-    return find(needle) != npos;
-  }
+    -> decltype(What::view(), bool{}) { return find(needle) != npos; }
 
 #if defined(__cpp_lib_string_view) && 201606L <= __cpp_lib_string_view
   static constexpr bool contains(compat::string_view needle) noexcept {
@@ -353,9 +347,7 @@ struct nttp_string_source {
 
 template <static_string_literal Text>
 struct string_length_selection<nttp_string_source<Text>> {
-  static constexpr std::size_t get() noexcept {
-    return sizeof(Text.values) - 1;
-  }
+  static constexpr auto get() noexcept { return sizeof(Text.values) - 1; }
 };
 
 } // namespace detail
@@ -376,9 +368,7 @@ namespace detail {
 // Sized NTTP text has its extent independently of any terminating character.
 template <static_string_literal Text>
 struct string_length_selection<nttp_string<Text>> {
-  static constexpr std::size_t get() noexcept {
-    return sizeof(Text.values) - 1;
-  }
+  static constexpr auto get() noexcept { return sizeof(Text.values) - 1; }
 };
 
 } // namespace detail
@@ -404,8 +394,7 @@ static_assert(path.ends_with("city"), "");
 #  define OMNI_META_STRING(text) \
     ::omni::compat::invoke([] { \
       struct omni_string_source { \
-        static constexpr const char *str() noexcept { return text; } \
-      }; \
+        static constexpr const char *str() noexcept { return text; } }; \
       return ::omni::cpp11_static_string<omni_string_source>{}; \
     })
 #endif

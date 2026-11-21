@@ -15,7 +15,7 @@ namespace ryml {
 
 /** Maps arrays into element ranges and objects into key/value ranges.
  * Does not call \ref reflected_scope::mapping_to_type for the range;
- * element mappings use state.map_node, which defaults to that lookup.
+ * element mappings may use state.map_node, which defaults to that lookup.
  * Elements are mapped before insertion through the shared operation adapters.
  * \ref traits::is_key_value selects element or key/mapped-value arguments;
  * \ref traits::has_unique_key selects try_emplace instead of emplace.
@@ -44,7 +44,7 @@ struct to_range_t {
 /** Creates a range node-to-type mapping function.
  * Checks for object input for key/value ranges and array input otherwise.
  * Does not call \ref reflected_scope::mapping_to_type for the range;
- * element mappings use state.map_node, which defaults to that lookup.
+ * element mappings may use state.map_node, which defaults to that lookup.
  *
 ```
 default_to_range :: type<T> ->
@@ -63,7 +63,7 @@ constexpr auto default_to_range(omni::type_t<T>)
 
 /** Maps key/value ranges to objects and element ranges to arrays.
  * Does not call \ref reflected_scope::mapping_from_type for the range;
- * element mappings use state.map_node, which defaults to that lookup.
+ * element mappings may use state.map_node, which defaults to that lookup.
  *
 ```
 from_range :: (state, const T&, node) -> void

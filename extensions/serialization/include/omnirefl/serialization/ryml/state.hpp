@@ -857,6 +857,8 @@ struct read_state_t {
   }
 
 private:
+  // Child specializations need constructor access. Friend template heads must
+  // match the state declaration; keep this parameter list synchronized.
   template <typename, typename, typename, typename, typename>
   friend struct read_state_t;
 
@@ -924,6 +926,8 @@ struct write_state_t {
   }
 
 private:
+  // Child specializations need constructor access. Friend template heads must
+  // match the state declaration; keep this parameter list synchronized.
   template <bool, typename, typename, typename, typename>
   friend struct write_state_t;
 

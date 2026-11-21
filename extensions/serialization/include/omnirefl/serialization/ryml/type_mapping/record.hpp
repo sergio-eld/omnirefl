@@ -19,7 +19,7 @@ namespace ryml {
 namespace reflected_scope {
 
 /** Maps an object node into a reflected record's accessible non-static fields.
- * Does not call \ref mapping_to_type for the record. Nested members use
+ * Does not call \ref mapping_to_type for the record. Nested members may use
  * state.map_node, which defaults to that lookup.
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
@@ -90,7 +90,7 @@ struct to_record_t {
 
 /** Creates a reflected-record node-to-type mapping function.
  * Checks for object input before traversing the record.
- * Does not call \ref mapping_to_type for the record. Nested members use
+ * Does not call \ref mapping_to_type for the record. Nested members may use
  * state.map_node, which defaults to that lookup.
  *
 ```
@@ -108,7 +108,7 @@ constexpr auto default_to_record(omni::type_t<T>)
 }
 
 /** Maps accessible non-static record fields to object entries.
- * Does not call \ref mapping_from_type for the record. Nested members use
+ * Does not call \ref mapping_from_type for the record. Nested members may use
  * state.map_node, which defaults to that lookup.
  *
 ```
