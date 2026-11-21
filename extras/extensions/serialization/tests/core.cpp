@@ -24,6 +24,22 @@ TEST(optional_compat, constructs_values_in_constant_expressions) {
   static_assert(*integer == 42, "Value construction preserves the integer");
 }
 
+TEST(mapping_core, schema_paths_are_constant_strings) {
+  const auto prototype = OMNI_META_STRING("items");
+  constexpr decltype(prototype) items{};
+  constexpr omni::ryml::write_state_t<false> state{};
+  constexpr auto element = state.child(items).element();
+  static_assert(element.path().equals("root.items[]"), "Container schema path");
+
+  const omni::ryml::config_t<> options{};
+  const omni::ryml::read_state_t<> reading{options, 0, 0};
+  const auto child = reading.child(items).element();
+  static_assert(child.path().equals("root.items[]"),
+    "Runtime state, static path");
+  EXPECT_EQ("root.items[]",
+    std::string(child.path().data(), child.path().size()));
+}
+
 TEST(mapping_core, parses_and_converts_without_reflection_or_composition) {
   const auto tree = omni::ryml::core::parse(
     R"({"flag": true, "count": 42, "ratio": 2.5, "text": "reading"})");

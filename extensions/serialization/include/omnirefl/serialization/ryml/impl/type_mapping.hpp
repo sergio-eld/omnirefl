@@ -131,10 +131,11 @@ bool cpp11_record_member_event<Index, CheckPresence, Frame>::operator()() const 
   if (this->frame.pending[Index] != ::ryml::NONE) {
     const auto type = omni::type_t<
       typename compat::remove_cvref_t<decltype(slot)>::type>{};
-    const auto mapping = compat::invoke(this->frame.result->state.map_node,
-      this->frame.result->state, type);
+    const auto state = this->frame.result->state.field(
+      typename compat::remove_cvref_t<decltype(slot)>::field_type{});
+    const auto mapping = compat::invoke(state.map_node, state, type);
     // The record frame applies diagnostic limits when appending this report.
-    auto mapped = map_node_to_value_using(this->frame.result->state, mapping,
+    auto mapped = map_node_to_value_using(state, mapping,
       {this->frame.object.tree(), this->frame.pending[Index]}, type,
       /*priority=*/0);
     if (mapped.value)

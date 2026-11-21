@@ -546,17 +546,6 @@ struct from_type_t: traits::cp::unavailable {};
 
 } // namespace cp
 
-// C++11 requires explicit return types for these dispatchers.
-#if !defined(__cpp_return_type_deduction) \
-  || 201304L > __cpp_return_type_deduction
-namespace detail {
-
-template <typename T>
-struct from_type_cpp11_trailing_return;
-
-} // namespace detail
-#endif
-
 namespace reflected_scope {
 namespace detail {
 
@@ -763,6 +752,14 @@ OMNI_CPP14_CONSTEXPR auto mapping_to_type_t::operator()(const State &,
   return reflected_scope::mapping_to_type(type);
 }
 
+template <typename State, typename T>
+OMNI_CPP14_CONSTEXPR auto mapping_from_type_t::operator()(const State &,
+  omni::type_t<T> type) const
+  OMNI_CPP11_TRAILING_RETURN(
+    typename omni::ryml::detail::from_type_cpp11_trailing_return<T>::type) {
+  return reflected_scope::mapping_from_type(type);
+}
+
 namespace fn {
 
 /** Default local mapping selector; see reflected_scope::mapping_to_type. */
@@ -771,6 +768,14 @@ inline constexpr mapping_to_type_t mapping_to_type{};
 #else
 static constexpr const mapping_to_type_t &mapping_to_type =
   compat::detail::shared_state<mapping_to_type_t>::value;
+#endif
+
+/** Default local write-mapping selector; see mapping_from_type. */
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr mapping_from_type_t mapping_from_type{};
+#else
+static constexpr const mapping_from_type_t &mapping_from_type =
+  compat::detail::shared_state<mapping_from_type_t>::value;
 #endif
 
 } // namespace fn

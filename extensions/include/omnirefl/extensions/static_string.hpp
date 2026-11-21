@@ -198,6 +198,12 @@ template <std::size_t Size>
 struct static_string_literal {
   char values[Size];
 
+  constexpr explicit static_string_literal(compat::string_view text) noexcept {
+    for (std::size_t index = 0; index + 1 < Size; ++index)
+      this->values[index] = text[index];
+    this->values[Size - 1] = '\0';
+  }
+
   constexpr static_string_literal(const char (&text)[Size]) noexcept {
     for (std::size_t index = 0; index < Size; ++index)
       this->values[index] = text[index];

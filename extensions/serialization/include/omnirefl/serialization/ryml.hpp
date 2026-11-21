@@ -483,7 +483,34 @@ static constexpr const deserialize_t<> &deserialize =
 // between these builders and mapping remains to be designed.
 /** Owning RapidYAML tree serialization of supported C++ values.
  * Strings are copied into the tree's arena, so it can outlive the source. */
+template <typename MapNode = reflected_scope::mapping_from_type_t>
 struct as_owning_tree_t {
+  // (state, type<T>) -> mapping callable, selected at every schema position.
+  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
+
+  /** (QoL) Transform data member `.map_node` inplace, in one expression. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::is_invocable<F &&, const MapNode &>::value))
+  constexpr auto tdm_map_node(F &&f) const &
+    -> as_owning_tree_t<compat::decay_t<
+      compat::invoke_result_t<F &&, const MapNode &>>> {
+    return {
+      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
+    };
+  }
+
+  /** (QoL) Transform `.map_node`, consuming this binding. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::is_invocable<F &&, MapNode &&>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
+    -> as_owning_tree_t<compat::decay_t<
+      compat::invoke_result_t<F &&, MapNode &&>>> {
+    return {
+      /*map_node=*/compat::invoke(std::forward<F>(f),
+        std::move(this->map_node)),
+    };
+  }
+
   /** Serialize value into an owning tree. Empty optionals produce null;
    * empty optional sequence elements are omitted. The result can be modified
    * or passed to RapidYAML emitters. */
@@ -494,16 +521,43 @@ struct as_owning_tree_t {
 
 /** Owning tree serialization; string storage is copied into the tree. */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr as_owning_tree_t as_owning_tree{};
+inline constexpr as_owning_tree_t<> as_owning_tree{};
 #else
-static constexpr const as_owning_tree_t &as_owning_tree =
-  compat::detail::shared_state<as_owning_tree_t>::value;
+static constexpr const as_owning_tree_t<> &as_owning_tree =
+  compat::detail::shared_state<as_owning_tree_t<>>::value;
 #endif
 
 /** RapidYAML tree serialization borrowing the source's string storage.
  * The tree owns nodes and generated text. Source storage must remain alive
  * and unchanged while the tree is used. */
+template <typename MapNode = reflected_scope::mapping_from_type_t>
 struct as_ref_tree_t {
+  // (state, type<T>) -> mapping callable, selected at every schema position.
+  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
+
+  /** (QoL) Transform data member `.map_node` inplace, in one expression. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::is_invocable<F &&, const MapNode &>::value))
+  constexpr auto tdm_map_node(F &&f) const &
+    -> as_ref_tree_t<compat::decay_t<
+      compat::invoke_result_t<F &&, const MapNode &>>> {
+    return {
+      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
+    };
+  }
+
+  /** (QoL) Transform `.map_node`, consuming this binding. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::is_invocable<F &&, MapNode &&>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
+    -> as_ref_tree_t<compat::decay_t<
+      compat::invoke_result_t<F &&, MapNode &&>>> {
+    return {
+      /*map_node=*/compat::invoke(std::forward<F>(f),
+        std::move(this->map_node)),
+    };
+  }
+
   /** Serialize an lvalue into a tree borrowing its existing string storage.
    * Accepts const and mutable sources. Keep source storage alive and unchanged
    * while the tree is used. Empty optionals produce null; empty optional
@@ -519,16 +573,50 @@ struct as_ref_tree_t {
 
 /** Borrowing tree serialization; source strings must outlive the tree. */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr as_ref_tree_t as_ref_tree{};
+inline constexpr as_ref_tree_t<> as_ref_tree{};
 #else
-static constexpr const as_ref_tree_t &as_ref_tree =
-  compat::detail::shared_state<as_ref_tree_t>::value;
+static constexpr const as_ref_tree_t<> &as_ref_tree =
+  compat::detail::shared_state<as_ref_tree_t<>>::value;
 #endif
 
 /** JSON/YAML text serialization with the selected .format. */
+template <typename MapNode = reflected_scope::mapping_from_type_t>
 struct serialize_t {
   // Output format; use as_yaml or as_json for the predefined configurations.
   ::ryml::EmitType_e format;
+  // (state, type<T>) -> mapping callable, selected at every schema position.
+  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
+
+#if 201402L > OMNI_CPLUSPLUS
+  // C++11 has no aggregate member defaults; keep format-only initialization.
+  constexpr serialize_t(::ryml::EmitType_e output, MapNode mapping = {})
+    : format(output), map_node(std::move(mapping)) {}
+#endif
+
+  /** (QoL) Transform data member `.map_node` inplace, in one expression. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::is_invocable<F &&, const MapNode &>::value))
+  constexpr auto tdm_map_node(F &&f) const &
+    -> serialize_t<compat::decay_t<
+      compat::invoke_result_t<F &&, const MapNode &>>> {
+    return {
+      /*format=*/this->format,
+      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
+    };
+  }
+
+  /** (QoL) Transform `.map_node`, consuming this binding. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (compat::is_invocable<F &&, MapNode &&>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
+    -> serialize_t<compat::decay_t<
+      compat::invoke_result_t<F &&, MapNode &&>>> {
+    return {
+      /*format=*/this->format,
+      /*map_node=*/compat::invoke(std::forward<F>(f),
+        std::move(this->map_node)),
+    };
+  }
 
   /**
    * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
@@ -553,8 +641,8 @@ namespace detail {
 
 // Ad hoc: distinct configured defaults of one type before inline variables.
 struct serialization_defaults {
-  serialize_t yaml{::ryml::EMIT_YAML};
-  serialize_t json{::ryml::EMIT_JSON};
+  serialize_t<> yaml{::ryml::EMIT_YAML};
+  serialize_t<> json{::ryml::EMIT_JSON};
 };
 
 } // namespace detail
@@ -570,11 +658,11 @@ struct serialization_defaults {
 const auto yaml = as_yaml(value);
 ``` */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr serialize_t as_yaml{
+inline constexpr serialize_t<> as_yaml{
   /*format=*/::ryml::EMIT_YAML,
 };
 #else
-static constexpr const serialize_t &as_yaml =
+static constexpr const serialize_t<> &as_yaml =
   compat::detail::shared_state<detail::serialization_defaults>::value.yaml;
 #endif
 
@@ -588,11 +676,11 @@ static constexpr const serialize_t &as_yaml =
 const auto json = as_json(value);
 ``` */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr serialize_t as_json{
+inline constexpr serialize_t<> as_json{
   /*format=*/::ryml::EMIT_JSON,
 };
 #else
-static constexpr const serialize_t &as_json =
+static constexpr const serialize_t<> &as_json =
   compat::detail::shared_state<detail::serialization_defaults>::value.json;
 #endif
 

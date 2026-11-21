@@ -388,7 +388,7 @@ TEST(tree_serialization, exposes_callable_tree_builders) {
     R"("sensor")", borrowed.crootref()));
 
   EXPECT_FALSE((omni::compat::is_invocable<
-    omni::ryml::as_ref_tree_t, std::string &&>::value));
+    omni::ryml::as_ref_tree_t<>, std::string &&>::value));
 }
 
 TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {
@@ -639,6 +639,117 @@ TEST(mapping_dispatch, local_map_node_customization) {
     EXPECT_EQ(12, direct.value->value);
 #endif
 }
+
+#if 201703L <= OMNI_CPLUSPLUS
+namespace schema_paths {
+
+struct address { int number; };
+struct record {
+  schema_paths::address address;
+  schema_paths::address work_address;
+  std::vector<schema_paths::address> offices;
+  std::map<std::string, schema_paths::address> locations;
+};
+
+struct read_address {
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<address> type) const
+    -> omni::ryml::with_diagnostics_t<address> {
+    return omni::ryml::reflected_scope::default_to_record(type)(
+      std::move(state), node, type).transform([](address value) -> address {
+        return {value.number + 100};
+      });
+  }
+};
+
+struct select_reader {
+  template <typename State, typename T>
+  auto operator()(const State &state, omni::type_t<T> type) const {
+    if constexpr (state.path().ends_with("root.work_address"))
+      return read_address{};
+    else if constexpr (state.path().ends_with("root.offices[].number"))
+      return local_mapping::add_integer{10};
+    else if constexpr (state.path().ends_with("root.locations[].number"))
+      return local_mapping::add_integer{20};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+struct write_address {
+  template <typename State>
+  void operator()(State state, const address &value,
+    ::ryml::NodeRef node) const {
+    omni::ryml::reflected_scope::from_record(std::move(state),
+      address{value.number + 100}, node);
+  }
+};
+
+struct write_integer {
+  int increment;
+
+  template <typename State>
+  void operator()(State state, int value, ::ryml::NodeRef node) const {
+    omni::ryml::from_arithmetic(std::move(state),
+      value + this->increment, node);
+  }
+};
+
+struct select_writer {
+  template <typename State, typename T>
+  auto operator()(const State &state, omni::type_t<T> type) const {
+    if constexpr (state.path().ends_with("root.work_address"))
+      return write_address{};
+    else if constexpr (state.path().ends_with("root.offices[].number"))
+      return write_integer{10};
+    else if constexpr (state.path().ends_with("root.locations[].number"))
+      return write_integer{20};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
+} // namespace schema_paths
+
+TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
+  const std::string source = R"({
+    "address": {"number": 1},
+    "work_address": {"number": 2},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  })";
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_map_node([](auto) { return schema_paths::select_reader{}; });
+  const auto mapped = deserialize(omni::type_t<schema_paths::record>{}, source);
+  EXPECT_TRUE(mapped.value);
+  EXPECT_TRUE(mapped.diagnostics.empty());
+  if (mapped.value) {
+    EXPECT_EQ(1, mapped.value->address.number);
+    EXPECT_EQ(102, mapped.value->work_address.number);
+    EXPECT_EQ(13, mapped.value->offices.at(0).number);
+    EXPECT_EQ(24, mapped.value->locations.at("remote").number);
+  }
+
+  const schema_paths::record value{{1}, {2}, {{3}}, {{"remote", {4}}}};
+  constexpr auto as_json = omni::ryml::as_json
+    .tdm_map_node([](auto) { return schema_paths::select_writer{}; });
+  EXPECT_TRUE(serialization_test::matches_json(R"({
+    "address": {"number": 1},
+    "work_address": {"number": 102},
+    "offices": [{"number": 13}],
+    "locations": {"remote": {"number": 24}}
+  })", as_json(value)));
+
+#if 202002L <= OMNI_CPLUSPLUS
+  constexpr auto designated = omni::ryml::as_owning_tree_t{
+    .map_node = schema_paths::select_writer{},
+  };
+  const auto tree = designated(value);
+  EXPECT_EQ("102", tree["work_address"]["number"].val());
+#endif
+}
+#endif
 
 } // namespace
 

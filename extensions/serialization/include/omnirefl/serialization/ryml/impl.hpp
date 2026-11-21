@@ -44,10 +44,9 @@ auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_write_state<State>::value))
 void write_node(State context, const T &value, ::ryml::NodeRef node) {
-  omni::ryml::reflected_scope::mapping_from_type(omni::type_t<T>{})(
-    std::move(context),
-    value,
-    node);
+  const auto mapping =
+    compat::invoke(context.map_node, context, omni::type_t<T>{});
+  mapping(std::move(context), value, node);
 }
 
 namespace detail {
@@ -311,12 +310,13 @@ namespace detail {
 
 template <typename State, typename T>
 struct cpp11_lambda_write {
+  State context;
   const T &value;
 
   template <typename _M, omni::reflected_entity Entity>
   ::ryml::Tree operator()(omni::meta_t<_M, Entity>) const {
     ::ryml::Tree tree;
-    core::write_node(State{}, this->value, tree.rootref());
+    core::write_node(this->context, this->value, tree.rootref());
     return tree;
   }
 };
@@ -329,9 +329,9 @@ template <typename Discovery,
 struct tree_builder_case {
   OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
     (is_write_state<State>::value))
-  static ::ryml::Tree build(T &value) {
+  static ::ryml::Tree build(State context, T &value) {
     ::ryml::Tree tree;
-    write_node(State{}, value, tree.rootref());
+    write_node(std::move(context), value, tree.rootref());
     return tree;
   }
 };
@@ -340,9 +340,10 @@ template <typename Discovery, bool Wrapper>
 struct tree_builder_case<Discovery, true, Wrapper> {
   OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
     (is_write_state<State>::value))
-  static ::ryml::Tree build(T &value) {
+  static ::ryml::Tree build(State context, T &value) {
     return omni::reflected_call(
-      cpp11_lambda_write<State, T>{/*value=*/value},
+      cpp11_lambda_write<State, T>{/*context=*/std::move(context),
+        /*value=*/value},
       omni::type_t<Discovery>{});
   }
 };
@@ -351,31 +352,36 @@ template <typename Discovery>
 struct tree_builder_case<Discovery, false, true> {
   OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
     (is_write_state<State>::value))
-  static ::ryml::Tree build(T &value) {
+  static ::ryml::Tree build(State context, T &value) {
     return tree_builder_case<
       typename omni::ryml::detail::discovered_range_type<Discovery>::type>
-        ::template build<State>(value);
+        ::template build<State>(std::move(context), value);
   }
 };
 
 } // namespace detail
 } // namespace core
 
+template <typename MapNode>
 template <typename T>
-::ryml::Tree as_owning_tree_t::operator()(const T &value) const {
+::ryml::Tree as_owning_tree_t<MapNode>::operator()(const T &value) const {
   return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
-    ::template build<write_state_t<false>>(value);
+    ::build(write_state_t<false, compat::remove_cvref_t<MapNode>>{
+      this->map_node}, value);
 }
 
+template <typename MapNode>
 template <typename T>
-::ryml::Tree as_ref_tree_t::operator()(T &value) const {
+::ryml::Tree as_ref_tree_t<MapNode>::operator()(T &value) const {
   return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
-    ::template build<write_state_t<true>>(value);
+    ::build(write_state_t<true, compat::remove_cvref_t<MapNode>>{
+      this->map_node}, value);
 }
 
+template <typename MapNode>
 template <typename Value>
-std::string serialize_t::operator()(const Value &value) const {
-  const auto tree = as_ref_tree(value);
+std::string serialize_t<MapNode>::operator()(const Value &value) const {
+  const auto tree = as_ref_tree_t<const MapNode &>{this->map_node}(value);
 
   // Reserve an initial estimate without a sizing traversal. Borrowed strings,
   // escaping, or deeper YAML indentation may require an emitter resize/retry.
