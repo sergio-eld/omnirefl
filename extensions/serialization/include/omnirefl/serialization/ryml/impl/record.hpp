@@ -46,6 +46,15 @@ struct assign_record_fields {
   }
 };
 
+// A conversion result lets optional construct T directly; forwarding an
+// already-constructed T through its constructor would require another move.
+template <typename T, typename Frame>
+struct aggregate_record_constructor {
+  Frame *frame;
+
+  operator T() && { return omni::refl::aggregate_into<T>(this->frame->values); }
+};
+
 template <typename T>
 struct aggregate_record_value {
   using result_type = with_diagnostics_t<T>;
@@ -56,7 +65,7 @@ struct aggregate_record_value {
       return {compat::nullopt, std::move(frame->result->result.diagnostics)};
 
     return {
-      compat::make_optional(omni::refl::aggregate_into<T>(frame->values)),
+      compat::make_optional<T>(aggregate_record_constructor<T, Frame>{frame}),
       std::move(frame->result->result.diagnostics),
     };
   }
@@ -162,23 +171,8 @@ template <std::size_t Index, bool CheckPresence, typename Frame>
 struct cpp11_record_member_event {
   Frame &frame;
 
-  bool operator()() const {
-    auto &slot = std::get<Index>(this->frame.values);
-    if (CheckPresence)
-      return process_record_presence(this->frame.result, this->frame.object,
-        this->frame.pending[Index], &slot);
-
-    if (this->frame.pending[Index] != ::ryml::NONE) {
-      auto mapped = core::read_node(this->frame.result->state,
-        {this->frame.object.tree(), this->frame.pending[Index]},
-        omni::type_t<typename compat::remove_cvref_t<decltype(slot)>::type>{});
-      if (mapped.value)
-        slot.stored.emplace(std::move(*mapped.value));
-      this->frame.result->append(std::move(mapped).transform(
-        fn::default_value<compat::monostate>{}));
-    }
-    return !this->frame.result->stopped();
-  }
+  // Defined after type-mapping selection is available.
+  bool operator()() const;
 };
 
 // Tuple indices keep field values and selected nodes paired without a search.

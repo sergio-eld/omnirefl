@@ -297,43 +297,38 @@ auto map_node_to_value(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) -> with_diagnostics_t<T> {
-  if (state.limit_exceeded())
-    return {compat::nullopt, {{state.config.error_policy, {}}, {}, {}}};
-
-  // Retain the parent snapshot so only nonempty reports need accumulation.
   const auto error_policy = state.config.error_policy;
-  auto mapped = map_node_to_value_using(state,
-    mapping,
-    node,
-    type,
-    /*priority=*/0);
+  const bool stopped = state.limit_exceeded();
+  // A single return keeps the mapped value in the caller's result storage.
+  auto mapped = compat::invoke([&state, &mapping, node, type, stopped]()
+    -> with_diagnostics_t<T> {
+    if (stopped)
+      return {compat::nullopt, {{state.config.error_policy, {}}, {}, {}}};
 
-  if (mapped.diagnostics.issues.empty() && !state.limit_exceeded()) {
-    mapped.diagnostics.config.error_policy = error_policy;
-    return mapped;
-  }
-
-  // Only the report leaves this call. One hard error needs neither warning
-  // expansion nor truncation, so there are no counters to materialize.
-  if (mapped.diagnostics.issues.size() == 1
-    && !mapped.diagnostics.issues.front().warning && !state.limit_exceeded()) {
-    mapped.value.reset();
-    mapped.diagnostics.config.error_policy = error_policy;
-    return mapped;
-  }
-
-  auto result = make_node_accumulator(std::move(state));
-  result.result.diagnostics.config.error_policy = error_policy;
-  result.append({
-    /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
-      : compat::nullopt,
-    /*diagnostics=*/std::move(mapped.diagnostics),
+    return map_node_to_value_using(state, mapping, node, type,
+      /*priority=*/0);
   });
 
-  return {
-    /*value=*/result.result.value ? std::move(mapped.value) : compat::nullopt,
-    /*diagnostics=*/std::move(result.result.diagnostics),
-  };
+  if (!stopped && !mapped.diagnostics.issues.empty()) {
+    // One hard error needs no warning expansion or truncation.
+    if (mapped.diagnostics.issues.size() == 1
+      && !mapped.diagnostics.issues.front().warning)
+      mapped.value.reset();
+    else {
+      auto result = make_node_accumulator(std::move(state));
+      result.result.diagnostics.config.error_policy = error_policy;
+      result.append({
+        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
+      });
+      if (!result.result.value)
+        mapped.value.reset();
+      mapped.diagnostics = std::move(result.result.diagnostics);
+    }
+  }
+  mapped.diagnostics.config.error_policy = error_policy;
+  return mapped;
 }
 
 // C++11 overload ranking prefers value production when assignment is possible.
