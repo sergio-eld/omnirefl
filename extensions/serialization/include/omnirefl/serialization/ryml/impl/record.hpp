@@ -4,7 +4,6 @@
 
 #include <array>
 #include <cstddef>
-#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -368,7 +367,8 @@ auto to_record_t<NameByAlias>::operator()(State context,
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && std::is_move_constructible<T>::value,
+        && std::is_move_constructible<T>::value
+        && std::is_assignable<T &, T &&>::value,
       detail::aggregate_record_into<T>>,
     detail::bind_record_into<T>>::type{into};
   return detail::map_record<T>(std::move(context), node, this->name_by_alias,

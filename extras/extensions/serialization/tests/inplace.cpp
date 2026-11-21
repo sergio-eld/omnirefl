@@ -30,12 +30,27 @@ struct constructed_record {
   int value;
 };
 
+struct nonassignable_record {
+  int value;
+
+  nonassignable_record &operator=(const nonassignable_record &) = delete;
+};
+
 struct readings {
   int first;
   int second;
 };
 
 } // namespace inplace_models
+
+TEST(inplace_records, maps_fields_without_assigning_the_root) {
+  inplace_models::nonassignable_record into{7};
+  const auto result = omni::ryml::deserialize(&into, R"({"value": 42})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  EXPECT_EQ(42, into.value);
+}
 
 struct inplace_record_case {
   std::string name;
