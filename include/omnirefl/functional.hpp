@@ -8,6 +8,7 @@
 
 #include <omnirefl/compat.hpp>
 #include <omnirefl/traits.hpp>
+#include <omnirefl/functional/lookup_table.hpp>
 
 #include <cstddef>
 #include <tuple>
@@ -967,6 +968,18 @@ struct cpp11_foldl_visit {
 };
 #endif
 
+// This probes the fold's rvalue bind contract, not general expected storage.
+// A function pointer needs no definition even when Result contains local types.
+template <typename Result, typename = void>
+struct has_fold_and_then: std::false_type {};
+
+template <typename Result>
+struct has_fold_and_then<Result, compat::void_t<decltype(
+  std::declval<Result &&>().and_then(std::declval<Result (*)(
+    typename Result::value_type &&)>()))>>:
+    std::is_same<Result, decltype(std::declval<Result &&>().and_then(
+      std::declval<Result (*)(typename Result::value_type &&)>()))> {};
+
 template <typename Visit, typename Result>
 constexpr Result try_fold_values(Visit &, Result state) { return state; }
 
@@ -1473,7 +1486,7 @@ constexpr Accumulator
 OMNI_CONSTRAINED_TEMPLATE(
   (typename Visit, typename Result, typename Tuple),
   (traits::is_expected_like<Result>::value
-    && !std::is_void<typename Result::value_type>::value
+    && detail::has_fold_and_then<Result>::value
     && detail::is_tuple_like<compat::remove_cvref_t<Tuple>>::value))
 constexpr Result try_fold(Visit visit, Result initial, Tuple &&tuple) {
   return compat::apply(
@@ -1924,7 +1937,7 @@ constexpr foldl_closure<Visit, Accumulator> foldl(Visit visit,
 /** Bind a visitor and initial result for a later call or pipe. */
 OMNI_CONSTRAINED_TEMPLATE((typename Visit, typename Result),
   (traits::is_expected_like<Result>::value
-    && !std::is_void<typename Result::value_type>::value))
+    && detail::has_fold_and_then<Result>::value))
 constexpr try_fold_closure<Visit, Result> try_fold(Visit visit,
   Result initial) {
   return {std::move(visit), std::move(initial)};
