@@ -460,6 +460,7 @@ struct endpoint_with_retries {
 };
 
 struct optional_endpoint { omni::compat::optional<int> port; };
+struct endpoint_with_owned_alias { int default_service_port; };
 struct cluster {
   endpoint primary;
   std::vector<endpoint> peers;
@@ -472,6 +473,14 @@ struct endpoint_names {
       std::make_tuple("absent", "not_a_member"));
 
     return names(alias);
+  }
+};
+
+struct owned_endpoint_names {
+  omni::compat::optional<std::string> operator()(string_view alias) const {
+    return alias == "service_port"
+      ? omni::compat::optional<std::string>{"default_service_port"}
+      : omni::compat::nullopt;
   }
 };
 
@@ -527,6 +536,21 @@ struct to_type_t<alias_models::optional_endpoint> {
   }
 };
 
+template <>
+struct to_type_t<alias_models::endpoint_with_owned_alias> {
+  template <typename State>
+  auto operator()(State state,
+    ::ryml::ConstNodeRef node,
+    alias_models::endpoint_with_owned_alias *into) const
+    -> with_diagnostics_t<compat::monostate> {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::to_record_t<alias_models::owned_endpoint_names>{})(
+        std::move(state),
+        node,
+        into);
+  }
+};
+
 } // namespace cp
 } // namespace ryml
 } // namespace omni
@@ -536,6 +560,18 @@ namespace {
 using omni::json::duplicate_policy;
 using omni::json::unknown_policy;
 using omni::json::issue_code;
+
+TEST(record_aliases, accepts_owned_canonical_names) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<alias_models::endpoint_with_owned_alias>{},
+    R"({"service_port": 7})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(7, result.value->default_service_port);
+  }
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
 
 struct alias_issue {
   issue_code reason;
@@ -911,6 +947,52 @@ TEST(record_aliases, ignored_aliases_do_not_exhaust_warning_limit) {
 }
 
 } // namespace
+
+namespace aggregate_record_mapping {
+
+struct constructed_value {
+  int value;
+
+  explicit constructed_value(int value): value(value) {}
+  constructed_value(constructed_value &&) = default;
+  constructed_value &operator=(constructed_value &&) = delete;
+};
+
+struct request {
+  constructed_value item;
+  int count;
+};
+
+} // namespace aggregate_record_mapping
+
+template <>
+struct omni::ryml::cp::to_type_t<aggregate_record_mapping::constructed_value> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<aggregate_record_mapping::constructed_value>) const
+    -> omni::ryml::with_diagnostics_t<
+      aggregate_record_mapping::constructed_value> {
+    return omni::ryml::core::read_node(std::move(state), node,
+      omni::type_t<int>{})
+      .transform([](int value) -> aggregate_record_mapping::constructed_value {
+        return aggregate_record_mapping::constructed_value{value};
+      });
+  }
+};
+
+TEST(record_mapping, constructs_aggregate_with_nonassignable_custom_field) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<aggregate_record_mapping::request>{},
+    R"({"item": 7, "count": 2})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value) {
+    EXPECT_EQ(7, result.value->item.value);
+    EXPECT_EQ(2, result.value->count);
+  }
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+}
 
 #if defined(__GNUC__) && !defined(__clang__)
 #  pragma GCC diagnostic pop

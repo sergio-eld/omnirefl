@@ -119,24 +119,33 @@ auto from_optional_like_t::operator()(State context,
   }
 }
 
-namespace reflected_scope {
 namespace detail {
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Field, typename State),
-  (is_read_state<State>::value))
-void map_node_to_field(omni::ryml::detail::node_accumulator<State> *result,
-  ::ryml::ConstNodeRef node, Field field) {
-  // The record event fold stops before invoking any later field.
-  assert(!result->stopped());
-  const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
-  process_node_to_field_using(result,
-    mapping,
-    node,
-    field,
-    omni::ryml::detail::node_call_priority<2>{});
+template <std::size_t Index, bool CheckPresence, typename Frame>
+bool cpp11_record_member_event<Index, CheckPresence, Frame>::operator()() const {
+  auto &slot = std::get<Index>(this->frame.values);
+  if (CheckPresence)
+    return process_record_presence(this->frame.result, this->frame.object,
+      this->frame.pending[Index], &slot);
+
+  if (this->frame.pending[Index] != ::ryml::NONE) {
+    const auto type = omni::type_t<
+      typename compat::remove_cvref_t<decltype(slot)>::type>{};
+    const auto mapping = reflected_scope::mapping_to_type(type);
+    // The record frame applies diagnostic limits when appending this report.
+    auto mapped = map_node_to_value_using(this->frame.result->state, mapping,
+      {this->frame.object.tree(), this->frame.pending[Index]}, type,
+      /*priority=*/0);
+    if (mapped.value)
+      slot.stored.emplace(std::move(*mapped.value));
+    if (!mapped.value || !mapped.diagnostics.issues.empty()
+      || !mapped.diagnostics.parse_error_message.empty())
+      this->frame.result->append(std::move(mapped).transform(
+        fn::default_value<compat::monostate>{}));
+  }
+  return !this->frame.result->stopped();
 }
 
 } // namespace detail
-} // namespace reflected_scope
 } // namespace ryml
 } // namespace omni

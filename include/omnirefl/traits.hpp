@@ -66,18 +66,22 @@ struct select<case_<Condition, Operation>, Case...> {
 
 namespace detail {
 
-// A function-pointer probe avoids MSVC C5046 for declaration-only callables
-// whose result contains a local type. Void expected values take no argument.
-template <typename Result, typename Value = typename Result::value_type>
-struct expected_continuation {
-  using type = Result (*)(Value &&);
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <typename T>
+concept expected_like_impl = requires(T &&value, const T &constant) {
+  typename T::value_type;
+  typename T::error_type;
+  requires std::is_convertible<decltype(constant.has_value()), bool>::value;
+  requires std::is_same<compat::remove_cvref_t<decltype(
+    std::move(value).value())>,
+    compat::remove_cv_t<typename T::value_type>>::value;
+  requires std::is_same<compat::remove_cvref_t<decltype(*std::move(value))>,
+    compat::remove_cv_t<typename T::value_type>>::value;
+  requires std::is_same<compat::remove_cvref_t<decltype(
+    std::move(value).error())>,
+    compat::remove_cv_t<typename T::error_type>>::value;
 };
-
-template <typename Result>
-struct expected_continuation<Result, void> {
-  using type = Result (*)();
-};
-
+#else
 template <typename T, typename = void>
 struct expected_like_impl: std::false_type {};
 
@@ -87,12 +91,8 @@ struct expected_like_impl<T, compat::void_t<typename T::value_type,
   decltype(std::declval<const T &>().has_value()),
   decltype(std::declval<T &&>().value()),
   decltype(*std::declval<T &&>()),
-  decltype(std::declval<T &&>().error()),
-  decltype(std::declval<T &&>().and_then(
-    std::declval<typename expected_continuation<T>::type>()))>>:
+  decltype(std::declval<T &&>().error())>>:
     compat::conjunction<
-      std::is_same<T, decltype(std::declval<T &&>().and_then(
-        std::declval<typename expected_continuation<T>::type>()))>,
       std::is_convertible<decltype(std::declval<const T &>().has_value()), bool>,
       std::is_same<compat::remove_cvref_t<decltype(
         std::declval<T &&>().value())>,
@@ -103,6 +103,8 @@ struct expected_like_impl<T, compat::void_t<typename T::value_type,
       std::is_same<compat::remove_cvref_t<decltype(
         std::declval<T &&>().error())>,
         compat::remove_cv_t<typename T::error_type>>> {};
+
+#endif
 
 // Function templates cannot be partially specialized, so the public `is`
 // overloads delegate template-shape matching to these class templates.
@@ -308,11 +310,16 @@ OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile && noexcept);
 /** Expected-like value/error storage, independent of its implementation.
  * Requires value_type, error_type, has_value(), dereference, and value/error
  * accessors preserving their declared types. Qualifiers on T
- * do not affect recognition. Rvalue and_then must preserve the expected type.
+ * do not affect recognition. Monadic operations impose their own constraints.
  * No expected library is included by this trait. */
 template <typename T>
 struct is_expected_like:
-    detail::expected_like_impl<compat::remove_cvref_t<T>> {};
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+    compat::bool_constant<detail::expected_like_impl<compat::remove_cvref_t<T>>>
+#else
+    detail::expected_like_impl<compat::remove_cvref_t<T>>
+#endif
+{};
 
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 /** Value of is_expected_like. */
@@ -346,7 +353,7 @@ using type_size_template_construct_result_t =
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
 /** Expected-like value/error storage. See is_expected_like. */
 template <typename T>
-concept expected_like = is_expected_like<T>::value;
+concept expected_like = detail::expected_like_impl<compat::remove_cvref_t<T>>;
 
 /** Require brace construction of `To` from `Value`. */
 template <typename To, typename Value>

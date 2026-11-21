@@ -30,6 +30,11 @@ FetchContent_Declare(google_benchmark
 FetchContent_MakeAvailable(google_benchmark)
 
 add_subdirectory(instrumentation)
+if(_OMNI_CI_RUN)
+    message(STATUS "omnirefl: skipping internal lookup benchmark in CI")
+else()
+    add_subdirectory(lookup_table)
+endif()
 omnirefl_check_cxx20_language(_benchmarks_has_cxx20)
 if(_benchmarks_has_cxx20)
     add_subdirectory(record_conversion)

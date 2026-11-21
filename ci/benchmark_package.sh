@@ -64,6 +64,7 @@ mkdir -p "$source"
 tar -xzf "$extras" -C "$source" --strip-components=1
 cmake -S "$source" \
   -B "$build" -GNinja -DCMAKE_BUILD_TYPE=Release \
+  -D_OMNI_CI_RUN=ON \
   -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \
   -Domnirefl_ROOT="$install" \
   -DBENCHMARK_RESULTS="$results" -DBENCHMARK_NAME="$name" 2>&1 |

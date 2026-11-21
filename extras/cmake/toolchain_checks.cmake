@@ -1,3 +1,9 @@
+if(NOT DEFINED _OMNI_CI_RUN)
+    set(_OMNI_CI_RUN OFF)
+endif()
+set(_OMNI_CI_RUN "${_OMNI_CI_RUN}" CACHE INTERNAL
+    "Internal CI configuration marker")
+
 function(omnirefl_supported_cpp_standards out)
     set(_standards "")
     foreach(_feature IN LISTS CMAKE_CXX_COMPILE_FEATURES)

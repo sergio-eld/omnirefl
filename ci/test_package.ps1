@@ -48,7 +48,7 @@ try {
 
   $ErrorActionPreference = 'Stop'
 
-  $cmakeArgs = @('-GNinja', '-DCMAKE_BUILD_TYPE=Release',
+  $cmakeArgs = @('-GNinja', '-DCMAKE_BUILD_TYPE=Release', '-D_OMNI_CI_RUN=ON',
     "-Domnirefl_ROOT=$install")
   if ($CMakeArg) { $cmakeArgs += $CMakeArg }
 
