@@ -30,7 +30,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
 
     # Keep these tests free of forced generated headers and instrumentation.
     set(_core_target "cpp_${_standard}.json_ryml.test.core")
-    add_executable(${_core_target} core.cpp with_diagnostics.cpp)
+    add_executable(${_core_target} core.cpp with_diagnostics.cpp
+        ../../common/tests/static_string.cpp)
     set_target_properties(${_core_target} PROPERTIES
         OUTPUT_NAME "json_ryml_test_core_cpp_${_standard}")
     set_target_properties(${_test_target} ${_core_target} PROPERTIES
