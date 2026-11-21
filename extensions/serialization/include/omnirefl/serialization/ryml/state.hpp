@@ -772,6 +772,8 @@ struct schema_path {
  * contents or allocate storage.
  * Counters include issues reported by preceding operations in the enclosing
  * traversal. The path describes the C++ schema, independently of input keys.
+ * Mapping callbacks take a generic State, constrained by is_read_state,
+ * because child paths and local selectors produce different state types.
  * Custom mappings retain it by passing state onward; custom field traversal
  * extends it with child(OMNI_META_STRING("field")) and element() for containers.
  *
@@ -787,8 +789,8 @@ template <typename Config = omni::ryml::config_t<>,
   typename Path = detail::schema_path<detail::root_path_name>>
 struct read_state_t {
   const Config &config;
-  std::size_t error_count;
-  std::size_t warning_count;
+  std::size_t error_count OMNI_CPP14_DEFAULT_INIT();
+  std::size_t warning_count OMNI_CPP14_DEFAULT_INIT();
 
   // (state, type<T>) -> mapping callable; borrowed throughout traversal.
   const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(
@@ -796,8 +798,8 @@ struct read_state_t {
 
 #if 201402L > OMNI_CPLUSPLUS
   // C++11 aggregates cannot provide the default for this reference member.
-  constexpr read_state_t(const Config &options, std::size_t errors,
-    std::size_t warnings, const MapNode &mapping =
+  constexpr read_state_t(const Config &options, std::size_t errors = 0,
+    std::size_t warnings = 0, const MapNode &mapping =
       detail::default_map_node)
     : config(options), error_count(errors), warning_count(warnings),
       map_node(mapping) {}
@@ -808,7 +810,8 @@ struct read_state_t {
    * edges reuse their first path; this is not a runtime ancestry trace. */
   static constexpr auto path() -> typename Path::string_type { return {}; }
 
-  /** Child state for custom traversal into a named field. */
+  /** Child state for custom traversal into a named field.
+   * Appends text; field(meta) additionally recognizes recursive schema edges. */
   template <typename Name>
   constexpr auto child(Name) const
     -> read_state_t<Config, MapNode, typename Path::template child<Name>> {
@@ -841,7 +844,9 @@ struct read_state_t {
 
 /** Serialization policy, local mapping selection, and schema position.
  * BorrowStrings permits borrowing source-backed strings; temporary owning
- * conversions are still copied. The mapping selector is borrowed. */
+ * conversions are still copied. The mapping selector is borrowed. Mapping
+ * callbacks take a generic State constrained by is_write_state, preserving
+ * the child path and local selector when forwarding it. */
 template <bool BorrowStrings,
   typename MapNode = reflected_scope::mapping_from_type_t,
   typename Path = detail::schema_path<detail::root_path_name>>
@@ -858,7 +863,8 @@ struct write_state_t {
   /** Canonical schema path; see read_state_t::path. */
   static constexpr auto path() -> typename Path::string_type { return {}; }
 
-  /** Child state for custom traversal into a named field. */
+  /** Child state for custom traversal into a named field.
+   * Appends text; field(meta) additionally recognizes recursive schema edges. */
   template <typename Name>
   constexpr auto child(Name) const
     -> write_state_t<BorrowStrings, MapNode,
@@ -925,3 +931,10 @@ concept write_state_like = is_write_state<T>::value;
 
 } // namespace ryml
 } // namespace omni
+
+// TODO: [high] Expose enclosing_record as a type alias on traversal state,
+// keeping record type information separate from the schema path string.
+
+// TODO: [medium] Reduce state instantiations for records with several recursive
+// fields: edge canonicalization retains each permutation of distinct fields
+// before a repeated edge reuses its path.

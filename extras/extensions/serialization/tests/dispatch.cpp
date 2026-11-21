@@ -640,6 +640,18 @@ TEST(mapping_dispatch, local_map_node_customization) {
 #endif
 }
 
+TEST(mapping_dispatch, value_initialization_preserves_defaults) {
+  const omni::ryml::config_t<> options{};
+  const omni::ryml::read_state_t<> state{options};
+  EXPECT_EQ(0u, state.error_count);
+  EXPECT_EQ(0u, state.warning_count);
+
+  constexpr omni::ryml::serialize_t<> serialize{};
+  static_assert(::ryml::EmitType_e{} == serialize.format,
+    "Value initialization preserves the default format");
+  EXPECT_TRUE(serialization_test::matches_json("7", serialize(7)));
+}
+
 #if 201703L <= OMNI_CPLUSPLUS
 namespace schema_paths {
 

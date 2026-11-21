@@ -11,7 +11,7 @@
  * support composing parsing and schema-driven mapping explicitly. Entry points
  * are callable objects; their config members can be set at construction or
  * transformed through tdm_config. map_node selects local mappings throughout
- * deserialization and recursive schema traversal.
+ * serialization and deserialization, including recursive schema traversal.
  *
  * Compatible with C++11 and later; examples use C++20 syntax for brevity.
  * Guide: extras/extensions/serialization/guide/main.cpp.
@@ -588,8 +588,8 @@ struct serialize_t {
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
 
 #if 201402L > OMNI_CPLUSPLUS
-  // C++11 has no aggregate member defaults; keep format-only initialization.
-  constexpr serialize_t(::ryml::EmitType_e output, MapNode mapping = {})
+  // C++11 has no aggregate member defaults; keep empty/format-only braces.
+  constexpr serialize_t(::ryml::EmitType_e output = {}, MapNode mapping = {})
     : format(output), map_node(std::move(mapping)) {}
 #endif
 

@@ -429,7 +429,8 @@ cp::to_type<T> :: {
  *
  * Provide either overload, or both. map_by_schema and deserialize prefer
  * type<T> when its result can be assigned. T* is a fallback when value
- * production is unavailable.
+ * production is unavailable. A generic State parameter preserves child paths
+ * and local selectors; its constraint is is_read_state.
  *
  * Prefer this variable template over to_type_t for customization. Only one
  * of the two may be specialized for a given type.
@@ -470,7 +471,8 @@ cp::to_type_t<T>{} :: {
  *
  * Provide either overload, or both. map_by_schema and deserialize prefer
  * type<T> when its result can be assigned. T* is a fallback when value
- * production is unavailable.
+ * production is unavailable. A generic State parameter preserves child paths
+ * and local selectors; its constraint is is_read_state.
  *
  * Prefer the to_type variable template when C++14 or later is available.
  * Only one of the two may be specialized for a given type.
@@ -512,6 +514,9 @@ struct to_type_t: traits::cp::unavailable {};
 cp::from_type<T> :: (state, const T&, node) -> void
 ```
  *
+ * A generic State parameter preserves child paths and local selectors;
+ * its constraint is is_write_state.
+ *
  * @warning Keep specializations narrow: concrete types or specific template
  * families. Broad categories (e.g. all records or ranges) may overlap other
  * specializations and make lookup ambiguous. */
@@ -520,7 +525,8 @@ constexpr traits::cp::unavailable from_type{};
 #endif
 
 /** C++11-compatible C++-to-node customization. Unregistered types use a
- * default mapping function.
+ * default mapping function. A generic State parameter preserves child paths
+ * and local selectors; its constraint is is_write_state.
  * A scalar wrapper can delegate conversion to its wrapped value:
  *
 ```cpp
