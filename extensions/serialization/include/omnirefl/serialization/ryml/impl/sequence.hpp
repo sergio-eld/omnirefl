@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <utility>
 #include <vector>
@@ -141,6 +142,18 @@ struct range_mapping_nodes_case<true> {
   }
 };
 
+// Reservation is optional; custom ranges retain their insertion contract.
+// Probe the usual capacity API so unrelated reserve operations are not used.
+template <typename T>
+auto reserve_range_storage(T *into, ::ryml::ConstNodeRef node, int)
+  -> decltype(into->reserve(std::size_t{}), into->capacity(),
+    into->max_size(), void()) {
+  into->reserve(node.num_children());
+}
+
+template <typename T>
+void reserve_range_storage(T *, ::ryml::ConstNodeRef, long) {}
+
 template <bool KeyValue>
 struct read_range_case;
 
@@ -149,20 +162,26 @@ struct read_range_case<false> {
   template <typename T, typename State>
   static void apply(::ryml::ConstNodeRef node, T *into,
     node_accumulator<State> *result) {
+    bool reserve_pending = true;
     for (const auto child : node.children()) {
       if (result->stopped())
         break;
 
       auto mapped = core::read_node(result->state, child,
         omni::type_t<compat::range_value_t<T>>{});
-      result->append({
-        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
-          : compat::nullopt,
-        /*diagnostics=*/std::move(mapped.diagnostics),
-      });
-      if (mapped.value)
+      if (!mapped.value || !mapped.diagnostics.issues.empty()
+        || !mapped.diagnostics.parse_error_message.empty())
+        result->append(std::move(mapped.diagnostics), mapped.value.has_value());
+      if (mapped.value) {
+        // Immediate failures need no destination allocation.
+        if (reserve_pending) {
+          reserve_range_storage(into, node, /*priority=*/0);
+          reserve_pending = false;
+        }
+
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
           into, child, result, std::move(*mapped.value));
+      }
     }
   }
 };
@@ -199,11 +218,7 @@ struct read_range_case<true> {
         view_type{name.str, name.len});
       auto mapped = core::read_node(result->state, child,
         omni::type_t<traits::mapped_type_t<T>>{});
-      result->append({
-        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
-          : compat::nullopt,
-        /*diagnostics=*/std::move(mapped.diagnostics),
-      });
+      result->append(std::move(mapped.diagnostics), mapped.value.has_value());
       if (mapped.value)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
           into, child, result, std::move(key), std::move(*mapped.value));

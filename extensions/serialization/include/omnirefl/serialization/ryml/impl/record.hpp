@@ -46,7 +46,8 @@ auto process_node_to_field_using(
     if (succeeded)
       field.set_value(std::move(*mapped.value));
 
-    result->append(std::move(mapped.diagnostics), succeeded);
+    if (!succeeded || !mapped.diagnostics.parse_error_message.empty())
+      result->append(std::move(mapped.diagnostics), succeeded);
     return;
   }
 
@@ -76,7 +77,9 @@ auto process_node_to_field_using(
     std::addressof(field.ref())))) {
   auto state = result->state;
   auto mapped = mapping(std::move(state), node, std::addressof(field.ref()));
-  result->append(std::move(mapped.diagnostics), mapped.value.has_value());
+  if (!mapped.value || !mapped.diagnostics.issues.empty()
+    || !mapped.diagnostics.parse_error_message.empty() || result->stopped())
+    result->append(std::move(mapped.diagnostics), mapped.value.has_value());
 }
 
 // Bitfields and unaligned packed fields cannot supply a safe reference.
