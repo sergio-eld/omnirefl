@@ -171,7 +171,11 @@ struct read_range_case<false> {
         omni::type_t<compat::range_value_t<T>>{});
       if (!mapped.value || !mapped.diagnostics.issues.empty()
         || !mapped.diagnostics.parse_error_message.empty())
-        result->append(std::move(mapped.diagnostics), mapped.value.has_value());
+        result->append({
+          /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+            : compat::nullopt,
+          /*diagnostics=*/std::move(mapped.diagnostics),
+        });
       if (mapped.value) {
         // Immediate failures need no destination allocation.
         if (reserve_pending) {
@@ -218,7 +222,11 @@ struct read_range_case<true> {
         view_type{name.str, name.len});
       auto mapped = core::read_node(result->state, child,
         omni::type_t<traits::mapped_type_t<T>>{});
-      result->append(std::move(mapped.diagnostics), mapped.value.has_value());
+      result->append({
+        /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
+      });
       if (mapped.value)
         insert_range_value_case<traits::has_unique_key<T>::value>::apply(
           into, child, result, std::move(key), std::move(*mapped.value));

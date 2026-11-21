@@ -47,7 +47,11 @@ auto process_node_to_field_using(
       field.set_value(std::move(*mapped.value));
 
     if (!succeeded || !mapped.diagnostics.parse_error_message.empty())
-      result->append(std::move(mapped.diagnostics), succeeded);
+      result->append({
+        /*value=*/succeeded ? compat::make_optional(compat::monostate{})
+          : compat::nullopt,
+        /*diagnostics=*/std::move(mapped.diagnostics),
+      });
     return;
   }
 
@@ -79,7 +83,7 @@ auto process_node_to_field_using(
   auto mapped = mapping(std::move(state), node, std::addressof(field.ref()));
   if (!mapped.value || !mapped.diagnostics.issues.empty()
     || !mapped.diagnostics.parse_error_message.empty() || result->stopped())
-    result->append(std::move(mapped.diagnostics), mapped.value.has_value());
+    result->append(std::move(mapped));
 }
 
 // Bitfields and unaligned packed fields cannot supply a safe reference.

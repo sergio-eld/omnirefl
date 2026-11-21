@@ -153,26 +153,21 @@ struct node_accumulator {
   }
 
   void append(with_diagnostics_t<compat::monostate, diagnostics> child) {
-    this->append(std::move(child.diagnostics), child.value.has_value());
-  }
-
-  // Field processing can consume a report without first wrapping it in a
-  // second result object. The decoded value stays available to its caller.
-  void append(diagnostics &&child, bool has_value) {
-    if (!has_value)
+    if (!child.value)
       this->result.value.reset();
 
     // A single hard error needs no warning-limit expansion. Transfer its
     // storage instead of allocating another issue vector at each ancestor.
-    if (child.issues.size() == 1 && !child.issues.front().warning
+    if (child.diagnostics.issues.size() == 1
+      && !child.diagnostics.issues.front().warning
       && this->result.diagnostics.issues.empty() && !this->stopped()) {
       ++this->state.error_count;
       this->result.value.reset();
-      this->result.diagnostics.issues = std::move(child.issues);
+      this->result.diagnostics.issues = std::move(child.diagnostics.issues);
     } else {
       // report() includes the warning-limit error at the crossing warning.
       // Stopping there also skips a marker already included by the child.
-      for (auto &entry : child.issues) {
+      for (auto &entry : child.diagnostics.issues) {
         if (this->stopped())
           break;
 
@@ -180,14 +175,14 @@ struct node_accumulator {
       }
     }
 
-    if (!child.parse_error_message.empty()) {
+    if (!child.diagnostics.parse_error_message.empty()) {
       if (this->result.diagnostics.parse_error_message.empty())
         this->result.diagnostics.parse_error_message =
-          std::move(child.parse_error_message);
+          std::move(child.diagnostics.parse_error_message);
       else {
         this->result.diagnostics.parse_error_message += '\n';
         this->result.diagnostics.parse_error_message +=
-          child.parse_error_message;
+          child.diagnostics.parse_error_message;
       }
     }
 
