@@ -3,11 +3,12 @@
 #include <omnirefl/functional.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace omni {
 namespace ryml {
@@ -21,27 +22,39 @@ using omni::ryml::detail::node_call_priority;
 OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename Field, typename State),
   (std::is_assignable<typename Field::type &,
     typename Field::type &&>::value))
-auto map_node_to_field_using(State state,
+auto process_node_to_field_using(
+  omni::ryml::detail::node_accumulator<State> *result,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   Field field,
   node_call_priority<2>)
-  -> decltype(field.set_value(std::move(*mapping(std::move(state),
-    node, omni::type_t<typename Field::type>{}).value)),
-    with_diagnostics_t<compat::monostate>{}) {
-  auto result = omni::ryml::detail::make_node_accumulator(state);
+  -> decltype(field.set_value(std::move(*mapping(std::declval<State>(),
+    node, omni::type_t<typename Field::type>{}).value))) {
+  const auto error_policy = result->state.config.error_policy;
+  auto state = result->state;
   auto mapped = mapping(std::move(state),
     node, omni::type_t<typename Field::type>{});
-  result.append({
-    /*value=*/mapped.value
-      ? compat::make_optional(compat::monostate{}) : compat::nullopt,
+
+  if (mapped.diagnostics.issues.empty()) {
+    const bool succeeded = mapped.value && !result->stopped();
+    if (succeeded)
+      field.set_value(std::move(*mapped.value));
+
+    result->append(std::move(mapped.diagnostics), succeeded);
+    return;
+  }
+
+  auto checked = omni::ryml::detail::make_node_accumulator(result->state);
+  checked.result.diagnostics.config.error_policy = error_policy;
+  checked.append({
+    /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
+      : compat::nullopt,
     /*diagnostics=*/std::move(mapped.diagnostics),
   });
-
-  if (result.result.value)
+  if (checked.result.value)
     field.set_value(std::move(*mapped.value));
 
-  return std::move(result).finish();
+  result->append(std::move(checked).finish());
 }
 
 // Pointer-only mappings use the existing member when it has a safe reference.
@@ -79,37 +92,42 @@ auto map_node_to_field_using(State state,
   return std::move(result).finish();
 }
 
+// Mutation-only mappings retain their existing reference/copy adaptation.
+template <typename Mapping, typename Field, typename State>
+void process_node_to_field_using(
+  omni::ryml::detail::node_accumulator<State> *result,
+  const Mapping &mapping, ::ryml::ConstNodeRef node, Field field,
+  node_call_priority<0>) {
+  result->append(map_node_to_field_using(result->state,
+    mapping, node, field, node_call_priority<1>{}));
+}
+
 } // namespace detail
 } // namespace reflected_scope
 
 namespace detail {
 
-// Pending members retain their selected input node. Canonical presence is
-// known before classification, so aliases can be ignored regardless of order.
+// The document scan selects nodes directly. Only aliases need a separate
+// canonical-presence query, cached so repeated aliases do not repeat lookup.
 struct record_entry {
   compat::string_view name;
   ::ryml::ConstNodeRef node;
-  bool has_canonical;
+  compat::optional<bool> canonical_presence;
 };
 
-// C++11 lambda equivalent: prepare each member's canonical candidate.
+// C++11 lambda equivalent: initialize the fixed field table in schema order.
 struct cpp11_collect_members {
-  const ::ryml::ConstNodeRef &node;
-  std::vector<record_entry> &pending;
-
-  template <typename _F>
-  void operator()(omni::data_member_meta_t<_F> field) const {
-    const auto canonical = this->node.find_child(c4::to_csubstr(field.name()));
-    this->pending.push_back({
-      /*name=*/field.name(),
-      /*node=*/canonical,
-      /*has_canonical=*/!canonical.invalid(),
-    });
+  template <typename... Fields>
+  std::array<record_entry, sizeof...(Fields)> operator()(
+    const Fields &...fields) const {
+    return {{record_entry{
+      /*name=*/fields.name(),
+      /*node=*/{},
+      /*canonical_presence=*/compat::nullopt,
+    }...}};
   }
 };
 
-// Only absent optional fields are initialized here. Other field types must
-// not instantiate assignment just because the runtime presence check fails.
 OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
   (traits::is_optional<T>::value && std::is_default_constructible<T>::value
     && std::is_assignable<T &, T &&>::value))
@@ -129,80 +147,71 @@ OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
   (!traits::is_optional<T>::value || !std::is_default_constructible<T>::value))
 void initialize_missing(Field) {}
 
-// A bound member operation is inert until the fold supplies its current state.
-template <typename Record, typename _F>
-struct record_member_event {
-  omni::data_member_binding_t<Record, _F> field;
-  const std::vector<record_entry> &pending;
-  ::ryml::ConstNodeRef object;
-  bool check_presence;
+template <typename State, typename Field>
+bool process_record_presence(node_accumulator<State> *result,
+  ::ryml::ConstNodeRef object, const record_entry &entry, Field field) {
+  if (!entry.node.invalid())
+    return true;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(State state) const
-    -> with_diagnostics_t<compat::monostate, diagnostics> {
-    const compat::string_view name{this->field.name()};
-    const auto entry = std::find_if(this->pending.begin(), this->pending.end(),
-      [name](const record_entry &entry) { return name == entry.name; });
+  using member_type = typename Field::type;
+  if (traits::is_optional<member_type>::value
+    && std::is_default_constructible<member_type>::value) {
+    initialize_missing(field);
+    return !result->stopped();
+  }
 
-    const auto node = entry == this->pending.end()
-      ? ::ryml::ConstNodeRef{} : entry->node;
+  // The absent field has no node; derive its path from the object.
+  auto missing = core::make_issue(json::issue_code::missing_field,
+    json::value_kind::unknown, ::ryml::ConstNodeRef{});
 
-    if (!this->check_presence && !node.invalid())
-      return reflected_scope::detail::map_node_to_field(std::move(state),
-        node,
-        this->field);
+  missing.path = core::node_path(object);
+  missing.path.push_back({{entry.name.data(), entry.name.size()},
+    compat::nullopt});
+  result->report(std::move(missing));
+  return !result->stopped();
+}
 
-    auto result = make_node_accumulator(std::move(state));
-    if (!this->check_presence || !node.invalid())
-      return std::move(result).finish();
-
-    using member_type = typename omni::data_member_meta_t<_F>::type;
-    if (traits::is_optional<member_type>::value
-      && std::is_default_constructible<member_type>::value) {
-      initialize_missing(this->field);
-      return std::move(result).finish();
-    }
-
-    // The absent field has no node; derive its path from the containing object.
-    auto missing = core::make_issue(json::issue_code::missing_field,
-      json::value_kind::unknown, ::ryml::ConstNodeRef{});
-
-    missing.path = core::node_path(this->object);
-    missing.path.push_back({c4::to_csubstr(this->field.name()),
-      compat::nullopt});
-    result.report(std::move(missing));
-    return std::move(result).finish();
+// Only the stop flag crosses the fold; diagnostics stay in the local frame.
+struct cpp11_process_record_event {
+  template <typename Event>
+  fn::fold_control<bool> operator()(bool, const Event &event) const {
+    return event() ? fn::continue_with(true) : fn::stop_with(false);
   }
 };
 
-// C++11 lambda equivalent: defer node selection until the fold runs the event.
-struct cpp11_defer_member {
-  const std::vector<record_entry> &pending;
-  ::ryml::ConstNodeRef object;
-  bool check_presence;
+// Tuple indices keep bindings and selected nodes paired without another name
+// search. Parameterless reference-capturing lambdas also work in C++11.
+template <typename State, typename Members, std::size_t... Index>
+void process_record_members(node_accumulator<State> *result,
+  ::ryml::ConstNodeRef object, const Members &members,
+  const std::array<record_entry, sizeof...(Index)> &pending,
+  compat::index_sequence<Index...>) {
+  // Every closure references one shared frame instead of repeating its four
+  // bindings. This also keeps empty-record instantiations warning-free.
+  struct {
+    node_accumulator<State> *result;
+    ::ryml::ConstNodeRef object;
+    const Members &members;
+    const std::array<record_entry, sizeof...(Index)> &pending;
+  } frame{result, object, members, pending};
+  (void)frame;
 
-  template <typename Record, typename _F>
-  record_member_event<Record, _F> operator()(
-    omni::data_member_binding_t<Record, _F> field) const {
-    return {
-      /*field=*/field,
-      /*pending=*/this->pending,
-      /*object=*/this->object,
-      /*check_presence=*/this->check_presence,
-    };
-  }
-};
+  const auto events = std::tuple_cat(
+    std::make_tuple([&frame]() -> bool {
+      return process_record_presence(frame.result, frame.object,
+        frame.pending[Index], std::get<Index>(frame.members));
+    }...),
 
-// C++11 lambda equivalent: own diagnostics and budget accounting in the fold.
-struct cpp11_fold_member {
-  template <typename State, typename Event>
-  fn::fold_control<node_accumulator<State>> operator()(
-    node_accumulator<State> result, const Event &event) const {
-    result.append(event(result.state));
-    return result.stopped() ? fn::stop_with(std::move(result))
-                            : fn::continue_with(std::move(result));
-  }
-};
+    std::make_tuple([&frame]() -> bool {
+      if (!frame.pending[Index].node.invalid())
+        reflected_scope::detail::map_node_to_field(frame.result,
+          frame.pending[Index].node, std::get<Index>(frame.members));
+
+      return !frame.result->stopped();
+    }...));
+
+  events | fn::try_fold(cpp11_process_record_event{}, fn::continue_with(true));
+}
 
 template <typename State>
 struct cpp11_write_member {
@@ -242,12 +251,8 @@ auto to_record_t<NameByAlias>::operator()(State context,
     | fn::filter(fn::is_non_static);
 #endif
 
-  std::vector<omni::ryml::detail::record_entry> pending;
-  pending.reserve(std::tuple_size<decltype(fields)>::value);
-  fields | fn::each(omni::ryml::detail::cpp11_collect_members{
-    /*node=*/node,
-    /*pending=*/pending,
-  });
+  auto pending = compat::apply(omni::ryml::detail::cpp11_collect_members{},
+    fields);
 
   // Structural issues precede missing fields and value mapping, preserving
   // diagnostic order regardless of the document's member order.
@@ -272,13 +277,18 @@ auto to_record_t<NameByAlias>::operator()(State context,
             return *canonical == entry.name;
           });
       }
-      if (entry != pending.end() && entry->has_canonical)
-        continue;
+      if (entry != pending.end()) {
+        if (!entry->canonical_presence)
+          entry->canonical_presence = !node.find_child(
+            {entry->name.data(), entry->name.size()}).invalid();
+
+        if (*entry->canonical_presence)
+          continue;
+      }
     }
 
     const bool known = entry != pending.end();
-    const bool duplicate = known && !entry->node.invalid()
-      && entry->node.id() != child.id();
+    const bool duplicate = known && !entry->node.invalid();
 
     if (known && !duplicate) {
       entry->node = child;
@@ -321,23 +331,10 @@ auto to_record_t<NameByAlias>::operator()(State context,
   const auto members = binding.accessible_data_members()
     | fn::filter(fn::is_non_static);
 
-  const auto events = fn::concat(
-    members | fn::map(omni::ryml::detail::cpp11_defer_member{
-      /*pending=*/pending,
-      /*object=*/node,
-      /*check_presence=*/true,
-    }),
+  omni::ryml::detail::process_record_members(&result, node, members, pending,
+    compat::make_index_sequence<std::tuple_size<decltype(fields)>::value>{});
 
-    members | fn::map(omni::ryml::detail::cpp11_defer_member{
-      /*pending=*/pending,
-      /*object=*/node,
-      /*check_presence=*/false,
-    }));
-
-  auto folded = events | fn::try_fold(omni::ryml::detail::cpp11_fold_member{},
-    fn::continue_with(std::move(result)));
-
-  return std::move(folded.value).finish();
+  return std::move(result).finish();
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),

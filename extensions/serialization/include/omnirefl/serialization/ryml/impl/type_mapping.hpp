@@ -2,6 +2,7 @@
 
 #include <c4/format.hpp>
 
+#include <cassert>
 #include <limits>
 #include <type_traits>
 #include <utility>
@@ -123,16 +124,12 @@ namespace detail {
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Field, typename State),
   (is_read_state<State>::value))
-auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
-  -> with_diagnostics_t<compat::monostate> {
-  if (state.limit_exceeded())
-    return {
-      /*value=*/compat::nullopt,
-      /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
-    };
-
+void map_node_to_field(omni::ryml::detail::node_accumulator<State> *result,
+  ::ryml::ConstNodeRef node, Field field) {
+  // The record event fold stops before invoking any later field.
+  assert(!result->stopped());
   const auto mapping = mapping_to_type(omni::type_t<typename Field::type>{});
-  return map_node_to_field_using(std::move(state),
+  process_node_to_field_using(result,
     mapping,
     node,
     field,

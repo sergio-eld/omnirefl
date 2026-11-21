@@ -22,8 +22,8 @@ namespace detail {
 // declaration without depending on the later customization-point definitions.
 OMNI_CONSTRAINED_TEMPLATE((typename Field, typename State),
   (is_read_state<State>::value))
-auto map_node_to_field(State state, ::ryml::ConstNodeRef node, Field field)
-  -> with_diagnostics_t<compat::monostate>;
+void map_node_to_field(omni::ryml::detail::node_accumulator<State> *result,
+  ::ryml::ConstNodeRef node, Field field);
 
 } // namespace detail
 } // namespace reflected_scope
@@ -310,16 +310,24 @@ auto map_node_to_value(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) -> with_diagnostics_t<T> {
-  auto result = make_node_accumulator(state);
-  if (result.stopped())
-    return {compat::nullopt, std::move(result.result.diagnostics)};
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{state.config.error_policy, {}}, {}, {}}};
 
-  auto mapped = map_node_to_value_using(std::move(state),
+  // Retain the parent snapshot so only nonempty reports need accumulation.
+  const auto error_policy = state.config.error_policy;
+  auto mapped = map_node_to_value_using(state,
     mapping,
     node,
     type,
     /*priority=*/0);
 
+  if (mapped.diagnostics.issues.empty() && !state.limit_exceeded()) {
+    mapped.diagnostics.config.error_policy = error_policy;
+    return mapped;
+  }
+
+  auto result = make_node_accumulator(std::move(state));
+  result.result.diagnostics.config.error_policy = error_policy;
   result.append({
     /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
       : compat::nullopt,

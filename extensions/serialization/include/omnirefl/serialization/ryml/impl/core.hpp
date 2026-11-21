@@ -153,22 +153,43 @@ struct node_accumulator {
   }
 
   void append(with_diagnostics_t<compat::monostate, diagnostics> child) {
-    if (!child.value)
+    this->append(std::move(child.diagnostics), child.value.has_value());
+  }
+
+  // Field processing can consume a report without first wrapping it in a
+  // second result object. The decoded value stays available to its caller.
+  void append(diagnostics &&child, bool has_value) {
+    if (!has_value)
       this->result.value.reset();
 
-    // report() includes the warning-limit error at the crossing warning.
-    // Stopping there also skips a marker already included by the child.
-    for (auto &entry : child.diagnostics.issues) {
-      if (this->stopped())
-        break;
+    // A single hard error needs no warning-limit expansion. Transfer its
+    // storage instead of allocating another issue vector at each ancestor.
+    if (child.issues.size() == 1 && !child.issues.front().warning
+      && this->result.diagnostics.issues.empty() && !this->stopped()) {
+      ++this->state.error_count;
+      this->result.value.reset();
+      this->result.diagnostics.issues = std::move(child.issues);
+    } else {
+      // report() includes the warning-limit error at the crossing warning.
+      // Stopping there also skips a marker already included by the child.
+      for (auto &entry : child.issues) {
+        if (this->stopped())
+          break;
 
-      this->report(std::move(entry));
+        this->report(std::move(entry));
+      }
     }
 
-    if (!child.diagnostics.parse_error_message.empty())
-      this->result.diagnostics.parse_error_message = append_diagnostics_t{}(
-        std::move(this->result.diagnostics.parse_error_message),
-        std::move(child.diagnostics.parse_error_message));
+    if (!child.parse_error_message.empty()) {
+      if (this->result.diagnostics.parse_error_message.empty())
+        this->result.diagnostics.parse_error_message =
+          std::move(child.parse_error_message);
+      else {
+        this->result.diagnostics.parse_error_message += '\n';
+        this->result.diagnostics.parse_error_message +=
+          child.parse_error_message;
+      }
+    }
 
     if (this->stopped())
       this->result.value.reset();
@@ -225,13 +246,13 @@ auto read_scalar(State context,
   omni::type_t<T>,
   json::value_kind expected)
   -> with_diagnostics_t<T, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(
-    std::move(context));
   const auto scalar = node.val();
   const auto converted = omni::ryml::detail::from_chars<compat::remove_cv_t<T>>(
     scalar);
 
   if (!converted) {
+    auto result = omni::ryml::detail::make_node_accumulator(
+      std::move(context));
     result.report(core::make_issue(
       converted.error(),
       expected,
@@ -243,7 +264,11 @@ auto read_scalar(State context,
 
   return {
     /*value=*/ *converted,
-    /*diagnostics=*/std::move(result.result.diagnostics),
+    /*diagnostics=*/{
+      /*config=*/{context.config.error_policy, {}},
+      /*issues=*/{},
+      /*parse_error_message=*/{},
+    },
   };
 }
 
