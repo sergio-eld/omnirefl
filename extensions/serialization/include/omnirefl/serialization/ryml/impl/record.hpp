@@ -277,12 +277,13 @@ auto to_record_t<NameByAlias>::operator()(State context,
     const compat::string_view input_name{name.str, name.len};
     auto direct = table.lookup(input_name);
     const auto canonical = direct
-      ? compat::optional<compat::string_view>{}
+      ? compat::decay_t<decltype(
+          compat::invoke(this->name_by_alias, input_name))>{}
       : compat::invoke(this->name_by_alias, input_name);
     const auto field = std::move(direct).or_else([&table, &canonical](
       fn::not_found_t<compat::string_view> missing) {
       if (canonical)
-        return table.lookup(*canonical);
+        return table.lookup(compat::string_view{*canonical});
 
       return decltype(table.lookup(missing.name))::failure(std::move(missing));
     });

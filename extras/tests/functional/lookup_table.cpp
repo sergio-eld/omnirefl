@@ -134,6 +134,14 @@ struct read_category {
   int operator()(const int &&value) const { return value + 4; }
 };
 
+template <typename Table, typename Key, typename = void>
+struct accepts_key: std::false_type {};
+
+template <typename Table, typename Key>
+struct accepts_key<Table, Key, omni::compat::void_t<decltype(
+  std::declval<const Table &>().lookup(std::declval<Key>()))>>:
+    std::true_type {};
+
 // Independent fixture text also needs constexpr indexing with C++11 libc++.
 template <std::size_t Size>
 struct name_text {
@@ -443,6 +451,53 @@ TEST(fn_lookup_table, preserves_the_value_category_for_transformations) {
     std::move(value).transform(lookup_test::read_category{}).value());
   EXPECT_EQ(11,
     std::move(constant).transform(lookup_test::read_category{}).value());
+}
+
+TEST(fn_lookup_table, copies_and_moves_const_values) {
+  const auto original = omni::fn::lookup_result_t<const int,
+    std::string>::success(7);
+  auto copied = original;
+  const auto moved = std::move(copied);
+
+  EXPECT_TRUE(moved.has_value());
+  if (moved.has_value()) {
+    EXPECT_EQ(7, moved.value());
+  }
+  EXPECT_EQ(7, original.value());
+}
+
+TEST(fn_lookup_table, copies_and_moves_const_errors) {
+  const auto original = omni::fn::lookup_result_t<int,
+    const std::string>::failure("missing");
+  auto copied = original;
+  const auto moved = std::move(copied);
+
+  EXPECT_FALSE(moved.has_value());
+  if (!moved.has_value()) {
+    EXPECT_EQ("missing", moved.error());
+  }
+  EXPECT_EQ("missing", original.error());
+}
+
+TEST(fn_lookup_table, accepts_only_narrow_byte_key_expressions) {
+  constexpr auto table = omni::fn::lookup_table(lookup_test::account_id{7});
+  static_assert(lookup_test::accepts_key<decltype(table), std::string>::value,
+    "Narrow strings are lookup keys");
+  static_assert(lookup_test::accepts_key<decltype(table),
+    const char (&)[11]>::value, "Narrow literals are lookup keys");
+  static_assert(!lookup_test::accepts_key<decltype(table), int>::value,
+    "Non-key arguments do not participate in lookup");
+  static_assert(!lookup_test::accepts_key<decltype(table), std::wstring>::value,
+    "Wide text is not a narrow byte key");
+  static_assert(!lookup_test::accepts_key<decltype(table),
+    std::array<int, 2>>::value, "Multi-byte ranges are not narrow byte keys");
+
+  const auto found = table.lookup("account_id")
+    .transform(lookup_test::read_value{});
+  EXPECT_TRUE(found.has_value());
+  if (found.has_value()) {
+    EXPECT_EQ(7, found.value());
+  }
 }
 
 TEST(fn_lookup_table, transforms_to_void_and_binds_without_arguments) {

@@ -249,7 +249,6 @@ bool run(key_view name, const std::string &document,
     {"literal", Source::literal}, {"loop", Source::loop},
     {"lookup", Source::lookup}, {"reference", key_size},
   }};
-  // C++11 does not require constexpr std::array::size (notably in libc++).
   constexpr auto strategy_count = std::tuple_size<decltype(strategies)>::value;
   for (const auto &input : inputs) {
     std::array<std::vector<double>, strategy_count> samples;

@@ -152,13 +152,14 @@ struct lookup_storage_base {
   constexpr lookup_storage_base(lookup_error_tag tag, Args &&...args)
     : available(false), data(tag, std::forward<Args>(args)...) {}
 
+  // The union provides writable storage even when an alternative is const.
   lookup_storage_base(const lookup_storage_base &other)
     : available(other.available) {
     if (this->available)
-      ::new (static_cast<void *>(std::addressof(this->data.value)))
+      ::new (static_cast<void *>(std::addressof(this->data)))
         Value(other.data.value);
     else
-      ::new (static_cast<void *>(std::addressof(this->data.error)))
+      ::new (static_cast<void *>(std::addressof(this->data)))
         Error(other.data.error);
   }
 
@@ -167,10 +168,10 @@ struct lookup_storage_base {
       && std::is_nothrow_move_constructible<Error>::value)
     : available(other.available) {
     if (this->available)
-      ::new (static_cast<void *>(std::addressof(this->data.value)))
+      ::new (static_cast<void *>(std::addressof(this->data)))
         Value(std::move(other.data.value));
     else
-      ::new (static_cast<void *>(std::addressof(this->data.error)))
+      ::new (static_cast<void *>(std::addressof(this->data)))
         Error(std::move(other.data.error));
   }
 
@@ -1094,6 +1095,22 @@ struct lookup_search_policy<Data, true>: lookup_linear_scan<Data> {};
 template <typename Data>
 struct lookup_search_policy<Data, false>: lookup_sampled_search<Data> {};
 
+template <typename Key, typename = void>
+struct is_lookup_key: std::false_type {};
+
+template <typename Key>
+struct is_lookup_key<Key, compat::void_t<
+  decltype(std::declval<const Key &>().size()),
+  decltype(std::declval<const Key &>().data()),
+  decltype(std::declval<const Key &>()[std::size_t{}])>>:
+    compat::conjunction<
+      std::is_integral<compat::remove_cvref_t<decltype(
+        std::declval<const Key &>().size())>>,
+      std::is_convertible<decltype(std::declval<const Key &>().data()),
+        const char *>,
+      std::is_convertible<decltype(std::declval<const Key &>()[std::size_t{}]),
+        char>> {};
+
 } // namespace detail
 
 /** One borrowed table entry, retaining its concrete type for visitation.
@@ -1118,8 +1135,9 @@ struct lookup_selection_t {
  * Meta-like entries expose a static constexpr name() returning a narrow,
  * null-terminated string or a string-like value with size() and operator[].
  * Names must be unique. Supplied entries are copied into the table.
- * lookup keys provide size(), data(), and operator[]. Results own a decayed
- * key on failure and borrow the selected descriptor on success.
+ * lookup keys provide integral size(), data() convertible to const char*,
+ * and indexed characters. Results own a decayed key on failure and borrow
+ * the selected descriptor on success.
  * @pre The table outlives its lookup results and their untransformed values. */
 template <typename... Meta>
 struct lookup_table_t {
@@ -1136,7 +1154,9 @@ struct lookup_table_t {
    * lookup :: name -> result<selection<meta...>, not_found<name>>
    * transform/and_then pass the selected meta directly to their callback.
    * or_else can return another lookup to resolve an alias. */
-  template <typename Key>
+  OMNI_CONSTRAINED_TEMPLATE((typename Key),
+    (detail::is_lookup_key<typename std::remove_reference<Key>::type>::value
+      && std::is_constructible<compat::decay_t<Key>, Key &&>::value))
   auto lookup(Key &&key) const &
     -> lookup_result_t<lookup_selection_t<entries_type>,
       not_found_t<compat::decay_t<Key>>> {
