@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -60,14 +61,8 @@ struct aggregate_record_value {
   using result_type = with_diagnostics_t<T>;
 
   template <typename Frame>
-  result_type operator()(Frame *frame) const {
-    if (!frame->result->result.value)
-      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
-
-    return {
-      compat::make_optional<T>(aggregate_record_constructor<T, Frame>{frame}),
-      std::move(frame->result->result.diagnostics),
-    };
+  void operator()(Frame *frame) const {
+    frame->value->emplace(aggregate_record_constructor<T, Frame>{frame});
   }
 };
 
@@ -76,14 +71,9 @@ struct bind_record_value {
   using result_type = with_diagnostics_t<T>;
 
   template <typename Frame>
-  result_type operator()(Frame *frame) const {
-    if (!frame->result->result.value)
-      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
-
-    auto value = compat::make_optional<T>();
-    frame->values | fn::each(assign_record_fields<T>{&*value});
-    return {std::move(value),
-      std::move(frame->result->result.diagnostics)};
+  void operator()(Frame *frame) const {
+    frame->values | fn::each(assign_record_fields<T>{
+      std::addressof(frame->value->emplace())});
   }
 };
 
@@ -93,12 +83,9 @@ struct aggregate_record_into {
   T *into;
 
   template <typename Frame>
-  result_type operator()(Frame *frame) const {
-    if (!frame->result->result.value)
-      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
-
+  void operator()(Frame *frame) const {
     *this->into = omni::refl::aggregate_into<T>(frame->values);
-    return {compat::monostate{}, std::move(frame->result->result.diagnostics)};
+    frame->value->emplace();
   }
 };
 
@@ -108,12 +95,9 @@ struct bind_record_into {
   T *into;
 
   template <typename Frame>
-  result_type operator()(Frame *frame) const {
-    if (!frame->result->result.value)
-      return {compat::nullopt, std::move(frame->result->result.diagnostics)};
-
+  void operator()(Frame *frame) const {
     frame->values | fn::each(assign_record_fields<T>{this->into});
-    return {compat::monostate{}, std::move(frame->result->result.diagnostics)};
+    frame->value->emplace();
   }
 };
 
@@ -153,13 +137,13 @@ bool process_record_presence(node_accumulator<State> *result,
   return !result->stopped();
 }
 
-// Only a frame pointer crosses the fold; diagnostics and field values stay put.
+// Events capture their frame; the fold carries only continuation success.
 struct cpp11_process_record_event {
-  template <typename Frame, typename Event>
-  auto operator()(Frame *frame, const Event &event) const
-    -> compat::expected<Frame *, compat::monostate> {
+  template <typename Event>
+  auto operator()(compat::monostate, const Event &event) const
+    -> compat::expected<compat::monostate, compat::monostate> {
     if (event())
-      return frame;
+      return compat::monostate{};
 
     return compat::unexpected<compat::monostate>{compat::monostate{}};
   }
@@ -188,7 +172,8 @@ auto process_record_members(node_accumulator<State> *result,
     ::ryml::ConstNodeRef object;
     Values &values;
     const std::array<::ryml::id_type, sizeof...(Index)> &pending;
-  } frame{result, object, *values, pending};
+    compat::optional<typename Finalizer::result_type::value_type> *value;
+  } frame{result, object, *values, pending, nullptr};
 
   const auto events = std::tuple_cat(
     std::make_tuple(
@@ -196,13 +181,18 @@ auto process_record_members(node_accumulator<State> *result,
     std::make_tuple(
       cpp11_record_member_event<Index, false, decltype(frame)>{frame}...));
 
-  auto finalized = std::move(events | fn::try_fold(cpp11_process_record_event{},
-    compat::expected<decltype(frame) *, compat::monostate>{&frame}))
-      .transform(std::move(finalizer));
-  if (finalized)
-    return std::move(*finalized);
+  auto folded = events | fn::try_fold(cpp11_process_record_event{},
+    compat::expected<compat::monostate, compat::monostate>{
+      compat::monostate{}});
+  if (!result->result.value)
+    return {compat::nullopt, std::move(result->result.diagnostics)};
 
-  return {compat::nullopt, std::move(result->result.diagnostics)};
+  // The output starts after traversal, keeping it unaliased throughout the fold.
+  compat::optional<typename Finalizer::result_type::value_type> value{};
+  frame.value = &value;
+  static_cast<void>(std::move(folded).transform(
+    [&frame, &finalizer](compat::monostate) { finalizer(&frame); }));
+  return {std::move(value), std::move(result->result.diagnostics)};
 }
 
 template <typename State>
