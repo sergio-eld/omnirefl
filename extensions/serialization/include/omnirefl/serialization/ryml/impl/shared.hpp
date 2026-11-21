@@ -326,6 +326,15 @@ auto map_node_to_value(State state,
     return mapped;
   }
 
+  // Only the report leaves this call. One hard error needs neither warning
+  // expansion nor truncation, so there are no counters to materialize.
+  if (mapped.diagnostics.issues.size() == 1
+    && !mapped.diagnostics.issues.front().warning && !state.limit_exceeded()) {
+    mapped.value.reset();
+    mapped.diagnostics.config.error_policy = error_policy;
+    return mapped;
+  }
+
   auto result = make_node_accumulator(std::move(state));
   result.result.diagnostics.config.error_policy = error_policy;
   result.append({
