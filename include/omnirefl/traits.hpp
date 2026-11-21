@@ -66,6 +66,38 @@ struct select<case_<Condition, Operation>, Case...> {
 
 namespace detail {
 
+// Unevaluated callback for probing and_then without an expected dependency.
+template <typename Result>
+struct expected_continuation {
+  template <typename... Value>
+  Result operator()(Value &&...) const;
+};
+
+template <typename T, typename = void>
+struct expected_like_impl: std::false_type {};
+
+template <typename T>
+struct expected_like_impl<T, compat::void_t<typename T::value_type,
+  typename T::error_type,
+  decltype(std::declval<const T &>().has_value()),
+  decltype(std::declval<T &&>().value()),
+  decltype(*std::declval<T &&>()),
+  decltype(std::declval<T &&>().error()),
+  decltype(std::declval<T &&>().and_then(expected_continuation<T>{}))>>:
+    compat::conjunction<
+      std::is_same<T, decltype(std::declval<T &&>().and_then(
+        expected_continuation<T>{}))>,
+      std::is_convertible<decltype(std::declval<const T &>().has_value()), bool>,
+      std::is_same<compat::remove_cvref_t<decltype(
+        std::declval<T &&>().value())>,
+        compat::remove_cv_t<typename T::value_type>>,
+      std::is_same<compat::remove_cvref_t<decltype(
+        *std::declval<T &&>())>,
+        compat::remove_cv_t<typename T::value_type>>,
+      std::is_same<compat::remove_cvref_t<decltype(
+        std::declval<T &&>().error())>,
+        compat::remove_cv_t<typename T::error_type>>> {};
+
 // Function templates cannot be partially specialized, so the public `is`
 // overloads delegate template-shape matching to these class templates.
 template <template <typename...> class, typename>
@@ -267,6 +299,21 @@ OMNI_FUNCTION_SIGNATURE_MEMBER(const volatile && noexcept);
 
 #undef OMNI_FUNCTION_SIGNATURE_MEMBER
 
+/** Expected-like value/error storage, independent of its implementation.
+ * Requires value_type, error_type, has_value(), dereference, and value/error
+ * accessors preserving their declared types. Qualifiers on T
+ * do not affect recognition. Rvalue and_then must preserve the expected type.
+ * No expected library is included by this trait. */
+template <typename T>
+struct is_expected_like:
+    detail::expected_like_impl<compat::remove_cvref_t<T>> {};
+
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+/** Value of is_expected_like. */
+template <typename T>
+constexpr bool is_expected_like_v = is_expected_like<T>::value;
+#endif
+
 /**
  * Report whether a type-parameter-only class template can construct from
  * `Values` using CTAD or the pre-C++17 decayed-argument fallback.
@@ -291,6 +338,10 @@ using type_size_template_construct_result_t =
   typename detail::type_size_template_construct_result<Template, Value>::type;
 
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+/** Expected-like value/error storage. See is_expected_like. */
+template <typename T>
+concept expected_like = is_expected_like<T>::value;
+
 /** Require brace construction of `To` from `Value`. */
 template <typename To, typename Value>
 concept brace_constructible_from = is_brace_constructible<To, Value>::value;

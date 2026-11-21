@@ -113,22 +113,31 @@ void process_node_to_field_using(
 
 namespace detail {
 
-// Typed comparisons expose the schema's literal names without a runtime
-// descriptor table. The fold stops at the matching field's schema index.
+// Literal comparisons return the first schema index, or the field count.
+template <std::size_t Index>
+std::size_t find_record_member_index(compat::string_view) { return Index; }
+
+template <std::size_t Index, typename Field, typename... Rest>
+std::size_t find_record_member_index(compat::string_view name,
+  Field field, Rest... rest) {
+  return name == compat::string_view{field.name()} ? Index
+    : find_record_member_index<Index + 1>(name, rest...);
+}
+
+// C++11 tuple unpacking uses a named callable instead of a generic lambda.
 struct cpp11_find_record_member {
   compat::string_view name;
 
-  template <typename Field>
-  fn::fold_control<std::size_t> operator()(std::size_t index, Field field) const {
-    return this->name == compat::string_view{field.name()}
-      ? fn::stop_with(index) : fn::continue_with(index + 1);
+  template <typename... Field>
+  std::size_t operator()(Field... field) const {
+    return find_record_member_index<0>(this->name, field...);
   }
 };
 
 template <typename Fields>
-std::size_t record_member_index(const Fields &fields, compat::string_view name) {
-  return (fields | fn::try_fold(cpp11_find_record_member{name},
-    fn::continue_with(std::size_t{}))).value;
+std::size_t record_member_index(const Fields &fields,
+  compat::string_view name) {
+  return compat::apply(cpp11_find_record_member{name}, fields);
 }
 
 OMNI_CONSTRAINED_TEMPLATE((typename Field, typename T = typename Field::type),
@@ -173,22 +182,47 @@ bool process_record_presence(node_accumulator<State> *result,
   return !result->stopped();
 }
 
-// Only the stop flag crosses the fold; diagnostics stay in the local frame.
+// Only continuation crosses the fold; diagnostics stay in the local frame.
 struct cpp11_process_record_event {
   template <typename Event>
-  fn::fold_control<bool> operator()(bool, const Event &event) const {
-    return event() ? fn::continue_with(true) : fn::stop_with(false);
+  auto operator()(compat::monostate, const Event &event) const
+    -> compat::expected<compat::monostate, compat::monostate> {
+    if (event())
+      return {};
+
+    return compat::unexpected<compat::monostate>{compat::monostate{}};
   }
 };
 
-// Tuple indices keep bindings and selected nodes paired without another name
-// search. Parameterless reference-capturing lambdas also work in C++11.
+// GCC 7 rejects pack expansions found only inside lambda bodies. Indexed
+// callables retain the same reference capture without that expansion.
+template <std::size_t Index, bool CheckPresence, typename Frame>
+struct cpp11_record_member_event {
+  Frame &frame;
+
+  bool operator()() const {
+    if (CheckPresence)
+      return process_record_presence(this->frame.result, this->frame.object,
+        this->frame.pending[Index], reflected_scope::detail::bind_record_member(
+          this->frame.into, std::get<Index>(this->frame.fields)));
+
+    if (this->frame.pending[Index] != ::ryml::NONE)
+      reflected_scope::detail::map_node_to_field(this->frame.result,
+        {this->frame.object.tree(), this->frame.pending[Index]},
+        reflected_scope::detail::bind_record_member(
+          this->frame.into, std::get<Index>(this->frame.fields)));
+
+    return !this->frame.result->stopped();
+  }
+};
+
+// Tuple indices keep bindings and selected nodes paired without another search.
 template <typename State, typename Record, typename Fields, std::size_t... Index>
 void process_record_members(node_accumulator<State> *result,
   ::ryml::ConstNodeRef object, Record *into, const Fields &fields,
   const std::array<::ryml::id_type, sizeof...(Index)> &pending,
   compat::index_sequence<Index...>) {
-  // Each closure references one shared frame instead of repeating its captures.
+  // Each event references one shared frame instead of repeating its captures.
   // This also keeps empty-record instantiations warning-free.
   struct {
     node_accumulator<State> *result;
@@ -200,23 +234,15 @@ void process_record_members(node_accumulator<State> *result,
   (void)frame;
 
   const auto events = std::tuple_cat(
-    std::make_tuple([&frame]() -> bool {
-      return process_record_presence(frame.result, frame.object,
-        frame.pending[Index], reflected_scope::detail::bind_record_member(
-          frame.into, std::get<Index>(frame.fields)));
-    }...),
+    std::make_tuple(
+      cpp11_record_member_event<Index, true, decltype(frame)>{frame}...),
 
-    std::make_tuple([&frame]() -> bool {
-      if (frame.pending[Index] != ::ryml::NONE)
-        reflected_scope::detail::map_node_to_field(frame.result,
-          {frame.object.tree(), frame.pending[Index]},
-          reflected_scope::detail::bind_record_member(
-            frame.into, std::get<Index>(frame.fields)));
+    std::make_tuple(
+      cpp11_record_member_event<Index, false, decltype(frame)>{frame}...));
 
-      return !frame.result->stopped();
-    }...));
-
-  events | fn::try_fold(cpp11_process_record_event{}, fn::continue_with(true));
+  // The frame retains failures; this result only controls further traversal.
+  static_cast<void>(events | fn::try_fold(cpp11_process_record_event{},
+    compat::expected<compat::monostate, compat::monostate>{}));
 }
 
 template <typename State>
