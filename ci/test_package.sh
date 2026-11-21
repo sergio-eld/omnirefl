@@ -196,6 +196,7 @@ test -d "$source/tests"
 set -- cmake \
   -S "$source" \
   -B "$build" \
+  -D_OMNI_CI_RUN=ON \
   -DBUILD_BENCHMARKS=OFF \
   -GNinja \
   -DCMAKE_BUILD_TYPE=Release \

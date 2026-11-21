@@ -275,28 +275,30 @@ auto to_record_t<NameByAlias>::operator()(State context,
 
     const auto name = child.key();
     const compat::string_view input_name{name.str, name.len};
-    const auto mapped_name = table.lookup(input_name);
-    auto index = mapped_name ? mapped_name.value().index : pending.size();
+    auto direct = table.lookup(input_name);
+    const auto canonical = direct
+      ? compat::optional<compat::string_view>{}
+      : compat::invoke(this->name_by_alias, input_name);
+    const auto field = std::move(direct).or_else([&table, &canonical](
+      fn::not_found_t<compat::string_view> missing) {
+      if (canonical)
+        return table.lookup(*canonical);
 
-    if (index == pending.size()) {
-      if (const auto canonical =
-        compat::invoke(this->name_by_alias, input_name)) {
-        const auto mapped_alias = table.lookup(*canonical);
-        index = mapped_alias ? mapped_alias.value().index : pending.size();
-        if (index != pending.size()) {
-          auto &presence = canonical_presence[index];
-          if (!presence)
-            presence = !node.find_child(
-              {canonical->data(), canonical->size()}).invalid();
+      return decltype(table.lookup(missing.name))::failure(std::move(missing));
+    });
 
-          if (*presence)
-            continue;
-        }
-      }
+    if (canonical && field) {
+      auto &presence = canonical_presence[field.value().index];
+      if (!presence)
+        presence = !node.find_child(
+          {canonical->data(), canonical->size()}).invalid();
+
+      if (*presence)
+        continue;
     }
 
-    const auto entry = index == pending.size() ? pending.end()
-      : pending.begin() + index;
+    const auto entry = field ? pending.begin() + field.value().index
+      : pending.end();
 
     const bool known = entry != pending.end();
     const bool duplicate = known && *entry != ::ryml::NONE;

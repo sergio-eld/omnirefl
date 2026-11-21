@@ -46,9 +46,18 @@ class lookup_result_t;
 template <typename Tuple>
 struct lookup_selection_t;
 
-// C++11 libc++ tuple constructors are not constexpr. Reuse the indexed
-// compatibility storage until standard tuple construction becomes constexpr.
-#if OMNI_CPLUSPLUS < 201402L
+// libc++ tuple construction is not constexpr in C++11. libstdc++ 7 tuple
+// move traits also exceed the default template depth with 64 entries. Reuse
+// indexed compatibility storage only where standard tuple storage hits these
+// constraints; newer libraries retain std::tuple.
+#if OMNI_CPLUSPLUS < 201402L \
+  || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE <= 7)
+#  define OMNI_FN_LOOKUP_INDEXED_ENTRIES 1
+#else
+#  define OMNI_FN_LOOKUP_INDEXED_ENTRIES 0
+#endif
+
+#if OMNI_FN_LOOKUP_INDEXED_ENTRIES
 namespace detail {
 
 template <typename... Meta>
@@ -1116,8 +1125,7 @@ template <typename... Meta>
 struct lookup_table_t {
   static_assert(detail::lookup_table_data<Meta...>::unique(),
     "lookup_table requires unique entry names");
-  // Standard tuple construction is constexpr starting in C++14.
-#if OMNI_CPLUSPLUS < 201402L
+#if OMNI_FN_LOOKUP_INDEXED_ENTRIES
   using entries_type = detail::lookup_entries<Meta...>;
 #else
   using entries_type = std::tuple<Meta...>;
@@ -1168,8 +1176,8 @@ constexpr lookup_table_t<Meta...> lookup_table(const Meta &...meta) {
   return {/*entries=*/typename lookup_table_t<Meta...>::entries_type{meta...}};
 }
 
-// C++11 tuple input must be unpacked into the constexpr-compatible storage.
-#if OMNI_CPLUSPLUS < 201402L
+// Tuple input must be unpacked when indexed storage replaces std::tuple.
+#if OMNI_FN_LOOKUP_INDEXED_ENTRIES
 namespace detail {
 
 template <typename... Meta, std::size_t... Index>
@@ -1190,7 +1198,7 @@ constexpr lookup_table_t<Meta...> lookup_table(
 template <typename... Meta>
 constexpr lookup_table_t<Meta...> lookup_table(
   const std::tuple<Meta...> &meta) {
-#if OMNI_CPLUSPLUS < 201402L
+#if OMNI_FN_LOOKUP_INDEXED_ENTRIES
   return detail::lookup_table_from_tuple(meta,
     compat::make_index_sequence<sizeof...(Meta)>{});
 #else
@@ -1200,3 +1208,9 @@ constexpr lookup_table_t<Meta...> lookup_table(
 
 } // namespace fn
 } // namespace omni
+
+#undef OMNI_FN_LOOKUP_INDEXED_ENTRIES
+
+// TODO: [medium] Investigate slower small-table lookup on shuffled queries
+// versus literal metadata-name comparisons; see
+// extras/benchmarks/lookup_table/main.cpp. Preserve ordered-query performance.
