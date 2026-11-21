@@ -18,6 +18,9 @@
 
 namespace omni {
 
+template <typename T>
+struct type_t;
+
 // Only backend-independent JSON/YAML mapping contracts belong here.
 namespace json {
 
@@ -648,15 +651,68 @@ transform_diagnostics :: (Diagnostics -> Report) -> with_diagnostics<T, Report>
   }
 };
 
+namespace detail {
+
+// The C++11 result is defined after the built-in mapping types are complete.
+template <typename T>
+struct to_type_cpp11_trailing_return;
+
+} // namespace detail
+
+namespace reflected_scope {
+
+/** Callable form of the node-to-type customization lookup.
+ *
+```
+mapping_to_type :: (state, type<T>) -> Mapping
+```
+ * State is accepted for compatibility with local mapping selectors.
+ * The default selection depends only on T. */
+struct mapping_to_type_t {
+  template <typename State, typename T>
+  OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
+    OMNI_CPP11_TRAILING_RETURN(
+      typename omni::ryml::detail::to_type_cpp11_trailing_return<T>::type);
+};
+
+} // namespace reflected_scope
+
+namespace detail {
+
+// Default states can be constructed without including type_mapping.hpp.
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr reflected_scope::mapping_to_type_t default_map_node{};
+#else
+static constexpr const reflected_scope::mapping_to_type_t &default_map_node =
+  compat::detail::shared_state<reflected_scope::mapping_to_type_t>::value;
+#endif
+
+} // namespace detail
+
 /** Deserialization configuration and traversal progress passed to readers.
- * Config is borrowed. Copies do not copy configuration or allocate storage.
+ * Config and the mapping selector are borrowed. Copies do not copy their
+ * contents or allocate storage.
  * Counters include issues reported by preceding operations in the enclosing
  * traversal. */
-template <typename Config = omni::ryml::config_t<>>
+template <typename Config = omni::ryml::config_t<>,
+  typename MapNode = reflected_scope::mapping_to_type_t>
 struct read_state_t {
   const Config &config;
   std::size_t error_count;
   std::size_t warning_count;
+
+  // (state, type<T>) -> mapping callable; borrowed for the traversal's lifetime.
+  const MapNode &map_node OMNI_CPP14_DEFAULT_INIT(
+    detail::default_map_node);
+
+#if 201402L > OMNI_CPLUSPLUS
+  // C++11 aggregates cannot provide the default for this reference member.
+  constexpr read_state_t(const Config &options, std::size_t errors,
+    std::size_t warnings, const MapNode &mapping =
+      detail::default_map_node)
+    : config(options), error_count(errors), warning_count(warnings),
+      map_node(mapping) {}
+#endif
 
   /** Whether an error or warning budget has been exceeded. */
   constexpr bool limit_exceeded() const {

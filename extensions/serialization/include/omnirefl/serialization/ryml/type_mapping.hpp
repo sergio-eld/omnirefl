@@ -552,9 +552,6 @@ struct from_type_t: traits::cp::unavailable {};
 namespace detail {
 
 template <typename T>
-struct to_type_cpp11_trailing_return;
-
-template <typename T>
 struct from_type_cpp11_trailing_return;
 
 } // namespace detail
@@ -753,3 +750,30 @@ struct from_type_cpp11_trailing_return {
 #endif
 
 #include <omnirefl/serialization/ryml/impl/type_mapping.hpp>
+
+namespace omni {
+namespace ryml {
+namespace reflected_scope {
+
+template <typename State, typename T>
+OMNI_CPP14_CONSTEXPR auto mapping_to_type_t::operator()(const State &,
+  omni::type_t<T> type) const
+  OMNI_CPP11_TRAILING_RETURN(
+    typename omni::ryml::detail::to_type_cpp11_trailing_return<T>::type) {
+  return reflected_scope::mapping_to_type(type);
+}
+
+namespace fn {
+
+/** Default local mapping selector; see reflected_scope::mapping_to_type. */
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr mapping_to_type_t mapping_to_type{};
+#else
+static constexpr const mapping_to_type_t &mapping_to_type =
+  compat::detail::shared_state<mapping_to_type_t>::value;
+#endif
+
+} // namespace fn
+} // namespace reflected_scope
+} // namespace ryml
+} // namespace omni

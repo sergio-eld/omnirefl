@@ -15,8 +15,9 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
   -> with_diagnostics_t<T, diagnostics> {
+  const auto mapping = compat::invoke(context.map_node, context, type);
   return omni::ryml::detail::map_node_to_value(std::move(context),
-    omni::ryml::reflected_scope::mapping_to_type(type), node, type);
+    mapping, node, type);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -28,7 +29,7 @@ auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
     result.result.value.reset();
   else {
     const auto mapping =
-      omni::ryml::reflected_scope::mapping_to_type(omni::type_t<T>{});
+      compat::invoke(context.map_node, context, omni::type_t<T>{});
 
     result.append(omni::ryml::detail::read_into(std::move(context),
       mapping,
@@ -51,59 +52,18 @@ void write_node(State context, const T &value, ::ryml::NodeRef node) {
 
 namespace detail {
 
-// An explicit default keeps non-reflected entry routes independent of metadata.
-template <typename T, typename Default>
-OMNI_CPP14_CONSTEXPR auto registered_mapping(omni::type_t<T>,
-  const Default &mapping_default)
-  OMNI_CPP11_TRAILING_RETURN(decltype(omni::ryml::detail::first_available(
-    cp::to_type_t<T>{}, traits::cp::unavailable{}, mapping_default))) {
-  const cp::to_type_t<T> mapping_t{};
-  const auto mapping_var =
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-    cp::to_type<T>;
-#else
-    traits::cp::unavailable{};
-#endif
-
-  static_assert(traits::cp::unavailable{} == mapping_t
-      || traits::cp::unavailable{} == mapping_var,
-    "Specialize either cp::to_type_t or cp::to_type, not both");
-
-  const auto mapping = omni::ryml::detail::first_available(
-    mapping_t, mapping_var, mapping_default);
-
-  static_assert(std::is_trivially_copyable<decltype(mapping)>::value
-      && std::is_copy_constructible<decltype(mapping)>::value,
-    "Node mapping callables must be trivially copyable and copy-constructible");
-
-  return mapping;
-}
-
-template <typename Default>
-struct map_registered_or {
+// A callable alternative for non-reflected routes in the discovery switch.
+struct map_selected {
   template <typename T, typename State>
-  auto operator()(State context,
-    ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const
-    -> with_diagnostics_t<T, diagnostics> {
-    return omni::ryml::detail::map_node_to_value(std::move(context),
-      registered_mapping(type, Default{}), node, type);
+  auto operator()(State context, ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T> {
+    return read_node(std::move(context), node, type);
   }
 
   template <typename T, typename State>
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate, diagnostics> {
-    auto result = omni::ryml::detail::make_node_accumulator(context);
-    if (context.limit_exceeded())
-      result.result.value.reset();
-    else
-      result.append(omni::ryml::detail::read_into(std::move(context),
-        registered_mapping(omni::type_t<T>{}, Default{}),
-        node,
-        into,
-        /*priority=*/0));
-
-    return std::move(result).finish();
+    -> with_diagnostics_t<compat::monostate> {
+    return read_node(std::move(context), node, into);
   }
 };
 
@@ -129,10 +89,7 @@ auto map_to_fundamental_t::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) const
   -> with_diagnostics_t<T, diagnostics> {
-  return detail::map_registered_or<default_to_arithmetic_t>{}(
-    std::move(context),
-    node,
-    type);
+  return read_node(std::move(context), node, type);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -143,10 +100,7 @@ auto map_to_fundamental_t::operator()(State context,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
-  return detail::map_registered_or<default_to_arithmetic_t>{}(
-    std::move(context),
-    node,
-    into);
+  return read_node(std::move(context), node, into);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -156,10 +110,7 @@ auto map_to_string_like_t::operator()(State context,
   ::ryml::ConstNodeRef node,
   omni::type_t<T> type) const
   -> with_diagnostics_t<T, diagnostics> {
-  return detail::map_registered_or<default_to_string_like_t>{}(
-    std::move(context),
-    node,
-    type);
+  return read_node(std::move(context), node, type);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -170,10 +121,7 @@ auto map_to_string_like_t::operator()(State context,
   T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
-  return detail::map_registered_or<default_to_string_like_t>{}(
-    std::move(context),
-    node,
-    into);
+  return read_node(std::move(context), node, into);
 }
 
 namespace detail {
@@ -189,7 +137,8 @@ struct cpp11_lambda_read_value {
   auto operator()(omni::meta_t<_M, Entity>) const
     -> with_diagnostics_t<T> {
     const auto mapping =
-      omni::ryml::reflected_scope::mapping_to_type(omni::type_t<T>{});
+      compat::invoke(this->context.map_node, this->context,
+        omni::type_t<T>{});
 
     return omni::ryml::detail::map_node_to_value(this->context,
       mapping,
@@ -257,8 +206,7 @@ auto map_to_sequence_t::operator()(State context,
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
     traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_registered_or<
-      decltype(default_to_range(omni::type_t<T>{}))>>::type{};
+    detail::map_selected>::type{};
 
   return map(std::move(context), node, type);
 }
@@ -274,8 +222,7 @@ auto map_to_sequence_t::operator()(State context,
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
     traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_registered_or<
-      decltype(default_to_range(omni::type_t<T>{}))>>::type{};
+    detail::map_selected>::type{};
 
   return map(std::move(context), node, into);
 }
@@ -290,8 +237,7 @@ auto map_to_optional_t::operator()(State context,
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
     traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_registered_or<
-      decltype(default_to_optional_like(omni::type_t<T>{}))>>::type{};
+    detail::map_selected>::type{};
 
   return map(std::move(context), node, type);
 }
@@ -307,8 +253,7 @@ auto map_to_optional_t::operator()(State context,
   using target = typename detail::reflection_target<T>::type;
   constexpr auto map = typename traits::select<
     traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_registered_or<
-      decltype(default_to_optional_like(omni::type_t<T>{}))>>::type{};
+    detail::map_selected>::type{};
 
   return map(std::move(context), node, into);
 }
@@ -335,8 +280,9 @@ auto parse_error_diagnostics(Config &&options, std::string message)
     tree, std::move(report));
 }
 
-template <typename T, typename Config, typename Destination>
-auto deserialize(Config &&options, Destination destination, std::string source)
+template <typename T, typename Config, typename MapNode, typename Destination>
+auto deserialize(Config &&options, const MapNode &map_node,
+  Destination destination, std::string source)
   -> with_diagnostics_t<T, diagnostics_result_t<Config>> {
   auto parsed = core::parse(std::move(source));
   if (!parsed)
@@ -346,8 +292,8 @@ auto deserialize(Config &&options, Destination destination, std::string source)
         std::forward<Config>(options), std::move(parsed.error())),
     };
 
-  auto mapped = map_by_schema_t<Config &>{options}(
-    destination, parsed->crootref());
+  const map_by_schema_t<Config &, const MapNode &> map{options, map_node};
+  auto mapped = map(destination, parsed->crootref());
 
   return {
     /*value=*/std::move(mapped.value),

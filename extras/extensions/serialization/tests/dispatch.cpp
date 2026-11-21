@@ -570,6 +570,76 @@ TEST(mapping_dispatch, disabled_string_keys_do_not_hide_the_mapped_record) {
     EXPECT_EQ(expected, *result.value);
 }
 
+namespace local_mapping {
+
+struct record { int value; };
+
+struct add_integer {
+  int increment;
+
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
+    return omni::ryml::default_to_integral(std::move(state), node, type)
+      .transform([this](int value) { return value + this->increment; });
+  }
+};
+
+struct select_mapping {
+  int increment;
+
+  template <typename State, typename T>
+  auto operator()(const State &state, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_to_type(state, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+
+  template <typename State>
+  add_integer operator()(const State &, omni::type_t<int>) const {
+    return {this->increment};
+  }
+};
+
+} // namespace local_mapping
+
+TEST(mapping_dispatch, local_map_node_customization) {
+  const auto customize = [](omni::ryml::reflected_scope::mapping_to_type_t) {
+    return local_mapping::select_mapping{5};
+  };
+  const auto deserialize = omni::ryml::deserialize.tdm_map_node(customize);
+  const auto result = deserialize(omni::type_t<local_mapping::record>{},
+    R"({"value": 7})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value)
+    EXPECT_EQ(12, result.value->value);
+
+  const auto parsed = omni::ryml::core::parse(R"({"value": 7})");
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+
+  const auto map_by_schema = omni::ryml::map_by_schema.tdm_map_node(customize);
+  const auto mapped = map_by_schema(omni::type_t<local_mapping::record>{},
+    *parsed);
+  EXPECT_TRUE(mapped.value);
+  EXPECT_TRUE(mapped.diagnostics.issues.empty());
+  if (mapped.value)
+    EXPECT_EQ(12, mapped.value->value);
+
+#if 202002L <= OMNI_CPLUSPLUS
+  constexpr auto designated = omni::ryml::deserialize_t{
+    .map_node = local_mapping::select_mapping{5},
+  };
+  const auto direct = designated(omni::type<local_mapping::record>,
+    R"({"value": 7})");
+  EXPECT_TRUE(direct.value);
+  if (direct.value)
+    EXPECT_EQ(12, direct.value->value);
+#endif
+}
+
 } // namespace
 
 #if defined(__GNUC__) && !defined(__clang__)
