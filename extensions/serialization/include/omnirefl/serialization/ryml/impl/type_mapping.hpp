@@ -137,9 +137,12 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
       typename compat::remove_cvref_t<decltype(slot)>::field_type{});
     const auto mapping = compat::invoke(state.map_node, state, type);
     // The record frame applies diagnostic limits when appending this report.
-    auto mapped = map_node_to_value_using(state, mapping,
-      {this->frame.object.tree(), this->frame.pending[Index]}, type,
-      /*priority=*/0);
+    auto mapped = validate_record_field(state,
+      {this->frame.object.tree(), this->frame.pending[Index]}, slot.name(),
+      map_node_to_value_using(state, mapping,
+        {this->frame.object.tree(), this->frame.pending[Index]}, type,
+        /*priority=*/0),
+      this->frame.strategy.validate_fields);
     if (mapped.value)
       slot.stored.emplace(std::move(*mapped.value));
     if (!mapped.value || !mapped.diagnostics.issues.empty()

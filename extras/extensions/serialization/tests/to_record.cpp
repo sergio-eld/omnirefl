@@ -44,7 +44,6 @@ struct copy_only_name_by_alias {
 
 namespace tests {
 
-// TODO: [high] Bind alias fixtures through the model API when available.
 
 TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
   const auto names = omni::ryml::aliases_dict(
@@ -328,10 +327,12 @@ class runtime_record_aliases: public testing::TestWithParam<bool> {};
 TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
   // The same resolver type accepts the alias only in legacy mode.
   const bool legacy = GetParam();
-  const auto compositor =
-    omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases>{
-      /*name_by_alias=*/{/*legacy=*/legacy},
-    };
+  const auto strategy = omni::mapping::record_strategy
+    .tdm_aliases_by_name([legacy](const std::tuple<> &) {
+      return examples::runtime_aliases{legacy};
+    });
+  const auto compositor = omni::ryml::reflected_scope::to_record_t<
+    decltype(strategy)>{strategy};
 
   for (const std::string document : {R"({"hostname": "localhost"})",
          "hostname: localhost\n"}) {
@@ -472,7 +473,10 @@ struct to_type_t<alias_models::endpoint> {
     alias_models::endpoint *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
-      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+      reflected_scope::to_record_t<
+        omni::mapping::record_strategy_t<
+          decltype(omni::mapping::record_strategy.filter_fields),
+          alias_models::endpoint_names>>{})(
         std::move(state),
         node,
         into);
@@ -487,7 +491,10 @@ struct to_type_t<alias_models::endpoint_with_retries> {
     alias_models::endpoint_with_retries *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
-      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+      reflected_scope::to_record_t<
+        omni::mapping::record_strategy_t<
+          decltype(omni::mapping::record_strategy.filter_fields),
+          alias_models::endpoint_names>>{})(
         std::move(state),
         node,
         into);
@@ -502,7 +509,10 @@ struct to_type_t<alias_models::optional_endpoint> {
     alias_models::optional_endpoint *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
-      reflected_scope::to_record_t<alias_models::endpoint_names>{})(
+      reflected_scope::to_record_t<
+        omni::mapping::record_strategy_t<
+          decltype(omni::mapping::record_strategy.filter_fields),
+          alias_models::endpoint_names>>{})(
         std::move(state),
         node,
         into);
@@ -517,7 +527,10 @@ struct to_type_t<alias_models::endpoint_with_owned_alias> {
     alias_models::endpoint_with_owned_alias *into) const
     -> with_diagnostics_t<compat::monostate> {
     return compose::with_node_check<core::expect_object_node>(
-      reflected_scope::to_record_t<alias_models::owned_endpoint_names>{})(
+      reflected_scope::to_record_t<
+        omni::mapping::record_strategy_t<
+          decltype(omni::mapping::record_strategy.filter_fields),
+          alias_models::owned_endpoint_names>>{})(
         std::move(state),
         node,
         into);

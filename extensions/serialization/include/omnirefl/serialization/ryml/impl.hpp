@@ -354,8 +354,8 @@ template <typename MapNode>
 template <typename T>
 ::ryml::Tree as_owning_tree_t<MapNode>::operator()(const T &value) const {
   return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
-    ::build(write_state_t<false, compat::remove_cvref_t<MapNode>,
-      compat::remove_cvref_t<T>>{
+    ::build(write_state_t<detail::write_state_config<false,
+      compat::remove_cvref_t<MapNode>, compat::remove_cvref_t<T>>>{
       this->map_node}, value);
 }
 
@@ -363,8 +363,8 @@ template <typename MapNode>
 template <typename T>
 ::ryml::Tree as_ref_tree_t<MapNode>::operator()(T &value) const {
   return core::detail::tree_builder_case<compat::remove_cvref_t<T>>
-    ::build(write_state_t<true, compat::remove_cvref_t<MapNode>,
-      compat::remove_cvref_t<T>>{
+    ::build(write_state_t<detail::write_state_config<true,
+      compat::remove_cvref_t<MapNode>, compat::remove_cvref_t<T>>>{
       this->map_node}, value);
 }
 

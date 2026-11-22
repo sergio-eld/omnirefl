@@ -66,14 +66,14 @@ TEST(read_state, identifies_read_state_specializations) {
   EXPECT_TRUE(omni::ryml::is_read_state<omni::ryml::read_state_t<>>::value);
   EXPECT_TRUE(omni::ryml::is_read_state<
     const omni::ryml::read_state_t<> &>::value);
-  EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::write_state_t<false>>::value);
+  EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::write_state_t<>>::value);
   EXPECT_FALSE(omni::ryml::is_read_state<omni::ryml::config_t<>>::value);
 }
 
 TEST(write_state, identifies_write_state_specializations) {
-  EXPECT_TRUE(omni::ryml::is_write_state<omni::ryml::write_state_t<false>>::value);
+  EXPECT_TRUE(omni::ryml::is_write_state<omni::ryml::write_state_t<>>::value);
   EXPECT_TRUE(omni::ryml::is_write_state<
-    const omni::ryml::write_state_t<true> &>::value);
+    const omni::ryml::write_state_t<> &>::value);
   EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::read_state_t<>>::value);
   EXPECT_FALSE(omni::ryml::is_write_state<omni::ryml::config_t<>>::value);
 }

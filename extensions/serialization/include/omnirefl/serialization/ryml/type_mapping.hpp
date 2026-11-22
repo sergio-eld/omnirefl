@@ -603,17 +603,17 @@ using default_mapping_from_type = typename traits::select<
   traits::case_<omni::ryml::detail::is_mapped_range<const T>::value,
     from_range_t>,
   traits::case_<omni::is_reflected_enum<T>::value,
-    reflected_scope::from_enum_t>,
+    reflected_scope::from_enum_t<>>,
   traits::case_<omni::is_reflected_record<T>::value,
-    reflected_scope::from_record_t>,
+    reflected_scope::from_record_t<>>,
   traits::cp::unavailable>::type;
 
 } // namespace detail
 
 /** Returns the registered node-to-C++ callable by value, or the default
  * compositor when neither customization is registered. Selected callables
- * must be trivially copyable and copy-constructible. Registration conflicts
- * and missing mappings are diagnosed before invoking the mapping function.
+ * must be copy-constructible. Registration conflicts and missing mappings
+ * are diagnosed before invoking the mapping function.
  *
 ```
 mapping_to_type :: type<T> -> {
@@ -652,9 +652,8 @@ OMNI_CPP14_CONSTEXPR auto mapping_to_type(omni::type_t<T>)
   using mapping_type = decltype(omni::ryml::detail::first_available(
     mapping_t, mapping_var, mapping_default));
 
-  static_assert(std::is_trivially_copyable<mapping_type>::value
-      && std::is_copy_constructible<mapping_type>::value,
-    "Node mapping callables must be trivially copyable and copy-constructible");
+  static_assert(std::is_copy_constructible<mapping_type>::value,
+    "Node mapping callables must be copy-constructible");
 
   return omni::ryml::detail::first_available(
     mapping_t, mapping_var, mapping_default);
@@ -662,8 +661,8 @@ OMNI_CPP14_CONSTEXPR auto mapping_to_type(omni::type_t<T>)
 
 /** Returns the registered C++-to-node callable by value, or the default
  * compositor when neither customization is registered. Selected callables
- * must be trivially copyable and copy-constructible. Registration conflicts
- * and missing mappings are diagnosed before invoking the mapping function.
+ * must be copy-constructible. Registration conflicts and missing mappings
+ * are diagnosed before invoking the mapping function.
  *
 ```
 mapping_from_type :: type<T> -> ((state, const T&, node) -> void)
@@ -697,10 +696,8 @@ OMNI_CPP14_CONSTEXPR auto mapping_from_type(omni::type_t<T>)
   using mapping_type = decltype(omni::ryml::detail::first_available(
     mapping_t, mapping_var, mapping_default));
 
-  static_assert(std::is_trivially_copyable<mapping_type>::value
-      && std::is_copy_constructible<mapping_type>::value,
-    "Value mapping callables must be trivially copyable "
-    "and copy-constructible");
+  static_assert(std::is_copy_constructible<mapping_type>::value,
+    "Value mapping callables must be copy-constructible");
 
   return omni::ryml::detail::first_available(
     mapping_t, mapping_var, mapping_default);

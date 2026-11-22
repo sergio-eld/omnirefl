@@ -21,6 +21,14 @@
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 
+// FIXME: [high] Bound recursive deserialization for both deserialize and
+// map_by_schema. A model such as:
+//   struct node { std::vector<node> children; };
+// permits arbitrarily deep input, which can exhaust the stack. Define a
+// configurable depth policy with a terminal internal-error result. A Depth
+// NTTP must stop child instantiation at the limit; a static_assert there would
+// reject every recursive model, independently of the actual input depth.
+
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
@@ -159,8 +167,8 @@ struct map_by_schema_t {
     -> with_diagnostics_t<T> {
     // Borrowing config must not change the state type accepted by mappings.
     return detail::map_by_schema_dispatch_t<T>{}(
-      read_state_t<compat::remove_cvref_t<Config>,
-        compat::remove_cvref_t<MapNode>, T>{
+      read_state_t<detail::read_state_config<compat::remove_cvref_t<Config>,
+        compat::remove_cvref_t<MapNode>, T>>{
         /*config=*/this->config,
         /*error_count=*/0,
         /*warning_count=*/0,
@@ -200,8 +208,8 @@ struct map_by_schema_t {
   auto operator()(T *into, ::ryml::ConstNodeRef node) const
     -> with_diagnostics_t<compat::monostate> {
     return detail::map_by_schema_dispatch_t<T>{}(
-      read_state_t<compat::remove_cvref_t<Config>,
-        compat::remove_cvref_t<MapNode>, T>{
+      read_state_t<detail::read_state_config<compat::remove_cvref_t<Config>,
+        compat::remove_cvref_t<MapNode>, T>>{
         /*config=*/this->config,
         /*error_count=*/0,
         /*warning_count=*/0,
@@ -579,9 +587,6 @@ static constexpr const as_ref_tree_t<> &as_ref_tree =
   compat::detail::shared_state<as_ref_tree_t<>>::value;
 #endif
 
-// REFACTORME: [high] Provide a configurable serialize object so format-selected
-// calls can use a bound object instead of constructing serialize_t each time.
-// Default to JSON; tdm_format can select YAML.
 /** JSON/YAML text serialization with the selected .format. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
 struct serialize_t {
@@ -595,6 +600,29 @@ struct serialize_t {
   constexpr serialize_t(::ryml::EmitType_e output = {}, MapNode mapping = {})
     : format(output), map_node(std::move(mapping)) {}
 #endif
+
+  /** (QoL) Transform data member `.format` inplace, in one expression.
+   * f :: EmitType -> EmitType. The returned binding copies map_node. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (std::is_convertible<compat::invoke_result_t<F &&,
+      const ::ryml::EmitType_e &>, ::ryml::EmitType_e>::value))
+  constexpr auto tdm_format(F &&f) const & -> serialize_t {
+    return {
+      /*format=*/compat::invoke(std::forward<F>(f), this->format),
+      /*map_node=*/this->map_node,
+    };
+  }
+
+  /** (QoL) Transform `.format`, consuming this binding. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F),
+    (std::is_convertible<compat::invoke_result_t<F &&,
+      ::ryml::EmitType_e &&>, ::ryml::EmitType_e>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_format(F &&f) && -> serialize_t {
+    return {
+      /*format=*/compat::invoke(std::forward<F>(f), std::move(this->format)),
+      /*map_node=*/std::move(this->map_node),
+    };
+  }
 
   /** (QoL) Transform data member `.map_node` inplace, in one expression. */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
@@ -687,6 +715,20 @@ static constexpr const serialize_t<> &as_json =
   compat::detail::shared_state<detail::serialization_defaults>::value.json;
 #endif
 
+/** JSON serialization with configurable format and local mapping selection.
+ * tdm_format returns a binding with a transformed format; as_json and as_yaml
+ * provide the predefined formats. Input storage stays alive through the call.
+ *
+```cpp
+const auto json = serialize(value);
+``` */
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr serialize_t<> serialize{::ryml::EMIT_JSON};
+#else
+static constexpr const serialize_t<> &serialize =
+  compat::detail::shared_state<detail::serialization_defaults>::value.json;
+#endif
+
 } // namespace ryml
 } // namespace omni
 
@@ -730,10 +772,6 @@ OMNI_SKIP_METADATA(c4::csubstr,
 // parsing with a result-based error interface.
 
 // TODO: [low] Consider warning thresholds per policy in json::error_policy.
-
-// TODO: [high] Consider a configurable mapping-depth limit for recursive
-// deserialization to prevent stack exhaustion. It should also apply when
-// map_by_schema receives an existing tree.
 
 // TODO: [medium] Consider a config_t input-size limit checked by deserialize
 // before parsing or allocating a tree. Source text is already buffered in a

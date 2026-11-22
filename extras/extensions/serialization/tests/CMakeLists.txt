@@ -62,11 +62,11 @@ foreach(_standard IN LISTS _supported_cpp_standards)
 
 endforeach()
 
-# Discovery regressions have their own executable so focused header iterations
+# Dispatch and strategy regressions have their own executable so iterations
 # need not rebuild all serialization test sources.
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_dispatch_target "cpp_${_standard}.json_ryml.test.dispatch")
-    add_executable(${_dispatch_target} dispatch.cpp)
+    add_executable(${_dispatch_target} dispatch.cpp mapping_strategy.cpp)
     set_target_properties(${_dispatch_target} PROPERTIES
         OUTPUT_NAME "json_ryml_test_dispatch_cpp_${_standard}"
         CXX_STANDARD ${_standard}

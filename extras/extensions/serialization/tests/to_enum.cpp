@@ -44,7 +44,6 @@ namespace ryml {
 namespace cp {
 
 template <>
-// TODO: [high] Move alias fixture configuration to the model API.
 struct to_type_t<enum_alias_models::state> {
   template <typename State>
   auto operator()(State state,
@@ -53,7 +52,7 @@ struct to_type_t<enum_alias_models::state> {
     return compose::with_mutating_node_to_type_overload(
       compose::with_node_check<core::expect_string_node>(
         core::reflected_scope::map_node_to_enum_t<
-          enum_alias_models::state_names>{}))(std::move(state), node, into);
+          mapping::enum_strategy_t<enum_alias_models::state_names>>{}))(std::move(state), node, into);
   }
 };
 
@@ -109,7 +108,7 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
       omni::ryml::compose::with_node_check<
         omni::ryml::core::expect_string_node>(
         omni::ryml::core::reflected_scope::map_node_to_enum_t<
-          decltype(resolver)>{resolver}));
+          omni::mapping::enum_strategy_t<decltype(resolver)>>{{resolver}}));
 
   const auto tree = omni::ryml::core::parse(R"("active")");
   EXPECT_TRUE(tree);
