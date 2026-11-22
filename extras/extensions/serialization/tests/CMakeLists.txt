@@ -64,6 +64,15 @@ endforeach()
 
 # Dispatch and strategy regressions have their own executable so iterations
 # need not rebuild all serialization test sources.
+set(_serialization_dispatch_pool "")
+if(_OMNI_CI_RUN AND CMAKE_GENERATOR MATCHES "Ninja"
+    AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Recursive dispatch fixtures can require several GB per GCC invocation.
+    # Share one compile slot across standards while other targets stay parallel.
+    set(_serialization_dispatch_pool serialization_dispatch)
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS
+        "${_serialization_dispatch_pool}=1")
+endif()
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_dispatch_target "cpp_${_standard}.json_ryml.test.dispatch")
     add_executable(${_dispatch_target} dispatch.cpp mapping_strategy.cpp)
@@ -74,6 +83,10 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         CXX_EXTENSIONS NO)
     target_link_libraries(${_dispatch_target} PRIVATE
         gtest_main omni::serialization)
+    if(_serialization_dispatch_pool)
+        set_property(TARGET ${_dispatch_target} PROPERTY JOB_POOL_COMPILE
+            "${_serialization_dispatch_pool}")
+    endif()
     omni_reflected_target(${_dispatch_target})
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
         add_test(NAME ${_dispatch_target} COMMAND ${_dispatch_target})
