@@ -19,28 +19,14 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-namespace detail {
-
-template <typename T, typename Strategy>
-constexpr bool complete_record_fields();
-
-template <typename T, typename Strategy>
-constexpr bool can_finalize_existing_record() {
-  return std::is_same<compat::remove_cvref_t<
-      decltype(std::declval<Strategy>().finalize)>, omni::fn::identity>::value
-    || (std::is_move_constructible<T>::value
-      && std::is_assignable<T &, T &&>::value);
-}
-
-} // namespace detail
-
 /** Maps an object node into a reflected record's selected instance fields.
  * Does not call \ref mapping_to_type for the record. Nested members may use
  * state.map_node, which defaults to that lookup.
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
- * Aggregatable records are constructed from mapped field values. Other
- * records receive those values through their field bindings and set_value.
+ * Aggregatable records with all instance fields selected are constructed
+ * from mapped values. Other cases assign values through field bindings and
+ * set_value.
  *
  * A canonical name takes precedence over its aliases, even when its value is
  * invalid. Duplicate policies select among canonical occurrences when present,
@@ -49,8 +35,8 @@ constexpr bool can_finalize_existing_record() {
  * strategy supplies field selection, aliases, field validators, and record
  * finalization; tdm_strategy returns an adjusted mapping. Static members are
  * always excluded from deserialization. Filtered fields are not required;
- * their document keys follow the unknown-field policy. Constructing a value
- * with omitted fields requires a default-constructible record.
+ * their document keys follow the unknown-field policy. The type<T> overload
+ * requires a default-constructible record; T* accepts an existing record.
  * Validators return expected<T, issue or range<issue>> or with_diagnostics<T>.
  * They preserve values and run before assignment; finalization runs after
  * successful record construction, including for nested records.
@@ -67,16 +53,13 @@ struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::is_reflected_record<T>::value
       && std::is_move_constructible<T>::value
-      && (std::is_default_constructible<T>::value
-        || (omni::refl::is_aggregatable<T>::value
-          && detail::complete_record_fields<T, Strategy>()))
+      && std::is_default_constructible<T>::value
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node,
     omni::type_t<T>) const -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::is_reflected_record<T>::value
-      && detail::can_finalize_existing_record<T, Strategy>()
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;

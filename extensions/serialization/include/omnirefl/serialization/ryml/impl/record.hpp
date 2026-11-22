@@ -268,6 +268,9 @@ template <typename State, typename T, typename Finalize>
 auto finalize_record_into(State state, ::ryml::ConstNodeRef node,
   with_diagnostics_t<compat::monostate> mapped, T *into,
   const Finalize &finalize) -> with_diagnostics_t<compat::monostate> {
+  static_assert(std::is_move_constructible<T>::value
+      && std::is_assignable<T &, T &&>::value,
+    "Finalizing an existing record requires move construction and assignment");
   if (!mapped.value)
     return mapped;
 
@@ -416,7 +419,7 @@ constexpr auto readable_record_fields()
 }
 
 template <typename T, typename Strategy>
-constexpr bool complete_record_fields() {
+constexpr bool selects_all_record_fields() {
   return std::tuple_size<decltype(readable_record_fields<T, Strategy>())>::value
     == std::tuple_size<decltype(omni::meta_for<T>::accessible_data_members()
       | omni::fn::filter(omni::fn::is_non_static))>::value;
@@ -535,9 +538,7 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && std::is_move_constructible<T>::value
-    && (std::is_default_constructible<T>::value
-      || (omni::refl::is_aggregatable<T>::value
-        && detail::complete_record_fields<T, Strategy>()))
+    && std::is_default_constructible<T>::value
     && is_read_state<State>::value))
 auto to_record_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
@@ -545,7 +546,7 @@ auto to_record_t<Strategy>::operator()(State context,
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && detail::complete_record_fields<T, Strategy>()
+        && detail::selects_all_record_fields<T, Strategy>()
         && std::is_move_constructible<T>::value,
       detail::aggregate_record_value<T>>,
     detail::bind_record_value<T>>::type{};
@@ -557,7 +558,6 @@ auto to_record_t<Strategy>::operator()(State context,
 template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
-    && detail::can_finalize_existing_record<T, Strategy>()
     && is_read_state<State>::value))
 auto to_record_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, T *into) const
@@ -566,7 +566,7 @@ auto to_record_t<Strategy>::operator()(State context,
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && detail::complete_record_fields<T, Strategy>()
+        && detail::selects_all_record_fields<T, Strategy>()
         && std::is_move_constructible<T>::value
         && std::is_assignable<T &, T &&>::value,
       detail::aggregate_record_into<T>>,
