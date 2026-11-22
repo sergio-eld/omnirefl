@@ -536,13 +536,13 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
 
 } // namespace detail
 
-template <typename Strategy>
+template <typename Strategy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && std::is_move_constructible<T>::value
     && std::is_default_constructible<T>::value
     && is_read_state<State>::value))
-auto map_object_node_t<Strategy>::operator()(State context,
+auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
   if (context.limit_exceeded())
@@ -552,14 +552,16 @@ auto map_object_node_t<Strategy>::operator()(State context,
 #endif
       context.config.error_policy, {}}, {}, {}}};
 
-  auto checked = core::expect_object_node(node);
-  if (!checked)
-    return {compat::nullopt,
-      {{
+  if (this->with_node_check) {
+    auto checked = core::expect_object_node(node);
+    if (!checked)
+      return {compat::nullopt,
+        {{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
+          /*base=*/{},
 #endif
-        context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+          context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
 
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
@@ -573,11 +575,11 @@ auto map_object_node_t<Strategy>::operator()(State context,
     this->strategy.finalize);
 }
 
-template <typename Strategy>
+template <typename Strategy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && is_read_state<State>::value))
-auto map_object_node_t<Strategy>::operator()(State context,
+auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   ::ryml::ConstNodeRef node, T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
@@ -588,14 +590,16 @@ auto map_object_node_t<Strategy>::operator()(State context,
 #endif
       context.config.error_policy, {}}, {}, {}}};
 
-  auto checked = core::expect_object_node(node);
-  if (!checked)
-    return {compat::nullopt,
-      {{
+  if (this->with_node_check) {
+    auto checked = core::expect_object_node(node);
+    if (!checked)
+      return {compat::nullopt,
+        {{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
+          /*base=*/{},
 #endif
-        context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+          context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
 
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<

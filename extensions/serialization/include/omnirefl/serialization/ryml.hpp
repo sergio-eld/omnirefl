@@ -33,6 +33,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/serialization/ryml/compose.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/serialization/ryml/type_mapping.hpp>

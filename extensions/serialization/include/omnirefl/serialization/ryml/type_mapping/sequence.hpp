@@ -4,8 +4,9 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/serialization/ryml/compose.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/shared.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_node.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -41,25 +42,44 @@ struct to_range_t {
   // enabling their default mapping. JSON object names are always strings.
 };
 
-/** Creates a range node-to-type mapping function.
- * Checks for object input for key/value ranges and array input otherwise.
- * Does not call \ref reflected_scope::mapping_to_type for the range;
- * elements are mapped through state.map_node.
+/** Maps array nodes into element ranges and object nodes into key/value ranges.
+ * Elements are mapped through state.map_node.
  *
 ```
-default_to_range :: type<T> ->
-  (state, node, T*) -> with_diagnostics<monostate>
+map_range_node :: (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
-template <typename T>
-constexpr auto default_to_range(omni::type_t<T>)
-  -> typename traits::select<
-    traits::case_<traits::is_key_value<T>::value,
-      compose::detail::with_node_check_t<core::expect_object_node, to_range_t>>,
-    compose::detail::with_node_check_t<core::expect_array_node,
-      to_range_t>>::type {
-  return {};
-}
+template <typename WithNodeCheck = std::true_type>
+struct map_range_node_t:
+    detail::tdm_for_map_range_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_range_node<WithNodeCheck>;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (detail::is_mapped_range<T>::value && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_range_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_range_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_range_node_t<> map_range_node{};
+#else
+static constexpr const map_range_node_t<> &map_range_node =
+  compat::detail::shared_state<map_range_node_t<>>::value;
+#endif
 
 /** Maps key/value ranges to objects and element ranges to arrays.
  * Does not call \ref reflected_scope::mapping_from_type for the range;

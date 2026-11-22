@@ -89,6 +89,52 @@ auto map_node_to_enum_t<Strategy>::operator()(State context,
 
 namespace reflected_scope {
 
+template <typename Strategy, typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (omni::is_reflected_enum<T>::value && is_read_state<State>::value))
+auto map_string_node_t<Strategy, WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T>) const -> with_diagnostics_t<T> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_string_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return core::reflected_scope::map_node_to_enum_t<Strategy>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    this->strategy}(std::move(state), node, omni::type_t<T>{});
+}
+
+template <typename Strategy, typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (omni::is_reflected_enum<T>::value
+    && std::is_assignable<T &, T &&>::value
+    && is_read_state<State>::value))
+auto map_string_node_t<Strategy, WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  assert(into);
+  return (*this)(std::move(state), node, omni::type_t<T>{})
+    .transform([into](T value) -> compat::monostate {
+      *into = value;
+      return {};
+    });
+}
+
 template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,

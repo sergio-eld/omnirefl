@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <map>
 #include <utility>
@@ -353,6 +354,33 @@ auto to_range_t::operator()(State context,
     node, into, &result);
 
   return std::move(result).finish();
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (detail::is_mapped_range<T>::value && is_read_state<State>::value))
+auto map_range_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = traits::is_key_value<T>::value
+      ? core::expect_object_node(node) : core::expect_array_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return to_range_t{}(std::move(state), node, into);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),

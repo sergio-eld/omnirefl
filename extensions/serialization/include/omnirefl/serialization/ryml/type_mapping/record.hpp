@@ -29,13 +29,15 @@ map_object_node :: {
 ```
  *
  * Members are mapped through state.map_node.
- * Non-object input reports an expected-object diagnostic.
+ * Non-object input reports an expected-object diagnostic by default.
  * @pre node belongs to a valid tree, pointers are non-null, and record
  * metadata is available in reflected scope. */
-template <typename Strategy = mapping::record_strategy_t<>>
+template <typename Strategy = mapping::record_strategy_t<>,
+  typename WithNodeCheck = std::true_type>
 struct map_object_node_t:
-    detail::tdm_for_map_object_node<Strategy> {
-  using tdm_provider = detail::tdm_for_map_object_node<Strategy>;
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck> {
+  using tdm_provider =
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>;
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_object_node_t requires mapping::record_strategy_t");
@@ -43,6 +45,10 @@ struct map_object_node_t:
   /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
+
+  /** Disable only when the node is already known to be an object. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::is_reflected_record<T>::value
@@ -63,15 +69,18 @@ struct map_object_node_t:
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr map_object_node_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
-    (std::is_constructible<Strategy, Value &&>::value))
-  constexpr map_object_node_t(Value &&value)
-    : strategy(std::forward<Value>(value)) {}
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+    typename CheckValue = WithNodeCheck),
+    (std::is_constructible<Strategy, Value &&>::value
+      && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
+  constexpr map_object_node_t(Value &&value, CheckValue &&check = {})
+    : strategy(std::forward<Value>(value)),
+      with_node_check(std::forward<CheckValue>(check)) {}
 #endif
 };
 
-/** Reflected-record mapping with the shared default strategy.
- * tdm_strategy binds a configured strategy; non-object input is rejected. */
+/** Reflected-record mapping with the shared default strategy and
+ * node checking enabled. */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr map_object_node_t<> map_object_node{};
 #else

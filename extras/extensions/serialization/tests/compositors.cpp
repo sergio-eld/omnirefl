@@ -286,7 +286,7 @@ TEST(record_mapping, constructs_a_copy_only_value_with_the_default_mapping) {
 }
 
 TEST(arithmetic_mapping, constrains_value_and_mutating_destinations) {
-  using omni::ryml::default_to_arithmetic;
+  using omni::ryml::map_arithmetic_node;
   using state = omni::ryml::read_state_t<>;
   using node = ::ryml::ConstNodeRef;
 
@@ -294,11 +294,11 @@ TEST(arithmetic_mapping, constrains_value_and_mutating_destinations) {
     state, node, omni::type_t<bool>>::value));
   EXPECT_FALSE((omni::compat::is_invocable<decltype(map_node_to_arithmetic),
     state, node, omni::type_t<const bool>>::value));
-  EXPECT_TRUE((omni::compat::is_invocable<decltype(default_to_arithmetic),
+  EXPECT_TRUE((omni::compat::is_invocable<decltype(map_arithmetic_node),
     state, node, int *>::value));
-  EXPECT_FALSE((omni::compat::is_invocable<decltype(default_to_arithmetic),
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(map_arithmetic_node),
     state, node, const int *>::value));
-  EXPECT_FALSE((omni::compat::is_invocable<decltype(default_to_arithmetic),
+  EXPECT_FALSE((omni::compat::is_invocable<decltype(map_arithmetic_node),
     state, node, omni::type_t<const bool>>::value));
 }
 

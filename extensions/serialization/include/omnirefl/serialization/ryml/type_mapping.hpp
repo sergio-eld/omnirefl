@@ -8,8 +8,8 @@
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/serialization/ryml/compose.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_node.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/enum.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/sequence.hpp>
 #include <omnirefl/serialization/ryml/type_mapping/record.hpp>
@@ -34,7 +34,7 @@ namespace ryml {
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_string_like :: {
+map_string_node :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
@@ -42,34 +42,46 @@ default_to_string_like :: {
  *
  * @details String-view destinations borrow the tree's character storage.
  * The tree and its character storage must remain valid while views are used. */
-struct default_to_string_like_t {
+template <typename WithNodeCheck = std::true_type>
+struct map_string_node_t:
+    detail::tdm_for_map_string_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_string_node<WithNodeCheck>;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_string_like<T>::value && is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const -> with_diagnostics_t<T> {
-    return compose::with_node_check<core::expect_string_node>(
-      core::map_node_to_string_like)(std::move(state), node, type);
-  }
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
 
   /** (QoL) Mutating adapter for the value-producing overload. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (traits::is_string_like<T>::value && is_read_state<State>::value
-      && std::is_assignable<T &, T &&>::value))
+    (traits::is_string_like<T>::value
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return compose::with_mutating_node_to_type_overload(
-      compose::with_node_check<core::expect_string_node>(
-        core::map_node_to_string_like))(std::move(state), node, into);
-  }
+    -> with_diagnostics_t<compat::monostate>;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_string_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_string_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_string_like_t default_to_string_like{};
+inline constexpr map_string_node_t<> map_string_node{};
 #else
-static constexpr const default_to_string_like_t &default_to_string_like =
-  compat::detail::shared_state<default_to_string_like_t>::value;
+static constexpr const map_string_node_t<> &map_string_node =
+  compat::detail::shared_state<map_string_node_t<>>::value;
 #endif
 
 /** Maps a string-like value to a quoted JSON/YAML scalar.
@@ -101,42 +113,54 @@ static constexpr const map_string_like_t &map_string_like =
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_boolean :: {
+map_boolean_node :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
-struct default_to_boolean_t {
+template <typename WithNodeCheck = std::true_type>
+struct map_boolean_node_t:
+    detail::tdm_for_map_boolean_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_boolean_node<WithNodeCheck>;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && !std::is_const<T>::value && is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const -> with_diagnostics_t<T> {
-    return compose::with_node_check<core::expect_boolean_node>(
-      core::map_node_to_boolean)(std::move(state), node, type);
-  }
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
 
   /** (QoL) Mutating adapter for the value-producing overload. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
-      && !std::is_const<T>::value && is_read_state<State>::value
-      && std::is_assignable<T &, T &&>::value))
+      && !std::is_const<T>::value
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return compose::with_mutating_node_to_type_overload(
-      compose::with_node_check<core::expect_boolean_node>(
-        core::map_node_to_boolean))(std::move(state), node, into);
-  }
+    -> with_diagnostics_t<compat::monostate>;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_boolean_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_boolean_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_boolean_t default_to_boolean{};
+inline constexpr map_boolean_node_t<> map_boolean_node{};
 #else
-static constexpr const default_to_boolean_t &default_to_boolean =
-  compat::detail::shared_state<default_to_boolean_t>::value;
+static constexpr const map_boolean_node_t<> &map_boolean_node =
+  compat::detail::shared_state<map_boolean_node_t<>>::value;
 #endif
 
 /** Maps a Boolean value to a JSON/YAML scalar.
@@ -166,44 +190,55 @@ static constexpr const map_boolean_t &map_boolean =
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_integral :: {
+map_integer_node :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
-struct default_to_integral_t {
+template <typename WithNodeCheck = std::true_type>
+struct map_integer_node_t:
+    detail::tdm_for_map_integer_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_integer_node<WithNodeCheck>;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const -> with_diagnostics_t<T> {
-    return compose::with_node_check<core::expect_integer_node>(
-      core::map_node_to_integral)(std::move(state), node, type);
-  }
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
 
   /** (QoL) Mutating adapter for the value-producing overload. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
-      && is_read_state<State>::value
-      && std::is_assignable<T &, T &&>::value))
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return compose::with_mutating_node_to_type_overload(
-      compose::with_node_check<core::expect_integer_node>(
-        core::map_node_to_integral))(std::move(state), node, into);
-  }
+    -> with_diagnostics_t<compat::monostate>;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_integer_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_integer_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_integral_t default_to_integral{};
+inline constexpr map_integer_node_t<> map_integer_node{};
 #else
-static constexpr const default_to_integral_t &default_to_integral =
-  compat::detail::shared_state<default_to_integral_t>::value;
+static constexpr const map_integer_node_t<> &map_integer_node =
+  compat::detail::shared_state<map_integer_node_t<>>::value;
 #endif
 
 /** Maps an integral value to a JSON/YAML scalar.
@@ -234,40 +269,52 @@ static constexpr const map_integral_t &map_integral =
  * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
-default_to_floating_point :: {
+map_number_node :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
-struct default_to_floating_point_t {
+template <typename WithNodeCheck = std::true_type>
+struct map_number_node_t:
+    detail::tdm_for_map_number_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_number_node<WithNodeCheck>;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const -> with_diagnostics_t<T> {
-    return compose::with_node_check<core::expect_number_node>(
-      core::map_node_to_floating_point)(std::move(state), node, type);
-  }
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
 
   /** (QoL) Mutating adapter for the value-producing overload. */
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_floating_point<T>::value && is_read_state<State>::value
-      && std::is_assignable<T &, T &&>::value))
+    (std::is_floating_point<T>::value
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return compose::with_mutating_node_to_type_overload(
-      compose::with_node_check<core::expect_number_node>(
-        core::map_node_to_floating_point))(std::move(state), node, into);
-  }
+    -> with_diagnostics_t<compat::monostate>;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_number_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_number_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_floating_point_t default_to_floating_point{};
+inline constexpr map_number_node_t<> map_number_node{};
 #else
-static constexpr const default_to_floating_point_t &default_to_floating_point =
-  compat::detail::shared_state<default_to_floating_point_t>::value;
+static constexpr const map_number_node_t<> &map_number_node =
+  compat::detail::shared_state<map_number_node_t<>>::value;
 #endif
 
 /** Maps a floating-point value to a JSON/YAML scalar.
@@ -299,46 +346,63 @@ static constexpr const map_floating_point_t &map_floating_point =
  * be assignable from the mapped value.
  *
 ```
-default_to_arithmetic :: {
+map_arithmetic_node :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
  */
-struct default_to_arithmetic_t {
+template <typename WithNodeCheck = std::true_type>
+struct map_arithmetic_node_t:
+    detail::tdm_for_map_arithmetic_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_arithmetic_node<WithNodeCheck>;
+
   // Validate the category required by T, rather than accepting every scalar.
   template <typename T>
   using mapping_type = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      default_to_boolean_t>,
-    traits::case_<std::is_integral<T>::value, default_to_integral_t>,
-    default_to_floating_point_t>::type;
+      map_boolean_node_t<WithNodeCheck>>,
+    traits::case_<std::is_integral<T>::value,
+      map_integer_node_t<WithNodeCheck>>,
+    map_number_node_t<WithNodeCheck>>::type;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_read_state<State>::value
+    (std::is_arithmetic<T>::value
       && (!std::is_const<T>::value
-        || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
+        || !std::is_same<bool, compat::remove_cv_t<T>>::value)
+      && is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
-    omni::type_t<T> type) const -> with_diagnostics_t<T> {
-    return mapping_type<T>{}(std::move(state), node, type);
-  }
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_read_state<State>::value
-      && std::is_assignable<T &, T &&>::value))
+    (std::is_arithmetic<T>::value
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return mapping_type<T>{}(std::move(state), node, into);
-  }
+    -> with_diagnostics_t<compat::monostate>;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_arithmetic_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_arithmetic_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr default_to_arithmetic_t default_to_arithmetic{};
+inline constexpr map_arithmetic_node_t<> map_arithmetic_node{};
 #else
-static constexpr const default_to_arithmetic_t &default_to_arithmetic =
-  compat::detail::shared_state<default_to_arithmetic_t>::value;
+static constexpr const map_arithmetic_node_t<> &map_arithmetic_node =
+  compat::detail::shared_state<map_arithmetic_node_t<>>::value;
 #endif
 
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
@@ -376,21 +440,44 @@ struct to_optional_like_t {
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 };
 
-/** Creates an optional-like node-to-type mapping function.
- * Null resets the destination; non-null values dispatch through
- * \ref reflected_scope::mapping_to_type for the contained type.
+/** Maps null or a value node into an optional-like destination.
+ * Contained values are mapped through state.map_node.
  *
 ```
-default_to_optional_like :: type<T> ->
-  (state, node, T*) -> with_diagnostics<monostate>
+map_value_node :: (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
-template <typename T>
-constexpr auto default_to_optional_like(omni::type_t<T>)
-  -> compose::detail::with_node_check_t<core::expect_value_node,
-    to_optional_like_t> {
-  return {};
-}
+template <typename WithNodeCheck = std::true_type>
+struct map_value_node_t:
+    detail::tdm_for_map_value_node<WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_value_node<WithNodeCheck>;
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (traits::is_optional<T>::value && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_value_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_value_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_value_node_t<> map_value_node{};
+#else
+static constexpr const map_value_node_t<> &map_value_node =
+  compat::detail::shared_state<map_value_node_t<>>::value;
+#endif
 
 /** Maps an empty optional to null, or maps its contained value to a node.
  * Contained values use \ref reflected_scope::mapping_from_type.
@@ -446,7 +533,7 @@ template <>
 const auto omni::ryml::cp::to_type<counter> =
   [](auto state, ::ryml::ConstNodeRef node, omni::type_t<counter>)
     -> omni::ryml::with_diagnostics_t<counter> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type<decltype(counter::value)>)
       .transform([](auto value) -> counter { return {value}; });
@@ -489,7 +576,7 @@ struct omni::ryml::cp::to_type_t<counter> {
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<counter>) const -> omni::ryml::with_diagnostics_t<counter> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type_t<decltype(counter::value)>{})
       .transform([](decltype(counter::value) value) -> counter {
@@ -567,19 +654,19 @@ namespace detail {
 template <typename _T, typename T = compat::remove_cv_t<_T>>
 using default_mapping_to_type = typename traits::select<
   traits::case_<traits::is_string_like<T>::value,
-    default_to_string_like_t>,
+    omni::ryml::map_string_node_t<>>,
   traits::case_<std::is_same<bool, T>::value,
-    default_to_boolean_t>,
+    map_boolean_node_t<>>,
   traits::case_<std::is_integral<T>::value,
-    default_to_integral_t>,
+    map_integer_node_t<>>,
   traits::case_<std::is_floating_point<T>::value,
-    default_to_floating_point_t>,
+    map_number_node_t<>>,
   traits::case_<traits::is_optional<T>::value,
-    decltype(default_to_optional_like(omni::type_t<T>{}))>,
+    map_value_node_t<>>,
   traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
-    decltype(default_to_range(omni::type_t<T>{}))>,
+    map_range_node_t<>>,
   traits::case_<omni::is_reflected_enum<T>::value,
-    decltype(reflected_scope::default_to_enum(omni::type_t<T>{}))>,
+    reflected_scope::map_string_node_t<>>,
   traits::case_<omni::is_reflected_record<T>::value,
     reflected_scope::map_object_node_t<>>,
   traits::cp::unavailable>::type;

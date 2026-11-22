@@ -1024,3 +1024,5 @@ concept write_state_like = is_write_state<T>::value;
 // depth creates unbounded state specializations for recursive models. A
 // static_assert there would reject every recursive model, even for shallow input.
 // Coordinate the runtime-depth policy with the FIXME in ryml.hpp.
+
+// REFACTORME: [high] Simplify the traversal-state types and their implementation.

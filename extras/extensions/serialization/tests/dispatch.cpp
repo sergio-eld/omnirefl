@@ -139,7 +139,7 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
     ::ryml::ConstNodeRef node,
     omni::type_t<immutable_number>) const
     -> omni::ryml::with_diagnostics_t<immutable_number> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type_t<int>{})
       .transform([](int value) -> immutable_number {
@@ -156,7 +156,7 @@ struct omni::ryml::cp::to_type_t<default_state_number> {
     ::ryml::ConstNodeRef node,
     omni::type_t<default_state_number>) const
     -> omni::ryml::with_diagnostics_t<default_state_number> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type_t<int>{})
       .transform([](int value) -> default_state_number { return {value}; });
@@ -170,7 +170,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
     ::ryml::ConstNodeRef node,
     unsigned short *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into);
   }
@@ -183,7 +183,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
 template <>
 const auto omni::ryml::cp::to_type<my_string> =
   [](auto state, ::ryml::ConstNodeRef node, my_string *into) {
-    return omni::ryml::default_to_string_like(std::move(state),
+    return omni::ryml::map_string_node(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into);
   };
@@ -193,7 +193,7 @@ struct omni::ryml::cp::to_type_t<my_string> {
   template <typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node, my_string *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_string_like(std::move(state),
+    return omni::ryml::map_string_node(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into);
   }
@@ -583,7 +583,7 @@ struct add_integer {
   template <typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
-    return omni::ryml::default_to_integral(std::move(state), node, type)
+    return omni::ryml::map_integer_node(std::move(state), node, type)
       .transform([this](int value) { return value + this->increment; });
   }
 };
@@ -605,6 +605,62 @@ struct select_mapping {
 };
 
 } // namespace local_mapping
+
+namespace unchecked_nodes {
+
+enum class status { ready };
+
+struct record {
+  bool enabled;
+  short count;
+  double weight;
+  std::string label;
+  std::vector<int> values;
+  std::map<std::string, int> scores;
+  omni::compat::optional<int> extra;
+  status state;
+};
+
+struct select_mapping {
+  template <typename State, typename T>
+  auto operator()(State, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::mapping_to_type(type)
+      .tdm_with_node_check(omni::fn::default_value<std::false_type>{})) {
+    return omni::ryml::reflected_scope::mapping_to_type(type)
+      .tdm_with_node_check(omni::fn::default_value<std::false_type>{});
+  }
+
+  template <typename State>
+  auto operator()(State, omni::type_t<short>) const
+    -> decltype(omni::ryml::map_arithmetic_node.tdm_with_node_check(
+      omni::fn::default_value<std::false_type>{})) {
+    return omni::ryml::map_arithmetic_node.tdm_with_node_check(
+      omni::fn::default_value<std::false_type>{});
+  }
+};
+
+} // namespace unchecked_nodes
+
+TEST(mapping_dispatch, built_in_readers_allow_prevalidated_nodes) {
+  const auto deserialize = serialization_test::deserialize
+    .tdm_map_node(omni::fn::default_value<unchecked_nodes::select_mapping>{});
+  const auto result = deserialize(omni::type_t<unchecked_nodes::record>{},
+    R"({"enabled": true, "count": 3, "weight": 2.5, "label": "ready",
+      "values": [4, 8], "scores": {"math": 15}, "extra": 16, "state": "ready"})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_TRUE(result.value->enabled);
+    EXPECT_EQ(3, result.value->count);
+    EXPECT_EQ(2.5, result.value->weight);
+    EXPECT_EQ("ready", result.value->label);
+    EXPECT_EQ((std::vector<int>{4, 8}), result.value->values);
+    EXPECT_EQ((std::map<std::string, int>{{"math", 15}}), result.value->scores);
+    EXPECT_EQ(16, result.value->extra);
+    EXPECT_EQ(unchecked_nodes::status::ready, result.value->state);
+  }
+}
 
 TEST(mapping_dispatch, local_map_node_customization) {
   const auto customize = [](omni::ryml::reflected_scope::mapping_to_type_t) {

@@ -379,8 +379,10 @@ struct to_type_t<strategy_examples::status> {
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<strategy_examples::status> type) const
     -> with_diagnostics_t<strategy_examples::status> {
-    return reflected_scope::default_to_enum(type,
-      strategy_examples::status_strategy)(std::move(state), node, type);
+    return reflected_scope::map_string_node.tdm_strategy(
+      [](const mapping::enum_strategy_t<> &) {
+        return strategy_examples::status_strategy;
+      })(std::move(state), node, type);
   }
 };
 
@@ -725,5 +727,50 @@ TEST(mapping_strategy, functional_updates_preserve_other_properties) {
   EXPECT_FALSE(rejected);
   if (!rejected) {
     EXPECT_EQ(omni::compat::string_view{"below limit"}, rejected.error());
+  }
+}
+
+TEST(mapping_strategy, node_check_updates_preserve_the_record_strategy) {
+  using omni::ryml::reflected_scope::map_object_node;
+  const auto unchecked = map_object_node
+    .tdm_with_node_check(omni::fn::default_value<std::false_type>{});
+  const auto mapping = unchecked.tdm_strategy(
+    [](const omni::mapping::record_strategy_t<> &) {
+      return strategy_examples::interval_strategy;
+    });
+  static_assert(!decltype(mapping.with_node_check)::value,
+    "Updating the strategy retains the disabled node check");
+
+  const auto tree = omni::ryml::core::parse(
+    R"({"start": 2, "finish": 7, "label": "meeting"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto result = serialization_test::map_using(omni::ryml::config_t<>{},
+    mapping, omni::type_t<strategy_examples::interval>{}, tree->crootref());
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ(2, result.value->begin);
+    EXPECT_EQ(7, result.value->end);
+    EXPECT_EQ("meeting", result.value->label);
+  }
+
+  const auto checked = mapping.tdm_with_node_check(
+    omni::fn::default_value<std::true_type>{});
+  const auto sequence = omni::ryml::core::parse("[]");
+  EXPECT_TRUE(sequence);
+  if (!sequence)
+    return;
+
+  const auto mismatch = serialization_test::map_using(
+    omni::ryml::config_t<>{}, checked,
+    omni::type_t<strategy_examples::interval>{}, sequence->crootref());
+  EXPECT_FALSE(mismatch.value);
+  EXPECT_EQ(1U, mismatch.diagnostics.issues.size());
+  if (!mismatch.diagnostics.issues.empty()) {
+    EXPECT_EQ(omni::json::value_kind::mapping,
+      mismatch.diagnostics.issues.front().expected);
   }
 }

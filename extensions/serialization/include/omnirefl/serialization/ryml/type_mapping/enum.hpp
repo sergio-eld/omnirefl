@@ -7,7 +7,7 @@
 #include <omnirefl/extensions/mapping_strategy.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/serialization/ryml/compose.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/shared.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -59,6 +59,9 @@ struct map_node_to_enum_t:
   constexpr map_node_to_enum_t(Value &&value)
     : strategy(std::forward<Value>(value)) {}
 #endif
+
+  // REFACTORME: [medium] Reassess the naming and separation of this conversion
+  // and the checked map_string_node reader; enums have string-node input.
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -73,30 +76,70 @@ static constexpr const map_node_to_enum_t<> &map_node_to_enum =
 
 namespace reflected_scope {
 
-/** Creates an enum node-to-type mapping function.
- * Checks for string input before looking up enumerators.
- * Does not call \ref omni::ryml::reflected_scope::mapping_to_type.
+/** Maps a string node into a reflected enum, resolving names and aliases.
+ * Does not call \ref mapping_to_type for this enum.
+ * Declared names take precedence over aliases; unknown names report the input.
  *
 ```
-default_to_enum :: (type<T>, strategy = enum_strategy) -> {
+map_string_node :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
 ```
- */
-template <typename T, typename Strategy = mapping::enum_strategy_t<>>
-constexpr auto default_to_enum(omni::type_t<T>, Strategy strategy = {})
-  -> compose::detail::with_mutating_node_to_type_overload_t<
-    compose::detail::with_node_check_t<core::expect_string_node,
-      core::reflected_scope::map_node_to_enum_t<Strategy>>> {
-  return compose::with_mutating_node_to_type_overload(
-    compose::with_node_check<core::expect_string_node>(
-      core::reflected_scope::map_node_to_enum_t<Strategy>{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
+ *
+ * @pre node belongs to a valid tree, pointers are non-null, and enum metadata
+ * is available in reflected scope. */
+template <typename Strategy = mapping::enum_strategy_t<>,
+  typename WithNodeCheck = std::true_type>
+struct map_string_node_t:
+    detail::tdm_for_map_string_node<Strategy, WithNodeCheck> {
+  using tdm_provider = detail::tdm_for_map_string_node<Strategy, WithNodeCheck>;
+
+  static_assert(mapping::is_enum_strategy<Strategy>::value,
+    "map_string_node_t requires mapping::enum_strategy_t");
+
+  /** \ref mapping::enum_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  /** Disable only when the node is already known to be a string. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::is_reflected_enum<T>::value && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
+
+  /** (QoL) Mutating adapter for the value-producing overload. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::is_reflected_enum<T>::value
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_string_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+    typename CheckValue = WithNodeCheck),
+    (std::is_constructible<Strategy, Value &&>::value
+      && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
+  constexpr map_string_node_t(Value &&value, CheckValue &&check = {})
+    : strategy(std::forward<Value>(value)),
+      with_node_check(std::forward<CheckValue>(check)) {}
 #endif
-        std::move(strategy)}));
-}
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_string_node_t<> map_string_node{};
+#else
+static constexpr const map_string_node_t<> &map_string_node =
+  compat::detail::shared_state<map_string_node_t<>>::value;
+#endif
 
 /** Maps a reflected enum value to its declared name as a quoted scalar.
  * Does not call \ref omni::ryml::reflected_scope::mapping_from_type.

@@ -10,6 +10,48 @@
 namespace omni {
 namespace ryml {
 
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (traits::is_string_like<T>::value && is_read_state<State>::value))
+auto map_string_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_string_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return core::map_node_to_string_like(std::move(state), node, type);
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (traits::is_string_like<T>::value
+    && std::is_assignable<T &, T &&>::value
+    && is_read_state<State>::value))
+auto map_string_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  assert(into);
+  return (*this)(std::move(state), node, omni::type_t<T>{})
+    .transform([into](T &&value) -> compat::monostate {
+      *into = std::move(value);
+      return {};
+    });
+}
+
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_string_like<T>,
     is_write_state<State>>::value))
@@ -39,6 +81,50 @@ auto map_string_like_t::operator()(State context,
   node.set_val_style(::ryml::VAL_DQUO);
 }
 
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_same<bool, compat::remove_cv_t<T>>::value
+    && !std::is_const<T>::value && is_read_state<State>::value))
+auto map_boolean_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_boolean_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return core::map_node_to_boolean(std::move(state), node, type);
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_same<bool, compat::remove_cv_t<T>>::value
+    && !std::is_const<T>::value
+    && std::is_assignable<T &, T &&>::value
+    && is_read_state<State>::value))
+auto map_boolean_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  assert(into);
+  return (*this)(std::move(state), node, omni::type_t<T>{})
+    .transform([into](T &&value) -> compat::monostate {
+      *into = std::move(value);
+      return {};
+    });
+}
+
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
@@ -47,6 +133,51 @@ void map_boolean_t::operator()(State,
   ::ryml::NodeRef node) const {
   // C4's plain bool conversion emits 0/1 rather than document booleans.
   node.set_serialized(c4::fmt::boolalpha(value));
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_integral<T>::value
+    && !std::is_same<bool, compat::remove_cv_t<T>>::value
+    && is_read_state<State>::value))
+auto map_integer_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_integer_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return core::map_node_to_integral(std::move(state), node, type);
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_integral<T>::value
+    && !std::is_same<bool, compat::remove_cv_t<T>>::value
+    && std::is_assignable<T &, T &&>::value
+    && is_read_state<State>::value))
+auto map_integer_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  assert(into);
+  return (*this)(std::move(state), node, omni::type_t<T>{})
+    .transform([into](T &&value) -> compat::monostate {
+      *into = std::move(value);
+      return {};
+    });
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -59,6 +190,48 @@ void map_integral_t::operator()(State,
   node.set_serialized(value);
 }
 
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_floating_point<T>::value && is_read_state<State>::value))
+auto map_number_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_number_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return core::map_node_to_floating_point(std::move(state), node, type);
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_floating_point<T>::value
+    && std::is_assignable<T &, T &&>::value
+    && is_read_state<State>::value))
+auto map_number_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  assert(into);
+  return (*this)(std::move(state), node, omni::type_t<T>{})
+    .transform([into](T &&value) -> compat::monostate {
+      *into = std::move(value);
+      return {};
+    });
+}
+
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_write_state<State>::value))
 void map_floating_point_t::operator()(State,
@@ -67,6 +240,37 @@ void map_floating_point_t::operator()(State,
   // Preserve enough significant digits to recover the original value.
   node.set_serialized(c4::fmt::real(value,
     std::numeric_limits<T>::max_digits10, c4::FTOA_FLEX));
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_arithmetic<T>::value
+    && (!std::is_const<T>::value
+      || !std::is_same<bool, compat::remove_cv_t<T>>::value)
+    && is_read_state<State>::value))
+auto map_arithmetic_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  return mapping_type<T>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    this->with_node_check}(std::move(state), node, type);
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (std::is_arithmetic<T>::value
+    && std::is_assignable<T &, T &&>::value
+    && is_read_state<State>::value))
+auto map_arithmetic_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  return mapping_type<T>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    this->with_node_check}(std::move(state), node, into);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -103,6 +307,32 @@ auto to_optional_like_t::operator()(State context,
       adapt::emplace(into, std::move(value));
       return {};
     });
+}
+
+template <typename WithNodeCheck>
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+  (traits::is_optional<T>::value && is_read_state<State>::value))
+auto map_value_node_t<WithNodeCheck>::operator()(State state,
+  ::ryml::ConstNodeRef node, T *into) const
+  -> with_diagnostics_t<compat::monostate> {
+  if (state.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_value_node(node);
+    if (!checked)
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
+  return to_optional_like_t{}(std::move(state), node, into);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
