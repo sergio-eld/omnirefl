@@ -6,6 +6,7 @@
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/functional.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <algorithm>
 #include <array>

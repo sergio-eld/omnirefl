@@ -1236,6 +1236,7 @@ struct from_type_cpp11_trailing_return {
 #include <omnirefl/serialization/ryml/impl/enum.hpp>
 #include <omnirefl/serialization/ryml/impl/sequence.hpp>
 #include <omnirefl/serialization/ryml/impl/type_mapping.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 namespace omni {
 namespace ryml {

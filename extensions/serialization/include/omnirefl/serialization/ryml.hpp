@@ -612,6 +612,7 @@ static constexpr const serialize_t<> &serialize =
 
 // Definitions follow the complete public interface.
 #include <omnirefl/serialization/ryml/impl.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 // Built-in string operations must satisfy the same contract as custom strings.
 static_assert(omni::traits::is_string_like<std::string>::value,

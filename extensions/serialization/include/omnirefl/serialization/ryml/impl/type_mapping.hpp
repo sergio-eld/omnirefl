@@ -1,5 +1,7 @@
 #pragma once
 
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
+
 #include <c4/format.hpp>
 
 #include <cassert>

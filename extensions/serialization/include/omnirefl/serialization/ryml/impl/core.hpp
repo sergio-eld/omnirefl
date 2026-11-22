@@ -8,6 +8,7 @@
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/traits.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>

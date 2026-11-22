@@ -5,6 +5,7 @@
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
 #include <omnirefl/serialization/ryml/impl/shared.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <array>
 #include <cstddef>

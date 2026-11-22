@@ -473,3 +473,4 @@ static constexpr const map_to_optional_t &map_to_optional =
 } // namespace omni
 
 #include <omnirefl/serialization/ryml/impl/core.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>

@@ -3,6 +3,7 @@
 /** Terminal mapping overloads; no recursive mapping is instantiated. */
 
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 namespace omni {
 namespace ryml {

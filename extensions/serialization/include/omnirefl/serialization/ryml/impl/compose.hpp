@@ -6,6 +6,7 @@
 #include <omnirefl/functional.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>

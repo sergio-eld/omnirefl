@@ -664,3 +664,4 @@ struct with_mutating_node_to_type_overload_t:
 } // namespace omni
 
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
