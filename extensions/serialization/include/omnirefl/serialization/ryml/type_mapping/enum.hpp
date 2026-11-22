@@ -27,9 +27,6 @@ namespace reflected_scope {
  * Declared enumerator names take precedence over aliases. Unknown names
  * produce diagnostics identifying the original input node.
  *
- * strategy supplies the shared enumerator alias configuration;
- * tdm_strategy returns an adjusted mapping. Serialization keeps canonical
- * enumerator names.
  * @pre Caller validates string input in a valid tree; a debug assertion
  * checks this precondition. Metadata for T must be available in reflected
  * scope.
@@ -39,6 +36,10 @@ struct map_node_to_enum_t:
     detail::tdm_for_map_node_to_enum<Strategy> {
   using tdm_provider = detail::tdm_for_map_node_to_enum<Strategy>;
 
+  static_assert(mapping::is_enum_strategy<Strategy>::value,
+    "map_node_to_enum_t requires mapping::enum_strategy_t");
+
+  /** \ref mapping::enum_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
 
@@ -110,6 +111,10 @@ struct map_enum_t:
     detail::tdm_for_map_enum<Strategy> {
   using tdm_provider = detail::tdm_for_map_enum<Strategy>;
 
+  static_assert(mapping::is_enum_strategy<Strategy>::value,
+    "map_enum_t requires mapping::enum_strategy_t");
+
+  /** \ref mapping::enum_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
 

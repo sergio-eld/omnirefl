@@ -19,7 +19,7 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-/** Maps an object node into a reflected record's selected instance fields.
+/** Maps an object node into a reflected record.
  *
 ```
 map_object_node :: {
@@ -28,39 +28,19 @@ map_object_node :: {
 }
 ```
  *
- * Does not call \ref mapping_to_type for the record. Nested members may use
- * state.map_node, which defaults to that lookup.
- * Traversal follows the record schema over the node, applying config's
- * duplicate, unknown-member, and diagnostic-limit policies.
- * Aggregatable records with all instance fields selected are constructed
- * from mapped values. Other cases assign values through field bindings and
- * set_value.
- *
- * A canonical name takes precedence over its aliases, even when its value is
- * invalid. Duplicate policies select among canonical occurrences when present,
- * otherwise among aliases. Diagnostics use the original node keys.
- *
- * strategy supplies field selection, aliases, field validators, and record
- * finalization; tdm_strategy returns an adjusted mapping. Static members are
- * always excluded from deserialization. Filtered fields are not required;
- * their document keys follow the unknown-field policy. The type<T> overload
- * requires a default-constructible record; T* accepts an existing record.
- * Validators return expected<T, issue or range<issue>> or with_diagnostics<T>.
- * They preserve values and run before assignment; finalization runs after
- * successful record construction, including for nested records.
- * Nonidentity finalization through T* requires a move-constructible record
- * assignable from its returned value. Identity finalization adds no such
- * requirement. Literal validator keys need typed or SFINAE-friendly callbacks;
- * OMNI_META_STRING keys select the field before probing generic callbacks.
- * @pre The destination pointer must be non-null and node must belong to a
- * valid tree. Non-object input produces an expected-object diagnostic.
- * Record metadata must be available in reflected scope.
- */
+ * Members are mapped through state.map_node.
+ * Non-object input reports an expected-object diagnostic.
+ * @pre node belongs to a valid tree, pointers are non-null, and record
+ * metadata is available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>>
 struct map_object_node_t:
     detail::tdm_for_map_object_node<Strategy> {
   using tdm_provider = detail::tdm_for_map_object_node<Strategy>;
 
+  static_assert(mapping::is_record_strategy<Strategy>::value,
+    "map_object_node_t requires mapping::record_strategy_t");
+
+  /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
 
@@ -100,9 +80,7 @@ static constexpr const map_object_node_t<> &map_object_node =
 #endif
 
 /** Maps selected record fields to object entries with canonical names.
- * The default strategy excludes static and functional members.
- * Does not call \ref mapping_from_type for the record. Nested members may use
- * state.map_node, which defaults to that lookup.
+ * Members are mapped through state.map_node.
  *
 ```
 map_record :: (state, const T&, node) -> void
@@ -114,6 +92,10 @@ struct map_record_t:
     detail::tdm_for_map_record<Strategy> {
   using tdm_provider = detail::tdm_for_map_record<Strategy>;
 
+  static_assert(mapping::is_record_strategy<Strategy>::value,
+    "map_record_t requires mapping::record_strategy_t");
+
+  /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
 

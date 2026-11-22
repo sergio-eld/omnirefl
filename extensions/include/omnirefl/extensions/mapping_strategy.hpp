@@ -8,6 +8,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/impl/tdm_mapping_strategy.hpp>
 #include <omnirefl/functional.hpp>
+#include <omnirefl/traits.hpp>
 
 #include <array>
 #include <cstddef>
@@ -97,6 +98,36 @@ struct enum_strategy_t:
     : aliases_by_name(std::forward<Value>(value)) {}
 #endif
 };
+
+/** Whether T specializes record_strategy_t, ignoring cv/ref qualifiers. */
+template <typename T>
+struct is_record_strategy:
+    compat::bool_constant<
+      traits::is_specialization_of<record_strategy_t, T>()> {};
+
+/** Whether T specializes enum_strategy_t, ignoring cv/ref qualifiers. */
+template <typename T>
+struct is_enum_strategy:
+    compat::bool_constant<
+      traits::is_specialization_of<enum_strategy_t, T>()> {};
+
+// C++14 adds variable templates for trait values.
+#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
+template <typename T>
+constexpr bool is_record_strategy_v = is_record_strategy<T>::value;
+
+template <typename T>
+constexpr bool is_enum_strategy_v = is_enum_strategy<T>::value;
+#endif
+
+// C++20 concepts expose the same strategy contracts.
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <typename T>
+concept record_strategy_like = is_record_strategy<T>::value;
+
+template <typename T>
+concept enum_strategy_like = is_enum_strategy<T>::value;
+#endif
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr record_strategy_t<> record_strategy{};
