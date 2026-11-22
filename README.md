@@ -958,6 +958,19 @@ limits the declarations it can represent.
   use an aligned representation such as `std::array` for whole-field access.
 
 </details>
+
+### JSON/YAML mapping
+
+Records with several recursive fields can require excessive compilation time
+and compiler memory, even with the tree-depth limit. For example:
+
+```cpp
+struct node {
+  std::vector<node> children, alternatives, fallbacks;
+};
+```
+
+Distinct recursive paths and depths instantiate separate mappings.
 <!-- pages:limitations:end -->
 
 ## Troubleshooting and Bug Reports
