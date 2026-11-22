@@ -101,12 +101,12 @@ constexpr auto default_to_enum(omni::type_t<T>, Strategy strategy = {})
  * Does not call \ref omni::ryml::reflected_scope::mapping_from_type.
  *
 ```
-from_enum :: (state, T, node) -> void
+map_enum :: (state, T, node) -> void
 ```
  *
  * @pre Metadata for T must be available in reflected scope. */
 template <typename Strategy = mapping::enum_strategy_t<>>
-struct from_enum_t {
+struct map_enum_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_write_state<State>>::value))
@@ -119,7 +119,7 @@ struct from_enum_t {
     typename Result = compat::invoke_result_t<F &&, const Strategy &>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> from_enum_t<compat::decay_t<Result>> {
+    -> map_enum_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f), this->strategy)};
   }
 
@@ -128,7 +128,7 @@ struct from_enum_t {
     typename Result = compat::invoke_result_t<F &&, Strategy &&>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> from_enum_t<compat::decay_t<Result>> {
+    -> map_enum_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f),
       std::move(this->strategy))};
   }
@@ -136,10 +136,10 @@ struct from_enum_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_enum_t<> from_enum{};
+inline constexpr map_enum_t<> map_enum{};
 #else
-static constexpr const from_enum_t<> &from_enum =
-  compat::detail::shared_state<from_enum_t<>>::value;
+static constexpr const map_enum_t<> &map_enum =
+  compat::detail::shared_state<map_enum_t<>>::value;
 #endif
 
 } // namespace reflected_scope

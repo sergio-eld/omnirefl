@@ -2,7 +2,9 @@
 
 #include <omnirefl/functional.hpp>
 #include <omnirefl/extensions/static_string.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 
 #include <array>
 #include <cstddef>
@@ -540,9 +542,17 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
     && std::is_move_constructible<T>::value
     && std::is_default_constructible<T>::value
     && is_read_state<State>::value))
-auto to_record_t<Strategy>::operator()(State context,
+auto map_object_node_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
+  if (context.limit_exceeded())
+    return {compat::nullopt, {{context.config.error_policy, {}}, {}, {}}};
+
+  auto checked = core::expect_object_node(node);
+  if (!checked)
+    return {compat::nullopt,
+      {{context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
@@ -559,10 +569,18 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && is_read_state<State>::value))
-auto to_record_t<Strategy>::operator()(State context,
+auto map_object_node_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
+  if (context.limit_exceeded())
+    return {compat::nullopt, {{context.config.error_policy, {}}, {}, {}}};
+
+  auto checked = core::expect_object_node(node);
+  if (!checked)
+    return {compat::nullopt,
+      {{context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
@@ -580,7 +598,7 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto from_record_t<Strategy>::operator()(State context,
+auto map_record_t<Strategy>::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {

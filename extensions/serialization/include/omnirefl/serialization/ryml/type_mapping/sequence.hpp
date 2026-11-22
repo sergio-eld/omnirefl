@@ -66,13 +66,13 @@ constexpr auto default_to_range(omni::type_t<T>)
  * element mappings may use state.map_node, which defaults to that lookup.
  *
 ```
-from_range :: (state, const T&, node) -> void
+map_range :: (state, const T&, node) -> void
 ```
  *
  * Empty optional array elements are omitted. Optional object values remain.
  * Non-scalar C++ elements must be exposed as lvalue references to value_type;
  * default mapping rejects temporary-producing iterators in both tree modes. */
-struct from_range_t {
+struct map_range_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
@@ -81,10 +81,10 @@ struct from_range_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_range_t from_range{};
+inline constexpr map_range_t map_range{};
 #else
-static constexpr const from_range_t &from_range =
-  compat::detail::shared_state<from_range_t>::value;
+static constexpr const map_range_t &map_range =
+  compat::detail::shared_state<map_range_t>::value;
 #endif
 
 } // namespace ryml

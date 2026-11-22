@@ -13,7 +13,7 @@ namespace ryml {
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_string_like<T>,
     is_write_state<State>>::value))
-auto from_string_like_t::operator()(State context,
+auto map_string_like_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {
@@ -42,7 +42,7 @@ auto from_string_like_t::operator()(State context,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_boolean_t::operator()(State,
+void map_boolean_t::operator()(State,
   const T &value,
   ::ryml::NodeRef node) const {
   // C4's plain bool conversion emits 0/1 rather than document booleans.
@@ -53,7 +53,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_integral<T>::value
     && !std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void from_integral_t::operator()(State,
+void map_integral_t::operator()(State,
   const T &value,
   ::ryml::NodeRef node) const {
   node.set_serialized(value);
@@ -61,7 +61,7 @@ void from_integral_t::operator()(State,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_write_state<State>::value))
-void from_floating_point_t::operator()(State,
+void map_floating_point_t::operator()(State,
   const T &value,
   ::ryml::NodeRef node) const {
   // Preserve enough significant digits to recover the original value.
@@ -71,14 +71,14 @@ void from_floating_point_t::operator()(State,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && is_write_state<State>::value))
-auto from_arithmetic_t::operator()(State context,
+auto map_arithmetic_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const -> void {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      from_boolean_t>,
-    traits::case_<std::is_integral<T>::value, from_integral_t>,
-    from_floating_point_t>::type{};
+      map_boolean_t>,
+    traits::case_<std::is_integral<T>::value, map_integral_t>,
+    map_floating_point_t>::type{};
 
   write(std::move(context), value, node);
 }
@@ -107,7 +107,7 @@ auto to_optional_like_t::operator()(State context,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
-auto from_optional_like_t::operator()(State context,
+auto map_optional_like_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {

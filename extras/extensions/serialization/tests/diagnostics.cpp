@@ -182,7 +182,7 @@ TEST(mapping_diagnostics, reuses_relative_paths_from_a_borrowed_issue_range) {
     omni::json::value_kind::unknown, ::ryml::ConstNodeRef{});
   missing.path.push_back({"child", omni::compat::nullopt});
   const issue_view errors{&missing, &missing + 1};
-  const auto mapping = omni::ryml::compose::to_record(
+  const auto mapping = omni::ryml::compose::map_object_node(
     [errors](::ryml::ConstNodeRef) -> omni::compat::expected<int, issue_view> {
       return omni::compat::unexpected<issue_view>{errors};
     });

@@ -18,7 +18,7 @@ namespace {
 using omni::json::issue_code;
 using omni::json::value_kind;
 using omni::ryml::compose::node_check;
-using omni::ryml::compose::to_record;
+using omni::ryml::compose::map_object_node;
 using omni::ryml::compose::with_node_check;
 using serialization_test::map_using;
 
@@ -253,7 +253,7 @@ struct diagnostic_count_callback {
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <>
 const auto omni::ryml::cp::to_type<counted_record> =
-  to_record(count_properties);
+  map_object_node(count_properties);
 #else
 // C++11 initializes the function-pointer binding when the mapping is called.
 template <>
@@ -264,7 +264,7 @@ struct omni::ryml::cp::to_type_t<counted_record> {
     ::ryml::ConstNodeRef node,
     counted_record *into) const -> omni::ryml::with_diagnostics_t<
       omni::compat::monostate> {
-    return to_record(count_properties)(std::move(state), node, into);
+    return map_object_node(count_properties)(std::move(state), node, into);
   }
 };
 #endif
@@ -388,7 +388,7 @@ TEST(record_callback, passes_owned_state_to_a_value_callback) {
   if (!tree)
     return;
 
-  const auto mapping = to_record(owned_value_callback{});
+  const auto mapping = map_object_node(owned_value_callback{});
 
   const omni::ryml::config_t<> options{};
   const auto result = map_using(options, mapping,
@@ -406,7 +406,7 @@ TEST(record_callback, passes_owned_state_to_a_state_only_callback) {
   if (!tree)
     return;
 
-  const auto mapping = to_record(owned_state_callback{});
+  const auto mapping = map_object_node(owned_state_callback{});
 
   const omni::ryml::config_t<> options{};
   const auto result = map_using(options, mapping,
@@ -424,7 +424,7 @@ TEST(record_callback, passes_owned_state_to_a_mutating_callback) {
   if (!tree)
     return;
 
-  const auto mapping = to_record(owned_mutating_callback{});
+  const auto mapping = map_object_node(owned_mutating_callback{});
 
   const omni::ryml::config_t<> options{};
   counted_record into{};
@@ -456,7 +456,7 @@ TEST(record_callback, lifts_the_callback_without_explicit_adaptation) {
     return;
 
   const omni::ryml::config_t<> options{};
-  const auto mapping = to_record(count_properties);
+  const auto mapping = map_object_node(count_properties);
   const auto value = map_using(options, mapping,
     omni::type_t<counted_record>{}, tree->crootref());
 
@@ -480,7 +480,7 @@ TEST(record_callback, retains_document_paths_and_source_nodes) {
 
   const omni::ryml::config_t<> options{};
   const auto outer = tree->crootref()["outer"];
-  const auto mapping = to_record(reject_count);
+  const auto mapping = map_object_node(reject_count);
   const auto result = map_using(options, mapping,
     omni::type_t<counted_record>{}, outer);
 
@@ -500,7 +500,7 @@ TEST(record_callback, preserves_multiple_issues_and_their_document_paths) {
   if (!tree)
     return;
 
-  const auto mapping = to_record([](::ryml::ConstNodeRef node)
+  const auto mapping = map_object_node([](::ryml::ConstNodeRef node)
     -> omni::compat::expected<counted_record,
       std::vector<omni::ryml::issue>> {
     auto count = omni::ryml::core::make_issue(issue_code::out_of_range,
@@ -551,7 +551,7 @@ TEST_P(callback_issue_limits, limits_issues_returned_by_a_callback) {
     return;
 
   const bool warnings = c.warnings;
-  const auto mapping = to_record([warnings](::ryml::ConstNodeRef node)
+  const auto mapping = map_object_node([warnings](::ryml::ConstNodeRef node)
     -> omni::compat::expected<counted_record,
       std::vector<omni::ryml::issue>> {
     const auto issue = omni::ryml::core::make_issue(
@@ -633,7 +633,7 @@ TEST(shape_callback, maps_integer_input_with_a_destination_tag) {
   if (!tree)
     return;
 
-  const auto mapping = omni::ryml::compose::to_integral(
+  const auto mapping = omni::ryml::compose::map_integer_node(
     parse_integer_callback{});
 
   const omni::ryml::config_t<> options{};
@@ -660,7 +660,7 @@ TEST(record_callback, maps_into_a_nonassignable_destination) {
   if (!tree)
     return;
 
-  const auto map = to_record(map_nonassignable_account{});
+  const auto map = map_object_node(map_nonassignable_account{});
 
   omni::ryml::config_t<> options{};
   options.error_policy.unknown_fields = omni::json::unknown_policy::allow;
@@ -694,7 +694,7 @@ TEST(record_callback, accepts_a_mapping_that_already_returns_diagnostics) {
   if (!tree)
     return;
 
-  const auto mapping = to_record(diagnostic_count_callback{});
+  const auto mapping = map_object_node(diagnostic_count_callback{});
 
   const omni::ryml::config_t<> options{};
   const auto mapped = map_using(options, mapping,
@@ -715,11 +715,12 @@ TEST(record_callback, pointer_only_callback_exposes_only_mutation) {
     explicit record(std::size_t count): count(count) {}
   };
 
-  const auto mapping = to_record([](::ryml::ConstNodeRef node, record *into)
-    -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
-    into->count = node.num_children();
-    return omni::compat::monostate{};
-  });
+  const auto mapping = map_object_node(
+    [](::ryml::ConstNodeRef node, record *into)
+      -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
+      into->count = node.num_children();
+      return omni::compat::monostate{};
+    });
 
   EXPECT_TRUE((omni::compat::is_invocable<decltype(mapping),
     omni::ryml::read_state_t<>,
@@ -748,11 +749,12 @@ TEST(record_callback,
   if (!tree)
     return;
 
-  const auto mapping = to_record([](::ryml::ConstNodeRef node, record *into)
-    -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
-    into->count = node.num_children();
-    return omni::compat::monostate{};
-  });
+  const auto mapping = map_object_node(
+    [](::ryml::ConstNodeRef node, record *into)
+      -> omni::compat::expected<omni::compat::monostate, omni::ryml::issue> {
+      into->count = node.num_children();
+      return omni::compat::monostate{};
+    });
 
   const omni::ryml::config_t<> options{};
   record into{0};
@@ -797,7 +799,7 @@ TEST(shape_callback, accepts_errors_with_a_distinct_sentinel) {
   if (!tree)
     return;
 
-  const auto mapping = omni::ryml::compose::to_integral(
+  const auto mapping = omni::ryml::compose::map_integer_node(
     [](::ryml::ConstNodeRef node)
       -> omni::compat::expected<int, issue_range> {
       return omni::compat::unexpected<issue_range>{issue_range{{
@@ -858,7 +860,7 @@ TEST(shape_callback, assigns_from_a_generic_state_and_explicit_node_callback) {
   if (!tree)
     return;
 
-  const auto mapping = omni::ryml::compose::to_integral(
+  const auto mapping = omni::ryml::compose::map_integer_node(
     [](auto state, ::ryml::ConstNodeRef node) {
       return omni::ryml::core::map_node_to_integral(
         std::move(state), node, omni::type_t<int>{});

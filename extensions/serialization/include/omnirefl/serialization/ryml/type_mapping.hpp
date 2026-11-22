@@ -78,10 +78,10 @@ static constexpr const default_to_string_like_t &default_to_string_like =
  * Converted text is copied; reference-tree writing may borrow source views.
  *
 ```
-from_string_like :: (state, const T&, node) -> void
+map_string_like :: (state, const T&, node) -> void
 ```
  */
-struct from_string_like_t {
+struct map_string_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_string_like<T>,
       is_write_state<State>>::value))
@@ -90,10 +90,10 @@ struct from_string_like_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_string_like_t from_string_like{};
+inline constexpr map_string_like_t map_string_like{};
 #else
-static constexpr const from_string_like_t &from_string_like =
-  compat::detail::shared_state<from_string_like_t>::value;
+static constexpr const map_string_like_t &map_string_like =
+  compat::detail::shared_state<map_string_like_t>::value;
 #endif
 
 /** Checked Boolean node-to-type mapping.
@@ -143,10 +143,10 @@ static constexpr const default_to_boolean_t &default_to_boolean =
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_boolean :: (state, T, node) -> void
+map_boolean :: (state, T, node) -> void
 ```
  */
-struct from_boolean_t {
+struct map_boolean_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
@@ -155,10 +155,10 @@ struct from_boolean_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_boolean_t from_boolean{};
+inline constexpr map_boolean_t map_boolean{};
 #else
-static constexpr const from_boolean_t &from_boolean =
-  compat::detail::shared_state<from_boolean_t>::value;
+static constexpr const map_boolean_t &map_boolean =
+  compat::detail::shared_state<map_boolean_t>::value;
 #endif
 
 /** Checked integer node-to-type mapping.
@@ -210,10 +210,10 @@ static constexpr const default_to_integral_t &default_to_integral =
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_integral :: (state, const T&, node) -> void
+map_integral :: (state, const T&, node) -> void
 ```
  */
-struct from_integral_t {
+struct map_integral_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
@@ -223,10 +223,10 @@ struct from_integral_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_integral_t from_integral{};
+inline constexpr map_integral_t map_integral{};
 #else
-static constexpr const from_integral_t &from_integral =
-  compat::detail::shared_state<from_integral_t>::value;
+static constexpr const map_integral_t &map_integral =
+  compat::detail::shared_state<map_integral_t>::value;
 #endif
 
 /** Checked floating-point node-to-type mapping.
@@ -275,10 +275,10 @@ static constexpr const default_to_floating_point_t &default_to_floating_point =
  * Preserves enough significant digits for round-trip conversion.
  *
 ```
-from_floating_point :: (state, const T&, node) -> void
+map_floating_point :: (state, const T&, node) -> void
 ```
  */
-struct from_floating_point_t {
+struct map_floating_point_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
@@ -286,10 +286,10 @@ struct from_floating_point_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_floating_point_t from_floating_point{};
+inline constexpr map_floating_point_t map_floating_point{};
 #else
-static constexpr const from_floating_point_t &from_floating_point =
-  compat::detail::shared_state<from_floating_point_t>::value;
+static constexpr const map_floating_point_t &map_floating_point =
+  compat::detail::shared_state<map_floating_point_t>::value;
 #endif
 
 /** Checked arithmetic node-to-type mapping.
@@ -345,10 +345,10 @@ static constexpr const default_to_arithmetic_t &default_to_arithmetic =
  * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
-from_arithmetic :: (state, const T&, node) -> void
+map_arithmetic :: (state, const T&, node) -> void
 ```
  */
-struct from_arithmetic_t {
+struct map_arithmetic_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_write_state<State>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
@@ -356,10 +356,10 @@ struct from_arithmetic_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_arithmetic_t from_arithmetic{};
+inline constexpr map_arithmetic_t map_arithmetic{};
 #else
-static constexpr const from_arithmetic_t &from_arithmetic =
-  compat::detail::shared_state<from_arithmetic_t>::value;
+static constexpr const map_arithmetic_t &map_arithmetic =
+  compat::detail::shared_state<map_arithmetic_t>::value;
 #endif
 
 // FIXME: [high] Separate optional unwrapping from fundamental mappings:
@@ -396,10 +396,10 @@ constexpr auto default_to_optional_like(omni::type_t<T>)
  * Contained values use \ref reflected_scope::mapping_from_type.
  *
 ```
-from_optional_like :: (state, const T&, node) -> void
+map_optional_like :: (state, const T&, node) -> void
 ```
  */
-struct from_optional_like_t {
+struct map_optional_like_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
@@ -408,10 +408,10 @@ struct from_optional_like_t {
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_optional_like_t from_optional_like{};
+inline constexpr map_optional_like_t map_optional_like{};
 #else
-static constexpr const from_optional_like_t &from_optional_like =
-  compat::detail::shared_state<from_optional_like_t>::value;
+static constexpr const map_optional_like_t &map_optional_like =
+  compat::detail::shared_state<map_optional_like_t>::value;
 #endif
 
 /** Customization points for C++ type mappings. */
@@ -539,7 +539,7 @@ struct omni::ryml::cp::from_type_t<counter> {
   void operator()(State context,
     const counter &value,
     ::ryml::NodeRef node) const {
-    omni::ryml::from_integral(context, value.value, node);
+    omni::ryml::map_integral(context, value.value, node);
   }
 };
 ```
@@ -581,7 +581,7 @@ using default_mapping_to_type = typename traits::select<
   traits::case_<omni::is_reflected_enum<T>::value,
     decltype(reflected_scope::default_to_enum(omni::type_t<T>{}))>,
   traits::case_<omni::is_reflected_record<T>::value,
-    decltype(reflected_scope::default_to_record(omni::type_t<T>{}))>,
+    reflected_scope::map_object_node_t<>>,
   traits::cp::unavailable>::type;
 
 /** Default type mappings are selected separately from cp::from_type to avoid
@@ -595,17 +595,17 @@ using default_mapping_to_type = typename traits::select<
  * scope. Without a default, this alias is traits::cp::unavailable. */
 template <typename _T, typename T = compat::remove_cv_t<_T>>
 using default_mapping_from_type = typename traits::select<
-  traits::case_<traits::is_string_like<T>::value, from_string_like_t>,
-  traits::case_<std::is_same<bool, T>::value, from_boolean_t>,
-  traits::case_<std::is_integral<T>::value, from_integral_t>,
-  traits::case_<std::is_floating_point<T>::value, from_floating_point_t>,
-  traits::case_<traits::is_optional<T>::value, from_optional_like_t>,
+  traits::case_<traits::is_string_like<T>::value, map_string_like_t>,
+  traits::case_<std::is_same<bool, T>::value, map_boolean_t>,
+  traits::case_<std::is_integral<T>::value, map_integral_t>,
+  traits::case_<std::is_floating_point<T>::value, map_floating_point_t>,
+  traits::case_<traits::is_optional<T>::value, map_optional_like_t>,
   traits::case_<omni::ryml::detail::is_mapped_range<const T>::value,
-    from_range_t>,
+    map_range_t>,
   traits::case_<omni::is_reflected_enum<T>::value,
-    reflected_scope::from_enum_t<>>,
+    reflected_scope::map_enum_t<>>,
   traits::case_<omni::is_reflected_record<T>::value,
-    reflected_scope::from_record_t<>>,
+    reflected_scope::map_record_t<>>,
   traits::cp::unavailable>::type;
 
 } // namespace detail

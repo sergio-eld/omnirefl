@@ -55,7 +55,7 @@ struct from_type_t<registered_integer> {
   void operator()(State state,
     const registered_integer &value,
     ::ryml::NodeRef node) const {
-    from_arithmetic(std::move(state), value.value, node);
+    map_arithmetic(std::move(state), value.value, node);
   }
 };
 
@@ -71,7 +71,7 @@ const auto from_type<endpoint<T>> = [](auto state,
 template <typename T>
 const auto to_type<endpoint<T>> =
   compose::with_node_check<core::expect_object_node>(
-    reflected_scope::to_record_t<mapping::record_strategy_t<
+    reflected_scope::map_object_node_t<mapping::record_strategy_t<
         decltype(mapping::record_strategy.filter_fields), endpoint_names>>{});
 #else
 template <typename T>
@@ -88,7 +88,7 @@ struct from_type_t<endpoint<T>> {
 template <typename T>
 struct to_type_t<endpoint<T>>:
     decltype(compose::with_node_check<core::expect_object_node>(
-      reflected_scope::to_record_t<mapping::record_strategy_t<
+      reflected_scope::map_object_node_t<mapping::record_strategy_t<
         decltype(mapping::record_strategy.filter_fields), endpoint_names>>{})) {};
 #endif
 
@@ -108,7 +108,7 @@ const auto to_type<shifted_integer> =
 template <>
 const auto from_type<shifted_integer> =
   [bias = 11](auto state, const shifted_integer &value, ::ryml::NodeRef node) {
-    from_integral(std::move(state), value.value + bias, node);
+    map_integral(std::move(state), value.value + bias, node);
   };
 #else
 // C++11 uses named callable types instead of capturing generic lambdas.
@@ -139,7 +139,7 @@ struct from_type_t<shifted_integer> {
   void operator()(State state,
     const shifted_integer &value,
     ::ryml::NodeRef node) const {
-    from_integral(std::move(state), value.value + this->bias, node);
+    map_integral(std::move(state), value.value + this->bias, node);
   }
 };
 #endif
@@ -151,7 +151,7 @@ struct from_type_t<const qualified_integer> {
   void operator()(State state,
     const qualified_integer &value,
     ::ryml::NodeRef node) const {
-    from_integral(std::move(state), value.value, node);
+    map_integral(std::move(state), value.value, node);
   }
 };
 
@@ -195,25 +195,25 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::map_boolean_t>::value,
   "Boolean precedes the integral writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<int>{})),
-    omni::ryml::from_integral_t>::value,
+    omni::ryml::map_integral_t>::value,
   "Signed integers use the integer writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<unsigned>{})),
-    omni::ryml::from_integral_t>::value,
+    omni::ryml::map_integral_t>::value,
   "Unsigned integers use the integer writer");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<double>{})),
-    omni::ryml::from_floating_point_t>::value,
+    omni::ryml::map_floating_point_t>::value,
   "Floating-point values use the real writer");
 
 static_assert(std::is_same<
@@ -226,7 +226,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<std::string>{})),
-    omni::ryml::from_string_like_t>::value,
+    omni::ryml::map_string_like_t>::value,
   "String from-type selection");
 
 static_assert(std::is_same<
@@ -239,7 +239,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<std::vector<int>>{})),
-    omni::ryml::from_range_t>::value,
+    omni::ryml::map_range_t>::value,
   "Range from-type selection");
 
 static_assert(std::is_same<
@@ -252,7 +252,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<omni::compat::optional<int>>{})),
-    omni::ryml::from_optional_like_t>::value,
+    omni::ryml::map_optional_like_t>::value,
   "Optional from-type selection");
 
 static_assert(std::is_same<
@@ -276,7 +276,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::map_boolean_t>::value,
   "const bool uses the Boolean from-type mapping");
 
 static_assert(std::is_same<
@@ -288,7 +288,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<volatile bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::map_boolean_t>::value,
   "volatile bool uses the Boolean from-type mapping");
 
 static_assert(std::is_same<
@@ -300,7 +300,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const volatile bool>{})),
-    omni::ryml::from_boolean_t>::value,
+    omni::ryml::map_boolean_t>::value,
   "const volatile bool uses the Boolean from-type mapping");
 
 static_assert(std::is_same<
@@ -313,7 +313,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const std::string>{})),
-    omni::ryml::from_string_like_t>::value,
+    omni::ryml::map_string_like_t>::value,
   "Qualified string from-type selection");
 
 static_assert(std::is_same<
@@ -326,7 +326,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const std::vector<int>>{})),
-    omni::ryml::from_range_t>::value,
+    omni::ryml::map_range_t>::value,
   "Qualified range from-type selection");
 
 static_assert(std::is_same<
@@ -339,7 +339,7 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const omni::compat::optional<int>>{})),
-    omni::ryml::from_optional_like_t>::value,
+    omni::ryml::map_optional_like_t>::value,
   "Qualified optional from-type selection");
 
 static_assert(std::is_same<
@@ -463,14 +463,13 @@ TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
 
 TEST(type_mapping, selects_reflected_defaults) {
   omni::reflected_call(cpp11_check_mapping_types<
-      decltype(omni::ryml::reflected_scope::default_to_record(
-        omni::type_t<uncustomized_record>{})),
-      omni::ryml::reflected_scope::from_record_t<>>{},
+      omni::ryml::reflected_scope::map_object_node_t<>,
+      omni::ryml::reflected_scope::map_record_t<>>{},
     omni::type_t<uncustomized_record>{});
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_enum(
         omni::type_t<uncustomized_enum>{})),
-      omni::ryml::reflected_scope::from_enum_t<>>{},
+      omni::ryml::reflected_scope::map_enum_t<>>{},
     omni::type_t<uncustomized_enum>{});
 }
 

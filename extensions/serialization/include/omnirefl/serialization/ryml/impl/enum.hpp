@@ -81,7 +81,7 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
-auto from_enum_t<Strategy>::operator()(State,
+auto map_enum_t<Strategy>::operator()(State,
   T value,
   ::ryml::NodeRef node) const -> void {
   constexpr auto enumerators = omni::meta_for<T>::enumerators();

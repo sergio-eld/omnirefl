@@ -117,9 +117,9 @@ struct without_label {
 struct select_static_writer {
   template <typename State>
   auto operator()(State, omni::type_t<interval>) const
-    -> decltype(omni::ryml::reflected_scope::from_record
+    -> decltype(omni::ryml::reflected_scope::map_record
       .tdm_strategy(include_statics{})) {
-    return omni::ryml::reflected_scope::from_record
+    return omni::ryml::reflected_scope::map_record
       .tdm_strategy(include_statics{});
   }
 
@@ -315,14 +315,17 @@ struct to_type_t<numeric_strategy_examples::settings> {
     -> with_diagnostics_t<numeric_strategy_examples::settings> {
     const auto strategy = mapping::record_strategy
       .tdm_validate_fields(numeric_strategy_examples::field_checks{});
-    return reflected_scope::default_to_record(type, strategy)(
+    return reflected_scope::map_object_node.tdm_strategy(
+      [&strategy](const mapping::record_strategy_t<> &) {
+        return strategy;
+      })(
       std::move(state), node, type);
   }
 };
 
 template <>
 struct to_type_t<filtered_root_examples::settings>:
-    reflected_scope::to_record_t<mapping::record_strategy_t<
+    reflected_scope::map_object_node_t<mapping::record_strategy_t<
       filtered_root_examples::parsed_only>> {};
 
 template <>
@@ -333,7 +336,10 @@ struct to_type_t<generic_strategy_examples::settings> {
     -> with_diagnostics_t<generic_strategy_examples::settings> {
     const auto strategy = mapping::record_strategy
       .tdm_validate_fields(generic_strategy_examples::field_checks{});
-    return reflected_scope::default_to_record(type, strategy)(
+    return reflected_scope::map_object_node.tdm_strategy(
+      [&strategy](const mapping::record_strategy_t<> &) {
+        return strategy;
+      })(
       std::move(state), node, type);
   }
 };
@@ -346,7 +352,10 @@ struct to_type_t<optional_strategy_examples::settings> {
     -> with_diagnostics_t<optional_strategy_examples::settings> {
     const auto strategy = mapping::record_strategy
       .tdm_validate_fields(optional_strategy_examples::field_checks{});
-    return reflected_scope::default_to_record(type, strategy)(
+    return reflected_scope::map_object_node.tdm_strategy(
+      [&strategy](const mapping::record_strategy_t<> &) {
+        return strategy;
+      })(
       std::move(state), node, type);
   }
 };
@@ -357,8 +366,10 @@ struct to_type_t<strategy_examples::interval> {
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<strategy_examples::interval> type) const
     -> with_diagnostics_t<strategy_examples::interval> {
-    return reflected_scope::default_to_record(type,
-      strategy_examples::interval_strategy)(std::move(state), node, type);
+    return reflected_scope::map_object_node.tdm_strategy(
+      [](const mapping::record_strategy_t<> &) {
+        return strategy_examples::interval_strategy;
+      })(std::move(state), node, type);
   }
 };
 
@@ -379,9 +390,10 @@ struct to_type_t<strategy_examples::existing> {
   auto operator()(State state, ::ryml::ConstNodeRef node,
     strategy_examples::existing *into) const
     -> with_diagnostics_t<compat::monostate> {
-    return reflected_scope::default_to_record(
-      omni::type_t<strategy_examples::existing>{},
-      strategy_examples::existing_strategy)(std::move(state), node, into);
+    return reflected_scope::map_object_node.tdm_strategy(
+      [](const mapping::record_strategy_t<> &) {
+        return strategy_examples::existing_strategy;
+      })(std::move(state), node, into);
   }
 };
 
@@ -447,8 +459,10 @@ TEST(mapping_strategy, filtered_fields_keep_their_defaults) {
   const auto strategy = strategy_examples::interval_strategy
     .tdm_filter_fields(
       omni::fn::default_value<strategy_examples::without_label>{});
-  const auto mapping = omni::ryml::reflected_scope::default_to_record(
-    omni::type_t<strategy_examples::interval>{}, strategy);
+  const auto mapping = omni::ryml::reflected_scope::map_object_node
+    .tdm_strategy([&strategy](const omni::mapping::record_strategy_t<> &) {
+      return strategy;
+    });
   const auto tree = omni::ryml::core::parse(R"({"start":1,"finish":3})");
   EXPECT_TRUE(tree);
   if (!tree)
@@ -468,8 +482,10 @@ TEST(mapping_strategy, filtered_fields_keep_their_defaults) {
     .finalize = strategy.finalize,
   };
   const auto direct = serialization_test::map_using(omni::ryml::config_t<>{},
-    omni::ryml::reflected_scope::default_to_record(
-      omni::type_t<strategy_examples::interval>{}, designated),
+    omni::ryml::reflected_scope::map_object_node.tdm_strategy(
+      [&designated](const omni::mapping::record_strategy_t<> &) {
+        return designated;
+      }),
     omni::type_t<strategy_examples::interval>{}, tree->crootref());
   EXPECT_TRUE(direct.value);
   if (direct.value) {
@@ -493,8 +509,10 @@ TEST(mapping_strategy, static_fields_are_opt_in_for_serialization_only) {
 
   const auto strategy = strategy_examples::include_statics{}(
     omni::mapping::record_strategy);
-  const auto mapping = omni::ryml::reflected_scope::default_to_record(
-    omni::type_t<strategy_examples::interval>{}, strategy);
+  const auto mapping = omni::ryml::reflected_scope::map_object_node
+    .tdm_strategy([&strategy](const omni::mapping::record_strategy_t<> &) {
+      return strategy;
+    });
   const auto tree = omni::ryml::core::parse(
     R"({"begin":1,"end":3,"label":"ok"})");
   EXPECT_TRUE(tree);

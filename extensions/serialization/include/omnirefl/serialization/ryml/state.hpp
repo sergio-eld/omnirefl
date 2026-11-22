@@ -784,47 +784,53 @@ struct schema_path {
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t,
   typename Root = void, typename EnclosingRecord = void,
-  typename Path = schema_path<root_path_name>>
+  typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
+  std::size_t DepthLimit = 10>
 struct read_state_config {
   using config_type = Config;
   using map_node_type = MapNode;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
   using path_type = Path;
+  static constexpr std::size_t depth = Depth;
+  static constexpr std::size_t depth_limit = DepthLimit;
 
   template <typename Record, typename Name>
   using child = read_state_config<Config, MapNode, Root, Record,
-    typename Path::template child<Name>>;
+    typename Path::template child<Name>, Depth + 1, DepthLimit>;
 
   template <typename Record, typename Field>
   using field = read_state_config<Config, MapNode, Root, Record,
-    typename Path::template field<Field>>;
+    typename Path::template field<Field>, Depth + 1, DepthLimit>;
 
   using element = read_state_config<Config, MapNode, Root, EnclosingRecord,
-    typename Path::element>;
+    typename Path::element, Depth + 1, DepthLimit>;
 };
 
 template <bool BorrowStrings = false,
   typename MapNode = reflected_scope::mapping_from_type_t,
   typename Root = void, typename EnclosingRecord = void,
-  typename Path = schema_path<root_path_name>>
+  typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
+  std::size_t DepthLimit = 10>
 struct write_state_config {
   static constexpr bool borrow_strings = BorrowStrings;
   using map_node_type = MapNode;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
   using path_type = Path;
+  static constexpr std::size_t depth = Depth;
+  static constexpr std::size_t depth_limit = DepthLimit;
 
   template <typename Record, typename Name>
   using child = write_state_config<BorrowStrings, MapNode, Root, Record,
-    typename Path::template child<Name>>;
+    typename Path::template child<Name>, Depth + 1, DepthLimit>;
 
   template <typename Record, typename Field>
   using field = write_state_config<BorrowStrings, MapNode, Root, Record,
-    typename Path::template field<Field>>;
+    typename Path::template field<Field>, Depth + 1, DepthLimit>;
 
   using element = write_state_config<BorrowStrings, MapNode, Root,
-    EnclosingRecord, typename Path::element>;
+    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
 };
 
 } // namespace detail
@@ -856,6 +862,16 @@ template <typename StateConfig = detail::read_state_config<>>
 struct read_state_t {
   using enclosing_root = typename StateConfig::enclosing_root;
   using enclosing_record = typename StateConfig::enclosing_record;
+
+  /** Tree depth, starting at zero for the root.
+   * child(), field(), and element() increment it; optional unwrapping does not.
+   * No depth limit is enforced yet. */
+  static constexpr std::size_t depth() { return StateConfig::depth; }
+
+  /** Tree-depth limit, defaulting to 10; not enforced yet. */
+  static constexpr std::size_t depth_limit() {
+    return StateConfig::depth_limit;
+  }
 
   const typename StateConfig::config_type &config;
   std::size_t error_count;
@@ -936,6 +952,16 @@ template <typename StateConfig = detail::write_state_config<>>
 struct write_state_t {
   using enclosing_root = typename StateConfig::enclosing_root;
   using enclosing_record = typename StateConfig::enclosing_record;
+
+  /** Tree depth, starting at zero for the root.
+   * child(), field(), and element() increment it; optional unwrapping does not.
+   * No depth limit is enforced yet. */
+  static constexpr std::size_t depth() { return StateConfig::depth; }
+
+  /** Tree-depth limit, defaulting to 10; not enforced yet. */
+  static constexpr std::size_t depth_limit() {
+    return StateConfig::depth_limit;
+  }
 
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
   const typename StateConfig::map_node_type &map_node;
@@ -1018,7 +1044,8 @@ concept write_state_like = is_write_state<T>::value;
 } // namespace ryml
 } // namespace omni
 
-// TODO: [high] Add a std::size_t Depth NTTP with a terminal mapping that
-// returns an internal error without instantiating another child. A
+// TODO: [high] Bound the Depth NTTP with a terminal mapping that returns an
+// internal error without instantiating another child. Until then, advancing
+// depth creates unbounded state specializations for recursive models. A
 // static_assert there would reject every recursive model, even for shallow input.
 // Coordinate the runtime-depth policy with the FIXME in ryml.hpp.

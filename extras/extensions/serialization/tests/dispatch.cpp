@@ -671,7 +671,7 @@ struct read_address {
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<address> type) const
     -> omni::ryml::with_diagnostics_t<address> {
-    return omni::ryml::reflected_scope::default_to_record(type)(
+    return omni::ryml::reflected_scope::map_object_node(
       std::move(state), node, type).transform([](address value) -> address {
         return {value.number + 100};
       });
@@ -696,7 +696,7 @@ struct write_address {
   template <typename State>
   void operator()(State state, const address &value,
     ::ryml::NodeRef node) const {
-    omni::ryml::reflected_scope::from_record(std::move(state),
+    omni::ryml::reflected_scope::map_record(std::move(state),
       address{value.number + 100}, node);
   }
 };
@@ -706,7 +706,7 @@ struct write_integer {
 
   template <typename State>
   void operator()(State state, int value, ::ryml::NodeRef node) const {
-    omni::ryml::from_arithmetic(std::move(state),
+    omni::ryml::map_arithmetic(std::move(state),
       value + this->increment, node);
   }
 };
@@ -756,6 +756,65 @@ struct select_context_writer {
 };
 
 } // namespace schema_paths
+
+namespace traversal_depth {
+
+struct select_reader {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    static_assert(10 == state.depth_limit(), "The default depth limit is 10");
+    if constexpr (std::is_same<T, int>::value)
+      return local_mapping::add_integer{static_cast<int>(state.depth())};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+struct select_writer {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    static_assert(10 == state.depth_limit(), "The default depth limit is 10");
+    if constexpr (std::is_same<T, int>::value)
+      return schema_paths::write_integer{static_cast<int>(state.depth())};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
+} // namespace traversal_depth
+
+TEST(mapping_dispatch, depth_selects_read_and_write_decorations) {
+  const std::string source = R"({"records": [{
+    "address": {"number": 1},
+    "work_address": {"number": 2},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  }]})";
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_map_node([](auto) { return traversal_depth::select_reader{}; });
+  const auto result = deserialize(omni::type_t<schema_paths::root>{}, source);
+  EXPECT_TRUE(result.value) << result.diagnostics;
+  if (!result.value)
+    return;
+
+  EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
+    "address": {"number": 5},
+    "work_address": {"number": 6},
+    "offices": [{"number": 8}],
+    "locations": {"remote": {"number": 9}}
+  }]})", omni::ryml::as_json(*result.value)));
+
+  const auto as_json = omni::ryml::as_json
+    .tdm_map_node([](auto) { return traversal_depth::select_writer{}; });
+  EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
+    "address": {"number": 9},
+    "work_address": {"number": 10},
+    "offices": [{"number": 13}],
+    "locations": {"remote": {"number": 14}}
+  }]})", as_json(*result.value)));
+  EXPECT_EQ(7, deserialize(omni::type_t<int>{}, "7").value);
+  EXPECT_TRUE(serialization_test::matches_json("7", as_json(7)));
+}
 
 TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
   const std::string source = R"({

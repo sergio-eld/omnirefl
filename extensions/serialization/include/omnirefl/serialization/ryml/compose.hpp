@@ -153,11 +153,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_record(ValueFunction) :: {
+map_object_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_record(MutatingFunction) ::
+map_object_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -175,7 +175,7 @@ to_record(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_record(Function &&f)
+constexpr auto map_object_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_object_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -199,11 +199,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_range(ValueFunction) :: {
+map_array_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_range(MutatingFunction) ::
+map_array_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -217,11 +217,11 @@ to_range(MutatingFunction) ::
  * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
  * the state parameter to distinguish the callback from (node, T*).
  *
- * Element conversion belongs to f. Object-shaped ranges use to_record.
+ * Element conversion belongs to f. Object-shaped ranges use map_object_node.
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_range(Function &&f)
+constexpr auto map_array_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_array_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -230,7 +230,7 @@ constexpr auto to_range(Function &&f)
       lift_to_with_diagnostics(std::forward<Function>(f))));
 }
 
-/** (QoL) Higher-order function for enum mappings from JSON/YAML strings.
+/** (QoL) Higher-order function for mappings from JSON/YAML strings.
  * String input reaches f; other node shapes return an expected-string
  * diagnostic without calling f. Quotes and explicit YAML string tags are
  * honored.
@@ -246,58 +246,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_enum(ValueFunction) :: {
+map_string_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_enum(MutatingFunction) ::
-  (state, node, T*) -> with_diagnostics<monostate>
-```
- *
- * A value-producing callback's T* adapter requires assignment from its result.
- * A pointer-only callback provides no type<T> overload. Callbacks may return
- * with_diagnostics instead of expected. Errors with a source node ID keep
- * document paths; otherwise paths are relative to the input node.
- * with_diagnostics carries complete paths and configuration.
- *
- * Callbacks are invoked through a const object. For generic (state, node)
- * callbacks, declare the node parameter as ::ryml::ConstNodeRef or constrain
- * the state parameter to distinguish the callback from (node, T*).
- *
- * Enumerator lookup and aliases belong to f; no enum metadata is queried.
- * The compositor does not call reflected_scope::mapping_to_type.
- * @pre The node belongs to a valid tree; destination pointers are non-null. */
-template <typename Function>
-constexpr auto to_enum(Function &&f)
-  OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
-    with_node_check<core::expect_string_node>(
-      lift_to_with_diagnostics(std::forward<Function>(f)))))) {
-  return with_mutating_node_to_type_overload(
-    with_node_check<core::expect_string_node>(
-      lift_to_with_diagnostics(std::forward<Function>(f))));
-}
-
-/** (QoL) Higher-order function for string-like mappings from JSON/YAML strings.
- * String input reaches f; other node shapes return an expected-string
- * diagnostic without calling f. Quotes and explicit YAML string tags are
- * honored.
- *
-```
-Error :: issue | input_range<issue>
-Result<T> :: expected<T, Error> | with_diagnostics<T>
-state :: read_state_like
-
-ValueFunction :: node -> Result<T>
-ValueFunction :: (state, node) -> Result<T>
-ValueFunction :: (state, node, type<T>) -> Result<T>
-MutatingFunction :: (node, T*) -> Result<monostate>
-MutatingFunction :: (state, node, T*) -> Result<monostate>
-
-to_string_like(ValueFunction) :: {
-  (state, node, type<T>) -> with_diagnostics<T>,
-  (state, node, T*)      -> with_diagnostics<monostate>
-}
-to_string_like(MutatingFunction) ::
+map_string_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -315,7 +268,7 @@ to_string_like(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_string_like(Function &&f)
+constexpr auto map_string_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_string_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -340,11 +293,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_boolean(ValueFunction) :: {
+map_boolean_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_boolean(MutatingFunction) ::
+map_boolean_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -362,7 +315,7 @@ to_boolean(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_boolean(Function &&f)
+constexpr auto map_boolean_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_boolean_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -386,11 +339,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_integral(ValueFunction) :: {
+map_integer_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_integral(MutatingFunction) ::
+map_integer_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -408,7 +361,7 @@ to_integral(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_integral(Function &&f)
+constexpr auto map_integer_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_integer_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -432,11 +385,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_floating_point(ValueFunction) :: {
+map_number_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_floating_point(MutatingFunction) ::
+map_number_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -454,7 +407,7 @@ to_floating_point(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_floating_point(Function &&f)
+constexpr auto map_number_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_number_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -478,11 +431,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_arithmetic(ValueFunction) :: {
+map_arithmetic_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_arithmetic(MutatingFunction) ::
+map_arithmetic_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -500,7 +453,7 @@ to_arithmetic(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_arithmetic(Function &&f)
+constexpr auto map_arithmetic_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_arithmetic_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {
@@ -524,11 +477,11 @@ ValueFunction :: (state, node, type<T>) -> Result<T>
 MutatingFunction :: (node, T*) -> Result<monostate>
 MutatingFunction :: (state, node, T*) -> Result<monostate>
 
-to_optional_like(ValueFunction) :: {
+map_value_node(ValueFunction) :: {
   (state, node, type<T>) -> with_diagnostics<T>,
   (state, node, T*)      -> with_diagnostics<monostate>
 }
-to_optional_like(MutatingFunction) ::
+map_value_node(MutatingFunction) ::
   (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
@@ -546,7 +499,7 @@ to_optional_like(MutatingFunction) ::
  * The compositor does not call reflected_scope::mapping_to_type.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
-constexpr auto to_optional_like(Function &&f)
+constexpr auto map_value_node(Function &&f)
   OMNI_CPP11_TRAILING_RETURN(decltype(with_mutating_node_to_type_overload(
     with_node_check<core::expect_value_node>(
       lift_to_with_diagnostics(std::forward<Function>(f)))))) {

@@ -138,7 +138,7 @@ constexpr auto predicate = omni::fn::is_non_static
 Types that depend on metadata queries belong in a `reflected_scope` namespace
 or subnamespace. This includes queries deferred until a member template is
 instantiated. The qualified name makes that dependency visible, as in
-`codec::reflected_scope::to_record_t`.
+`codec::reflected_scope::map_object_node_t`.
 
 ## `tdm_` prefix: functional data-member updates
 

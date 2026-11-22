@@ -291,7 +291,7 @@ struct write_range_case<true> {
     (is_write_state<State>::value))
   static void apply(State context, const T &value, ::ryml::NodeRef node) {
     static_assert(traits::is_string_like<traits::key_type_t<T>>::value,
-      "from_range requires string-adaptable keys for JSON/YAML objects");
+      "map_range requires string-adaptable keys for JSON/YAML objects");
 
     node.set_map();
     using std::begin;
@@ -358,7 +358,7 @@ auto to_range_t::operator()(State context,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-void from_range_t::operator()(State context,
+void map_range_t::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const {
   using element_type = compat::range_value_t<T>;
