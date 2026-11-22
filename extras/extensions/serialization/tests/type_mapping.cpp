@@ -463,7 +463,7 @@ TEST(type_mapping, selects_reflected_defaults) {
       omni::ryml::reflected_scope::map_record_t<>>{},
     omni::type_t<uncustomized_record>{});
   omni::reflected_call(cpp11_check_mapping_types<
-      omni::ryml::reflected_scope::map_string_node_t<>,
+      omni::ryml::reflected_scope::map_node_to_enum_t<>,
       omni::ryml::reflected_scope::map_enum_t<>>{},
     omni::type_t<uncustomized_enum>{});
 }

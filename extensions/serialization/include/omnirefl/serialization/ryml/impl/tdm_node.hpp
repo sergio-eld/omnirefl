@@ -43,7 +43,8 @@ struct tdm_for_map_string_node {
     -> map_string_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -57,7 +58,8 @@ struct tdm_for_map_string_node {
     -> map_string_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),
@@ -84,7 +86,8 @@ struct tdm_for_map_boolean_node {
     -> map_boolean_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -98,7 +101,8 @@ struct tdm_for_map_boolean_node {
     -> map_boolean_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),
@@ -125,7 +129,8 @@ struct tdm_for_map_integer_node {
     -> map_integer_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -139,7 +144,8 @@ struct tdm_for_map_integer_node {
     -> map_integer_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),
@@ -166,7 +172,8 @@ struct tdm_for_map_number_node {
     -> map_number_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -180,7 +187,8 @@ struct tdm_for_map_number_node {
     -> map_number_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),
@@ -207,7 +215,8 @@ struct tdm_for_map_arithmetic_node {
     -> map_arithmetic_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -221,7 +230,8 @@ struct tdm_for_map_arithmetic_node {
     -> map_arithmetic_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),
@@ -291,7 +301,8 @@ struct tdm_for_map_value_node {
     -> map_value_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -305,7 +316,8 @@ struct tdm_for_map_value_node {
     -> map_value_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),

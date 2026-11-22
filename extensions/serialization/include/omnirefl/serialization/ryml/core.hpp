@@ -110,7 +110,10 @@ map_node_to_string_like :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates the node shape. node must refer to a scalar in a
  * valid tree; only a debug assertion checks the scalar-node precondition. */
-struct map_node_to_string_like_t {
+struct map_node_to_string_like_t:
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -118,7 +121,6 @@ struct map_node_to_string_like_t {
       is_read_state<State>>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -143,7 +145,9 @@ map_node_to_boolean :: (state, node, type<bool>) -> with_diagnostics<bool>
  *
  * @details Uses \ref parse_boolean for conversion. The caller validates the
  * input; debug assertions check the precondition. */
-struct map_node_to_boolean_t {
+struct map_node_to_boolean_t: omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -151,7 +155,6 @@ struct map_node_to_boolean_t {
       && !std::is_const<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -176,7 +179,10 @@ map_node_to_integral :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates integer input in a valid tree; a debug assertion
  * checks this precondition. Destination range is checked during conversion. */
-struct map_node_to_integral_t {
+struct map_node_to_integral_t:
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -185,7 +191,6 @@ struct map_node_to_integral_t {
       && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -210,21 +215,24 @@ map_node_to_floating_point :: (state, node, type<T>) -> with_diagnostics<T>
  *
  * @pre Caller validates numeric input in a valid tree; a debug assertion
  * checks this precondition. */
-struct map_node_to_floating_point_t {
+struct map_node_to_floating_point_t:
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr map_node_to_floating_point_t map_node_to_floating_point{};
 #else
-static constexpr const map_node_to_floating_point_t &map_node_to_floating_point =
-  compat::detail::shared_state<map_node_to_floating_point_t>::value;
+static constexpr const map_node_to_floating_point_t &
+  map_node_to_floating_point =
+    compat::detail::shared_state<map_node_to_floating_point_t>::value;
 #endif
 
 /** Checks for a Boolean or numeric node.
@@ -243,7 +251,10 @@ map_node_to_arithmetic :: (state, node, type<T>) -> with_diagnostics<T>
  * @pre Caller validates Boolean input for bool, integer input for other
  * integral types, or numeric input for floating-point types, in a valid tree.
  * Only debug assertions check these preconditions. */
-struct map_node_to_arithmetic_t {
+struct map_node_to_arithmetic_t:
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   // REFACTORME: [medium] Consider replacing ConstNodeRef with value-level
   // input; node validation belongs to composition.
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -252,7 +263,6 @@ struct map_node_to_arithmetic_t {
         || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
   auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
     -> with_diagnostics_t<T, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -331,7 +341,6 @@ struct map_to_fundamental_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -360,7 +369,6 @@ struct map_to_string_like_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -391,7 +399,6 @@ struct map_to_reflected_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -422,7 +429,6 @@ struct map_to_sequence_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -452,7 +458,6 @@ struct map_to_optional_t {
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables

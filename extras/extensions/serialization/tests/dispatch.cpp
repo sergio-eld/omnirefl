@@ -59,6 +59,31 @@ struct default_state_number {
   int value;
 };
 
+namespace custom_depth {
+
+struct leaf { int checked; int raw; };
+struct node { leaf data; std::vector<node> children; };
+
+struct read_leaf {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<leaf>) const -> omni::ryml::with_diagnostics_t<leaf> {
+    return omni::ryml::map_integer_node(
+      state.child(OMNI_META_STRING("checked")), node["checked"],
+      omni::type_t<int>{}).and_then([&state, &node](int checked)
+        -> omni::ryml::with_diagnostics_t<leaf> {
+      return omni::ryml::core::map_node_to_integral(
+        state.child(OMNI_META_STRING("raw")), node["raw"],
+        omni::type_t<int>{}).transform([checked](int raw) -> leaf {
+          return {checked, raw};
+        });
+    });
+  }
+};
+
+} // namespace custom_depth
+
 namespace diagnostic_callbacks {
 
 std::string classification(const omni::ryml::diagnostics &report) {
@@ -199,6 +224,11 @@ struct omni::ryml::cp::to_type_t<my_string> {
   }
 };
 #endif
+
+template <>
+struct omni::ryml::cp::to_type_t<custom_depth::leaf>:
+    decltype(omni::ryml::compose::map_object_node(
+      custom_depth::read_leaf{})) {};
 
 namespace {
 
@@ -646,7 +676,8 @@ TEST(mapping_dispatch, built_in_readers_allow_prevalidated_nodes) {
     .tdm_map_node(omni::fn::default_value<unchecked_nodes::select_mapping>{});
   const auto result = deserialize(omni::type_t<unchecked_nodes::record>{},
     R"({"enabled": true, "count": 3, "weight": 2.5, "label": "ready",
-      "values": [4, 8], "scores": {"math": 15}, "extra": 16, "state": "ready"})");
+      "values": [4, 8], "scores": {"math": 15},
+      "extra": 16, "state": "ready"})");
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -711,6 +742,22 @@ TEST(mapping_dispatch, value_initialization_preserves_defaults) {
   EXPECT_TRUE(serialization_test::matches_json("7", serialize(7)));
 }
 
+TEST(mapping_dispatch, custom_recursive_fields_can_delegate_scalar_children) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<custom_depth::node>>{},
+    R"([{"data": {"checked": 7, "raw": 9}, "children": []}])");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ(1U, result.value->size());
+    if (!result.value->empty()) {
+      EXPECT_EQ(7, result.value->front().data.checked);
+      EXPECT_EQ(9, result.value->front().data.raw);
+    }
+  }
+}
+
 namespace bounded_depth {
 
 struct node {
@@ -755,13 +802,28 @@ TEST_P(traversal, bounds_recursive_read_and_write_instantiation) {
   }
 }
 
-// The array root is depth 0; each record layer consumes two edges, including
-// its scalar and empty-array fields. Five layers reach the default limit 10.
+constexpr auto depth_limit = omni::ryml::read_state_t<>::depth_limit();
+static_assert(10 == depth_limit, "The default tree-depth limit is 10");
+
 INSTANTIATE_TEST_SUITE_P(default_limit, traversal,
-  testing::Values(depth_case{5, true}, depth_case{6, false}),
+  testing::Values(depth_case{depth_limit / 2, true},
+    depth_case{depth_limit / 2 + 1, false}),
   [](const testing::TestParamInfo<depth_case> &info) {
-    return info.param.accepted ? "at_limit" : "beyond_limit";
+    return info.param.accepted ? "at_limit" : "element_beyond_limit";
   });
+
+TEST(traversal, root_record_reports_field_depth_overflow) {
+  const auto source = document(depth_limit / 2 + 1);
+  const auto result = serialization_test::deserialize(omni::type_t<node>{},
+    source.substr(1, source.size() - 2));
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (!result.diagnostics.issues.empty()) {
+    EXPECT_EQ(omni::json::issue_code::depth_limit_exceeded,
+      result.diagnostics.issues.front().reason);
+  }
+}
 
 } // namespace bounded_depth
 
@@ -872,7 +934,6 @@ namespace traversal_depth {
 struct select_reader {
   template <typename State, typename T>
   auto operator()(State state, omni::type_t<T> type) const {
-    static_assert(10 == state.depth_limit(), "The default depth limit is 10");
     if constexpr (std::is_same<T, int>::value)
       return local_mapping::add_integer{static_cast<int>(state.depth())};
     else
@@ -883,7 +944,6 @@ struct select_reader {
 struct select_writer {
   template <typename State, typename T>
   auto operator()(State state, omni::type_t<T> type) const {
-    static_assert(10 == state.depth_limit(), "The default depth limit is 10");
     if constexpr (std::is_same<T, int>::value)
       return schema_paths::write_integer{static_cast<int>(state.depth())};
     else

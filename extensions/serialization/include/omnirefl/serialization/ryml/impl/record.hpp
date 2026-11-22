@@ -26,7 +26,8 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
 }
 
 // Optional storage does not default-construct field values before mapping.
-// Inheriting the metadata wrapper supplies aggregate_into's named-field protocol.
+// Inheriting the metadata wrapper supplies aggregate_into's named-field
+// protocol.
 template <typename Field>
 struct record_value_slot: Field {
   // Match the metadata identity used by explicit state.field(meta) traversal.
@@ -371,7 +372,7 @@ auto process_record_members(node_accumulator<State> *result,
   if (!result->result.value)
     return {compat::nullopt, std::move(result->result.diagnostics)};
 
-  // The output starts after traversal, keeping it unaliased throughout the fold.
+  // The output starts after traversal and remains unaliased during the fold.
   compat::optional<typename Finalizer::result_type::value_type> value{};
   frame.value = &value;
   static_cast<void>(std::move(folded).transform(

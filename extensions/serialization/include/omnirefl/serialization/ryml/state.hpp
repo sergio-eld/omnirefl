@@ -140,7 +140,6 @@ struct as_ref_tree_t;
 /** Render issue records using their source tree while it is alive. */
 struct render_diagnostics_t {
   std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -1092,4 +1091,4 @@ concept write_state_like = is_write_state<T>::value;
 } // namespace ryml
 } // namespace omni
 
-// REFACTORME: [high] Simplify the traversal-state types and their implementation.
+// REFACTORME: [high] Simplify traversal-state types and implementation.

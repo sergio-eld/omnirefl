@@ -30,8 +30,6 @@ namespace ryml {
  * the same customization. Optional mappings below dispatch contained values. */
 
 /** Checked char-based string-like node-to-type mapping.
- * Checks the node type before calling the core mapping function.
- * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
 map_string_node :: {
@@ -44,8 +42,10 @@ map_string_node :: {
  * The tree and its character storage must remain valid while views are used. */
 template <typename WithNodeCheck = std::true_type>
 struct map_string_node_t:
-    detail::tdm_for_map_string_node<WithNodeCheck> {
+    detail::tdm_for_map_string_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_string_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   /** Disable only when the node satisfies the destination's shape. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -85,20 +85,19 @@ static constexpr const map_string_node_t<> &map_string_node =
 #endif
 
 /** Maps a string-like value to a quoted JSON/YAML scalar.
- * Does not call \ref reflected_scope::mapping_from_type.
- * Custom string APIs are supported through \ref adapt::as_string.
- * Converted text is copied; reference-tree writing may borrow source views.
+ * String conversion uses \ref adapt::as_string.
  *
 ```
 map_string_like :: (state, const T&, node) -> void
 ```
  */
-struct map_string_like_t {
+struct map_string_like_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_string_like<T>,
       is_write_state<State>>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -109,8 +108,6 @@ static constexpr const map_string_like_t &map_string_like =
 #endif
 
 /** Checked Boolean node-to-type mapping.
- * Checks the node type before calling the core mapping function.
- * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
 map_boolean_node :: {
@@ -121,8 +118,10 @@ map_boolean_node :: {
  */
 template <typename WithNodeCheck = std::true_type>
 struct map_boolean_node_t:
-    detail::tdm_for_map_boolean_node<WithNodeCheck> {
+    detail::tdm_for_map_boolean_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_boolean_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   /** Disable only when the node satisfies the destination's shape. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -164,18 +163,18 @@ static constexpr const map_boolean_node_t<> &map_boolean_node =
 #endif
 
 /** Maps a Boolean value to a JSON/YAML scalar.
- * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
 map_boolean :: (state, T, node) -> void
 ```
  */
-struct map_boolean_t {
+struct map_boolean_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -186,8 +185,6 @@ static constexpr const map_boolean_t &map_boolean =
 #endif
 
 /** Checked integer node-to-type mapping.
- * Checks the node type before calling the core mapping function.
- * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
 map_integer_node :: {
@@ -198,8 +195,10 @@ map_integer_node :: {
  */
 template <typename WithNodeCheck = std::true_type>
 struct map_integer_node_t:
-    detail::tdm_for_map_integer_node<WithNodeCheck> {
+    detail::tdm_for_map_integer_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_integer_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   /** Disable only when the node satisfies the destination's shape. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -242,19 +241,19 @@ static constexpr const map_integer_node_t<> &map_integer_node =
 #endif
 
 /** Maps an integral value to a JSON/YAML scalar.
- * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
 map_integral :: (state, const T&, node) -> void
 ```
  */
-struct map_integral_t {
+struct map_integral_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -265,8 +264,6 @@ static constexpr const map_integral_t &map_integral =
 #endif
 
 /** Checked floating-point node-to-type mapping.
- * Checks the node type before calling the core mapping function.
- * Does not call \ref reflected_scope::mapping_to_type.
  *
 ```
 map_number_node :: {
@@ -277,8 +274,10 @@ map_number_node :: {
  */
 template <typename WithNodeCheck = std::true_type>
 struct map_number_node_t:
-    detail::tdm_for_map_number_node<WithNodeCheck> {
+    detail::tdm_for_map_number_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_number_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   /** Disable only when the node satisfies the destination's shape. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -318,18 +317,18 @@ static constexpr const map_number_node_t<> &map_number_node =
 #endif
 
 /** Maps a floating-point value to a JSON/YAML scalar.
- * Does not call \ref reflected_scope::mapping_from_type.
  * Preserves enough significant digits for round-trip conversion.
  *
 ```
 map_floating_point :: (state, const T&, node) -> void
 ```
  */
-struct map_floating_point_t {
+struct map_floating_point_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
   void operator()(State, const T &value, ::ryml::NodeRef node) const;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -340,10 +339,6 @@ static constexpr const map_floating_point_t &map_floating_point =
 #endif
 
 /** Checked arithmetic node-to-type mapping.
- * Checks the node type before calling the core mapping function.
- * Does not call \ref reflected_scope::mapping_to_type.
- * Boolean destinations require a non-const type. Pointer destinations must
- * be assignable from the mapped value.
  *
 ```
 map_arithmetic_node :: {
@@ -354,8 +349,10 @@ map_arithmetic_node :: {
  */
 template <typename WithNodeCheck = std::true_type>
 struct map_arithmetic_node_t:
-    detail::tdm_for_map_arithmetic_node<WithNodeCheck> {
+    detail::tdm_for_map_arithmetic_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_arithmetic_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   // Validate the category required by T, rather than accepting every scalar.
   template <typename T>
@@ -406,17 +403,17 @@ static constexpr const map_arithmetic_node_t<> &map_arithmetic_node =
 #endif
 
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
- * Does not call \ref reflected_scope::mapping_from_type.
  *
 ```
 map_arithmetic :: (state, const T&, node) -> void
 ```
  */
-struct map_arithmetic_t {
+struct map_arithmetic_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_write_state<State>::value))
   auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -433,7 +430,9 @@ static constexpr const map_arithmetic_t &map_arithmetic =
 /** Maps a node into an optional-like destination.
  * Null resets the destination. Non-null input uses the contained type's
  * registered mapping and is emplaced only on success. */
-struct to_optional_like_t {
+struct to_optional_like_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_read_state<State>>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
@@ -449,12 +448,15 @@ map_value_node :: (state, node, T*) -> with_diagnostics<monostate>
  */
 template <typename WithNodeCheck = std::true_type>
 struct map_value_node_t:
-    detail::tdm_for_map_value_node<WithNodeCheck> {
+    detail::tdm_for_map_value_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_value_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   /** Disable only when the node satisfies the destination's shape. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_with_node_check;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (traits::is_optional<T>::value && is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
@@ -486,12 +488,13 @@ static constexpr const map_value_node_t<> &map_value_node =
 map_optional_like :: (state, const T&, node) -> void
 ```
  */
-struct map_optional_like_t {
+struct map_optional_like_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -666,7 +669,7 @@ using default_mapping_to_type = typename traits::select<
   traits::case_<omni::ryml::detail::is_mapped_range<T>::value,
     map_range_node_t<>>,
   traits::case_<omni::is_reflected_enum<T>::value,
-    reflected_scope::map_string_node_t<>>,
+    reflected_scope::map_node_to_enum_t<>>,
   traits::case_<omni::is_reflected_record<T>::value,
     reflected_scope::map_object_node_t<>>,
   traits::cp::unavailable>::type;

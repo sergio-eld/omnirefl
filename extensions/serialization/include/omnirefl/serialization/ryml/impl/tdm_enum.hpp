@@ -28,7 +28,8 @@ struct tdm_for_map_node_to_enum {
     -> map_node_to_enum_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().strategy),
     };
@@ -42,7 +43,8 @@ struct tdm_for_map_node_to_enum {
     -> map_node_to_enum_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().strategy)),
@@ -66,7 +68,7 @@ private:
 namespace reflected_scope {
 
 template <typename Strategy, typename WithNodeCheck>
-struct map_string_node_t;
+struct map_node_to_enum_t;
 
 template <typename Strategy>
 struct map_enum_t;
@@ -74,17 +76,18 @@ struct map_enum_t;
 namespace detail {
 
 template <typename Strategy, typename WithNodeCheck>
-struct tdm_for_map_string_node {
+struct tdm_for_map_node_to_enum {
   /** (QoL) Functional update of the shared mapping strategy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
     typename Result = compat::invoke_result_t<F &&, const Strategy &>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value
       && std::is_copy_constructible<WithNodeCheck>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> map_string_node_t<compat::decay_t<Result>, WithNodeCheck> {
+    -> map_node_to_enum_t<compat::decay_t<Result>, WithNodeCheck> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().strategy),
       this->derived().with_node_check,
@@ -97,10 +100,11 @@ struct tdm_for_map_string_node {
     (std::is_constructible<compat::decay_t<Result>, Result>::value
       && std::is_move_constructible<WithNodeCheck>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> map_string_node_t<compat::decay_t<Result>, WithNodeCheck> {
+    -> map_node_to_enum_t<compat::decay_t<Result>, WithNodeCheck> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().strategy)),
@@ -114,10 +118,11 @@ struct tdm_for_map_string_node {
     (std::is_constructible<compat::decay_t<Result>, Result>::value
       && std::is_copy_constructible<Strategy>::value))
   constexpr auto tdm_with_node_check(F &&f) const &
-    -> map_string_node_t<Strategy, compat::decay_t<Result>> {
+    -> map_node_to_enum_t<Strategy, compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       this->derived().strategy,
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
@@ -130,10 +135,11 @@ struct tdm_for_map_string_node {
     (std::is_constructible<compat::decay_t<Result>, Result>::value
       && std::is_move_constructible<Strategy>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_with_node_check(F &&f) &&
-    -> map_string_node_t<Strategy, compat::decay_t<Result>> {
+    -> map_node_to_enum_t<Strategy, compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       std::move(this->derived().strategy),
       compat::invoke(std::forward<F>(f),
@@ -143,13 +149,15 @@ struct tdm_for_map_string_node {
 
 private:
   // Direct returns keep the updater bodies constexpr-compatible with C++11.
-  constexpr const map_string_node_t<Strategy, WithNodeCheck> &
+  constexpr const map_node_to_enum_t<Strategy, WithNodeCheck> &
   derived() const & {
-    return static_cast<const map_string_node_t<Strategy, WithNodeCheck> &>(*this);
+    return static_cast<
+      const map_node_to_enum_t<Strategy, WithNodeCheck> &>(*this);
   }
 
-  OMNI_CPP14_CONSTEXPR map_string_node_t<Strategy, WithNodeCheck> &derived() & {
-    return static_cast<map_string_node_t<Strategy, WithNodeCheck> &>(*this);
+  OMNI_CPP14_CONSTEXPR map_node_to_enum_t<Strategy, WithNodeCheck> &
+  derived() & {
+    return static_cast<map_node_to_enum_t<Strategy, WithNodeCheck> &>(*this);
   }
 };
 
@@ -163,7 +171,8 @@ struct tdm_for_map_enum {
     -> map_enum_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().strategy),
     };
@@ -177,7 +186,8 @@ struct tdm_for_map_enum {
     -> map_enum_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().strategy)),

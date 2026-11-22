@@ -49,7 +49,7 @@ struct to_type_t<enum_alias_models::state> {
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
     enum_alias_models::state *into) const -> with_diagnostics_t<compat::monostate> {
-    return reflected_scope::map_string_node_t<
+    return reflected_scope::map_node_to_enum_t<
       mapping::enum_strategy_t<enum_alias_models::state_names>>{}(
       std::move(state), node, into);
   }
@@ -104,7 +104,7 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
 
   const auto strategy = omni::mapping::enum_strategy.tdm_aliases_by_name(
     [resolver](const std::tuple<> &) { return resolver; });
-  const auto compositor = omni::ryml::reflected_scope::map_string_node
+  const auto compositor = omni::ryml::reflected_scope::map_node_to_enum
     .tdm_strategy([strategy](const omni::mapping::enum_strategy_t<> &) {
       return strategy;
     });

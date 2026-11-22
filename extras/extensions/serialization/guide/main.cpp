@@ -1365,7 +1365,8 @@ const auto omni::ryml::cp::to_type<composed_record::inner> =
       -> omni::ryml::with_diagnostics_t<composed_record::inner> {
       composed_record::inner value{};
       // Bypass this registration for inner; its members keep their own lookup.
-      auto mapped = omni::ryml::reflected_scope::map_object_node(std::move(state),
+      auto mapped = omni::ryml::reflected_scope::map_object_node(
+        std::move(state),
         node,
         &value);
 
@@ -1734,7 +1735,7 @@ const auto from_type<customization_mapping::record> =
 
 template <>
 const auto to_type<customization_mapping::status> =
-  reflected_scope::map_string_node.tdm_strategy([](auto strategy) {
+  reflected_scope::map_node_to_enum.tdm_strategy([](auto strategy) {
     return strategy.tdm_aliases_by_name([](auto) {
       return omni::mapping::aliases_dict(std::tuple{"busy", "working"});
     });

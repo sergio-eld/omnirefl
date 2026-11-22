@@ -95,7 +95,12 @@ with_mutating_node_to_type_overload :: Mapping -> {
 template <typename Mapping>
 constexpr auto with_mutating_node_to_type_overload(Mapping &&mapping)
   -> detail::with_mutating_node_to_type_overload_t<compat::decay_t<Mapping>> {
-  return {/*mapping=*/std::forward<Mapping>(mapping)};
+  return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    /*mapping=*/std::forward<Mapping>(mapping),
+  };
 }
 
 /** (QoL) Higher-order function lifting node callbacks to with_diagnostics
@@ -584,6 +589,7 @@ struct with_node_check_t:
 
     return this->lifted_mapping(std::move(state), *checked, into);
   }
+
 // Ad hoc: classes with bases are not aggregates before C++17.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr with_node_check_t() = default;
@@ -593,22 +599,25 @@ struct with_node_check_t:
   constexpr with_node_check_t(Value &&mapping)
     : lifted_mapping(std::forward<Value>(mapping)) {}
 #endif
-
 };
 
 template <typename Mapping>
-struct with_mutating_node_to_type_overload_t {
+struct with_mutating_node_to_type_overload_t:
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   Mapping mapping;
 
   // Overload ranking preserves a native pointer call before trying assignment.
-  template <typename T, typename State>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_read_state<State>::value))
   auto map_into(State state, ::ryml::ConstNodeRef node, T *into, int) const
     -> decltype(this->mapping(std::move(state), node, into)) {
     return this->mapping(std::move(state), node, into);
   }
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_assignable<T &, T &&>::value))
+    (std::is_assignable<T &, T &&>::value && is_read_state<State>::value))
   auto map_into(State state, ::ryml::ConstNodeRef node, T *into, long) const
     -> with_diagnostics_t<compat::monostate, compat::decay_t<decltype(
       this->mapping(std::move(state), node, omni::type_t<T>{}).diagnostics)>> {
@@ -620,7 +629,8 @@ struct with_mutating_node_to_type_overload_t {
   }
 
   // The trailing decltype excludes unsupported wrapped calls through SFINAE.
-  template <typename T, typename State>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<T> type) const
@@ -628,12 +638,24 @@ struct with_mutating_node_to_type_overload_t {
     return this->mapping(std::move(state), node, type);
   }
 
-  template <typename T, typename State>
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> decltype(this->map_into(std::move(state), node, into, 0)) {
     assert(into);
     return this->map_into(std::move(state), node, into, 0);
   }
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr with_mutating_node_to_type_overload_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Mapping),
+    (std::is_constructible<Mapping, Value &&>::value))
+  constexpr with_mutating_node_to_type_overload_t(Value &&value)
+    : mapping(std::forward<Value>(value)) {}
+#endif
 };
 
 } // namespace detail

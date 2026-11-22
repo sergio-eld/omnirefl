@@ -96,10 +96,12 @@ private:
   // Direct returns keep the updater bodies constexpr-compatible with C++11.
   constexpr const map_object_node_t<Strategy, WithNodeCheck> &
   derived() const & {
-    return static_cast<const map_object_node_t<Strategy, WithNodeCheck> &>(*this);
+    return static_cast<
+      const map_object_node_t<Strategy, WithNodeCheck> &>(*this);
   }
 
-  OMNI_CPP14_CONSTEXPR map_object_node_t<Strategy, WithNodeCheck> &derived() & {
+  OMNI_CPP14_CONSTEXPR map_object_node_t<Strategy, WithNodeCheck> &
+  derived() & {
     return static_cast<map_object_node_t<Strategy, WithNodeCheck> &>(*this);
   }
 };

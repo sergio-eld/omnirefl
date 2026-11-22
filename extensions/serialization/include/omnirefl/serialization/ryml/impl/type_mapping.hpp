@@ -253,7 +253,8 @@ auto map_arithmetic_node_t<WithNodeCheck>::operator()(State state,
   omni::type_t<T> type) const -> with_diagnostics_t<T> {
   return mapping_type<T>{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-    /*base=*/{},
+    /*tdm_base=*/{},
+    /*depth_base=*/{},
 #endif
     this->with_node_check}(std::move(state), node, type);
 }
@@ -268,7 +269,8 @@ auto map_arithmetic_node_t<WithNodeCheck>::operator()(State state,
   -> with_diagnostics_t<compat::monostate> {
   return mapping_type<T>{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-    /*base=*/{},
+    /*tdm_base=*/{},
+    /*depth_base=*/{},
 #endif
     this->with_node_check}(std::move(state), node, into);
 }

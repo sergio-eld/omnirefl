@@ -325,4 +325,5 @@ OMNI_CPP14_CONSTEXPR bool valid_record_strategy(const Names &names,
 // TODO: [medium] Consider direct-value tdm_ overloads. Unary callable values
 // can also be updaters: passing
 // fn::identity{} to tdm_finalize could retain the old finalizer or replace it
-// with the no-op finalizer. Resolve that interpretation before adding overloads.
+// with the no-op finalizer. Resolve that interpretation before adding
+// overloads.
