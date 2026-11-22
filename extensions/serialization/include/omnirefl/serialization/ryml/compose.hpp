@@ -7,6 +7,7 @@
 #include <omnirefl/functional.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -137,8 +138,8 @@ lift_to_with_diagnostics(MutatingFunction) ::
  * without a source ID use paths relative to the input node. Issue order is
  * retained. with_diagnostics results pass through with complete diagnostics.
  * Callbacks are invoked as const objects and receive an owned state snapshot.
- * The node is passed unchanged; this
- * adapter does not check its shape or select a registered type mapping.
+ * The node is passed unchanged; this adapter does not check its shape or
+ * select a registered type mapping.
  * @pre The node belongs to a valid tree; destination pointers are non-null. */
 template <typename Function>
 constexpr auto lift_to_with_diagnostics(Function &&f)
@@ -609,6 +610,7 @@ struct with_mutating_node_to_type_overload_t:
   Mapping mapping;
 
   // Overload ranking preserves a native pointer call before trying assignment.
+  // Trailing-return lookup requires these helpers before operator().
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_read_state<State>::value))
   auto map_into(State state, ::ryml::ConstNodeRef node, T *into, int) const
@@ -664,4 +666,3 @@ struct with_mutating_node_to_type_overload_t:
 } // namespace omni
 
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
-#include <omnirefl/serialization/ryml/with_diagnostics.hpp>

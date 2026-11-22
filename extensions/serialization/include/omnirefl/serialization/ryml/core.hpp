@@ -7,8 +7,9 @@
 
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/serialization/ryml/impl/depth.hpp>
+#include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -31,6 +32,11 @@ namespace core {
 /**
  * Non-throwing adapter for RapidYAML parsing errors. Parses text into an
  * owning tree and returns syntax errors through expected.
+ *
+```
+parse :: (string, ParserOptions) -> expected<tree, string>
+```
+ *
  * ParserOptions are passed directly to ryml. Location tracking, if enabled,
  * ends with this call; the returned tree does not retain the parser.
  *
@@ -69,33 +75,53 @@ inline OMNI_CPP14_CONSTEXPR auto parse_boolean(compat::string_view text)
   -> compat::expected<bool, compat::string_view>;
 
 /** Checks for an object node.
- * @pre node must belong to a valid tree.
  *
 ```
 expect_object_node :: node -> expected<node, issue>
 ```
- */
+ *
+ * @pre node must belong to a valid tree. */
 inline auto expect_object_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
 
 /** Checks for an array node.
+ *
+```
+expect_array_node :: node -> expected<node, issue>
+```
+ *
  * @pre node must belong to a valid tree. */
 inline auto expect_array_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
 
 /** Checks for a scalar node, including null.
+ *
+```
+expect_scalar_node :: node -> expected<node, issue>
+```
+ *
  * @pre node must belong to a valid tree. */
 inline auto expect_scalar_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
 
 /** Checks for a value node: scalar, object, or array. Null is a scalar value.
  * Optional mapping checks the contained type separately for non-null input.
+ *
+```
+expect_value_node :: node -> expected<node, issue>
+```
+ *
  * @pre node must belong to a valid tree. */
 inline auto expect_value_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
 
 /** Checks for a string node, honoring quotes and explicit YAML string tags.
  * Plain null, Boolean, and numeric spellings are not strings.
+ *
+```
+expect_string_node :: node -> expected<node, issue>
+```
+ *
  * @pre node must belong to a valid tree. */
 inline auto expect_string_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
@@ -289,6 +315,11 @@ auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
 }
 
 /** Node-to-type mapping through a customization or its default.
+ *
+```
+read_node :: (state, node, type<T>) -> with_diagnostics<T>
+```
+ *
  * Pointer-only mappings are adapted when T is default-constructible.
  * @pre Required metadata is available in reflected scope. */
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -299,6 +330,11 @@ auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
 // REFACTORME: [high] Review responsibility for diagnostic accumulation and
 // limit checks between this dispatcher and the node mappers.
 /** Dispatch one node through the selected to_type callable with diagnostics.
+ *
+```
+read_node :: (state, node, T*) -> with_diagnostics<monostate>
+```
+ *
  * Prefers its type<T> overload when the produced value can be assigned to
  * *into; otherwise uses its T* overload. A mapping error does not trigger
  * fallback to another overload. */
@@ -317,13 +353,25 @@ auto write_node(const depth_exceeded &stopped, const T &value)
 
 // REFACTORME: [high] This selects and invokes a mapping via state.map_node.
 // Reassess whether a separate writer dispatcher is needed.
-/** Dispatch one value through its serialization customization or default. */
+/** Dispatch one value through its serialization customization or default.
+ *
+```
+write_node :: (state, const T&) -> node
+```
+ */
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_write_state<State>::value))
 auto write_node(State context, const T &value) -> ::ryml::NodeRef;
 
 /** (Ad hoc: see detail) Map Boolean, integer, or real JSON/YAML nodes
  * into corresponding fundamental C++ types.
+ *
+```
+map_to_fundamental :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
  *
  * @details reflected_call requires a metadata-bearing target. This route
  * handles arithmetic destinations without reflection.
@@ -352,6 +400,13 @@ static constexpr const map_to_fundamental_t &map_to_fundamental =
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into string-like C++ types.
+ *
+```
+map_to_string_like :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
  *
  * @details String-like destinations may be instrumentation-disabled. This
  * route keeps them outside reflected_call.
@@ -382,6 +437,13 @@ static constexpr const map_to_string_like_t &map_to_string_like =
 /** (Ad hoc: see detail) Map JSON/YAML nodes into C++ types requiring
  * reflected scope.
  *
+```
+map_to_reflected :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
+ *
  * @details reflected_call needs a metadata-bearing type, not an arbitrary
  * compound destination. Range and optional wrappers are unwrapped to obtain
  * that reflection target while mapping retains the original destination.
@@ -410,6 +472,13 @@ static constexpr const map_to_reflected_t &map_to_reflected =
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML arrays or objects into C++ ranges.
+ *
+```
+map_to_sequence :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
  *
  * @details reflected_call cannot use the compound range as its reflection
  * target. Discovery follows element or mapped-value types before establishing
@@ -440,6 +509,13 @@ static constexpr const map_to_sequence_t &map_to_sequence =
 #endif
 
 /** (Ad hoc: see detail) Map JSON/YAML nodes into optional-like C++ types.
+ *
+```
+map_to_optional :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
  *
  * @details reflected_call requires sanitizing this compound destination to
  * its contained type. Discovery establishes scope only when needed and keeps
@@ -473,4 +549,3 @@ static constexpr const map_to_optional_t &map_to_optional =
 } // namespace omni
 
 #include <omnirefl/serialization/ryml/impl/core.hpp>
-#include <omnirefl/serialization/ryml/with_diagnostics.hpp>

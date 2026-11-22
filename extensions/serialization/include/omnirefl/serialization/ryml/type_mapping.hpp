@@ -15,6 +15,7 @@
 #include <omnirefl/serialization/ryml/impl/tdm_node.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_record.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 #include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -615,6 +616,11 @@ static constexpr const map_arithmetic_node_t<> &map_arithmetic_node =
 #endif
 
 /** Maps a node into an optional-like destination.
+ *
+```
+to_optional_like :: (state, node, T*) -> with_diagnostics<monostate>
+```
+ *
  * Null resets the destination. Non-null input uses the contained type's
  * registered mapping and is emplaced only on success. */
 struct to_optional_like_t: detail::with_depth_exceeded_operator {
@@ -761,7 +767,7 @@ static constexpr const map_string_like_t &map_string_like =
 /** Maps a Boolean value to a JSON/YAML scalar.
  *
 ```
-map_boolean :: (state, T) -> node
+map_boolean :: (state, const T&) -> node
 ```
  */
 struct map_boolean_t: detail::with_depth_exceeded_operator {
@@ -1236,7 +1242,6 @@ struct from_type_cpp11_trailing_return {
 #include <omnirefl/serialization/ryml/impl/enum.hpp>
 #include <omnirefl/serialization/ryml/impl/sequence.hpp>
 #include <omnirefl/serialization/ryml/impl/type_mapping.hpp>
-#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 namespace omni {
 namespace ryml {

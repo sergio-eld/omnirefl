@@ -200,6 +200,7 @@ private:
 
 public:
   using size_type = std::size_t;
+
   static constexpr size_type npos = compat::string_view::npos;
 
   static constexpr const char *data() noexcept { return view().data(); }

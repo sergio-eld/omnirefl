@@ -151,7 +151,8 @@ transform :: (T -> U) -> with_diagnostics<U, Diagnostics>
    * Diagnostic limits remain the mapping operation's responsibility.
    *
 ```
-and_then :: (T -> with_diagnostics<U, Diagnostics>)
+Merge :: (Diagnostics, Diagnostics) -> Diagnostics
+and_then :: (T -> with_diagnostics<U, Diagnostics>, Merge = default)
   -> with_diagnostics<U, Diagnostics>
 ```
    */

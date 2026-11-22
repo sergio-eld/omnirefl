@@ -69,6 +69,8 @@
  *   customization_mapping.enum_aliases - accept alternate enumerator names
  *   extended_container_mapping.appends_members_and_restores_them
  *     combine an inherited container with appended record members
+ *   extended_container_mapping.customizes_appended_members_by_schema_path
+ *     select a named C++ field represented as an array element
  *   invalid_extended_container_mapping.rejects_invalid_contents
  *     reject missing or invalid values before modifying the destination
  *   customization_mapping_limits.collects_default_and_custom_conversion_errors
@@ -1705,8 +1707,9 @@ cp::to_type<T> :: {
  * current snapshot; paths are derived from source nodes when issues occur.
  * When combining child results, account for their issues before passing the
  * state to the next operation.
- * write_state_like constrains the writer's state, which carries the string
- * storage policy. Forward it unchanged to nested writers.
+ * write_state_like constrains the writer's state, which carries the destination
+ * and string storage policy. Same-node delegation forwards state unchanged.
+ * Child writers retarget with at(child) and derive field() or element() state.
  * Before C++20, is_read_state<State> and is_write_state<State> provide the
  * corresponding Boolean traits; C++14 also provides their _v forms.
  *
@@ -1795,7 +1798,8 @@ struct from_type_t<customization_mapping::extended_values> {
     binding.accessible_data_members()
       | fn::each(
         [&node, context](omni::data_member_binding auto field) -> void {
-          core::write_node(context.at(node.append_child()), field.value());
+          core::write_node(context.at(node.append_child())
+            .template field<T>(field.as_meta()), field.value());
         });
     return node;
   }
@@ -1994,6 +1998,26 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
   [](const testing::TestParamInfo<extended_container_case> &info) {
     return info.param.name;
   });
+
+/** Schema paths use C++ field names even when custom writers append those
+ * fields as array elements. Local selection can customize one such field. */
+TEST(extended_container_mapping, customizes_appended_members_by_schema_path) {
+  const auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
+    return []<omni::ryml::write_state_like State, typename T>(State state,
+      omni::type_t<T> type) {
+      if constexpr (std::is_same<T, int>::value
+        && state.path().ends_with("root.first"))
+        return [](auto state, const int &value) -> ::ryml::NodeRef {
+          return omni::ryml::map_integral(std::move(state), value + 10);
+        };
+      else
+        return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+    };
+  });
+
+  const customization_mapping::extended_values source{{1, 2}, 4, 8};
+  EXPECT_TRUE(same_document("[1, 2, 14, 8]", serialize(source)));
+}
 
 struct invalid_extended_container_case {
   std::string name;
