@@ -248,7 +248,8 @@ struct tdm_for_map_range_node {
     -> map_range_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
@@ -262,7 +263,8 @@ struct tdm_for_map_range_node {
     -> map_range_node_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),

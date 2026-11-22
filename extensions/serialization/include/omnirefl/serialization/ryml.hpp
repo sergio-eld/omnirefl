@@ -21,13 +21,8 @@
 // FIXME: [low] Freestanding: public diagnostics and text APIs require hosted
 // owning strings and vectors; provide an alternative representation.
 
-// FIXME: [high] Bound recursive deserialization for both deserialize and
-// map_by_schema. A model such as:
-//   struct node { std::vector<node> children; };
-// permits arbitrarily deep input, which can exhaust the stack. Define a
-// configurable depth policy with a terminal internal-error result. A Depth
-// NTTP must stop child instantiation at the limit; a static_assert there would
-// reject every recursive model, independently of the actual input depth.
+// FIXME: [high] Report write-depth overflow instead of silently stopping;
+// the void write pipeline cannot propagate diagnostics (see impl/depth.hpp).
 
 #include <omnirefl/serialization/ryml/impl/tdm_binding.hpp>
 #include <omnirefl/extensions/compat.hpp>

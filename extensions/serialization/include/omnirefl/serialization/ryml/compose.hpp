@@ -63,6 +63,9 @@ constexpr auto with_node_check(Mapping &&mapping)
   OMNI_CPP11_TRAILING_RETURN(
     detail::with_node_check_t<Check, compat::decay_t<Mapping>>) {
   return detail::with_node_check_t<Check, compat::decay_t<Mapping>>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
     /*lifted_mapping=*/std::forward<Mapping>(mapping)};
 }
 
@@ -537,7 +540,10 @@ with_node_check<Check> :: Mapping -> Mapping
 // implementation.
 // REFACTORME: [medium] Consider selecting factory-produced default values.
 template <node_check Check, typename Mapping>
-struct with_node_check_t {
+struct with_node_check_t:
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
   // Keeping the check in the type preserves it under default construction.
   static constexpr auto expect_node = Check;
   Mapping lifted_mapping;
@@ -578,6 +584,16 @@ struct with_node_check_t {
 
     return this->lifted_mapping(std::move(state), *checked, into);
   }
+// Ad hoc: classes with bases are not aggregates before C++17.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr with_node_check_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Mapping),
+    (std::is_constructible<Mapping, Value &&>::value))
+  constexpr with_node_check_t(Value &&mapping)
+    : lifted_mapping(std::forward<Value>(mapping)) {}
+#endif
+
 };
 
 template <typename Mapping>

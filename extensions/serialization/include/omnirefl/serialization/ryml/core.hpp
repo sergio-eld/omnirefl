@@ -8,6 +8,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/impl/depth.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -261,6 +262,22 @@ static constexpr const map_node_to_arithmetic_t &map_node_to_arithmetic =
   compat::detail::shared_state<map_node_to_arithmetic_t>::value;
 #endif
 
+/** Terminal read: reports the depth limit without selecting a mapping. */
+template <typename T>
+auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) -> with_diagnostics_t<T> {
+  return omni::ryml::detail::with_depth_exceeded_operator{}(
+    stopped, node, type);
+}
+
+template <typename T>
+auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
+  T *into)
+  -> with_diagnostics_t<compat::monostate> {
+  return omni::ryml::detail::with_depth_exceeded_operator{}(
+    stopped, node, into);
+}
+
 /** Node-to-type mapping through a customization or its default.
  * Pointer-only mappings are adapted when T is default-constructible.
  * @pre Required metadata is available in reflected scope. */
@@ -279,6 +296,13 @@ OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+/** Terminal write; see the depth-overflow FIXME in impl/depth.hpp. */
+template <typename T>
+void write_node(const depth_exceeded &stopped, const T &value,
+  ::ryml::NodeRef node) {
+  omni::ryml::detail::with_depth_exceeded_operator{}(stopped, value, node);
+}
 
 // REFACTORME: [high] This selects and invokes a mapping via state.map_node.
 // Reassess whether a separate writer dispatcher is needed.

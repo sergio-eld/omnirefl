@@ -711,6 +711,60 @@ TEST(mapping_dispatch, value_initialization_preserves_defaults) {
   EXPECT_TRUE(serialization_test::matches_json("7", serialize(7)));
 }
 
+namespace bounded_depth {
+
+struct node {
+  int value;
+  std::vector<node> children;
+  std::vector<node> alternatives;
+  std::vector<node> fallbacks;
+};
+
+std::string document(std::size_t levels) {
+  std::string children = "[]";
+  for (std::size_t level = 0; level < levels; ++level)
+    children = R"([{"value": 7, "children": )" + children
+      + R"(, "alternatives": [], "fallbacks": []}])";
+  return children;
+}
+
+struct depth_case {
+  std::size_t levels;
+  bool accepted;
+};
+
+class traversal: public testing::TestWithParam<depth_case> {};
+
+TEST_P(traversal, bounds_recursive_read_and_write_instantiation) {
+  const auto &c = GetParam();
+  const auto source = document(c.levels);
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<node>>{}, source);
+
+  EXPECT_EQ(c.accepted, bool(result.value));
+  if (c.accepted && result.value) {
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+    EXPECT_TRUE(serialization_test::matches_json(source,
+      omni::ryml::as_json(*result.value)));
+  } else if (!c.accepted) {
+    EXPECT_EQ(1U, result.diagnostics.issues.size());
+    if (!result.diagnostics.issues.empty()) {
+      EXPECT_EQ(omni::json::issue_code::depth_limit_exceeded,
+        result.diagnostics.issues.front().reason);
+    }
+  }
+}
+
+// The array root is depth 0; each record layer consumes two edges, including
+// its scalar and empty-array fields. Five layers reach the default limit 10.
+INSTANTIATE_TEST_SUITE_P(default_limit, traversal,
+  testing::Values(depth_case{5, true}, depth_case{6, false}),
+  [](const testing::TestParamInfo<depth_case> &info) {
+    return info.param.accepted ? "at_limit" : "beyond_limit";
+  });
+
+} // namespace bounded_depth
+
 #if 201703L <= OMNI_CPLUSPLUS
 namespace schema_paths {
 

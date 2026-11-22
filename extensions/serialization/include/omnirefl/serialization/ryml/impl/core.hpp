@@ -616,6 +616,19 @@ auto map_node_to_arithmetic_t::operator()(State state,
 
 } // namespace core
 
+namespace detail {
+
+inline diagnostics depth_error(::ryml::ConstNodeRef node) {
+  return {
+    /*config=*/{},
+    /*issues=*/{core::make_issue(json::issue_code::depth_limit_exceeded,
+      json::value_kind::unknown, node)},
+    /*parse_error_message=*/{},
+  };
+}
+
+} // namespace detail
+
 inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
   const diagnostics &d) const {
   std::string message;
@@ -643,6 +656,10 @@ inline std::string render_diagnostics_t::operator()(const ::ryml::Tree &tree,
       message += "warning: ";
 
     switch (entry.reason) {
+    case json::issue_code::depth_limit_exceeded:
+      message += "tree depth limit exceeded";
+      break;
+
     case json::issue_code::warning_limit_exceeded:
       message += "warning limit exceeded";
       break;

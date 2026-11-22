@@ -351,6 +351,22 @@ auto map_optional_like_t::operator()(State context,
 
 namespace detail {
 
+// The record frame applies diagnostic limits; retain its direct mapping path.
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto map_record_field_value(State state, ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) -> with_diagnostics_t<T> {
+  const auto mapping = compat::invoke(state.map_node, state, type);
+  return map_node_to_value_using(std::move(state), mapping, node, type,
+    /*priority=*/0);
+}
+
+template <typename T>
+auto map_record_field_value(const depth_exceeded &stopped,
+  ::ryml::ConstNodeRef node, omni::type_t<T> type) -> with_diagnostics_t<T> {
+  return core::read_node(stopped, node, type);
+}
+
 template <typename Record, std::size_t Index, bool CheckPresence,
   typename Frame>
 bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
@@ -367,12 +383,14 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
       typename compat::remove_cvref_t<decltype(slot)>::type>{};
     constexpr auto field = typename compat::remove_cvref_t<
       decltype(slot)>::field_type{};
-    const auto state = this->frame.result->state.template field<Record>(field);
+    const auto &state = this->frame.result->state.template field<Record>(field);
     const auto node = present
       ? ::ryml::ConstNodeRef{this->frame.object.tree(),
           this->frame.pending[Index]}
       : ::ryml::ConstNodeRef{};
-    auto mapped = validate_record_field(state, node, field,
+    // Validation needs the enclosing policy/progress, not the child's path.
+    // A terminal child has no state, so keep the parent for validation.
+    auto mapped = validate_record_field(this->frame.result->state, node, field,
       compat::invoke([this, &slot, &state, &node, &type, present]()
         -> with_diagnostics_t<typename decltype(type)::type> {
         if (!present)
@@ -381,10 +399,8 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
               /*base=*/{},
 #endif
-              state.config.error_policy, {}}, {}, {}}};
-        const auto mapping = compat::invoke(state.map_node, state, type);
-        return map_node_to_value_using(state, mapping, node, type,
-          /*priority=*/0);
+              this->frame.result->state.config.error_policy, {}}, {}, {}}};
+        return map_record_field_value(state, node, type);
       }), this->frame.strategy.validate_fields);
     if (!present)
       for (auto &entry : mapped.diagnostics.issues) {

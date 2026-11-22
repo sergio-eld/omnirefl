@@ -31,7 +31,8 @@ struct tdm_for_map_object_node {
     -> map_object_node_t<compat::decay_t<Result>, WithNodeCheck> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().strategy),
       this->derived().with_node_check,
@@ -47,7 +48,8 @@ struct tdm_for_map_object_node {
     -> map_object_node_t<compat::decay_t<Result>, WithNodeCheck> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().strategy)),
@@ -64,7 +66,8 @@ struct tdm_for_map_object_node {
     -> map_object_node_t<Strategy, compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       this->derived().strategy,
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
@@ -80,7 +83,8 @@ struct tdm_for_map_object_node {
     -> map_object_node_t<Strategy, compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       std::move(this->derived().strategy),
       compat::invoke(std::forward<F>(f),
@@ -110,7 +114,8 @@ struct tdm_for_map_record {
     -> map_record_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().strategy),
     };
@@ -124,7 +129,8 @@ struct tdm_for_map_record {
     -> map_record_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().strategy)),

@@ -7,6 +7,7 @@
 #include <omnirefl/extensions/mapping_strategy.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -35,9 +36,11 @@ map_object_node :: {
 template <typename Strategy = mapping::record_strategy_t<>,
   typename WithNodeCheck = std::true_type>
 struct map_object_node_t:
-    detail::tdm_for_map_object_node<Strategy, WithNodeCheck> {
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>,
+    omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider =
     detail::tdm_for_map_object_node<Strategy, WithNodeCheck>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_object_node_t requires mapping::record_strategy_t");
@@ -98,8 +101,10 @@ map_record :: (state, const T&, node) -> void
  * @pre Record metadata must be available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>>
 struct map_record_t:
-    detail::tdm_for_map_record<Strategy> {
+    detail::tdm_for_map_record<Strategy>,
+    omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_record<Strategy>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_record_t requires mapping::record_strategy_t");

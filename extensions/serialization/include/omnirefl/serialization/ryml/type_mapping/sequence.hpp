@@ -31,7 +31,9 @@ namespace ryml {
  * valid tree. The caller validates object/array shape for the destination;
  * the implementation only asserts that precondition.
  */
-struct to_range_t {
+struct to_range_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<detail::is_mapped_range<T>,
       is_read_state<State>>::value))
@@ -51,8 +53,10 @@ map_range_node :: (state, node, T*) -> with_diagnostics<monostate>
  */
 template <typename WithNodeCheck = std::true_type>
 struct map_range_node_t:
-    detail::tdm_for_map_range_node<WithNodeCheck> {
+    detail::tdm_for_map_range_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_range_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
 
   /** Disable only when the node satisfies the destination's shape. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -92,7 +96,9 @@ map_range :: (state, const T&, node) -> void
  * Empty optional array elements are omitted. Optional object values remain.
  * Non-scalar C++ elements must be exposed as lvalue references to value_type;
  * default mapping rejects temporary-producing iterators in both tree modes. */
-struct map_range_t {
+struct map_range_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
