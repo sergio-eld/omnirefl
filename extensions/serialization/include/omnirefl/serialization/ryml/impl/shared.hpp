@@ -273,15 +273,20 @@ auto map_node_to_value_using(State state,
   return mapping(std::move(state), node, type);
 }
 
+// Avoid probing pointer calls when value production is available: a generic
+// callback can reject the unintended argument types inside its body.
 OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
-  (std::is_default_constructible<T>::value))
+  (compat::conjunction<std::is_default_constructible<T>,
+    compat::negation<compat::is_invocable<const Mapping &, State,
+      ::ryml::ConstNodeRef, omni::type_t<T>>>,
+    compat::is_invocable<const Mapping &, State,
+      ::ryml::ConstNodeRef, T *>>::value))
 auto map_node_to_value_using(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>,
   long)
-  -> decltype(mapping(std::move(state), node, static_cast<T *>(nullptr)),
-    with_diagnostics_t<T>{}) {
+  -> with_diagnostics_t<T> {
   auto value = compat::make_optional<T>();
   auto mapped = mapping(std::move(state), node, &*value);
   return {
@@ -349,12 +354,18 @@ auto read_into(State state,
     });
 }
 
-template <typename Mapping, typename T, typename State>
+OMNI_CONSTRAINED_TEMPLATE((typename Mapping, typename T, typename State),
+  (compat::conjunction<
+    compat::negation<compat::conjunction<std::is_assignable<T &, T &&>,
+      compat::is_invocable<const Mapping &, State,
+        ::ryml::ConstNodeRef, omni::type_t<T>>>>,
+    compat::is_invocable<const Mapping &, State,
+      ::ryml::ConstNodeRef, T *>>::value))
 auto read_into(State state,
   const Mapping &mapping,
   ::ryml::ConstNodeRef node,
   T *into,
-  long) -> decltype(mapping(std::move(state), node, into)) {
+  long) -> with_diagnostics_t<compat::monostate> {
   return mapping(std::move(state), node, into);
 }
 

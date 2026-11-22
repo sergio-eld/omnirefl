@@ -19,8 +19,8 @@ namespace ryml {
 namespace reflected_scope {
 
 /** Maps an object node into a reflected record's accessible non-static fields.
- * Does not call \ref mapping_to_type for the record; member mappings still
- * use it.
+ * Does not call \ref mapping_to_type for the record. Nested members may use
+ * state.map_node, which defaults to that lookup.
  * Traversal follows the record schema over the node, applying config's
  * duplicate, unknown-member, and diagnostic-limit policies.
  * Aggregatable records are constructed from mapped field values. Other
@@ -38,7 +38,7 @@ namespace reflected_scope {
  * valid tree and be an object. Record metadata must be available in reflected
  * scope; node shape is checked only by a debug assertion.
  */
-template <typename NameByAlias = fn::default_value<
+template <typename NameByAlias = omni::fn::default_value<
   compat::optional<compat::string_view>>>
 struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -90,8 +90,8 @@ struct to_record_t {
 
 /** Creates a reflected-record node-to-type mapping function.
  * Checks for object input before traversing the record.
- * Does not call \ref mapping_to_type for the record; member mappings still
- * use it.
+ * Does not call \ref mapping_to_type for the record. Nested members may use
+ * state.map_node, which defaults to that lookup.
  *
 ```
 default_to_record :: type<T> -> {
@@ -108,8 +108,8 @@ constexpr auto default_to_record(omni::type_t<T>)
 }
 
 /** Maps accessible non-static record fields to object entries.
- * Does not call \ref mapping_from_type for the record; member mappings still
- * use it.
+ * Does not call \ref mapping_from_type for the record. Nested members may use
+ * state.map_node, which defaults to that lookup.
  *
 ```
 from_record :: (state, const T&, node) -> void

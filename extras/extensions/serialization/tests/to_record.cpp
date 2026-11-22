@@ -323,21 +323,6 @@ TEST(to_record_aliases, supports_runtime_configuration_per_instance) {
 }
 #endif
 
-// C++11 lambda equivalent: apply this compositor inside the reflected scope.
-struct cpp11_map_with_aliases {
-  omni::ryml::reflected_scope::to_record_t<examples::runtime_aliases>
-    compositor;
-  ::ryml::ConstNodeRef node;
-  omni::ryml::read_state_t<> context;
-
-  template <typename Record>
-  auto operator()(omni::record_binding_t<Record> record) const
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate,
-      omni::ryml::diagnostics> {
-    return this->compositor(this->context, this->node, &record.value());
-  }
-};
-
 class runtime_record_aliases: public testing::TestWithParam<bool> {};
 
 TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
@@ -358,21 +343,9 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
       continue;
 
     const omni::ryml::config_t<> options{};
-    const omni::ryml::read_state_t<> context{
-      /*config=*/options,
-      /*error_count=*/0,
-      /*warning_count=*/0,
-      };
-
     examples::runtime_endpoint into{/*host=*/"unchanged"};
-    const auto mapped = omni::reflected_call(
-      cpp11_map_with_aliases{
-        /*compositor=*/compositor,
-        /*node=*/tree->crootref(),
-        /*context=*/context,
-      },
-
-      into);
+    const auto mapped = serialization_test::map_using(options, compositor,
+      &into, tree->crootref());
 
     EXPECT_EQ(legacy, bool(mapped.value));
     EXPECT_EQ(legacy ? "localhost" : "unchanged", into.host);

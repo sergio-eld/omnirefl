@@ -25,6 +25,8 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
 // Inheriting the metadata wrapper supplies aggregate_into's named-field protocol.
 template <typename Field>
 struct record_value_slot: Field {
+  // Match the metadata identity used by explicit state.field(meta) traversal.
+  using field_type = Field;
   compat::optional<typename Field::type> stored;
 
   typename Field::type &&value() && { return std::move(*this->stored); }
@@ -72,7 +74,7 @@ struct bind_record_value {
 
   template <typename Frame>
   void operator()(Frame *frame) const {
-    frame->values | fn::each(assign_record_fields<T>{
+    frame->values | omni::fn::each(assign_record_fields<T>{
       std::addressof(frame->value->emplace())});
   }
 };
@@ -96,7 +98,7 @@ struct bind_record_into {
 
   template <typename Frame>
   void operator()(Frame *frame) const {
-    frame->values | fn::each(assign_record_fields<T>{this->into});
+    frame->values | omni::fn::each(assign_record_fields<T>{this->into});
     frame->value->emplace();
   }
 };
@@ -151,7 +153,8 @@ struct cpp11_process_record_event {
 
 // GCC 7 rejects pack expansions found only inside lambda bodies. Indexed
 // callables retain the same reference capture without that expansion.
-template <std::size_t Index, bool CheckPresence, typename Frame>
+template <typename Record, std::size_t Index, bool CheckPresence,
+  typename Frame>
 struct cpp11_record_member_event {
   Frame &frame;
 
@@ -160,8 +163,8 @@ struct cpp11_record_member_event {
 };
 
 // Tuple indices keep field values and selected nodes paired without a search.
-template <typename State, typename Values, typename Finalizer,
-  std::size_t... Index>
+template <typename Record, typename State, typename Values,
+  typename Finalizer, std::size_t... Index>
 auto process_record_members(node_accumulator<State> *result,
   ::ryml::ConstNodeRef object, Values *values,
   const std::array<::ryml::id_type, sizeof...(Index)> &pending,
@@ -177,11 +180,13 @@ auto process_record_members(node_accumulator<State> *result,
 
   const auto events = std::tuple_cat(
     std::make_tuple(
-      cpp11_record_member_event<Index, true, decltype(frame)>{frame}...),
+      cpp11_record_member_event<Record, Index, true,
+        decltype(frame)>{frame}...),
     std::make_tuple(
-      cpp11_record_member_event<Index, false, decltype(frame)>{frame}...));
+      cpp11_record_member_event<Record, Index, false,
+        decltype(frame)>{frame}...));
 
-  auto folded = events | fn::try_fold(cpp11_process_record_event{},
+  auto folded = events | omni::fn::try_fold(cpp11_process_record_event{},
     compat::expected<compat::monostate, compat::monostate>{
       compat::monostate{}});
   if (!result->result.value)
@@ -204,7 +209,11 @@ struct cpp11_write_member {
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    core::write_node(this->context, field.value(), child);
+    core::write_node(
+      this->context.template field<compat::remove_cvref_t<Record>>(
+        omni::data_member_meta_t<_F>{}),
+      field.value(),
+      child);
   }
 };
 
@@ -224,12 +233,12 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
   // C++11 tuple operations need not support constant evaluation.
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr auto fields = omni::meta_for<T>::accessible_data_members()
-    | fn::filter(fn::is_non_static);
-  constexpr auto table = fn::lookup_table(fields);
+    | omni::fn::filter(omni::fn::is_non_static);
+  constexpr auto table = omni::fn::lookup_table(fields);
 #else
   const auto fields = omni::meta_for<T>::accessible_data_members()
-    | fn::filter(fn::is_non_static);
-  const auto table = fn::lookup_table(fields);
+    | omni::fn::filter(omni::fn::is_non_static);
+  const auto table = omni::fn::lookup_table(fields);
 #endif
 
   // Selected children share this object's tree; only IDs need storage.
@@ -254,7 +263,7 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
       ? compat::decay_t<decltype(compat::invoke(name_by_alias, input_name))>{}
       : compat::invoke(name_by_alias, input_name);
     const auto field = std::move(direct).or_else([&table, &canonical](
-      fn::not_found_t<compat::string_view> missing) {
+      omni::fn::not_found_t<compat::string_view> missing) {
       if (canonical)
         return table.lookup(compat::string_view{*canonical});
 
@@ -315,7 +324,7 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
     return {compat::nullopt, std::move(result.result.diagnostics)};
 
   auto values = record_value_slots(fields);
-  return omni::ryml::detail::process_record_members(&result, node, &values,
+  return omni::ryml::detail::process_record_members<T>(&result, node, &values,
     pending, std::move(finalizer),
     compat::make_index_sequence<std::tuple_size<decltype(fields)>::value>{});
 }
@@ -369,8 +378,8 @@ auto from_record_t::operator()(State context,
   node.set_map();
   const auto binding = omni::meta_for<T>::bind(value);
   binding.accessible_data_members()
-    | fn::filter(fn::is_non_static)
-    | fn::each(omni::ryml::detail::cpp11_write_member<State>{
+    | omni::fn::filter(omni::fn::is_non_static)
+    | omni::fn::each(omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/std::move(context),
     });

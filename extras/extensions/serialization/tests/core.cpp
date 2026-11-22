@@ -24,76 +24,11 @@ TEST(optional_compat, constructs_values_in_constant_expressions) {
   static_assert(*integer == 42, "Value construction preserves the integer");
 }
 
-TEST(mapping_core, parses_and_converts_without_reflection_or_composition) {
-  const auto tree = omni::ryml::core::parse(
-    R"({"flag": true, "count": 42, "ratio": 2.5, "text": "reading"})");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> state{options, 0, 0};
-  const auto root = tree->crootref();
-  const auto boolean = omni::ryml::core::map_node_to_boolean(state,
-    root["flag"],
-    omni::type_t<bool>{});
-
-  const auto integer = omni::ryml::core::map_node_to_integral(state,
-    root["count"],
-    omni::type_t<std::int16_t>{});
-
-  const auto real = omni::ryml::core::map_node_to_floating_point(state,
-    root["ratio"],
-    omni::type_t<float>{});
-
-  const auto arithmetic = omni::ryml::core::map_node_to_arithmetic(state,
-    root["count"],
-    omni::type_t<std::int32_t>{});
-
-  const auto text = omni::ryml::core::map_node_to_string_like(state,
-    root["text"],
-    omni::type_t<std::string>{});
-
-  EXPECT_EQ(true, boolean.value);
-  EXPECT_EQ(42, integer.value);
-  EXPECT_EQ(2.5F, real.value);
-  EXPECT_EQ(42, arithmetic.value);
-  EXPECT_EQ(std::string{"reading"}, text.value);
-  EXPECT_TRUE(boolean.diagnostics.issues.empty());
-  EXPECT_TRUE(integer.diagnostics.issues.empty());
-  EXPECT_TRUE(real.diagnostics.issues.empty());
-  EXPECT_TRUE(arithmetic.diagnostics.issues.empty());
-  EXPECT_TRUE(text.diagnostics.issues.empty());
-}
-
 TEST(mapping_core, returns_syntax_errors_without_throwing) {
   const auto result = omni::ryml::core::parse("{");
   EXPECT_FALSE(result);
   if (!result)
     EXPECT_FALSE(result.error().empty());
-}
-
-TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
-  const auto tree = omni::ryml::core::parse(R"({"count": 128})");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const omni::ryml::config_t<> options{};
-  const omni::ryml::read_state_t<> root{options, 0, 0};
-  const auto node = tree->crootref()["count"];
-  const auto result = omni::ryml::core::map_node_to_integral(
-    root, node, omni::type_t<std::int8_t>{});
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ(1U, result.diagnostics.issues.size());
-  if (result.diagnostics.issues.size() == 1) {
-    EXPECT_EQ(omni::json::issue_code::out_of_range,
-      result.diagnostics.issues[0].reason);
-
-    EXPECT_EQ("/count", omni::ryml::detail::render_path(
-      result.diagnostics.issues[0].path));
-  }
 }
 
 TEST(mapping_core, reports_escaped_keys_and_sequence_positions) {

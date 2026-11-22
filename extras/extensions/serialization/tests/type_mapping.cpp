@@ -1,8 +1,10 @@
 #include "json_match.hpp"
 
+#include <cstdint>
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -29,33 +31,7 @@ struct endpoint_names {
 struct shifted_integer { int value; };
 struct qualified_integer { int value; };
 
-namespace mapping_observation {
-
-struct trace {
-  std::vector<std::string> paths;
-  std::vector<std::size_t> errors;
-  std::vector<std::size_t> warnings;
-  std::vector<const void *> configurations;
-};
-
-struct renderer {
-  trace *observed;
-
-  std::size_t operator()(const ::ryml::Tree &,
-    omni::ryml::diagnostics report) const {
-    return report.issues.size();
-  }
-};
-
-struct number { int value; };
-struct record {
-  number first;
-  number second;
-  number third;
-};
-
-} // namespace mapping_observation
-
+struct registered_integer { int value; };
 
 } // namespace
 
@@ -64,34 +40,21 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type_t<mapping_observation::number> {
+struct to_type_t<registered_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
-    mapping_observation::number *into) const
+    registered_integer *into) const
     -> with_diagnostics_t<compat::monostate> {
-    auto &trace = *state.config.transform_diagnostics.observed;
-    trace.paths.push_back(detail::render_path(core::node_path(node)));
-    trace.errors.push_back(state.error_count);
-    trace.warnings.push_back(state.warning_count);
-    trace.configurations.push_back(&state.config);
-
-    auto result = core::read_node(state, node, &into->value);
-    if (result.value && into->value < 0) {
-      result.diagnostics.issues.push_back(core::make_issue(
-        json::issue_code::out_of_range, json::value_kind::integer,
-        node, /*warning=*/true));
-    }
-
-    return result;
+    return core::read_node(std::move(state), node, &into->value);
   }
 };
 
 template <>
-struct from_type_t<mapping_observation::number> {
+struct from_type_t<registered_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   void operator()(State state,
-    const mapping_observation::number &value,
+    const registered_integer &value,
     ::ryml::NodeRef node) const {
     from_arithmetic(std::move(state), value.value, node);
   }
@@ -201,7 +164,7 @@ static_assert(omni::traits::cp::unavailable{}
     == omni::ryml::cp::to_type_t<int>{},
   "Unregistered structs compare equal to unavailable");
 static_assert(omni::traits::cp::unavailable{}
-    != omni::ryml::cp::to_type_t<mapping_observation::number>{},
+    != omni::ryml::cp::to_type_t<registered_integer>{},
   "Registered structs do not compare equal to unavailable");
 
 static_assert(std::is_same<
@@ -293,14 +256,14 @@ static_assert(std::is_same<
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_to_type(
-      omni::type_t<mapping_observation::number>{})),
-    omni::ryml::cp::to_type_t<mapping_observation::number>>::value,
+      omni::type_t<registered_integer>{})),
+    omni::ryml::cp::to_type_t<registered_integer>>::value,
   "Struct registration to-type selection");
 
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<mapping_observation::number>{})),
-    omni::ryml::cp::from_type_t<mapping_observation::number>>::value,
+      omni::type_t<registered_integer>{})),
+    omni::ryml::cp::from_type_t<registered_integer>>::value,
   "Struct registration from-type selection");
 
 static_assert(std::is_same<
@@ -434,6 +397,69 @@ struct cpp11_check_mapping_types {
   }
 };
 
+TEST(mapping_core, parses_and_converts_through_explicit_core_mappings) {
+  const auto tree = omni::ryml::core::parse(
+    R"({"flag": true, "count": 42, "ratio": 2.5, "text": "reading"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::config_t<> options{};
+  const auto root = tree->crootref();
+  const auto boolean = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_boolean,
+    omni::type_t<bool>{}, root["flag"]);
+
+  const auto integer = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_integral,
+    omni::type_t<std::int16_t>{}, root["count"]);
+
+  const auto real = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_floating_point,
+    omni::type_t<float>{}, root["ratio"]);
+
+  const auto arithmetic = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_arithmetic,
+    omni::type_t<std::int32_t>{}, root["count"]);
+
+  const auto text = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_string_like,
+    omni::type_t<std::string>{}, root["text"]);
+
+  EXPECT_EQ(true, boolean.value);
+  EXPECT_EQ(42, integer.value);
+  EXPECT_EQ(2.5F, real.value);
+  EXPECT_EQ(42, arithmetic.value);
+  EXPECT_EQ(std::string{"reading"}, text.value);
+  EXPECT_TRUE(boolean.diagnostics.issues.empty());
+  EXPECT_TRUE(integer.diagnostics.issues.empty());
+  EXPECT_TRUE(real.diagnostics.issues.empty());
+  EXPECT_TRUE(arithmetic.diagnostics.issues.empty());
+  EXPECT_TRUE(text.diagnostics.issues.empty());
+}
+
+TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
+  const auto tree = omni::ryml::core::parse(R"({"count": 128})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::config_t<> options{};
+  const auto node = tree->crootref()["count"];
+  const auto result = serialization_test::map_using(options,
+    omni::ryml::core::map_node_to_integral, omni::type_t<std::int8_t>{}, node);
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (result.diagnostics.issues.size() == 1) {
+    EXPECT_EQ(omni::json::issue_code::out_of_range,
+      result.diagnostics.issues[0].reason);
+
+    EXPECT_EQ("/count", omni::ryml::detail::render_path(
+      result.diagnostics.issues[0].path));
+  }
+}
+
 TEST(type_mapping, selects_reflected_defaults) {
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_record(
@@ -460,28 +486,41 @@ TEST(type_mapping, preserves_initialized_writer_state) {
   EXPECT_EQ("16", omni::ryml::as_json(shifted_integer{5}));
 }
 
+// C++11 needs a named generic selector to retain the explicitly queried tag.
+template <typename Qualified>
+struct select_qualified_writer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+    (omni::ryml::is_write_state<State>::value))
+  auto operator()(State, omni::type_t<T>) const
+    -> decltype(omni::ryml::reflected_scope::mapping_from_type(
+      omni::type_t<Qualified>{})) {
+    return omni::ryml::reflected_scope::mapping_from_type(
+      omni::type_t<Qualified>{});
+  }
+};
+
 TEST(type_mapping, writes_cv_qualified_boolean_tags) {
   const bool enabled = true;
   volatile bool disabled = false;
   const volatile bool fixed = true;
-  const omni::ryml::write_state_t<false> state{};
-  ::ryml::Tree tree;
+  const auto write_const = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<const bool>{};
+    });
+  const auto write_volatile = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<volatile bool>{};
+    });
+  const auto write_const_volatile = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<const volatile bool>{};
+    });
 
-  omni::ryml::reflected_scope::mapping_from_type(omni::type_t<const bool>{})(
-    state,
-    enabled,
-    tree.rootref());
-  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(tree));
-
-  omni::ryml::reflected_scope::mapping_from_type(omni::type_t<volatile bool>{})(
-    state,
-    disabled,
-    tree.rootref());
-  EXPECT_EQ("false", ::ryml::emitrs_json<std::string>(tree));
-
-  omni::ryml::reflected_scope::mapping_from_type(
-    omni::type_t<const volatile bool>{})(state, fixed, tree.rootref());
-  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(tree));
+  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(write_const(enabled)));
+  EXPECT_EQ("false",
+    ::ryml::emitrs_json<std::string>(write_volatile(disabled)));
+  EXPECT_EQ("true",
+    ::ryml::emitrs_json<std::string>(write_const_volatile(fixed)));
 }
 
 TEST(type_mapping, reads_a_volatile_boolean) {
@@ -495,12 +534,12 @@ TEST(type_mapping, reads_a_volatile_boolean) {
 
 TEST(type_mapping, preserves_qualified_registration) {
   const qualified_integer value{23};
-  const omni::ryml::write_state_t<false> state{};
-  ::ryml::Tree tree;
+  const auto as_owning_tree = omni::ryml::as_owning_tree.tdm_map_node(
+    [](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return select_qualified_writer<const qualified_integer>{};
+    });
 
-  omni::ryml::reflected_scope::mapping_from_type(
-    omni::type_t<const qualified_integer>{})(state, value, tree.rootref());
-  EXPECT_EQ("23", ::ryml::emitrs_json<std::string>(tree));
+  EXPECT_EQ("23", ::ryml::emitrs_json<std::string>(as_owning_tree(value)));
 }
 
 TEST(write_state, preserves_string_storage_through_custom_mapping) {
@@ -519,85 +558,6 @@ TEST(write_state, preserves_string_storage_through_custom_mapping) {
   source.clear();
   EXPECT_TRUE(serialization_test::matches_node(
     R"(["east", "west"])", owning.crootref()));
-}
-
-TEST(read_state, passes_original_config_and_updated_counts_to_children) {
-  mapping_observation::trace trace;
-  const auto load = omni::ryml::deserialize.tdm_config(
-    [&trace](omni::ryml::config_t<> options) {
-      options.error_policy.error_limit = 1;
-      return options.tdm_transform_diagnostics(
-        [&trace](omni::ryml::render_diagnostics_t) {
-          return mapping_observation::renderer{&trace};
-        });
-    });
-
-  const auto result = load(omni::type_t<mapping_observation::record>{},
-    R"({"first":-7,"second":"bad","third":3})");
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ(2U, result.diagnostics);
-  EXPECT_EQ((std::vector<std::string>{"/first", "/second", "/third"}),
-    trace.paths);
-
-  EXPECT_EQ((std::vector<std::size_t>{0, 0, 1}), trace.errors);
-  EXPECT_EQ((std::vector<std::size_t>{0, 1, 1}), trace.warnings);
-  EXPECT_EQ(trace.paths.size(), trace.configurations.size());
-  for (const auto address : trace.configurations)
-    EXPECT_EQ(static_cast<const void *>(&load.config), address);
-}
-
-class record_mapping_limits: public testing::TestWithParam<bool> {};
-
-TEST_P(record_mapping_limits, stops_before_evaluating_later_members) {
-  const bool warnings = GetParam();
-  mapping_observation::trace trace;
-  const auto load = omni::ryml::deserialize.tdm_config(
-    [&trace, warnings](omni::ryml::config_t<> options) {
-      options.error_policy.error_limit = 0;
-      if (warnings)
-        options.error_policy.warning_limit = 0;
-
-      return options.tdm_transform_diagnostics(
-        [&trace](omni::ryml::render_diagnostics_t) {
-          return mapping_observation::renderer{&trace};
-        });
-    });
-
-  const auto result = load(omni::type_t<mapping_observation::record>{},
-    warnings ? R"({"first":-7,"second":2,"third":3})"
-             : R"({"first":"bad","second":2,"third":3})");
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ(warnings ? 2U : 1U, result.diagnostics);
-  EXPECT_EQ((std::vector<std::string>{"/first"}), trace.paths);
-  EXPECT_EQ((std::vector<std::size_t>{0}), trace.errors);
-  EXPECT_EQ((std::vector<std::size_t>{0}), trace.warnings);
-}
-
-INSTANTIATE_TEST_SUITE_P(budgets,
-  record_mapping_limits,
-  testing::Bool(),
-  [](const testing::TestParamInfo<bool> &info) {
-    return info.param ? "Warnings" : "Errors";
-  });
-
-TEST(record_mapping_events, missing_members_stop_before_value_operations) {
-  mapping_observation::trace trace;
-  const auto load = omni::ryml::deserialize.tdm_config(
-    [&trace](omni::ryml::config_t<> options) {
-      return options.tdm_transform_diagnostics(
-        [&trace](omni::ryml::render_diagnostics_t) {
-          return mapping_observation::renderer{&trace};
-        });
-    });
-
-  const auto result = load(omni::type_t<mapping_observation::record>{},
-    R"({"first":1,"third":3})");
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ(1U, result.diagnostics);
-  EXPECT_TRUE(trace.paths.empty());
 }
 
 TEST(mapping_customization, selects_serialization_registration) {

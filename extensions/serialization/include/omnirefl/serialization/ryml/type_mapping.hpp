@@ -429,7 +429,8 @@ cp::to_type<T> :: {
  *
  * Provide either overload, or both. map_by_schema and deserialize prefer
  * type<T> when its result can be assigned. T* is a fallback when value
- * production is unavailable.
+ * production is unavailable. A generic State parameter preserves child paths
+ * and local selectors; its constraint is is_read_state.
  *
  * Prefer this variable template over to_type_t for customization. Only one
  * of the two may be specialized for a given type.
@@ -470,7 +471,8 @@ cp::to_type_t<T>{} :: {
  *
  * Provide either overload, or both. map_by_schema and deserialize prefer
  * type<T> when its result can be assigned. T* is a fallback when value
- * production is unavailable.
+ * production is unavailable. A generic State parameter preserves child paths
+ * and local selectors; its constraint is is_read_state.
  *
  * Prefer the to_type variable template when C++14 or later is available.
  * Only one of the two may be specialized for a given type.
@@ -512,6 +514,9 @@ struct to_type_t: traits::cp::unavailable {};
 cp::from_type<T> :: (state, const T&, node) -> void
 ```
  *
+ * A generic State parameter preserves child paths and local selectors;
+ * its constraint is is_write_state.
+ *
  * @warning Keep specializations narrow: concrete types or specific template
  * families. Broad categories (e.g. all records or ranges) may overlap other
  * specializations and make lookup ambiguous. */
@@ -520,7 +525,8 @@ constexpr traits::cp::unavailable from_type{};
 #endif
 
 /** C++11-compatible C++-to-node customization. Unregistered types use a
- * default mapping function.
+ * default mapping function. A generic State parameter preserves child paths
+ * and local selectors; its constraint is is_write_state.
  * A scalar wrapper can delegate conversion to its wrapped value:
  *
 ```cpp
@@ -545,20 +551,6 @@ template <typename T, typename Enable = void>
 struct from_type_t: traits::cp::unavailable {};
 
 } // namespace cp
-
-// C++11 requires explicit return types for these dispatchers.
-#if !defined(__cpp_return_type_deduction) \
-  || 201304L > __cpp_return_type_deduction
-namespace detail {
-
-template <typename T>
-struct to_type_cpp11_trailing_return;
-
-template <typename T>
-struct from_type_cpp11_trailing_return;
-
-} // namespace detail
-#endif
 
 namespace reflected_scope {
 namespace detail {
@@ -753,3 +745,47 @@ struct from_type_cpp11_trailing_return {
 #endif
 
 #include <omnirefl/serialization/ryml/impl/type_mapping.hpp>
+
+namespace omni {
+namespace ryml {
+namespace reflected_scope {
+
+template <typename State, typename T>
+OMNI_CPP14_CONSTEXPR auto mapping_to_type_t::operator()(const State &,
+  omni::type_t<T> type) const
+  OMNI_CPP11_TRAILING_RETURN(
+    typename omni::ryml::detail::to_type_cpp11_trailing_return<T>::type) {
+  return reflected_scope::mapping_to_type(type);
+}
+
+template <typename State, typename T>
+OMNI_CPP14_CONSTEXPR auto mapping_from_type_t::operator()(const State &,
+  omni::type_t<T> type) const
+  OMNI_CPP11_TRAILING_RETURN(
+    typename omni::ryml::detail::from_type_cpp11_trailing_return<T>::type) {
+  return reflected_scope::mapping_from_type(type);
+}
+
+namespace fn {
+
+/** Default local mapping selector; see reflected_scope::mapping_to_type. */
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr mapping_to_type_t mapping_to_type{};
+#else
+static constexpr const mapping_to_type_t &mapping_to_type =
+  compat::detail::shared_state<mapping_to_type_t>::value;
+#endif
+
+/** Default local write-mapping selector; see
+ * reflected_scope::mapping_from_type. */
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr mapping_from_type_t mapping_from_type{};
+#else
+static constexpr const mapping_from_type_t &mapping_from_type =
+  compat::detail::shared_state<mapping_from_type_t>::value;
+#endif
+
+} // namespace fn
+} // namespace reflected_scope
+} // namespace ryml
+} // namespace omni

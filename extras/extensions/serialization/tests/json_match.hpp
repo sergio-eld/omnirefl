@@ -6,6 +6,7 @@
 #include <string>
 #include <deque>
 #include <memory>
+#include <type_traits>
 
 namespace serialization_test {
 
@@ -43,6 +44,42 @@ struct collect_diagnostics {
 using config = omni::ryml::config_t<collect_diagnostics>;
 using deserialize_type = omni::ryml::deserialize_t<config>;
 const deserialize_type deserialize{config{}};
+
+// Borrow one mapping for T while retaining normal nested-type lookup.
+template <typename T, typename Mapping>
+struct select_mapping {
+  const Mapping &mapping;
+
+  template <typename State>
+  const Mapping &operator()(const State &, omni::type_t<T>) const {
+    return this->mapping;
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename Other),
+    (!std::is_same<T, Other>::value))
+  auto operator()(const State &state, omni::type_t<Other> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_to_type(state, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+template <typename Mapping, typename T>
+auto map_using(const omni::ryml::config_t<> &options, const Mapping &mapping,
+  omni::type_t<T> type, ::ryml::ConstNodeRef node)
+  -> omni::ryml::with_diagnostics_t<T> {
+  const omni::ryml::map_by_schema_t<const omni::ryml::config_t<> &,
+    select_mapping<T, Mapping>> map{options, {mapping}};
+  return map(type, node);
+}
+
+template <typename Mapping, typename T>
+auto map_using(const omni::ryml::config_t<> &options, const Mapping &mapping,
+  T *into, ::ryml::ConstNodeRef node)
+  -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+  const omni::ryml::map_by_schema_t<const omni::ryml::config_t<> &,
+    select_mapping<T, Mapping>> map{options, {mapping}};
+  return map(into, node);
+}
 
 // Existing conformance cases compare rendered text as well as structured data.
 struct render_collected_diagnostics {

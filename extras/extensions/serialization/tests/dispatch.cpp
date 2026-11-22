@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -149,7 +150,9 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
 
 template <>
 struct omni::ryml::cp::to_type_t<default_state_number> {
-  auto operator()(omni::ryml::read_state_t<> state,
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<default_state_number>) const
     -> omni::ryml::with_diagnostics_t<default_state_number> {
@@ -363,7 +366,7 @@ INSTANTIATE_TEST_SUITE_P(documents,
     return info.param.name;
   });
 
-TEST(mapping_dispatch, bound_config_preserves_the_default_state_type) {
+TEST(mapping_dispatch, bound_config_passes_a_read_state) {
   const auto result = omni::ryml::deserialize(
     omni::type_t<default_state_number>{}, "42");
 
@@ -388,7 +391,7 @@ TEST(tree_serialization, exposes_callable_tree_builders) {
     R"("sensor")", borrowed.crootref()));
 
   EXPECT_FALSE((omni::compat::is_invocable<
-    omni::ryml::as_ref_tree_t, std::string &&>::value));
+    omni::ryml::as_ref_tree_t<>, std::string &&>::value));
 }
 
 TEST(mapping_dispatch, constructs_an_immutable_value_from_a_node) {
@@ -569,6 +572,277 @@ TEST(mapping_dispatch, disabled_string_keys_do_not_hide_the_mapped_record) {
   if (result.value)
     EXPECT_EQ(expected, *result.value);
 }
+
+namespace local_mapping {
+
+struct record { int value; };
+
+struct add_integer {
+  int increment;
+
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
+    return omni::ryml::default_to_integral(std::move(state), node, type)
+      .transform([this](int value) { return value + this->increment; });
+  }
+};
+
+struct select_mapping {
+  int increment;
+
+  template <typename State, typename T>
+  auto operator()(const State &state, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_to_type(state, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+
+  template <typename State>
+  add_integer operator()(State state, omni::type_t<int>) const {
+    constexpr bool selected = state.path().equals("root.value");
+    return {selected ? this->increment : 0};
+  }
+};
+
+} // namespace local_mapping
+
+TEST(mapping_dispatch, local_map_node_customization) {
+  const auto customize = [](omni::ryml::reflected_scope::mapping_to_type_t) {
+    return local_mapping::select_mapping{5};
+  };
+  const auto deserialize = omni::ryml::deserialize.tdm_map_node(customize);
+  const auto result = deserialize(omni::type_t<local_mapping::record>{},
+    R"({"value": 7})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value)
+    EXPECT_EQ(12, result.value->value);
+
+  const auto parsed = omni::ryml::core::parse(R"({"value": 7})");
+  EXPECT_TRUE(parsed);
+  if (!parsed)
+    return;
+
+  const auto map_by_schema = omni::ryml::map_by_schema.tdm_map_node(customize);
+  const auto mapped = map_by_schema(omni::type_t<local_mapping::record>{},
+    *parsed);
+  EXPECT_TRUE(mapped.value);
+  EXPECT_TRUE(mapped.diagnostics.issues.empty());
+  if (mapped.value)
+    EXPECT_EQ(12, mapped.value->value);
+
+// Aggregate deduction requires more than the C++20 language mode.
+#if defined(__cpp_designated_initializers) \
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
+  constexpr auto designated = omni::ryml::deserialize_t{
+    .map_node = local_mapping::select_mapping{5},
+  };
+  const auto direct = designated(omni::type<local_mapping::record>,
+    R"({"value": 7})");
+  EXPECT_TRUE(direct.value);
+  if (direct.value)
+    EXPECT_EQ(12, direct.value->value);
+#endif
+}
+
+TEST(mapping_dispatch, value_initialization_preserves_defaults) {
+  constexpr omni::ryml::serialize_t<> serialize{};
+  static_assert(::ryml::EmitType_e{} == serialize.format,
+    "Value initialization preserves the default format");
+  EXPECT_TRUE(serialization_test::matches_json("7", serialize(7)));
+}
+
+#if 201703L <= OMNI_CPLUSPLUS
+namespace schema_paths {
+
+struct address { int number; };
+struct record {
+  schema_paths::address address;
+  schema_paths::address work_address;
+  std::vector<schema_paths::address> offices;
+  std::map<std::string, schema_paths::address> locations;
+};
+
+struct read_address {
+  template <typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<address> type) const
+    -> omni::ryml::with_diagnostics_t<address> {
+    return omni::ryml::reflected_scope::default_to_record(type)(
+      std::move(state), node, type).transform([](address value) -> address {
+        return {value.number + 100};
+      });
+  }
+};
+
+struct select_reader {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    if constexpr (state.path().ends_with("root.work_address"))
+      return read_address{};
+    else if constexpr (state.path().ends_with("root.offices[].number"))
+      return local_mapping::add_integer{10};
+    else if constexpr (state.path().ends_with("root.locations[].number"))
+      return local_mapping::add_integer{20};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+struct write_address {
+  template <typename State>
+  void operator()(State state, const address &value,
+    ::ryml::NodeRef node) const {
+    omni::ryml::reflected_scope::from_record(std::move(state),
+      address{value.number + 100}, node);
+  }
+};
+
+struct write_integer {
+  int increment;
+
+  template <typename State>
+  void operator()(State state, int value, ::ryml::NodeRef node) const {
+    omni::ryml::from_arithmetic(std::move(state),
+      value + this->increment, node);
+  }
+};
+
+struct select_writer {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    if constexpr (state.path().ends_with("root.work_address"))
+      return write_address{};
+    else if constexpr (state.path().ends_with("root.offices[].number"))
+      return write_integer{10};
+    else if constexpr (state.path().ends_with("root.locations[].number"))
+      return write_integer{20};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
+struct root {
+  omni::compat::optional<std::vector<record>> records;
+};
+
+struct select_context_reader {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    if constexpr (std::is_same<typename State::enclosing_root, root>::value
+      && std::is_same<typename State::enclosing_record, address>::value
+      && std::is_same<T, int>::value
+      && state.path().ends_with("work_address.number"))
+      return local_mapping::add_integer{10};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+struct select_context_writer {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    if constexpr (std::is_same<typename State::enclosing_root, root>::value
+      && std::is_same<typename State::enclosing_record, address>::value
+      && std::is_same<T, int>::value
+      && state.path().ends_with("work_address.number"))
+      return write_integer{10};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
+} // namespace schema_paths
+
+TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
+  const std::string source = R"({
+    "address": {"number": 1},
+    "work_address": {"number": 2},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  })";
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_map_node([](auto) { return schema_paths::select_reader{}; });
+  const auto mapped = deserialize(omni::type_t<schema_paths::record>{}, source);
+  EXPECT_TRUE(mapped.value);
+  EXPECT_TRUE(mapped.diagnostics.empty());
+  if (mapped.value) {
+    EXPECT_EQ(1, mapped.value->address.number);
+    EXPECT_EQ(102, mapped.value->work_address.number);
+    EXPECT_EQ(13, mapped.value->offices.at(0).number);
+    EXPECT_EQ(24, mapped.value->locations.at("remote").number);
+  }
+
+  const schema_paths::record value{{1}, {2}, {{3}}, {{"remote", {4}}}};
+  constexpr auto as_json = omni::ryml::as_json
+    .tdm_map_node([](auto) { return schema_paths::select_writer{}; });
+  EXPECT_TRUE(serialization_test::matches_json(R"({
+    "address": {"number": 1},
+    "work_address": {"number": 102},
+    "offices": [{"number": 13}],
+    "locations": {"remote": {"number": 24}}
+  })", as_json(value)));
+
+// Aggregate deduction requires more than the C++20 language mode.
+#if defined(__cpp_designated_initializers) \
+  && 201707L <= __cpp_designated_initializers \
+  && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
+    || (defined(__clang__) && 17 <= __clang_major__))
+  constexpr auto designated = omni::ryml::as_owning_tree_t{
+    .map_node = schema_paths::select_writer{},
+  };
+  const auto tree = designated(value);
+  EXPECT_EQ("102", tree["work_address"]["number"].val());
+#endif
+}
+
+TEST(mapping_dispatch, reads_and_writes_use_parent_root_and_schema_location) {
+  const std::string source = R"({"records": [{
+    "address": {"number": 1},
+    "work_address": {"number": 2},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  }]})";
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_map_node([](auto) { return schema_paths::select_context_reader{}; });
+  const auto mapped = deserialize(omni::type_t<schema_paths::root>{}, source);
+  EXPECT_TRUE(mapped.value) << mapped.diagnostics;
+  if (!mapped.value)
+    return;
+
+  EXPECT_TRUE(mapped.value->records);
+  if (!mapped.value->records)
+    return;
+
+  EXPECT_EQ(1U, mapped.value->records->size());
+  if (mapped.value->records->empty())
+    return;
+  const auto &record = mapped.value->records->at(0);
+  EXPECT_EQ(1, record.address.number);
+  EXPECT_EQ(12, record.work_address.number);
+  EXPECT_EQ(3, record.offices.at(0).number);
+  EXPECT_EQ(4, record.locations.at("remote").number);
+
+  constexpr auto as_json = omni::ryml::as_json
+    .tdm_map_node([](auto) { return schema_paths::select_context_writer{}; });
+  EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
+    "address": {"number": 1},
+    "work_address": {"number": 22},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  }]})", as_json(*mapped.value)));
+
+  // Parent, self, and the matching suffix stay the same; only the root changes.
+  const auto independent = deserialize(omni::type_t<schema_paths::record>{},
+    as_json(record));
+  EXPECT_TRUE(independent.value) << independent.diagnostics;
+  if (independent.value)
+    EXPECT_EQ(12, independent.value->work_address.number);
+}
+#endif
 
 } // namespace
 
