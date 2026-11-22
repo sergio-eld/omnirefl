@@ -2,6 +2,7 @@
 #include "json_match.hpp"
 
 #include <array>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -162,11 +163,193 @@ struct positive_existing {
 const auto existing_strategy = omni::mapping::record_strategy
   .tdm_finalize(omni::fn::default_value<positive_existing>{});
 
+struct copy_only_aliases {
+  copy_only_aliases() = default;
+  copy_only_aliases(const copy_only_aliases &) = default;
+  copy_only_aliases(copy_only_aliases &&) = delete;
+
+  omni::compat::optional<string_view> operator()(string_view name) const {
+    return name == "legacy" ? omni::compat::make_optional(string_view{"name"})
+                            : omni::compat::nullopt;
+  }
+};
+
+struct owning_check {
+  std::unique_ptr<int> limit;
+
+  auto operator()(int value) const -> omni::compat::expected<int, string_view> {
+    if (value < *this->limit)
+      return omni::compat::unexpected<string_view>{"below limit"};
+    return value;
+  }
+};
+
+struct update_aliases {
+  template <typename Strategy>
+  auto operator()(Strategy &&strategy) const
+    -> decltype(std::forward<Strategy>(strategy).tdm_aliases_by_name(
+      omni::fn::identity{})) {
+    return std::forward<Strategy>(strategy).tdm_aliases_by_name(
+      omni::fn::identity{});
+  }
+};
+
 } // namespace strategy_examples
+
+namespace optional_strategy_examples {
+
+struct settings { omni::compat::optional<int> value; };
+
+struct require_value {
+  auto operator()(omni::compat::optional<int> value) const
+    -> omni::compat::expected<omni::compat::optional<int>, omni::ryml::issue> {
+    if (!value)
+      return omni::compat::unexpected<omni::ryml::issue>{
+        omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+          omni::json::value_kind::integer, ::ryml::ConstNodeRef{})};
+    return value;
+  }
+};
+
+struct field_checks {
+  auto operator()(const std::tuple<> &) const
+    -> decltype(std::make_tuple(std::make_tuple("value", require_value{}))) {
+    return std::make_tuple(std::make_tuple("value", require_value{}));
+  }
+};
+
+} // namespace optional_strategy_examples
+
+namespace numeric_strategy_examples {
+
+struct settings {
+  int age;
+  double ratio;
+  long total;
+};
+
+struct field_checks {
+  auto operator()(const std::tuple<> &) const
+    -> decltype(std::make_tuple(
+      std::make_tuple("age", strategy_examples::nonnegative{}))) {
+    return std::make_tuple(
+      std::make_tuple("age", strategy_examples::nonnegative{}));
+  }
+};
+
+} // namespace numeric_strategy_examples
+
+namespace filtered_root_examples {
+
+struct token {
+  int value;
+  explicit token(int initial): value(initial) {}
+};
+
+struct settings {
+  token retained;
+  int parsed;
+};
+
+struct parsed_only {
+  template <typename _F>
+  constexpr auto operator()(omni::data_member_meta_t<_F>) const
+    -> omni::compat::bool_constant<
+      'p' == omni::data_member_meta_t<_F>{}.name()[0]> { return {}; }
+};
+
+} // namespace filtered_root_examples
+
+namespace generic_strategy_examples {
+
+struct settings {
+  int age;
+  std::string name;
+};
+
+struct nonnegative {
+  template <typename T>
+  auto operator()(T value) const -> omni::compat::expected<T, omni::ryml::issue> {
+    if (value < 0)
+      return omni::compat::unexpected<omni::ryml::issue>{
+        omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+          omni::json::value_kind::integer, ::ryml::ConstNodeRef{})};
+    return value;
+  }
+};
+
+struct nonempty {
+  template <typename T>
+  auto operator()(T value) const -> omni::compat::expected<T, omni::ryml::issue> {
+    if (value.empty())
+      return omni::compat::unexpected<omni::ryml::issue>{
+        omni::ryml::core::make_issue(omni::json::issue_code::out_of_range,
+          omni::json::value_kind::string, ::ryml::ConstNodeRef{})};
+    return value;
+  }
+};
+
+const auto age_key = OMNI_META_STRING("age");
+const auto name_key = OMNI_META_STRING("name");
+
+struct field_checks {
+  auto operator()(const std::tuple<> &) const
+    -> decltype(std::make_tuple(std::make_tuple(age_key, nonnegative{}),
+      std::make_tuple(name_key, nonempty{}))) {
+    return std::make_tuple(std::make_tuple(age_key, nonnegative{}),
+      std::make_tuple(name_key, nonempty{}));
+  }
+};
+
+} // namespace generic_strategy_examples
 
 namespace omni {
 namespace ryml {
 namespace cp {
+
+template <>
+struct to_type_t<numeric_strategy_examples::settings> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<numeric_strategy_examples::settings> type) const
+    -> with_diagnostics_t<numeric_strategy_examples::settings> {
+    const auto strategy = mapping::record_strategy
+      .tdm_validate_fields(numeric_strategy_examples::field_checks{});
+    return reflected_scope::default_to_record(type, strategy)(
+      std::move(state), node, type);
+  }
+};
+
+template <>
+struct to_type_t<filtered_root_examples::settings>:
+    reflected_scope::to_record_t<mapping::record_strategy_t<
+      filtered_root_examples::parsed_only>> {};
+
+template <>
+struct to_type_t<generic_strategy_examples::settings> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<generic_strategy_examples::settings> type) const
+    -> with_diagnostics_t<generic_strategy_examples::settings> {
+    const auto strategy = mapping::record_strategy
+      .tdm_validate_fields(generic_strategy_examples::field_checks{});
+    return reflected_scope::default_to_record(type, strategy)(
+      std::move(state), node, type);
+  }
+};
+
+template <>
+struct to_type_t<optional_strategy_examples::settings> {
+  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<optional_strategy_examples::settings> type) const
+    -> with_diagnostics_t<optional_strategy_examples::settings> {
+    const auto strategy = mapping::record_strategy
+      .tdm_validate_fields(optional_strategy_examples::field_checks{});
+    return reflected_scope::default_to_record(type, strategy)(
+      std::move(state), node, type);
+  }
+};
 
 template <>
 struct to_type_t<strategy_examples::interval> {
@@ -392,4 +575,137 @@ TEST(mapping_strategy, checks_alias_names_and_collisions) {
   EXPECT_FALSE(omni::mapping::valid_aliases(names,
     omni::mapping::aliases_dict(std::make_tuple("begin", "same"),
       std::make_tuple("end", "same"))));
+}
+
+struct optional_validation_case {
+  std::string name;
+  std::string document;
+  bool accepted;
+  omni::json::value_kind actual;
+};
+
+class optional_strategy_validation:
+    public testing::TestWithParam<optional_validation_case> {};
+
+TEST_P(optional_strategy_validation, validates_the_decoded_optional) {
+  const auto &input = GetParam();
+  const auto result = serialization_test::deserialize(
+    omni::type_t<optional_strategy_examples::settings>{}, input.document);
+  EXPECT_EQ(input.accepted, result.value.has_value());
+  if (input.accepted) {
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+    if (result.value) {
+      EXPECT_EQ(7, result.value->value);
+    }
+  } else {
+    EXPECT_EQ(1U, result.diagnostics.issues.size());
+    if (result.diagnostics.issues.size() == 1) {
+      EXPECT_EQ(omni::json::issue_code::out_of_range,
+        result.diagnostics.issues.front().reason);
+      EXPECT_EQ("/value", omni::ryml::detail::render_path(
+        result.diagnostics.issues.front().path));
+      EXPECT_EQ(input.actual, result.diagnostics.issues.front().actual);
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(presence, optional_strategy_validation,
+  testing::Values(
+    optional_validation_case{"omitted", "{}", false,
+      omni::json::value_kind::unknown},
+    optional_validation_case{"null", R"({"value":null})", false,
+      omni::json::value_kind::null},
+    optional_validation_case{"present", R"({"value":7})", true,
+      omni::json::value_kind::integer}),
+  [](const testing::TestParamInfo<optional_validation_case> &input) {
+    return input.param.name;
+  });
+
+TEST(mapping_strategy, integer_validation_leaves_other_scalar_types_unchanged) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<numeric_strategy_examples::settings>{},
+    R"({"age":7,"ratio":1.25,"total":42})");
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ(7, result.value->age);
+    EXPECT_DOUBLE_EQ(1.25, result.value->ratio);
+    EXPECT_EQ(42, result.value->total);
+  }
+}
+
+TEST(mapping_strategy, filtered_nondefault_root_uses_its_pointer_mapping) {
+  filtered_root_examples::settings value{filtered_root_examples::token{19}, 1};
+  const auto result = serialization_test::deserialize(
+    &value, R"({"parsed":7})");
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  EXPECT_EQ(19, value.retained.value);
+  EXPECT_EQ(7, value.parsed);
+}
+
+struct generic_validation_case {
+  std::string name;
+  std::string document;
+  std::string rejected_field;
+};
+
+class typed_key_strategy_validation:
+    public testing::TestWithParam<generic_validation_case> {};
+
+TEST_P(typed_key_strategy_validation, binds_generic_checks_to_the_named_type) {
+  const auto &input = GetParam();
+  const auto result = serialization_test::deserialize(
+    omni::type_t<generic_strategy_examples::settings>{}, input.document);
+  EXPECT_EQ(input.rejected_field.empty(), result.value.has_value());
+  if (input.rejected_field.empty()) {
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+    if (result.value) {
+      EXPECT_EQ(7, result.value->age);
+      EXPECT_EQ("Alice", result.value->name);
+    }
+  } else {
+    EXPECT_EQ(1U, result.diagnostics.issues.size());
+    if (result.diagnostics.issues.size() == 1) {
+      EXPECT_EQ(input.rejected_field, omni::ryml::detail::render_path(
+        result.diagnostics.issues.front().path));
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(fields, typed_key_strategy_validation,
+  testing::Values(
+    generic_validation_case{"valid", R"({"age":7,"name":"Alice"})", ""},
+    generic_validation_case{"negative", R"({"age":-1,"name":"Alice"})", "/age"},
+    generic_validation_case{"empty", R"({"age":7,"name":""})", "/name"}),
+  [](const testing::TestParamInfo<generic_validation_case> &input) {
+    return input.param.name;
+  });
+
+TEST(mapping_strategy, functional_updates_preserve_other_properties) {
+  const omni::mapping::record_strategy_t<
+    decltype(omni::mapping::record_strategy.filter_fields),
+    strategy_examples::copy_only_aliases> original{};
+  const auto updated = original.tdm_filter_fields(omni::fn::identity{});
+  EXPECT_EQ(omni::compat::string_view{"name"},
+    omni::mapping::resolve_alias(updated.aliases_by_name, "legacy"));
+
+  using owning_strategy = omni::mapping::record_strategy_t<
+    decltype(omni::mapping::record_strategy.filter_fields), std::tuple<>,
+    std::tuple<>, strategy_examples::owning_check>;
+  static_assert(!omni::compat::is_invocable<strategy_examples::update_aliases,
+    const owning_strategy &>::value,
+    "A const update cannot copy a move-only property");
+  static_assert(omni::compat::is_invocable<strategy_examples::update_aliases,
+    owning_strategy &&>::value,
+    "A consuming update can move that property");
+  owning_strategy owned{};
+  owned.finalize.limit.reset(new int{4});
+  const auto consumed = strategy_examples::update_aliases{}(std::move(owned));
+  EXPECT_EQ(7, consumed.finalize(7));
+  const auto rejected = consumed.finalize(3);
+  EXPECT_FALSE(rejected);
+  if (!rejected) {
+    EXPECT_EQ(omni::compat::string_view{"below limit"}, rejected.error());
+  }
 }

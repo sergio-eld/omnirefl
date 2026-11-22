@@ -12,6 +12,7 @@
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
+#include <type_traits>
 #include <utility>
 
 namespace omni {
@@ -43,20 +44,20 @@ struct map_node_to_enum_t {
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
 
   /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Strategy &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> map_node_to_enum_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const Strategy &>>> {
+    -> map_node_to_enum_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f), this->strategy)};
   }
 
   /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Strategy &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> map_node_to_enum_t<compat::decay_t<
-      compat::invoke_result_t<F &&, Strategy &&>>> {
+    -> map_node_to_enum_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f),
       std::move(this->strategy))};
   }
@@ -114,20 +115,20 @@ struct from_enum_t {
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
 
   /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Strategy &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> from_enum_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const Strategy &>>> {
+    -> from_enum_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f), this->strategy)};
   }
 
   /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Strategy &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> from_enum_t<compat::decay_t<
-      compat::invoke_result_t<F &&, Strategy &&>>> {
+    -> from_enum_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f),
       std::move(this->strategy))};
   }

@@ -19,6 +19,21 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
+namespace detail {
+
+template <typename T, typename Strategy>
+constexpr bool complete_record_fields();
+
+template <typename T, typename Strategy>
+constexpr bool can_finalize_existing_record() {
+  return std::is_same<compat::remove_cvref_t<
+      decltype(std::declval<Strategy>().finalize)>, omni::fn::identity>::value
+    || (std::is_move_constructible<T>::value
+      && std::is_assignable<T &, T &&>::value);
+}
+
+} // namespace detail
+
 /** Maps an object node into a reflected record's selected instance fields.
  * Does not call \ref mapping_to_type for the record. Nested members may use
  * state.map_node, which defaults to that lookup.
@@ -39,6 +54,10 @@ namespace reflected_scope {
  * Validators return expected<T, issue or range<issue>> or with_diagnostics<T>.
  * They preserve values and run before assignment; finalization runs after
  * successful record construction, including for nested records.
+ * Nonidentity finalization through T* requires a move-constructible record
+ * assignable from its returned value. Identity finalization adds no such
+ * requirement. Literal validator keys need typed or SFINAE-friendly callbacks;
+ * OMNI_META_STRING keys select the field before probing generic callbacks.
  * @pre The destination pointer must be non-null and node must belong to a
  * valid tree and be an object. Record metadata must be available in reflected
  * scope; node shape is checked only by a debug assertion.
@@ -46,35 +65,39 @@ namespace reflected_scope {
 template <typename Strategy = mapping::record_strategy_t<>>
 struct to_record_t {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<omni::is_reflected_record<T>,
-      compat::disjunction<std::is_default_constructible<T>,
-        omni::refl::is_aggregatable<T>>, is_read_state<State>>::value))
+    (omni::is_reflected_record<T>::value
+      && std::is_move_constructible<T>::value
+      && (std::is_default_constructible<T>::value
+        || (omni::refl::is_aggregatable<T>::value
+          && detail::complete_record_fields<T, Strategy>()))
+      && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node,
     omni::type_t<T>) const -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<omni::is_reflected_record<T>,
-      is_read_state<State>>::value))
+    (omni::is_reflected_record<T>::value
+      && detail::can_finalize_existing_record<T, Strategy>()
+      && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
 
   /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Strategy &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> to_record_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const Strategy &>>> {
+    -> to_record_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f), this->strategy)};
   }
 
   /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Strategy &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> to_record_t<compat::decay_t<
-      compat::invoke_result_t<F &&, Strategy &&>>> {
+    -> to_record_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f),
       std::move(this->strategy))};
   }
@@ -130,20 +153,20 @@ struct from_record_t {
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
 
   /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Strategy &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> from_record_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const Strategy &>>> {
+    -> from_record_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f), this->strategy)};
   }
 
   /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Strategy &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> from_record_t<compat::decay_t<
-      compat::invoke_result_t<F &&, Strategy &&>>> {
+    -> from_record_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f),
       std::move(this->strategy))};
   }

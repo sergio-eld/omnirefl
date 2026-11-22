@@ -130,19 +130,37 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
     return process_record_presence(this->frame.result, this->frame.object,
       this->frame.pending[Index], &slot);
 
-  if (this->frame.pending[Index] != ::ryml::NONE) {
-    const auto type = omni::type_t<
+  const bool present = this->frame.pending[Index] != ::ryml::NONE;
+  if (present || (slot.stored && std::tuple_size<decltype(
+      this->frame.strategy.validate_fields)>::value != 0)) {
+    constexpr auto type = omni::type_t<
       typename compat::remove_cvref_t<decltype(slot)>::type>{};
-    const auto state = this->frame.result->state.template field<Record>(
-      typename compat::remove_cvref_t<decltype(slot)>::field_type{});
-    const auto mapping = compat::invoke(state.map_node, state, type);
-    // The record frame applies diagnostic limits when appending this report.
-    auto mapped = validate_record_field(state,
-      {this->frame.object.tree(), this->frame.pending[Index]}, slot.name(),
-      map_node_to_value_using(state, mapping,
-        {this->frame.object.tree(), this->frame.pending[Index]}, type,
-        /*priority=*/0),
-      this->frame.strategy.validate_fields);
+    constexpr auto field = typename compat::remove_cvref_t<
+      decltype(slot)>::field_type{};
+    const auto state = this->frame.result->state.template field<Record>(field);
+    const auto node = present
+      ? ::ryml::ConstNodeRef{this->frame.object.tree(),
+          this->frame.pending[Index]}
+      : ::ryml::ConstNodeRef{};
+    auto mapped = validate_record_field(state, node, field,
+      compat::invoke([this, &slot, &state, &node, &type, present]()
+        -> with_diagnostics_t<typename decltype(type)::type> {
+        if (!present)
+          return {std::move(slot.stored),
+            {{state.config.error_policy, {}}, {}, {}}};
+        const auto mapping = compat::invoke(state.map_node, state, type);
+        return map_node_to_value_using(state, mapping, node, type,
+          /*priority=*/0);
+      }), this->frame.strategy.validate_fields);
+    if (!present)
+      for (auto &entry : mapped.diagnostics.issues) {
+        if (entry.node_id != ::ryml::NONE)
+          continue;
+        auto path = core::node_path(this->frame.object);
+        path.push_back({c4::to_csubstr(field.name()), compat::nullopt});
+        path.insert(path.end(), entry.path.begin(), entry.path.end());
+        entry.path = std::move(path);
+      }
     if (mapped.value)
       slot.stored.emplace(std::move(*mapped.value));
     if (!mapped.value || !mapped.diagnostics.issues.empty()

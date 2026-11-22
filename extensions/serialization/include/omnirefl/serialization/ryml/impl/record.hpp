@@ -1,6 +1,7 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
+#include <omnirefl/extensions/static_string.hpp>
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
 
 #include <array>
@@ -161,45 +162,79 @@ struct validation_frame {
   }
 };
 
-template <typename Frame>
+// A callable may accept an unrelated scalar by implicit conversion. Its
+// result must also preserve this field's type before its body is instantiated.
+template <typename Check, typename T, typename = void>
+struct is_validator_for: std::false_type {};
+
+template <typename Check, typename T>
+struct is_validator_for<Check, T, compat::void_t<typename compat::decay_t<
+    compat::invoke_result_t<Check, T &&>>::value_type>>:
+    std::is_same<T, typename compat::decay_t<
+      compat::invoke_result_t<Check, T &&>>::value_type> {};
+
+template <typename Frame, typename Field>
 struct validate_field_group {
   Frame *frame;
-  compat::string_view name;
+  Field field;
 
   template <typename Group, std::size_t... Index>
   void apply(const Group &group, compat::index_sequence<Index...>) const {
     // Initializer-list evaluation preserves validator order before C++17.
     const int checked[] = {0,
       (this->frame->check(std::get<Index + 1>(group),
-        compat::is_invocable<decltype(std::get<Index + 1>(group)),
-          typename Frame::value_type &&>{}), 0)...};
+        is_validator_for<decltype(std::get<Index + 1>(group)),
+          typename Frame::value_type>{}), 0)...};
     (void)checked;
   }
 
   template <typename Group>
+  void apply_selected(const Group &, std::false_type) const {}
+
+  template <typename Group>
+  void apply_selected(const Group &group, std::true_type) const {
+    this->apply(group,
+      compat::make_index_sequence<std::tuple_size<Group>::value - 1>{});
+  }
+
+  template <typename Group>
+  void select(const Group &group, std::true_type) const {
+    using key_type = typename std::tuple_element<0, Group>::type;
+    this->apply_selected(group,
+      compat::bool_constant<key_type::equals(Field{}.name())>{});
+  }
+
+  template <typename Group>
+  void select(const Group &group, std::false_type) const {
+    if (compat::string_view{this->field.name()}
+      == compat::string_view{std::get<0>(group)})
+      this->apply_selected(group, std::true_type{});
+  }
+
+  template <typename Group>
   void operator()(const Group &group) const {
-    if (this->name == compat::string_view{std::get<0>(group)})
-      this->apply(group,
-        compat::make_index_sequence<std::tuple_size<Group>::value - 1>{});
+    this->select(group, compat::bool_constant<traits::is_specialization_of<
+      omni::cpp11_static_string, decltype(std::get<0>(group))>()>{});
   }
 };
 
-template <typename State, typename T>
+template <typename State, typename Field, typename T>
 auto validate_record_field(State, ::ryml::ConstNodeRef,
-  compat::string_view, with_diagnostics_t<T> mapped, const std::tuple<> &)
+  Field, with_diagnostics_t<T> mapped, const std::tuple<> &)
   -> with_diagnostics_t<T> {
   return mapped;
 }
 
-template <typename State, typename T, typename Groups>
+template <typename State, typename Field, typename T, typename Groups>
 auto validate_record_field(State state, ::ryml::ConstNodeRef node,
-  compat::string_view name, with_diagnostics_t<T> mapped,
+  Field field, with_diagnostics_t<T> mapped,
   const Groups &groups) -> with_diagnostics_t<T> {
   validation_frame<State, T> frame{
     make_node_accumulator(std::move(state)), std::move(mapped.value), node};
   frame.result.append(std::move(mapped).transform(
     omni::fn::default_value<compat::monostate>{}));
-  groups | omni::fn::each(validate_field_group<decltype(frame)>{&frame, name});
+  groups | omni::fn::each(
+    validate_field_group<decltype(frame), Field>{&frame, field});
   return std::move(frame).finish();
 }
 
@@ -370,19 +405,19 @@ struct record_field_names {
 };
 
 template <typename T, typename Strategy>
-constexpr auto readable_record_fields(const Strategy &strategy)
+constexpr auto readable_record_fields()
   -> decltype(omni::meta_for<T>::accessible_data_members()
     | omni::fn::filter(omni::fn::is_non_static)
-    | omni::fn::filter(strategy.filter_fields)) {
+    | omni::fn::filter(decltype(std::declval<Strategy>().filter_fields){})) {
+  using filter_type = decltype(std::declval<Strategy>().filter_fields);
   return omni::meta_for<T>::accessible_data_members()
     | omni::fn::filter(omni::fn::is_non_static)
-    | omni::fn::filter(strategy.filter_fields);
+    | omni::fn::filter(filter_type{});
 }
 
 template <typename T, typename Strategy>
 constexpr bool complete_record_fields() {
-  return std::tuple_size<decltype(readable_record_fields<T>(
-      std::declval<const Strategy &>()))>::value
+  return std::tuple_size<decltype(readable_record_fields<T, Strategy>())>::value
     == std::tuple_size<decltype(omni::meta_for<T>::accessible_data_members()
       | omni::fn::filter(omni::fn::is_non_static))>::value;
 }
@@ -397,8 +432,13 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
   assert(mapping::valid_record_strategy(compat::apply(record_field_names{},
     omni::meta_for<T>::accessible_data_members()), strategy));
 
-  const auto fields = readable_record_fields<T>(strategy);
+#if 201402L <= OMNI_CPLUSPLUS
+  constexpr auto fields = readable_record_fields<T, Strategy>();
+  constexpr auto table = omni::fn::lookup_table(fields);
+#else
+  const auto fields = readable_record_fields<T, Strategy>();
   const auto table = omni::fn::lookup_table(fields);
+#endif
 
   // Selected children share this object's tree; only IDs need storage.
   std::array<::ryml::id_type,
@@ -493,9 +533,12 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
 
 template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_record<T>,
-    compat::disjunction<std::is_default_constructible<T>,
-      omni::refl::is_aggregatable<T>>, is_read_state<State>>::value))
+  (omni::is_reflected_record<T>::value
+    && std::is_move_constructible<T>::value
+    && (std::is_default_constructible<T>::value
+      || (omni::refl::is_aggregatable<T>::value
+        && detail::complete_record_fields<T, Strategy>()))
+    && is_read_state<State>::value))
 auto to_record_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
@@ -513,8 +556,9 @@ auto to_record_t<Strategy>::operator()(State context,
 
 template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_record<T>,
-    is_read_state<State>>::value))
+  (omni::is_reflected_record<T>::value
+    && detail::can_finalize_existing_record<T, Strategy>()
+    && is_read_state<State>::value))
 auto to_record_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {

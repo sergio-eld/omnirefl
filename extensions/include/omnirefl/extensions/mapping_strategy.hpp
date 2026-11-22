@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace omni {
@@ -26,7 +27,8 @@ struct record_strategy_updates;
 /** Record field selection, aliases, and validation.
  * Predicates are stateless, default-constructible, and return Boolean traits.
  * Validators preserve successfully checked values; Error is interpreted by
- * the consuming extension.
+ * the consuming extension. Type-carried keys such as OMNI_META_STRING("age")
+ * let an extension select a field before instantiating a generic validator.
  *
  * Field and alias names refer to the original C++ declaration, independently
  * of a protocol's representation. Aliases must not overlap canonical names or
@@ -63,10 +65,14 @@ private:
   template <typename, typename, typename, typename>
   friend struct detail::record_strategy_updates;
 
-  constexpr record_strategy_t(FilterFields filter, AliasesByName aliases,
-    ValidateFields validators, Finalize finish)
-    : filter_fields(std::move(filter)), aliases_by_name(std::move(aliases)),
-      validate_fields(std::move(validators)), finalize(std::move(finish)) {}
+  template <typename Filter, typename Aliases, typename Validators,
+    typename Finish>
+  constexpr record_strategy_t(Filter &&filter, Aliases &&aliases,
+    Validators &&validators, Finish &&finish)
+    : filter_fields(std::forward<Filter>(filter)),
+      aliases_by_name(std::forward<Aliases>(aliases)),
+      validate_fields(std::forward<Validators>(validators)),
+      finalize(std::forward<Finish>(finish)) {}
 #endif
 };
 
@@ -77,11 +83,14 @@ template <typename FilterFields, typename AliasesByName,
 struct record_strategy_updates {
   /** (QoL) Functional update of .filter_fields; other members are
    * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const FilterFields &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const FilterFields &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<AliasesByName, const AliasesByName &>::value
+      && std::is_constructible<ValidateFields, const ValidateFields &>::value
+      && std::is_constructible<Finalize, const Finalize &>::value))
   constexpr auto tdm_filter_fields(F &&f) const &
-    -> record_strategy_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const FilterFields &>>,
+    -> record_strategy_t<compat::decay_t<Result>,
       AliasesByName,
       ValidateFields,
       Finalize> {
@@ -94,11 +103,14 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .filter_fields; other members are
    * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, FilterFields &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, FilterFields &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<AliasesByName, AliasesByName &&>::value
+      && std::is_constructible<ValidateFields, ValidateFields &&>::value
+      && std::is_constructible<Finalize, Finalize &&>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_filter_fields(F &&f) &&
-    -> record_strategy_t<compat::decay_t<
-      compat::invoke_result_t<F &&, FilterFields &&>>,
+    -> record_strategy_t<compat::decay_t<Result>,
       AliasesByName,
       ValidateFields,
       Finalize> {
@@ -112,11 +124,15 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .aliases_by_name; other members are
    * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const AliasesByName &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const AliasesByName &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<FilterFields, const FilterFields &>::value
+      && std::is_constructible<ValidateFields, const ValidateFields &>::value
+      && std::is_constructible<Finalize, const Finalize &>::value))
   constexpr auto tdm_aliases_by_name(F &&f) const &
     -> record_strategy_t<FilterFields,
-      compat::decay_t<compat::invoke_result_t<F &&, const AliasesByName &>>,
+      compat::decay_t<Result>,
       ValidateFields,
       Finalize> {
     return make_strategy(
@@ -128,11 +144,15 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .aliases_by_name; other members are
    * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, AliasesByName &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, AliasesByName &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<FilterFields, FilterFields &&>::value
+      && std::is_constructible<ValidateFields, ValidateFields &&>::value
+      && std::is_constructible<Finalize, Finalize &&>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_aliases_by_name(F &&f) &&
     -> record_strategy_t<FilterFields,
-      compat::decay_t<compat::invoke_result_t<F &&, AliasesByName &&>>,
+      compat::decay_t<Result>,
       ValidateFields,
       Finalize> {
     return make_strategy(
@@ -145,12 +165,16 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .validate_fields; other members are
    * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const ValidateFields &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const ValidateFields &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<FilterFields, const FilterFields &>::value
+      && std::is_constructible<AliasesByName, const AliasesByName &>::value
+      && std::is_constructible<Finalize, const Finalize &>::value))
   constexpr auto tdm_validate_fields(F &&f) const &
     -> record_strategy_t<FilterFields,
       AliasesByName,
-      compat::decay_t<compat::invoke_result_t<F &&, const ValidateFields &>>,
+      compat::decay_t<Result>,
       Finalize> {
     return make_strategy(
       this->derived().filter_fields,
@@ -161,12 +185,16 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .validate_fields; other members are
    * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, ValidateFields &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, ValidateFields &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<FilterFields, FilterFields &&>::value
+      && std::is_constructible<AliasesByName, AliasesByName &&>::value
+      && std::is_constructible<Finalize, Finalize &&>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_validate_fields(F &&f) &&
     -> record_strategy_t<FilterFields,
       AliasesByName,
-      compat::decay_t<compat::invoke_result_t<F &&, ValidateFields &&>>,
+      compat::decay_t<Result>,
       Finalize> {
     return make_strategy(
       std::move(this->derived().filter_fields),
@@ -178,13 +206,17 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .finalize; other members are
    * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Finalize &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const Finalize &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<FilterFields, const FilterFields &>::value
+      && std::is_constructible<AliasesByName, const AliasesByName &>::value
+      && std::is_constructible<ValidateFields, const ValidateFields &>::value))
   constexpr auto tdm_finalize(F &&f) const &
     -> record_strategy_t<FilterFields,
       AliasesByName,
       ValidateFields,
-      compat::decay_t<compat::invoke_result_t<F &&, const Finalize &>>> {
+      compat::decay_t<Result>> {
     return make_strategy(
       this->derived().filter_fields,
       this->derived().aliases_by_name,
@@ -194,13 +226,17 @@ struct record_strategy_updates {
 
   /** (QoL) Functional update of .finalize; other members are
    * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Finalize &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, Finalize &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_constructible<FilterFields, FilterFields &&>::value
+      && std::is_constructible<AliasesByName, AliasesByName &&>::value
+      && std::is_constructible<ValidateFields, ValidateFields &&>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_finalize(F &&f) &&
     -> record_strategy_t<FilterFields,
       AliasesByName,
       ValidateFields,
-      compat::decay_t<compat::invoke_result_t<F &&, Finalize &&>>> {
+      compat::decay_t<Result>> {
     return make_strategy(
       std::move(this->derived().filter_fields),
       std::move(this->derived().aliases_by_name),
@@ -248,20 +284,20 @@ struct enum_strategy_t {
   AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
 
   /** (QoL) Functional update of .aliases_by_name. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const AliasesByName &>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const AliasesByName &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   constexpr auto tdm_aliases_by_name(F &&f) const &
-    -> enum_strategy_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const AliasesByName &>>> {
+    -> enum_strategy_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f), this->aliases_by_name)};
   }
 
   /** (QoL) Functional update consuming .aliases_by_name. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, AliasesByName &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, AliasesByName &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_aliases_by_name(F &&f) &&
-    -> enum_strategy_t<compat::decay_t<
-      compat::invoke_result_t<F &&, AliasesByName &&>>> {
+    -> enum_strategy_t<compat::decay_t<Result>> {
     return {compat::invoke(std::forward<F>(f),
       std::move(this->aliases_by_name))};
   }

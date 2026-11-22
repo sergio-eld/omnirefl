@@ -597,15 +597,21 @@ struct serialize_t {
 
 #if 201402L > OMNI_CPLUSPLUS
   // C++11 has no aggregate member defaults; keep empty/format-only braces.
-  constexpr serialize_t(::ryml::EmitType_e output = {}, MapNode mapping = {})
-    : format(output), map_node(std::move(mapping)) {}
+  constexpr serialize_t(::ryml::EmitType_e output = {})
+    : format(output), map_node{} {}
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Mapping),
+    (std::is_constructible<MapNode, Mapping &&>::value))
+  constexpr serialize_t(::ryml::EmitType_e output, Mapping &&mapping)
+    : format(output), map_node(std::forward<Mapping>(mapping)) {}
 #endif
 
   /** (QoL) Transform data member `.format` inplace, in one expression.
    * f :: EmitType -> EmitType. The returned binding copies map_node. */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (std::is_convertible<compat::invoke_result_t<F &&,
-      const ::ryml::EmitType_e &>, ::ryml::EmitType_e>::value))
+      const ::ryml::EmitType_e &>, ::ryml::EmitType_e>::value
+      && std::is_copy_constructible<MapNode>::value))
   constexpr auto tdm_format(F &&f) const & -> serialize_t {
     return {
       /*format=*/compat::invoke(std::forward<F>(f), this->format),
@@ -616,7 +622,8 @@ struct serialize_t {
   /** (QoL) Transform `.format`, consuming this binding. */
   OMNI_CONSTRAINED_TEMPLATE((typename F),
     (std::is_convertible<compat::invoke_result_t<F &&,
-      ::ryml::EmitType_e &&>, ::ryml::EmitType_e>::value))
+      ::ryml::EmitType_e &&>, ::ryml::EmitType_e>::value
+      && std::is_constructible<MapNode, MapNode &&>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_format(F &&f) && -> serialize_t {
     return {
       /*format=*/compat::invoke(std::forward<F>(f), std::move(this->format)),
