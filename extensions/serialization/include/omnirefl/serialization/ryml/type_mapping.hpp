@@ -5,14 +5,17 @@
  * Registration: docs/CONVENTIONS.md#customization-points. */
 
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/extensions/mapping_strategy.hpp>
 #include <omnirefl/extensions/traits.hpp>
-#include <omnirefl/traits.hpp>
+#include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_enum.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_node.hpp>
-#include <omnirefl/serialization/ryml/type_mapping/enum.hpp>
-#include <omnirefl/serialization/ryml/type_mapping/sequence.hpp>
-#include <omnirefl/serialization/ryml/type_mapping/record.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_record.hpp>
+#include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -23,11 +26,311 @@
 namespace omni {
 namespace ryml {
 
+// -----------------------------------------------------------------------------
+// Mappings requiring reflected scope
+// -----------------------------------------------------------------------------
+
+namespace core {
+namespace reflected_scope {
+
+/** Maps a string node into a reflected enum value.
+ *
+```
+map_node_to_enum :: (state, node, type<T>) -> with_diagnostics<T>
+```
+ *
+ * @pre node is a string in a valid tree; enum metadata is available in
+ * reflected scope. */
+template <typename Strategy = mapping::enum_strategy_t<>>
+struct map_node_to_enum_t:
+    detail::tdm_for_map_node_to_enum<Strategy>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider = detail::tdm_for_map_node_to_enum<Strategy>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_enum_strategy<Strategy>::value,
+    "map_node_to_enum_t requires mapping::enum_strategy_t");
+
+  /** \ref mapping::enum_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<omni::is_reflected_enum<T>,
+      is_read_state<State>>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node, omni::type_t<T>) const
+    -> with_diagnostics_t<T, diagnostics>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_node_to_enum_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_node_to_enum_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_enum_t<> map_node_to_enum{};
+#else
+static constexpr const map_node_to_enum_t<> &map_node_to_enum =
+  compat::detail::shared_state<map_node_to_enum_t<>>::value;
+#endif
+
+} // namespace reflected_scope
+} // namespace core
+
+namespace reflected_scope {
+
+// Node to C++ value.
+
+/** Maps an object node into a reflected record.
+ *
+```
+map_object_node :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
+ *
+ * Members are mapped through state.map_node.
+ * Non-object input reports an expected-object diagnostic by default.
+ * @pre node belongs to a valid tree, pointers are non-null, and record
+ * metadata is available in reflected scope. */
+template <typename Strategy = mapping::record_strategy_t<>,
+  typename WithNodeCheck = std::true_type>
+struct map_object_node_t:
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider =
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_record_strategy<Strategy>::value,
+    "map_object_node_t requires mapping::record_strategy_t");
+
+  /** \ref mapping::record_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  /** Disable only when the node is already known to be an object. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::is_reflected_record<T>::value
+      && std::is_move_constructible<T>::value
+      && std::is_default_constructible<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node,
+    omni::type_t<T>) const -> with_diagnostics_t<T, diagnostics>;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::is_reflected_record<T>::value
+      && is_read_state<State>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_object_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+    typename CheckValue = WithNodeCheck),
+    (std::is_constructible<Strategy, Value &&>::value
+      && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
+  constexpr map_object_node_t(Value &&value, CheckValue &&check = {})
+    : strategy(std::forward<Value>(value)),
+      with_node_check(std::forward<CheckValue>(check)) {}
+#endif
+};
+
+/** Reflected-record mapping with the shared default strategy and
+ * node checking enabled. */
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_object_node_t<> map_object_node{};
+#else
+static constexpr const map_object_node_t<> &map_object_node =
+  compat::detail::shared_state<map_object_node_t<>>::value;
+#endif
+
+/** Maps a string node into a reflected enum, resolving names and aliases.
+ *
+```
+map_node_to_enum :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
+}
+```
+ *
+ * @pre node belongs to a valid tree, pointers are non-null, and enum metadata
+ * is available in reflected scope. */
+template <typename Strategy = mapping::enum_strategy_t<>,
+  typename WithNodeCheck = std::true_type>
+struct map_node_to_enum_t:
+    detail::tdm_for_map_node_to_enum<Strategy, WithNodeCheck>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider =
+    detail::tdm_for_map_node_to_enum<Strategy, WithNodeCheck>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_enum_strategy<Strategy>::value,
+    "map_node_to_enum_t requires mapping::enum_strategy_t");
+
+  /** \ref mapping::enum_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  /** Disable only when the node is already known to be a string. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::is_reflected_enum<T>::value && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<T> type) const -> with_diagnostics_t<T>;
+
+  /** (QoL) Mutating adapter for the value-producing overload. */
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (omni::is_reflected_enum<T>::value
+      && std::is_assignable<T &, T &&>::value
+      && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_node_to_enum_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+    typename CheckValue = WithNodeCheck),
+    (std::is_constructible<Strategy, Value &&>::value
+      && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
+  constexpr map_node_to_enum_t(Value &&value, CheckValue &&check = {})
+    : strategy(std::forward<Value>(value)),
+      with_node_check(std::forward<CheckValue>(check)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_node_to_enum_t<> map_node_to_enum{};
+#else
+static constexpr const map_node_to_enum_t<> &map_node_to_enum =
+  compat::detail::shared_state<map_node_to_enum_t<>>::value;
+#endif
+
+// C++ value to node.
+
+/** Maps selected record fields to object entries with canonical names.
+ * Members are mapped through state.map_node.
+ *
+```
+map_record :: (state, const T&, node) -> void
+```
+ *
+ * @pre Record metadata must be available in reflected scope. */
+template <typename Strategy = mapping::record_strategy_t<>>
+struct map_record_t:
+    detail::tdm_for_map_record<Strategy>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider = detail::tdm_for_map_record<Strategy>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_record_strategy<Strategy>::value,
+    "map_record_t requires mapping::record_strategy_t");
+
+  /** \ref mapping::record_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<omni::is_reflected_record<T>,
+      is_write_state<State>>::value))
+  auto operator()(State context, const T &value, ::ryml::NodeRef node) const
+    -> void;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_record_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_record_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_record_t<> map_record{};
+#else
+static constexpr const map_record_t<> &map_record =
+  compat::detail::shared_state<map_record_t<>>::value;
+#endif
+
+/** Maps a reflected enum value to its declared name as a quoted scalar.
+ *
+```
+map_enum :: (state, T, node) -> void
+```
+ *
+ * @pre Metadata for T must be available in reflected scope. */
+template <typename Strategy = mapping::enum_strategy_t<>>
+struct map_enum_t:
+    detail::tdm_for_map_enum<Strategy>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider = detail::tdm_for_map_enum<Strategy>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_enum_strategy<Strategy>::value,
+    "map_enum_t requires mapping::enum_strategy_t");
+
+  /** \ref mapping::enum_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<omni::is_reflected_enum<T>,
+      is_write_state<State>>::value))
+  auto operator()(State, T value, ::ryml::NodeRef node) const -> void;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_enum_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_enum_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_enum_t<> map_enum{};
+#else
+static constexpr const map_enum_t<> &map_enum =
+  compat::detail::shared_state<map_enum_t<>>::value;
+#endif
+
+} // namespace reflected_scope
+
+// -----------------------------------------------------------------------------
+// Mappings without reflected scope
+// -----------------------------------------------------------------------------
+
 /** Non-recursive fundamental type mappings may be used inside custom
  * cp::to_type and cp::from_type implementations. They call neither
  * \ref reflected_scope::mapping_to_type nor
  * \ref reflected_scope::mapping_from_type, avoiding recursive selection of
  * the same customization. Optional mappings below dispatch contained values. */
+
+// Node to C++ value.
 
 /** Checked char-based string-like node-to-type mapping.
  *
@@ -84,29 +387,6 @@ static constexpr const map_string_node_t<> &map_string_node =
   compat::detail::shared_state<map_string_node_t<>>::value;
 #endif
 
-/** Maps a string-like value to a quoted JSON/YAML scalar.
- * String conversion uses \ref adapt::as_string.
- *
-```
-map_string_like :: (state, const T&, node) -> void
-```
- */
-struct map_string_like_t: detail::with_depth_exceeded_operator {
-  using detail::with_depth_exceeded_operator::operator();
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (compat::conjunction<traits::is_string_like<T>,
-      is_write_state<State>>::value))
-  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
-};
-
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_string_like_t map_string_like{};
-#else
-static constexpr const map_string_like_t &map_string_like =
-  compat::detail::shared_state<map_string_like_t>::value;
-#endif
-
 /** Checked Boolean node-to-type mapping.
  *
 ```
@@ -160,28 +440,6 @@ inline constexpr map_boolean_node_t<> map_boolean_node{};
 #else
 static constexpr const map_boolean_node_t<> &map_boolean_node =
   compat::detail::shared_state<map_boolean_node_t<>>::value;
-#endif
-
-/** Maps a Boolean value to a JSON/YAML scalar.
- *
-```
-map_boolean :: (state, T, node) -> void
-```
- */
-struct map_boolean_t: detail::with_depth_exceeded_operator {
-  using detail::with_depth_exceeded_operator::operator();
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_same<bool, compat::remove_cv_t<T>>::value
-      && is_write_state<State>::value))
-  void operator()(State, const T &value, ::ryml::NodeRef node) const;
-};
-
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_boolean_t map_boolean{};
-#else
-static constexpr const map_boolean_t &map_boolean =
-  compat::detail::shared_state<map_boolean_t>::value;
 #endif
 
 /** Checked integer node-to-type mapping.
@@ -240,29 +498,6 @@ static constexpr const map_integer_node_t<> &map_integer_node =
   compat::detail::shared_state<map_integer_node_t<>>::value;
 #endif
 
-/** Maps an integral value to a JSON/YAML scalar.
- *
-```
-map_integral :: (state, const T&, node) -> void
-```
- */
-struct map_integral_t: detail::with_depth_exceeded_operator {
-  using detail::with_depth_exceeded_operator::operator();
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_integral<T>::value
-      && !std::is_same<bool, compat::remove_cv_t<T>>::value
-      && is_write_state<State>::value))
-  void operator()(State, const T &value, ::ryml::NodeRef node) const;
-};
-
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_integral_t map_integral{};
-#else
-static constexpr const map_integral_t &map_integral =
-  compat::detail::shared_state<map_integral_t>::value;
-#endif
-
 /** Checked floating-point node-to-type mapping.
  *
 ```
@@ -314,28 +549,6 @@ inline constexpr map_number_node_t<> map_number_node{};
 #else
 static constexpr const map_number_node_t<> &map_number_node =
   compat::detail::shared_state<map_number_node_t<>>::value;
-#endif
-
-/** Maps a floating-point value to a JSON/YAML scalar.
- * Preserves enough significant digits for round-trip conversion.
- *
-```
-map_floating_point :: (state, const T&, node) -> void
-```
- */
-struct map_floating_point_t: detail::with_depth_exceeded_operator {
-  using detail::with_depth_exceeded_operator::operator();
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_floating_point<T>::value && is_write_state<State>::value))
-  void operator()(State, const T &value, ::ryml::NodeRef node) const;
-};
-
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_floating_point_t map_floating_point{};
-#else
-static constexpr const map_floating_point_t &map_floating_point =
-  compat::detail::shared_state<map_floating_point_t>::value;
 #endif
 
 /** Checked arithmetic node-to-type mapping.
@@ -402,31 +615,6 @@ static constexpr const map_arithmetic_node_t<> &map_arithmetic_node =
   compat::detail::shared_state<map_arithmetic_node_t<>>::value;
 #endif
 
-/** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
- *
-```
-map_arithmetic :: (state, const T&, node) -> void
-```
- */
-struct map_arithmetic_t: detail::with_depth_exceeded_operator {
-  using detail::with_depth_exceeded_operator::operator();
-
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (std::is_arithmetic<T>::value && is_write_state<State>::value))
-  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
-};
-
-#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_arithmetic_t map_arithmetic{};
-#else
-static constexpr const map_arithmetic_t &map_arithmetic =
-  compat::detail::shared_state<map_arithmetic_t>::value;
-#endif
-
-// FIXME: [high] Separate optional unwrapping from fundamental mappings:
-// these optional-like mappings recursively invoke the type-mapping
-// dispatchers for the contained value; they are not non-recursive defaults.
-
 /** Maps a node into an optional-like destination.
  * Null resets the destination. Non-null input uses the contained type's
  * registered mapping and is emplaced only on success. */
@@ -481,6 +669,184 @@ static constexpr const map_value_node_t<> &map_value_node =
   compat::detail::shared_state<map_value_node_t<>>::value;
 #endif
 
+/** Maps array nodes into element ranges and object nodes into key/value ranges.
+ *
+```
+to_range :: (state, node, T*) -> with_diagnostics<monostate>
+```
+ *
+ * Elements are mapped through state.map_node.
+ * @pre into is non-null; node is valid and has the destination's shape.
+ * Object keys are string-like; range operations use \ref adapt::clear and
+ * the insertion adapters. */
+struct to_range_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<detail::is_mapped_range<T>,
+      is_read_state<State>>::value))
+  auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate, diagnostics>;
+
+  // TODO: [high] Define the representation of non-string object keys before
+  // enabling their default mapping. JSON object names are always strings.
+};
+
+/** Maps array nodes into element ranges and object nodes into key/value ranges.
+ * Elements are mapped through state.map_node.
+ *
+```
+map_range_node :: (state, node, T*) -> with_diagnostics<monostate>
+```
+ */
+template <typename WithNodeCheck = std::true_type>
+struct map_range_node_t:
+    detail::tdm_for_map_range_node<WithNodeCheck>,
+    detail::with_depth_exceeded_operator {
+  using tdm_provider = detail::tdm_for_map_range_node<WithNodeCheck>;
+  using detail::with_depth_exceeded_operator::operator();
+
+  /** Disable only when the node satisfies the destination's shape. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (detail::is_mapped_range<T>::value && is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate>;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_range_node_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = WithNodeCheck),
+    (std::is_constructible<WithNodeCheck, Value &&>::value))
+  constexpr map_range_node_t(Value &&value)
+    : with_node_check(std::forward<Value>(value)) {}
+#endif
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_range_node_t<> map_range_node{};
+#else
+static constexpr const map_range_node_t<> &map_range_node =
+  compat::detail::shared_state<map_range_node_t<>>::value;
+#endif
+
+// C++ value to node.
+
+/** Maps a string-like value to a quoted JSON/YAML scalar.
+ * String conversion uses \ref adapt::as_string.
+ *
+```
+map_string_like :: (state, const T&, node) -> void
+```
+ */
+struct map_string_like_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<traits::is_string_like<T>,
+      is_write_state<State>>::value))
+  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_string_like_t map_string_like{};
+#else
+static constexpr const map_string_like_t &map_string_like =
+  compat::detail::shared_state<map_string_like_t>::value;
+#endif
+
+/** Maps a Boolean value to a JSON/YAML scalar.
+ *
+```
+map_boolean :: (state, T, node) -> void
+```
+ */
+struct map_boolean_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_write_state<State>::value))
+  void operator()(State, const T &value, ::ryml::NodeRef node) const;
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_boolean_t map_boolean{};
+#else
+static constexpr const map_boolean_t &map_boolean =
+  compat::detail::shared_state<map_boolean_t>::value;
+#endif
+
+/** Maps an integral value to a JSON/YAML scalar.
+ *
+```
+map_integral :: (state, const T&, node) -> void
+```
+ */
+struct map_integral_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_integral<T>::value
+      && !std::is_same<bool, compat::remove_cv_t<T>>::value
+      && is_write_state<State>::value))
+  void operator()(State, const T &value, ::ryml::NodeRef node) const;
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_integral_t map_integral{};
+#else
+static constexpr const map_integral_t &map_integral =
+  compat::detail::shared_state<map_integral_t>::value;
+#endif
+
+/** Maps a floating-point value to a JSON/YAML scalar.
+ * Preserves enough significant digits for round-trip conversion.
+ *
+```
+map_floating_point :: (state, const T&, node) -> void
+```
+ */
+struct map_floating_point_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_floating_point<T>::value && is_write_state<State>::value))
+  void operator()(State, const T &value, ::ryml::NodeRef node) const;
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_floating_point_t map_floating_point{};
+#else
+static constexpr const map_floating_point_t &map_floating_point =
+  compat::detail::shared_state<map_floating_point_t>::value;
+#endif
+
+/** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
+ *
+```
+map_arithmetic :: (state, const T&, node) -> void
+```
+ */
+struct map_arithmetic_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (std::is_arithmetic<T>::value && is_write_state<State>::value))
+  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_arithmetic_t map_arithmetic{};
+#else
+static constexpr const map_arithmetic_t &map_arithmetic =
+  compat::detail::shared_state<map_arithmetic_t>::value;
+#endif
+
 /** Maps an empty optional to null, or maps its contained value to a node.
  * Contained values use \ref reflected_scope::mapping_from_type.
  *
@@ -503,6 +869,35 @@ inline constexpr map_optional_like_t map_optional_like{};
 static constexpr const map_optional_like_t &map_optional_like =
   compat::detail::shared_state<map_optional_like_t>::value;
 #endif
+
+/** Maps key/value ranges to objects and element ranges to arrays.
+ *
+```
+map_range :: (state, const T&, node) -> void
+```
+ *
+ * Elements are mapped through state.map_node; empty optional array elements
+ * are omitted. \ref traits::is_key_value selects object or array output.
+ * @pre Non-scalar elements are exposed as lvalue references to value_type. */
+struct map_range_t: detail::with_depth_exceeded_operator {
+  using detail::with_depth_exceeded_operator::operator();
+
+  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+    (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
+      is_write_state<State>>::value))
+  void operator()(State context, const T &value, ::ryml::NodeRef node) const;
+};
+
+#if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
+inline constexpr map_range_t map_range{};
+#else
+static constexpr const map_range_t &map_range =
+  compat::detail::shared_state<map_range_t>::value;
+#endif
+
+// -----------------------------------------------------------------------------
+// Type mapping customization and lookup
+// -----------------------------------------------------------------------------
 
 /** Customization points for C++ type mappings. */
 namespace cp {
@@ -831,6 +1226,9 @@ struct from_type_cpp11_trailing_return {
 } // namespace omni
 #endif
 
+#include <omnirefl/serialization/ryml/impl/record.hpp>
+#include <omnirefl/serialization/ryml/impl/enum.hpp>
+#include <omnirefl/serialization/ryml/impl/sequence.hpp>
 #include <omnirefl/serialization/ryml/impl/type_mapping.hpp>
 
 namespace omni {
@@ -876,3 +1274,10 @@ static constexpr const mapping_from_type_t &mapping_from_type =
 } // namespace reflected_scope
 } // namespace ryml
 } // namespace omni
+
+// TODO: [medium] Consider recovery for missing data members in map_object_node,
+// including exposed default member initializers.
+
+// FIXME: [high] Separate optional unwrapping from fundamental mappings:
+// these optional-like mappings recursively invoke the type-mapping
+// dispatchers for the contained value; they are not non-recursive defaults.
