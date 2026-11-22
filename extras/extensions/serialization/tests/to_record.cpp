@@ -44,7 +44,6 @@ struct copy_only_name_by_alias {
 
 namespace tests {
 
-
 TEST(alias_lookup, resolves_aliases_from_unsorted_groups_and_a_copy) {
   const auto names = omni::ryml::aliases_dict(
     std::make_tuple("port", "service_port", "listen_port"),
@@ -331,8 +330,10 @@ TEST_P(runtime_record_aliases, maps_using_the_resolvers_runtime_state) {
     .tdm_aliases_by_name([legacy](const std::tuple<> &) {
       return examples::runtime_aliases{legacy};
     });
-  const auto compositor = omni::ryml::reflected_scope::map_object_node_t<
-    decltype(strategy)>{strategy};
+  const auto compositor = omni::ryml::reflected_scope::map_object_node
+    .tdm_strategy([&strategy](const omni::mapping::record_strategy_t<> &) {
+      return strategy;
+    });
 
   for (const std::string document : {R"({"hostname": "localhost"})",
          "hostname: localhost\n"}) {

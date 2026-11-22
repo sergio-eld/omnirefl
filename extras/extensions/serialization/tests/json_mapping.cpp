@@ -591,8 +591,6 @@ const auto cases = std::make_tuple(
 
 } // namespace error_limits
 
-
-
 namespace policy_interactions {
 
 using dsl::expect;
@@ -853,35 +851,35 @@ INSTANTIATE_TEST_SUITE_P(ryml_duplicates,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize},
     duplicate_fields::duplicates)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_unknown_fields,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize},
     unknown_fields::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_warning_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize},
     warning_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_error_limits,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize},
     error_limits::cases)));
 
 INSTANTIATE_TEST_SUITE_P(ryml_policy_interactions,
   mapping_conformance,
   ::testing::ValuesIn(omni::compat::apply(
     bind_cases<serialization_test::deserialize_type>{
-      serialization_test::deserialize_type{serialization_test::config{}}},
+      serialization_test::deserialize},
     policy_interactions::cases)));
 
 } // namespace registration

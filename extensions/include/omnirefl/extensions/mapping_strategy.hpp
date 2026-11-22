@@ -6,6 +6,7 @@
  * See docs/CONVENTIONS.md, functional data-member updates. */
 
 #include <omnirefl/extensions/compat.hpp>
+#include <omnirefl/extensions/impl/tdm_mapping_strategy.hpp>
 #include <omnirefl/functional.hpp>
 
 #include <array>
@@ -16,14 +17,6 @@
 
 namespace omni {
 namespace mapping {
-namespace detail {
-
-template <typename FilterFields, typename AliasesByName,
-  typename ValidateFields, typename Finalize>
-struct record_strategy_updates;
-
-} // namespace detail
-
 /** Record field selection, aliases, and validation.
  * Predicates are stateless, default-constructible, and return Boolean traits.
  * Validators preserve successfully checked values; Error is interpreted by
@@ -42,19 +35,26 @@ template <typename FilterFields = decltype(
 struct record_strategy_t:
     detail::record_strategy_updates<FilterFields, AliasesByName,
       ValidateFields, Finalize> {
+  using tdm_provider = detail::record_strategy_updates<FilterFields,
+    AliasesByName, ValidateFields, Finalize>;
+
   // filter_fields :: field_meta_like -> bool_constant
   FilterFields filter_fields OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_filter_fields;
 
   // aliases_by_name :: {field_name: [alias]}
   AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_aliases_by_name;
 
   // validate_fields :: {field_name: [validator]}
   // validator :: T -> expected<T, Error> | with_diagnostics<T>
   ValidateFields validate_fields OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_validate_fields;
 
   // finalize :: Record -> expected<Record, Error> | with_diagnostics<Record>
   // The default identity performs no validation.
   Finalize finalize OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_finalize;
 
 // Before C++17, aggregate bases need constructors for constexpr tdm_ updates.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
@@ -76,231 +76,26 @@ private:
 #endif
 };
 
-namespace detail {
-
-template <typename FilterFields, typename AliasesByName,
-  typename ValidateFields, typename Finalize>
-struct record_strategy_updates {
-  /** (QoL) Functional update of .filter_fields; other members are
-   * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const FilterFields &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<AliasesByName, const AliasesByName &>::value
-      && std::is_constructible<ValidateFields, const ValidateFields &>::value
-      && std::is_constructible<Finalize, const Finalize &>::value))
-  constexpr auto tdm_filter_fields(F &&f) const &
-    -> record_strategy_t<compat::decay_t<Result>,
-      AliasesByName,
-      ValidateFields,
-      Finalize> {
-    return make_strategy(
-      compat::invoke(std::forward<F>(f), this->derived().filter_fields),
-      this->derived().aliases_by_name,
-      this->derived().validate_fields,
-      this->derived().finalize);
-  }
-
-  /** (QoL) Functional update of .filter_fields; other members are
-   * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, FilterFields &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<AliasesByName, AliasesByName &&>::value
-      && std::is_constructible<ValidateFields, ValidateFields &&>::value
-      && std::is_constructible<Finalize, Finalize &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_filter_fields(F &&f) &&
-    -> record_strategy_t<compat::decay_t<Result>,
-      AliasesByName,
-      ValidateFields,
-      Finalize> {
-    return make_strategy(
-      compat::invoke(std::forward<F>(f),
-        std::move(this->derived().filter_fields)),
-      std::move(this->derived().aliases_by_name),
-      std::move(this->derived().validate_fields),
-      std::move(this->derived().finalize));
-  }
-
-  /** (QoL) Functional update of .aliases_by_name; other members are
-   * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const AliasesByName &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<FilterFields, const FilterFields &>::value
-      && std::is_constructible<ValidateFields, const ValidateFields &>::value
-      && std::is_constructible<Finalize, const Finalize &>::value))
-  constexpr auto tdm_aliases_by_name(F &&f) const &
-    -> record_strategy_t<FilterFields,
-      compat::decay_t<Result>,
-      ValidateFields,
-      Finalize> {
-    return make_strategy(
-      this->derived().filter_fields,
-      compat::invoke(std::forward<F>(f), this->derived().aliases_by_name),
-      this->derived().validate_fields,
-      this->derived().finalize);
-  }
-
-  /** (QoL) Functional update of .aliases_by_name; other members are
-   * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, AliasesByName &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<FilterFields, FilterFields &&>::value
-      && std::is_constructible<ValidateFields, ValidateFields &&>::value
-      && std::is_constructible<Finalize, Finalize &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_aliases_by_name(F &&f) &&
-    -> record_strategy_t<FilterFields,
-      compat::decay_t<Result>,
-      ValidateFields,
-      Finalize> {
-    return make_strategy(
-      std::move(this->derived().filter_fields),
-      compat::invoke(std::forward<F>(f),
-        std::move(this->derived().aliases_by_name)),
-      std::move(this->derived().validate_fields),
-      std::move(this->derived().finalize));
-  }
-
-  /** (QoL) Functional update of .validate_fields; other members are
-   * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const ValidateFields &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<FilterFields, const FilterFields &>::value
-      && std::is_constructible<AliasesByName, const AliasesByName &>::value
-      && std::is_constructible<Finalize, const Finalize &>::value))
-  constexpr auto tdm_validate_fields(F &&f) const &
-    -> record_strategy_t<FilterFields,
-      AliasesByName,
-      compat::decay_t<Result>,
-      Finalize> {
-    return make_strategy(
-      this->derived().filter_fields,
-      this->derived().aliases_by_name,
-      compat::invoke(std::forward<F>(f), this->derived().validate_fields),
-      this->derived().finalize);
-  }
-
-  /** (QoL) Functional update of .validate_fields; other members are
-   * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, ValidateFields &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<FilterFields, FilterFields &&>::value
-      && std::is_constructible<AliasesByName, AliasesByName &&>::value
-      && std::is_constructible<Finalize, Finalize &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_validate_fields(F &&f) &&
-    -> record_strategy_t<FilterFields,
-      AliasesByName,
-      compat::decay_t<Result>,
-      Finalize> {
-    return make_strategy(
-      std::move(this->derived().filter_fields),
-      std::move(this->derived().aliases_by_name),
-      compat::invoke(std::forward<F>(f),
-        std::move(this->derived().validate_fields)),
-      std::move(this->derived().finalize));
-  }
-
-  /** (QoL) Functional update of .finalize; other members are
-   * copied from the const strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Finalize &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<FilterFields, const FilterFields &>::value
-      && std::is_constructible<AliasesByName, const AliasesByName &>::value
-      && std::is_constructible<ValidateFields, const ValidateFields &>::value))
-  constexpr auto tdm_finalize(F &&f) const &
-    -> record_strategy_t<FilterFields,
-      AliasesByName,
-      ValidateFields,
-      compat::decay_t<Result>> {
-    return make_strategy(
-      this->derived().filter_fields,
-      this->derived().aliases_by_name,
-      this->derived().validate_fields,
-      compat::invoke(std::forward<F>(f), this->derived().finalize));
-  }
-
-  /** (QoL) Functional update of .finalize; other members are
-   * moved from the consumed strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Finalize &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_constructible<FilterFields, FilterFields &&>::value
-      && std::is_constructible<AliasesByName, AliasesByName &&>::value
-      && std::is_constructible<ValidateFields, ValidateFields &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_finalize(F &&f) &&
-    -> record_strategy_t<FilterFields,
-      AliasesByName,
-      ValidateFields,
-      compat::decay_t<Result>> {
-    return make_strategy(
-      std::move(this->derived().filter_fields),
-      std::move(this->derived().aliases_by_name),
-      std::move(this->derived().validate_fields),
-      compat::invoke(std::forward<F>(f), std::move(this->derived().finalize)));
-  }
-
-private:
-  constexpr const record_strategy_t<FilterFields, AliasesByName,
-    ValidateFields, Finalize> &derived() const & {
-    return static_cast<const record_strategy_t<FilterFields, AliasesByName,
-      ValidateFields, Finalize> &>(*this);
-  }
-
-  OMNI_CPP14_CONSTEXPR record_strategy_t<FilterFields, AliasesByName,
-    ValidateFields, Finalize> &derived() & {
-    return static_cast<record_strategy_t<FilterFields, AliasesByName,
-      ValidateFields, Finalize> &>(*this);
-  }
-
-  template <typename Filter, typename Aliases, typename Validators,
-    typename Finish>
-  static constexpr auto make_strategy(Filter &&filter, Aliases &&aliases,
-    Validators &&validators, Finish &&finish)
-    -> record_strategy_t<compat::decay_t<Filter>, compat::decay_t<Aliases>,
-      compat::decay_t<Validators>, compat::decay_t<Finish>> {
-    return {
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
-#endif
-      /*filter_fields=*/std::forward<Filter>(filter),
-      /*aliases_by_name=*/std::forward<Aliases>(aliases),
-      /*validate_fields=*/std::forward<Validators>(validators),
-      /*finalize=*/std::forward<Finish>(finish),
-    };
-  }
-};
-
-} // namespace detail
-
 /** Enum names and their accepted aliases.
  * aliases_by_name :: {enumerator_name: [alias]} */
 template <typename AliasesByName = std::tuple<>>
-struct enum_strategy_t {
+struct enum_strategy_t:
+    detail::tdm_for_enum_strategy<AliasesByName> {
+  using tdm_provider = detail::tdm_for_enum_strategy<AliasesByName>;
+
   AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_aliases_by_name;
 
-  /** (QoL) Functional update of .aliases_by_name. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const AliasesByName &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_aliases_by_name(F &&f) const &
-    -> enum_strategy_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f), this->aliases_by_name)};
-  }
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr enum_strategy_t() = default;
 
-  /** (QoL) Functional update consuming .aliases_by_name. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, AliasesByName &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_aliases_by_name(F &&f) &&
-    -> enum_strategy_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f),
-      std::move(this->aliases_by_name))};
-  }
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = AliasesByName),
+    (std::is_constructible<AliasesByName, Value &&>::value))
+  constexpr enum_strategy_t(Value &&value)
+    : aliases_by_name(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -495,3 +290,8 @@ OMNI_CPP14_CONSTEXPR bool valid_record_strategy(const Names &names,
 // TODO: [medium] Explore lazy dependent-field validation only if it offers
 // practical benefits over record finalization; dependency ordering and sibling
 // branch dependencies could substantially complicate the interface.
+
+// TODO: [medium] Consider direct-value tdm_ overloads. Unary callable values
+// can also be updaters: passing
+// fn::identity{} to tdm_finalize could retain the old finalizer or replace it
+// with the no-op finalizer. Resolve that interpretation before adding overloads.

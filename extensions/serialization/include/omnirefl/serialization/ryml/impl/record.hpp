@@ -546,12 +546,20 @@ auto map_object_node_t<Strategy>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
   if (context.limit_exceeded())
-    return {compat::nullopt, {{context.config.error_policy, {}}, {}, {}}};
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      context.config.error_policy, {}}, {}, {}}};
 
   auto checked = core::expect_object_node(node);
   if (!checked)
     return {compat::nullopt,
-      {{context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+      {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
 
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
@@ -574,12 +582,20 @@ auto map_object_node_t<Strategy>::operator()(State context,
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
   if (context.limit_exceeded())
-    return {compat::nullopt, {{context.config.error_policy, {}}, {}, {}}};
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      context.config.error_policy, {}}, {}, {}}};
 
   auto checked = core::expect_object_node(node);
   if (!checked)
     return {compat::nullopt,
-      {{context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+      {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
 
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<

@@ -552,7 +552,11 @@ struct with_node_check_t {
     if (state.limit_exceeded())
       return {
         /*value=*/compat::nullopt,
-        /*diagnostics=*/{/*config=*/{state.config.error_policy, {}}, {}, {}},
+        /*diagnostics=*/{/*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+          /*base=*/{},
+#endif
+          state.config.error_policy, {}}, {}, {}},
       };
 
     auto checked = this->expect_node(node);
@@ -560,7 +564,11 @@ struct with_node_check_t {
       return {
         /*value=*/compat::nullopt,
         /*diagnostics=*/{
-          /*config=*/{state.config.error_policy, {}},
+          /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+            /*base=*/{},
+#endif
+            state.config.error_policy, {}},
           /*issues=*/{omni::ryml::detail::node_function_error(
             std::move(checked.error()), node)},
           /*parse_error_message=*/{},

@@ -201,7 +201,11 @@ node_accumulator<State> make_node_accumulator(State state) {
   with_diagnostics_t<compat::monostate> result{
     /*value=*/compat::monostate{},
     /*diagnostics=*/{
-      /*config=*/{state.config.error_policy, {}},
+      /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}},
       /*issues=*/{},
       /*parse_error_message=*/{},
     },
@@ -260,7 +264,11 @@ auto read_scalar(State context,
   return {
     /*value=*/ *converted,
     /*diagnostics=*/{
-      /*config=*/{context.config.error_policy, {}},
+      /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        context.config.error_policy, {}},
       /*issues=*/{},
       /*parse_error_message=*/{},
     },
@@ -479,7 +487,11 @@ auto map_node_to_string_like_t::operator()(State state,
     /*value=*/adapt::from_string(omni::type_t<T>{},
       view_type{scalar.str, scalar.len}),
     /*diagnostics=*/{
-      /*config=*/{state.config.error_policy, {}},
+      /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}},
       /*issues=*/{},
       /*parse_error_message=*/{},
     },
@@ -509,7 +521,11 @@ auto map_node_to_boolean_t::operator()(State state,
   return {
     /*value=*/ *result,
     /*diagnostics=*/{
-      /*config=*/{state.config.error_policy, {}},
+      /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}},
       /*issues=*/{},
       /*parse_error_message=*/{},
     },

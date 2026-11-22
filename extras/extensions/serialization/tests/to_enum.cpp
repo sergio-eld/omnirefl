@@ -103,12 +103,10 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   const auto resolver = [](string_view)
     -> omni::compat::optional<string_view> { return string_view{"idle"}; };
 
-  const auto compositor =
-    omni::ryml::compose::with_mutating_node_to_type_overload(
-      omni::ryml::compose::with_node_check<
-        omni::ryml::core::expect_string_node>(
-        omni::ryml::core::reflected_scope::map_node_to_enum_t<
-          omni::mapping::enum_strategy_t<decltype(resolver)>>{{resolver}}));
+  const auto strategy = omni::mapping::enum_strategy.tdm_aliases_by_name(
+    [resolver](const std::tuple<> &) { return resolver; });
+  const auto compositor = omni::ryml::reflected_scope::default_to_enum(
+    omni::type_t<state>{}, strategy);
 
   const auto tree = omni::ryml::core::parse(R"("active")");
   EXPECT_TRUE(tree);

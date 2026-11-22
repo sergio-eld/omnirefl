@@ -29,6 +29,7 @@
 // NTTP must stop child instantiation at the limit; a static_assert there would
 // reject every recursive model, independently of the actual input depth.
 
+#include <omnirefl/serialization/ryml/impl/tdm_binding.hpp>
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
@@ -91,69 +92,18 @@ using map_by_schema_dispatch_t = typename traits::select<
  */
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t>
-struct map_by_schema_t {
-  static_assert(is_config<Config>::value,
-    "map_by_schema_t requires a specialization of omni::ryml::config_t");
+struct map_by_schema_t:
+    detail::tdm_for_map_by_schema<Config, MapNode> {
+  using tdm_provider = detail::tdm_for_map_by_schema<Config, MapNode>;
 
   Config config OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_config;
 
   /** Local mapping selection, propagated through recursive reads.
    * `map_node :: (state, type<T>) -> Mapping`
    * Mapping follows the cp::to_type callable contract. */
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-
-  /** (QoL) Transform data member `.config` inplace, in a single expression.
-   * Invokes f immediately and returns a new binding with the resulting config,
-   * preserving this binding. f :: const Config& -> NewConfig. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Config &>::value))
-  constexpr auto tdm_config(F &&f) const &
-    -> map_by_schema_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const Config &>>, MapNode> {
-    return {
-      /*config=*/compat::invoke(std::forward<F>(f), this->config),
-      /*map_node=*/this->map_node,
-    };
-  }
-
-  /** (QoL) Transform data member `.config`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Config &&>::value))
-  // C++11 constexpr member functions are implicitly const, preventing moves.
-  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) &&
-    -> map_by_schema_t<
-      compat::decay_t<compat::invoke_result_t<F &&, Config &&>>, MapNode> {
-    return {
-      /*config=*/compat::invoke(std::forward<F>(f), std::move(this->config)),
-      /*map_node=*/std::move(this->map_node),
-    };
-  }
-
-  /** (QoL) Transform data member `.map_node` inplace, in one expression.
-   * f :: const MapNode& -> NewMapNode. Other bound data is copied. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const MapNode &>::value))
-  constexpr auto tdm_map_node(F &&f) const &
-    -> map_by_schema_t<Config, compat::decay_t<
-      compat::invoke_result_t<F &&, const MapNode &>>> {
-    return {
-      /*config=*/this->config,
-      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
-    };
-  }
-
-  /** (QoL) Transform `.map_node`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, MapNode &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
-    -> map_by_schema_t<Config, compat::decay_t<
-      compat::invoke_result_t<F &&, MapNode &&>>> {
-    return {
-      /*config=*/std::move(this->config),
-      /*map_node=*/compat::invoke(std::forward<F>(f),
-        std::move(this->map_node)),
-    };
-  }
+  using tdm_provider::tdm_map_node;
 
   /** Map a node into T by traversing its C++ schema over the node.
    * Value mappings construct T directly; pointer-only mappings require T to
@@ -238,6 +188,22 @@ struct map_by_schema_t {
     (std::is_object<T>::value && !std::is_const<T>::value))
   void operator()(T *, const ::ryml::Tree &&) const = delete;
 
+  static_assert(is_config<Config>::value,
+    "map_by_schema_t requires a specialization of omni::ryml::config_t");
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_by_schema_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename First = Config,
+    typename Second = MapNode),
+    (std::is_constructible<Config, First &&>::value
+      && std::is_constructible<MapNode, Second &&>::value))
+  constexpr map_by_schema_t(First &&first, Second &&second = Second{})
+    : config(std::forward<First>(first)),
+      map_node(std::forward<Second>(second)) {}
+#endif
 };
 
 /** Schema-driven node/tree mapping with default configuration.
@@ -268,69 +234,18 @@ auto deserialize(Config &&options, const MapNode &map_node,
  * tdm_config returns a new callable with transformed configuration. */
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t>
-struct deserialize_t {
-  static_assert(is_config<Config>::value,
-    "deserialize_t requires a specialization of omni::ryml::config_t");
+struct deserialize_t:
+    detail::tdm_for_deserialize<Config, MapNode> {
+  using tdm_provider = detail::tdm_for_deserialize<Config, MapNode>;
 
   Config config OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_config;
 
   /** Local mapping selection, propagated through recursive reads.
    * `map_node :: (state, type<T>) -> Mapping`
    * Mapping follows the cp::to_type callable contract. */
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-
-  /** (QoL) Transform data member `.config` inplace, in a single expression.
-   * Invokes f immediately and returns a new binding with the resulting config,
-   * preserving this binding. f :: const Config& -> NewConfig. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const Config &>::value))
-  constexpr auto tdm_config(F &&f) const &
-    -> deserialize_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const Config &>>, MapNode> {
-    return {
-      /*config=*/compat::invoke(std::forward<F>(f), this->config),
-      /*map_node=*/this->map_node,
-    };
-  }
-
-  /** (QoL) Transform data member `.config`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, Config &&>::value))
-  // C++11 constexpr member functions are implicitly const, preventing moves.
-  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) &&
-    -> deserialize_t<compat::decay_t<
-      compat::invoke_result_t<F &&, Config &&>>, MapNode> {
-    return {
-      /*config=*/compat::invoke(std::forward<F>(f), std::move(this->config)),
-      /*map_node=*/std::move(this->map_node),
-    };
-  }
-
-  /** (QoL) Transform data member `.map_node` inplace, in one expression.
-   * f :: const MapNode& -> NewMapNode. Other bound data is copied. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const MapNode &>::value))
-  constexpr auto tdm_map_node(F &&f) const &
-    -> deserialize_t<Config, compat::decay_t<
-      compat::invoke_result_t<F &&, const MapNode &>>> {
-    return {
-      /*config=*/this->config,
-      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
-    };
-  }
-
-  /** (QoL) Transform `.map_node`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, MapNode &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
-    -> deserialize_t<Config, compat::decay_t<
-      compat::invoke_result_t<F &&, MapNode &&>>> {
-    return {
-      /*config=*/std::move(this->config),
-      /*map_node=*/compat::invoke(std::forward<F>(f),
-        std::move(this->map_node)),
-    };
-  }
+  using tdm_provider::tdm_map_node;
 
   /** Deserialize source text into Record, returning transformed diagnostics.
    * Uses the mutable config, including lvalue-only diagnostic callbacks.
@@ -476,6 +391,22 @@ struct deserialize_t {
       this->map_node, into, std::move(source));
   }
 
+  static_assert(is_config<Config>::value,
+    "deserialize_t requires a specialization of omni::ryml::config_t");
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr deserialize_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename First = Config,
+    typename Second = MapNode),
+    (std::is_constructible<Config, First &&>::value
+      && std::is_constructible<MapNode, Second &&>::value))
+  constexpr deserialize_t(First &&first, Second &&second = Second{})
+    : config(std::forward<First>(first)),
+      map_node(std::forward<Second>(second)) {}
+#endif
 };
 
 /** JSON/YAML deserialization with default config and text diagnostics. */
@@ -492,32 +423,13 @@ static constexpr const deserialize_t<> &deserialize =
 /** Owning RapidYAML tree serialization of supported C++ values.
  * Strings are copied into the tree's arena, so it can outlive the source. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
-struct as_owning_tree_t {
+struct as_owning_tree_t:
+    detail::tdm_for_as_owning_tree<MapNode> {
+  using tdm_provider = detail::tdm_for_as_owning_tree<MapNode>;
+
   // (state, type<T>) -> mapping callable, selected at every schema position.
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-
-  /** (QoL) Transform data member `.map_node` inplace, in one expression. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const MapNode &>::value))
-  constexpr auto tdm_map_node(F &&f) const &
-    -> as_owning_tree_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const MapNode &>>> {
-    return {
-      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
-    };
-  }
-
-  /** (QoL) Transform `.map_node`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, MapNode &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
-    -> as_owning_tree_t<compat::decay_t<
-      compat::invoke_result_t<F &&, MapNode &&>>> {
-    return {
-      /*map_node=*/compat::invoke(std::forward<F>(f),
-        std::move(this->map_node)),
-    };
-  }
+  using tdm_provider::tdm_map_node;
 
   /** Serialize value into an owning tree. Empty optionals produce null;
    * empty optional sequence elements are omitted. The result can be modified
@@ -525,6 +437,16 @@ struct as_owning_tree_t {
   template <typename T>
   ::ryml::Tree operator()(const T &value) const;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr as_owning_tree_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode),
+    (std::is_constructible<MapNode, Value &&>::value))
+  constexpr as_owning_tree_t(Value &&value)
+    : map_node(std::forward<Value>(value)) {}
+#endif
 };
 
 /** Owning tree serialization; string storage is copied into the tree. */
@@ -539,32 +461,13 @@ static constexpr const as_owning_tree_t<> &as_owning_tree =
  * The tree owns nodes and generated text. Source storage must remain alive
  * and unchanged while the tree is used. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
-struct as_ref_tree_t {
+struct as_ref_tree_t:
+    detail::tdm_for_as_ref_tree<MapNode> {
+  using tdm_provider = detail::tdm_for_as_ref_tree<MapNode>;
+
   // (state, type<T>) -> mapping callable, selected at every schema position.
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-
-  /** (QoL) Transform data member `.map_node` inplace, in one expression. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const MapNode &>::value))
-  constexpr auto tdm_map_node(F &&f) const &
-    -> as_ref_tree_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const MapNode &>>> {
-    return {
-      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
-    };
-  }
-
-  /** (QoL) Transform `.map_node`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, MapNode &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
-    -> as_ref_tree_t<compat::decay_t<
-      compat::invoke_result_t<F &&, MapNode &&>>> {
-    return {
-      /*map_node=*/compat::invoke(std::forward<F>(f),
-        std::move(this->map_node)),
-    };
-  }
+  using tdm_provider::tdm_map_node;
 
   /** Serialize an lvalue into a tree borrowing its existing string storage.
    * Accepts const and mutable sources. Keep source storage alive and unchanged
@@ -577,6 +480,16 @@ struct as_ref_tree_t {
   template <typename T>
   ::ryml::Tree operator()(const T &&) const = delete;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr as_ref_tree_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode),
+    (std::is_constructible<MapNode, Value &&>::value))
+  constexpr as_ref_tree_t(Value &&value)
+    : map_node(std::forward<Value>(value)) {}
+#endif
 };
 
 /** Borrowing tree serialization; source strings must outlive the tree. */
@@ -589,72 +502,16 @@ static constexpr const as_ref_tree_t<> &as_ref_tree =
 
 /** JSON/YAML text serialization with the selected .format. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
-struct serialize_t {
+struct serialize_t:
+    detail::tdm_for_serialize<MapNode> {
+  using tdm_provider = detail::tdm_for_serialize<MapNode>;
+
   // Output format; use as_yaml or as_json for the predefined configurations.
-  ::ryml::EmitType_e format;
+  ::ryml::EmitType_e format{};
+  using tdm_provider::tdm_format;
   // (state, type<T>) -> mapping callable, selected at every schema position.
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-
-#if 201402L > OMNI_CPLUSPLUS
-  // C++11 has no aggregate member defaults; keep empty/format-only braces.
-  constexpr serialize_t(::ryml::EmitType_e output = {})
-    : format(output), map_node{} {}
-
-  OMNI_CONSTRAINED_TEMPLATE((typename Mapping),
-    (std::is_constructible<MapNode, Mapping &&>::value))
-  constexpr serialize_t(::ryml::EmitType_e output, Mapping &&mapping)
-    : format(output), map_node(std::forward<Mapping>(mapping)) {}
-#endif
-
-  /** (QoL) Transform data member `.format` inplace, in one expression.
-   * f :: EmitType -> EmitType. The returned binding copies map_node. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (std::is_convertible<compat::invoke_result_t<F &&,
-      const ::ryml::EmitType_e &>, ::ryml::EmitType_e>::value
-      && std::is_copy_constructible<MapNode>::value))
-  constexpr auto tdm_format(F &&f) const & -> serialize_t {
-    return {
-      /*format=*/compat::invoke(std::forward<F>(f), this->format),
-      /*map_node=*/this->map_node,
-    };
-  }
-
-  /** (QoL) Transform `.format`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (std::is_convertible<compat::invoke_result_t<F &&,
-      ::ryml::EmitType_e &&>, ::ryml::EmitType_e>::value
-      && std::is_constructible<MapNode, MapNode &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_format(F &&f) && -> serialize_t {
-    return {
-      /*format=*/compat::invoke(std::forward<F>(f), std::move(this->format)),
-      /*map_node=*/std::move(this->map_node),
-    };
-  }
-
-  /** (QoL) Transform data member `.map_node` inplace, in one expression. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const MapNode &>::value))
-  constexpr auto tdm_map_node(F &&f) const &
-    -> serialize_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const MapNode &>>> {
-    return {
-      /*format=*/this->format,
-      /*map_node=*/compat::invoke(std::forward<F>(f), this->map_node),
-    };
-  }
-
-  /** (QoL) Transform `.map_node`, consuming this binding. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, MapNode &&>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_map_node(F &&f) &&
-    -> serialize_t<compat::decay_t<
-      compat::invoke_result_t<F &&, MapNode &&>>> {
-    return {
-      /*format=*/this->format,
-      /*map_node=*/compat::invoke(std::forward<F>(f),
-        std::move(this->map_node)),
-    };
-  }
+  using tdm_provider::tdm_map_node;
 
   /**
    * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
@@ -672,6 +529,19 @@ struct serialize_t {
   template <typename Value>
   std::string operator()(const Value &value) const;
 
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr serialize_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename First = ::ryml::EmitType_e,
+    typename Second = MapNode),
+    (std::is_constructible<::ryml::EmitType_e, First &&>::value
+      && std::is_constructible<MapNode, Second &&>::value))
+  constexpr serialize_t(First &&first, Second &&second = Second{})
+    : format(std::forward<First>(first)),
+      map_node(std::forward<Second>(second)) {}
+#endif
 };
 
 #if !defined(__cpp_inline_variables) || 201606L > __cpp_inline_variables
@@ -697,6 +567,7 @@ const auto yaml = as_yaml(value);
 ``` */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr serialize_t<> as_yaml{
+  /*base=*/{},
   /*format=*/::ryml::EMIT_YAML,
 };
 #else
@@ -715,6 +586,7 @@ const auto json = as_json(value);
 ``` */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr serialize_t<> as_json{
+  /*base=*/{},
   /*format=*/::ryml::EMIT_JSON,
 };
 #else
@@ -730,7 +602,10 @@ static constexpr const serialize_t<> &as_json =
 const auto json = serialize(value);
 ``` */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr serialize_t<> serialize{::ryml::EMIT_JSON};
+inline constexpr serialize_t<> serialize{
+  /*base=*/{},
+  /*format=*/::ryml::EMIT_JSON,
+};
 #else
 static constexpr const serialize_t<> &serialize =
   compat::detail::shared_state<detail::serialization_defaults>::value.json;

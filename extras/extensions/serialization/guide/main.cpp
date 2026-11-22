@@ -1937,7 +1937,6 @@ TEST(customization_mapping, field_aliases) {
     EXPECT_EQ(7, canonical.value->count);
 }
 
-
 /** Enum aliases accept alternative text without changing serialized enumerator
  * names. The configured enum compositor still rejects unknown text and values
  * whose node kind is not a string. */
@@ -1953,7 +1952,6 @@ TEST(customization_mapping, enum_aliases) {
   EXPECT_EQ(customization_mapping::status::busy, *result.value);
   EXPECT_EQ(R"("busy")", omni::ryml::as_json(*result.value));
 }
-
 
 struct extended_container_case {
   std::string name;

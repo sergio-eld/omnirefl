@@ -29,6 +29,11 @@ Names use `snake_case`, following the standard library: namespaces, types,
 concepts, functions, data members, variables, and enumerators. `CamelCase` is
 reserved for template parameters, such as `Value` or `BufferSize`.
 
+Class declarations group using declarations, data members, call operators,
+other convenience members, compatibility machinery, and local
+TODO/FIXME/REFACTORME notes, in that order. Each `tdm_` declaration follows its
+corresponding data member.
+
 ### Functional composition notation
 
 Functional-composition annotations may use signature pseudocode when C++

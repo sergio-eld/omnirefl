@@ -2,6 +2,7 @@
 
 /** Built-in reflected record mappings. */
 
+#include <omnirefl/serialization/ryml/impl/tdm_record.hpp>
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/mapping_strategy.hpp>
 #include <omnirefl/functional.hpp>
@@ -56,7 +57,13 @@ map_object_node :: {
  * Record metadata must be available in reflected scope.
  */
 template <typename Strategy = mapping::record_strategy_t<>>
-struct map_object_node_t {
+struct map_object_node_t:
+    detail::tdm_for_map_object_node<Strategy> {
+  using tdm_provider = detail::tdm_for_map_object_node<Strategy>;
+
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::is_reflected_record<T>::value
       && std::is_move_constructible<T>::value
@@ -71,27 +78,16 @@ struct map_object_node_t {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_object_node_t() = default;
 
-  /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_strategy(F &&f) const &
-    -> map_object_node_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f), this->strategy)};
-  }
-
-  /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> map_object_node_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f),
-      std::move(this->strategy))};
-  }
-
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_object_node_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
+#endif
 };
 
 /** Reflected-record mapping with the shared default strategy.
@@ -114,34 +110,29 @@ map_record :: (state, const T&, node) -> void
  *
  * @pre Record metadata must be available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>>
-struct map_record_t {
+struct map_record_t:
+    detail::tdm_for_map_record<Strategy> {
+  using tdm_provider = detail::tdm_for_map_record<Strategy>;
+
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
       is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
 
-  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_record_t() = default;
 
-  /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_strategy(F &&f) const &
-    -> map_record_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f), this->strategy)};
-  }
-
-  /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> map_record_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f),
-      std::move(this->strategy))};
-  }
-
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_record_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables

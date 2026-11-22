@@ -67,7 +67,11 @@ struct to_type_t<compatible_integer> {
       return {
         /*value=*/compat::nullopt,
         /*diagnostics=*/{
-          /*config=*/{context.config.error_policy, {}},
+          /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+            /*base=*/{},
+#endif
+            context.config.error_policy, {}},
           /*issues=*/{core::make_issue(json::issue_code::invalid_scalar,
             json::value_kind::integer, node)},
           /*parse_error_message=*/{},
@@ -77,7 +81,11 @@ struct to_type_t<compatible_integer> {
     auto result = with_diagnostics_t<compat::monostate>{
       /*value=*/compat::monostate{},
       /*diagnostics=*/{
-        /*config=*/{context.config.error_policy, {}},
+        /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+          /*base=*/{},
+#endif
+          context.config.error_policy, {}},
         /*issues=*/{},
         /*parse_error_message=*/{},
       },

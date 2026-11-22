@@ -294,7 +294,13 @@ TEST(inplace_deserialization, preserves_lvalue_only_diagnostics_invocability) {
   using config_type = omni::ryml::config_t<lvalue_renderer>;
   using binding_type = omni::ryml::deserialize_t<config_type>;
   binding_type load{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
     /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
       /*error_policy=*/{},
       /*transform_diagnostics=*/{"custom: "},
     },
@@ -324,7 +330,13 @@ struct consuming_renderer {
 TEST(inplace_deserialization, consumes_a_move_only_diagnostics_configuration) {
   using config_type = omni::ryml::config_t<consuming_renderer>;
   auto load = omni::ryml::deserialize_t<config_type>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
     /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
       /*error_policy=*/{},
       /*transform_diagnostics=*/{
         /*prefix=*/omni::compat::make_unique<std::string>("custom: "),

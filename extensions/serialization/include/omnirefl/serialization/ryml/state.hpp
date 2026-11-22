@@ -2,9 +2,10 @@
 
 /** Shared mapping configuration, diagnostics, and read/write states. */
 
-#include <omnirefl/traits.hpp>
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/static_string.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_config.hpp>
+#include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -153,55 +154,29 @@ static constexpr const render_diagnostics_t &render_diagnostics =
  * Earlier standards can use tdm_transform_diagnostics to change the callable
  * type without spelling the resulting config specialization. */
 template <typename TransformDiagnostics = render_diagnostics_t>
-struct config_t {
+struct config_t:
+    detail::tdm_for_config<TransformDiagnostics> {
+  using tdm_provider = detail::tdm_for_config<TransformDiagnostics>;
+
   json::error_policy error_policy OMNI_CPP14_DEFAULT_INIT();
 
   // Called with the live source tree and collected diagnostics on every result.
   TransformDiagnostics transform_diagnostics OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_transform_diagnostics;
 
-  /** (QoL) Transform data member `.transform_diagnostics` inplace.
-   * Configure it within a single expression.
-   * Invokes f immediately with the current callable and returns a new config
-   * containing its result, preserving error_policy and this config.
-   * f :: TransformDiagnostics -> NewTransformDiagnostics.
-   *
-```cpp
-const auto load = omni::ryml::deserialize.tdm_config(
-  [](omni::ryml::config_t<> options) {
-    return options.tdm_transform_diagnostics(
-      [](omni::ryml::render_diagnostics_t previous) {
-        return [previous](const ::ryml::Tree &tree,
-          omni::ryml::diagnostics report) {
-          return previous(tree, report).size();
-        };
-      });
-  });
-``` */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const TransformDiagnostics &>::value))
-  constexpr auto tdm_transform_diagnostics(F &&f) const &
-    -> config_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const TransformDiagnostics &>>> {
-    return {
-      this->error_policy,
-      /*transform_diagnostics=*/compat::invoke(
-        std::forward<F>(f), this->transform_diagnostics),
-    };
-  }
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr config_t() = default;
 
-  /** Transform `.transform_diagnostics`, consuming this configuration. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, TransformDiagnostics &&>::value))
-  // C++11 constexpr member functions are implicitly const, preventing moves.
-  OMNI_CPP14_CONSTEXPR auto tdm_transform_diagnostics(F &&f) &&
-    -> config_t<compat::decay_t<
-      compat::invoke_result_t<F &&, TransformDiagnostics &&>>> {
-    return {
-      std::move(this->error_policy),
-      /*transform_diagnostics=*/compat::invoke(std::forward<F>(f),
-        std::move(this->transform_diagnostics)),
-    };
-  }
+  OMNI_CONSTRAINED_TEMPLATE((typename First = json::error_policy,
+    typename Second = TransformDiagnostics),
+    (std::is_constructible<json::error_policy, First &&>::value
+      && std::is_constructible<TransformDiagnostics, Second &&>::value))
+  constexpr config_t(First &&first, Second &&second = Second{})
+    : error_policy(std::forward<First>(first)),
+      transform_diagnostics(std::forward<Second>(second)) {}
+#endif
 };
 
 /** Whether T is a config_t specialization, ignoring cv/ref qualifiers. */
@@ -863,6 +838,13 @@ struct read_state_t {
   using enclosing_root = typename StateConfig::enclosing_root;
   using enclosing_record = typename StateConfig::enclosing_record;
 
+  const typename StateConfig::config_type &config;
+  std::size_t error_count;
+  std::size_t warning_count;
+
+  // (state, type<T>) -> mapping callable; borrowed throughout traversal.
+  const typename StateConfig::map_node_type &map_node;
+
   /** Tree depth, starting at zero for the root.
    * child(), field(), and element() increment it; optional unwrapping does not.
    * No depth limit is enforced yet. */
@@ -872,16 +854,6 @@ struct read_state_t {
   static constexpr std::size_t depth_limit() {
     return StateConfig::depth_limit;
   }
-
-  const typename StateConfig::config_type &config;
-  std::size_t error_count;
-  std::size_t warning_count;
-
-  // (state, type<T>) -> mapping callable; borrowed throughout traversal.
-  const typename StateConfig::map_node_type &map_node;
-
-  // Rvalue propagation copies this borrowed traversal token as well.
-  constexpr read_state_t(const read_state_t &) = default;
 
   /** Canonical schema path: root.field, with [] for container values.
    * Independent of runtime keys, indices, and input aliases. Recursive schema
@@ -924,6 +896,9 @@ struct read_state_t {
         && *this->config.error_policy.warning_limit < this->warning_count);
   }
 
+  // Rvalue propagation copies this borrowed traversal token as well.
+  constexpr read_state_t(const read_state_t &) = default;
+
 private:
   // Child states use other configurations and need constructor access.
   template <typename>
@@ -953,6 +928,9 @@ struct write_state_t {
   using enclosing_root = typename StateConfig::enclosing_root;
   using enclosing_record = typename StateConfig::enclosing_record;
 
+  static constexpr bool borrow_strings = StateConfig::borrow_strings;
+  const typename StateConfig::map_node_type &map_node;
+
   /** Tree depth, starting at zero for the root.
    * child(), field(), and element() increment it; optional unwrapping does not.
    * No depth limit is enforced yet. */
@@ -962,12 +940,6 @@ struct write_state_t {
   static constexpr std::size_t depth_limit() {
     return StateConfig::depth_limit;
   }
-
-  static constexpr bool borrow_strings = StateConfig::borrow_strings;
-  const typename StateConfig::map_node_type &map_node;
-
-  // Rvalue propagation copies this borrowed traversal token as well.
-  constexpr write_state_t(const write_state_t &) = default;
 
   /** Canonical schema path; see read_state_t::path. */
   static constexpr auto path()
@@ -997,6 +969,9 @@ struct write_state_t {
     -> write_state_t<typename StateConfig::element> {
     return {this->map_node};
   }
+
+  // Rvalue propagation copies this borrowed traversal token as well.
+  constexpr write_state_t(const write_state_t &) = default;
 
 private:
   // Child states use other configurations and need constructor access.

@@ -40,7 +40,11 @@ auto map_node_to_enum_t<Strategy>::operator()(State context,
     return {
       /*value=*/found,
       /*diagnostics=*/{
-        /*config=*/{context.config.error_policy, {}},
+        /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+          /*base=*/{},
+#endif
+          context.config.error_policy, {}},
         /*issues=*/{},
         /*parse_error_message=*/{},
       },
@@ -52,7 +56,11 @@ auto map_node_to_enum_t<Strategy>::operator()(State context,
       return {
         /*value=*/found,
         /*diagnostics=*/{
-          /*config=*/{context.config.error_policy, {}},
+          /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+            /*base=*/{},
+#endif
+            context.config.error_policy, {}},
           /*issues=*/{},
           /*parse_error_message=*/{},
         },
@@ -62,7 +70,11 @@ auto map_node_to_enum_t<Strategy>::operator()(State context,
   return {
     /*value=*/compat::nullopt,
     /*diagnostics=*/{
-      /*config=*/{context.config.error_policy, {}},
+      /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        context.config.error_policy, {}},
       /*issues=*/{omni::ryml::core::make_issue(
         json::issue_code::invalid_scalar,
         json::value_kind::string,

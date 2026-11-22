@@ -147,7 +147,11 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
         -> with_diagnostics_t<typename decltype(type)::type> {
         if (!present)
           return {std::move(slot.stored),
-            {{state.config.error_policy, {}}, {}, {}}};
+            {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+              /*base=*/{},
+#endif
+              state.config.error_policy, {}}, {}, {}}};
         const auto mapping = compat::invoke(state.map_node, state, type);
         return map_node_to_value_using(state, mapping, node, type,
           /*priority=*/0);

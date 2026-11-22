@@ -242,7 +242,11 @@ struct diagnostic_count_callback {
     -> omni::ryml::with_diagnostics_t<counted_record> {
     return {
       /*value=*/counted_record{node.num_children()},
-      /*diagnostics=*/{{state.config.error_policy, {}}, {}, {}},
+      /*diagnostics=*/{{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {}, {}},
     };
   }
 };
