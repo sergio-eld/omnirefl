@@ -45,10 +45,9 @@ struct to_type_t<my_int> {
 template <>
 struct from_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(State context,
-    const my_int &value,
-    ::ryml::NodeRef node) const {
-    core::write_node(std::move(context), value.value, node);
+  auto operator()(State context,
+    const my_int &value) const -> ::ryml::NodeRef {
+    return core::write_node(std::move(context), value.value);
   }
 };
 

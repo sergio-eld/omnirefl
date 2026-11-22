@@ -871,10 +871,9 @@ struct select_reader {
 
 struct write_address {
   template <typename State>
-  void operator()(State state, const address &value,
-    ::ryml::NodeRef node) const {
-    omni::ryml::reflected_scope::map_record(std::move(state),
-      address{value.number + 100}, node);
+  auto operator()(State state, const address &value) const -> ::ryml::NodeRef {
+    return omni::ryml::reflected_scope::map_record(std::move(state),
+      address{value.number + 100});
   }
 };
 
@@ -882,9 +881,9 @@ struct write_integer {
   int increment;
 
   template <typename State>
-  void operator()(State state, int value, ::ryml::NodeRef node) const {
-    omni::ryml::map_arithmetic(std::move(state),
-      value + this->increment, node);
+  auto operator()(State state, int value) const -> ::ryml::NodeRef {
+    return omni::ryml::map_arithmetic(std::move(state),
+      value + this->increment);
   }
 };
 

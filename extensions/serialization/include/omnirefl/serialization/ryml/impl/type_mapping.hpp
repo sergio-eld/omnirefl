@@ -55,10 +55,9 @@ auto map_string_node_t<WithNodeCheck>::operator()(State state,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_string_like<T>,
     is_write_state<State>>::value))
-auto map_string_like_t::operator()(State context,
-  const T &value,
-  ::ryml::NodeRef node) const
-  -> void {
+auto map_string_like_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   const auto &text = adapt::as_string(value);
   using storage_type = decltype(adapt::as_string(value));
   using text_type = compat::remove_cvref_t<storage_type>;
@@ -79,6 +78,7 @@ auto map_string_like_t::operator()(State context,
     node.set_serialized(scalar);
 
   node.set_val_style(::ryml::VAL_DQUO);
+  return node;
 }
 
 template <typename WithNodeCheck>
@@ -128,11 +128,12 @@ auto map_boolean_node_t<WithNodeCheck>::operator()(State state,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void map_boolean_t::operator()(State,
-  const T &value,
-  ::ryml::NodeRef node) const {
+auto map_boolean_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   // C4's plain bool conversion emits 0/1 rather than document booleans.
   node.set_serialized(c4::fmt::boolalpha(value));
+  return node;
 }
 
 template <typename WithNodeCheck>
@@ -184,10 +185,11 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_integral<T>::value
     && !std::is_same<bool, compat::remove_cv_t<T>>::value
     && is_write_state<State>::value))
-void map_integral_t::operator()(State,
-  const T &value,
-  ::ryml::NodeRef node) const {
+auto map_integral_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   node.set_serialized(value);
+  return node;
 }
 
 template <typename WithNodeCheck>
@@ -234,12 +236,13 @@ auto map_number_node_t<WithNodeCheck>::operator()(State state,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_write_state<State>::value))
-void map_floating_point_t::operator()(State,
-  const T &value,
-  ::ryml::NodeRef node) const {
+auto map_floating_point_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   // Preserve enough significant digits to recover the original value.
   node.set_serialized(c4::fmt::real(value,
     std::numeric_limits<T>::max_digits10, c4::FTOA_FLEX));
+  return node;
 }
 
 template <typename WithNodeCheck>
@@ -277,16 +280,15 @@ auto map_arithmetic_node_t<WithNodeCheck>::operator()(State state,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_arithmetic<T>::value && is_write_state<State>::value))
-auto map_arithmetic_t::operator()(State context,
-  const T &value,
-  ::ryml::NodeRef node) const -> void {
+auto map_arithmetic_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
   const auto write = typename traits::select<
     traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
       map_boolean_t>,
     traits::case_<std::is_integral<T>::value, map_integral_t>,
     map_floating_point_t>::type{};
 
-  write(std::move(context), value, node);
+  return write(std::move(context), value);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -339,16 +341,15 @@ auto map_value_node_t<WithNodeCheck>::operator()(State state,
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
-auto map_optional_like_t::operator()(State context,
-  const T &value,
-  ::ryml::NodeRef node) const
-  -> void {
+auto map_optional_like_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
   if (adapt::has_value(value))
-    core::write_node(std::move(context), adapt::get_value(value), node);
-  else {
-    node.set_val("null");
-    node.set_val_style(::ryml::VAL_PLAIN);
-  }
+    return core::write_node(std::move(context), adapt::get_value(value));
+
+  auto node = context.node();
+  node.set_val("null");
+  node.set_val_style(::ryml::VAL_PLAIN);
+  return node;
 }
 
 namespace detail {

@@ -390,10 +390,9 @@ struct cpp11_write_member {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
     core::write_node(
-      this->context.template field<compat::remove_cvref_t<Record>>(
+      this->context.at(child).template field<compat::remove_cvref_t<Record>>(
         omni::data_member_meta_t<_F>{}),
-      field.value(),
-      child);
+      field.value());
   }
 };
 
@@ -619,10 +618,9 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto map_record_t<Strategy>::operator()(State context,
-  const T &value,
-  ::ryml::NodeRef node) const
-  -> void {
+auto map_record_t<Strategy>::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   assert(mapping::valid_record_strategy(
     compat::apply(detail::record_field_names{},
       omni::meta_for<T>::accessible_data_members()), this->strategy));
@@ -634,6 +632,7 @@ auto map_record_t<Strategy>::operator()(State context,
       /*node=*/node,
       /*context=*/std::move(context),
     });
+  return node;
 }
 
 } // namespace reflected_scope

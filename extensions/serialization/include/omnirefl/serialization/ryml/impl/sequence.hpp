@@ -280,7 +280,7 @@ struct write_range_case<false> {
     for (; current != last; ++current) {
       const element_type &element = *current;
       if (!is_null(element)) {
-        core::write_node(context.element(), element, node.append_child());
+        core::write_node(context.at(node.append_child()).element(), element);
       }
     }
   }
@@ -324,7 +324,7 @@ struct write_range_case<true> {
         child.set_key_serialized(text);
 
       child.set_key_style(::ryml::KEY_DQUO);
-      core::write_node(context.element(), entry.second, child);
+      core::write_node(context.at(child).element(), entry.second);
     }
   }
 };
@@ -386,9 +386,9 @@ auto map_range_node_t<WithNodeCheck>::operator()(State state,
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-void map_range_t::operator()(State context,
-  const T &value,
-  ::ryml::NodeRef node) const {
+auto map_range_t::operator()(State context, const T &value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   using element_type = compat::range_value_t<T>;
   using element_reference = compat::range_reference_t<const T>;
 
@@ -408,6 +408,7 @@ void map_range_t::operator()(State context,
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.
+  return node;
 }
 
 } // namespace ryml

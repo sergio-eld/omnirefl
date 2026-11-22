@@ -141,16 +141,17 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
-auto map_enum_t<Strategy>::operator()(State,
-  T value,
-  ::ryml::NodeRef node) const -> void {
+auto map_enum_t<Strategy>::operator()(State context, T value) const
+  -> ::ryml::NodeRef {
+  auto node = context.node();
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
   for (const auto &enumerator : enumerators)
     if (value == enumerator.first) {
       node.set_serialized(c4::to_csubstr(enumerator.second));
       node.set_val_style(::ryml::VAL_DQUO);
-      return;
+      return node;
     }
+  return node;
 }
 
 } // namespace reflected_scope

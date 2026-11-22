@@ -670,9 +670,8 @@ const auto omni::ryml::cp::to_type<basic_customization::my_integer> =
 template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
   [](omni::ryml::write_state_like auto state,
-    const basic_customization::my_integer &value,
-    ::ryml::NodeRef node) -> void {
-    omni::ryml::map_integral(std::move(state), value.value, node);
+    const basic_customization::my_integer &value) -> ::ryml::NodeRef {
+    return omni::ryml::map_integral(std::move(state), value.value);
   };
 
 namespace {
@@ -727,10 +726,10 @@ template <>
 struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_write_state<State>::value))
-  void operator()(State state,
-    const basic_customization::my_cpp11_integer &value,
-    ::ryml::NodeRef node) const {
-    omni::ryml::map_integral(std::move(state), value.value, node);
+  auto operator()(State state,
+    const basic_customization::my_cpp11_integer &value) const
+    -> ::ryml::NodeRef {
+    return omni::ryml::map_integral(std::move(state), value.value);
   }
 };
 
@@ -773,9 +772,8 @@ const auto omni::ryml::cp::to_type<basic_customization::my_container> =
 template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_container> =
   [](omni::ryml::write_state_like auto state,
-    const basic_customization::my_container &value,
-    ::ryml::NodeRef node) -> void {
-    omni::ryml::map_range(std::move(state), value.values, node);
+    const basic_customization::my_container &value) -> ::ryml::NodeRef {
+    return omni::ryml::map_range(std::move(state), value.values);
   };
 
 namespace {
@@ -818,9 +816,8 @@ const auto omni::ryml::cp::to_type<basic_customization::my_string> =
 template <>
 const auto omni::ryml::cp::from_type<basic_customization::my_string> =
   [](omni::ryml::write_state_like auto state,
-    const basic_customization::my_string &value,
-    ::ryml::NodeRef node) -> void {
-    omni::ryml::map_string_like(std::move(state), value.value, node);
+    const basic_customization::my_string &value) -> ::ryml::NodeRef {
+    return omni::ryml::map_string_like(std::move(state), value.value);
   };
 
 namespace {
@@ -1791,15 +1788,16 @@ struct to_type_t<customization_mapping::extended_values> {
 template <>
 struct from_type_t<customization_mapping::extended_values> {
   template <typename T, omni::ryml::write_state_like State>
-  void operator()(State context, const T &value, ::ryml::NodeRef node) const {
-    map_range(std::move(context), value, node);
+  auto operator()(State context, const T &value) const -> ::ryml::NodeRef {
+    auto node = map_range(context, value);
 
     const auto binding = omni::meta_for<T>::bind(value);
     binding.accessible_data_members()
       | fn::each(
         [&node, context](omni::data_member_binding auto field) -> void {
-          core::write_node(context, field.value(), node.append_child());
+          core::write_node(context.at(node.append_child()), field.value());
         });
+    return node;
   }
 };
 
@@ -1833,10 +1831,9 @@ struct to_type_t<customization_mapping::integer> {
 template <>
 struct from_type_t<customization_mapping::integer> {
   template <omni::ryml::write_state_like State>
-  void operator()(State context,
-    const customization_mapping::integer &value,
-    ::ryml::NodeRef node) const {
-    core::write_node(std::move(context), value.value, node);
+  auto operator()(State context,
+    const customization_mapping::integer &value) const -> ::ryml::NodeRef {
+    return core::write_node(std::move(context), value.value);
   }
 };
 

@@ -10,6 +10,7 @@
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -979,6 +980,7 @@ private:
 };
 
 /** Serialization policy, local mapping selection, and schema position.
+ * State and node handles borrow the active builder call and must not escape it.
  * Root states are created by the tree builders; custom mappings copy the
  * supplied state or derive children. BorrowStrings permits borrowing
  * source-backed strings; temporary owning conversions are still copied.
@@ -994,6 +996,17 @@ struct write_state_t {
 
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
   const typename StateConfig::map_node_type &map_node;
+
+  /** Destination node, valid only during the active builder call. */
+  ::ryml::NodeRef node() const { return {this->tree, this->node_id}; }
+
+  /** Copy this traversal context for another node in its output tree.
+   * Path and depth are unchanged; use child(), field(), or element() for
+   * a schema edge. @pre destination is a readable node in the same tree. */
+  write_state_t at(::ryml::NodeRef destination) const {
+    assert(destination.readable() && destination.tree() == this->tree);
+    return {*this, destination.id()};
+  }
 
   /** Tree depth, starting at zero for the root.
    * child(), field(), and element() increment it; optional unwrapping does not.
@@ -1061,10 +1074,18 @@ private:
 
   template <typename ParentConfig>
   constexpr write_state_t(const write_state_t<ParentConfig> &parent)
-    : map_node(parent.map_node) {}
+    : map_node(parent.map_node), tree(parent.tree),
+      node_id(parent.node_id) {}
 
-  constexpr write_state_t(const typename StateConfig::map_node_type &mapping)
-    : map_node(mapping) {}
+  constexpr write_state_t(const typename StateConfig::map_node_type &mapping,
+    ::ryml::Tree *tree, ::ryml::id_type node_id)
+    : map_node(mapping), tree(tree), node_id(node_id) {}
+
+  constexpr write_state_t(const write_state_t &parent, ::ryml::id_type node_id)
+    : map_node(parent.map_node), tree(parent.tree), node_id(node_id) {}
+
+  ::ryml::Tree *tree;
+  ::ryml::id_type node_id;
 };
 
 /** Whether T is a read_state_t specialization, ignoring cv/ref qualifiers. */

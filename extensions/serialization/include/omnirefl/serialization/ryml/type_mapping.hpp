@@ -230,7 +230,7 @@ static constexpr const map_node_to_enum_t<> &map_node_to_enum =
  * Members are mapped through state.map_node.
  *
 ```
-map_record :: (state, const T&, node) -> void
+map_record :: (state, const T&) -> node
 ```
  *
  * @pre Record metadata must be available in reflected scope. */
@@ -251,8 +251,7 @@ struct map_record_t:
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
       is_write_state<State>>::value))
-  auto operator()(State context, const T &value, ::ryml::NodeRef node) const
-    -> void;
+  auto operator()(State context, const T &value) const -> ::ryml::NodeRef;
 
 // Ad hoc: classes with bases are not aggregates before C++17. These
 // constructors preserve field initialization in the older standards.
@@ -276,7 +275,7 @@ static constexpr const map_record_t<> &map_record =
 /** Maps a reflected enum value to its declared name as a quoted scalar.
  *
 ```
-map_enum :: (state, T, node) -> void
+map_enum :: (state, T) -> node
 ```
  *
  * @pre Metadata for T must be available in reflected scope. */
@@ -297,7 +296,7 @@ struct map_enum_t:
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_enum<T>,
       is_write_state<State>>::value))
-  auto operator()(State, T value, ::ryml::NodeRef node) const -> void;
+  auto operator()(State, T value) const -> ::ryml::NodeRef;
 
 // Ad hoc: classes with bases are not aggregates before C++17. These
 // constructors preserve field initialization in the older standards.
@@ -740,7 +739,7 @@ static constexpr const map_range_node_t<> &map_range_node =
  * String conversion uses \ref adapt::as_string.
  *
 ```
-map_string_like :: (state, const T&, node) -> void
+map_string_like :: (state, const T&) -> node
 ```
  */
 struct map_string_like_t: detail::with_depth_exceeded_operator {
@@ -749,7 +748,7 @@ struct map_string_like_t: detail::with_depth_exceeded_operator {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_string_like<T>,
       is_write_state<State>>::value))
-  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
+  auto operator()(State, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -762,7 +761,7 @@ static constexpr const map_string_like_t &map_string_like =
 /** Maps a Boolean value to a JSON/YAML scalar.
  *
 ```
-map_boolean :: (state, T, node) -> void
+map_boolean :: (state, T) -> node
 ```
  */
 struct map_boolean_t: detail::with_depth_exceeded_operator {
@@ -771,7 +770,7 @@ struct map_boolean_t: detail::with_depth_exceeded_operator {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
-  void operator()(State, const T &value, ::ryml::NodeRef node) const;
+  auto operator()(State, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -784,7 +783,7 @@ static constexpr const map_boolean_t &map_boolean =
 /** Maps an integral value to a JSON/YAML scalar.
  *
 ```
-map_integral :: (state, const T&, node) -> void
+map_integral :: (state, const T&) -> node
 ```
  */
 struct map_integral_t: detail::with_depth_exceeded_operator {
@@ -794,7 +793,7 @@ struct map_integral_t: detail::with_depth_exceeded_operator {
     (std::is_integral<T>::value
       && !std::is_same<bool, compat::remove_cv_t<T>>::value
       && is_write_state<State>::value))
-  void operator()(State, const T &value, ::ryml::NodeRef node) const;
+  auto operator()(State, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -808,7 +807,7 @@ static constexpr const map_integral_t &map_integral =
  * Preserves enough significant digits for round-trip conversion.
  *
 ```
-map_floating_point :: (state, const T&, node) -> void
+map_floating_point :: (state, const T&) -> node
 ```
  */
 struct map_floating_point_t: detail::with_depth_exceeded_operator {
@@ -816,7 +815,7 @@ struct map_floating_point_t: detail::with_depth_exceeded_operator {
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_floating_point<T>::value && is_write_state<State>::value))
-  void operator()(State, const T &value, ::ryml::NodeRef node) const;
+  auto operator()(State, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -829,7 +828,7 @@ static constexpr const map_floating_point_t &map_floating_point =
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
  *
 ```
-map_arithmetic :: (state, const T&, node) -> void
+map_arithmetic :: (state, const T&) -> node
 ```
  */
 struct map_arithmetic_t: detail::with_depth_exceeded_operator {
@@ -837,7 +836,7 @@ struct map_arithmetic_t: detail::with_depth_exceeded_operator {
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (std::is_arithmetic<T>::value && is_write_state<State>::value))
-  auto operator()(State, const T &value, ::ryml::NodeRef node) const -> void;
+  auto operator()(State, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -848,10 +847,10 @@ static constexpr const map_arithmetic_t &map_arithmetic =
 #endif
 
 /** Maps an empty optional to null, or maps its contained value to a node.
- * Contained values use \ref reflected_scope::mapping_from_type.
+ * Contained values are mapped through state.map_node.
  *
 ```
-map_optional_like :: (state, const T&, node) -> void
+map_optional_like :: (state, const T&) -> node
 ```
  */
 struct map_optional_like_t: detail::with_depth_exceeded_operator {
@@ -859,8 +858,7 @@ struct map_optional_like_t: detail::with_depth_exceeded_operator {
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
-  auto operator()(State context, const T &value, ::ryml::NodeRef node) const
-    -> void;
+  auto operator()(State context, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -873,7 +871,7 @@ static constexpr const map_optional_like_t &map_optional_like =
 /** Maps key/value ranges to objects and element ranges to arrays.
  *
 ```
-map_range :: (state, const T&, node) -> void
+map_range :: (state, const T&) -> node
 ```
  *
  * Elements are mapped through state.map_node; empty optional array elements
@@ -885,7 +883,7 @@ struct map_range_t: detail::with_depth_exceeded_operator {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
-  void operator()(State context, const T &value, ::ryml::NodeRef node) const;
+  auto operator()(State context, const T &value) const -> ::ryml::NodeRef;
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -996,9 +994,11 @@ struct to_type_t: traits::cp::unavailable {};
  * the dispatcher selects a default otherwise.
  *
 ```
-cp::from_type<T> :: (state, const T&, node) -> void
+cp::from_type<T> :: (state, const T&) -> node
 ```
  *
+ * State supplies the destination node through state.node(); returned nodes
+ * borrow the active builder call and must not escape it.
  * A generic State parameter preserves child paths and local selectors;
  * its constraint is is_write_state.
  *
@@ -1010,7 +1010,14 @@ constexpr traits::cp::unavailable from_type{};
 #endif
 
 /** C++11-compatible C++-to-node customization. Unregistered types use a
- * default mapping function. A generic State parameter preserves child paths
+ * default mapping function.
+ *
+```
+cp::from_type_t<T> :: (state, const T&) -> node
+```
+ *
+ * State supplies the destination through state.node(); returned nodes must
+ * not escape the active builder call. A generic State preserves child paths
  * and local selectors; its constraint is is_write_state.
  * A scalar wrapper can delegate conversion to its wrapped value:
  *
@@ -1021,10 +1028,9 @@ template <>
 struct omni::ryml::cp::from_type_t<counter> {
   OMNI_CONSTRAINED_TEMPLATE((typename State),
     (omni::ryml::is_write_state<State>::value))
-  void operator()(State context,
-    const counter &value,
-    ::ryml::NodeRef node) const {
-    omni::ryml::map_integral(context, value.value, node);
+  auto operator()(State context,
+    const counter &value) const -> ::ryml::NodeRef {
+    return omni::ryml::map_integral(context, value.value);
   }
 };
 ```
@@ -1150,7 +1156,7 @@ OMNI_CPP14_CONSTEXPR auto mapping_to_type(omni::type_t<T>)
  * are diagnosed before invoking the mapping function.
  *
 ```
-mapping_from_type :: type<T> -> ((state, const T&, node) -> void)
+mapping_from_type :: type<T> -> ((state, const T&) -> node)
 ```
  *
  * @pre Metadata required by the selected mapping is available in reflected

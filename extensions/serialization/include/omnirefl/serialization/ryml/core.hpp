@@ -307,11 +307,12 @@ OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
 auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-/** Terminal write; see the depth-overflow FIXME in impl/depth.hpp. */
+/** Terminal write returns an invalid node without modifying the tree.
+ * See the depth-overflow FIXME in impl/depth.hpp. */
 template <typename T>
-void write_node(const depth_exceeded &stopped, const T &value,
-  ::ryml::NodeRef node) {
-  omni::ryml::detail::with_depth_exceeded_operator{}(stopped, value, node);
+auto write_node(const depth_exceeded &stopped, const T &value)
+  -> ::ryml::NodeRef {
+  return omni::ryml::detail::with_depth_exceeded_operator{}(stopped, value);
 }
 
 // REFACTORME: [high] This selects and invokes a mapping via state.map_node.
@@ -319,7 +320,7 @@ void write_node(const depth_exceeded &stopped, const T &value,
 /** Dispatch one value through its serialization customization or default. */
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_write_state<State>::value))
-void write_node(State context, const T &value, ::ryml::NodeRef node);
+auto write_node(State context, const T &value) -> ::ryml::NodeRef;
 
 /** (Ad hoc: see detail) Map Boolean, integer, or real JSON/YAML nodes
  * into corresponding fundamental C++ types.
