@@ -288,19 +288,21 @@ class optional_serialization:
     public testing::TestWithParam<::ryml::EmitType_e> {};
 
 TEST_P(optional_serialization, writes_present_and_empty_scalar_roots) {
-  const omni::ryml::serialize_t<> emit{GetParam()};
+  const auto serialize = omni::ryml::serialize
+    .tdm_format([this](::ryml::EmitType_e) { return GetParam(); });
   EXPECT_TRUE(serialization_test::matches_json(
-    "null", emit(omni::compat::optional<int>{})));
+    "null", serialize(omni::compat::optional<int>{})));
   EXPECT_TRUE(serialization_test::matches_json(
-    "0", emit(omni::compat::optional<int>{0})));
+    "0", serialize(omni::compat::optional<int>{0})));
   EXPECT_TRUE(serialization_test::matches_json(
-    "false", emit(omni::compat::optional<bool>{false})));
+    "false", serialize(omni::compat::optional<bool>{false})));
   EXPECT_TRUE(serialization_test::matches_json(
-    R"("null")", emit(omni::compat::optional<std::string>{"null"})));
+    R"("null")", serialize(omni::compat::optional<std::string>{"null"})));
 }
 
 TEST_P(optional_serialization, preserves_present_false_values) {
-  const omni::ryml::serialize_t<> emit{GetParam()};
+  const auto serialize = omni::ryml::serialize
+    .tdm_format([this](::ryml::EmitType_e) { return GetParam(); });
   const std::vector<omni::compat::optional<int>> integers{
     omni::compat::nullopt, 0, 7, omni::compat::nullopt};
 
@@ -310,11 +312,11 @@ TEST_P(optional_serialization, preserves_present_false_values) {
   const std::vector<omni::compat::optional<std::string>> strings{
     std::string{}, omni::compat::nullopt, std::string{"null"}};
 
-  EXPECT_TRUE(serialization_test::matches_json("[0, 7]", emit(integers)));
+  EXPECT_TRUE(serialization_test::matches_json("[0, 7]", serialize(integers)));
   EXPECT_TRUE(serialization_test::matches_json(
-    "[false, true]", emit(booleans)));
+    "[false, true]", serialize(booleans)));
   EXPECT_TRUE(serialization_test::matches_json(
-    R"(["", "null"])", emit(strings)));
+    R"(["", "null"])", serialize(strings)));
 }
 
 TEST_P(optional_serialization, writes_empty_sequence_for_empty_elements) {
@@ -322,11 +324,12 @@ TEST_P(optional_serialization, writes_empty_sequence_for_empty_elements) {
     omni::compat::nullopt, omni::compat::nullopt};
 
   EXPECT_TRUE(serialization_test::matches_json(
-    "[]", omni::ryml::serialize_t<>{GetParam()}(values)));
+    "[]", serialization_test::serialize(GetParam(), values)));
 }
 
 TEST_P(optional_serialization, handles_nested_optionals_and_sequences) {
-  const omni::ryml::serialize_t<> emit{GetParam()};
+  const auto serialize = omni::ryml::serialize
+    .tdm_format([this](::ryml::EmitType_e) { return GetParam(); });
   const auto empty = omni::compat::make_optional<omni::compat::optional<int>>(
     omni::compat::nullopt);
 
@@ -336,9 +339,10 @@ TEST_P(optional_serialization, handles_nested_optionals_and_sequences) {
   const auto sequences = make_vector<omni::compat::optional<std::vector<int>>>(
     omni::compat::nullopt, std::vector<int>{}, std::vector<int>{7});
 
-  EXPECT_TRUE(serialization_test::matches_json("null", emit(empty)));
-  EXPECT_TRUE(serialization_test::matches_json("[7]", emit(nested)));
-  EXPECT_TRUE(serialization_test::matches_json("[[], [7]]", emit(sequences)));
+  EXPECT_TRUE(serialization_test::matches_json("null", serialize(empty)));
+  EXPECT_TRUE(serialization_test::matches_json("[7]", serialize(nested)));
+  EXPECT_TRUE(serialization_test::matches_json(
+    "[[], [7]]", serialize(sequences)));
 }
 
 INSTANTIATE_TEST_SUITE_P(formats,

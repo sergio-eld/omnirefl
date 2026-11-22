@@ -56,6 +56,7 @@
  *   advanced.composed_record_mapping - nested lookup for vector elements
  *   advanced.mutating_scalar_mapping - exceptional pointer-only conversion
  *   advanced.mutating_record_mapping - existing records and state delegation
+ *   advanced.serialize_static_fields - adjust a shared record strategy
  *   advanced.tree_ownership - choose owning or borrowed string storage
  *   advanced.borrowed_input - tree and diagnostic lifetimes
  *
@@ -64,6 +65,8 @@
  *     select scalar, container, record, and custom mappings
  *   customization_mapping.standard_range_insertion
  *     reuse insertion adapters without another mapping adapter
+ *   customization_mapping.field_aliases - accept alternate record field names
+ *   customization_mapping.enum_aliases - accept alternate enumerator names
  *   extended_container_mapping.appends_members_and_restores_them
  *     combine an inherited container with appended record members
  *   invalid_extended_container_mapping.rejects_invalid_contents
@@ -1473,6 +1476,52 @@ TEST(advanced, mutating_record_mapping) {
   EXPECT_EQ(443, into.port);
 }
 
+namespace static_field_serialization {
+
+struct settings {
+  std::string name;
+  static constexpr int revision = 1;
+};
+
+} // namespace static_field_serialization
+
+/** Shared record strategies omit static members by default. This local writer
+ * includes them in the output, without changing the C++ type or its global
+ * customization. Deserialization always excludes static members. */
+TEST(advanced, serialize_static_fields) {
+  using static_field_serialization::settings;
+
+  constexpr auto serialize = omni::ryml::serialize
+    .tdm_map_node([](auto) {
+      return []<typename T>(auto state, omni::type_t<T> type) {
+        if constexpr (std::is_same_v<T, settings>) {
+          return omni::ryml::reflected_scope::from_record
+            .tdm_strategy([](auto strategy) {
+              return strategy.tdm_filter_fields([](auto) {
+                return omni::fn::is_non_functional;
+              });
+            });
+        } else {
+          return omni::ryml::reflected_scope::fn::mapping_from_type(
+            state, type);
+        }
+      };
+    });
+
+  const settings value{.name = "api"};
+  EXPECT_TRUE(same_document(R"({"name":"api"})",
+    omni::ryml::serialize(value)));
+  EXPECT_TRUE(same_document(R"({"name":"api","revision":1})",
+    serialize(value)));
+
+  const auto result = omni::ryml::deserialize(
+    omni::type<settings>, R"({"name":"api"})");
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value)
+    EXPECT_EQ("api", result.value->name);
+}
+
 namespace {
 
 namespace tree_ownership {
@@ -1666,27 +1715,23 @@ cp::to_type<T> :: {
 namespace cp {
 
 // A configured default compositor can be registered without a wrapper.
-#if 0
-// TODO: [high] Move alias configuration to the model customization API.
 template <>
 const auto to_type<customization_mapping::record> =
-  reflected_scope::to_record.tdm_name_by_alias(
-    [](const auto &) {
-      return aliases_dict(std::tuple{"count", "legacy_count"});
-    });
-#endif
+  reflected_scope::default_to_record(omni::type<customization_mapping::record>,
+    omni::mapping::record_strategy.tdm_aliases_by_name([](auto) {
+      return omni::mapping::aliases_dict(std::tuple{"count", "legacy_count"});
+    }));
 
 template <>
 const auto from_type<customization_mapping::record> =
   reflected_scope::from_record;
 
-#if 0
-// TODO: [high] Move alias configuration to the model customization API.
 template <>
 const auto to_type<customization_mapping::status> =
-  reflected_scope::to_enum.tdm_value_by_alias(
-    [](const auto &) { return aliases_dict(std::tuple{"busy", "working"}); });
-#endif
+  reflected_scope::default_to_enum(omni::type<customization_mapping::status>,
+    omni::mapping::enum_strategy.tdm_aliases_by_name([](auto) {
+      return omni::mapping::aliases_dict(std::tuple{"busy", "working"});
+    }));
 
 template <>
 const auto from_type<customization_mapping::status> =
@@ -1855,8 +1900,6 @@ TEST(customization_mapping, standard_range_insertion) {
  * among aliases when the canonical name is absent.
  * Alias sets must not overlap other members' names or aliases. The dictionary
  * borrows its names; these literals have static storage. */
-#if 0
-// TODO: [high] Restore this example through model alias configuration.
 TEST(customization_mapping, field_aliases) {
   const auto result = omni::ryml::deserialize(
     omni::type<customization_mapping::record>,
@@ -1888,13 +1931,10 @@ TEST(customization_mapping, field_aliases) {
     EXPECT_EQ(7, canonical.value->count);
 }
 
-#endif
 
 /** Enum aliases accept alternative text without changing serialized enumerator
  * names. The configured enum compositor still rejects unknown text and values
  * whose node kind is not a string. */
-#if 0
-// TODO: [high] Restore this example through model alias configuration.
 TEST(customization_mapping, enum_aliases) {
   const auto result = omni::ryml::deserialize(
     omni::type<customization_mapping::status>, R"("working")");
@@ -1908,7 +1948,6 @@ TEST(customization_mapping, enum_aliases) {
   EXPECT_EQ(R"("busy")", omni::ryml::as_json(*result.value));
 }
 
-#endif
 
 struct extended_container_case {
   std::string name;

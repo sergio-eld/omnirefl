@@ -76,6 +76,11 @@ auto invoke_expected_node(State state,
 }
 
 inline issue node_function_error(issue error, ::ryml::ConstNodeRef node) {
+  // An absent optional has a schema value but no document node. Its caller
+  // supplies the missing-field path after validation.
+  if (node.invalid())
+    return error;
+
   if (error.node_id == ::ryml::NONE) {
     auto prefix = core::node_path(node);
     prefix.insert(prefix.end(), error.path.begin(), error.path.end());

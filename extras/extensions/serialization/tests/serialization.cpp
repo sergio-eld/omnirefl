@@ -317,7 +317,7 @@ TEST_P(enum_fields, emits_a_canonical_name_for_aliased_values) {
     EXPECT_TRUE(serialization_test::matches_json(
       execution_state::stopped == value
         ? R"({"state": "stopped"})" : R"({"state": "active"})",
-      omni::ryml::serialize_t<>{/*format=*/GetParam()}(enum_record{value})));
+      serialization_test::serialize(GetParam(), enum_record{value})));
   }
 }
 
@@ -593,9 +593,7 @@ class serialization: public testing::TestWithParam<::ryml::EmitType_e> {};
 
 TEST_P(serialization, writes_record_fields_with_their_document_types) {
   const serialization_data::payload value{"Ada", 815};
-  const auto output = omni::ryml::serialize_t<>{
-    /*format=*/GetParam(),
-  }(value);
+  const auto output = serialization_test::serialize(GetParam(), value);
   EXPECT_TRUE(
     serialization_test::matches_json(R"({"name": "Ada", "code": 815})",
       output));
@@ -619,9 +617,7 @@ TEST_P(serialization, writes_nested_records_and_sequences) {
     "oceanic",
     {{"Ada", 815}, {"Grace", 108}},
   };
-  const auto output = omni::ryml::serialize_t<>{
-    /*format=*/GetParam(),
-  }(value);
+  const auto output = serialization_test::serialize(GetParam(), value);
   EXPECT_TRUE(serialization_test::matches_json(
     R"(
 {
@@ -2255,9 +2251,7 @@ TEST(deserialization_warnings, required_records_share_the_hard_error_budget) {
     serialization_test::render_diagnostics(result.diagnostics));
 }
 
-constexpr omni::ryml::serialize_t<> json_serializer{
-  /*format=*/::ryml::EMIT_JSON,
-};
+constexpr auto json_serializer = omni::ryml::serialize;
 static_assert(::ryml::EMIT_YAML == omni::ryml::as_yaml.format,
   "as_yaml must emit YAML");
 static_assert(::ryml::EMIT_JSON == omni::ryml::as_json.format,
@@ -2291,9 +2285,7 @@ struct empty_values {
 };
 
 TEST_P(serialization, retains_empty_strings_containers_and_records) {
-  const auto output = omni::ryml::serialize_t<>{
-    /*format=*/GetParam(),
-  }(empty_values{});
+  const auto output = serialization_test::serialize(GetParam(), empty_values{});
   EXPECT_TRUE(serialization_test::matches_json(
     R"({"name": "", "values": [], "records": [], "object": {}})",
     output));
@@ -2313,9 +2305,7 @@ int record_with_shared_state::shared = 42;
 
 TEST_P(serialization, omits_static_data_members) {
   EXPECT_TRUE(serialization_test::matches_json(R"({"value": 7})",
-    omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(record_with_shared_state{7})));
+    serialization_test::serialize(GetParam(), record_with_shared_state{7})));
 }
 
 TEST(deserialization, does_not_require_or_write_static_data_members) {
@@ -2359,31 +2349,25 @@ TEST(deserialization, allowed_extra_fields_do_not_write_static_storage) {
 
 TEST_P(serialization, writes_an_empty_root_record) {
   EXPECT_TRUE(serialization_test::matches_json(R"({})",
-    omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(empty_record{})));
+    serialization_test::serialize(GetParam(), empty_record{})));
 }
 
 TEST_P(serialization, writes_root_string_sequence) {
   EXPECT_TRUE(serialization_test::matches_json(R"(["first", "second"])",
-    omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(std::vector<std::string>{"first", "second"})));
+    serialization_test::serialize(GetParam(),
+      std::vector<std::string>{"first", "second"})));
 }
 
 TEST_P(serialization, writes_empty_root_sequence) {
   EXPECT_TRUE(serialization_test::matches_json(R"([])",
-    omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(std::vector<int>{})));
+    serialization_test::serialize(GetParam(), std::vector<int>{})));
 }
 
 TEST_P(serialization, writes_nested_root_sequences_of_records) {
   EXPECT_TRUE(
     serialization_test::matches_json(R"([[{"name": "Iris", "code": 42}]])",
-      omni::ryml::serialize_t<>{
-        /*format=*/GetParam(),
-      }(std::vector<std::vector<serialization_data::payload>>{
+      serialization_test::serialize(GetParam(),
+        std::vector<std::vector<serialization_data::payload>>{
         {serialization_data::payload{"Iris", 42}}})));
 }
 
@@ -2398,18 +2382,15 @@ struct boolean_values {
 TEST_P(serialization, writes_booleans_and_boolean_sequences_as_words) {
   EXPECT_TRUE(serialization_test::matches_json(
     R"({"enabled": false, "flags": [true, false]})",
-    omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(boolean_values{false, {true, false}})));
+    serialization_test::serialize(GetParam(),
+      boolean_values{false, {true, false}})));
 }
 
 TEST_P(serialization, reads_bitfields_without_mutating_the_source) {
   const serialization_data::bitfield_values value{815, true};
   EXPECT_TRUE(
     serialization_test::matches_json(R"({"code": 815, "enabled": true})",
-      omni::ryml::serialize_t<>{
-        /*format=*/GetParam(),
-      }(value)));
+      serialization_test::serialize(GetParam(), value)));
   EXPECT_EQ(815U, value.code);
   EXPECT_TRUE(value.enabled);
 }
@@ -2432,16 +2413,12 @@ struct read_only_record {
 
 TEST_P(serialization, includes_const_public_fields_and_omits_private_fields) {
   EXPECT_TRUE(serialization_test::matches_json(R"({"code": 42, "name": "Ada"})",
-    omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(read_only_record{})));
+    serialization_test::serialize(GetParam(), read_only_record{})));
 }
 
 TEST_P(serialization, preserves_private_state) {
   const read_only_record value{};
-  const auto source = omni::ryml::serialize_t<>{
-    /*format=*/GetParam(),
-  }(value);
+  const auto source = serialization_test::serialize(GetParam(), value);
 
   EXPECT_EQ(815, value.hidden_value());
   EXPECT_FALSE(source.empty());
@@ -2475,9 +2452,7 @@ TEST_P(serialization,
       std::numeric_limits<double>::max(),
       -0.125},
   };
-  const auto output = omni::ryml::serialize_t<>{
-    /*format=*/GetParam(),
-  }(value);
+  const auto output = serialization_test::serialize(GetParam(), value);
   const auto restored =
     strict_deserialize(omni::type_t<numeric_values>{}, output);
 
@@ -2497,9 +2472,7 @@ TEST_P(serialization, serialized_text_outlives_the_source) {
   std::string output;
   {
     serialization_data::payload value{std::string(4096, 'x'), 815};
-    output = omni::ryml::serialize_t<>{
-      /*format=*/GetParam(),
-    }(value);
+    output = serialization_test::serialize(GetParam(), value);
     value.name.assign(4096, 'y');
   }
   const auto restored =
@@ -2540,9 +2513,8 @@ TEST_P(serialized_strings,
   preserves_string_types_and_escapes_special_characters) {
   omni::compat::apply(
     [](::ryml::EmitType_e format, const string_case &c) {
-      const auto output = omni::ryml::serialize_t<>{
-        /*format=*/format,
-      }(serialization_data::payload{c.text, 815});
+      const auto output = serialization_test::serialize(format,
+        serialization_data::payload{c.text, 815});
       EXPECT_TRUE(serialization_test::matches_json(c.json, output));
     },
     GetParam());

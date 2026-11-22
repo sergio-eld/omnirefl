@@ -18,7 +18,6 @@ namespace {
 template <typename T>
 struct endpoint { T port; };
 
-// TODO: [high] Move this alias fixture to the model customization API.
 struct endpoint_names {
   omni::compat::optional<omni::compat::string_view> operator()(
     omni::compat::string_view alias) const {
@@ -72,7 +71,8 @@ const auto from_type<endpoint<T>> = [](auto state,
 template <typename T>
 const auto to_type<endpoint<T>> =
   compose::with_node_check<core::expect_object_node>(
-    reflected_scope::to_record_t<endpoint_names>{});
+    reflected_scope::to_record_t<mapping::record_strategy_t<
+        decltype(mapping::record_strategy.filter_fields), endpoint_names>>{});
 #else
 template <typename T>
 struct from_type_t<endpoint<T>> {
@@ -88,7 +88,8 @@ struct from_type_t<endpoint<T>> {
 template <typename T>
 struct to_type_t<endpoint<T>>:
     decltype(compose::with_node_check<core::expect_object_node>(
-      reflected_scope::to_record_t<endpoint_names>{})) {};
+      reflected_scope::to_record_t<mapping::record_strategy_t<
+        decltype(mapping::record_strategy.filter_fields), endpoint_names>>{})) {};
 #endif
 
 // Initialized captures must survive dispatcher selection in both directions.
@@ -464,12 +465,12 @@ TEST(type_mapping, selects_reflected_defaults) {
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_record(
         omni::type_t<uncustomized_record>{})),
-      omni::ryml::reflected_scope::from_record_t>{},
+      omni::ryml::reflected_scope::from_record_t<>>{},
     omni::type_t<uncustomized_record>{});
   omni::reflected_call(cpp11_check_mapping_types<
       decltype(omni::ryml::reflected_scope::default_to_enum(
         omni::type_t<uncustomized_enum>{})),
-      omni::ryml::reflected_scope::from_enum_t>{},
+      omni::ryml::reflected_scope::from_enum_t<>>{},
     omni::type_t<uncustomized_enum>{});
 }
 

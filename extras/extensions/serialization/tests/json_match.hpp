@@ -81,6 +81,13 @@ auto map_using(const omni::ryml::config_t<> &options, const Mapping &mapping,
   return map(into, node);
 }
 
+// Both format rows use the public configurable serialization binding.
+template <typename T>
+std::string serialize(::ryml::EmitType_e format, const T &value) {
+  return omni::ryml::serialize
+    .tdm_format([format](::ryml::EmitType_e) { return format; })(value);
+}
+
 // Existing conformance cases compare rendered text as well as structured data.
 struct render_collected_diagnostics {
   std::string operator()(const collected_diagnostics &report) const {
