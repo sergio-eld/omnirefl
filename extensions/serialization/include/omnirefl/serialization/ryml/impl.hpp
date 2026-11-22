@@ -255,7 +255,11 @@ auto parse_error_diagnostics(Config &&options, std::string message)
   -> diagnostics_result_t<Config> {
   const ::ryml::Tree tree{/*node_capacity=*/0, /*arena_capacity=*/0};
   diagnostics report{
-    /*config=*/{options.error_policy, {}},
+    /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      options.error_policy, {}},
     /*issues=*/{
       core::make_issue(json::issue_code::parse_error,
         json::value_kind::unknown, ::ryml::ConstNodeRef{}),
@@ -279,7 +283,11 @@ auto deserialize(Config &&options, const MapNode &map_node,
         std::forward<Config>(options), std::move(parsed.error())),
     };
 
-  const map_by_schema_t<Config &, const MapNode &> map{options, map_node};
+  const map_by_schema_t<Config &, const MapNode &> map{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    options, map_node};
   auto mapped = map(destination, parsed->crootref());
 
   return {
@@ -371,7 +379,11 @@ template <typename T>
 template <typename MapNode>
 template <typename Value>
 std::string serialize_t<MapNode>::operator()(const Value &value) const {
-  const auto tree = as_ref_tree_t<const MapNode &>{this->map_node}(value);
+  const auto tree = as_ref_tree_t<const MapNode &>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    this->map_node}(value);
 
   // Reserve an initial estimate without a sizing traversal. Borrowed strings,
   // escaping, or deeper YAML indentation may require an emitter resize/retry.

@@ -2,9 +2,10 @@
 
 /** Shared mapping configuration, diagnostics, and read/write states. */
 
-#include <omnirefl/traits.hpp>
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/static_string.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_config.hpp>
+#include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -50,7 +51,8 @@ enum class issue_code : std::uint8_t {
   duplicate_field,
   parse_error,
   warning_limit_exceeded,
-  duplicate_element //< Repeated value in a unique-element destination.
+  duplicate_element, //< Repeated value in a unique-element destination.
+  depth_limit_exceeded //< Traversal would exceed the configured tree depth.
 };
 
 /** Value categories used in mapping expectations and observed input.
@@ -138,7 +140,6 @@ struct as_ref_tree_t;
 /** Render issue records using their source tree while it is alive. */
 struct render_diagnostics_t {
   std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
-
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
@@ -153,55 +154,29 @@ static constexpr const render_diagnostics_t &render_diagnostics =
  * Earlier standards can use tdm_transform_diagnostics to change the callable
  * type without spelling the resulting config specialization. */
 template <typename TransformDiagnostics = render_diagnostics_t>
-struct config_t {
+struct config_t:
+    detail::tdm_for_config<TransformDiagnostics> {
+  using tdm_provider = detail::tdm_for_config<TransformDiagnostics>;
+
   json::error_policy error_policy OMNI_CPP14_DEFAULT_INIT();
 
   // Called with the live source tree and collected diagnostics on every result.
   TransformDiagnostics transform_diagnostics OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_transform_diagnostics;
 
-  /** (QoL) Transform data member `.transform_diagnostics` inplace.
-   * Configure it within a single expression.
-   * Invokes f immediately with the current callable and returns a new config
-   * containing its result, preserving error_policy and this config.
-   * f :: TransformDiagnostics -> NewTransformDiagnostics.
-   *
-```cpp
-const auto load = omni::ryml::deserialize.tdm_config(
-  [](omni::ryml::config_t<> options) {
-    return options.tdm_transform_diagnostics(
-      [](omni::ryml::render_diagnostics_t previous) {
-        return [previous](const ::ryml::Tree &tree,
-          omni::ryml::diagnostics report) {
-          return previous(tree, report).size();
-        };
-      });
-  });
-``` */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, const TransformDiagnostics &>::value))
-  constexpr auto tdm_transform_diagnostics(F &&f) const &
-    -> config_t<compat::decay_t<
-      compat::invoke_result_t<F &&, const TransformDiagnostics &>>> {
-    return {
-      this->error_policy,
-      /*transform_diagnostics=*/compat::invoke(
-        std::forward<F>(f), this->transform_diagnostics),
-    };
-  }
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr config_t() = default;
 
-  /** Transform `.transform_diagnostics`, consuming this configuration. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (compat::is_invocable<F &&, TransformDiagnostics &&>::value))
-  // C++11 constexpr member functions are implicitly const, preventing moves.
-  OMNI_CPP14_CONSTEXPR auto tdm_transform_diagnostics(F &&f) &&
-    -> config_t<compat::decay_t<
-      compat::invoke_result_t<F &&, TransformDiagnostics &&>>> {
-    return {
-      std::move(this->error_policy),
-      /*transform_diagnostics=*/compat::invoke(std::forward<F>(f),
-        std::move(this->transform_diagnostics)),
-    };
-  }
+  OMNI_CONSTRAINED_TEMPLATE((typename First = json::error_policy,
+    typename Second = TransformDiagnostics),
+    (std::is_constructible<json::error_policy, First &&>::value
+      && std::is_constructible<TransformDiagnostics, Second &&>::value))
+  constexpr config_t(First &&first, Second &&second = Second{})
+    : error_policy(std::forward<First>(first)),
+      transform_diagnostics(std::forward<Second>(second)) {}
+#endif
 };
 
 /** Whether T is a config_t specialization, ignoring cv/ref qualifiers. */
@@ -661,6 +636,35 @@ transform_diagnostics :: (Diagnostics -> Report) -> with_diagnostics<T, Report>
   }
 };
 
+template <typename StateConfig>
+struct read_state_t;
+
+template <typename StateConfig>
+struct write_state_t;
+
+/** Terminal traversal token. Returned instead of a child state when
+ * another edge would exceed the tree-depth limit. It carries no path and
+ * cannot create further children. Reads report an error; writes currently
+ * stop without reporting one (see the write overload's FIXME). */
+struct depth_exceeded {
+  // C++11 return-by-value requires an accessible copy constructor.
+  constexpr depth_exceeded(const depth_exceeded &) = default;
+
+private:
+  template <typename>
+  friend struct read_state_t;
+
+  template <typename>
+  friend struct write_state_t;
+
+  // Ordinary states must not match terminal overloads through conversion.
+  template <typename StateConfig>
+  explicit constexpr depth_exceeded(const read_state_t<StateConfig> &) {}
+
+  template <typename StateConfig>
+  explicit constexpr depth_exceeded(const write_state_t<StateConfig> &) {}
+};
+
 namespace detail {
 
 // The C++11 result is defined after the built-in mapping types are complete.
@@ -727,16 +731,13 @@ struct field_path_name: cpp11_static_string<path_dot, Name> {};
 template <typename... Segments>
 struct schema_path;
 
-// FIXME: [high] Reduce state instantiations for several recursive fields:
+// FIXME: [high] Reduce recursive path/depth specializations. For example:
 //   struct node {
-//     std::vector<node> children;
-//     std::vector<node> alternatives;
-//     std::vector<node> fallbacks;
+//     std::vector<node> children, alternatives, fallbacks;
 //   };
-// Distinct edge orders, e.g. root.children[].alternatives[] and
-// root.alternatives[].children[], create separate state types before edge
-// repetition reuses a path.
-
+// Different field orders form distinct paths; each depth adds another state
+// specialization. The terminal sentinel bounds this expansion but does not
+// prevent excessive compiler memory use before the limit, on reads or writes.
 // Re-entering the same reflected field revisits a recursive schema edge.
 // Reuse its first schema path rather than instantiate unbounded state types.
 template <typename Prefix, typename Segment, typename... Remaining>
@@ -784,47 +785,77 @@ struct schema_path {
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t,
   typename Root = void, typename EnclosingRecord = void,
-  typename Path = schema_path<root_path_name>>
+  typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
+  std::size_t DepthLimit = 10>
 struct read_state_config {
   using config_type = Config;
   using map_node_type = MapNode;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
   using path_type = Path;
+  static constexpr std::size_t depth = Depth;
+  static constexpr std::size_t depth_limit = DepthLimit;
 
   template <typename Record, typename Name>
   using child = read_state_config<Config, MapNode, Root, Record,
-    typename Path::template child<Name>>;
+    typename Path::template child<Name>, Depth + 1, DepthLimit>;
 
   template <typename Record, typename Field>
   using field = read_state_config<Config, MapNode, Root, Record,
-    typename Path::template field<Field>>;
+    typename Path::template field<Field>, Depth + 1, DepthLimit>;
 
   using element = read_state_config<Config, MapNode, Root, EnclosingRecord,
-    typename Path::element>;
+    typename Path::element, Depth + 1, DepthLimit>;
 };
 
 template <bool BorrowStrings = false,
   typename MapNode = reflected_scope::mapping_from_type_t,
   typename Root = void, typename EnclosingRecord = void,
-  typename Path = schema_path<root_path_name>>
+  typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
+  std::size_t DepthLimit = 10>
 struct write_state_config {
   static constexpr bool borrow_strings = BorrowStrings;
   using map_node_type = MapNode;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
   using path_type = Path;
+  static constexpr std::size_t depth = Depth;
+  static constexpr std::size_t depth_limit = DepthLimit;
 
   template <typename Record, typename Name>
   using child = write_state_config<BorrowStrings, MapNode, Root, Record,
-    typename Path::template child<Name>>;
+    typename Path::template child<Name>, Depth + 1, DepthLimit>;
 
   template <typename Record, typename Field>
   using field = write_state_config<BorrowStrings, MapNode, Root, Record,
-    typename Path::template field<Field>>;
+    typename Path::template field<Field>, Depth + 1, DepthLimit>;
 
   using element = write_state_config<BorrowStrings, MapNode, Root,
-    EnclosingRecord, typename Path::element>;
+    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
+};
+
+// Select the terminal token before forming any child configuration or path.
+template <template <typename> class State, typename StateConfig,
+  bool CanDescend = (StateConfig::depth < StateConfig::depth_limit)>
+struct state_children {
+  template <typename Record, typename Name>
+  using child = State<typename StateConfig::template child<Record, Name>>;
+
+  template <typename Record, typename Field>
+  using field = State<typename StateConfig::template field<Record, Field>>;
+
+  using element = State<typename StateConfig::element>;
+};
+
+template <template <typename> class State, typename StateConfig>
+struct state_children<State, StateConfig, false> {
+  template <typename Record, typename Name>
+  using child = depth_exceeded;
+
+  template <typename Record, typename Field>
+  using field = depth_exceeded;
+
+  using element = depth_exceeded;
 };
 
 } // namespace detail
@@ -842,8 +873,9 @@ struct write_state_config {
  * because child paths and local selectors produce different state types.
  * Path-aware selectors take State by value so path() remains a constant
  * expression in C++17/20; config and the selector are still borrowed.
- * Custom mappings retain it by passing state onward; custom field traversal
- * extends it with child(OMNI_META_STRING("field")) and element() for containers.
+ * Same-node indirections forward the existing state. Custom traversal derives
+ * a child state for each edge: child(OMNI_META_STRING("field")) for a named
+ * field, field(meta) for a reflected field, or element() for container values.
  *
 ```cpp
 // Inside a generic mapping selector, from C++17:
@@ -864,8 +896,15 @@ struct read_state_t {
   // (state, type<T>) -> mapping callable; borrowed throughout traversal.
   const typename StateConfig::map_node_type &map_node;
 
-  // Rvalue propagation copies this borrowed traversal token as well.
-  constexpr read_state_t(const read_state_t &) = default;
+  /** Tree depth, starting at zero for the root.
+   * child(), field(), and element() increment it; optional unwrapping does not.
+   * At the limit, these operations return depth_exceeded instead of a state. */
+  static constexpr std::size_t depth() { return StateConfig::depth; }
+
+  /** Maximum tree depth, defaulting to 10. */
+  static constexpr std::size_t depth_limit() {
+    return StateConfig::depth_limit;
+  }
 
   /** Canonical schema path: root.field, with [] for container values.
    * Independent of runtime keys, indices, and input aliases. Recursive schema
@@ -875,30 +914,38 @@ struct read_state_t {
     return StateConfig::path_type::string();
   }
 
-  /** Child state for custom traversal into a named field.
-   * Appends text; field(meta) additionally recognizes recursive schema edges.
-   * Supply child<Record>(name) when entering a different containing record. */
+  /** Child state from a string token: child(OMNI_META_STRING("address"))
+   * appends .address. Every call appends; reflected-field identity is unknown.
+   * Record sets enclosing_record; omitted, the current record is retained.
+   * At depth_limit(), returns depth_exceeded instead. */
   template <typename Record = enclosing_record, typename Name>
   constexpr auto child(Name) const
-    -> read_state_t<typename StateConfig::template child<Record, Name>> {
-    return {this->config, this->error_count, this->warning_count,
-      this->map_node};
+    -> typename detail::state_children<read_state_t, StateConfig>::template
+      child<Record, Name> {
+    return typename detail::state_children<read_state_t, StateConfig>::template
+      child<Record, Name>{*this};
   }
 
-  /** Child state for a reflected field, retaining recursive schema identity.
-   * Supply field<Record>(meta) to set the immediate containing record. */
+  /** Child state from reflected metadata: appends `.` then field.name().
+   * Repeating the same field metadata reuses its first path, removing the
+   * intervening suffix to keep recursive schema paths finite.
+   * Record sets enclosing_record; omitted, the current record is retained.
+   * At depth_limit(), returns depth_exceeded instead. */
   template <typename Record = enclosing_record, typename Field>
   constexpr auto field(Field) const
-    -> read_state_t<typename StateConfig::template field<Record, Field>> {
-    return {this->config, this->error_count, this->warning_count,
-      this->map_node};
+    -> typename detail::state_children<read_state_t, StateConfig>::template
+      field<Record, Field> {
+    return typename detail::state_children<read_state_t, StateConfig>::template
+      field<Record, Field>{*this};
   }
 
-  /** Container-value state; runtime positions and keys share the [] marker. */
+  /** Container-value state: root.items becomes root.items[].
+   * Indices and mapping keys share []; enclosing_record is retained.
+   * At depth_limit(), returns depth_exceeded instead. */
   constexpr auto element() const
-    -> read_state_t<typename StateConfig::element> {
-    return {this->config, this->error_count, this->warning_count,
-      this->map_node};
+    -> typename detail::state_children<read_state_t, StateConfig>::element {
+    return typename detail::state_children<read_state_t, StateConfig>::element{
+      *this};
   }
 
   /** Whether an error or warning budget has been exceeded. */
@@ -908,6 +955,9 @@ struct read_state_t {
         && *this->config.error_policy.warning_limit < this->warning_count);
   }
 
+  // Rvalue propagation copies this borrowed traversal token as well.
+  constexpr read_state_t(const read_state_t &) = default;
+
 private:
   // Child states use other configurations and need constructor access.
   template <typename>
@@ -915,6 +965,11 @@ private:
 
   template <typename, typename>
   friend struct map_by_schema_t;
+
+  template <typename ParentConfig>
+  constexpr read_state_t(const read_state_t<ParentConfig> &parent)
+    : config(parent.config), error_count(parent.error_count),
+      warning_count(parent.warning_count), map_node(parent.map_node) {}
 
   constexpr read_state_t(const typename StateConfig::config_type &options,
     std::size_t errors, std::size_t warnings,
@@ -940,8 +995,15 @@ struct write_state_t {
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
   const typename StateConfig::map_node_type &map_node;
 
-  // Rvalue propagation copies this borrowed traversal token as well.
-  constexpr write_state_t(const write_state_t &) = default;
+  /** Tree depth, starting at zero for the root.
+   * child(), field(), and element() increment it; optional unwrapping does not.
+   * At the limit, these operations return depth_exceeded instead of a state. */
+  static constexpr std::size_t depth() { return StateConfig::depth; }
+
+  /** Maximum tree depth, defaulting to 10. */
+  static constexpr std::size_t depth_limit() {
+    return StateConfig::depth_limit;
+  }
 
   /** Canonical schema path; see read_state_t::path. */
   static constexpr auto path()
@@ -949,28 +1011,42 @@ struct write_state_t {
     return StateConfig::path_type::string();
   }
 
-  /** Child state for custom traversal into a named field.
-   * Appends text; field(meta) additionally recognizes recursive schema edges.
-   * Supply child<Record>(name) when entering a different containing record. */
+  /** Child state from a string token: child(OMNI_META_STRING("address"))
+   * appends .address. Every call appends; reflected-field identity is unknown.
+   * Record sets enclosing_record; omitted, the current record is retained.
+   * At depth_limit(), returns depth_exceeded instead. */
   template <typename Record = enclosing_record, typename Name>
   constexpr auto child(Name) const
-    -> write_state_t<typename StateConfig::template child<Record, Name>> {
-    return {this->map_node};
+    -> typename detail::state_children<write_state_t, StateConfig>::template
+      child<Record, Name> {
+    return typename detail::state_children<write_state_t, StateConfig>::template
+      child<Record, Name>{*this};
   }
 
-  /** Child state retaining a reflected field's recursive schema identity.
-   * Supply field<Record>(meta) to set the immediate containing record. */
+  /** Child state from reflected metadata: appends `.` then field.name().
+   * Repeating the same field metadata reuses its first path, removing the
+   * intervening suffix to keep recursive schema paths finite.
+   * Record sets enclosing_record; omitted, the current record is retained.
+   * At depth_limit(), returns depth_exceeded instead. */
   template <typename Record = enclosing_record, typename Field>
   constexpr auto field(Field) const
-    -> write_state_t<typename StateConfig::template field<Record, Field>> {
-    return {this->map_node};
+    -> typename detail::state_children<write_state_t, StateConfig>::template
+      field<Record, Field> {
+    return typename detail::state_children<write_state_t, StateConfig>::template
+      field<Record, Field>{*this};
   }
 
-  /** Container-value state; runtime positions and keys share the [] marker. */
+  /** Container-value state: root.items becomes root.items[].
+   * Indices and mapping keys share []; enclosing_record is retained.
+   * At depth_limit(), returns depth_exceeded instead. */
   constexpr auto element() const
-    -> write_state_t<typename StateConfig::element> {
-    return {this->map_node};
+    -> typename detail::state_children<write_state_t, StateConfig>::element {
+    return typename detail::state_children<write_state_t, StateConfig>::element{
+      *this};
   }
+
+  // Rvalue propagation copies this borrowed traversal token as well.
+  constexpr write_state_t(const write_state_t &) = default;
 
 private:
   // Child states use other configurations and need constructor access.
@@ -982,6 +1058,10 @@ private:
 
   template <typename>
   friend struct as_ref_tree_t;
+
+  template <typename ParentConfig>
+  constexpr write_state_t(const write_state_t<ParentConfig> &parent)
+    : map_node(parent.map_node) {}
 
   constexpr write_state_t(const typename StateConfig::map_node_type &mapping)
     : map_node(mapping) {}
@@ -1018,7 +1098,4 @@ concept write_state_like = is_write_state<T>::value;
 } // namespace ryml
 } // namespace omni
 
-// TODO: [high] Add a std::size_t Depth NTTP with a terminal mapping that
-// returns an internal error without instantiating another child. A
-// static_assert there would reject every recursive model, even for shallow input.
-// Coordinate the runtime-depth policy with the FIXME in ryml.hpp.
+// REFACTORME: [high] Simplify traversal-state types and implementation.

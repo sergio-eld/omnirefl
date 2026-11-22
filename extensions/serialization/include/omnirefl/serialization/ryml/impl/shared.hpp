@@ -308,7 +308,11 @@ auto map_node_to_value(State state,
   auto mapped = compat::invoke([&state, &mapping, node, type, stopped]()
     -> with_diagnostics_t<T> {
     if (stopped)
-      return {compat::nullopt, {{state.config.error_policy, {}}, {}, {}}};
+      return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {}, {}}};
 
     return map_node_to_value_using(state, mapping, node, type,
       /*priority=*/0);

@@ -43,7 +43,8 @@ struct collect_diagnostics {
 
 using config = omni::ryml::config_t<collect_diagnostics>;
 using deserialize_type = omni::ryml::deserialize_t<config>;
-const deserialize_type deserialize{config{}};
+const auto deserialize = omni::ryml::deserialize.tdm_config(
+  [](const omni::ryml::config_t<> &) { return config{}; });
 
 // Borrow one mapping for T while retaining normal nested-type lookup.
 template <typename T, typename Mapping>
@@ -68,7 +69,11 @@ auto map_using(const omni::ryml::config_t<> &options, const Mapping &mapping,
   omni::type_t<T> type, ::ryml::ConstNodeRef node)
   -> omni::ryml::with_diagnostics_t<T> {
   const omni::ryml::map_by_schema_t<const omni::ryml::config_t<> &,
-    select_mapping<T, Mapping>> map{options, {mapping}};
+    select_mapping<T, Mapping>> map{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    options, {mapping}};
   return map(type, node);
 }
 
@@ -77,7 +82,11 @@ auto map_using(const omni::ryml::config_t<> &options, const Mapping &mapping,
   T *into, ::ryml::ConstNodeRef node)
   -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
   const omni::ryml::map_by_schema_t<const omni::ryml::config_t<> &,
-    select_mapping<T, Mapping>> map{options, {mapping}};
+    select_mapping<T, Mapping>> map{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
+    options, {mapping}};
   return map(into, node);
 }
 

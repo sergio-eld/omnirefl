@@ -59,6 +59,31 @@ struct default_state_number {
   int value;
 };
 
+namespace custom_depth {
+
+struct leaf { int checked; int raw; };
+struct node { leaf data; std::vector<node> children; };
+
+struct read_leaf {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<leaf>) const -> omni::ryml::with_diagnostics_t<leaf> {
+    return omni::ryml::map_integer_node(
+      state.child(OMNI_META_STRING("checked")), node["checked"],
+      omni::type_t<int>{}).and_then([&state, &node](int checked)
+        -> omni::ryml::with_diagnostics_t<leaf> {
+      return omni::ryml::core::map_node_to_integral(
+        state.child(OMNI_META_STRING("raw")), node["raw"],
+        omni::type_t<int>{}).transform([checked](int raw) -> leaf {
+          return {checked, raw};
+        });
+    });
+  }
+};
+
+} // namespace custom_depth
+
 namespace diagnostic_callbacks {
 
 std::string classification(const omni::ryml::diagnostics &report) {
@@ -139,7 +164,7 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
     ::ryml::ConstNodeRef node,
     omni::type_t<immutable_number>) const
     -> omni::ryml::with_diagnostics_t<immutable_number> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type_t<int>{})
       .transform([](int value) -> immutable_number {
@@ -156,7 +181,7 @@ struct omni::ryml::cp::to_type_t<default_state_number> {
     ::ryml::ConstNodeRef node,
     omni::type_t<default_state_number>) const
     -> omni::ryml::with_diagnostics_t<default_state_number> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type_t<int>{})
       .transform([](int value) -> default_state_number { return {value}; });
@@ -170,7 +195,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
     ::ryml::ConstNodeRef node,
     unsigned short *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_integral(std::move(state),
+    return omni::ryml::map_integer_node(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into);
   }
@@ -183,7 +208,7 @@ struct omni::ryml::cp::to_type_t<unsigned short> {
 template <>
 const auto omni::ryml::cp::to_type<my_string> =
   [](auto state, ::ryml::ConstNodeRef node, my_string *into) {
-    return omni::ryml::default_to_string_like(std::move(state),
+    return omni::ryml::map_string_node(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into);
   };
@@ -193,12 +218,17 @@ struct omni::ryml::cp::to_type_t<my_string> {
   template <typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node, my_string *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::default_to_string_like(std::move(state),
+    return omni::ryml::map_string_node(std::move(state),
       node.is_seq() && 1 == node.num_children() ? node[0] : node,
       into);
   }
 };
 #endif
+
+template <>
+struct omni::ryml::cp::to_type_t<custom_depth::leaf>:
+    decltype(omni::ryml::compose::map_object_node(
+      custom_depth::read_leaf{})) {};
 
 namespace {
 
@@ -583,7 +613,7 @@ struct add_integer {
   template <typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
-    return omni::ryml::default_to_integral(std::move(state), node, type)
+    return omni::ryml::map_integer_node(std::move(state), node, type)
       .transform([this](int value) { return value + this->increment; });
   }
 };
@@ -605,6 +635,63 @@ struct select_mapping {
 };
 
 } // namespace local_mapping
+
+namespace unchecked_nodes {
+
+enum class status { ready };
+
+struct record {
+  bool enabled;
+  short count;
+  double weight;
+  std::string label;
+  std::vector<int> values;
+  std::map<std::string, int> scores;
+  omni::compat::optional<int> extra;
+  status state;
+};
+
+struct select_mapping {
+  template <typename State, typename T>
+  auto operator()(State, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::mapping_to_type(type)
+      .tdm_with_node_check(omni::fn::default_value<std::false_type>{})) {
+    return omni::ryml::reflected_scope::mapping_to_type(type)
+      .tdm_with_node_check(omni::fn::default_value<std::false_type>{});
+  }
+
+  template <typename State>
+  auto operator()(State, omni::type_t<short>) const
+    -> decltype(omni::ryml::map_arithmetic_node.tdm_with_node_check(
+      omni::fn::default_value<std::false_type>{})) {
+    return omni::ryml::map_arithmetic_node.tdm_with_node_check(
+      omni::fn::default_value<std::false_type>{});
+  }
+};
+
+} // namespace unchecked_nodes
+
+TEST(mapping_dispatch, built_in_readers_allow_prevalidated_nodes) {
+  const auto deserialize = serialization_test::deserialize
+    .tdm_map_node(omni::fn::default_value<unchecked_nodes::select_mapping>{});
+  const auto result = deserialize(omni::type_t<unchecked_nodes::record>{},
+    R"({"enabled": true, "count": 3, "weight": 2.5, "label": "ready",
+      "values": [4, 8], "scores": {"math": 15},
+      "extra": 16, "state": "ready"})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_TRUE(result.value->enabled);
+    EXPECT_EQ(3, result.value->count);
+    EXPECT_EQ(2.5, result.value->weight);
+    EXPECT_EQ("ready", result.value->label);
+    EXPECT_EQ((std::vector<int>{4, 8}), result.value->values);
+    EXPECT_EQ((std::map<std::string, int>{{"math", 15}}), result.value->scores);
+    EXPECT_EQ(16, result.value->extra);
+    EXPECT_EQ(unchecked_nodes::status::ready, result.value->state);
+  }
+}
 
 TEST(mapping_dispatch, local_map_node_customization) {
   const auto customize = [](omni::ryml::reflected_scope::mapping_to_type_t) {
@@ -655,6 +742,96 @@ TEST(mapping_dispatch, value_initialization_preserves_defaults) {
   EXPECT_TRUE(serialization_test::matches_json("7", serialize(7)));
 }
 
+TEST(mapping_dispatch, custom_recursive_fields_can_delegate_scalar_children) {
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<custom_depth::node>>{},
+    R"([{"data": {"checked": 7, "raw": 9}, "children": []}])");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value) {
+    EXPECT_EQ(1U, result.value->size());
+    if (!result.value->empty()) {
+      EXPECT_EQ(7, result.value->front().data.checked);
+      EXPECT_EQ(9, result.value->front().data.raw);
+    }
+  }
+}
+
+// FIXME: [high] Re-enable after reducing recursive path/depth instantiations.
+// Three recursive fields at depth 10 exhaust compiler memory in parallel CI
+// builds, even though the terminal sentinel bounds the number of states.
+#if 0
+namespace bounded_depth {
+
+struct node {
+  int value;
+  std::vector<node> children;
+  std::vector<node> alternatives;
+  std::vector<node> fallbacks;
+};
+
+std::string document(std::size_t levels) {
+  std::string children = "[]";
+  for (std::size_t level = 0; level < levels; ++level)
+    children = R"([{"value": 7, "children": )" + children
+      + R"(, "alternatives": [], "fallbacks": []}])";
+  return children;
+}
+
+struct depth_case {
+  std::size_t levels;
+  bool accepted;
+};
+
+class traversal: public testing::TestWithParam<depth_case> {};
+
+TEST_P(traversal, bounds_recursive_read_and_write_instantiation) {
+  const auto &c = GetParam();
+  const auto source = document(c.levels);
+  const auto result = serialization_test::deserialize(
+    omni::type_t<std::vector<node>>{}, source);
+
+  EXPECT_EQ(c.accepted, bool(result.value));
+  if (c.accepted && result.value) {
+    EXPECT_TRUE(result.diagnostics.issues.empty());
+    EXPECT_TRUE(serialization_test::matches_json(source,
+      omni::ryml::as_json(*result.value)));
+  } else if (!c.accepted) {
+    EXPECT_EQ(1U, result.diagnostics.issues.size());
+    if (!result.diagnostics.issues.empty()) {
+      EXPECT_EQ(omni::json::issue_code::depth_limit_exceeded,
+        result.diagnostics.issues.front().reason);
+    }
+  }
+}
+
+constexpr auto depth_limit = omni::ryml::read_state_t<>::depth_limit();
+static_assert(10 == depth_limit, "The default tree-depth limit is 10");
+
+INSTANTIATE_TEST_SUITE_P(default_limit, traversal,
+  testing::Values(depth_case{depth_limit / 2, true},
+    depth_case{depth_limit / 2 + 1, false}),
+  [](const testing::TestParamInfo<depth_case> &info) {
+    return info.param.accepted ? "at_limit" : "element_beyond_limit";
+  });
+
+TEST(traversal, root_record_reports_field_depth_overflow) {
+  const auto source = document(depth_limit / 2 + 1);
+  const auto result = serialization_test::deserialize(omni::type_t<node>{},
+    source.substr(1, source.size() - 2));
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (!result.diagnostics.issues.empty()) {
+    EXPECT_EQ(omni::json::issue_code::depth_limit_exceeded,
+      result.diagnostics.issues.front().reason);
+  }
+}
+
+} // namespace bounded_depth
+#endif
+
 #if 201703L <= OMNI_CPLUSPLUS
 namespace schema_paths {
 
@@ -671,7 +848,7 @@ struct read_address {
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<address> type) const
     -> omni::ryml::with_diagnostics_t<address> {
-    return omni::ryml::reflected_scope::default_to_record(type)(
+    return omni::ryml::reflected_scope::map_object_node(
       std::move(state), node, type).transform([](address value) -> address {
         return {value.number + 100};
       });
@@ -696,7 +873,7 @@ struct write_address {
   template <typename State>
   void operator()(State state, const address &value,
     ::ryml::NodeRef node) const {
-    omni::ryml::reflected_scope::from_record(std::move(state),
+    omni::ryml::reflected_scope::map_record(std::move(state),
       address{value.number + 100}, node);
   }
 };
@@ -706,7 +883,7 @@ struct write_integer {
 
   template <typename State>
   void operator()(State state, int value, ::ryml::NodeRef node) const {
-    omni::ryml::from_arithmetic(std::move(state),
+    omni::ryml::map_arithmetic(std::move(state),
       value + this->increment, node);
   }
 };
@@ -756,6 +933,63 @@ struct select_context_writer {
 };
 
 } // namespace schema_paths
+
+namespace traversal_depth {
+
+struct select_reader {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    if constexpr (std::is_same<T, int>::value)
+      return local_mapping::add_integer{static_cast<int>(state.depth())};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  }
+};
+
+struct select_writer {
+  template <typename State, typename T>
+  auto operator()(State state, omni::type_t<T> type) const {
+    if constexpr (std::is_same<T, int>::value)
+      return schema_paths::write_integer{static_cast<int>(state.depth())};
+    else
+      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
+} // namespace traversal_depth
+
+TEST(mapping_dispatch, depth_selects_read_and_write_decorations) {
+  const std::string source = R"({"records": [{
+    "address": {"number": 1},
+    "work_address": {"number": 2},
+    "offices": [{"number": 3}],
+    "locations": {"remote": {"number": 4}}
+  }]})";
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_map_node([](auto) { return traversal_depth::select_reader{}; });
+  const auto result = deserialize(omni::type_t<schema_paths::root>{}, source);
+  EXPECT_TRUE(result.value) << result.diagnostics;
+  if (!result.value)
+    return;
+
+  EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
+    "address": {"number": 5},
+    "work_address": {"number": 6},
+    "offices": [{"number": 8}],
+    "locations": {"remote": {"number": 9}}
+  }]})", omni::ryml::as_json(*result.value)));
+
+  const auto as_json = omni::ryml::as_json
+    .tdm_map_node([](auto) { return traversal_depth::select_writer{}; });
+  EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
+    "address": {"number": 9},
+    "work_address": {"number": 10},
+    "offices": [{"number": 13}],
+    "locations": {"remote": {"number": 14}}
+  }]})", as_json(*result.value)));
+  EXPECT_EQ(7, deserialize(omni::type_t<int>{}, "7").value);
+  EXPECT_TRUE(serialization_test::matches_json("7", as_json(7)));
+}
 
 TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
   const std::string source = R"({

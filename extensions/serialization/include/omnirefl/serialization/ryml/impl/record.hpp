@@ -2,7 +2,9 @@
 
 #include <omnirefl/functional.hpp>
 #include <omnirefl/extensions/static_string.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 
 #include <array>
 #include <cstddef>
@@ -24,7 +26,8 @@ constexpr omni::data_member_binding_t<Record, _F> bind_record_member(
 }
 
 // Optional storage does not default-construct field values before mapping.
-// Inheriting the metadata wrapper supplies aggregate_into's named-field protocol.
+// Inheriting the metadata wrapper supplies aggregate_into's named-field
+// protocol.
 template <typename Field>
 struct record_value_slot: Field {
   // Match the metadata identity used by explicit state.field(meta) traversal.
@@ -268,6 +271,9 @@ template <typename State, typename T, typename Finalize>
 auto finalize_record_into(State state, ::ryml::ConstNodeRef node,
   with_diagnostics_t<compat::monostate> mapped, T *into,
   const Finalize &finalize) -> with_diagnostics_t<compat::monostate> {
+  static_assert(std::is_move_constructible<T>::value
+      && std::is_assignable<T &, T &&>::value,
+    "Finalizing an existing record requires move construction and assignment");
   if (!mapped.value)
     return mapped;
 
@@ -366,7 +372,7 @@ auto process_record_members(node_accumulator<State> *result,
   if (!result->result.value)
     return {compat::nullopt, std::move(result->result.diagnostics)};
 
-  // The output starts after traversal, keeping it unaliased throughout the fold.
+  // The output starts after traversal and remains unaliased during the fold.
   compat::optional<typename Finalizer::result_type::value_type> value{};
   frame.value = &value;
   static_cast<void>(std::move(folded).transform(
@@ -416,7 +422,7 @@ constexpr auto readable_record_fields()
 }
 
 template <typename T, typename Strategy>
-constexpr bool complete_record_fields() {
+constexpr bool selects_all_record_fields() {
   return std::tuple_size<decltype(readable_record_fields<T, Strategy>())>::value
     == std::tuple_size<decltype(omni::meta_for<T>::accessible_data_members()
       | omni::fn::filter(omni::fn::is_non_static))>::value;
@@ -531,21 +537,37 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
 
 } // namespace detail
 
-template <typename Strategy>
+template <typename Strategy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && std::is_move_constructible<T>::value
-    && (std::is_default_constructible<T>::value
-      || (omni::refl::is_aggregatable<T>::value
-        && detail::complete_record_fields<T, Strategy>()))
+    && std::is_default_constructible<T>::value
     && is_read_state<State>::value))
-auto to_record_t<Strategy>::operator()(State context,
+auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
+  if (context.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      context.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_object_node(node);
+    if (!checked)
+      return {compat::nullopt,
+        {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+          /*base=*/{},
+#endif
+          context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && detail::complete_record_fields<T, Strategy>()
+        && detail::selects_all_record_fields<T, Strategy>()
         && std::is_move_constructible<T>::value,
       detail::aggregate_record_value<T>>,
     detail::bind_record_value<T>>::type{};
@@ -554,19 +576,36 @@ auto to_record_t<Strategy>::operator()(State context,
     this->strategy.finalize);
 }
 
-template <typename Strategy>
+template <typename Strategy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
-    && detail::can_finalize_existing_record<T, Strategy>()
     && is_read_state<State>::value))
-auto to_record_t<Strategy>::operator()(State context,
+auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   ::ryml::ConstNodeRef node, T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
+  if (context.limit_exceeded())
+    return {compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      context.config.error_policy, {}}, {}, {}}};
+
+  if (this->with_node_check) {
+    auto checked = core::expect_object_node(node);
+    if (!checked)
+      return {compat::nullopt,
+        {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+          /*base=*/{},
+#endif
+          context.config.error_policy, {}}, {std::move(checked.error())}, {}}};
+  }
+
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && detail::complete_record_fields<T, Strategy>()
+        && detail::selects_all_record_fields<T, Strategy>()
         && std::is_move_constructible<T>::value
         && std::is_assignable<T &, T &&>::value,
       detail::aggregate_record_into<T>>,
@@ -580,7 +619,7 @@ template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto from_record_t<Strategy>::operator()(State context,
+auto map_record_t<Strategy>::operator()(State context,
   const T &value,
   ::ryml::NodeRef node) const
   -> void {

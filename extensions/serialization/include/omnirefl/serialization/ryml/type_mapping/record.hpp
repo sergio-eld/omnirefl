@@ -2,12 +2,13 @@
 
 /** Built-in reflected record mappings. */
 
+#include <omnirefl/serialization/ryml/impl/tdm_record.hpp>
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/mapping_strategy.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/serialization/ryml/compose.hpp>
-#include <omnirefl/serialization/ryml/impl/shared.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
+#include <omnirefl/serialization/ryml/state.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -19,165 +20,122 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-namespace detail {
-
-template <typename T, typename Strategy>
-constexpr bool complete_record_fields();
-
-template <typename T, typename Strategy>
-constexpr bool can_finalize_existing_record() {
-  return std::is_same<compat::remove_cvref_t<
-      decltype(std::declval<Strategy>().finalize)>, omni::fn::identity>::value
-    || (std::is_move_constructible<T>::value
-      && std::is_assignable<T &, T &&>::value);
+/** Maps an object node into a reflected record.
+ *
+```
+map_object_node :: {
+  (state, node, type<T>) -> with_diagnostics<T>,
+  (state, node, T*)      -> with_diagnostics<monostate>
 }
-
-} // namespace detail
-
-/** Maps an object node into a reflected record's selected instance fields.
- * Does not call \ref mapping_to_type for the record. Nested members may use
- * state.map_node, which defaults to that lookup.
- * Traversal follows the record schema over the node, applying config's
- * duplicate, unknown-member, and diagnostic-limit policies.
- * Aggregatable records are constructed from mapped field values. Other
- * records receive those values through their field bindings and set_value.
+```
  *
- * A canonical name takes precedence over its aliases, even when its value is
- * invalid. Duplicate policies select among canonical occurrences when present,
- * otherwise among aliases. Diagnostics use the original node keys.
- *
- * strategy supplies field selection, aliases, field validators, and record
- * finalization; tdm_strategy returns an adjusted mapping. Static members are
- * always excluded from deserialization. Filtered fields are not required;
- * their document keys follow the unknown-field policy. Constructing a value
- * with omitted fields requires a default-constructible record.
- * Validators return expected<T, issue or range<issue>> or with_diagnostics<T>.
- * They preserve values and run before assignment; finalization runs after
- * successful record construction, including for nested records.
- * Nonidentity finalization through T* requires a move-constructible record
- * assignable from its returned value. Identity finalization adds no such
- * requirement. Literal validator keys need typed or SFINAE-friendly callbacks;
- * OMNI_META_STRING keys select the field before probing generic callbacks.
- * @pre The destination pointer must be non-null and node must belong to a
- * valid tree and be an object. Record metadata must be available in reflected
- * scope; node shape is checked only by a debug assertion.
- */
-template <typename Strategy = mapping::record_strategy_t<>>
-struct to_record_t {
+ * Members are mapped through state.map_node.
+ * Non-object input reports an expected-object diagnostic by default.
+ * @pre node belongs to a valid tree, pointers are non-null, and record
+ * metadata is available in reflected scope. */
+template <typename Strategy = mapping::record_strategy_t<>,
+  typename WithNodeCheck = std::true_type>
+struct map_object_node_t:
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider =
+    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_record_strategy<Strategy>::value,
+    "map_object_node_t requires mapping::record_strategy_t");
+
+  /** \ref mapping::record_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
+  /** Disable only when the node is already known to be an object. */
+  WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_with_node_check;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::is_reflected_record<T>::value
       && std::is_move_constructible<T>::value
-      && (std::is_default_constructible<T>::value
-        || (omni::refl::is_aggregatable<T>::value
-          && detail::complete_record_fields<T, Strategy>()))
+      && std::is_default_constructible<T>::value
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node,
     omni::type_t<T>) const -> with_diagnostics_t<T, diagnostics>;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (omni::is_reflected_record<T>::value
-      && detail::can_finalize_existing_record<T, Strategy>()
       && is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics>;
 
-  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_object_node_t() = default;
 
-  /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_strategy(F &&f) const &
-    -> to_record_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f), this->strategy)};
-  }
-
-  /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> to_record_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f),
-      std::move(this->strategy))};
-  }
-
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+    typename CheckValue = WithNodeCheck),
+    (std::is_constructible<Strategy, Value &&>::value
+      && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
+  constexpr map_object_node_t(Value &&value, CheckValue &&check = {})
+    : strategy(std::forward<Value>(value)),
+      with_node_check(std::forward<CheckValue>(check)) {}
+#endif
 };
 
-/** Reflected-record mapping with the shared default strategy.
- * tdm_strategy binds a configured strategy; the node must be an object. */
+/** Reflected-record mapping with the shared default strategy and
+ * node checking enabled. */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr to_record_t<> to_record{};
+inline constexpr map_object_node_t<> map_object_node{};
 #else
-static constexpr const to_record_t<> &to_record =
-  compat::detail::shared_state<to_record_t<>>::value;
+static constexpr const map_object_node_t<> &map_object_node =
+  compat::detail::shared_state<map_object_node_t<>>::value;
 #endif
 
-/** Creates a reflected-record node-to-type mapping function.
- * Checks for object input before traversing the record.
- * Does not call \ref mapping_to_type for the record. Nested members may use
- * state.map_node, which defaults to that lookup.
- *
-```
-default_to_record :: (type<T>, strategy = record_strategy) -> {
-  (state, node, type<T>) -> with_diagnostics<T>,
-  (state, node, T*)      -> with_diagnostics<monostate>
-}
-```
- */
-template <typename T, typename Strategy = mapping::record_strategy_t<>>
-constexpr auto default_to_record(omni::type_t<T>, Strategy strategy = {})
-  -> compose::detail::with_node_check_t<core::expect_object_node,
-    to_record_t<Strategy>> {
-  return {/*lifted_mapping=*/{std::move(strategy)}};
-}
-
 /** Maps selected record fields to object entries with canonical names.
- * The default strategy excludes static and functional members.
- * Does not call \ref mapping_from_type for the record. Nested members may use
- * state.map_node, which defaults to that lookup.
+ * Members are mapped through state.map_node.
  *
 ```
-from_record :: (state, const T&, node) -> void
+map_record :: (state, const T&, node) -> void
 ```
  *
  * @pre Record metadata must be available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>>
-struct from_record_t {
+struct map_record_t:
+    detail::tdm_for_map_record<Strategy>,
+    omni::ryml::detail::with_depth_exceeded_operator {
+  using tdm_provider = detail::tdm_for_map_record<Strategy>;
+  using omni::ryml::detail::with_depth_exceeded_operator::operator();
+
+  static_assert(mapping::is_record_strategy<Strategy>::value,
+    "map_record_t requires mapping::record_strategy_t");
+
+  /** \ref mapping::record_strategy_t */
+  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_strategy;
+
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
       is_write_state<State>>::value))
   auto operator()(State context, const T &value, ::ryml::NodeRef node) const
     -> void;
 
-  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_record_t() = default;
 
-  /** (QoL) Functional update of the shared mapping strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_strategy(F &&f) const &
-    -> from_record_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f), this->strategy)};
-  }
-
-  /** (QoL) Functional update consuming the bound strategy. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> from_record_t<compat::decay_t<Result>> {
-    return {compat::invoke(std::forward<F>(f),
-      std::move(this->strategy))};
-  }
-
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_record_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr from_record_t<> from_record{};
+inline constexpr map_record_t<> map_record{};
 #else
-static constexpr const from_record_t<> &from_record =
-  compat::detail::shared_state<from_record_t<>>::value;
+static constexpr const map_record_t<> &map_record =
+  compat::detail::shared_state<map_record_t<>>::value;
 #endif
 
 } // namespace reflected_scope
@@ -186,5 +144,5 @@ static constexpr const from_record_t<> &from_record =
 
 #include <omnirefl/serialization/ryml/impl/record.hpp>
 
-// TODO: [medium] Consider recovery for missing data members in to_record,
+// TODO: [medium] Consider recovery for missing data members in map_object_node,
 // including exposed default member initializers.

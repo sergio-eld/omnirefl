@@ -21,7 +21,11 @@ struct omni::ryml::cp::to_type_t<diagnostic_inputs::empty_record> {
   auto operator()(State state,
     ::ryml::ConstNodeRef node, omni::type_t<diagnostic_inputs::empty_record>)
     const -> omni::ryml::with_diagnostics_t<diagnostic_inputs::empty_record> {
-    omni::ryml::diagnostics report{{state.config.error_policy, {}}, {}, {}};
+    omni::ryml::diagnostics report{{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}}, {}, {}};
     const bool warnings = state.config.error_policy.unknown_fields
       == (omni::json::unknown_policy::allow | omni::json::unknown_policy::warn);
     for (const auto child : node.children())
@@ -51,10 +55,18 @@ struct omni::ryml::cp::to_type_t<diagnostic_inputs::embedded_document> {
     if (parsed)
       return {
         /*value=*/diagnostic_inputs::embedded_document{},
-        /*diagnostics=*/{{state.config.error_policy, {}}, {}, {}},
+        /*diagnostics=*/{{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+          /*base=*/{},
+#endif
+          state.config.error_policy, {}}, {}, {}},
       };
 
-    return {omni::compat::nullopt, {{state.config.error_policy, {}},
+    return {omni::compat::nullopt, {{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      state.config.error_policy, {}},
       {omni::ryml::core::make_issue(omni::json::issue_code::parse_error,
         omni::json::value_kind::unknown, node)}, std::move(parsed.error())}};
   }
@@ -182,7 +194,7 @@ TEST(mapping_diagnostics, reuses_relative_paths_from_a_borrowed_issue_range) {
     omni::json::value_kind::unknown, ::ryml::ConstNodeRef{});
   missing.path.push_back({"child", omni::compat::nullopt});
   const issue_view errors{&missing, &missing + 1};
-  const auto mapping = omni::ryml::compose::to_record(
+  const auto mapping = omni::ryml::compose::map_object_node(
     [errors](::ryml::ConstNodeRef) -> omni::compat::expected<int, issue_view> {
       return omni::compat::unexpected<issue_view>{errors};
     });
@@ -249,7 +261,13 @@ struct move_only_renderer {
 TEST(diagnostics_transform, moves_retained_state_through_chained_updates) {
   using config_type = omni::ryml::config_t<move_only_renderer>;
   const auto load = omni::ryml::deserialize_t<config_type>{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+    /*base=*/{},
+#endif
     /*config=*/{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
       /*error_policy=*/{},
       /*transform_diagnostics=*/{
         /*prefix=*/omni::compat::make_unique<std::string>("custom: "),
