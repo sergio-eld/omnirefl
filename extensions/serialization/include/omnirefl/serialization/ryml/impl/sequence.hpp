@@ -239,100 +239,6 @@ struct read_range_case<true> {
 
 } // namespace detail
 
-namespace detail {
-
-template <typename T>
-bool is_null(const T &value);
-
-template <bool Optional>
-struct is_null_case {
-  template <typename T>
-  static bool get(const T &) { return false; }
-};
-
-template <>
-struct is_null_case<true> {
-  template <typename T>
-  static bool get(const T &value) {
-    return !adapt::has_value(value) || is_null(adapt::get_value(value));
-  }
-};
-
-template <typename T>
-bool is_null(const T &value) {
-  return is_null_case<traits::is_optional<T>::value>::get(value);
-}
-
-template <bool KeyValue>
-struct write_range_case;
-
-template <>
-struct write_range_case<false> {
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_write_state<State>::value))
-  static void apply(State context, const T &value, ::ryml::NodeRef node) {
-    using element_type = compat::range_value_t<T>;
-    node.set_seq();
-    // Separate iterator/sentinel declarations also support non-common ranges
-    // before C++17 permitted them in range-based for loops.
-    using std::begin;
-    using std::end;
-    auto current = begin(value);
-    const auto last = end(value);
-    for (; current != last; ++current) {
-      const element_type &element = *current;
-      if (!is_null(element)) {
-        core::write_node(context.at(node.append_child()).element(), element);
-      }
-    }
-  }
-};
-
-template <>
-struct write_range_case<true> {
-  OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-    (is_write_state<State>::value))
-  static void apply(State context, const T &value, ::ryml::NodeRef node) {
-    static_assert(traits::is_string_like<traits::key_type_t<T>>::value,
-      "map_range requires string-adaptable keys for JSON/YAML objects");
-
-    node.set_map();
-    using std::begin;
-    using std::end;
-    auto current = begin(value);
-    const auto last = end(value);
-    for (; current != last; ++current) {
-      const auto &entry = *current;
-      const auto &key = adapt::as_string(entry.first);
-      using storage_type = decltype(adapt::as_string(entry.first));
-      using text_type = compat::remove_cvref_t<storage_type>;
-      static_assert(std::is_same<char, typename text_type::value_type>::value,
-        "Ryml object keys require char text from the string adapter");
-
-      using view_type = compat::basic_string_view<
-        typename text_type::value_type,
-        typename text_type::traits_type>;
-
-      constexpr bool borrows_source =
-        std::is_lvalue_reference<storage_type>::value
-        || std::is_same<text_type, view_type>::value;
-
-      const c4::csubstr text{key.data(), key.size()};
-      auto child = node.append_child();
-      // Owning key conversions are temporary, even for a reference tree.
-      if (context.borrow_strings && borrows_source)
-        child.set_key(text);
-      else
-        child.set_key_serialized(text);
-
-      child.set_key_style(::ryml::KEY_DQUO);
-      core::write_node(context.at(child).element(), entry.second);
-    }
-  }
-};
-
-} // namespace detail
-
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<detail::is_mapped_range<T>,
     is_read_state<State>>::value))
@@ -383,34 +289,6 @@ auto map_range_node_t<WithNodeCheck>::operator()(State state,
   }
 
   return to_range_t{}(std::move(state), node, into);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
-    is_write_state<State>>::value))
-auto map_range_t::operator()(State context, const T &value) const
-  -> ::ryml::NodeRef {
-  auto node = context.node();
-  using element_type = compat::range_value_t<T>;
-  using element_reference = compat::range_reference_t<const T>;
-
-  // Materialized non-scalar elements may own strings borrowed by the tree.
-  static_assert(compat::disjunction<std::is_scalar<element_type>,
-    compat::conjunction<std::is_lvalue_reference<element_reference>,
-      std::is_same<element_type,
-        compat::remove_cvref_t<element_reference>>>>::value,
-    "Default range serialization requires lvalue references to value_type "
-    "for non-scalar elements; specialize cp::from_type_t for value-producing "
-    "or converting-proxy iterators.");
-
-  detail::write_range_case<traits::is_key_value<T>::value>::apply(
-    std::move(context),
-    value,
-    node);
-
-  // TODO: [medium] Consider supporting generators and temporary-producing
-  // iterators by copying materialized elements' strings into tree storage.
-  return node;
 }
 
 } // namespace ryml

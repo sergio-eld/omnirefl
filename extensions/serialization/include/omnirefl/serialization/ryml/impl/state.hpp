@@ -18,7 +18,7 @@ struct mapping_from_type_t;
 
 namespace detail {
 
-// The C++11 result is defined after the built-in mapping types are complete.
+// C++11 lookup results are defined in customization.hpp after mapper types.
 template <typename T>
 struct to_type_cpp11_trailing_return;
 

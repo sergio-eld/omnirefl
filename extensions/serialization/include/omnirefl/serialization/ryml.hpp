@@ -29,9 +29,11 @@
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/compose.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
+#include <omnirefl/serialization/ryml/customization.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_binding.hpp>
+#include <omnirefl/serialization/ryml/map_node.hpp>
+#include <omnirefl/serialization/ryml/map_type.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
-#include <omnirefl/serialization/ryml/type_mapping.hpp>
 #include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 #include <omnirefl/traits.hpp>
 

@@ -1,10 +1,14 @@
 #pragma once
 
+#include <omnirefl/reflected_scope.hpp>
+#include <omnirefl/serialization/ryml/impl/shared.hpp>
 #include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <type_traits>
+#include <utility>
 
 namespace omni {
 namespace ryml {
@@ -139,22 +143,6 @@ auto map_node_to_enum_t<Strategy, WithNodeCheck>::operator()(State state,
     });
 }
 
-template <typename Strategy>
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_enum<T>,
-    is_write_state<State>>::value))
-auto map_enum_t<Strategy>::operator()(State context, T value) const
-  -> ::ryml::NodeRef {
-  auto node = context.node();
-  constexpr auto enumerators = omni::meta_for<T>::enumerators();
-  for (const auto &enumerator : enumerators)
-    if (value == enumerator.first) {
-      node.set_serialized(c4::to_csubstr(enumerator.second));
-      node.set_val_style(::ryml::VAL_DQUO);
-      return node;
-    }
-  return node;
-}
 
 } // namespace reflected_scope
 } // namespace ryml

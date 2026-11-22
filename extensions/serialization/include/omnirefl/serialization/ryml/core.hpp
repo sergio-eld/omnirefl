@@ -2,7 +2,8 @@
 
 /** Parsing, node-shape checks, value conversions, and schema dispatch.
  * Raw map_node_to_* functions require validated input and do not select
- * custom type mappings. Schema dispatch definitions are supplied by ryml.hpp.
+ * custom type mappings. map_node.hpp and map_type.hpp supply recursive mapping
+ * dispatch; ryml.hpp supplies schema entry-point routing.
  */
 
 #include <omnirefl/extensions/compat.hpp>

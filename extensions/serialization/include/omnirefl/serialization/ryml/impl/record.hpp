@@ -1,6 +1,7 @@
 #pragma once
 
 #include <omnirefl/functional.hpp>
+#include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/extensions/static_string.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
@@ -8,6 +9,7 @@
 #include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <tuple>
@@ -381,34 +383,10 @@ auto process_record_members(node_accumulator<State> *result,
   return {std::move(value), std::move(result->result.diagnostics)};
 }
 
-template <typename State>
-struct cpp11_write_member {
-  ::ryml::NodeRef &node;
-  State context;
-
-  template <typename Record, typename _F>
-  void operator()(omni::data_member_binding_t<Record, _F> field) const {
-    auto child = this->node.append_child();
-    child.set_key_serialized(field.name());
-    core::write_node(
-      this->context.at(child).template field<compat::remove_cvref_t<Record>>(
-        omni::data_member_meta_t<_F>{}),
-      field.value());
-  }
-};
-
 } // namespace detail
 
 namespace reflected_scope {
 namespace detail {
-
-struct record_field_names {
-  template <typename... Fields>
-  constexpr auto operator()(const Fields &...fields) const
-    -> std::array<compat::string_view, sizeof...(Fields)> {
-    return {{compat::string_view{fields.name()}...}};
-  }
-};
 
 template <typename T, typename Strategy>
 constexpr auto readable_record_fields()
@@ -613,27 +591,6 @@ auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   return omni::ryml::detail::finalize_record_into(context, node,
     detail::map_record<T>(context, node, this->strategy, finalize), into,
     this->strategy.finalize);
-}
-
-template <typename Strategy>
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_record<T>,
-    is_write_state<State>>::value))
-auto map_record_t<Strategy>::operator()(State context, const T &value) const
-  -> ::ryml::NodeRef {
-  auto node = context.node();
-  assert(mapping::valid_record_strategy(
-    compat::apply(detail::record_field_names{},
-      omni::meta_for<T>::accessible_data_members()), this->strategy));
-  node.set_map();
-  const auto binding = omni::meta_for<T>::bind(value);
-  binding.accessible_data_members()
-    | omni::fn::filter(this->strategy.filter_fields)
-    | omni::fn::each(omni::ryml::detail::cpp11_write_member<State>{
-      /*node=*/node,
-      /*context=*/std::move(context),
-    });
-  return node;
 }
 
 } // namespace reflected_scope

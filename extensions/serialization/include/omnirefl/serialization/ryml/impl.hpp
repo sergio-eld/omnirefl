@@ -13,43 +13,6 @@ namespace omni {
 namespace ryml {
 namespace core {
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
-  -> with_diagnostics_t<T, diagnostics> {
-  const auto mapping = compat::invoke(context.map_node, context, type);
-  return omni::ryml::detail::map_node_to_value(std::move(context),
-    mapping, node, type);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
-  if (context.limit_exceeded())
-    result.result.value.reset();
-  else {
-    const auto mapping =
-      compat::invoke(context.map_node, context, omni::type_t<T>{});
-
-    result.append(omni::ryml::detail::read_into(std::move(context),
-      mapping,
-      node,
-      into,
-      /*priority=*/0));
-  }
-
-  return std::move(result).finish();
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value))
-auto write_node(State context, const T &value) -> ::ryml::NodeRef {
-  const auto mapping =
-    compat::invoke(context.map_node, context, omni::type_t<T>{});
-  return mapping(std::move(context), value);
-}
 
 namespace detail {
 
