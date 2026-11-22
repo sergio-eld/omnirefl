@@ -731,6 +731,13 @@ struct field_path_name: cpp11_static_string<path_dot, Name> {};
 template <typename... Segments>
 struct schema_path;
 
+// FIXME: [high] Reduce recursive path/depth specializations. For example:
+//   struct node {
+//     std::vector<node> children, alternatives, fallbacks;
+//   };
+// Different field orders form distinct paths; each depth adds another state
+// specialization. The terminal sentinel bounds this expansion but does not
+// prevent excessive compiler memory use before the limit, on reads or writes.
 // Re-entering the same reflected field revisits a recursive schema edge.
 // Reuse its first schema path rather than instantiate unbounded state types.
 template <typename Prefix, typename Segment, typename... Remaining>
