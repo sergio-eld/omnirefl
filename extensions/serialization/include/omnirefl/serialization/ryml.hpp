@@ -76,14 +76,17 @@ struct reflect_as_root:
 
 namespace detail {
 
+template <typename T, typename = void>
+struct reflection_target;
+
+struct map_selected;
+struct map_in_reflected_scope;
+
+// reflected_call accepts the discovered record/enum, not its containers.
 template <typename T>
-using map_by_schema_dispatch_t = typename traits::select<
-  traits::case_<cp::reflect_as_root<T>::value, core::map_to_reflected_t>,
-  traits::case_<traits::is_string_like<T>::value, core::map_to_string_like_t>,
-  traits::case_<std::is_arithmetic<T>::value, core::map_to_fundamental_t>,
-  traits::case_<traits::is_optional<T>::value, core::map_to_optional_t>,
-  traits::case_<is_mapped_range<T>::value, core::map_to_sequence_t>,
-  core::map_to_reflected_t>::type;
+using map_by_schema_dispatch_t = compat::conditional_t<
+  cp::reflect_as_root<typename reflection_target<T>::type>::value,
+  map_in_reflected_scope, map_selected>;
 
 } // namespace detail
 

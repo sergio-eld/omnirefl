@@ -80,7 +80,7 @@ struct read {
   auto operator()(State state,
     ::ryml::ConstNodeRef node,
     omni::type_t<value>) const -> omni::ryml::with_diagnostics_t<value> {
-    auto result = omni::ryml::core::map_node_to_integral(std::move(state),
+    auto result = omni::ryml::map_integer_node(std::move(state),
       node,
       omni::type_t<int>{});
 
@@ -826,7 +826,7 @@ struct read {
     (omni::ryml::is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node) const
     -> omni::ryml::with_diagnostics_t<value> {
-    auto result = omni::ryml::core::map_node_to_boolean(std::move(state),
+    auto result = omni::ryml::map_boolean_node(std::move(state),
       node,
       omni::type_t<bool>{});
 
@@ -1178,7 +1178,7 @@ struct read {
   template <typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node, value *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+    return omni::ryml::map_integer_node(std::move(state), node,
       omni::type_t<int>{})
       .transform([into](int number) -> omni::compat::monostate {
         into->number = number + into->bias;
@@ -1221,7 +1221,7 @@ struct read {
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<constructed>) const
     -> omni::ryml::with_diagnostics_t<constructed> {
-    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+    return omni::ryml::map_integer_node(std::move(state), node,
       omni::type_t<int>{})
       .transform([](int number) -> constructed { return constructed{number}; });
   }
@@ -1229,7 +1229,7 @@ struct read {
   template <typename State, typename T>
   auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+    return omni::ryml::map_integer_node(std::move(state), node,
       omni::type_t<int>{})
       .transform([into](int number) -> omni::compat::monostate {
         into->number = number;
@@ -1270,7 +1270,7 @@ struct add {
   template <typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node, digit *into) const
     -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    return omni::ryml::core::map_node_to_integral(std::move(state), node,
+    return omni::ryml::map_integer_node(std::move(state), node,
       omni::type_t<unsigned>{})
       .transform([into](unsigned number) -> omni::compat::monostate {
         *into = static_cast<digit>(static_cast<unsigned>(*into) + number);

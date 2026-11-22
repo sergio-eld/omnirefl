@@ -15,14 +15,11 @@ namespace ryml {
 namespace core {
 namespace reflected_scope {
 
-template <typename Strategy>
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<omni::is_reflected_enum<T>,
-    is_read_state<State>>::value))
-auto map_node_to_enum_t<Strategy>::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename Strategy),
+  (omni::is_reflected_enum<T>::value
+    && mapping::is_enum_strategy<Strategy>::value))
+auto parse_as_enum(::ryml::ConstNodeRef node, const Strategy &strategy)
+  -> compat::expected<T, issue> {
   assert(core::expect_string_node(node));
 
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
@@ -30,7 +27,7 @@ auto map_node_to_enum_t<Strategy>::operator()(State context,
   std::array<compat::string_view, enumerators.size()> names{};
   for (std::size_t index = 0; index < enumerators.size(); ++index)
     names[index] = enumerators[index].second;
-  assert(mapping::valid_aliases(names, this->strategy.aliases_by_name));
+  assert(mapping::valid_aliases(names, strategy.aliases_by_name));
 #endif
   const auto find_name = [enumerators](compat::string_view name)
     -> compat::optional<T> {
@@ -42,53 +39,16 @@ auto map_node_to_enum_t<Strategy>::operator()(State context,
   };
 
   const compat::string_view value{node.val().str, node.val().len};
-  if (const auto found = find_name(value)) {
-    return {
-      /*value=*/found,
-      /*diagnostics=*/{
-        /*config=*/{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-          /*base=*/{},
-#endif
-          context.config.error_policy, {}},
-        /*issues=*/{},
-        /*parse_error_message=*/{},
-      },
-    };
-  }
+  if (const auto found = find_name(value))
+    return *found;
 
   if (const auto canonical = mapping::resolve_alias(
-      this->strategy.aliases_by_name, value))
-    if (const auto found = find_name(*canonical)) {
-      return {
-        /*value=*/found,
-        /*diagnostics=*/{
-          /*config=*/{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-            /*base=*/{},
-#endif
-            context.config.error_policy, {}},
-          /*issues=*/{},
-          /*parse_error_message=*/{},
-        },
-      };
-    }
+      strategy.aliases_by_name, value))
+    if (const auto found = find_name(*canonical))
+      return *found;
 
-  return {
-    /*value=*/compat::nullopt,
-    /*diagnostics=*/{
-      /*config=*/{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
-#endif
-        context.config.error_policy, {}},
-      /*issues=*/{omni::ryml::core::make_issue(
-        json::issue_code::invalid_scalar,
-        json::value_kind::string,
-        node)},
-      /*parse_error_message=*/{},
-    },
-  };
+  return compat::unexpected<issue>{core::make_issue(
+    json::issue_code::invalid_scalar, json::value_kind::string, node)};
 }
 
 } // namespace reflected_scope
@@ -119,12 +79,8 @@ auto map_node_to_enum_t<Strategy, WithNodeCheck>::operator()(State state,
         state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
   }
 
-  return core::reflected_scope::map_node_to_enum_t<Strategy>{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-    /*tdm_base=*/{},
-    /*depth_base=*/{},
-#endif
-    this->strategy}(std::move(state), node, omni::type_t<T>{});
+  return omni::ryml::detail::node_result(std::move(state),
+    core::reflected_scope::parse_as_enum<T>(node, this->strategy), node);
 }
 
 template <typename Strategy, typename WithNodeCheck>
@@ -142,7 +98,6 @@ auto map_node_to_enum_t<Strategy, WithNodeCheck>::operator()(State state,
       return {};
     });
 }
-
 
 } // namespace reflected_scope
 } // namespace ryml

@@ -205,7 +205,7 @@ using default_mapping_to_type = typename traits::select<
  *
  * @details Record and enum selection requires generated metadata in reflected
  * scope. Without a default, this alias is traits::cp::unavailable. */
-template <typename _T, typename T = compat::remove_cv_t<_T>>
+template <typename _T, typename T = compat::remove_cvref_t<_T>>
 using default_mapping_from_type = typename traits::select<
   traits::case_<traits::is_string_like<T>::value, map_string_like_t>,
   traits::case_<std::is_same<bool, T>::value, map_boolean_t>,
@@ -273,8 +273,9 @@ OMNI_CPP14_CONSTEXPR auto mapping_to_type(omni::type_t<T>)
 
 /** Returns the registered C++-to-node callable by value, or the default
  * compositor when neither customization is registered. Selected callables
- * must be copy-constructible. Registration conflicts and missing mappings
- * are diagnosed before invoking the mapping function.
+ * must be copy-constructible. Lookup ignores cv-qualifiers and references.
+ * Registration conflicts and missing mappings are diagnosed before invoking
+ * the mapping function.
  *
 ```
 mapping_from_type :: type<T> -> ((state, const T&) -> node)
@@ -282,8 +283,8 @@ mapping_from_type :: type<T> -> ((state, const T&) -> node)
  *
  * @pre Metadata required by the selected mapping is available in reflected
  * scope; core entry points establish that scope before dispatch. */
-template <typename T>
-OMNI_CPP14_CONSTEXPR auto mapping_from_type(omni::type_t<T>)
+template <typename Input, typename T = compat::remove_cvref_t<Input>>
+OMNI_CPP14_CONSTEXPR auto mapping_from_type(omni::type_t<Input>)
   OMNI_CPP11_TRAILING_RETURN(
     typename omni::ryml::detail::from_type_cpp11_trailing_return<T>::type) {
   const cp::from_type_t<T> mapping_t{};
@@ -342,7 +343,7 @@ struct to_type_cpp11_trailing_return {
 template <typename T>
 struct from_type_cpp11_trailing_return {
   using type = decltype(first_available(
-    cp::from_type_t<T>{},
+    cp::from_type_t<compat::remove_cvref_t<T>>{},
     // C++11 has no variable-template registration.
     traits::cp::unavailable{},
     reflected_scope::detail::default_mapping_from_type<T>{}));

@@ -16,20 +16,12 @@
 
 namespace omni {
 namespace ryml {
-namespace core {
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (is_write_state<State>::value))
-auto write_node(State context, const T &value) -> ::ryml::NodeRef {
-  const auto mapping =
-    compat::invoke(context.map_node, context, omni::type_t<T>{});
-  return mapping(std::move(context), value);
-}
-
-} // namespace core
-
 namespace detail {
 
+// Ad hoc: selection precedes the mapping's terminal operator, so custom
+// selectors must accept terminal children too. Built-in writers handle the
+// sentinel; custom mappings without that overload can fail compilation.
+// Reassess with the read_node dispatch-boundary REFACTORME in core.hpp.
 template <typename State>
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
@@ -39,10 +31,11 @@ struct cpp11_write_member {
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     auto child = this->node.append_child();
     child.set_key_serialized(field.name());
-    core::write_node(
-      this->context.at(child).template field<compat::remove_cvref_t<Record>>(
-        omni::data_member_meta_t<_F>{}),
-      field.value());
+    const auto state = this->context.at(child)
+      .template field<compat::remove_cvref_t<Record>>(field.as_meta());
+    const auto mapping = compat::invoke(this->context.map_node,
+      state, omni::type_t<typename omni::data_member_meta_t<_F>::type>{});
+    mapping(state, field.value());
   }
 };
 
@@ -133,7 +126,10 @@ struct write_range_case<false> {
     for (; current != last; ++current) {
       const element_type &element = *current;
       if (!is_null(element)) {
-        core::write_node(context.at(node.append_child()).element(), element);
+        const auto state = context.at(node.append_child()).element();
+        const auto mapping = compat::invoke(context.map_node,
+          state, omni::type_t<element_type>{});
+        mapping(state, element);
       }
     }
   }
@@ -177,7 +173,10 @@ struct write_range_case<true> {
         child.set_key_serialized(text);
 
       child.set_key_style(::ryml::KEY_DQUO);
-      core::write_node(context.at(child).element(), entry.second);
+      const auto state = context.at(child).element();
+      const auto mapping = compat::invoke(context.map_node,
+        state, omni::type_t<traits::mapped_type_t<T>>{});
+      mapping(state, entry.second);
     }
   }
 };
@@ -263,8 +262,11 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<traits::is_optional<T>, is_write_state<State>>::value))
 auto map_optional_like_t::operator()(State context, const T &value) const
   -> ::ryml::NodeRef {
-  if (adapt::has_value(value))
-    return core::write_node(std::move(context), adapt::get_value(value));
+  if (adapt::has_value(value)) {
+    const auto mapping = compat::invoke(context.map_node,
+      context, omni::type_t<typename T::value_type>{});
+    return mapping(std::move(context), adapt::get_value(value));
+  }
 
   auto node = context.node();
   node.set_val("null");

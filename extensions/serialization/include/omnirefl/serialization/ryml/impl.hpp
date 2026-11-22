@@ -11,79 +11,28 @@
 
 namespace omni {
 namespace ryml {
-namespace core {
-
-
 namespace detail {
-
-// A callable alternative for non-reflected routes in the discovery switch.
-struct map_selected {
-  template <typename State, typename Destination>
-  auto operator()(State context, ::ryml::ConstNodeRef node,
-    Destination destination) const
-    -> decltype(read_node(std::move(context), node, destination)) {
-    return read_node(std::move(context), node, destination);
-  }
-};
 
 // reflected_call needs a metadata-bearing type, even for an empty range.
 // Only discovery unwraps wrappers; the mapped destination stays T.
-template <typename T, typename = void>
+template <typename T, typename>
 struct reflection_target { using type = T; };
 
 template <typename T>
 struct reflection_target<T,
   compat::enable_if_t<!cp::reflect_as_root<T>::value
-    && compat::disjunction<omni::ryml::detail::is_mapped_range<T>,
-      traits::is_optional<T>>::value>>:
-    reflection_target<
-      typename omni::ryml::detail::discovered_range_type<T>::type> {};
+    && compat::disjunction<is_mapped_range<T>, traits::is_optional<T>>::value>>:
+    reflection_target<typename discovered_range_type<T>::type> {};
 
-} // namespace detail
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_arithmetic<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_fundamental_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const
-  -> with_diagnostics_t<T, diagnostics> {
-  return read_node(std::move(context), node, type);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_arithmetic<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_fundamental_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  T *into) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  assert(into);
-  return read_node(std::move(context), node, into);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (traits::is_string_like<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_string_like_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const
-  -> with_diagnostics_t<T, diagnostics> {
-  return read_node(std::move(context), node, type);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (traits::is_string_like<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_string_like_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  T *into) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  assert(into);
-  return read_node(std::move(context), node, into);
-}
-
-namespace detail {
+// C++11 type selection needs a callable for the non-reflected alternative.
+// Keep its invocation through read_node so local/global overrides still apply.
+struct map_selected {
+  template <typename State, typename Destination>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    Destination into) const -> decltype(core::read_node(state, node, into)) {
+    return core::read_node(std::move(state), node, into);
+  }
+};
 
 // A separate visitor keeps value construction inside reflected scope without
 // creating or assigning a destination before selecting its mapping.
@@ -112,107 +61,24 @@ struct cpp11_lambda_read {
   }
 };
 
-} // namespace detail
+struct map_in_reflected_scope {
+  template <typename T, typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<T>) const -> with_diagnostics_t<T> {
+    return omni::reflected_call(
+      cpp11_lambda_read_value<T, State>{node, std::move(state)},
+      omni::type_t<typename reflection_target<T>::type>{});
+  }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_object<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_reflected_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
-  using target = typename detail::reflection_target<T>::type;
-  return omni::reflected_call(
-    detail::cpp11_lambda_read_value<T, State>{
-      /*node=*/node,
-      /*context=*/std::move(context),
-    },
-    omni::type_t<target>{});
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_object<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_reflected_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  T *into) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  assert(into);
-  using target = typename detail::reflection_target<T>::type;
-  return omni::reflected_call(
-    detail::cpp11_lambda_read<T, State>{
-      /*node=*/node,
-      /*into=*/ *into,
-      /*context=*/std::move(context),
-    },
-    omni::type_t<target>{});
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_sequence_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const
-  -> with_diagnostics_t<T, diagnostics> {
-  using target = typename detail::reflection_target<T>::type;
-  constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_selected>::type{};
-
-  return map(std::move(context), node, type);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (omni::ryml::detail::is_mapped_range<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_sequence_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  T *into) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  assert(into);
-  using target = typename detail::reflection_target<T>::type;
-  constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_selected>::type{};
-
-  return map(std::move(context), node, into);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (traits::is_optional<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_optional_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const
-  -> with_diagnostics_t<T, diagnostics> {
-  using target = typename detail::reflection_target<T>::type;
-  constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_selected>::type{};
-
-  return map(std::move(context), node, type);
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (traits::is_optional<T>::value && !std::is_const<T>::value
-    && is_read_state<State>::value))
-auto map_to_optional_t::operator()(State context,
-  ::ryml::ConstNodeRef node,
-  T *into) const
-  -> with_diagnostics_t<compat::monostate, diagnostics> {
-  assert(into);
-  using target = typename detail::reflection_target<T>::type;
-  constexpr auto map = typename traits::select<
-    traits::case_<cp::reflect_as_root<target>::value, map_to_reflected_t>,
-    detail::map_selected>::type{};
-
-  return map(std::move(context), node, into);
-}
-
-} // namespace core
-
-namespace detail {
+  template <typename T, typename State>
+  auto operator()(State state, ::ryml::ConstNodeRef node, T *into) const
+    -> with_diagnostics_t<compat::monostate> {
+    assert(into);
+    return omni::reflected_call(
+      cpp11_lambda_read<T, State>{node, *into, std::move(state)},
+      omni::type_t<typename reflection_target<T>::type>{});
+  }
+};
 
 // Syntax errors still reach the configured renderer while an empty tree lives.
 template <typename Config>
@@ -269,6 +135,8 @@ auto deserialize(Config &&options, const MapNode &map_node,
 namespace core {
 namespace detail {
 
+// Root selectors receive the schema type; borrowing a const value must not
+// change the type tag seen by a local selector.
 template <typename State, typename T>
 struct cpp11_lambda_write {
   State context;
@@ -276,7 +144,9 @@ struct cpp11_lambda_write {
 
   template <typename _M, omni::reflected_entity Entity>
   void operator()(omni::meta_t<_M, Entity>) const {
-    core::write_node(this->context, this->value);
+    const auto mapping = compat::invoke(this->context.map_node,
+      this->context, omni::type_t<typename State::enclosing_root>{});
+    mapping(this->context, this->value);
   }
 };
 
@@ -289,7 +159,9 @@ struct tree_builder_case {
   OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
     (is_write_state<State>::value))
   static void build(State context, T &value) {
-    write_node(std::move(context), value);
+    const auto mapping = compat::invoke(context.map_node,
+      context, omni::type_t<typename State::enclosing_root>{});
+    mapping(std::move(context), value);
   }
 };
 

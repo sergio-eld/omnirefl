@@ -63,7 +63,9 @@ struct from_type_t<registered_integer> {
 template <typename T>
 const auto from_type<endpoint<T>> = [](auto state,
   const endpoint<T> &value) -> ::ryml::NodeRef {
-  return core::write_node(std::move(state), value.port);
+  const auto mapping = compat::invoke(state.map_node,
+    state, omni::type_t<T>{});
+  return mapping(std::move(state), value.port);
 };
 
 template <typename T>
@@ -77,7 +79,9 @@ struct from_type_t<endpoint<T>> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   auto operator()(State state,
     const endpoint<T> &value) const -> ::ryml::NodeRef {
-    return core::write_node(std::move(state), value.port);
+    const auto mapping = compat::invoke(state.map_node,
+      state, omni::type_t<T>{});
+    return mapping(std::move(state), value.port);
   }
 };
 
@@ -140,9 +144,9 @@ struct from_type_t<shifted_integer> {
 };
 #endif
 
-// Registration lookup must preserve T's cv-qualification.
+// Registration lookup normalizes qualified type tags.
 template <>
-struct from_type_t<const qualified_integer> {
+struct from_type_t<qualified_integer> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   auto operator()(State state,
     const qualified_integer &value) const -> ::ryml::NodeRef {
@@ -336,8 +340,8 @@ static_assert(std::is_same<
 static_assert(std::is_same<
     decltype(omni::ryml::reflected_scope::mapping_from_type(
       omni::type_t<const qualified_integer>{})),
-    omni::ryml::cp::from_type_t<const qualified_integer>>::value,
-  "Registration lookup preserves the original qualified type");
+    omni::ryml::cp::from_type_t<qualified_integer>>::value,
+  "Registration lookup normalizes the qualified type");
 
 // Compare registrations with the registered objects, not a return-type helper.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
@@ -396,38 +400,32 @@ TEST(mapping_core, parses_and_converts_through_explicit_core_mappings) {
   if (!tree)
     return;
 
-  const omni::ryml::config_t<> options{};
   const auto root = tree->crootref();
-  const auto boolean = serialization_test::map_using(options,
-    omni::ryml::core::map_node_to_boolean,
-    omni::type_t<bool>{}, root["flag"]);
+  const auto boolean = omni::ryml::core::parse_as_boolean(root["flag"]);
+  const auto integer = omni::ryml::core::parse_as_integral<std::int16_t>(
+    root["count"]);
+  const auto real = omni::ryml::core::parse_as_floating_point<float>(
+    root["ratio"]);
+  const auto arithmetic = omni::ryml::core::parse_as_arithmetic<std::int32_t>(
+    root["count"]);
+  const auto text = omni::ryml::core::parse_as_string_like<std::string>(
+    root["text"]);
 
-  const auto integer = serialization_test::map_using(options,
-    omni::ryml::core::map_node_to_integral,
-    omni::type_t<std::int16_t>{}, root["count"]);
-
-  const auto real = serialization_test::map_using(options,
-    omni::ryml::core::map_node_to_floating_point,
-    omni::type_t<float>{}, root["ratio"]);
-
-  const auto arithmetic = serialization_test::map_using(options,
-    omni::ryml::core::map_node_to_arithmetic,
-    omni::type_t<std::int32_t>{}, root["count"]);
-
-  const auto text = serialization_test::map_using(options,
-    omni::ryml::core::map_node_to_string_like,
-    omni::type_t<std::string>{}, root["text"]);
-
-  EXPECT_EQ(true, boolean.value);
-  EXPECT_EQ(42, integer.value);
-  EXPECT_EQ(2.5F, real.value);
-  EXPECT_EQ(42, arithmetic.value);
-  EXPECT_EQ(std::string{"reading"}, text.value);
-  EXPECT_TRUE(boolean.diagnostics.issues.empty());
-  EXPECT_TRUE(integer.diagnostics.issues.empty());
-  EXPECT_TRUE(real.diagnostics.issues.empty());
-  EXPECT_TRUE(arithmetic.diagnostics.issues.empty());
-  EXPECT_TRUE(text.diagnostics.issues.empty());
+  EXPECT_TRUE(boolean);
+  EXPECT_TRUE(integer);
+  EXPECT_TRUE(real);
+  EXPECT_TRUE(arithmetic);
+  EXPECT_TRUE(text);
+  if (boolean)
+    EXPECT_EQ(true, *boolean);
+  if (integer)
+    EXPECT_EQ(42, *integer);
+  if (real)
+    EXPECT_EQ(2.5F, *real);
+  if (arithmetic)
+    EXPECT_EQ(42, *arithmetic);
+  if (text)
+    EXPECT_EQ(std::string{"reading"}, *text);
 }
 
 TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
@@ -436,19 +434,13 @@ TEST(mapping_core, reports_overflow_at_the_nodes_document_path) {
   if (!tree)
     return;
 
-  const omni::ryml::config_t<> options{};
   const auto node = tree->crootref()["count"];
-  const auto result = serialization_test::map_using(options,
-    omni::ryml::core::map_node_to_integral, omni::type_t<std::int8_t>{}, node);
+  const auto result = omni::ryml::core::parse_as_integral<std::int8_t>(node);
 
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ(1U, result.diagnostics.issues.size());
-  if (result.diagnostics.issues.size() == 1) {
-    EXPECT_EQ(omni::json::issue_code::out_of_range,
-      result.diagnostics.issues[0].reason);
-
-    EXPECT_EQ("/count", omni::ryml::detail::render_path(
-      result.diagnostics.issues[0].path));
+  EXPECT_FALSE(result);
+  if (!result) {
+    EXPECT_EQ(omni::json::issue_code::out_of_range, result.error().reason);
+    EXPECT_EQ("/count", omni::ryml::detail::render_path(result.error().path));
   }
 }
 
@@ -522,7 +514,7 @@ TEST(type_mapping, reads_a_volatile_boolean) {
   EXPECT_TRUE(into);
 }
 
-TEST(type_mapping, preserves_qualified_registration) {
+TEST(type_mapping, normalizes_qualified_registration_lookup) {
   const qualified_integer value{23};
   const auto as_owning_tree = omni::ryml::as_owning_tree.tdm_map_node(
     [](omni::ryml::reflected_scope::mapping_from_type_t) {

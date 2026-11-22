@@ -106,6 +106,7 @@ OMNI_ENABLE_BIT_FLAGS(unknown_policy)
  * define what it exposes during mapping without promising a partial result.
  */
 struct error_policy {
+  // Values above zero enable experimental collection of multiple errors.
   // Number of mapping errors processing may pass before stopping on the next.
   // Warnings do not count. Zero stops at the first error.
   std::uint16_t error_limit = 0;

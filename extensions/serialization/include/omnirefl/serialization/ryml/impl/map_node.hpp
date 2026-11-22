@@ -85,7 +85,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
     && is_read_state<State>::value))
 auto map_integer_node_t<WithNodeCheck>::operator()(State state,
   ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  omni::type_t<T>) const -> with_diagnostics_t<T> {
   if (state.limit_exceeded())
     return {compat::nullopt, {{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
@@ -103,7 +103,8 @@ auto map_integer_node_t<WithNodeCheck>::operator()(State state,
         state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
   }
 
-  return core::map_node_to_integral(std::move(state), node, type);
+  return detail::node_result(std::move(state),
+    core::parse_as_integral<T>(node), node, omni::type_t<T>{});
 }
 
 template <typename WithNodeCheck>
@@ -128,7 +129,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (std::is_floating_point<T>::value && is_read_state<State>::value))
 auto map_number_node_t<WithNodeCheck>::operator()(State state,
   ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  omni::type_t<T>) const -> with_diagnostics_t<T> {
   if (state.limit_exceeded())
     return {compat::nullopt, {{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
@@ -146,7 +147,8 @@ auto map_number_node_t<WithNodeCheck>::operator()(State state,
         state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
   }
 
-  return core::map_node_to_floating_point(std::move(state), node, type);
+  return detail::node_result(std::move(state),
+    core::parse_as_floating_point<T>(node), node, omni::type_t<T>{});
 }
 
 template <typename WithNodeCheck>
@@ -171,7 +173,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
     && !std::is_const<T>::value && is_read_state<State>::value))
 auto map_boolean_node_t<WithNodeCheck>::operator()(State state,
   ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  omni::type_t<T>) const -> with_diagnostics_t<T> {
   if (state.limit_exceeded())
     return {compat::nullopt, {{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
@@ -189,7 +191,8 @@ auto map_boolean_node_t<WithNodeCheck>::operator()(State state,
         state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
   }
 
-  return core::map_node_to_boolean(std::move(state), node, type);
+  return detail::node_result(std::move(state),
+    core::parse_as_boolean(node), node, omni::type_t<T>{});
 }
 
 template <typename WithNodeCheck>
@@ -214,7 +217,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (traits::is_string_like<T>::value && is_read_state<State>::value))
 auto map_string_node_t<WithNodeCheck>::operator()(State state,
   ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) const -> with_diagnostics_t<T> {
+  omni::type_t<T>) const -> with_diagnostics_t<T> {
   if (state.limit_exceeded())
     return {compat::nullopt, {{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
@@ -232,7 +235,8 @@ auto map_string_node_t<WithNodeCheck>::operator()(State state,
         state.config.error_policy, {}}, {std::move(checked.error())}, {}}};
   }
 
-  return core::map_node_to_string_like(std::move(state), node, type);
+  return detail::node_result(std::move(state),
+    core::parse_as_string_like<T>(node), node, omni::type_t<T>{});
 }
 
 template <typename WithNodeCheck>

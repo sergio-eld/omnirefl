@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstddef>
 #include <csetjmp>
+#include <iterator>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -215,6 +216,89 @@ node_accumulator<State> make_node_accumulator(State state) {
   return {/*state=*/std::move(state), /*result=*/std::move(result)};
 }
 
+inline issue node_function_error(issue error, ::ryml::ConstNodeRef node) {
+  // An absent optional has a schema value but no document node. Its caller
+  // supplies the missing-field path after validation.
+  if (node.invalid())
+    return error;
+
+  if (error.node_id == ::ryml::NONE) {
+    auto prefix = core::node_path(node);
+    prefix.insert(prefix.end(), error.path.begin(), error.path.end());
+    error.path = std::move(prefix);
+    error.node_id = node.id();
+  }
+
+  const ::ryml::ConstNodeRef source{node.tree(), error.node_id};
+  if (error.path.empty() && source.has_parent())
+    error.path = core::node_path(source);
+
+  if (error.actual == json::value_kind::unknown)
+    error.actual = node_kind(source);
+
+  return error;
+}
+
+// Parsers return unqualified arithmetic values; the destination tag retains
+// cv-qualified destinations requested by traversal.
+template <typename Value, typename State, typename T = Value>
+auto node_result(State state,
+  compat::expected<Value, issue> mapped,
+  ::ryml::ConstNodeRef node, omni::type_t<T> = {}) -> with_diagnostics_t<T> {
+  if (mapped)
+    return {
+      /*value=*/std::move(*mapped),
+      /*diagnostics=*/{{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {}, {}},
+    };
+
+  auto result = make_node_accumulator(std::move(state));
+
+  result.report(node_function_error(std::move(mapped.error()), node));
+
+  return {compat::nullopt, std::move(result.result.diagnostics)};
+}
+
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename Errors, typename State,
+  typename Error = compat::remove_cvref_t<compat::range_reference_t<Errors>>),
+  (compat::is_input_range<Errors>::value && std::is_same<issue, Error>::value))
+auto node_result(State state,
+  compat::expected<T, Errors> mapped,
+  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
+  if (mapped)
+    return {
+      /*value=*/std::move(*mapped),
+      /*diagnostics=*/{{
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+        /*base=*/{},
+#endif
+        state.config.error_policy, {}}, {}, {}},
+    };
+
+  auto result = make_node_accumulator(std::move(state));
+
+  using std::begin;
+  using std::end;
+  auto first = begin(mapped.error());
+  const auto last = end(mapped.error());
+  for (; first != last; ++first) {
+    result.report(node_function_error(*first, node));
+    if (result.stopped())
+      break;
+  }
+
+  return {compat::nullopt, std::move(result.result.diagnostics)};
+}
+
+template <typename T, typename State>
+auto node_result(State, with_diagnostics_t<T> mapped, ::ryml::ConstNodeRef)
+  -> with_diagnostics_t<T> {
+  return mapped;
+}
+
 // Format validation precedes conversion; failure here means out of range.
 OMNI_CONSTRAINED_TEMPLATE((typename T), (std::is_integral<T>::value))
 compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
@@ -239,41 +323,14 @@ compat::expected<T, json::issue_code> from_chars(c4::csubstr scalar) {
   return value;
 }
 
-// Shared checked conversion; node format is validated before this call.
-template <typename T, typename State>
-auto read_scalar(State context,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>,
-  json::value_kind expected)
-  -> with_diagnostics_t<T, diagnostics> {
-  const auto scalar = node.val();
-  const auto converted = omni::ryml::detail::from_chars<compat::remove_cv_t<T>>(
-    scalar);
-
-  if (!converted) {
-    auto result = omni::ryml::detail::make_node_accumulator(
-      std::move(context));
-    result.report(core::make_issue(
-      converted.error(),
-      expected,
-      node,
-      /*warning=*/false));
-
-    return {compat::nullopt, std::move(result.result.diagnostics)};
-  }
-
-  return {
-    /*value=*/ *converted,
-    /*diagnostics=*/{
-      /*config=*/{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
-#endif
-        context.config.error_policy, {}},
-      /*issues=*/{},
-      /*parse_error_message=*/{},
-    },
-  };
+// Node format is validated before conversion; failure means out of range.
+template <typename T>
+auto read_scalar(::ryml::ConstNodeRef node, json::value_kind expected)
+  -> compat::expected<compat::remove_cv_t<T>, issue> {
+  return omni::ryml::detail::from_chars<compat::remove_cv_t<T>>(node.val())
+    .transform_error([node, expected](json::issue_code reason) {
+      return core::make_issue(reason, expected, node);
+    });
 }
 
 } // namespace detail
@@ -462,41 +519,50 @@ inline auto expect_string_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::string, node)};
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (compat::conjunction<traits::is_string_like<T>,
-    is_read_state<State>>::value))
-auto map_node_to_string_like_t::operator()(State state,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T),
+  (traits::is_string_like<T>::value))
+auto parse_as_string_like(::ryml::ConstNodeRef node)
+  -> compat::expected<T, issue> {
   assert(node.has_val() && !node.is_container());
   const auto scalar = node.val();
   using storage_type = compat::remove_cvref_t<decltype(adapt::as_string(
     std::declval<const T &>()))>;
-
   static_assert(std::is_same<char, typename storage_type::value_type>::value,
     "Ryml string mapping currently supports only char text.");
 
   // TODO: [medium] Define UTF-8 conversion for non-char strings and handling
   // of invalid UTF-8 through the shared operation customization points.
   // See the disabled wide-string case in tests/string_mapping.cpp.
-
   using view_type = compat::basic_string_view<
     typename storage_type::value_type, typename storage_type::traits_type>;
+  return adapt::from_string(omni::type_t<T>{},
+    view_type{scalar.str, scalar.len});
+}
 
-  return {
-    /*value=*/adapt::from_string(omni::type_t<T>{},
-      view_type{scalar.str, scalar.len}),
-    /*diagnostics=*/{
-      /*config=*/{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
-#endif
-        state.config.error_policy, {}},
-      /*issues=*/{},
-      /*parse_error_message=*/{},
-    },
-  };
+inline auto expect_arithmetic_node(::ryml::ConstNodeRef node)
+  -> compat::expected<::ryml::ConstNodeRef, issue> {
+  if (detail::is_boolean_node(node) || detail::is_number_node(node))
+    return node;
+
+  return compat::unexpected<issue>{make_issue(
+    json::issue_code::unexpected_kind, json::value_kind::scalar, node)};
+}
+
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T),
+  (std::is_arithmetic<T>::value))
+auto parse_as_arithmetic(::ryml::ConstNodeRef node)
+  -> compat::expected<compat::remove_cv_t<T>, issue> {
+  assert((std::is_same<bool, compat::remove_cv_t<T>>::value
+    ? bool(expect_boolean_node(node))
+    : std::is_integral<T>::value
+      ? bool(expect_integer_node(node)) : bool(expect_number_node(node))));
+  return omni::ryml::detail::read_scalar<T>(node,
+    std::is_same<bool, compat::remove_cv_t<T>>::value
+      ? json::value_kind::boolean
+      : std::is_integral<T>::value
+        ? (std::is_unsigned<T>::value
+          ? json::value_kind::unsigned_integer : json::value_kind::integer)
+        : json::value_kind::number);
 }
 
 inline auto expect_boolean_node(::ryml::ConstNodeRef node)
@@ -508,29 +574,13 @@ inline auto expect_boolean_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::boolean, node)};
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_same<bool, compat::remove_cv_t<T>>::value
-    && !std::is_const<T>::value && is_read_state<State>::value))
-auto map_node_to_boolean_t::operator()(State state,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
+inline auto parse_as_boolean(::ryml::ConstNodeRef node)
+  -> compat::expected<bool, issue> {
   assert(node.has_val() && !node.is_container() && !node.is_val_quoted());
   const auto scalar = node.val();
   const auto result = parse_boolean({scalar.str, scalar.len});
   assert(result.has_value());
-  return {
-    /*value=*/ *result,
-    /*diagnostics=*/{
-      /*config=*/{
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-        /*base=*/{},
-#endif
-        state.config.error_policy, {}},
-      /*issues=*/{},
-      /*parse_error_message=*/{},
-    },
-  };
+  return *result;
 }
 
 inline auto expect_integer_node(::ryml::ConstNodeRef node)
@@ -548,22 +598,15 @@ inline auto expect_integer_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::integer, node)};
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T),
   (std::is_integral<T>::value
-    && !std::is_same<bool, compat::remove_cv_t<T>>::value
-    && is_read_state<State>::value))
-auto map_node_to_integral_t::operator()(State state,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
-  assert(core::expect_integer_node(node));
-  const auto expected = std::is_unsigned<T>::value
-    ? json::value_kind::unsigned_integer : json::value_kind::integer;
-
-  return omni::ryml::detail::read_scalar(std::move(state),
-    node,
-    omni::type_t<T>{},
-    expected);
+    && !std::is_same<bool, compat::remove_cv_t<T>>::value))
+auto parse_as_integral(::ryml::ConstNodeRef node)
+  -> compat::expected<compat::remove_cv_t<T>, issue> {
+  assert(expect_integer_node(node));
+  return omni::ryml::detail::read_scalar<T>(node,
+    std::is_unsigned<T>::value
+      ? json::value_kind::unsigned_integer : json::value_kind::integer);
 }
 
 inline auto expect_number_node(::ryml::ConstNodeRef node)
@@ -575,45 +618,14 @@ inline auto expect_number_node(::ryml::ConstNodeRef node)
     json::issue_code::unexpected_kind, json::value_kind::number, node)};
 }
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_floating_point<T>::value && is_read_state<State>::value))
-auto map_node_to_floating_point_t::operator()(State state,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
-  assert(core::expect_number_node(node));
-  return omni::ryml::detail::read_scalar(std::move(state),
-    node,
-    omni::type_t<T>{},
-    json::value_kind::number);
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T),
+  (std::is_floating_point<T>::value))
+auto parse_as_floating_point(::ryml::ConstNodeRef node)
+  -> compat::expected<compat::remove_cv_t<T>, issue> {
+  assert(expect_number_node(node));
+  return omni::ryml::detail::read_scalar<T>(node, json::value_kind::number);
 }
 
-inline auto expect_arithmetic_node(::ryml::ConstNodeRef node)
-  -> compat::expected<::ryml::ConstNodeRef, issue> {
-  if (detail::is_boolean_node(node) || detail::is_number_node(node))
-    return node;
-
-  return compat::unexpected<issue>{make_issue(
-    json::issue_code::unexpected_kind, json::value_kind::scalar, node)};
-}
-
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
-  (std::is_arithmetic<T>::value && is_read_state<State>::value
-    && (!std::is_const<T>::value
-      || !std::is_same<bool, compat::remove_cv_t<T>>::value)))
-auto map_node_to_arithmetic_t::operator()(State state,
-  ::ryml::ConstNodeRef node,
-  omni::type_t<T>) const
-  -> with_diagnostics_t<T, diagnostics> {
-  assert(node.has_val() && !node.is_container());
-  constexpr auto read = typename traits::select<
-    traits::case_<std::is_same<bool, compat::remove_cv_t<T>>::value,
-      core::map_node_to_boolean_t>,
-    traits::case_<std::is_integral<T>::value, core::map_node_to_integral_t>,
-    core::map_node_to_floating_point_t>::type{};
-
-  return read(std::move(state), node, omni::type_t<T>{});
-}
 
 } // namespace core
 

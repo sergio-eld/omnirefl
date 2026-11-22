@@ -73,7 +73,8 @@ struct read_leaf {
       state.child(OMNI_META_STRING("checked")), node["checked"],
       omni::type_t<int>{}).and_then([&state, &node](int checked)
         -> omni::ryml::with_diagnostics_t<leaf> {
-      return omni::ryml::core::map_node_to_integral(
+      return omni::ryml::compose::map_integer_node(
+        omni::ryml::core::parse_as_integral<int>)(
         state.child(OMNI_META_STRING("raw")), node["raw"],
         omni::type_t<int>{}).transform([checked](int raw) -> leaf {
           return {checked, raw};
