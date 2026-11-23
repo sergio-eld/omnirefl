@@ -39,6 +39,17 @@ ctest --output-on-failure
 Local containers require Bash, curl, and Docker Compose. On Windows, open the
 repository through WSL.
 
+## Recovery mode
+
+Package preparation saves its output to `artifacts/devcontainer/prepare.log`
+in the checkout, including when Codespaces falls back to recovery mode.
+
+To build from source while a release is unpublished, open
+`.devcontainer/devcontainer.json` and change the final `initializeCommand`
+argument from `"v0.0.8"` to `"source"`. This builds Omnirefl in its Alpine
+toolchain container. Then run **Codespaces: Rebuild Container** (or
+**Dev Containers: Rebuild Container** locally).
+
 ## Development (Cosmopolitan)
 
 **Development** opens the repository and includes a prebuilt x86_64
