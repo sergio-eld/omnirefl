@@ -91,7 +91,8 @@ inline auto expect_string_node(::ryml::ConstNodeRef node)
   -> compat::expected<::ryml::ConstNodeRef, issue>;
 
 /** Parses scalar text as a char-based string-like value.
- * String customization uses \ref adapt::from_string.
+ * String customization uses \ref adapt::from_string. View results borrow
+ * the tree's character storage, which must remain alive while views are used.
  * @pre The caller validates a scalar node in a valid tree. */
 OMNI_CONSTRAINED_TEMPLATE((typename T),
   (traits::is_string_like<T>::value))

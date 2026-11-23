@@ -18,10 +18,21 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-// Ad hoc: selection precedes the mapping's terminal operator, so custom
-// selectors must accept terminal children too. Built-in writers handle the
-// sentinel; custom mappings without that overload can fail compilation.
-// Reassess with the read_node dispatch-boundary REFACTORME in core.hpp.
+// Terminal children have no path or write-state interface. Intercept them
+// before selection so user selectors and mappings only receive real states.
+template <typename T>
+auto select_write_mapping(const depth_exceeded &, omni::type_t<T>)
+  -> with_depth_exceeded_operator {
+  return {};
+}
+
+OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+  (is_write_state<State>::value))
+auto select_write_mapping(const State &state, omni::type_t<T> type)
+  -> decltype(compat::invoke(state.map_node, state, type)) {
+  return compat::invoke(state.map_node, state, type);
+}
+
 template <typename State>
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
@@ -33,8 +44,8 @@ struct cpp11_write_member {
     child.set_key_serialized(field.name());
     const auto state = this->context.at(child)
       .template field<compat::remove_cvref_t<Record>>(field.as_meta());
-    const auto mapping = compat::invoke(this->context.map_node,
-      state, omni::type_t<typename omni::data_member_meta_t<_F>::type>{});
+    const auto mapping = select_write_mapping(state,
+      omni::type_t<typename omni::data_member_meta_t<_F>::type>{});
     mapping(state, field.value());
   }
 };
@@ -127,8 +138,8 @@ struct write_range_case<false> {
       const element_type &element = *current;
       if (!is_null(element)) {
         const auto state = context.at(node.append_child()).element();
-        const auto mapping = compat::invoke(context.map_node,
-          state, omni::type_t<element_type>{});
+        const auto mapping = select_write_mapping(state,
+          omni::type_t<element_type>{});
         mapping(state, element);
       }
     }
@@ -174,8 +185,8 @@ struct write_range_case<true> {
 
       child.set_key_style(::ryml::KEY_DQUO);
       const auto state = context.at(child).element();
-      const auto mapping = compat::invoke(context.map_node,
-        state, omni::type_t<traits::mapped_type_t<T>>{});
+      const auto mapping = select_write_mapping(state,
+        omni::type_t<traits::mapped_type_t<T>>{});
       mapping(state, entry.second);
     }
   }

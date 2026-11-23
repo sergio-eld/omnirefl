@@ -90,7 +90,8 @@ template <typename T>
 struct to_type_t<endpoint<T>>:
     decltype(compose::with_node_check<core::expect_object_node>(
       reflected_scope::map_object_node_t<mapping::record_strategy_t<
-        decltype(mapping::record_strategy.filter_fields), endpoint_names>>{})) {};
+        decltype(mapping::record_strategy.filter_fields),
+        endpoint_names>>{})) {};
 #endif
 
 // Initialized captures must survive dispatcher selection in both directions.

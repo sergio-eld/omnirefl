@@ -83,6 +83,34 @@ struct read_leaf {
   }
 };
 
+struct write_integer {
+  bool selected;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
+  auto operator()(State state, const int &value) const -> ::ryml::NodeRef {
+    return omni::ryml::map_integral(std::move(state),
+      value + (this->selected ? 10 : 0));
+  }
+};
+
+struct select_writer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
+  auto operator()(State state, omni::type_t<int>) const -> write_integer {
+    return {state.path().ends_with(".data.checked")};
+  }
+
+  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
+    (omni::ryml::is_write_state<State>::value
+      && !std::is_same<T, int>::value))
+  auto operator()(State state, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
+      state, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  }
+};
+
 } // namespace custom_depth
 
 namespace diagnostic_callbacks {
@@ -137,7 +165,6 @@ struct const_rvalue_only_renderer {
 };
 
 } // namespace diagnostic_callbacks
-
 } // namespace
 
 #if defined(OMNI_TOOL_RUN)
@@ -757,6 +784,17 @@ TEST(mapping_dispatch, custom_recursive_fields_can_delegate_scalar_children) {
       EXPECT_EQ(9, result.value->front().data.raw);
     }
   }
+}
+
+TEST(mapping_dispatch, recursive_writers_preserve_path_specific_selection) {
+  const custom_depth::node source{{1, 2}, {{{3, 4}, {}}}};
+  const auto as_json = omni::ryml::as_json.tdm_map_node(
+    omni::fn::default_value<custom_depth::select_writer>{});
+
+  EXPECT_TRUE(serialization_test::matches_json(R"({
+    "data": {"checked": 11, "raw": 2},
+    "children": [{"data": {"checked": 13, "raw": 4}, "children": []}]
+  })", as_json(source)));
 }
 
 // FIXME: [high] Re-enable after reducing recursive path/depth instantiations.

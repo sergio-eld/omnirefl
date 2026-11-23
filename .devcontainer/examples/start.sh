@@ -2,7 +2,8 @@
 set -eu
 
 cd "$(dirname "$0")/../.."
-tar -xzf artifacts/devcontainer/omnirefl.tar.gz -C /usr/local --strip-components=1
+tar -xzf artifacts/devcontainer/omnirefl.tar.gz \
+  -C /usr/local --strip-components=1
 
 # Seed the ignored sandbox without replacing edits on subsequent starts.
 mkdir -p extras/examples/scratch
@@ -70,14 +71,23 @@ struct person {
 };
 
 int main() {
-  const auto names = omni::reflected_call(field_names{}, omni::type_t<person>{});
+  const auto names = omni::reflected_call(
+    field_names{}, omni::type_t<person>{});
   for (const auto &name : names)
     std::cout << name << '\n';
 }
 EOF
 fi
 
-# Configure after creating scratch so its compile command is available.
+# Seed JSON separately so existing reflection scratchpads stay untouched.
+mkdir -p extras/examples/scratch_json
+for file in CMakeLists.txt main.cpp; do
+  if [ ! -e "extras/examples/scratch_json/$file" ]; then
+    cp ".devcontainer/examples/json/$file" "extras/examples/scratch_json/$file"
+  fi
+done
+
+# Configure after seeding so both sandboxes have compile commands.
 cd extras
 if [ "--fresh" = "${1:-}" ]; then
   cmake --fresh --preset examples

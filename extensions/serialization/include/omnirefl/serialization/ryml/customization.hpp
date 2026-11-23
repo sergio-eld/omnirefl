@@ -354,7 +354,6 @@ struct from_type_cpp11_trailing_return {
 } // namespace omni
 #endif
 
-
 namespace omni {
 namespace ryml {
 namespace reflected_scope {

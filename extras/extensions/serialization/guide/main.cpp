@@ -6,36 +6,25 @@
  * The contents follow source order; topics may have dedicated model namespaces.
  *
  * Basics
- *   basics.deserialize_record - default mapping interface and its result
- *   basics.deserialize_record_invalid_input - empty value and diagnostic text
- *   basics.deserialize_into - map a non-default-constructible record
+ *   basics.deserialize_record - default mapping and nested type discovery
+ *   basics.deserialize_record_invalid_input
+ *     values, diagnostics, and warnings
+ *   basics.malformed_input - invalid document syntax
+ *   basics.inferred_validation - C++ types determine required and valid fields
  *   basics.serialize_record - choose JSON or YAML output
  *   basics.scalar_and_sequence_roots - documents need not be objects
  *   basics.enum_mapping - declared names and unknown-name rejection
- *   basics.missing_fields - missing required data members are errors
- *   basics.invalid_fields - invalid input is not a missing field
- *   basics.nested_records - discover nested record types
  *   basics.sequences - vectors of records and nested vectors
  *   basics.optional_fields - missing, null, present, and invalid values
  *   basics.serialize_optional_fields - empty optionals become null
  *   basics.optional_sequence_elements - omit empty optional elements
  *   basics.key_value_ranges - map string-keyed objects
- *   basics.mapping_result - values, success markers, and structured issues
- *   basics.fundamental_mapping_results - decoded values and conversion errors
  *   basics.custom_scalar_mapping
  *     map a wrapper through the default scalar mappers
- *   basics.custom_scalar_mapping_cpp11 - equivalent C++11 struct registration
- *   basics.custom_container_mapping
- *     reuse range mapping for a container wrapper
- *   basics.custom_string_mapping - reuse string mapping for a string wrapper
  *   basics.custom_record_mapping
  *     reuse record mapping and member customizations
- *
- * Diagnostics
- *   diagnostics.structured_issues - issue codes, values, and paths
- *   diagnostics.rendering - render retained issues on demand
- *   diagnostics.custom_results - choose and compose the diagnostics result
- *   diagnostics.valid_values_with_warnings - success can retain warnings
+ *   basics.in_place_mapping_customization
+ *     customize the mapping lookup used by deserialize and serialize
  *
  * Advanced
  *   advanced.local_configuration - customize config with tdm_config
@@ -44,19 +33,41 @@
  *   advanced.duplicate_fields - choose a repeated field occurrence
  *   advanced.error_limit - experimental collection of multiple errors
  *   advanced.warning_limit - fail when the warning limit is exceeded
+ *   advanced.map_by_schema - map an existing tree and retain structured issues
+ *   advanced.fundamental_mapping_results
+ *     decoded values and conversion errors
+ *   advanced.deserialize_into - map a non-default-constructible record
+ *
+ * Advanced: diagnostics
+ *   diagnostics.structured_issues - issue codes, values, and paths
+ *   diagnostics.rendering - render retained issues on demand
+ *   diagnostics.custom_results - choose and compose the diagnostics result
+ *   diagnostics.valid_values_with_warnings - success can retain warnings
+ *
+ * Advanced: customization and composition
+ *   advanced.custom_scalar_mapping_cpp11
+ *     equivalent C++11 struct registration
+ *   advanced.custom_container_mapping
+ *     reuse range mapping for a container wrapper
+ *   advanced.custom_string_mapping - reuse string mapping for a string wrapper
  *   advanced.composed_integer_mapping - wrap a node-only expected conversion
  *   advanced.composed_boolean_mapping - construct an application flag
  *   advanced.composed_real_mapping - pass state to a value conversion
  *   advanced.composed_string_mapping - select a template result by type tag
  *   advanced.composed_arithmetic_mapping - numeric templates and diagnostics
- *   advanced.composed_arithmetic_shape_errors - incompatible numeric categories
+ *   advanced.composed_arithmetic_shape_errors
+ *     incompatible numeric categories
  *   advanced.composed_enum_mapping - choose custom protocol names
  *   advanced.composed_range_mapping - construct a wrapper around a sequence
  *   advanced.composed_optional_mapping - construct nullable wrappers
  *   advanced.composed_record_mapping - nested lookup for vector elements
  *   advanced.mutating_scalar_mapping - exceptional pointer-only conversion
  *   advanced.mutating_record_mapping - existing records and state delegation
- *   advanced.serialize_static_fields - adjust a shared record strategy
+ *   advanced.record_strategy - share field selection between reader and writer
+ *   advanced.strategy_aliases - alternate record field and enum names
+ *   advanced.field_validation - validate decoded fields without changing them
+ *   advanced.record_validation - validate whole records, including nested ones
+ *   advanced.path_specific_mapping - customize one use of a nested type
  *   advanced.tree_ownership - choose owning or borrowed string storage
  *   advanced.borrowed_input - tree and diagnostic lifetimes
  *
@@ -102,6 +113,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <tuple>
 #include <type_traits>
@@ -133,29 +145,20 @@ struct service {
   std::vector<std::string> tags;
 };
 
-struct measurement {
-  explicit measurement(int initial): value(initial) {}
-  int value;
-};
-
 enum class status { ready, busy };
 
 } // namespace basic_mapping
 
-/** The RapidYAML-backed interface accepts JSON and YAML input. deserialize is
- * a callable with default config already bound: pass the requested type and
- * input text to map it into a C++ value. See `advanced.local_configuration` for
- * local customization and `advanced.explicit_configuration` for explicit config.
- *
- * The result contains an optional value and retained diagnostics; a value is
- * available only on success. The default diagnostics are rendered text; see
- * `diagnostics.custom_results` for a custom result type.
- */
+/** `deserialize` accepts JSON or YAML and maps it to the requested C++ type.
+ * Instrumentation discovers nested types through the reflection dependency
+ * protocol: `service::upstream` exposes `endpoint` as a dependency.
+ * With CMake, `omni_reflected_target` supplies the generated metadata header.
+ * See `advanced.local_configuration` for local configuration. */
 TEST(basics, deserialize_record) {
   using namespace std::string_literals;
 
-  // omni::type<T> supplies a type tag; C++11: omni::type_t<T>{}.
-  const auto result = omni::ryml::deserialize(
+  // `omni::type<T>` supplies a type tag; C++11: `omni::type_t<T>{}`.
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<basic_mapping::service>,
     R"(
 {
@@ -179,13 +182,18 @@ TEST(basics, deserialize_record) {
   }
 }
 
-/** with_diagnostics_t<T, D> carries an optional value and diagnostics together.
- * Failed mapping leaves value empty. deserialize renders diagnostics as text
- * by default; the path identifies the invalid nested member.
- * Diagnostics can also carry warnings alongside a successful value; see
- * `diagnostics.valid_values_with_warnings`. */
+/** `deserialize` returns `with_diagnostics_t<T, D>`, containing the mapped
+ * object in `.value` (`optional<T>`) and a report in `.diagnostics` (`D`).
+ * The default report is rendered text. Failure leaves `.value` empty, as with
+ * the invalid `port` below. Success provides a value but may still carry
+ * warnings; see `diagnostics.valid_values_with_warnings`.
+ *
+ * Reported locations use JSON Pointer paths (RFC 6901), such as
+ * `/upstream/port`.
+ * For structured reports from an existing tree, see
+ * `advanced.map_by_schema`. */
 TEST(basics, deserialize_record_invalid_input) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<basic_mapping::service>,
     R"(
 {
@@ -196,23 +204,48 @@ TEST(basics, deserialize_record_invalid_input) {
 )");
 
   EXPECT_FALSE(result.value.has_value());
-  EXPECT_EQ("/upstream/port: expected integer, found scalar", result.diagnostics);
+  EXPECT_EQ("/upstream/port: expected integer, found scalar",
+    result.diagnostics);
 }
 
-/** (QoL) Maps into a record without requiring a default constructor.
- * The result holds a success marker (compat::monostate); the mapped value stays
- * in the supplied object. A failed mapping leaves its state unspecified.
- * `basics.mapping_result` explains the success marker in more detail.
- * @warning This overload supplies the root object. Member types without
- * default constructors require custom mappings; see
- * `basics.custom_record_mapping` and `advanced.mutating_record_mapping`. */
-TEST(basics, deserialize_into) {
-  basic_mapping::measurement into{7};
-  const auto result = omni::ryml::deserialize(&into, R"({"value": 42})");
+/** Malformed documents fail during parsing, before C++ field validation.
+ * They use the same result interface as mapping errors. */
+TEST(basics, malformed_input) {
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    omni::type<basic_mapping::service>, R"({"name":)");
 
-  EXPECT_TRUE(result.value.has_value());
-  EXPECT_TRUE(result.diagnostics.empty());
-  EXPECT_EQ(42, into.value);
+  EXPECT_FALSE(result.value);
+  EXPECT_FALSE(result.diagnostics.empty());
+}
+
+namespace policy_examples {
+
+struct measurement { int value; };
+
+} // namespace policy_examples
+
+/** Validation is inferred from destination C++ types: a plain `int` field is
+ * required and accepts neither a string nor null. Optional fields are shown
+ * below. */
+TEST(basics, inferred_validation) {
+  using namespace std::literals;
+
+  const std::vector cases{
+    std::pair{"{}"s, "/value: missing field"sv},
+    std::pair{R"({"value": "bad"})"s,
+      "/value: expected integer, found scalar"sv},
+    std::pair{R"({"value": null})"s,
+      "/value: expected integer, found null"sv},
+  };
+
+  for (const auto &[document, diagnostic] : cases) {
+    SCOPED_TRACE(document);
+    const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+      omni::type<policy_examples::measurement>, document);
+
+    EXPECT_FALSE(result.value);
+    EXPECT_EQ(diagnostic, result.diagnostics);
+  }
 }
 
 /** JSON and YAML output represent the same C++ value. as_json and as_yaml
@@ -250,19 +283,22 @@ tags:
 // Supported scalars and vectors can be complete documents, without a record.
 TEST(basics, scalar_and_sequence_roots) {
   EXPECT_EQ("42", omni::ryml::as_json(42));
-  const auto scalar = omni::ryml::deserialize(omni::type<int>, "42");
+  const omni::ryml::with_diagnostics_t scalar = omni::ryml::deserialize(
+    omni::type<int>, "42");
   EXPECT_TRUE(scalar.value);
   if (scalar.value)
     EXPECT_EQ(42, *scalar.value);
 
   EXPECT_EQ("true", omni::ryml::as_json(true));
-  const auto boolean = omni::ryml::deserialize(omni::type<bool>, "true");
+  const omni::ryml::with_diagnostics_t boolean = omni::ryml::deserialize(
+    omni::type<bool>, "true");
   EXPECT_TRUE(boolean.value);
   if (boolean.value)
     EXPECT_TRUE(*boolean.value);
 
   EXPECT_EQ("0.5", omni::ryml::as_json(0.5));
-  const auto real = omni::ryml::deserialize(omni::type<double>, "0.5");
+  const omni::ryml::with_diagnostics_t real = omni::ryml::deserialize(
+    omni::type<double>, "0.5");
   EXPECT_TRUE(real.value);
   if (real.value)
     EXPECT_DOUBLE_EQ(0.5, *real.value);
@@ -270,7 +306,7 @@ TEST(basics, scalar_and_sequence_roots) {
   const std::vector values{7, 42};
   EXPECT_TRUE(same_document("[7, 42]", omni::ryml::as_json(values)));
   EXPECT_TRUE(same_document("- 7\n- 42\n", omni::ryml::as_yaml(values)));
-  const auto sequence = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t sequence = omni::ryml::deserialize(
     omni::type<std::vector<int>>, "[7, 42]");
 
   EXPECT_TRUE(sequence.value);
@@ -281,7 +317,7 @@ TEST(basics, scalar_and_sequence_roots) {
 /** Reflected enums use their declared names as strings in JSON and YAML.
  * Numeric values and strings without a declared name are rejected. */
 TEST(basics, enum_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<basic_mapping::status>, R"("busy")");
 
   EXPECT_TRUE(result.value);
@@ -291,70 +327,11 @@ TEST(basics, enum_mapping) {
     EXPECT_EQ(R"("busy")", omni::ryml::as_json(*result.value));
   }
 
-  const auto unknown = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t unknown = omni::ryml::deserialize(
     omni::type<basic_mapping::status>, R"("missing")");
 
   EXPECT_FALSE(unknown.value);
   EXPECT_FALSE(unknown.diagnostics.empty());
-}
-
-namespace policy_examples {
-
-struct measurement { int value; };
-
-} // namespace policy_examples
-
-
-
-
-
-// Missing required data members produce errors.
-TEST(basics, missing_fields) {
-  const auto result = omni::ryml::deserialize(
-    omni::type<policy_examples::measurement>, "{}");
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ("/value: missing field", result.diagnostics);
-}
-
-// Invalid scalar values and explicit null are errors for an integer member.
-TEST(basics, invalid_fields) {
-  using namespace std::string_literals;
-
-  const auto deserialize = omni::ryml::deserialize;
-
-  const std::vector documents{
-    R"({"value": "bad"})"s,
-    R"({"value": null})"s,
-  };
-
-  for (const auto &document : documents) {
-    SCOPED_TRACE(document);
-    const auto result = deserialize(
-      omni::type<policy_examples::measurement>, document);
-
-    EXPECT_FALSE(result.value);
-    EXPECT_FALSE(result.diagnostics.empty());
-  }
-}
-
-// The outer record's metadata discovers its nested record dependencies.
-TEST(basics, nested_records) {
-  const auto result = omni::ryml::deserialize(
-    omni::type<basic_mapping::service>,
-    R"(
-{
-  "name": "gateway", "upstream": {"host": "localhost", "port": 8080},
-  "tags": []
-}
-)");
-
-  EXPECT_TRUE(result.value);
-  if (result.value) {
-    EXPECT_EQ("localhost", result.value->upstream.host);
-    EXPECT_EQ(8080U, result.value->upstream.port);
-    EXPECT_TRUE(result.value->tags.empty());
-  }
 }
 
 namespace sequence_mapping {
@@ -368,7 +345,7 @@ struct batch {
 
 // Vectors can contain reflected records or further vectors.
 TEST(basics, sequences) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<sequence_mapping::batch>,
     R"(
 {
@@ -408,7 +385,7 @@ TEST(basics, optional_fields) {
   const std::vector absent{"{}"s, R"({"value": null})"s};
   for (const auto &document : absent) {
     SCOPED_TRACE(document);
-    const auto result = omni::ryml::deserialize(
+    const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
       omni::type<optional_mapping::measurement>, document);
 
     EXPECT_TRUE(result.value);
@@ -416,7 +393,7 @@ TEST(basics, optional_fields) {
       EXPECT_FALSE(result.value->value);
   }
 
-  const auto present = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t present = omni::ryml::deserialize(
     omni::type<optional_mapping::measurement>, R"({"value": 7})");
 
   EXPECT_TRUE(present.value);
@@ -427,7 +404,7 @@ TEST(basics, optional_fields) {
     }
   }
 
-  const auto invalid = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t invalid = omni::ryml::deserialize(
     omni::type<optional_mapping::measurement>, R"({"value": "bad"})");
 
   EXPECT_FALSE(invalid.value);
@@ -464,7 +441,7 @@ TEST(basics, key_value_ranges) {
   const std::string json = R"({"first": 7, "second": 42})";
   EXPECT_TRUE(same_document(json, omni::ryml::as_json(source)));
   EXPECT_TRUE(same_document(json, omni::ryml::as_yaml(source)));
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<std::map<std::string, int>>, json);
 
   EXPECT_TRUE(result.value);
@@ -472,76 +449,11 @@ TEST(basics, key_value_ranges) {
     EXPECT_EQ(source, *result.value);
 }
 
-/** map_by_schema returns with_diagnostics_t<T>: .value is optional<T>, and
- * .diagnostics contains structured issues rather than the default deserialize
- * binding's rendered text. An engaged .value means success, possibly with
- * warnings; an empty .value means failure. The source tree stays alive while
- * its node references and diagnostic paths are used.
- *
- * A pointer-based node reader updates an existing T, so its result uses
- * with_diagnostics_t<compat::monostate>. The engaged monostate marks success;
- * the decoded object is in the supplied destination. On failure, .value is
- * empty and .diagnostics describes the errors. The destination state is then
- * unspecified and may contain partial updates; failure promises no rollback.
- *
- * Custom readers return this result to the enclosing mapper, which collects
- * its issues and applies the error/warning limits. Reading state supplies the
- * config and accumulated counts; it is passed down explicitly,
- * rather than used as a mutable output for diagnostics.
- * See `diagnostics.structured_issues` for individual issue fields. */
-TEST(basics, mapping_result) {
-  const auto tree = omni::ryml::core::parse("42");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const auto result = omni::ryml::map_by_schema(omni::type<int>, *tree);
-
-  EXPECT_TRUE(result.value);
-  EXPECT_TRUE(result.diagnostics.issues.empty());
-  if (result.value)
-    EXPECT_EQ(42, *result.value);
-}
-
-/** Fundamental values and string views use type tags and return structured
- * diagnostics. */
-TEST(basics, fundamental_mapping_results) {
-  using omni::ryml::map_by_schema;
-
-  const auto tree = omni::ryml::core::parse(
-    R"({"boolean": true, "integer": 7, "real": 2.5, "text": "hello"})");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const auto node = tree->crootref();
-  const auto boolean = map_by_schema(omni::type<bool>, node["boolean"]);
-  const auto integer = map_by_schema(omni::type<int>, node["integer"]);
-  const auto natural = map_by_schema(omni::type<unsigned>, node["integer"]);
-  const auto real = map_by_schema(omni::type<double>, node["real"]);
-  const auto text = map_by_schema(omni::type<std::string>, node["text"]);
-  const auto view = map_by_schema(omni::type<omni::compat::string_view>,
-    node["text"]);
-
-  EXPECT_EQ(true, boolean.value);
-  EXPECT_EQ(7, integer.value);
-  EXPECT_EQ(7U, natural.value);
-  EXPECT_EQ(2.5, real.value);
-  EXPECT_EQ("hello", text.value);
-  EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
-
-  const auto invalid = map_by_schema(omni::type<int>, node["text"]);
-
-  EXPECT_FALSE(invalid.value);
-  EXPECT_FALSE(invalid.diagnostics.issues.empty());
-}
-
 namespace basic_customization {
 
 struct my_integer { int value; };
 
 } // namespace basic_customization
-
 } // namespace
 
 // Register one reader and writer per type. The callable form is available
@@ -569,16 +481,16 @@ const auto omni::ryml::cp::from_type<basic_customization::my_integer> =
 
 namespace {
 
-/** A wrapper need not map to an object. to_type and from_type select its
- * representation globally; only one registration form is used per direction.
- * transform wraps the decoded integer and keeps its diagnostics.
- * These callables use map_integer_node for integer checks and diagnostics
- * and map_integral for writing. write_state_like and read_state_like identify
- * each direction's state without spelling its implementation parameters. The
+/** A wrapper need not map to an object. `cp::to_type` and `cp::from_type`
+ * register its mappings globally; use one registration form per direction.
+ * `.transform` wraps the decoded integer and keeps its diagnostics.
+ * These callables use `map_integer_node` for integer checks and diagnostics
+ * and `map_integral` for writing. `write_state_like` and `read_state_like`
+ * identify each direction's state without its implementation parameters. The
  * generic signatures delay instantiation until called within reflected scope.
- * `basics.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
+ * `advanced.custom_scalar_mapping_cpp11` shows the trait-based equivalent. */
 TEST(basics, custom_scalar_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<basic_customization::my_integer>, "42");
 
   EXPECT_TRUE(result.value);
@@ -591,10 +503,464 @@ TEST(basics, custom_scalar_mapping) {
 
 namespace basic_customization {
 
+struct my_record {
+  my_integer reading;
+  std::string name;
+};
+
+} // namespace basic_customization
+} // namespace
+
+// Reader signature: (read_state_like, ConstNodeRef, T *)
+//   -> with_diagnostics_t<monostate>.
+// Exposition: spell out state forwarding; direct registration can reuse
+// map_object_node itself. The generic destination delays metadata queries.
+template <>
+const auto omni::ryml::cp::to_type<basic_customization::my_record> =
+  []<typename T>(omni::ryml::read_state_like auto state,
+    ::ryml::ConstNodeRef node,
+    T *into)
+    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
+    // Forward the current state when delegating to another mapping.
+    return omni::ryml::reflected_scope::map_object_node(
+      std::move(state),
+      node,
+      into);
+  };
+
+template <>
+const auto omni::ryml::cp::from_type<basic_customization::my_record> =
+  omni::ryml::reflected_scope::map_record;
+
+namespace {
+
+/** A custom record mapping can delegate to `map_object_node` and `map_record`.
+ * Member conversions still use their `cp::` registrations, so
+ * `my_record::reading` uses the scalar mapping for `my_integer` shown above. */
+TEST(basics, custom_record_mapping) {
+  const std::string document = R"({"reading": 7, "name": "sensor"})";
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    omni::type<basic_customization::my_record>, document);
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ(7, result.value->reading.value);
+    EXPECT_EQ("sensor", result.value->name);
+    EXPECT_TRUE(same_document(document, omni::ryml::as_json(*result.value)));
+  }
+}
+
+namespace static_field_serialization {
+
+struct settings {
+  std::string name;
+  static constexpr int revision = 1;
+};
+
+} // namespace static_field_serialization
+
+/** `deserialize` and `serialize` expose a `.map_node` callable data member.
+ * It receives `(state, type<T>)` and returns the mapping for that position.
+ * Defaults delegate to `mapping_to_type` and `mapping_from_type`, respectively;
+ * those dispatchers select a `cp::` registration or a built-in mapping.
+ * `.tdm_map_node` returns a local binding with a different selector.
+ * Here it includes static data members for `settings`; other types keep the
+ * default selection. Static members remain excluded from deserialization.
+ * See `advanced.record_strategy` for field selection and
+ * `advanced.path_specific_mapping` for path-based customization.
+ *
+ * C++11 uses named callables and overloaded `operator()` instead of generic
+ * lambdas and `if constexpr`. See `strategy_examples::select_static_writer`
+ * and `strategy_examples::include_statics` in `../tests/mapping_strategy.cpp`
+ * for the selector and `.tdm_strategy` updater idioms. */
+TEST(basics, in_place_mapping_customization) {
+  using static_field_serialization::settings;
+
+  constexpr auto serialize = omni::ryml::serialize
+    .tdm_map_node([](auto) {
+      return []<typename T>(auto state, omni::type_t<T> type) {
+        if constexpr (std::is_same_v<T, settings>) {
+          // Include static data members while still excluding functions.
+          // See `advanced.record_strategy` for `.filter_fields`.
+          return omni::ryml::reflected_scope::map_record
+            .tdm_strategy([](auto strategy) {
+              return strategy.tdm_filter_fields([](auto) {
+                return omni::fn::is_non_functional;
+              });
+            });
+        } else {
+          return omni::ryml::reflected_scope::fn::mapping_from_type(
+            state, type);
+        }
+      };
+    });
+
+  const settings value{.name = "api"};
+  EXPECT_TRUE(same_document(R"({"name":"api"})",
+    omni::ryml::serialize(value)));
+  EXPECT_TRUE(same_document(R"({"name":"api","revision":1})",
+    serialize(value)));
+
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    omni::type<settings>, R"({"name":"api"})");
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value)
+    EXPECT_EQ("api", result.value->name);
+}
+
+/** tdm_config customizes a local deserializer without changing defaults.
+ * This example allows unknown fields and captures an experimental error limit
+ * from the calling scope. */
+TEST(advanced, local_configuration) {
+  const std::uint16_t limit = 2;
+  // C++11: spell the parameter type as omni::ryml::config_t<>.
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [limit](omni::ryml::config_like auto s) {
+      s.error_policy.error_limit = limit;
+      s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
+      return s;
+    });
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::measurement>,
+    R"({"value": 7, "trace": true})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(7, result.value->value);
+
+  EXPECT_TRUE(result.diagnostics.empty());
+  EXPECT_EQ(2, deserialize.config.error_policy.error_limit);
+  EXPECT_EQ(0, omni::ryml::deserialize.config.error_policy.error_limit);
+  EXPECT_EQ(omni::json::unknown_policy::reject,
+    omni::ryml::deserialize.config.error_policy.unknown_fields);
+}
+
+/** An explicitly configured callable can be constructed in one expression. */
+TEST(advanced, explicit_configuration) {
+  // GCC 10 needs the nested policy type for aggregate deduction.
+  constexpr auto deserialize = omni::ryml::deserialize_t{
+    .config = omni::ryml::config_t{
+      .error_policy = omni::json::error_policy{
+        .unknown_fields = omni::json::unknown_policy::allow,
+      },
+    },
+  };
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::measurement>,
+    R"({"value": 7, "trace": true})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(7, result.value->value);
+
+  EXPECT_TRUE(result.diagnostics.empty());
+}
+
+/** Unknown fields are rejected by default. allow ignores them; allow | warn
+ * retains a warning. warn alone does not allow an unknown field.
+ */
+TEST(advanced, unknown_fields) {
+  using omni::json::unknown_policy;
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_like auto s) {
+      s.error_policy.unknown_fields =
+        unknown_policy::allow | unknown_policy::warn;
+      return s;
+    });
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::measurement>,
+    R"({"value": 7, "trace": true})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(7, result.value->value);
+
+  EXPECT_EQ("/trace: warning: unknown field", result.diagnostics);
+}
+
+/** Duplicate fields are rejected by default. allow selects the first
+ * occurrence; last selects the last and implies allow. Add warn to report them
+ * when accepted. Discarded occurrences are not mapped; an invalid selected
+ * occurrence does not fall back to a different occurrence.
+ */
+TEST(advanced, duplicate_fields) {
+  using omni::json::duplicate_policy;
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_like auto s) {
+      s.error_policy.duplicates =
+        duplicate_policy::last | duplicate_policy::warn;
+      return s;
+    });
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::measurement>,
+    R"({"value": 7, "value": 42})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(42, result.value->value);
+
+  EXPECT_EQ("/value: warning: duplicate field", result.diagnostics);
+}
+
+namespace policy_examples {
+
+struct two_readings {
+  int first;
+  int second;
+};
+
+} // namespace policy_examples
+
+/** (Experimental) Collects multiple mapping errors.
+ * error_limit counts errors that may be passed before stopping on the next.
+ * Zero stops at the first error; one permits collecting two. Warnings do not
+ * consume this budget, and increasing it never exposes an invalid value.
+ */
+TEST(advanced, error_limit) {
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_like auto s) {
+      s.error_policy.error_limit = 1;
+      return s;
+    });
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::two_readings>,
+    R"({"first": "bad", "second": "bad"})");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("/first: expected integer, found scalar\n"
+            "/second: expected integer, found scalar",
+    result.diagnostics);
+}
+
+/** warning_limit is optional: unset means unlimited, zero fails on the first
+ * warning. Exceeding it adds an error and prevents returning a value.
+ */
+TEST(advanced, warning_limit) {
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_like auto s) {
+      s.error_policy.unknown_fields = omni::json::unknown_policy::allow
+        | omni::json::unknown_policy::warn;
+      s.error_policy.warning_limit = 0;
+      return s;
+    });
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::measurement>,
+    R"({"value": 7, "trace": true})");
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("/trace: warning: unknown field\n/trace: warning limit exceeded",
+    result.diagnostics);
+}
+
+/** map_by_schema maps an already parsed tree or subtree. Its diagnostics stay
+ * structured for inspection or rendering; see `diagnostics.structured_issues`.
+ * Keep the tree and its character storage alive while using borrowed values
+ * or diagnostics. */
+TEST(advanced, map_by_schema) {
+  const auto tree = omni::ryml::core::parse("42");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::with_diagnostics_t result = omni::ryml::map_by_schema(
+    omni::type<int>, *tree);
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.issues.empty());
+  if (result.value)
+    EXPECT_EQ(42, *result.value);
+}
+
+/** Fundamental values and string views use type tags and return structured
+ * diagnostics. */
+TEST(advanced, fundamental_mapping_results) {
+  using omni::ryml::map_by_schema;
+
+  const auto tree = omni::ryml::core::parse(
+    R"({"boolean": true, "integer": 7, "real": 2.5, "text": "hello"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const auto node = tree->crootref();
+  const omni::ryml::with_diagnostics_t boolean = map_by_schema(
+    omni::type<bool>, node["boolean"]);
+  const omni::ryml::with_diagnostics_t integer = map_by_schema(
+    omni::type<int>, node["integer"]);
+  const omni::ryml::with_diagnostics_t natural = map_by_schema(
+    omni::type<unsigned>, node["integer"]);
+  const omni::ryml::with_diagnostics_t real = map_by_schema(
+    omni::type<double>, node["real"]);
+  const omni::ryml::with_diagnostics_t text = map_by_schema(
+    omni::type<std::string>, node["text"]);
+  const omni::ryml::with_diagnostics_t view = map_by_schema(
+    omni::type<omni::compat::string_view>, node["text"]);
+
+  EXPECT_EQ(true, boolean.value);
+  EXPECT_EQ(7, integer.value);
+  EXPECT_EQ(7U, natural.value);
+  EXPECT_EQ(2.5, real.value);
+  EXPECT_EQ("hello", text.value);
+  EXPECT_EQ(omni::compat::string_view{"hello"}, view.value);
+
+  const omni::ryml::with_diagnostics_t invalid = map_by_schema(
+    omni::type<int>, node["text"]);
+
+  EXPECT_FALSE(invalid.value);
+  EXPECT_FALSE(invalid.diagnostics.issues.empty());
+}
+
+namespace basic_mapping {
+
+struct measurement {
+  explicit measurement(int initial): value(initial) {}
+  int value;
+};
+
+} // namespace basic_mapping
+
+/** (QoL) Maps into a record without requiring a default constructor.
+ * The result holds a success marker (compat::monostate); the mapped value stays
+ * in the supplied object. A failed mapping leaves its state unspecified.
+ * @warning This overload supplies the root object. Member types without
+ * default constructors require custom mappings; see
+ * `basics.custom_record_mapping` and `advanced.mutating_record_mapping`. */
+TEST(advanced, deserialize_into) {
+  basic_mapping::measurement into{7};
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    &into, R"({"value": 42})");
+
+  EXPECT_TRUE(result.value.has_value());
+  EXPECT_TRUE(result.diagnostics.empty());
+  EXPECT_EQ(42, into.value);
+}
+
+/** Inspect issue codes and field/index paths with the caller-owned tree.
+ * node_id identifies the original node, including duplicate-key occurrences.
+ * Keep the tree and its character storage alive while using these diagnostics.
+ */
+TEST(diagnostics, structured_issues) {
+  const auto tree = omni::ryml::core::parse(R"({"value": "bad"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::with_diagnostics_t result = omni::ryml::map_by_schema(
+    omni::type<policy_examples::measurement>, *tree);
+
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  for (const auto &issue : result.diagnostics.issues) {
+    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
+    EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
+    EXPECT_EQ(omni::json::value_kind::scalar, issue.actual);
+    EXPECT_EQ("bad", tree->val(issue.node_id));
+    EXPECT_EQ(1U, issue.path.size());
+    for (const auto &segment : issue.path) {
+      EXPECT_EQ("value", segment.field);
+      EXPECT_FALSE(segment.index);
+    }
+  }
+}
+
+/** Render mapping diagnostics using their source tree.
+ * Messages use RFC 6901 JSON Pointer paths, with <root> for a root-level issue.
+ * These identify document locations; state.path() instead describes the C++
+ * schema with paths such as root.upstream.port and [] for element types.
+ * The default deserialize binding already returns these rendered messages.
+ */
+TEST(diagnostics, rendering) {
+  const auto tree = omni::ryml::core::parse(R"({"value": "bad"})");
+  EXPECT_TRUE(tree);
+  if (!tree)
+    return;
+
+  const omni::ryml::with_diagnostics_t result = omni::ryml::map_by_schema(
+    omni::type<policy_examples::measurement>, *tree);
+
+  const std::string message =
+    omni::ryml::render_diagnostics(*tree, result.diagnostics);
+
+  EXPECT_EQ("/value: expected integer, found scalar", message);
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+}
+
+/** Diagnostics can be application data rather than text alone. The configured
+ * renderer receives the source tree and collected issues before the tree is
+ * released. This example decorates the current renderer with an issue count.
+ * tdm_config and tdm_transform_diagnostics immediately produce configured
+ * copies; rendering happens when the resulting deserialize callable is used. */
+TEST(diagnostics, custom_results) {
+  struct summary {
+    std::size_t issue_count;
+    std::string message;
+  };
+
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_like auto options) {
+      return options.tdm_transform_diagnostics(
+        [](omni::ryml::render_diagnostics_t previous) {
+          return [previous](const ::ryml::Tree &tree,
+            omni::ryml::diagnostics report) {
+            return summary{
+              .issue_count = report.issues.size(),
+              .message = previous(tree, report),
+            };
+          };
+        });
+    });
+
+  const omni::ryml::with_diagnostics_t success = deserialize(
+    omni::type<policy_examples::measurement>, R"({"value": 7})");
+
+  EXPECT_TRUE(success.value);
+  if (success.value)
+    EXPECT_EQ(7, success.value->value);
+
+  EXPECT_EQ(0U, success.diagnostics.issue_count);
+  EXPECT_TRUE(success.diagnostics.message.empty());
+
+  const omni::ryml::with_diagnostics_t failure = deserialize(
+    omni::type<policy_examples::measurement>, R"({"value": "bad"})");
+
+  EXPECT_FALSE(failure.value);
+  EXPECT_EQ(1U, failure.diagnostics.issue_count);
+  EXPECT_EQ("/value: expected integer, found scalar",
+    failure.diagnostics.message);
+}
+
+// Accepted input conditions can produce warnings alongside a valid value.
+TEST(diagnostics, valid_values_with_warnings) {
+  const auto deserialize = omni::ryml::deserialize.tdm_config(
+    [](omni::ryml::config_like auto s) {
+      s.error_policy.duplicates = omni::json::duplicate_policy::allow
+        | omni::json::duplicate_policy::warn;
+      return s;
+    });
+
+  const omni::ryml::with_diagnostics_t result = deserialize(
+    omni::type<policy_examples::measurement>,
+    R"({"value": 7, "value": 42})");
+
+  EXPECT_TRUE(result.value);
+  if (result.value)
+    EXPECT_EQ(7, result.value->value);
+
+  EXPECT_EQ("/value: warning: duplicate field", result.diagnostics);
+}
+
+namespace basic_customization {
+
 struct my_cpp11_integer { int value; };
 
 } // namespace basic_customization
-
 } // namespace
 
 // One C++11 equivalent: the same scalar mapping needs named operator() bodies.
@@ -630,8 +996,8 @@ namespace {
 
 /** Before C++14, specialize to_type_t and from_type_t instead of variable
  * templates. my_cpp11_integer uses the equivalent named callables above. */
-TEST(basics, custom_scalar_mapping_cpp11) {
-  const auto result = omni::ryml::deserialize(
+TEST(advanced, custom_scalar_mapping_cpp11) {
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type_t<basic_customization::my_cpp11_integer>{}, "42");
 
   EXPECT_TRUE(result.value);
@@ -647,7 +1013,6 @@ namespace basic_customization {
 struct my_container { std::vector<int> values; };
 
 } // namespace basic_customization
-
 } // namespace
 
 template <>
@@ -674,8 +1039,8 @@ namespace {
 /** A wrapper can use map_range_node and map_range for its container.
  * The built-in mappings handle insertion, element mapping, and diagnostics;
  * the specialization only exposes the wrapped container. */
-TEST(basics, custom_container_mapping) {
-  const auto result = omni::ryml::deserialize(
+TEST(advanced, custom_container_mapping) {
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<basic_customization::my_container>, "[7, 42]");
 
   EXPECT_TRUE(result.value);
@@ -692,7 +1057,6 @@ namespace basic_customization {
 struct my_string { std::string value; };
 
 } // namespace basic_customization
-
 } // namespace
 
 template <>
@@ -719,8 +1083,8 @@ namespace {
  * mapping.
  * A wrapper can delegate to them using its stored string; custom string APIs
  * can instead adapt the shared string operations. */
-TEST(basics, custom_string_mapping) {
-  const auto result = omni::ryml::deserialize(
+TEST(advanced, custom_string_mapping) {
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<basic_customization::my_string>, R"("gateway")");
 
   EXPECT_TRUE(result.value);
@@ -731,332 +1095,24 @@ TEST(basics, custom_string_mapping) {
   }
 }
 
-namespace basic_customization {
-
-struct my_record {
-  my_integer reading;
-  std::string name;
-};
-
-} // namespace basic_customization
-
-} // namespace
-
-// Reader signature: (read_state_like, ConstNodeRef, T *)
-//   -> with_diagnostics_t<monostate>.
-// Exposition: spell out state forwarding; direct registration can reuse
-// map_object_node itself. The generic destination delays metadata queries.
-template <>
-const auto omni::ryml::cp::to_type<basic_customization::my_record> =
-  []<typename T>(omni::ryml::read_state_like auto state,
-    ::ryml::ConstNodeRef node,
-    T *into)
-    -> omni::ryml::with_diagnostics_t<omni::compat::monostate> {
-    // Delegate with the current configuration and diagnostic counters.
-    return omni::ryml::reflected_scope::map_object_node(
-      std::move(state),
-      node,
-      into);
-  };
-
-template <>
-const auto omni::ryml::cp::from_type<basic_customization::my_record> =
-  omni::ryml::reflected_scope::map_record;
-
-namespace {
-
-/** map_object_node and map_record map accessible non-static members.
- * They remain available for custom registrations. The reader receives the
- * node, destination pointer, and mapping state. It returns success or failure
- * with diagnostics. A custom mapping passes the current state when
- * delegating, including to child nodes. Paths are derived from the source
- * tree when issues are reported. See the extended-container example for
- * accumulated diagnostics.
- * Member mappings still use their own customization points: my_record::reading
- * uses the scalar representation of my_integer. */
-TEST(basics, custom_record_mapping) {
-  const std::string document = R"({"reading": 7, "name": "sensor"})";
-  const auto result = omni::ryml::deserialize(
-    omni::type<basic_customization::my_record>, document);
-
-  EXPECT_TRUE(result.value);
-  EXPECT_TRUE(result.diagnostics.empty());
-  if (result.value) {
-    EXPECT_EQ(7, result.value->reading.value);
-    EXPECT_EQ("sensor", result.value->name);
-    EXPECT_TRUE(same_document(document, omni::ryml::as_json(*result.value)));
-  }
-}
-
-/** Inspect issue codes and field/index paths with the caller-owned tree.
- * node_id identifies the original node, including duplicate-key occurrences.
- * Keep the tree and its character storage alive while using these diagnostics.
- */
-TEST(diagnostics, structured_issues) {
-  const auto tree = omni::ryml::core::parse(R"({"value": "bad"})");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const auto result = omni::ryml::map_by_schema(
-    omni::type<policy_examples::measurement>, *tree);
-
-  EXPECT_EQ(1U, result.diagnostics.issues.size());
-  for (const auto &issue : result.diagnostics.issues) {
-    EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
-    EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
-    EXPECT_EQ(omni::json::value_kind::scalar, issue.actual);
-    EXPECT_EQ("bad", tree->val(issue.node_id));
-    EXPECT_EQ(1U, issue.path.size());
-    for (const auto &segment : issue.path) {
-      EXPECT_EQ("value", segment.field);
-      EXPECT_FALSE(segment.index);
-    }
-  }
-}
-
-/** Render mapping diagnostics using their source tree.
- * Messages use JSON Pointer paths, with <root> for a root-level issue.
- * The default deserialize binding already returns these rendered messages.
- */
-TEST(diagnostics, rendering) {
-  const auto tree = omni::ryml::core::parse(R"({"value": "bad"})");
-  EXPECT_TRUE(tree);
-  if (!tree)
-    return;
-
-  const auto result = omni::ryml::map_by_schema(
-    omni::type<policy_examples::measurement>, *tree);
-
-  const std::string message =
-    omni::ryml::render_diagnostics(*tree, result.diagnostics);
-
-  EXPECT_EQ("/value: expected integer, found scalar", message);
-  EXPECT_EQ(1U, result.diagnostics.issues.size());
-}
-
-/** Diagnostics can be application data rather than text alone. The configured
- * renderer receives the source tree and collected issues before the tree is
- * released. This example decorates the current renderer with an issue count.
- * tdm_config and tdm_transform_diagnostics immediately produce configured
- * copies; rendering happens when the resulting deserialize callable is used. */
-TEST(diagnostics, custom_results) {
-  struct summary {
-    std::size_t issue_count;
-    std::string message;
-  };
-
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_like auto options) {
-      return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t previous) {
-          return [previous](const ::ryml::Tree &tree,
-            omni::ryml::diagnostics report) {
-            return summary{
-              .issue_count = report.issues.size(),
-              .message = previous(tree, report),
-            };
-          };
-        });
-    });
-
-  const auto success = deserialize(
-    omni::type<policy_examples::measurement>, R"({"value": 7})");
-
-  EXPECT_TRUE(success.value);
-  if (success.value)
-    EXPECT_EQ(7, success.value->value);
-
-  EXPECT_EQ(0U, success.diagnostics.issue_count);
-  EXPECT_TRUE(success.diagnostics.message.empty());
-
-  const auto failure = deserialize(
-    omni::type<policy_examples::measurement>, R"({"value": "bad"})");
-
-  EXPECT_FALSE(failure.value);
-  EXPECT_EQ(1U, failure.diagnostics.issue_count);
-  EXPECT_EQ("/value: expected integer, found scalar", failure.diagnostics.message);
-}
-
-// Accepted input conditions can produce warnings alongside a valid value.
-TEST(diagnostics, valid_values_with_warnings) {
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_like auto s) {
-      s.error_policy.duplicates = omni::json::duplicate_policy::allow
-        | omni::json::duplicate_policy::warn;
-      return s;
-    });
-
-  const auto result = deserialize(omni::type<policy_examples::measurement>,
-    R"({"value": 7, "value": 42})");
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(7, result.value->value);
-
-  EXPECT_EQ("/value: warning: duplicate field", result.diagnostics);
-}
-
-/** tdm_config customizes a local deserializer without changing defaults.
- * This example allows unknown fields and captures an experimental error limit
- * from the calling scope. */
-TEST(advanced, local_configuration) {
-  const std::uint16_t limit = 2;
-  // C++11: spell the parameter type as omni::ryml::config_t<>.
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [limit](omni::ryml::config_like auto s) {
-      s.error_policy.error_limit = limit;
-      s.error_policy.unknown_fields = omni::json::unknown_policy::allow;
-      return s;
-    });
-
-  const auto result = deserialize(omni::type<policy_examples::measurement>,
-    R"({"value": 7, "trace": true})");
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(7, result.value->value);
-
-  EXPECT_TRUE(result.diagnostics.empty());
-  EXPECT_EQ(2, deserialize.config.error_policy.error_limit);
-  EXPECT_EQ(0, omni::ryml::deserialize.config.error_policy.error_limit);
-  EXPECT_EQ(omni::json::unknown_policy::reject,
-    omni::ryml::deserialize.config.error_policy.unknown_fields);
-}
-
-/** An explicitly configured callable can be constructed in one expression. */
-TEST(advanced, explicit_configuration) {
-  // GCC 10 needs the nested policy type for aggregate deduction.
-  constexpr auto deserialize = omni::ryml::deserialize_t{
-    .config = omni::ryml::config_t{
-      .error_policy = omni::json::error_policy{
-        .unknown_fields = omni::json::unknown_policy::allow,
-      },
-    },
-  };
-
-  const auto result = deserialize(omni::type<policy_examples::measurement>,
-    R"({"value": 7, "trace": true})");
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(7, result.value->value);
-
-  EXPECT_TRUE(result.diagnostics.empty());
-}
-
-/** Unknown fields are rejected by default. allow ignores them; allow | warn
- * retains a warning. warn alone does not allow an unknown field.
- */
-TEST(advanced, unknown_fields) {
-  using omni::json::unknown_policy;
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_like auto s) {
-      s.error_policy.unknown_fields =
-        unknown_policy::allow | unknown_policy::warn;
-      return s;
-    });
-
-  const auto result = deserialize(omni::type<policy_examples::measurement>,
-    R"({"value": 7, "trace": true})");
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(7, result.value->value);
-
-  EXPECT_EQ("/trace: warning: unknown field", result.diagnostics);
-}
-
-/** Duplicate fields are rejected by default. allow selects the first
- * occurrence; last selects the last and implies allow. Add warn to report them
- * when accepted. Discarded occurrences are not mapped; an invalid selected
- * occurrence does not fall back to a different occurrence.
- */
-TEST(advanced, duplicate_fields) {
-  using omni::json::duplicate_policy;
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_like auto s) {
-      s.error_policy.duplicates =
-        duplicate_policy::last | duplicate_policy::warn;
-      return s;
-    });
-
-  const auto result = deserialize(omni::type<policy_examples::measurement>,
-    R"({"value": 7, "value": 42})");
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(42, result.value->value);
-
-  EXPECT_EQ("/value: warning: duplicate field", result.diagnostics);
-}
-
-namespace policy_examples {
-
-struct two_readings {
-  int first;
-  int second;
-};
-
-} // namespace policy_examples
-
-/** (Experimental) Collects multiple mapping errors.
- * error_limit counts errors that may be passed before stopping on the next.
- * Zero stops at the first error; one permits collecting two. Warnings do not
- * consume this budget, and increasing it never exposes an invalid value.
- */
-TEST(advanced, error_limit) {
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_like auto s) {
-      s.error_policy.error_limit = 1;
-      return s;
-    });
-
-  const auto result = deserialize(omni::type<policy_examples::two_readings>,
-    R"({"first": "bad", "second": "bad"})");
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ("/first: expected integer, found scalar\n"
-            "/second: expected integer, found scalar",
-    result.diagnostics);
-}
-
-/** warning_limit is optional: unset means unlimited, zero fails on the first
- * warning. Exceeding it adds an error and prevents returning a value.
- */
-TEST(advanced, warning_limit) {
-  const auto deserialize = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_like auto s) {
-      s.error_policy.unknown_fields = omni::json::unknown_policy::allow
-        | omni::json::unknown_policy::warn;
-      s.error_policy.warning_limit = 0;
-      return s;
-    });
-
-  const auto result = deserialize(omni::type<policy_examples::measurement>,
-    R"({"value": 7, "trace": true})");
-
-  EXPECT_FALSE(result.value);
-  EXPECT_EQ("/trace: warning: unknown field\n/trace: warning limit exceeded",
-    result.diagnostics);
-}
-
 } // namespace
 
 /** Shape compositors validate the node before invoking a custom conversion.
- * A callback can return expected<T, issue>, expected<T, input_range<issue>>,
- * or with_diagnostics_t<T>. Errors with an explicit source node retain their
+ * A callback can return `expected<T, issue>`,
+ * `expected<T, input_range<issue>>`, or `with_diagnostics_t<T>`.
+ * Errors with an explicit source node retain their
  * document path. Otherwise, paths are relative to the callback input node.
- * The resulting callable registers through cp::to_type, map_by_schema's
- * customization point; deserialize uses the same lookup.
+ * The resulting callable registers through `cp::to_type`, the customization
+ * point for `map_by_schema`; `deserialize` uses the same registrations.
  * Value-producing callbacks are preferred. The exceptional pointer-only
  * callbacks appear after the value-producing examples below. */
 namespace composed_integer {
 
 struct my_int { int value; };
 
-// std::from_chars is C++17. Earlier standards can use the core numeric
-// conversion with state, as in advanced.composed_arithmetic_mapping.
+// `std::from_chars` is C++17. Earlier standards can use the node-only
+// `core::parse_as_integral<int>(node)` and `.transform` its value to `my_int`.
+// The enclosing `compose::map_integer_node` already validates the node kind.
 auto parse(::ryml::ConstNodeRef node)
   -> omni::compat::expected<my_int, omni::ryml::issue> {
   int value{};
@@ -1086,7 +1142,7 @@ const auto omni::ryml::cp::to_type<composed_integer::my_int> =
  * shape and adapts expected to the mapping result. Compare the direct
  * registration in basics.custom_scalar_mapping. */
 TEST(advanced, composed_integer_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_integer::my_int>, "42");
 
   EXPECT_TRUE(result.value);
@@ -1094,7 +1150,7 @@ TEST(advanced, composed_integer_mapping) {
   if (result.value)
     EXPECT_EQ(42, result.value->value);
 
-  const auto wrong_shape = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t wrong_shape = omni::ryml::deserialize(
     omni::type<composed_integer::my_int>, R"("42")");
 
   EXPECT_FALSE(wrong_shape.value);
@@ -1121,7 +1177,7 @@ const auto omni::ryml::cp::to_type<composed_boolean::feature_flag> =
 /** map_boolean_node accepts Boolean scalars and constructs an application
  * flag. */
 TEST(advanced, composed_boolean_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_boolean::feature_flag>, "true");
 
   EXPECT_TRUE(result.value);
@@ -1149,9 +1205,10 @@ const auto omni::ryml::cp::to_type<composed_real::temperature> =
     });
 
 /** A (state, node) callback reuses numeric conversion and returns expected.
- * map_number_node supplies the shape check and applies the caller's policies. */
+ * map_number_node supplies the shape check and applies the caller's
+ * policies. */
 TEST(advanced, composed_real_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_real::temperature>, "21.5");
 
   EXPECT_TRUE(result.value);
@@ -1184,9 +1241,10 @@ const auto omni::ryml::cp::to_type<composed_string::label<Text>> =
 
 /** A template family uses a type tag to select its result type.
  * map_string_node checks the node before the callback constructs its value
- * through the shared string adapter. This example uses owning std::string storage. */
+ * through the shared string adapter. This example uses owning std::string
+ * storage. */
 TEST(advanced, composed_string_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_string::label<std::string>>, R"("gateway")");
 
   EXPECT_TRUE(result.value);
@@ -1222,7 +1280,7 @@ const auto omni::ryml::cp::to_type<composed_arithmetic::number<T>> =
  * with_diagnostics preserves the core conversion's complete diagnostics;
  * map_arithmetic_node accepts Boolean, integer, and real inputs. */
 TEST(advanced, composed_arithmetic_mapping) {
-  const auto integer = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t integer = omni::ryml::deserialize(
     omni::type<composed_arithmetic::number<int>>, "42");
 
   EXPECT_TRUE(integer.value);
@@ -1230,7 +1288,7 @@ TEST(advanced, composed_arithmetic_mapping) {
   if (integer.value)
     EXPECT_EQ(42, integer.value->value);
 
-  const auto real = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t real = omni::ryml::deserialize(
     omni::type<composed_arithmetic::number<double>>, "2.5");
 
   EXPECT_TRUE(real.value);
@@ -1241,7 +1299,7 @@ TEST(advanced, composed_arithmetic_mapping) {
 
 /** A numeric template still validates the category required by its member. */
 TEST(advanced, composed_arithmetic_shape_errors) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_arithmetic::number<int>>, "1.5");
 
   EXPECT_FALSE(result.value);
@@ -1276,7 +1334,7 @@ const auto omni::ryml::cp::to_type<composed_enum::mode> =
  * accepted names.
  * Here the protocol's names differ from the C++ enumerator names. */
 TEST(advanced, composed_enum_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_enum::mode>, R"("running")");
 
   EXPECT_TRUE(result.value);
@@ -1284,7 +1342,7 @@ TEST(advanced, composed_enum_mapping) {
   if (result.value)
     EXPECT_EQ(composed_enum::mode::active, *result.value);
 
-  const auto unknown = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t unknown = omni::ryml::deserialize(
     omni::type<composed_enum::mode>, R"("paused")");
 
   EXPECT_FALSE(unknown.value);
@@ -1303,7 +1361,8 @@ const auto omni::ryml::cp::to_type<composed_range::readings> =
     ::ryml::ConstNodeRef node)
     -> omni::ryml::with_diagnostics_t<composed_range::readings> {
     composed_range::readings value{};
-    auto mapped = omni::ryml::to_range_t{}(std::move(state),
+    omni::ryml::with_diagnostics_t mapped = omni::ryml::to_range_t{}(
+      std::move(state),
       node,
       &value.values);
 
@@ -1317,7 +1376,7 @@ const auto omni::ryml::cp::to_type<composed_range::readings> =
 /** map_array_node supplies the array check. The callback constructs its wrapper
  * and delegates element conversion to the built-in range mapping. */
 TEST(advanced, composed_range_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_range::readings>, "[4, 8, 15]");
 
   EXPECT_TRUE(result.value);
@@ -1338,13 +1397,15 @@ const auto omni::ryml::cp::to_type<composed_optional::limit> =
     [](omni::ryml::read_state_like auto state, ::ryml::ConstNodeRef node)
       -> omni::ryml::with_diagnostics_t<composed_optional::limit> {
       composed_optional::limit value{};
-      auto mapped = omni::ryml::to_optional_like_t{}(std::move(state),
+      omni::ryml::with_diagnostics_t mapped = omni::ryml::to_optional_like_t{}(
+        std::move(state),
         node,
         &value.value);
 
       return {
         .value = mapped.value
-          ? omni::compat::make_optional(std::move(value)) : omni::compat::nullopt,
+          ? omni::compat::make_optional(std::move(value))
+          : omni::compat::nullopt,
         .diagnostics = std::move(mapped.diagnostics),
       };
     });
@@ -1352,7 +1413,7 @@ const auto omni::ryml::cp::to_type<composed_optional::limit> =
 /** map_value_node accepts null or a value. The callback supplies null's
  * meaning for its wrapper and delegates a present value's conversion. */
 TEST(advanced, composed_optional_mapping) {
-  const auto absent = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t absent = omni::ryml::deserialize(
     omni::type<composed_optional::limit>, "null");
 
   EXPECT_TRUE(absent.value);
@@ -1360,7 +1421,7 @@ TEST(advanced, composed_optional_mapping) {
   if (absent.value)
     EXPECT_FALSE(absent.value->value);
 
-  const auto present = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t present = omni::ryml::deserialize(
     omni::type<composed_optional::limit>, "42");
 
   EXPECT_TRUE(present.value);
@@ -1387,10 +1448,11 @@ const auto omni::ryml::cp::to_type<composed_record::inner> =
       -> omni::ryml::with_diagnostics_t<composed_record::inner> {
       composed_record::inner value{};
       // Bypass this registration for inner; its members keep their own lookup.
-      auto mapped = omni::ryml::reflected_scope::map_object_node(
-        std::move(state),
-        node,
-        &value);
+      omni::ryml::with_diagnostics_t mapped =
+        omni::ryml::reflected_scope::map_object_node(
+          std::move(state),
+          node,
+          &value);
 
       return {
         .value = mapped.value
@@ -1407,7 +1469,7 @@ const auto omni::ryml::cp::to_type<composed_record::inner> =
  * map_object_node checks object input before the callback traverses inner's
  * fields. */
 TEST(advanced, composed_record_mapping) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<composed_record::outer>,
     R"({"entries": [{"value": -7}, {"value": 42}]})");
 
@@ -1421,7 +1483,7 @@ TEST(advanced, composed_record_mapping) {
     }
   }
 
-  const auto wrong_shape = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t wrong_shape = omni::ryml::deserialize(
     omni::type<composed_record::outer>, R"({"entries": [7]})");
 
   EXPECT_FALSE(wrong_shape.value);
@@ -1461,7 +1523,8 @@ const auto omni::ryml::cp::to_type<mutating_scalar::descriptor> =
  * Mapping errors leave the destination state unspecified. */
 TEST(advanced, mutating_scalar_mapping) {
   mutating_scalar::descriptor into{7};
-  const auto result = omni::ryml::deserialize(&into, "42");
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    &into, "42");
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.empty());
@@ -1497,61 +1560,284 @@ const auto omni::ryml::cp::to_type<mutating_record::settings> =
  * record state. Value-producing callbacks remain the preferred interface. */
 TEST(advanced, mutating_record_mapping) {
   mutating_record::settings into{80};
-  const auto result = omni::ryml::deserialize(&into, R"({"port": 443})");
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    &into, R"({"port": 443})");
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.empty());
   EXPECT_EQ(443, into.port);
 }
 
-namespace static_field_serialization {
+namespace record_strategy_example {
 
-struct settings {
+struct account {
   std::string name;
-  static constexpr int revision = 1;
+  std::string secret;
 };
 
-} // namespace static_field_serialization
+constexpr auto public_fields = omni::mapping::record_strategy
+  .tdm_filter_fields([](auto) {
+    return [](omni::data_member_meta auto field) {
+      return std::bool_constant<std::string_view{field.name()} != "secret">{};
+    };
+  });
 
-/** Shared record strategies omit static members by default. This local writer
- * includes them in the output, without changing the C++ type or its global
- * customization. Deserialization always excludes static members. */
-TEST(advanced, serialize_static_fields) {
-  using static_field_serialization::settings;
+} // namespace record_strategy_example
 
-  constexpr auto serialize = omni::ryml::serialize
-    .tdm_map_node([](auto) {
-      return []<typename T>(auto state, omni::type_t<T> type) {
-        if constexpr (std::is_same_v<T, settings>) {
-          return omni::ryml::reflected_scope::map_record
-            .tdm_strategy([](auto strategy) {
-              return strategy.tdm_filter_fields([](auto) {
-                return omni::fn::is_non_functional;
-              });
-            });
-        } else {
-          return omni::ryml::reflected_scope::fn::mapping_from_type(
-            state, type);
-        }
-      };
-    });
+template <>
+const auto omni::ryml::cp::to_type<record_strategy_example::account> =
+  omni::ryml::reflected_scope::map_object_node.tdm_strategy([](auto) {
+    return record_strategy_example::public_fields;
+  });
 
-  const settings value{.name = "api"};
-  EXPECT_TRUE(same_document(R"({"name":"api"})",
-    omni::ryml::serialize(value)));
-  EXPECT_TRUE(same_document(R"({"name":"api","revision":1})",
-    serialize(value)));
+template <>
+const auto omni::ryml::cp::from_type<record_strategy_example::account> =
+  omni::ryml::reflected_scope::map_record.tdm_strategy([](auto) {
+    return record_strategy_example::public_fields;
+  });
 
-  const auto result = omni::ryml::deserialize(
-    omni::type<settings>, R"({"name":"api"})");
+/** `record_strategy_t` configures field selection, aliases, and validation.
+ * `.tdm_strategy` attaches it to a record mapping. Both `cp::` registrations
+ * share one strategy: `secret` is neither emitted nor required on input.
+ * The default `.filter_fields` is `fn::is_non_static && fn::is_non_functional`.
+ * The Basics example drops the first check to emit static data members.
+ * C++11 uses a named metadata predicate with a templated `operator()` returning
+ * `compat::bool_constant`; see `strategy_examples::without_label` in
+ * `../tests/mapping_strategy.cpp` for that predicate idiom.
+ * See `advanced.strategy_aliases`, `advanced.field_validation`, and
+ * `advanced.record_validation` for the other properties, or
+ * \ref omni::mapping::record_strategy_t for their contracts. */
+TEST(advanced, record_strategy) {
+  const record_strategy_example::account source{
+    .name = "Ada",
+    .secret = "session-token",
+  };
+  const std::string document = R"({"name": "Ada"})";
+
+  EXPECT_TRUE(same_document(document, omni::ryml::serialize(source)));
+
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    omni::type<record_strategy_example::account>, document);
+
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.empty());
-  if (result.value)
-    EXPECT_EQ("api", result.value->name);
+  if (result.value) {
+    EXPECT_EQ("Ada", result.value->name);
+    EXPECT_TRUE(result.value->secret.empty());
+  }
+}
+
+namespace strategy_aliases {
+
+enum class status { ready, busy };
+
+struct task {
+  std::string title;
+  status state;
+};
+
+} // namespace strategy_aliases
+
+template <>
+const auto omni::ryml::cp::to_type<strategy_aliases::task> =
+  omni::ryml::reflected_scope::map_object_node.tdm_strategy([](auto strategy) {
+    return strategy.tdm_aliases_by_name([](auto) {
+      return omni::mapping::aliases_dict(std::tuple{"title", "name"});
+    });
+  });
+
+template <>
+const auto omni::ryml::cp::to_type<strategy_aliases::status> =
+  omni::ryml::reflected_scope::map_node_to_enum.tdm_strategy([](auto strategy) {
+    return strategy.tdm_aliases_by_name([](auto) {
+      return omni::mapping::aliases_dict(std::tuple{"busy", "working"});
+    });
+  });
+
+/** Record and enum strategies accept aliases through `.aliases_by_name`.
+ * Each `aliases_dict` group starts with the C++ name, followed by aliases.
+ * Here `name` supplies `title`, and `working` selects `status::busy`.
+ * Serialization keeps the declared C++ names. */
+TEST(advanced, strategy_aliases) {
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
+    omni::type<strategy_aliases::task>,
+    R"({"name": "Sync accounts", "state": "working"})");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  if (result.value) {
+    EXPECT_EQ("Sync accounts", result.value->title);
+    EXPECT_EQ(strategy_aliases::status::busy, result.value->state);
+    EXPECT_TRUE(same_document(
+      R"({"title": "Sync accounts", "state": "busy"})",
+      omni::ryml::serialize(*result.value)));
+  }
+}
+
+namespace strategy_validation {
+
+struct interval {
+  int begin;
+  int end;
+};
+
+struct schedule { std::vector<interval> windows; };
+
+auto nonnegative(int value)
+  -> omni::compat::expected<int, omni::ryml::issue> {
+  if (value < 0)
+    return omni::compat::unexpected{omni::ryml::core::make_issue(
+      omni::json::issue_code::out_of_range,
+      omni::json::value_kind::integer, ::ryml::ConstNodeRef{})};
+
+  return value;
+}
+
+auto ordered(interval value)
+  -> omni::compat::expected<interval, omni::ryml::issue> {
+  if (value.end < value.begin)
+    return omni::compat::unexpected{omni::ryml::core::make_issue(
+      omni::json::issue_code::out_of_range,
+      omni::json::value_kind::mapping, ::ryml::ConstNodeRef{})};
+
+  return value;
+}
+
+} // namespace strategy_validation
+
+template <>
+const auto omni::ryml::cp::to_type<strategy_validation::interval> =
+  omni::ryml::reflected_scope::map_object_node.tdm_strategy([](auto strategy) {
+    return strategy
+      .tdm_validate_fields([](auto) {
+        return std::tuple{
+          std::tuple{"begin", &strategy_validation::nonnegative},
+          std::tuple{"end", &strategy_validation::nonnegative},
+        };
+      })
+      .tdm_finalize([](auto) { return strategy_validation::ordered; });
+  });
+
+/** `.validate_fields` associates C++ field names with value-preserving checks.
+ * Validators receive the decoded field and return `expected<T, issue>` or
+ * `with_diagnostics_t<T>`. A failed check prevents a mapped result; its issue
+ * receives the field's document path. Here both bounds must be nonnegative. */
+TEST(advanced, field_validation) {
+  const omni::ryml::with_diagnostics_t valid = omni::ryml::deserialize(
+    omni::type<strategy_validation::interval>, R"({"begin": 1, "end": 3})");
+
+  EXPECT_TRUE(valid.value);
+  EXPECT_TRUE(valid.diagnostics.empty());
+  if (valid.value) {
+    EXPECT_EQ(1, valid.value->begin);
+    EXPECT_EQ(3, valid.value->end);
+  }
+
+  const omni::ryml::with_diagnostics_t invalid = omni::ryml::deserialize(
+    omni::type<strategy_validation::interval>, R"({"begin": -1, "end": 3})");
+
+  EXPECT_FALSE(invalid.value);
+  EXPECT_EQ("/begin: \"-1\" is out of range", invalid.diagnostics);
+}
+
+/** `.finalize` checks the complete record after its fields pass validation.
+ * It follows the same value-preserving result contract as field validators.
+ * Here `ordered` checks the relation between `begin` and `end`, including
+ * when an `interval` appears inside a sequence. */
+TEST(advanced, record_validation) {
+  const omni::ryml::with_diagnostics_t valid = omni::ryml::deserialize(
+    omni::type<strategy_validation::schedule>,
+    R"({"windows": [{"begin": 1, "end": 3}]})");
+
+  EXPECT_TRUE(valid.value);
+  EXPECT_TRUE(valid.diagnostics.empty());
+  if (valid.value) {
+    EXPECT_EQ(1U, valid.value->windows.size());
+    if (valid.value->windows.size() == 1U) {
+      EXPECT_EQ(1, valid.value->windows.front().begin);
+      EXPECT_EQ(3, valid.value->windows.front().end);
+    }
+  }
+
+  const omni::ryml::with_diagnostics_t invalid = omni::ryml::deserialize(
+    omni::type<strategy_validation::schedule>,
+    R"({"windows": [{"begin": 3, "end": 1}]})");
+
+  EXPECT_FALSE(invalid.value);
+  EXPECT_TRUE(invalid.diagnostics.starts_with("/windows/0:"));
+}
+
+namespace path_specific_mapping {
+
+struct address {
+  std::string street;
+  std::string city;
+};
+
+struct contact {
+  address home_address;
+  address work_address;
+};
+
+} // namespace path_specific_mapping
+
+/** `state.path()` is a compile-time schema path built from C++ field names:
+ * `root.home_address` and `root.work_address` identify two uses of `address`.
+ * Container values add `[]` independently of runtime keys and indices.
+ * `typename decltype(state)::enclosing_record` names the containing C++ type:
+ * `contact` for both addresses. `type<T>` identifies the current value's type.
+ *
+ * This selector omits `street` only within `work_address`. The home address and
+ * other types keep their default mappings. See `advanced.record_strategy` for
+ * `.filter_fields`. `if constexpr` requires C++17; lambda templates require
+ * C++20. Earlier standards use named overloaded selectors, as in
+ * `strategy_examples::select_static_writer` in `../tests/mapping_strategy.cpp`.
+ * A selector can query `State::path()` and use `compat::conditional_t` in its
+ * return type when the path selects different mapper types. */
+TEST(advanced, path_specific_mapping) {
+  using path_specific_mapping::address;
+  using path_specific_mapping::contact;
+
+  constexpr auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
+    return []<typename T>(auto state, omni::type_t<T> type) {
+      if constexpr (std::is_same_v<T, address>
+        && state.path().starts_with("root.work_address")) {
+        return omni::ryml::reflected_scope::map_record
+          .tdm_strategy([](auto strategy) {
+            return strategy.tdm_filter_fields([](auto) {
+              return [](omni::data_member_meta auto field) {
+                return std::bool_constant<
+                  std::string_view{field.name()} != "street">{};
+              };
+            });
+          });
+      } else {
+        return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      }
+    };
+  });
+
+  const contact source{
+    .home_address = {.street = "12 Oak Road", .city = "Cambridge"},
+    .work_address = {.street = "8 Market Street", .city = "London"},
+  };
+
+  EXPECT_TRUE(same_document(R"(
+{
+  "home_address": {"street": "12 Oak Road", "city": "Cambridge"},
+  "work_address": {"street": "8 Market Street", "city": "London"}
+}
+)", omni::ryml::serialize(source)));
+
+  EXPECT_TRUE(same_document(R"(
+{
+  "home_address": {"street": "12 Oak Road", "city": "Cambridge"},
+  "work_address": {"city": "London"}
+}
+)", serialize(source)));
 }
 
 namespace {
-
 namespace tree_ownership {
 
 struct reading {
@@ -1592,7 +1878,7 @@ TEST(advanced, borrowed_input) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_by_schema(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::map_by_schema(
     omni::type<policy_examples::measurement>, tree->crootref()["entry"]);
 
   EXPECT_FALSE(result.value);
@@ -1707,9 +1993,10 @@ struct has_value<customization_mapping::optional_value<T>> {
 
 namespace ryml {
 
-/** cp::to_type customizes map_by_schema's node-to-type mapping; deserialize
- * uses the same lookup. Custom readers specialize the callable variable
- * to_type<T> or the C++11-compatible to_type_t<T>; registering both is an error.
+/** cp::to_type registers node-to-type mappings for map_by_schema and
+ * deserialize. Custom readers specialize the callable variable
+ * to_type<T> or the C++11-compatible to_type_t<T>; registering both is an
+ * error.
  *
 ```
 cp::to_type<T> :: {
@@ -1722,7 +2009,8 @@ cp::to_type<T> :: {
  * contract. map_by_schema and deserialize prefer value production when its
  * result is assignable, without retrying T* after a mapping error.
  * Shape compositors above adapt simpler callbacks to this contract. Writers
- * register cp::from_type<T> or cp::from_type_t<T>; unregistered types use defaults.
+ * register cp::from_type<T> or cp::from_type_t<T>; unregistered types use
+ * defaults.
  *
  * read_state_like constrains a reader's state without naming its template
  * parameters. State is the first argument and carries the borrowed
@@ -1782,7 +2070,8 @@ struct to_type_t<customization_mapping::extended_values> {
   auto operator()(State context, ::ryml::ConstNodeRef node, T *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     T values;
-    auto result = map_range_node(context, node, &values);
+    omni::ryml::with_diagnostics_t result = map_range_node(
+      context, node, &values);
     if (!result.value)
       return result;
 
@@ -1839,7 +2128,8 @@ struct to_type_t<customization_mapping::integer> {
     customization_mapping::integer *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     int converted{};
-    auto result = core::read_node(context, node, &converted);
+    omni::ryml::with_diagnostics_t result = core::read_node(
+      context, node, &converted);
     if (!result.value)
       return result;
 
@@ -1897,7 +2187,7 @@ TEST(customization_mapping, default_and_custom_adapters_round_trip) {
 
     document));
 
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<customization_mapping::record>, document);
 
   EXPECT_TRUE(result.value);
@@ -1920,7 +2210,7 @@ TEST(customization_mapping, default_and_custom_adapters_round_trip) {
 
 // Container mapping stays the same when insertion uses a different operation.
 TEST(customization_mapping, standard_range_insertion) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<std::set<int>>, "[7, 4]");
 
   EXPECT_TRUE(result.value);
@@ -1938,7 +2228,7 @@ TEST(customization_mapping, standard_range_insertion) {
  * Alias sets must not overlap other members' names or aliases. The dictionary
  * borrows its names; these literals have static storage. */
 TEST(customization_mapping, field_aliases) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<customization_mapping::record>,
     R"({"legacy_count": 2, "entries": [], "reading": 6})");
 
@@ -1951,7 +2241,7 @@ TEST(customization_mapping, field_aliases) {
   EXPECT_TRUE(same_document(R"({"count": 2, "entries": [], "reading": 6})",
     omni::ryml::as_json(*result.value)));
 
-  const auto canonical = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t canonical = omni::ryml::deserialize(
     omni::type<customization_mapping::record>,
     R"(
 {
@@ -1972,7 +2262,7 @@ TEST(customization_mapping, field_aliases) {
  * names. The configured enum compositor still rejects unknown text and values
  * whose node kind is not a string. */
 TEST(customization_mapping, enum_aliases) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<customization_mapping::status>, R"("working")");
 
   EXPECT_TRUE(result.value);
@@ -2001,7 +2291,7 @@ TEST_P(extended_container_mapping, appends_members_and_restores_them) {
   const auto &c = GetParam();
   EXPECT_TRUE(same_document(c.document, omni::ryml::as_json(c.source)));
 
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<customization_mapping::extended_values>, c.document);
 
   EXPECT_TRUE(result.value);
@@ -2028,7 +2318,9 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
   });
 
 /** Schema paths use C++ field names even when custom writers append those
- * fields as array elements. Local selection can customize one such field. */
+ * fields as array elements. Local selection can customize one such field.
+ * For earlier-standard named selectors and compile-time path selection, see
+ * the compatibility note above `TEST(advanced, path_specific_mapping)`. */
 TEST(extended_container_mapping, customizes_appended_members_by_schema_path) {
   const auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
     return []<omni::ryml::write_state_like State, typename T>(State state,
@@ -2066,7 +2358,8 @@ TEST_P(invalid_extended_container_mapping, rejects_invalid_contents) {
     return;
 
   auto into = c.initial;
-  const auto mapped = omni::ryml::map_by_schema(&into, *parsed);
+  const omni::ryml::with_diagnostics_t mapped = omni::ryml::map_by_schema(
+    &into, *parsed);
 
   EXPECT_FALSE(mapped.value);
   EXPECT_EQ(static_cast<const std::vector<int> &>(c.initial),
@@ -2135,7 +2428,7 @@ TEST_P(customization_mapping_limits,
   if (!tree)
     return;
 
-  const auto result = map_by_schema(
+  const omni::ryml::with_diagnostics_t result = map_by_schema(
     omni::type<customization_mapping::record>, *tree);
 
   EXPECT_FALSE(result.value);
@@ -2181,7 +2474,8 @@ TEST_P(customization_optional_mapping, maps_nullable_values) {
     return;
 
   auto into = c.initial;
-  const auto mapped = omni::ryml::map_by_schema(&into, *parsed);
+  const omni::ryml::with_diagnostics_t mapped = omni::ryml::map_by_schema(
+    &into, *parsed);
 
   EXPECT_EQ(bool(c.expected), bool(mapped.value));
   if (c.expected) {
@@ -2225,7 +2519,7 @@ INSTANTIATE_TEST_SUITE_P(nullable,
 /** Shared optional-operation adapters let a wrapper use the default optional
  * mapper without a serialization-specific registration. */
 TEST(customization_mapping, user_optional_operations_reuse_mapping_adapters) {
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<customization_mapping::optional_value<int>>, "7");
 
   EXPECT_TRUE(result.value);
@@ -2251,7 +2545,7 @@ TEST(customization_mapping, omits_empty_optional_sequence_elements) {
 // The wrapper's value_type exposes its contained record for discovery.
 TEST(customization_mapping, optional_record_uses_discovered_value_type) {
   const std::string document = R"({"item": {"value": 7}})";
-  const auto result = omni::ryml::deserialize(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type<customization_mapping::optional_record>, document);
 
   EXPECT_TRUE(result.value);
@@ -2292,7 +2586,7 @@ TEST_P(customization_enum_mapping, accepts_only_declared_string_names) {
   if (!tree)
     return;
 
-  const auto result = omni::ryml::map_by_schema(
+  const omni::ryml::with_diagnostics_t result = omni::ryml::map_by_schema(
     omni::type<customization_mapping::status>, *tree);
 
   EXPECT_EQ(bool(c.expected), bool(result.value));

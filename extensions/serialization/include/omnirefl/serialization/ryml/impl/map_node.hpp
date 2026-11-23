@@ -376,7 +376,6 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
 }
 
 } // namespace detail
-
 } // namespace ryml
 } // namespace omni
 

@@ -7,12 +7,12 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
-#include <omnirefl/traits.hpp>
 #include <omnirefl/serialization/ryml/with_diagnostics.hpp>
+#include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
-#include <ryml.hpp>
 #include <c4/format.hpp>
+#include <ryml.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -334,11 +334,7 @@ auto read_scalar(::ryml::ConstNodeRef node, json::value_kind expected)
 }
 
 } // namespace detail
-} // namespace ryml
-} // namespace omni
 
-namespace omni {
-namespace ryml {
 namespace core {
 
 inline compat::expected<::ryml::Tree, std::string> parse(std::string source,
@@ -625,7 +621,6 @@ auto parse_as_floating_point(::ryml::ConstNodeRef node)
   assert(expect_number_node(node));
   return omni::ryml::detail::read_scalar<T>(node, json::value_kind::number);
 }
-
 
 } // namespace core
 

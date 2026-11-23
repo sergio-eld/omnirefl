@@ -177,6 +177,5 @@ struct state_children<State, StateConfig, false> {
 };
 
 } // namespace detail
-
 } // namespace ryml
 } // namespace omni

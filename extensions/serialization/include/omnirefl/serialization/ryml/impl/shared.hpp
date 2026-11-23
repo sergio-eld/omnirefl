@@ -3,9 +3,9 @@
 // TODO: [medium] Validate aliases_dict against other aliases and reflected
 // canonical names, possibly inline when constructing a dictionary.
 
-#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/functional.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <algorithm>
@@ -386,7 +386,6 @@ struct record_field_names {
     return {{compat::string_view{fields.name()}...}};
   }
 };
-
 
 } // namespace detail
 } // namespace reflected_scope

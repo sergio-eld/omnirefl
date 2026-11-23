@@ -1,8 +1,8 @@
 #pragma once
 
+#include <omnirefl/extensions/static_string.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/reflected_scope.hpp>
-#include <omnirefl/extensions/static_string.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/compose.hpp>
 #include <omnirefl/serialization/ryml/impl/shared.hpp>

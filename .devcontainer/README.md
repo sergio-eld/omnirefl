@@ -19,8 +19,11 @@ have separate checkouts.
   package. Changes to example files only need a normal build.
 
 The Explorer opens `extras/`, and the terminal opens `extras/build/`. Startup
-configures the examples; select the `examples` preset to build. To also enable
-tests and benchmarks, run in that terminal:
+seeds the reflection and JSON sandboxes without overwriting edits; Codespaces
+opens both. The JSON sandbox defaults to C++20; changing its
+`CMAKE_CXX_STANDARD` to 11 selects the guarded compatibility examples. Select
+the `examples` preset to build. To also enable tests and benchmarks, run in
+that terminal:
 
 ```sh
 cmake .. -DBUILD_TESTING=ON -DBUILD_BENCHMARKS=ON

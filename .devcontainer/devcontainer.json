@@ -17,7 +17,8 @@
     "codespaces": {
       "openFiles": [
         "examples/sneak_peek/main.cpp",
-        "examples/scratch/main.cpp"
+        "examples/scratch/main.cpp",
+        "examples/scratch_json/main.cpp"
       ]
     },
     "vscode": {

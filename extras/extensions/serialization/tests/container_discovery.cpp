@@ -145,7 +145,8 @@ TYPED_TEST(container_discovery, discovers_and_maps_record_elements) {
 }
 
 TYPED_TEST(container_discovery, supports_empty_record_containers) {
-  const auto result = serialization_test::deserialize(omni::type_t<TypeParam>{}, "[]");
+  const auto result = serialization_test::deserialize(
+    omni::type_t<TypeParam>{}, "[]");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {

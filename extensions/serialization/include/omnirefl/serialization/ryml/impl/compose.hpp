@@ -76,7 +76,6 @@ auto invoke_expected_node(State state,
     node_call_priority<3>{});
 }
 
-
 } // namespace detail
 
 namespace compose {
