@@ -12,6 +12,7 @@ RUN --mount=type=cache,target=/src/build,sharing=locked \
 
 FROM build-base
 
-RUN apk add --no-cache gdb
+# gdb pulls musl-dbg, which must match musl and its development headers.
+RUN apk add --no-cache --upgrade gdb musl musl-dev
 
 COPY --from=package /packages/omnirefl.tar.gz /opt/omnirefl-packages/omnirefl.tar.gz
