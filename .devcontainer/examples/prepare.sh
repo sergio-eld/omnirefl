@@ -38,6 +38,8 @@ The release may not be published yet. Retry after publication, or build locally:
    Locally, run "Dev Containers: Rebuild Container".
 
 The source option builds Omnirefl in its Alpine toolchain container.
+Use a machine with at least 16 GB RAM for source builds.
+For an existing Codespace, use "Codespaces: Change Machine Type" first.
 Preparation log (also available in recovery mode): $package_dir/prepare.log
 EOF
       exit 1
