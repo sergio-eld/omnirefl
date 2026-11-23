@@ -79,8 +79,8 @@ struct emplace<optional_mapping::nullable<T>> {
 namespace {
 
 struct optional_string_case {
-  const char *name;
-  const char *source;
+  std::string name;
+  std::string source;
   omni::compat::optional<std::string> expected;
 };
 

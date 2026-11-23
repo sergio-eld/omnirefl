@@ -40,8 +40,8 @@ if [ ! -e extras/examples/scratch/field_names.hpp ]; then
 // Use through omni::reflected_call to collect public field names.
 struct field_names {
   template <typename _M>
-  std::vector<std::string> operator()(omni::record_meta_t<_M> record) const {
-    return names(record.accessible_data_members());
+  std::vector<std::string> operator()(omni::record_meta_t<_M> m) const {
+    return names(m.accessible_data_members());
   }
 
   private:
@@ -73,8 +73,8 @@ struct person {
 int main() {
   const auto names = omni::reflected_call(
     field_names{}, omni::type_t<person>{});
-  for (const auto &name : names)
-    std::cout << name << '\n';
+  for (const auto &n : names)
+    std::cout << n << '\n';
 }
 EOF
 fi

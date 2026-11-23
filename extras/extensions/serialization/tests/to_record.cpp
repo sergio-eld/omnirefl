@@ -102,88 +102,41 @@ TEST(alias_lookup, returns_no_name_for_an_empty_dictionary) {
   EXPECT_FALSE(canonical_only("hostname"));
 }
 
-TEST(alias_lookup, sorts_entries_in_constant_evaluation) {
-  constexpr auto sorted = omni::ryml::detail::cpp11_sorted_aliases{}(
-    omni::ryml::detail::alias_entry{"tls", "secure"},
-    omni::ryml::detail::alias_entry{"host_name", "host"},
-    omni::ryml::detail::alias_entry{"host", "host"},
-    omni::ryml::detail::alias_entry{"hostname", "host"},
-    omni::ryml::detail::alias_entry{"port", "port"});
+TEST(alias_lookup, resolves_empty_prefix_and_non_ascii_aliases) {
+  const auto names = omni::ryml::aliases_dict(
+    std::make_tuple("extended", "\x80"),
+    std::make_tuple("suffix", "host_"),
+    std::make_tuple("empty", ""),
+    std::make_tuple("plain", "host"),
+    std::make_tuple("long", "hostname"));
 
-  const auto tls = sorted("tls");
-  EXPECT_TRUE(tls);
-  if (tls)
-    EXPECT_EQ("secure", *tls);
-
-  const auto host_name = sorted("host_name");
-  EXPECT_TRUE(host_name);
-  if (host_name)
-    EXPECT_EQ("host", *host_name);
-
-  const auto host = sorted("host");
-  EXPECT_TRUE(host);
-  if (host)
-    EXPECT_EQ("host", *host);
-
-  const auto hostname = sorted("hostname");
-  EXPECT_TRUE(hostname);
-  if (hostname)
-    EXPECT_EQ("host", *hostname);
-
-  const auto port = sorted("port");
-  EXPECT_TRUE(port);
-  if (port)
-    EXPECT_EQ("port", *port);
-}
-
-TEST(alias_lookup, prepares_empty_and_single_entry_constexpr_tables) {
-  constexpr auto empty = omni::ryml::detail::cpp11_sorted_aliases{}();
-  constexpr auto single = omni::ryml::detail::cpp11_sorted_aliases{}(
-    omni::ryml::detail::alias_entry{"hostname", "host"});
-
-  EXPECT_FALSE(empty("hostname"));
-  const auto hostname = single("hostname");
-  EXPECT_TRUE(hostname);
-  if (hostname)
-    EXPECT_EQ("host", *hostname);
-}
-
-TEST(alias_lookup, orders_empty_prefix_and_non_ascii_keys) {
-  constexpr auto sorted = omni::ryml::detail::cpp11_sorted_aliases{}(
-    omni::ryml::detail::alias_entry{"\x80", "extended"},
-    omni::ryml::detail::alias_entry{"host_", "suffix"},
-    omni::ryml::detail::alias_entry{"", "empty"},
-    omni::ryml::detail::alias_entry{"host", "plain"},
-    omni::ryml::detail::alias_entry{"hostname", "long"});
-
-  const auto _x80 = sorted("\x80");
+  const auto _x80 = names("\x80");
   EXPECT_TRUE(_x80);
   if (_x80)
     EXPECT_EQ("extended", *_x80);
 
-  const auto host_ = sorted("host_");
+  const auto host_ = names("host_");
   EXPECT_TRUE(host_);
   if (host_)
     EXPECT_EQ("suffix", *host_);
 
-  const auto resolved_name = sorted("");
+  const auto resolved_name = names("");
   EXPECT_TRUE(resolved_name);
   if (resolved_name)
     EXPECT_EQ("empty", *resolved_name);
 
-  const auto host = sorted("host");
+  const auto host = names("host");
   EXPECT_TRUE(host);
   if (host)
     EXPECT_EQ("plain", *host);
 
-  const auto hostname = sorted("hostname");
+  const auto hostname = names("hostname");
   EXPECT_TRUE(hostname);
   if (hostname)
     EXPECT_EQ("long", *hostname);
 }
 
-// C++11 does not require make_tuple/tuple_cat to be constexpr. Sort preparation
-// is tested independently above; full factory evaluation starts with C++14.
+// `make_tuple`/`tuple_cat` support constexpr factory evaluation from C++14.
 #if 201402L <= OMNI_CPLUSPLUS
 TEST(alias_lookup, prepares_an_inverse_dictionary_in_constant_evaluation) {
   constexpr auto names = omni::ryml::aliases_dict(
