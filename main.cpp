@@ -3135,6 +3135,19 @@ std::expected<llvm::opt::InputArgList, std::string>
   return argList;
 }
 
+// Ad hoc: embedded Clang retired these backend code-generation switches.
+// Match only whole unknown options at the driver and cc1 boundaries so
+// forwarded options and identical header/macro operands remain distinct.
+// REFACTORME: [high] Move retired switches into compiler compatibility profiles.
+bool is_retired_codegen_option(const llvm::opt::Arg &a) {
+  static constexpr std::array flags{
+    "-fexperimental-new-pass-manager"sv,
+    "-fno-experimental-new-pass-manager"sv,
+  };
+  return llvm::opt::Option::UnknownClass == a.getOption().getKind()
+    && std::ranges::contains(flags, std::string_view{a.getSpelling()});
+}
+
 std::vector<std::string> filter_tool_irrelevant_args(
   const llvm::opt::InputArgList &args) {
   namespace options = clang::options;
@@ -3167,7 +3180,8 @@ std::vector<std::string> filter_tool_irrelevant_args(
   for (const llvm::opt::Arg *arg : args) {
     const llvm::opt::Option option = arg->getOption().getUnaliasedOption();
 
-    if (llvm::opt::Option::InputClass == option.getKind()
+    if (is_retired_codegen_option(*arg)
+      || llvm::opt::Option::InputClass == option.getKind()
       || option.hasFlag(options::LinkOption)
       || option.hasFlag(options::LinkerInput)
       || option.matches(options::OPT_Action_Group)
@@ -3721,6 +3735,18 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     return paths;
   });
 
+  // A Linux project normally compiles against the host libstdc++. Parsing it
+  // with the bundled libc++ changes implementation-defined standard library
+  // types, e.g. std::chrono::seconds::rep is long in libstdc++ and long long
+  // in libc++, so code valid for the real compiler can fail in the tool.
+  const bool host_libstdcxx_requested = !msvc_used && !mingw_used
+    && llvm::Triple{driver_triple}.isOSLinux()
+    && !normalized_args->hasArg(options::OPT_nostdinc,
+      options::OPT_nostdlibinc,
+      options::OPT_nostdincxx)
+    && normalized_args->getLastArgValue(options::OPT_stdlib_EQ, "libstdc++")
+      == "libstdc++";
+
   const std::vector<std::string> cc1_driver_args =
     std::invoke([&] -> std::vector<std::string> {
       // Preserve frontend-affecting driver arguments for every supported
@@ -3753,7 +3779,11 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       out.emplace_back("omnirefl");
 
-      if (!mingw_used) {
+      if (host_libstdcxx_requested) {
+        // Let the driver locate the libstdc++ the project compiles against.
+        // The bundled libc++ remains the fallback when none is found.
+        out.emplace_back("-stdlib=libstdc++");
+      } else if (!mingw_used) {
         // prevents from picking up on another compiler's C++ < std libs
         out.emplace_back("-nostdinc++");
       } else if (!mingw_include_paths.empty()) {
@@ -3790,11 +3820,11 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
       return out;
     });
 
-  // ad hoc: impersonate the original compiler basename so Clang's driver can
-  // infer its toolchain and language defaults; MSVC-style input must instead
-  // be normalized through clang-cl.
+  // Keep the compiler's directory for GCC discovery. Dropping it can produce
+  // /lib/../include paths that build tools normalize incorrectly when /lib
+  // is a symlink into /usr. MSVC-style input still needs clang-cl's dialect.
   clang::driver::Driver driver(
-    msvc_used ? "clang-cl" : fs::path(raw_flags.front()).filename().string(),
+    msvc_used ? "clang-cl" : raw_flags.front(),
     driver_triple,
     *log.clang_engine,
     "omnirefl reflection tool");
@@ -3858,7 +3888,28 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
   const auto &compilation_args = compilation->getJobs().begin()->getArguments();
 
-  const std::vector<std::string> frontend_args = compilation_args //
+  // -Xclang operands acquire their true option boundaries only after the
+  // driver lowers them to cc1 arguments; a forwarded include filename can
+  // otherwise look exactly like a retired switch.
+  unsigned missing_index = 0, missing_count = 0;
+  const llvm::opt::InputArgList frontend_options =
+    clang::getDriverOptTable().ParseArgs(compilation_args,
+      missing_index,
+      missing_count,
+      llvm::opt::Visibility{options::CC1Option});
+  if (missing_count) {
+    return std::unexpected(processing_error(source,
+      std::format("Missing frontend argument for option at index {}",
+        missing_index)));
+  }
+
+  llvm::opt::ArgStringList filtered_frontend_args;
+  for (const llvm::opt::Arg *arg : frontend_options) {
+    if (!is_retired_codegen_option(*arg))
+      arg->render(frontend_options, filtered_frontend_args);
+  }
+
+  const std::vector<std::string> frontend_args = filtered_frontend_args //
     | std::views::transform(omni::fn::as<std::string>()) //
     | std::ranges::to<std::vector>();
 
@@ -3955,11 +4006,21 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     // dir, target-specific bits/c++config.h dir, correct musl/glibc target
     // triple, feature macros, and include ordering. Missing any of those can
     // break standard headers before the tool reaches user code.
+    // The driver emits the target-specific libstdc++ directory only for a GCC
+    // installation it selected, together with the matching primary directory
+    // and in the order the real compiler uses.
+    const bool host_libstdcxx_used = host_libstdcxx_requested
+      && std::ranges::any_of(o.UserEntries, [](const auto &entry) {
+           std::error_code ec;
+           return fs::is_regular_file(fs::path(entry.Path) / "bits/c++config.h",
+             ec);
+         });
+
     if (!msvc_used && !mingw_used)
       o.UseStandardCXXIncludes = false;
     o.ResourceDir = resource_dir.generic_string();
 
-    if (!msvc_used && !mingw_used) {
+    if (!msvc_used && !mingw_used && !host_libstdcxx_used) {
       // Packaged headers are absolute and remain outside a target SDK.
       o.AddPath(
         // todo: this should be configured at compile time

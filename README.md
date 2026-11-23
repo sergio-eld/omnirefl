@@ -710,6 +710,10 @@ and functions. See [Limitations](#limitations) for details.
 
 <!-- pages:scope:end -->
 
+Older compilers can implement different revisions of a draft C++ standard.
+See [older compiler and draft-mode limitations](docs/compiler-compatibility.md)
+for known mismatches and the available workarounds.
+
 <!-- pages:dependency-protocols:start -->
 ### Dependency Protocols
 
