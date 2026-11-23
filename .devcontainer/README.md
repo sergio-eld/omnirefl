@@ -18,6 +18,11 @@ have separate checkouts.
   **Dev Containers: Rebuild Container** locally. This rebuilds and installs the
   package. Changes to example files only need a normal build.
 
+Fresh `master` may contain API changes absent from the published release,
+causing examples in the release-based container to fail to compile. The
+**Examples - current source** and **Development** configurations build the
+package from the same checkout, avoiding that version mismatch.
+
 The Explorer opens `extras/`, and the terminal opens `extras/build/`. Startup
 seeds the reflection and JSON sandboxes without overwriting edits; Codespaces
 opens both. The JSON sandbox defaults to C++20; changing its
