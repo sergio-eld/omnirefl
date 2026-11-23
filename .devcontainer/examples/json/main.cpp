@@ -73,21 +73,20 @@ int main() {
     R"({"name":)",
   };
 
-  for (const auto &invalid_document : invalid_documents) {
+  for (const auto &d : invalid_documents) {
 #if 201703L <= OMNI_CPLUSPLUS
     const omni::ryml::with_diagnostics_t rejected = omni::ryml::deserialize(
-      omni::type<service>, invalid_document);
+      omni::type<service>, d);
 #else
-    const auto rejected = omni::ryml::deserialize(
-      omni::type_t<service>{}, invalid_document);
+    const auto rejected = omni::ryml::deserialize(omni::type_t<service>{}, d);
 #endif
 
     if (rejected.value) {
-      std::cerr << "Unexpectedly accepted: " << invalid_document << '\n';
+      std::cerr << "Unexpectedly accepted: " << d << '\n';
       return 1;
     }
 
-    std::cout << "Rejected input:\n" << invalid_document << "\nDiagnostics:\n"
+    std::cout << "Rejected input:\n" << d << "\nDiagnostics:\n"
       << rejected.diagnostics << "\n\n";
   }
 }
