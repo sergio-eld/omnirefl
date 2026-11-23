@@ -10,8 +10,8 @@ have separate checkouts.
 
 ## Examples (Ubuntu 24.04)
 
-- **Examples - latest release** (default): use the latest
-  GitHub release.
+- **Examples - v0.0.8** (default): use the matching GitHub release. If its
+  package is not published yet, retry container creation after publication.
 - **Examples - current source**: use this checkout, including
   local changes. After changing the library, rebuild the container from the
   command palette: **Codespaces: Rebuild Container** in the browser, or

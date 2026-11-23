@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly package_source=${1:-latest_release}
+readonly package_source=${1:-v0.0.8}
 
-if [[ latest_release != "$package_source" && source != "$package_source" ]]; then
+if [[ source != "$package_source" \
+  && ! "$package_source" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   printf 'Unsupported package source: %s\n' "$package_source" >&2
   exit 1
 fi
@@ -14,13 +15,15 @@ mkdir -p "$package_dir"
 trap 'rm -f "$package_dir/omnirefl.tar.gz.tmp"' EXIT
 
 case "$package_source" in
-  latest_release)
+  v*)
     # Detached symbol archives are separate release assets.
-    curl -fL -o "$package_dir/omnirefl.tar.gz.tmp" "$(curl -fsSL \
-        https://api.github.com/repos/sergio-eld/omnirefl/releases/latest \
+    package_url=$(curl -fsSL \
+        "https://api.github.com/repos/sergio-eld/omnirefl/releases/tags/$package_source" \
         | sed -n \
           -e '/-symbols\.tar\.gz/d' \
-          -e 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')"
+          -e 's/.*"browser_download_url": "\(.*cosmo-universal.*\.tar\.gz\)".*/\1/p')
+    readonly package_url
+    curl -fL -o "$package_dir/omnirefl.tar.gz.tmp" "$package_url"
     ;;
   source)
     export COMPOSE_FILE=.devcontainer/compose.yml
