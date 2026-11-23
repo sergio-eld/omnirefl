@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# FIXME: [high] Fresh master can change the examples' API before a matching
+# package is released, breaking Codespaces despite this pin. Keep the package
+# and checkout compatible when selecting the default container recipe.
 readonly package_source=${1:-v0.0.8}
 
 if [[ source != "$package_source" \
