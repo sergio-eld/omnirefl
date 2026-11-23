@@ -1,5 +1,8 @@
 {
   "name": "Examples - current source (Ubuntu 24.04)",
+  "hostRequirements": {
+    "memory": "16gb"
+  },
   "dockerComposeFile": "../compose.yml",
   "service": "examples",
   "runServices": [

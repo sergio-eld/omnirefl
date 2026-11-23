@@ -1,5 +1,8 @@
 {
   "name": "Development (Cosmopolitan)",
+  "hostRequirements": {
+    "memory": "16gb"
+  },
   "dockerComposeFile": "../compose.yml",
   "service": "development",
   "runServices": [

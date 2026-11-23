@@ -10,12 +10,13 @@ trap 'rm -rf "$scratch"' EXIT
 export COSMO_BUILD_UNIVERSAL=${COSMO_BUILD_UNIVERSAL:-false}
 
 cd "$source"
-if [ true = "$COSMO_BUILD_UNIVERSAL" ]; then
-  cmake --preset cosmo -DOMNIREFL_PACKAGE_TARGET=cosmo-universal
-else
-  cmake --preset cosmo
-fi
 # Packaging needs the host tools, not the development tests and benchmarks.
+if [ true = "$COSMO_BUILD_UNIVERSAL" ]; then
+  cmake --preset cosmo -DOMNIREFL_PACKAGE_TARGET=cosmo-universal \
+    -DENABLE_TESTING=OFF -DENABLE_BENCH=OFF
+else
+  cmake --preset cosmo -DENABLE_TESTING=OFF -DENABLE_BENCH=OFF
+fi
 cmake --build --preset cosmo --target tool ccdb_query --parallel
 
 if [ true = "$COSMO_BUILD_UNIVERSAL" ]; then

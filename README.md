@@ -566,8 +566,11 @@ manually.
 
   </details>
 
-- **GitHub Codespaces:** select **Development** when creating the
-  Codespace; see the [container setup](.devcontainer/README.md).
+- **GitHub Codespaces:** see the [container setup](.devcontainer/README.md).
+  Fresh `master` may contain API changes absent from the published release,
+  causing examples in release-based containers to fail to compile. Select
+  **Examples - current source** or **Development** to build the package from
+  the same checkout.
 
 ### Latest CI artifacts
 

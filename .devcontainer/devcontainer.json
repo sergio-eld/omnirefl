@@ -1,5 +1,5 @@
 {
-  "name": "Examples - latest release (Ubuntu 24.04)",
+  "name": "Examples - v0.0.8 (Ubuntu 24.04)",
   "dockerComposeFile": "compose.yml",
   "service": "examples",
   "runServices": [
@@ -10,7 +10,7 @@
   "initializeCommand": [
     "bash",
     "${localWorkspaceFolder}/.devcontainer/examples/prepare.sh",
-    "latest_release"
+    "v0.0.8"
   ],
   "waitFor": "postStartCommand",
   "customizations": {
