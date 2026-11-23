@@ -290,10 +290,8 @@ TEST(arithmetic_mapping, constrains_value_and_mutating_destinations) {
   using state = omni::ryml::read_state_t<>;
   using node = ::ryml::ConstNodeRef;
 
-  EXPECT_TRUE((omni::compat::is_invocable<decltype(map_node_to_arithmetic),
-    state, node, omni::type_t<bool>>::value));
-  EXPECT_FALSE((omni::compat::is_invocable<decltype(map_node_to_arithmetic),
-    state, node, omni::type_t<const bool>>::value));
+  EXPECT_TRUE((omni::compat::is_invocable<
+    decltype(omni::ryml::core::parse_as_arithmetic<bool>), node>::value));
   EXPECT_TRUE((omni::compat::is_invocable<decltype(map_arithmetic_node),
     state, node, int *>::value));
   EXPECT_FALSE((omni::compat::is_invocable<decltype(map_arithmetic_node),
@@ -846,7 +844,7 @@ TEST(shape_callback, accepts_a_generic_state_and_node_callback) {
 
   const auto mapping = omni::ryml::compose::lift_to_with_diagnostics(
     [](auto state, auto node) {
-      return omni::ryml::core::map_node_to_integral(
+      return omni::ryml::map_integer_node(
         std::move(state), node, omni::type_t<int>{});
     });
 
@@ -866,7 +864,7 @@ TEST(shape_callback, assigns_from_a_generic_state_and_explicit_node_callback) {
 
   const auto mapping = omni::ryml::compose::map_integer_node(
     [](auto state, ::ryml::ConstNodeRef node) {
-      return omni::ryml::core::map_node_to_integral(
+      return omni::ryml::map_integer_node(
         std::move(state), node, omni::type_t<int>{});
     });
 

@@ -22,16 +22,19 @@
 // owning strings and vectors; provide an alternative representation.
 
 // FIXME: [high] Report write-depth overflow instead of silently stopping;
-// the void write pipeline cannot propagate diagnostics (see impl/depth.hpp).
+// the node-returning pipeline has no diagnostic result (see impl/depth.hpp).
 
-#include <omnirefl/serialization/ryml/impl/tdm_binding.hpp>
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/compose.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
+#include <omnirefl/serialization/ryml/customization.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_binding.hpp>
+#include <omnirefl/serialization/ryml/map_node.hpp>
+#include <omnirefl/serialization/ryml/map_type.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
-#include <omnirefl/serialization/ryml/type_mapping.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 #include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -73,19 +76,21 @@ struct reflect_as_root:
 
 namespace detail {
 
+template <typename T, typename = void>
+struct reflection_target;
+
+struct map_selected;
+struct map_in_reflected_scope;
+
+// reflected_call accepts the discovered record/enum, not its containers.
 template <typename T>
-using map_by_schema_dispatch_t = typename traits::select<
-  traits::case_<cp::reflect_as_root<T>::value, core::map_to_reflected_t>,
-  traits::case_<traits::is_string_like<T>::value, core::map_to_string_like_t>,
-  traits::case_<std::is_arithmetic<T>::value, core::map_to_fundamental_t>,
-  traits::case_<traits::is_optional<T>::value, core::map_to_optional_t>,
-  traits::case_<is_mapped_range<T>::value, core::map_to_sequence_t>,
-  core::map_to_reflected_t>::type;
+using map_by_schema_dispatch_t = compat::conditional_t<
+  cp::reflect_as_root<typename reflection_target<T>::type>::value,
+  map_in_reflected_scope, map_selected>;
 
 } // namespace detail
 
-/** Schema-driven mapping of a caller-owned tree or subtree with bound config.
- */
+/** Schema-driven mapping of a caller-owned tree or subtree with config. */
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t>
 struct map_by_schema_t:
@@ -102,6 +107,11 @@ struct map_by_schema_t:
   using tdm_provider::tdm_map_node;
 
   /** Map a node into T by traversing its C++ schema over the node.
+   *
+```
+map_by_schema :: (type<T>, node) -> with_diagnostics<T>
+```
+   *
    * Value mappings construct T directly; pointer-only mappings require T to
    * be default-constructible. Returns structured diagnostics without applying
    * config.transform_diagnostics.
@@ -126,6 +136,11 @@ struct map_by_schema_t:
   }
 
   /** (QoL) Map a whole tree into T through its root node.
+   *
+```
+map_by_schema :: (type<T>, tree) -> with_diagnostics<T>
+```
+   *
    * Returns structured diagnostics; config.transform_diagnostics is not
    * applied. Keep the tree and its character storage alive while using
    * borrowed values or diagnostics. */
@@ -142,6 +157,11 @@ struct map_by_schema_t:
   void operator()(omni::type_t<T>, const ::ryml::Tree &&) const = delete;
 
   /** Map a node into *into by traversing its C++ schema over the node.
+   *
+```
+map_by_schema :: (T*, node) -> with_diagnostics<monostate>
+```
+   *
    * Ranges replace existing contents. Mapping errors leave the destination
    * state unspecified and may produce partial updates. Success holds
    * monostate.
@@ -167,6 +187,11 @@ struct map_by_schema_t:
   }
 
   /** (QoL) Map a whole tree into *into through its root node.
+   *
+```
+map_by_schema :: (T*, tree) -> with_diagnostics<monostate>
+```
+   *
    * Ranges replace existing contents; mapping errors leave destination state
    * unspecified. Returns monostate on success with structured diagnostics;
    * config.transform_diagnostics is not applied.
@@ -244,6 +269,12 @@ struct deserialize_t:
   using tdm_provider::tdm_map_node;
 
   /** Deserialize source text into Record, returning transformed diagnostics.
+   *
+```
+deserialize :: (type<Record>, string) ->
+  with_diagnostics<Record, diagnostics_result_t<Config>>
+```
+   *
    * Uses the mutable config, including lvalue-only diagnostic callbacks.
    * Value mappings construct Record directly; pointer-only mappings require
    * default construction.
@@ -261,6 +292,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into Record, returning transformed diagnostics.
+   *
+```
+deserialize :: (type<Record>, string) ->
+  with_diagnostics<Record, diagnostics_result_t<Config>>
+```
+   *
    * Uses const config; the diagnostics callback must accept a const call.
    * Value mappings construct Record directly; pointer-only mappings require
    * default construction.
@@ -278,6 +315,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into Record, returning transformed diagnostics.
+   *
+```
+deserialize :: (type<Record>, string) ->
+  with_diagnostics<Record, diagnostics_result_t<Config>>
+```
+   *
    * Passes config as an rvalue, supporting consuming diagnostic callbacks.
    * Value mappings construct Record directly; pointer-only mappings require
    * default construction.
@@ -295,6 +338,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into Record with const-rvalue configuration.
+   *
+```
+deserialize :: (type<Record>, string) ->
+  with_diagnostics<Record, diagnostics_result_t<Config>>
+```
+   *
    * Returns transformed diagnostics, supporting const-rvalue-only callbacks.
    * Value mappings construct Record directly; pointer-only mappings require
    * default construction.
@@ -312,6 +361,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into *into with mutable config.
+   *
+```
+deserialize :: (T*, string) ->
+  with_diagnostics<monostate, diagnostics_result_t<Config>>
+```
+   *
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
@@ -331,6 +386,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into *into with const config.
+   *
+```
+deserialize :: (T*, string) ->
+  with_diagnostics<monostate, diagnostics_result_t<Config>>
+```
+   *
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
@@ -350,6 +411,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into *into, passing config as an rvalue.
+   *
+```
+deserialize :: (T*, string) ->
+  with_diagnostics<monostate, diagnostics_result_t<Config>>
+```
+   *
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
@@ -369,6 +436,12 @@ struct deserialize_t:
   }
 
   /** Deserialize source text into *into with const-rvalue configuration.
+   *
+```
+deserialize :: (T*, string) ->
+  with_diagnostics<monostate, diagnostics_result_t<Config>>
+```
+   *
    * Returns monostate on success with transformed diagnostics. Ranges replace
    * existing contents. Syntax errors leave *into unchanged; mapping errors
    * leave its state unspecified and may produce partial updates.
@@ -427,7 +500,13 @@ struct as_owning_tree_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
-  /** Serialize value into an owning tree. Empty optionals produce null;
+  /** Serialize value into an owning tree.
+   *
+```
+as_owning_tree :: const T& -> tree
+```
+   *
+   * Empty optionals produce null;
    * empty optional sequence elements are omitted. The result can be modified
    * or passed to RapidYAML emitters. */
   template <typename T>
@@ -466,6 +545,11 @@ struct as_ref_tree_t:
   using tdm_provider::tdm_map_node;
 
   /** Serialize an lvalue into a tree borrowing its existing string storage.
+   *
+```
+as_ref_tree :: T& -> tree
+```
+   *
    * Accepts const and mutable sources. Keep source storage alive and unchanged
    * while the tree is used. Empty optionals produce null; empty optional
    * sequence elements are omitted. */
@@ -505,12 +589,17 @@ struct serialize_t:
   // Output format; use as_yaml or as_json for the predefined configurations.
   ::ryml::EmitType_e format{};
   using tdm_provider::tdm_format;
+
   // (state, type<T>) -> mapping callable, selected at every schema position.
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
-  /**
-   * Serialize a reflected record, supported scalar, or vector to YAML or JSON.
+  /** Serialize a reflected record, supported scalar, or vector to YAML or JSON.
+   *
+```
+serialize :: const T& -> string
+```
+   *
    * Vectors may contain nested vectors or reflected records, including at the
    * root. String sources include char-based basic_string and c4 views, plus
    * basic_string_view when the standard library provides it.

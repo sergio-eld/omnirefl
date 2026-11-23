@@ -6,6 +6,7 @@
 #include <omnirefl/functional.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
@@ -73,71 +74,6 @@ auto invoke_expected_node(State state,
     node,
     into,
     node_call_priority<3>{});
-}
-
-inline issue node_function_error(issue error, ::ryml::ConstNodeRef node) {
-  // An absent optional has a schema value but no document node. Its caller
-  // supplies the missing-field path after validation.
-  if (node.invalid())
-    return error;
-
-  if (error.node_id == ::ryml::NONE) {
-    auto prefix = core::node_path(node);
-    prefix.insert(prefix.end(), error.path.begin(), error.path.end());
-    error.path = std::move(prefix);
-    error.node_id = node.id();
-  }
-
-  const ::ryml::ConstNodeRef source{node.tree(), error.node_id};
-  if (error.path.empty() && source.has_parent())
-    error.path = core::node_path(source);
-
-  if (error.actual == json::value_kind::unknown)
-    error.actual = node_kind(source);
-
-  return error;
-}
-
-template <typename T, typename State>
-auto node_result(State state,
-  compat::expected<T, issue> mapped,
-  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
-  auto result = make_node_accumulator(std::move(state));
-  if (mapped)
-    return {std::move(*mapped), std::move(result.result.diagnostics)};
-
-  result.report(node_function_error(std::move(mapped.error()), node));
-
-  return {compat::nullopt, std::move(result.result.diagnostics)};
-}
-
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename Errors, typename State,
-  typename Error = compat::remove_cvref_t<compat::range_reference_t<Errors>>),
-  (compat::is_input_range<Errors>::value && std::is_same<issue, Error>::value))
-auto node_result(State state,
-  compat::expected<T, Errors> mapped,
-  ::ryml::ConstNodeRef node) -> with_diagnostics_t<T> {
-  auto result = make_node_accumulator(std::move(state));
-  if (mapped)
-    return {std::move(*mapped), std::move(result.result.diagnostics)};
-
-  using std::begin;
-  using std::end;
-  auto first = begin(mapped.error());
-  const auto last = end(mapped.error());
-  for (; first != last; ++first) {
-    result.report(node_function_error(*first, node));
-    if (result.stopped())
-      break;
-  }
-
-  return {compat::nullopt, std::move(result.result.diagnostics)};
-}
-
-template <typename T, typename State>
-auto node_result(State, with_diagnostics_t<T> mapped, ::ryml::ConstNodeRef)
-  -> with_diagnostics_t<T> {
-  return mapped;
 }
 
 } // namespace detail

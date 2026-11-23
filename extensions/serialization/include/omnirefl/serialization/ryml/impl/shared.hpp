@@ -3,9 +3,10 @@
 // TODO: [medium] Validate aliases_dict against other aliases and reflected
 // canonical names, possibly inline when constructing a dictionary.
 
-#include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/functional.hpp>
+#include <omnirefl/serialization/ryml/core.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <algorithm>
 #include <array>
@@ -374,5 +375,19 @@ auto read_into(State state,
 }
 
 } // namespace detail
+
+namespace reflected_scope {
+namespace detail {
+
+struct record_field_names {
+  template <typename... Fields>
+  constexpr auto operator()(const Fields &...fields) const
+    -> std::array<compat::string_view, sizeof...(Fields)> {
+    return {{compat::string_view{fields.name()}...}};
+  }
+};
+
+} // namespace detail
+} // namespace reflected_scope
 } // namespace ryml
 } // namespace omni

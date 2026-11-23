@@ -3,18 +3,18 @@
 /** Shared mapping configuration, diagnostics, and read/write states. */
 
 #include <omnirefl/extensions/compat.hpp>
-#include <omnirefl/extensions/static_string.hpp>
+#include <omnirefl/serialization/ryml/impl/state.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_config.hpp>
 #include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
 #include <ryml.hpp>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
-#include <type_traits>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -106,6 +106,7 @@ OMNI_ENABLE_BIT_FLAGS(unknown_policy)
  * define what it exposes during mapping without promising a partial result.
  */
 struct error_policy {
+  // Values above zero enable experimental collection of multiple errors.
   // Number of mapping errors processing may pass before stopping on the next.
   // Warnings do not count. Zero stops at the first error.
   std::uint16_t error_limit = 0;
@@ -196,9 +197,7 @@ template <typename T>
 concept config_like = is_config<T>::value;
 #endif
 
-/**
- * Describes an input issue without rendering a message or deciding failure.
- */
+/** Describes an input issue without rendering a message or deciding failure. */
 struct issue {
   struct path_segment {
     // Field name borrowed from metadata or the caller-owned tree.
@@ -256,386 +255,6 @@ using diagnostics_result_t = compat::decay_t<compat::invoke_result_t<
   const ::ryml::Tree &,
   diagnostics>>;
 
-namespace detail {
-
-// Diagnostics are always present, including warnings accompanying a value.
-// Sequencing combines reports; other report types supply an explicit merger.
-struct append_diagnostics_t {
-  auto operator()(omni::ryml::diagnostics first,
-    omni::ryml::diagnostics second) const -> omni::ryml::diagnostics {
-    first.issues.insert(first.issues.end(),
-      std::make_move_iterator(second.issues.begin()),
-      std::make_move_iterator(second.issues.end()));
-
-    if (!second.parse_error_message.empty()) {
-      if (!first.parse_error_message.empty())
-        first.parse_error_message += '\n';
-
-      first.parse_error_message += second.parse_error_message;
-    }
-
-    return first;
-  }
-
-  std::string operator()(std::string first, std::string second) const {
-    if (first.empty())
-      return second;
-
-    if (!second.empty()) {
-      first += '\n';
-      first += second;
-    }
-
-    return first;
-  }
-
-  template <typename Issue, typename Allocator>
-  auto operator()(std::vector<Issue, Allocator> first,
-    std::vector<Issue, Allocator> second) const
-    -> std::vector<Issue, Allocator> {
-    first.insert(first.end(), std::make_move_iterator(second.begin()),
-      std::make_move_iterator(second.end()));
-    return first;
-  }
-};
-
-} // namespace detail
-
-/**
- * Holds the deserialized value, if available, and diagnostics even on failure.
- * Diagnostics can hold issue records or a rendered message.
- */
-template <typename T,
-  typename Diagnostics = omni::ryml::diagnostics>
-struct with_diagnostics_t {
-  using value_type = T;
-  using diagnostics_type = Diagnostics;
-
-  // Available only when mapping succeeds.
-  compat::optional<T> value;
-
-  // Retained issue records, or the result of transforming them for display.
-  Diagnostics diagnostics;
-
-  /** Transforms an available value with f, retaining diagnostics.
-   * An empty value stays empty. f must return a non-void value; references
-   * are stored as values. Rvalue overloads move the retained diagnostics.
-   *
-```
-transform :: (T -> U) -> with_diagnostics<U, Diagnostics>
-```
-   */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename U = compat::decay_t<compat::invoke_result_t<F &&, T &>>),
-    (std::is_constructible<U, compat::invoke_result_t<F &&, T &>>::value
-      && std::is_constructible<Diagnostics, Diagnostics &>::value))
-  OMNI_CPP14_CONSTEXPR auto transform(F &&f) &
-    -> with_diagnostics_t<U, Diagnostics> {
-    return {
-      /*value=*/this->value
-        ? compat::make_optional(compat::invoke(std::forward<F>(f),
-            *this->value))
-        : compat::nullopt,
-      /*diagnostics=*/this->diagnostics,
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename U = compat::decay_t<compat::invoke_result_t<F &&, const T &>>),
-    (std::is_constructible<U, compat::invoke_result_t<F &&, const T &>>::value
-      && std::is_constructible<Diagnostics, const Diagnostics &>::value))
-  OMNI_CPP14_CONSTEXPR auto transform(F &&f) const &
-    -> with_diagnostics_t<U, Diagnostics> {
-    return {
-      /*value=*/this->value
-        ? compat::make_optional(compat::invoke(std::forward<F>(f),
-            *this->value))
-        : compat::nullopt,
-      /*diagnostics=*/this->diagnostics,
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename U = compat::decay_t<compat::invoke_result_t<F &&, T &&>>),
-    (std::is_constructible<U, compat::invoke_result_t<F &&, T &&>>::value
-      && std::is_constructible<Diagnostics, Diagnostics &&>::value))
-  OMNI_CPP14_CONSTEXPR auto transform(F &&f) &&
-    -> with_diagnostics_t<U, Diagnostics> {
-    return {
-      /*value=*/this->value
-        ? compat::make_optional(compat::invoke(std::forward<F>(f),
-            std::move(*this->value)))
-        : compat::nullopt,
-      /*diagnostics=*/std::move(this->diagnostics),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename U = compat::decay_t<compat::invoke_result_t<F &&, const T &&>>),
-    (std::is_constructible<U, compat::invoke_result_t<F &&, const T &&>>::value
-      && std::is_constructible<Diagnostics, const Diagnostics &&>::value))
-  OMNI_CPP14_CONSTEXPR auto transform(F &&f) const &&
-    -> with_diagnostics_t<U, Diagnostics> {
-    return {
-      /*value=*/this->value
-        ? compat::make_optional(compat::invoke(std::forward<F>(f),
-            std::move(*this->value)))
-        : compat::nullopt,
-      /*diagnostics=*/std::move(this->diagnostics),
-    };
-  }
-
-  /** Sequences an available value through f, combining both reports in order.
-   * An empty value skips f and retains its diagnostics. f returns another
-   * with_diagnostics with the same diagnostics type. The default merger
-   * appends issue vectors, joins text with a newline, and retains the first
-   * mapping-policy snapshot. Other report types supply merge(first, second).
-   * Diagnostic limits remain the mapping operation's responsibility.
-   *
-```
-and_then :: (T -> with_diagnostics<U, Diagnostics>)
-  -> with_diagnostics<U, Diagnostics>
-```
-   */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Merge = detail::append_diagnostics_t,
-    typename Result = compat::decay_t<compat::invoke_result_t<F &&, T &>>,
-    typename Report = compat::invoke_result_t<Merge &&, Diagnostics &,
-      Diagnostics &&>),
-    (traits::is_specialization_of<omni::ryml::with_diagnostics_t, Result>()
-      && std::is_constructible<Result,
-        compat::invoke_result_t<F &&, T &>>::value
-      && std::is_same<Diagnostics, typename Result::diagnostics_type>::value
-      && std::is_constructible<Diagnostics, Diagnostics &>::value
-      && std::is_constructible<Diagnostics, Report>::value))
-  OMNI_CPP14_CONSTEXPR auto and_then(F &&f, Merge &&merge = {}) &
-    -> Result {
-    if (!this->value)
-      return {compat::nullopt, this->diagnostics};
-
-    auto next = compat::invoke(std::forward<F>(f), *this->value);
-    return {
-      /*value=*/std::move(next.value),
-      /*diagnostics=*/compat::invoke(std::forward<Merge>(merge),
-        this->diagnostics, std::move(next.diagnostics)),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Merge = detail::append_diagnostics_t,
-    typename Result = compat::decay_t<compat::invoke_result_t<F &&, const T &>>,
-    typename Report = compat::invoke_result_t<Merge &&, const Diagnostics &,
-      Diagnostics &&>),
-    (traits::is_specialization_of<omni::ryml::with_diagnostics_t, Result>()
-      && std::is_constructible<Result,
-        compat::invoke_result_t<F &&, const T &>>::value
-      && std::is_same<Diagnostics, typename Result::diagnostics_type>::value
-      && std::is_constructible<Diagnostics, const Diagnostics &>::value
-      && std::is_constructible<Diagnostics, Report>::value))
-  OMNI_CPP14_CONSTEXPR auto and_then(F &&f, Merge &&merge = {}) const &
-    -> Result {
-    if (!this->value)
-      return {compat::nullopt, this->diagnostics};
-
-    auto next = compat::invoke(std::forward<F>(f), *this->value);
-    return {
-      /*value=*/std::move(next.value),
-      /*diagnostics=*/compat::invoke(std::forward<Merge>(merge),
-        this->diagnostics, std::move(next.diagnostics)),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Merge = detail::append_diagnostics_t,
-    typename Result = compat::decay_t<compat::invoke_result_t<F &&, T &&>>,
-    typename Report = compat::invoke_result_t<Merge &&, Diagnostics &&,
-      Diagnostics &&>),
-    (traits::is_specialization_of<omni::ryml::with_diagnostics_t, Result>()
-      && std::is_constructible<Result,
-        compat::invoke_result_t<F &&, T &&>>::value
-      && std::is_same<Diagnostics, typename Result::diagnostics_type>::value
-      && std::is_constructible<Diagnostics, Diagnostics &&>::value
-      && std::is_constructible<Diagnostics, Report>::value))
-  OMNI_CPP14_CONSTEXPR auto and_then(F &&f, Merge &&merge = {}) &&
-    -> Result {
-    if (!this->value)
-      return {compat::nullopt, std::move(this->diagnostics)};
-
-    auto next = compat::invoke(std::forward<F>(f), std::move(*this->value));
-    return {
-      /*value=*/std::move(next.value),
-      /*diagnostics=*/compat::invoke(std::forward<Merge>(merge),
-        std::move(this->diagnostics), std::move(next.diagnostics)),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Merge = detail::append_diagnostics_t,
-    typename Result = compat::decay_t<
-      compat::invoke_result_t<F &&, const T &&>>,
-    typename Report = compat::invoke_result_t<Merge &&, const Diagnostics &&,
-      Diagnostics &&>),
-    (traits::is_specialization_of<omni::ryml::with_diagnostics_t, Result>()
-      && std::is_constructible<Result,
-        compat::invoke_result_t<F &&, const T &&>>::value
-      && std::is_same<Diagnostics, typename Result::diagnostics_type>::value
-      && std::is_constructible<Diagnostics, const Diagnostics &&>::value
-      && std::is_constructible<Diagnostics, Report>::value))
-  OMNI_CPP14_CONSTEXPR auto and_then(F &&f, Merge &&merge = {}) const &&
-    -> Result {
-    if (!this->value)
-      return {compat::nullopt, std::move(this->diagnostics)};
-
-    auto next = compat::invoke(std::forward<F>(f), std::move(*this->value));
-    return {
-      /*value=*/std::move(next.value),
-      /*diagnostics=*/compat::invoke(std::forward<Merge>(merge),
-        std::move(this->diagnostics), std::move(next.diagnostics)),
-    };
-  }
-
-  /** Recovers an empty value through f(diagnostics).
-   * An available value and its diagnostics pass through. f returns the same
-   * with_diagnostics type and decides which diagnostics its recovery retains.
-   *
-```
-or_else :: (Diagnostics -> with_diagnostics<T, Diagnostics>)
-  -> with_diagnostics<T, Diagnostics>
-```
-   */
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (std::is_same<with_diagnostics_t,
-      compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &>>>::value
-      && std::is_constructible<with_diagnostics_t,
-        compat::invoke_result_t<F &&, Diagnostics &>>::value
-      && std::is_constructible<compat::optional<T>,
-        compat::optional<T> &>::value
-      && std::is_constructible<Diagnostics, Diagnostics &>::value))
-  OMNI_CPP14_CONSTEXPR auto or_else(F &&f) & -> with_diagnostics_t {
-    if (this->value)
-      return {this->value, this->diagnostics};
-
-    return compat::invoke(std::forward<F>(f), this->diagnostics);
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (std::is_same<with_diagnostics_t,
-      compat::decay_t<
-        compat::invoke_result_t<F &&, const Diagnostics &>>>::value
-      && std::is_constructible<with_diagnostics_t,
-        compat::invoke_result_t<F &&, const Diagnostics &>>::value
-      && std::is_constructible<compat::optional<T>,
-        const compat::optional<T> &>::value
-      && std::is_constructible<Diagnostics, const Diagnostics &>::value))
-  OMNI_CPP14_CONSTEXPR auto or_else(F &&f) const & -> with_diagnostics_t {
-    if (this->value)
-      return {this->value, this->diagnostics};
-
-    return compat::invoke(std::forward<F>(f), this->diagnostics);
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (std::is_same<with_diagnostics_t,
-      compat::decay_t<compat::invoke_result_t<F &&, Diagnostics &&>>>::value
-      && std::is_constructible<with_diagnostics_t,
-        compat::invoke_result_t<F &&, Diagnostics &&>>::value
-      && std::is_constructible<compat::optional<T>,
-        compat::optional<T> &&>::value
-      && std::is_constructible<Diagnostics, Diagnostics &&>::value))
-  OMNI_CPP14_CONSTEXPR auto or_else(F &&f) && -> with_diagnostics_t {
-    if (this->value)
-      return {std::move(this->value), std::move(this->diagnostics)};
-
-    return compat::invoke(std::forward<F>(f), std::move(this->diagnostics));
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F),
-    (std::is_same<with_diagnostics_t,
-      compat::decay_t<
-        compat::invoke_result_t<F &&, const Diagnostics &&>>>::value
-      && std::is_constructible<with_diagnostics_t,
-        compat::invoke_result_t<F &&, const Diagnostics &&>>::value
-      && std::is_constructible<compat::optional<T>,
-        const compat::optional<T> &&>::value
-      && std::is_constructible<Diagnostics, const Diagnostics &&>::value))
-  OMNI_CPP14_CONSTEXPR auto or_else(F &&f) const && -> with_diagnostics_t {
-    if (this->value)
-      return {std::move(this->value), std::move(this->diagnostics)};
-
-    return compat::invoke(std::forward<F>(f), std::move(this->diagnostics));
-  }
-
-  /** Transforms diagnostics with f while retaining value availability.
-   * Reports are transformed on success as well as failure, so warnings are
-   * included. Rvalue overloads move the retained value.
-   *
-```
-transform_diagnostics :: (Diagnostics -> Report) -> with_diagnostics<T, Report>
-```
-   */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Report = compat::decay_t<
-      compat::invoke_result_t<F &&, Diagnostics &>>),
-    (std::is_constructible<Report,
-      compat::invoke_result_t<F &&, Diagnostics &>>::value
-      && std::is_constructible<compat::optional<T>,
-        compat::optional<T> &>::value))
-  OMNI_CPP14_CONSTEXPR auto transform_diagnostics(F &&f) &
-    -> with_diagnostics_t<T, Report> {
-    return {
-      /*value=*/this->value,
-      /*diagnostics=*/compat::invoke(std::forward<F>(f), this->diagnostics),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Report = compat::decay_t<
-      compat::invoke_result_t<F &&, const Diagnostics &>>),
-    (std::is_constructible<Report,
-      compat::invoke_result_t<F &&, const Diagnostics &>>::value
-      && std::is_constructible<compat::optional<T>,
-        const compat::optional<T> &>::value))
-  OMNI_CPP14_CONSTEXPR auto transform_diagnostics(F &&f) const &
-    -> with_diagnostics_t<T, Report> {
-    return {
-      /*value=*/this->value,
-      /*diagnostics=*/compat::invoke(std::forward<F>(f), this->diagnostics),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Report = compat::decay_t<
-      compat::invoke_result_t<F &&, Diagnostics &&>>),
-    (std::is_constructible<Report,
-      compat::invoke_result_t<F &&, Diagnostics &&>>::value
-      && std::is_constructible<compat::optional<T>,
-        compat::optional<T> &&>::value))
-  OMNI_CPP14_CONSTEXPR auto transform_diagnostics(F &&f) &&
-    -> with_diagnostics_t<T, Report> {
-    return {
-      /*value=*/std::move(this->value),
-      /*diagnostics=*/compat::invoke(std::forward<F>(f),
-        std::move(this->diagnostics)),
-    };
-  }
-
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Report = compat::decay_t<
-      compat::invoke_result_t<F &&, const Diagnostics &&>>),
-    (std::is_constructible<Report,
-      compat::invoke_result_t<F &&, const Diagnostics &&>>::value
-      && std::is_constructible<compat::optional<T>,
-        const compat::optional<T> &&>::value))
-  OMNI_CPP14_CONSTEXPR auto transform_diagnostics(F &&f) const &&
-    -> with_diagnostics_t<T, Report> {
-    return {
-      /*value=*/std::move(this->value),
-      /*diagnostics=*/compat::invoke(std::forward<F>(f),
-        std::move(this->diagnostics)),
-    };
-  }
-};
-
 template <typename StateConfig>
 struct read_state_t;
 
@@ -664,17 +283,6 @@ private:
   template <typename StateConfig>
   explicit constexpr depth_exceeded(const write_state_t<StateConfig> &) {}
 };
-
-namespace detail {
-
-// The C++11 result is defined after the built-in mapping types are complete.
-template <typename T>
-struct to_type_cpp11_trailing_return;
-
-template <typename T>
-struct from_type_cpp11_trailing_return;
-
-} // namespace detail
 
 namespace reflected_scope {
 
@@ -707,159 +315,6 @@ struct mapping_from_type_t {
 
 } // namespace reflected_scope
 
-namespace detail {
-
-// String providers keep the path independent of runtime traversal state.
-struct root_path_name {
-  static constexpr const char *str() { return "root"; }
-};
-struct path_dot {
-  static constexpr const char *str() { return "."; }
-};
-struct path_element {
-  static constexpr const char *str() { return "[]"; }
-};
-
-template <typename Field>
-struct name_as_string {
-  static constexpr const char *str() { return Field::name(); }
-};
-
-template <typename Name>
-struct field_path_name: cpp11_static_string<path_dot, Name> {};
-
-template <typename... Segments>
-struct schema_path;
-
-// FIXME: [high] Reduce recursive path/depth specializations. For example:
-//   struct node {
-//     std::vector<node> children, alternatives, fallbacks;
-//   };
-// Different field orders form distinct paths; each depth adds another state
-// specialization. The terminal sentinel bounds this expansion but does not
-// prevent excessive compiler memory use before the limit, on reads or writes.
-// Re-entering the same reflected field revisits a recursive schema edge.
-// Reuse its first schema path rather than instantiate unbounded state types.
-template <typename Prefix, typename Segment, typename... Remaining>
-struct schema_field_path;
-
-template <typename... Prefix, typename Segment>
-struct schema_field_path<schema_path<Prefix...>, Segment> {
-  using type = schema_path<Prefix..., Segment>;
-};
-
-template <typename... Prefix, typename Segment, typename... Tail>
-struct schema_field_path<schema_path<Prefix...>, Segment, Segment, Tail...> {
-  using type = schema_path<Prefix..., Segment>;
-};
-
-template <typename... Prefix, typename Segment, typename Head, typename... Tail>
-struct schema_field_path<schema_path<Prefix...>, Segment, Head, Tail...>:
-    schema_field_path<schema_path<Prefix..., Head>, Segment, Tail...> {};
-
-template <typename... Segments>
-struct schema_path {
-  template <typename Name>
-  using child = schema_path<Segments..., field_path_name<Name>>;
-
-  template <typename Field>
-  using field = typename schema_field_path<schema_path<>,
-    field_path_name<name_as_string<Field>>, Segments...>::type;
-
-  using element = schema_path<Segments..., path_element>;
-  using text = cpp11_static_string<Segments...>;
-
-  // Default traversal needs segment identity only. Render characters when a
-  // callback queries path(), rather than while forming every child state.
-  static constexpr auto string() OMNI_CPP11_TRAILING_RETURN(text) {
-#if OMNI_HAS_NTTP_STRING
-    return nttp_string<omni::detail::static_string_literal<
-      text::size() + 1>{text::view()}>{};
-#else
-    return text{};
-#endif
-  }
-};
-
-// Type-only bundles keep state friendship independent of parameter-list arity.
-template <typename Config = omni::ryml::config_t<>,
-  typename MapNode = reflected_scope::mapping_to_type_t,
-  typename Root = void, typename EnclosingRecord = void,
-  typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
-  std::size_t DepthLimit = 10>
-struct read_state_config {
-  using config_type = Config;
-  using map_node_type = MapNode;
-  using enclosing_root = Root;
-  using enclosing_record = EnclosingRecord;
-  using path_type = Path;
-  static constexpr std::size_t depth = Depth;
-  static constexpr std::size_t depth_limit = DepthLimit;
-
-  template <typename Record, typename Name>
-  using child = read_state_config<Config, MapNode, Root, Record,
-    typename Path::template child<Name>, Depth + 1, DepthLimit>;
-
-  template <typename Record, typename Field>
-  using field = read_state_config<Config, MapNode, Root, Record,
-    typename Path::template field<Field>, Depth + 1, DepthLimit>;
-
-  using element = read_state_config<Config, MapNode, Root, EnclosingRecord,
-    typename Path::element, Depth + 1, DepthLimit>;
-};
-
-template <bool BorrowStrings = false,
-  typename MapNode = reflected_scope::mapping_from_type_t,
-  typename Root = void, typename EnclosingRecord = void,
-  typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
-  std::size_t DepthLimit = 10>
-struct write_state_config {
-  static constexpr bool borrow_strings = BorrowStrings;
-  using map_node_type = MapNode;
-  using enclosing_root = Root;
-  using enclosing_record = EnclosingRecord;
-  using path_type = Path;
-  static constexpr std::size_t depth = Depth;
-  static constexpr std::size_t depth_limit = DepthLimit;
-
-  template <typename Record, typename Name>
-  using child = write_state_config<BorrowStrings, MapNode, Root, Record,
-    typename Path::template child<Name>, Depth + 1, DepthLimit>;
-
-  template <typename Record, typename Field>
-  using field = write_state_config<BorrowStrings, MapNode, Root, Record,
-    typename Path::template field<Field>, Depth + 1, DepthLimit>;
-
-  using element = write_state_config<BorrowStrings, MapNode, Root,
-    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
-};
-
-// Select the terminal token before forming any child configuration or path.
-template <template <typename> class State, typename StateConfig,
-  bool CanDescend = (StateConfig::depth < StateConfig::depth_limit)>
-struct state_children {
-  template <typename Record, typename Name>
-  using child = State<typename StateConfig::template child<Record, Name>>;
-
-  template <typename Record, typename Field>
-  using field = State<typename StateConfig::template field<Record, Field>>;
-
-  using element = State<typename StateConfig::element>;
-};
-
-template <template <typename> class State, typename StateConfig>
-struct state_children<State, StateConfig, false> {
-  template <typename Record, typename Name>
-  using child = depth_exceeded;
-
-  template <typename Record, typename Field>
-  using field = depth_exceeded;
-
-  using element = depth_exceeded;
-};
-
-} // namespace detail
-
 /** Deserialization configuration and traversal progress passed to readers.
  * Root states are created by map_by_schema; custom mappings copy the supplied
  * state or derive children. Config and the selector are borrowed, so copies
@@ -884,7 +339,7 @@ if constexpr (state.path().ends_with("root.work_address")) {
 }
 ```
  */
-template <typename StateConfig = detail::read_state_config<>>
+template <typename StateConfig = detail::read_state_config<config_t<>>>
 struct read_state_t {
   using enclosing_root = typename StateConfig::enclosing_root;
   using enclosing_record = typename StateConfig::enclosing_record;
@@ -979,6 +434,7 @@ private:
 };
 
 /** Serialization policy, local mapping selection, and schema position.
+ * State and node handles borrow the active builder call and must not escape it.
  * Root states are created by the tree builders; custom mappings copy the
  * supplied state or derive children. BorrowStrings permits borrowing
  * source-backed strings; temporary owning conversions are still copied.
@@ -994,6 +450,17 @@ struct write_state_t {
 
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
   const typename StateConfig::map_node_type &map_node;
+
+  /** Destination node, valid only during the active builder call. */
+  ::ryml::NodeRef node() const { return {this->tree, this->node_id}; }
+
+  /** Copy this traversal context for another node in its output tree.
+   * Path and depth are unchanged; use child(), field(), or element() for
+   * a schema edge. @pre destination is a readable node in the same tree. */
+  write_state_t at(::ryml::NodeRef destination) const {
+    assert(destination.readable() && destination.tree() == this->tree);
+    return {*this, destination.id()};
+  }
 
   /** Tree depth, starting at zero for the root.
    * child(), field(), and element() increment it; optional unwrapping does not.
@@ -1061,10 +528,18 @@ private:
 
   template <typename ParentConfig>
   constexpr write_state_t(const write_state_t<ParentConfig> &parent)
-    : map_node(parent.map_node) {}
+    : map_node(parent.map_node), tree(parent.tree),
+      node_id(parent.node_id) {}
 
-  constexpr write_state_t(const typename StateConfig::map_node_type &mapping)
-    : map_node(mapping) {}
+  constexpr write_state_t(const typename StateConfig::map_node_type &mapping,
+    ::ryml::Tree *tree, ::ryml::id_type node_id)
+    : map_node(mapping), tree(tree), node_id(node_id) {}
+
+  constexpr write_state_t(const write_state_t &parent, ::ryml::id_type node_id)
+    : map_node(parent.map_node), tree(parent.tree), node_id(node_id) {}
+
+  ::ryml::Tree *tree;
+  ::ryml::id_type node_id;
 };
 
 /** Whether T is a read_state_t specialization, ignoring cv/ref qualifiers. */

@@ -427,8 +427,8 @@ struct is_optional<T,
 
 // TODO: [high] Document the generalized operation-adapter pattern:
 // traits::cp specializations override primary member-based defaults;
-// dispatchers
-// deduce the adapted type and invoke the selected struct without ADL. Traits
+// dispatchers deduce the adapted type and invoke the selected struct without
+// ADL. Traits
 // check the complete dispatched protocol and its normalized result types.
 // Include template-family specializations and C++11 examples; adapted types
 // need neither inheritance nor explicit registration.

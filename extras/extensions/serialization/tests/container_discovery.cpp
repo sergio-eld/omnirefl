@@ -38,17 +38,18 @@ struct to_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, my_int *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return core::read_node(std::move(context), node, &into->value);
+    return map_integer_node(std::move(context), node, &into->value);
   }
 };
 
 template <>
 struct from_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  void operator()(State context,
-    const my_int &value,
-    ::ryml::NodeRef node) const {
-    core::write_node(std::move(context), value.value, node);
+  auto operator()(State context,
+    const my_int &value) const -> ::ryml::NodeRef {
+    const auto mapping = compat::invoke(context.map_node,
+      context, omni::type_t<int>{});
+    return mapping(std::move(context), value.value);
   }
 };
 
@@ -144,7 +145,8 @@ TYPED_TEST(container_discovery, discovers_and_maps_record_elements) {
 }
 
 TYPED_TEST(container_discovery, supports_empty_record_containers) {
-  const auto result = serialization_test::deserialize(omni::type_t<TypeParam>{}, "[]");
+  const auto result = serialization_test::deserialize(
+    omni::type_t<TypeParam>{}, "[]");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {

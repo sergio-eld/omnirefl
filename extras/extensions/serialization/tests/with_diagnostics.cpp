@@ -1,4 +1,4 @@
-#include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 #include <gtest/gtest.h>
 

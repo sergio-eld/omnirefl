@@ -964,7 +964,7 @@ struct omni::ryml::cp::to_type_t<aggregate_record_mapping::constructed_value> {
     omni::type_t<aggregate_record_mapping::constructed_value>) const
     -> omni::ryml::with_diagnostics_t<
       aggregate_record_mapping::constructed_value> {
-    return omni::ryml::core::read_node(std::move(state), node,
+    return omni::ryml::map_integer_node(std::move(state), node,
       omni::type_t<int>{})
       .transform([](int value) -> aggregate_record_mapping::constructed_value {
         return aggregate_record_mapping::constructed_value{value};

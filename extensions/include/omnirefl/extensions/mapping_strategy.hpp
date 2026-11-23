@@ -18,6 +18,7 @@
 
 namespace omni {
 namespace mapping {
+
 /** Record field selection, aliases, and validation.
  * Predicates are stateless, default-constructible, and return Boolean traits.
  * Validators preserve successfully checked values; Error is interpreted by
@@ -323,7 +324,7 @@ OMNI_CPP14_CONSTEXPR bool valid_record_strategy(const Names &names,
 // branch dependencies could substantially complicate the interface.
 
 // TODO: [medium] Consider direct-value tdm_ overloads. Unary callable values
-// can also be updaters: passing
-// fn::identity{} to tdm_finalize could retain the old finalizer or replace it
+// can also be updaters: passing fn::identity{} to tdm_finalize could retain
+// the old finalizer or replace it
 // with the no-op finalizer. Resolve that interpretation before adding
 // overloads.

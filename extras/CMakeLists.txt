@@ -16,7 +16,18 @@ endif()
 
 if(BUILD_EXAMPLES)
     if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/examples/scratch/CMakeLists.txt")
-        add_subdirectory(examples/scratch "${CMAKE_BINARY_DIR}/examples/scratch")
+        add_subdirectory(examples/scratch
+            "${CMAKE_BINARY_DIR}/examples/scratch")
+    endif()
+
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/examples/scratch_json/CMakeLists.txt")
+        if(DEFINED BUILD_EXTENSIONS AND NOT BUILD_EXTENSIONS)
+            message(STATUS
+                "omnirefl: skipping scratch_json: extensions disabled")
+        else()
+            add_subdirectory(examples/scratch_json
+                "${CMAKE_BINARY_DIR}/examples/scratch_json")
+        endif()
     endif()
 
     if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
@@ -30,16 +41,19 @@ if(BUILD_EXAMPLES)
                 add_test(NAME example.sneak_peek COMMAND sneak_peek)
             endif()
         else()
-            message(STATUS "omnirefl: skipping sneak_peek: C++23 library features are not available")
+            message(STATUS "omnirefl: skipping sneak_peek: "
+                "C++23 library features are not available")
         endif()
     endif()
 
     omnirefl_check_cxx20_language(_examples_has_guide_features)
 
     if(DEFINED BUILD_EXTENSIONS AND NOT BUILD_EXTENSIONS)
-        message(STATUS "omnirefl: skipping json_ryml.guide: extensions disabled")
+        message(STATUS
+            "omnirefl: skipping json_ryml.guide: extensions disabled")
     elseif(NOT _examples_has_guide_features)
-        message(STATUS "omnirefl: skipping json_ryml.guide: C++20 language features are not available")
+        message(STATUS "omnirefl: skipping json_ryml.guide: "
+            "C++20 language features are not available")
     else()
         add_subdirectory(extensions/serialization/guide
             "${CMAKE_BINARY_DIR}/extensions/serialization/guide")
@@ -49,7 +63,8 @@ if(BUILD_EXAMPLES)
         add_subdirectory(examples/comprehensive_guide
             "${CMAKE_BINARY_DIR}/examples/comprehensive_guide")
     else()
-        message(STATUS "omnirefl: skipping comprehensive_guide: C++20 language features are not available")
+        message(STATUS "omnirefl: skipping comprehensive_guide: "
+            "C++20 language features are not available")
     endif()
 endif()
 

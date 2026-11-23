@@ -10,3 +10,4 @@ sample/compile_commands.json
 site/dist/
 site/node_modules/
 /extras/examples/scratch/
+/extras/examples/scratch_json/

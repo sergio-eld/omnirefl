@@ -3,6 +3,7 @@
 /** Terminal mapping overloads; no recursive mapping is instantiated. */
 
 #include <omnirefl/serialization/ryml/state.hpp>
+#include <omnirefl/serialization/ryml/with_diagnostics.hpp>
 
 namespace omni {
 namespace ryml {
@@ -24,9 +25,11 @@ struct with_depth_exceeded_operator {
   }
 
   // FIXME: [high] Return a diagnostic for write-depth overflow. The current
-  // void write pipeline drops this error and may leave incomplete output.
+  // write pipeline drops this error and may leave incomplete output.
   template <typename T>
-  void operator()(const depth_exceeded &, const T &, ::ryml::NodeRef) const {}
+  ::ryml::NodeRef operator()(const depth_exceeded &, const T &) const {
+    return {};
+  }
 };
 
 } // namespace detail
