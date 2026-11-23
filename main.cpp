@@ -3721,6 +3721,17 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     return paths;
   });
 
+  // A Linux project normally compiles against the host libstdc++. Parsing it
+  // with the bundled libc++ changes implementation-defined standard library
+  // types, e.g. std::chrono::seconds::rep is long in libstdc++ and long long
+  // in libc++, so code valid for the real compiler can fail in the tool.
+  const bool host_libstdcxx_requested = !msvc_used && !mingw_used
+    && llvm::Triple{driver_triple}.isOSLinux()
+    && !normalized_args->hasArg(options::OPT_nostdinc,
+      options::OPT_nostdlibinc,
+      options::OPT_nostdincxx,
+      options::OPT_stdlib_EQ);
+
   const std::vector<std::string> cc1_driver_args =
     std::invoke([&] -> std::vector<std::string> {
       // Preserve frontend-affecting driver arguments for every supported
@@ -3753,7 +3764,11 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
 
       out.emplace_back("omnirefl");
 
-      if (!mingw_used) {
+      if (host_libstdcxx_requested) {
+        // Let the driver locate the libstdc++ the project compiles against.
+        // The bundled libc++ remains the fallback when none is found.
+        out.emplace_back("-stdlib=libstdc++");
+      } else if (!mingw_used) {
         // prevents from picking up on another compiler's C++ < std libs
         out.emplace_back("-nostdinc++");
       } else if (!mingw_include_paths.empty()) {
@@ -3955,11 +3970,25 @@ auto pipeline::to_compiler_invocation(const diagnostics &log,
     // dir, target-specific bits/c++config.h dir, correct musl/glibc target
     // triple, feature macros, and include ordering. Missing any of those can
     // break standard headers before the tool reaches user code.
+    // The driver emits the target-specific libstdc++ directory only for a GCC
+    // installation it selected, together with the matching primary directory
+    // and in the order the real compiler uses.
+    // FIXME: [medium] The process-triple fallback can select GNU/Linux for
+    // Alpine GCC. Its actual x86_64-alpine-linux-musl target discovers these
+    // headers correctly. Use the configured compiler's target instead of the
+    // tool's build target; retain bundled headers when discovery finds none.
+    const bool host_libstdcxx_used = host_libstdcxx_requested
+      && std::ranges::any_of(o.UserEntries, [](const auto &entry) {
+           std::error_code ec;
+           return fs::is_regular_file(fs::path(entry.Path) / "bits/c++config.h",
+             ec);
+         });
+
     if (!msvc_used && !mingw_used)
       o.UseStandardCXXIncludes = false;
     o.ResourceDir = resource_dir.generic_string();
 
-    if (!msvc_used && !mingw_used) {
+    if (!msvc_used && !mingw_used && !host_libstdcxx_used) {
       // Packaged headers are absolute and remain outside a target SDK.
       o.AddPath(
         // todo: this should be configured at compile time

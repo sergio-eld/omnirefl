@@ -497,8 +497,21 @@ function(omni_reflected_target target)
         set(_cfg_arg --config $<CONFIG>)
     endif()
 
+    # Passing every output to one `cmake -E rm` exceeds the Windows command-line
+    # limit for targets with a few dozen sources, so the list lives in a script.
+    set(_clean_script "${CMAKE_CURRENT_BINARY_DIR}/${target}.omni.clean.cmake")
+    set(_clean_files ${_gen_outputs} ${_gen_headers} ${_gen_depfiles})
+    # These paths are script literals, including any dollar signs or quotes.
+    string(REPLACE "\\" "\\\\" _clean_files "${_clean_files}")
+    string(REPLACE "\"" "\\\"" _clean_files "${_clean_files}")
+    string(REPLACE "$" "\\$" _clean_files "${_clean_files}")
+    list(TRANSFORM _clean_files PREPEND "    \"")
+    list(TRANSFORM _clean_files APPEND "\"")
+    list(JOIN _clean_files "\n" _clean_files)
+    file(WRITE "${_clean_script}" "file(REMOVE\n${_clean_files}\n)\n")
+
     add_custom_target(${target}.omni
-        COMMAND ${CMAKE_COMMAND} -E rm -f ${_gen_outputs} ${_gen_headers} ${_gen_depfiles}
+        COMMAND ${CMAKE_COMMAND} -P "${_clean_script}"
         COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target ${_gen_target} ${_cfg_arg}
         COMMENT "omnirefl: force-regenerate for ${target} [.omni]"
         VERBATIM

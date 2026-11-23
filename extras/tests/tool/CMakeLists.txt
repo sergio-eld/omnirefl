@@ -112,6 +112,28 @@ if(DEFINED omnirefl_DIR)
         -D "REQUIRED_REFLECTION_STEMS=main")
     _omnirefl_accepted_cmake_project(functional_header
         -D "EXECUTABLES=functional_header")
+    # Exercise the GNU/Linux target used by the embedded driver's default.
+    # Alpine's GCC requires its musl target; automatic target selection is
+    # still unresolved (see the process-triple fallback in main.cpp).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+            AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+            AND CMAKE_LIBRARY_ARCHITECTURE MATCHES "linux-gnu"
+            AND CMAKE_SIZEOF_VOID_P EQUAL 8
+            AND NOT CMAKE_CROSSCOMPILING)
+        _omnirefl_accepted_cmake_project(host_libstdcxx
+            -D "EXECUTABLES=host_libstdcxx"
+            -D "REQUIRED_REFLECTION_STEMS=main")
+    endif()
+    if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
+        add_test(NAME omnirefl.integration.force_regenerate
+            COMMAND ${CMAKE_COMMAND}
+                -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/force_regenerate"
+                -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/force_regenerate"
+                -D "GENERATOR=${CMAKE_GENERATOR}"
+                -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                -D "OMNIREFL_DIR=${omnirefl_DIR}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/integration/run_force_regenerate.cmake")
+    endif()
     if(NOT CMAKE_CROSSCOMPILING)
         # The two executables verify reflection against their own record shapes.
         _omnirefl_accepted_cmake_project(pch_shared_source
