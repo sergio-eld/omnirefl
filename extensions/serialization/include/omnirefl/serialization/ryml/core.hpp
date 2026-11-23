@@ -1,6 +1,6 @@
 #pragma once
 
-/** Parsing, node-shape checks, value conversions, and schema dispatch.
+/** Parsing, node-shape checks, and value conversions.
  * parse_as_* functions require validated input and do not select
  * custom type mappings. map_node.hpp and map_type.hpp supply recursive mapping
  * dispatch; ryml.hpp supplies schema entry-point routing. */
@@ -148,48 +148,6 @@ OMNI_CONSTRAINED_TEMPLATE((typename T),
   (std::is_floating_point<T>::value))
 auto parse_as_floating_point(::ryml::ConstNodeRef node)
   -> compat::expected<compat::remove_cv_t<T>, issue>;
-
-// Ad hoc: read_node accesses State before invoking the selected mapping,
-// so its terminal overloads must intercept the sentinel here. Remove these
-// duplicate guards when the dispatch boundary can forward it to the mapper.
-/** Terminal read: reports the depth limit without selecting a mapping. */
-template <typename T>
-auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
-  omni::type_t<T> type) -> with_diagnostics_t<T> {
-  return omni::ryml::detail::with_depth_exceeded_operator{}(
-    stopped, node, type);
-}
-
-template <typename T>
-auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
-  T *into)
-  -> with_diagnostics_t<compat::monostate> {
-  return omni::ryml::detail::with_depth_exceeded_operator{}(
-    stopped, node, into);
-}
-
-// REFACTORME: [high] Reassess this State-dependent dispatch boundary and
-// its overlap with mapping selection, adapters, and diagnostic limits.
-/** Node-to-type mapping through a customization or its default.
- *
- * Pointer-only mappings are adapted when T is default-constructible.
- * @pre Required metadata is available in reflected scope. */
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
-  -> with_diagnostics_t<T, diagnostics>;
-
-// REFACTORME: [high] Review responsibility for diagnostic accumulation and
-// limit checks between this dispatcher and the node mappers.
-/** Dispatch one node through the selected to_type callable with diagnostics.
- *
- * Prefers its type<T> overload when the produced value can be assigned to
- * *into; otherwise uses its T* overload. A mapping error does not trigger
- * fallback to another overload. */
-OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
-  (is_read_state<State>::value))
-auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
-  -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 } // namespace core
 } // namespace ryml

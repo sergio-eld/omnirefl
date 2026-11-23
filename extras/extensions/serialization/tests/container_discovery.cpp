@@ -38,7 +38,7 @@ struct to_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State context, ::ryml::ConstNodeRef node, my_int *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return core::read_node(std::move(context), node, &into->value);
+    return map_integer_node(std::move(context), node, &into->value);
   }
 };
 

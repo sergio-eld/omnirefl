@@ -29,8 +29,8 @@ struct reflection_target<T,
 struct map_selected {
   template <typename State, typename Destination>
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    Destination into) const -> decltype(core::read_node(state, node, into)) {
-    return core::read_node(std::move(state), node, into);
+    Destination into) const -> decltype(read_node(state, node, into)) {
+    return read_node(std::move(state), node, into);
   }
 };
 
@@ -44,7 +44,7 @@ struct cpp11_lambda_read_value {
   template <typename _M, omni::reflected_entity Entity>
   auto operator()(omni::meta_t<_M, Entity>) const
     -> with_diagnostics_t<T> {
-    return core::read_node(this->context, this->node, omni::type_t<T>{});
+    return read_node(this->context, this->node, omni::type_t<T>{});
   }
 };
 
@@ -57,7 +57,7 @@ struct cpp11_lambda_read {
   template <typename _M, omni::reflected_entity Entity>
   auto operator()(omni::meta_t<_M, Entity>) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
-    return core::read_node(this->context, this->node, &this->into);
+    return read_node(this->context, this->node, &this->into);
   }
 };
 

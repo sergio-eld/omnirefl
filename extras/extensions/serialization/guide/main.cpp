@@ -2128,7 +2128,7 @@ struct to_type_t<customization_mapping::integer> {
     customization_mapping::integer *into) const
     -> with_diagnostics_t<compat::monostate, diagnostics> {
     int converted{};
-    omni::ryml::with_diagnostics_t result = core::read_node(
+    omni::ryml::with_diagnostics_t result = map_integer_node(
       context, node, &converted);
     if (!result.value)
       return result;

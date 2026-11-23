@@ -45,7 +45,7 @@ struct to_type_t<registered_integer> {
     ::ryml::ConstNodeRef node,
     registered_integer *into) const
     -> with_diagnostics_t<compat::monostate> {
-    return core::read_node(std::move(state), node, &into->value);
+    return map_integer_node(std::move(state), node, &into->value);
   }
 };
 

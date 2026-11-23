@@ -11,14 +11,56 @@
 
 namespace omni {
 namespace ryml {
-namespace core {
+namespace detail {
+
+// Ad hoc: `read_node` accesses state before invoking the selected mapping,
+// so its terminal overloads must intercept the sentinel here. Remove these
+// duplicate guards when the dispatch boundary can forward it to the mapper.
+/** Terminal read: reports the depth limit without selecting a mapping. */
+template <typename T>
+auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
+  omni::type_t<T> type) -> with_diagnostics_t<T> {
+  return with_depth_exceeded_operator{}(
+    stopped, node, type);
+}
+
+template <typename T>
+auto read_node(const depth_exceeded &stopped, ::ryml::ConstNodeRef node,
+  T *into)
+  -> with_diagnostics_t<compat::monostate> {
+  return with_depth_exceeded_operator{}(
+    stopped, node, into);
+}
+
+// REFACTORME: [high] Reassess this state-dependent dispatch boundary and
+// its overlap with mapping selection, adapters, and diagnostic limits.
+/** Node-to-type mapping through a customization or its default.
+ *
+ * Pointer-only mappings are adapted when T is default-constructible.
+ * @pre Required metadata is available in reflected scope. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+  -> with_diagnostics_t<T, diagnostics>;
+
+// REFACTORME: [high] Review responsibility for diagnostic accumulation and
+// limit checks between this dispatcher and the node mappers.
+/** Dispatch one node through the selected to_type callable with diagnostics.
+ *
+ * Prefers its type<T> overload when the produced value can be assigned to
+ * *into; otherwise uses its T* overload. A mapping error does not trigger
+ * fallback to another overload. */
+OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
+  (is_read_state<State>::value))
+auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
+  -> with_diagnostics_t<compat::monostate, diagnostics>;
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
   -> with_diagnostics_t<T, diagnostics> {
   const auto mapping = compat::invoke(context.map_node, context, type);
-  return omni::ryml::detail::map_node_to_value(std::move(context),
+  return map_node_to_value(std::move(context),
     mapping, node, type);
 }
 
@@ -26,14 +68,14 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics> {
-  auto result = omni::ryml::detail::make_node_accumulator(context);
+  auto result = make_node_accumulator(context);
   if (context.limit_exceeded())
     result.result.value.reset();
   else {
     const auto mapping =
       compat::invoke(context.map_node, context, omni::type_t<T>{});
 
-    result.append(omni::ryml::detail::read_into(std::move(context),
+    result.append(read_into(std::move(context),
       mapping,
       node,
       into,
@@ -43,7 +85,7 @@ auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
   return std::move(result).finish();
 }
 
-} // namespace core
+} // namespace detail
 
 template <typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -269,7 +311,7 @@ auto to_optional_like_t::operator()(State context,
       std::move(context)).finish();
   }
 
-  return core::read_node(std::move(context), node,
+  return detail::read_node(std::move(context), node,
     omni::type_t<typename T::value_type>{})
     .transform([into](typename T::value_type &&value) -> compat::monostate {
       adapt::emplace(into, std::move(value));
@@ -318,7 +360,7 @@ auto map_record_field_value(State state, ::ryml::ConstNodeRef node,
 template <typename T>
 auto map_record_field_value(const depth_exceeded &stopped,
   ::ryml::ConstNodeRef node, omni::type_t<T> type) -> with_diagnostics_t<T> {
-  return core::read_node(stopped, node, type);
+  return read_node(stopped, node, type);
 }
 
 template <typename Record, std::size_t Index, bool CheckPresence,

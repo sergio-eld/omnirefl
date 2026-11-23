@@ -18,8 +18,10 @@ namespace omni {
 namespace ryml {
 namespace detail {
 
-// Terminal children have no path or write-state interface. Intercept them
-// before selection so user selectors and mappings only receive real states.
+// Ad hoc: traversal selects a writer before its terminal overload can run.
+// The depth sentinel lacks the state interface required by `.map_node`.
+// REFACTORME: [high] Consolidate writer selection and depth termination in
+// traversal, then remove these separate selection overloads.
 template <typename T>
 auto select_write_mapping(const depth_exceeded &, omni::type_t<T>)
   -> with_depth_exceeded_operator {

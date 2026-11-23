@@ -170,7 +170,7 @@ struct read_range_case<false> {
       if (result->stopped())
         break;
 
-      auto mapped = core::read_node(result->state.element(), child,
+      auto mapped = read_node(result->state.element(), child,
         omni::type_t<compat::range_value_t<T>>{});
       if (!mapped.value || !mapped.diagnostics.issues.empty()
         || !mapped.diagnostics.parse_error_message.empty())
@@ -223,7 +223,7 @@ struct read_range_case<true> {
       const auto name = child.key();
       auto key = adapt::from_string(omni::type_t<key_type>{},
         view_type{name.str, name.len});
-      auto mapped = core::read_node(result->state.element(), child,
+      auto mapped = read_node(result->state.element(), child,
         omni::type_t<traits::mapped_type_t<T>>{});
       result->append({
         /*value=*/mapped.value ? compat::make_optional(compat::monostate{})
