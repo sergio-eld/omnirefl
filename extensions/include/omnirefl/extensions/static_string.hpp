@@ -216,7 +216,8 @@ public:
   constexpr operator compat::string_view() const noexcept { return view(); }
 
   static constexpr bool starts_with(compat::string_view prefix) noexcept {
-#if 202002L <= OMNI_CPLUSPLUS
+#if defined(__cpp_lib_starts_ends_with) \
+  && 201711L <= __cpp_lib_starts_ends_with
     return view().starts_with(prefix);
 #else
     return prefix.size() <= size()
@@ -229,7 +230,8 @@ public:
   }
 
   static constexpr bool ends_with(compat::string_view suffix) noexcept {
-#if 202002L <= OMNI_CPLUSPLUS
+#if defined(__cpp_lib_starts_ends_with) \
+  && 201711L <= __cpp_lib_starts_ends_with
     return view().ends_with(suffix);
 #else
     return suffix.size() <= size()
