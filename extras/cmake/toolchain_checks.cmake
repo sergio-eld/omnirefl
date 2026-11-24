@@ -78,9 +78,11 @@ function(omnirefl_check_cxx23_library result)
         int main() {
             static_assert(std::formattable<int, char>);
             const std::string text = std::string_view{\"hello\"}
+                | std::views::split(' ')
+                | std::views::join_with(' ')
                 | std::ranges::to<std::string>();
             std::println(\"{}\", std::format(\"{}\", text));
         }"
-        _examples_has_cxx23_library)
-    set(${result} "${_examples_has_cxx23_library}" PARENT_SCOPE)
+        _examples_has_cxx23_join_with)
+    set(${result} "${_examples_has_cxx23_join_with}" PARENT_SCOPE)
 endfunction()
