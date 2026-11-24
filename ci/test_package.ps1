@@ -8,6 +8,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$suite = $env:OMNI_TEST_SUITE
+if (!$suite) { $suite = 'full' }
+if ($suite -notin @('smoke', 'full')) { throw "unknown test suite: $suite" }
 $archive = Get-Item $Package
 $null = mkdir -Force $Results
 $Results = (Resolve-Path $Results).Path
@@ -49,7 +52,7 @@ try {
   $ErrorActionPreference = 'Stop'
 
   $cmakeArgs = @('-GNinja', '-DCMAKE_BUILD_TYPE=Release', '-D_OMNI_CI_RUN=ON',
-    "-Domnirefl_ROOT=$install")
+    "-Domnirefl_ROOT=$install", "-DOMNI_TEST_SUITE=$suite")
   if ($CMakeArg) { $cmakeArgs += $CMakeArg }
 
   $ErrorActionPreference = 'Continue'

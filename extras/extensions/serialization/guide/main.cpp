@@ -640,6 +640,7 @@ TEST(advanced, local_configuration) {
 
 /** An explicitly configured callable can be constructed in one expression. */
 TEST(advanced, explicit_configuration) {
+#if defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides
   // GCC 10 needs the nested policy type for aggregate deduction.
   constexpr auto deserialize = omni::ryml::deserialize_t{
     .config = omni::ryml::config_t{
@@ -648,6 +649,16 @@ TEST(advanced, explicit_configuration) {
       },
     },
   };
+#else
+  // Older Clang supports designated initialization without aggregate CTAD.
+  constexpr auto deserialize = omni::ryml::deserialize_t<>{
+    .config = omni::ryml::config_t<>{
+      .error_policy = omni::json::error_policy{
+        .unknown_fields = omni::json::unknown_policy::allow,
+      },
+    },
+  };
+#endif
 
   const omni::ryml::with_diagnostics_t result = deserialize(
     omni::type<policy_examples::measurement>,

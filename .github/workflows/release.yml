@@ -36,6 +36,7 @@ jobs:
       contents: read
     outputs:
       reuse_artifacts: ${{ steps.reuse.outputs.reuse_artifacts }}
+      full_suite: ${{ steps.reusable_ci.outputs.full_suite }}
     env:
       # Fine-grained token with read/write access to repository contents.
       GH_TOKEN: ${{ secrets.OMNIREFL_RELEASE_TOKEN }}
@@ -97,96 +98,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          GITHUB_OUTPUT="$RUNNER_TEMP/reusable-ci.outputs" \
+            python3 ci/reuse_ci.py find --wait-master --require-symbols \
+              --targets $RELEASE_PACKAGE_TARGETS
+          cat "$RUNNER_TEMP/reusable-ci.outputs" >> "$GITHUB_OUTPUT"
+          source "$RUNNER_TEMP/reusable-ci.outputs"
 
-          source_run_is_valid() {
-            local metadata run_sha run_event run_branch run_conclusion
-
-            if ! metadata=$(
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" \
-                --jq '[.head_sha, .event, .head_branch, .conclusion] | @tsv'
-            ); then
-              echo "failed to verify CI run $run_id" >&2
-              return 1
-            fi
-
-            read -r run_sha run_event run_branch run_conclusion <<< "$metadata"
-            if [ "$GITHUB_SHA" != "$run_sha" ] \
-              || [ push != "$run_event" ] \
-              || [ master != "$run_branch" ] \
-              || [ success != "$run_conclusion" ]; then
-              echo "CI run $run_id does not match the release commit" >&2
-              return 1
-            fi
-          }
-
-          resolve_artifact() {
-            local kind=$1
-            local name=$2
-            local metadata count expired artifact_id artifact_digest
-
-            if ! metadata=$(gh api \
-              --method GET \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
-              -f name="$name" \
-              -F per_page=100 \
-              --jq \
-              '[.total_count, (if .total_count == 1 then .artifacts[0].expired else true end), (if .total_count == 1 then .artifacts[0].id else "" end), (if .total_count == 1 then .artifacts[0].digest else "" end)] | @tsv'); then
-              printf 'failed to inspect artifact: %s\n' "$name" >&2
-              return 1
-            fi
-
-            IFS=$'\t' read -r count expired artifact_id artifact_digest \
-              <<< "$metadata"
-            if [ 1 -ne "$count" ]; then
-              printf 'expected one reusable artifact %s, found %s\n' \
-                "$name" "$count"
-              return 1
-            fi
-            if [ false != "$expired" ]; then
-              printf 'reusable artifact is expired: %s\n' "$name"
-              return 1
-            fi
-            if [[ "$artifact_digest" != sha256:* ]]; then
-              printf 'reusable artifact has no SHA-256 digest: %s\n' "$name"
-              return 1
-            fi
-
-            printf '%s\t%s\t%s\t%s\n' \
-              "$kind" "$name" "$artifact_id" "$artifact_digest" \
-              >> "$artifact_manifest"
-          }
-
-          import_artifact() {
-            local kind=$1
-            local name=$2
-            local artifact_id=$3
-            local artifact_digest=$4
-            local archive destination
-
-            archive=$RUNNER_TEMP/$name.zip
-            destination=./reusable-artifacts/$kind/$name
-            if ! gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-              > "$archive"; then
-              printf 'failed to download reusable artifact: %s\n' "$name" >&2
-              return 1
-            fi
-            if ! printf '%s  %s\n' \
-              "${artifact_digest#sha256:}" "$archive" \
-              | sha256sum --check -; then
-              printf 'reusable artifact digest mismatch: %s\n' "$name" >&2
-              return 1
-            fi
-            if ! mkdir -p "$destination"; then
-              printf 'failed to stage reusable artifact: %s\n' "$name" >&2
-              return 1
-            fi
-            if ! unzip -q "$archive" -d "$destination"; then
-              printf 'failed to extract reusable artifact: %s\n' "$name" >&2
-              return 1
-            fi
-            rm -f "$archive"
-          }
+          if [ -n "$run_id" ]; then
+            for target in $RELEASE_PACKAGE_TARGETS; do
+              args=(--packages-dir \
+                "./reusable-artifacts/packages/packages-$target-${GITHUB_SHA::12}")
+              if [ extras != "$target" ]; then
+                args+=(--symbols-dir \
+                  "./reusable-artifacts/symbols/symbols-$target-${GITHUB_SHA::12}")
+              fi
+              python3 ci/reuse_ci.py download --run-id "$run_id" \
+                --target "$target" "${args[@]}"
+            done
+          fi
 
           required_files_available() {
             local file
@@ -197,61 +126,6 @@ jobs:
               fi
             done
           }
-
-          artifact_manifest=$RUNNER_TEMP/release-artifacts.tsv
-          : > "$artifact_manifest"
-          if ! run_id=$(gh api \
-            --method GET \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
-            -f branch=master \
-            -f event=push \
-            -f head_sha="$GITHUB_SHA" \
-            -F per_page=100 \
-            --jq '.workflow_runs[0].id // empty'); then
-            echo "failed to find CI for the release commit" >&2
-            exit 1
-          fi
-          if [ -n "$run_id" ]; then
-            echo "waiting for CI run $run_id at $GITHUB_SHA"
-            gh run watch "$run_id" \
-              --repo "$GITHUB_REPOSITORY" --interval 30 --exit-status
-          fi
-          if [ -n "$run_id" ] && ! source_run_is_valid; then
-            exit 1
-          fi
-
-          if [ -n "$run_id" ]; then
-            for target in $RELEASE_PACKAGE_TARGETS; do
-              if ! resolve_artifact packages \
-                "packages-$target-${GITHUB_SHA::12}"; then
-                run_id=
-                break
-              fi
-            done
-          fi
-          if [ -n "$run_id" ]; then
-            for target in $RELEASE_SYMBOL_TARGETS; do
-              if ! resolve_artifact symbols \
-                "symbols-$target-${GITHUB_SHA::12}"; then
-                run_id=
-                break
-              fi
-            done
-          fi
-          if [ -n "$run_id" ] && ! source_run_is_valid; then
-            exit 1
-          fi
-
-          if [ -n "$run_id" ]; then
-            while IFS=$'\t' read -r \
-              kind name artifact_id artifact_digest; do
-              if ! import_artifact \
-                "$kind" "$name" "$artifact_id" "$artifact_digest"; then
-                run_id=
-                break
-              fi
-            done < "$artifact_manifest"
-          fi
 
           version=${GITHUB_REF_NAME#v}
           if [ -n "$run_id" ]; then
@@ -276,9 +150,6 @@ jobs:
               run_id=
             fi
           fi
-          if [ -n "$run_id" ] && ! source_run_is_valid; then
-            exit 1
-          fi
 
           if [ -n "$run_id" ]; then
             echo "imported release artifacts from successful CI run $run_id"
@@ -291,7 +162,6 @@ jobs:
       - name: Upload Reusable Release Artifacts
         id: reusable_artifacts
         if: ${{ 'true' == steps.reusable_ci.outputs.candidate }}
-        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: release-inputs-${{ github.sha }}
@@ -310,21 +180,24 @@ jobs:
           if [ true = "$CANDIDATE" ] && [ success = "$UPLOAD_OUTCOME" ]; then
             reuse_artifacts=true
           elif [ true = "$CANDIDATE" ]; then
-            echo "failed to pin reusable artifacts; running full validation"
+            echo "failed to pin reusable artifacts; retry release preflight to restage packages" >&2
+            exit 1
           fi
           echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
 
   validation:
     name: Build and validate release
     needs: preflight
-    if: ${{ 'true' != needs.preflight.outputs.reuse_artifacts }}
+    if: >-
+      ${{ 'true' != needs.preflight.outputs.reuse_artifacts
+        || 'true' != needs.preflight.outputs.full_suite }}
     uses: ./.github/workflows/ci.yml
     with:
-      # Preflight skips this fallback when complete CI artifacts were reused.
-      # A fallback must build even when the tagged commit is site-only.
+      # Smoke packages are reusable independently of full-suite success.
+      # An existing full-suite proof permits smoke-only package restoration.
       build_sources: true
+      full_suite: ${{ 'true' != needs.preflight.outputs.full_suite }}
       skip_pages: true
-      upload_symbols: true
     # Ad hoc: `skip_pages` prevents deployment, but GitHub validates every
     # nested job's permission ceiling before evaluating its condition. The
     # tag-triggered caller must therefore still permit Pages. REFACTORME:
@@ -349,6 +222,7 @@ jobs:
           || (
             'skipped' == needs.validation.result
             && 'true' == needs.preflight.outputs.reuse_artifacts
+            && 'true' == needs.preflight.outputs.full_suite
           )
         )
       }}
@@ -376,51 +250,20 @@ jobs:
           REUSE_ARTIFACTS: ${{ needs.preflight.outputs.reuse_artifacts }}
         run: |
           set -euo pipefail
-
-          download_artifact() {
-            local name=$1
-            local destination=$2
-            local artifact_id artifact_digest archive
-            archive=$RUNNER_TEMP/$name.zip
-            read -r artifact_id artifact_digest < <(
-              gh api \
-                "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$name&per_page=1&direction=desc" \
-                --jq '.artifacts[0] | [.id, .digest] | @tsv'
-            )
-            if [ -z "$artifact_id" ] || [ null = "$artifact_id" ]; then
-              printf 'artifact was not found: %s\n' "$name" >&2
-              return 1
-            fi
-            if [[ "$artifact_digest" != sha256:* ]]; then
-              printf 'artifact has no SHA-256 digest: %s\n' "$name" >&2
-              return 1
-            fi
-
-            mkdir -p "$destination"
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-              > "$archive"
-            printf '%s  %s\n' "${artifact_digest#sha256:}" "$archive" |
-              sha256sum --check -
-            unzip -q "$archive" -d "$destination"
-            rm -f "$archive"
-          }
-
           short_sha=${GITHUB_SHA::12}
           if [ true = "$REUSE_ARTIFACTS" ]; then
-            download_artifact \
-              "release-inputs-$GITHUB_SHA" \
-              ./artifacts
+            python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+              --name "release-inputs-$GITHUB_SHA" --destination ./artifacts
           else
             for target in $RELEASE_PACKAGE_TARGETS; do
-              download_artifact \
-                "packages-$target-$short_sha" \
-                "./artifacts/packages/packages-$target-$short_sha"
+              python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+                --name "packages-$target-$short_sha" \
+                --destination "./artifacts/packages/packages-$target-$short_sha"
             done
             for target in $RELEASE_SYMBOL_TARGETS; do
-              download_artifact \
-                "symbols-$target-$short_sha" \
-                "./artifacts/symbols/symbols-$target-$short_sha"
+              python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+                --name "symbols-$target-$short_sha" \
+                --destination "./artifacts/symbols/symbols-$target-$short_sha"
             done
           fi
 
@@ -494,6 +337,23 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-checksums: ${{ steps.assets.outputs.directory }}/SHA256SUMS
+
+      - name: Verify tag still names the validated commit
+        run: |
+          set -euo pipefail
+          read -r kind commit < <(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+            --jq '.object | [.type, .sha] | @tsv')
+          # Annotated tags may point to another tag before reaching a commit.
+          while [ tag = "$kind" ]; do
+            read -r kind commit < <(gh api \
+              "repos/$GITHUB_REPOSITORY/git/tags/$commit" \
+              --jq '.object | [.type, .sha] | @tsv')
+          done
+          if [ commit != "$kind" ] || [ "$GITHUB_SHA" != "$commit" ]; then
+            echo "release tag moved; refusing assets validated for $GITHUB_SHA" >&2
+            exit 1
+          fi
 
       - name: Create Draft Prerelease
         id: create_release

@@ -931,7 +931,8 @@ if("17" IN_LIST _supported_cpp_standards)
     foreach(_target IN ITEMS
             regression_ccdb_output_suffix
             myregression_ccdb_output_suffix)
-        add_executable(${_target} EXCLUDE_FROM_ALL example_test.cpp)
+        add_executable(${_target} EXCLUDE_FROM_ALL
+            "${omnirefl_PROJECTS_DIR}/tests/smoke/main.cpp")
         set_target_properties(${_target} PROPERTIES
             CXX_STANDARD 17
             CXX_STANDARD_REQUIRED YES
@@ -940,6 +941,8 @@ if("17" IN_LIST _supported_cpp_standards)
             GTest::GTest
             gtest_main
             std_compat)
+        target_include_directories(${_target} PRIVATE
+            "${omnirefl_PROJECTS_DIR}/tests")
         omni_reflected_target(${_target} LOG_LEVEL warning)
     endforeach()
 
@@ -1027,7 +1030,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         static_members_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp
-        example_test.cpp
+        "${omnirefl_PROJECTS_DIR}/tests/smoke/main.cpp"
         packed_field_test.cpp
         "${omnirefl_PROJECTS_DIR}/benchmarks/instrumentation/baseline_test.cpp"
     )
@@ -1042,6 +1045,8 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
 
     target_compile_definitions(${_test_tgt} PRIVATE CXX_STANDARD=${cpp_standard})
     target_link_libraries(${_test_tgt} PRIVATE GTest::GTest std_compat ${_static_odr_tgt})
+    target_include_directories(${_test_tgt} PRIVATE
+        "${omnirefl_PROJECTS_DIR}/tests")
     omni_reflected_target(${_test_tgt})
 
     add_test(NAME "${cpp_prefix}.test.run_omni"

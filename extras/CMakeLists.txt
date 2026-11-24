@@ -31,7 +31,7 @@ if(BUILD_EXAMPLES)
     endif()
 
     if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-        message(STATUS "omnirefl: skipping sneak_peek: C++23 is not available")
+        message(WARNING "omnirefl: sneak_peek disabled: C++23 is not available")
     else()
         omnirefl_check_cxx23_library(_examples_has_cxx23_library)
         if(_examples_has_cxx23_library)
@@ -41,8 +41,9 @@ if(BUILD_EXAMPLES)
                 add_test(NAME example.sneak_peek COMMAND sneak_peek)
             endif()
         else()
-            message(STATUS "omnirefl: skipping sneak_peek: "
-                "C++23 library features are not available")
+            message(WARNING "omnirefl: sneak_peek disabled: "
+                "C++23 library requirements are not met "
+                "(format, print, ranges::to, views::join_with)")
         endif()
     endif()
 

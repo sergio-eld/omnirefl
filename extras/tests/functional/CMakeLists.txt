@@ -1,6 +1,7 @@
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_target "cpp_${_standard}.functional")
-    add_executable(${_target} main.cpp compat_pair.cpp)
+    add_executable(${_target} main.cpp compat_pair.cpp
+        "${omnirefl_PROJECTS_DIR}/tests/smoke/functional.cpp")
     set_target_properties(${_target} PROPERTIES
         CXX_STANDARD ${_standard}
         CXX_STANDARD_REQUIRED YES

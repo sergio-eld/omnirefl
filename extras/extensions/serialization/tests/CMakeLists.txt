@@ -1,3 +1,8 @@
+if(OMNI_TEST_SUITE STREQUAL "smoke")
+    add_subdirectory(smoke)
+    return()
+endif()
+
 # Exercise the patch helper shipped with the selected source or installed package.
 if(DEFINED omnirefl_DIR)
     set(_serialization_patch_script
@@ -13,12 +18,14 @@ add_test(NAME omnirefl.serialization.patch_reapplication
         -P "${CMAKE_CURRENT_LIST_DIR}/apply_patch.cmake")
 
 if(NOT TARGET json_model)
-    add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../model" json_model)
+    add_subdirectory("${omnirefl_PROJECTS_DIR}/extensions/serialization/model"
+        json_model)
 endif()
 
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.json_ryml.test")
-    add_executable(${_test_target} serialization.cpp scalar_roots.cpp
+    add_executable(${_test_target} smoke/main.cpp smoke/scalar_roots.cpp
+        smoke/custom_mapping.cpp serialization.cpp scalar_roots.cpp
         sequence_roots.cpp
         json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp
@@ -31,7 +38,7 @@ foreach(_standard IN LISTS _supported_cpp_standards)
     # Keep these tests free of forced generated headers and instrumentation.
     set(_core_target "cpp_${_standard}.json_ryml.test.core")
     add_executable(${_core_target} core.cpp with_diagnostics.cpp
-        ../../common/tests/static_string.cpp)
+        "${omnirefl_PROJECTS_DIR}/extensions/common/tests/static_string.cpp")
     set_target_properties(${_core_target} PROPERTIES
         OUTPUT_NAME "json_ryml_test_core_cpp_${_standard}")
     set_target_properties(${_test_target} ${_core_target} PROPERTIES
@@ -54,6 +61,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
     target_link_libraries(${_test_target} PRIVATE
         gtest_main omni::serialization json_model)
     target_link_libraries(${_core_target} PRIVATE gtest_main omni::serialization)
+    target_include_directories(${_test_target} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
     omni_reflected_target(${_test_target})
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
         add_test(NAME ${_test_target} COMMAND ${_test_target})

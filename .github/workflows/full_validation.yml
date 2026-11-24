@@ -1,0 +1,68 @@
+name: Periodic full validation
+
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '17 3 * * *'
+
+# Finish the active full run; the newest pending master revision is checked next.
+concurrency:
+  group: full-validation-master
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    name: Select periodic full validation
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      full_suite: ${{ steps.policy.outputs.full_suite }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select full suite
+        id: policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ci/full_validation.py
+
+  commit-ci:
+    name: Wait for successful commit CI
+    needs: select
+    if: ${{ 'true' == needs.select.outputs.full_suite }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Wait for reusable commit packages
+        timeout-minutes: 180
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ci/reuse_ci.py find --wait-master required --targets extras
+
+  validation:
+    name: Periodic full suite
+    needs: commit-ci
+    uses: ./.github/workflows/ci.yml
+    with:
+      build_sources: true
+      full_suite: true
+      skip_pages: true
+    # Reusable CI's declared Pages ceiling applies even when deployment is skipped.
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      pages: write

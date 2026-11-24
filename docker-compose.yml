@@ -17,14 +17,19 @@
 # build/test image versions. Compose loads it automatically; shell variables
 # may override it when testing another toolchain or distribution release.
 
+x-build-args: &build-args
+  LLVM_VERSION: ${LLVM_VERSION}
+
+x-linux-toolchain: &linux-toolchain
+  TOOLCHAIN: &linux-compiler ${TOOLCHAIN:-gcc}
+
 x-build-musl-ucrt-image: &build-musl-ucrt-image
   platform: linux/amd64
   image: ghcr.io/sergio-eld/omnirefl-build-alpine-x86_64-musl-ucrt:llvm-${LLVM_VERSION}
   build:
     context: .
     dockerfile: docker/build-alpine-x86_64-musl-ucrt.Dockerfile
-    args:
-      LLVM_VERSION: ${LLVM_VERSION}
+    args: *build-args
 
 x-build-musl-aarch64-image: &build-musl-aarch64-image
   platform: linux/arm64
@@ -32,8 +37,7 @@ x-build-musl-aarch64-image: &build-musl-aarch64-image
   build:
     context: .
     dockerfile: docker/build-alpine-aarch64-musl.Dockerfile
-    args:
-      LLVM_VERSION: ${LLVM_VERSION}
+    args: *build-args
 
 x-build-musl-command: &build-musl-command
   - /bin/ash
@@ -61,6 +65,10 @@ x-build-musl-command: &build-musl-command
     mkdir -p /tmp/package /packages
     cpack -G "DEB;TGZ" -B /tmp/package
     mv /tmp/package/*.deb /tmp/package/*.tar.gz /packages/
+
+x-test-environment: &test-environment
+  KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+  OMNI_TEST_SUITE: ${OMNI_TEST_SUITE:-full}
 
 x-test-linux-command: &test-linux-command |
   set -- /packages/*.tar.gz
@@ -121,8 +129,8 @@ services:
       context: .
       dockerfile: docker/build-alpine-cosmo.Dockerfile
       args:
+        <<: *build-args
         COSMOPOLITAN_VERSION: ${COSMOPOLITAN_VERSION}
-        LLVM_VERSION: ${LLVM_VERSION}
     volumes:
       - ./:/src:ro
       - ./build-alpine/cosmo/${COSMOPOLITAN_VERSION}-llvm-${LLVM_VERSION}:/build:rw
@@ -173,7 +181,7 @@ services:
 
   build-musl:
     <<: *build-musl-ucrt-image
-    environment:
+    environment: &build-musl-environment
       CMAKE_BUILD_TYPE: RelWithDebInfo
     volumes:
       - ./:/src:ro
@@ -184,8 +192,7 @@ services:
 
   build-musl-aarch64:
     <<: *build-musl-aarch64-image
-    environment:
-      CMAKE_BUILD_TYPE: RelWithDebInfo
+    environment: *build-musl-environment
     volumes:
       - ./:/src:ro
       - ./build-alpine/musl/aarch64/llvm-${LLVM_VERSION}:/build:rw
@@ -241,12 +248,11 @@ services:
       dockerfile: docker/test-alpine.Dockerfile
       args:
         ALPINE_VERSION: ${ALPINE_VERSION}
-        COMPILER: ${TOOLCHAIN:-gcc}
+        COMPILER: *linux-compiler
     environment:
-      TOOLCHAIN: ${TOOLCHAIN:-gcc}
+      <<: [*test-environment, *linux-toolchain]
       PACKAGE_TEST_SHELL: /bin/ash
       TEST_NAME: ${TEST_NAME:-alpine-x86_64-${TOOLCHAIN:-gcc}}
-      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
@@ -275,17 +281,16 @@ services:
       dockerfile: docker/test-ubuntu.Dockerfile
       args:
         UBUNTU_VERSION: ${UBUNTU_VERSION}
-        COMPILER: ${TOOLCHAIN:-gcc}
+        COMPILER: *linux-compiler
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/ubuntu-${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
       - ${EXTRAS_DIR:-./artifacts/packages/extras}:/extras:ro
       - ./ci:/runner:ro
     environment:
-      TOOLCHAIN: ${TOOLCHAIN:-gcc}
+      <<: [*test-environment, *linux-toolchain]
       PACKAGE_TEST_SHELL: /bin/bash
       TEST_NAME: ${TEST_NAME:-ubuntu-${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}}
-      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     working_dir: /tmp/build
     entrypoint:
       - /bin/bash
@@ -307,8 +312,8 @@ services:
   benchmark:
     image: *test-ubuntu-x86-image
     environment:
+      <<: *linux-toolchain
       BENCHMARK_NAME: ${BENCHMARK_NAME:-}
-      TOOLCHAIN: ${TOOLCHAIN:-gcc}
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/musl}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/benchmarks}:/results:rw
@@ -362,9 +367,9 @@ services:
       args:
         TOOLCHAIN: ${TOOLCHAIN:-msvc}
     environment:
+      <<: *test-environment
       TOOLCHAIN: ${TOOLCHAIN:-msvc}
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msvc}}
-      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
       - ${EXTRAS_DIR:-./artifacts/packages/extras}:C:/extras:ro
       - ./ci:C:/runner:ro
@@ -423,9 +428,9 @@ services:
       context: .
       dockerfile: docker/test-windows-msys2.Dockerfile
     environment:
+      <<: *test-environment
       TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msys2-mingw}}
-      KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
     volumes:
       - ${EXTRAS_DIR:-./artifacts/packages/extras}:C:/extras:ro
       - ./ci:C:/runner:ro

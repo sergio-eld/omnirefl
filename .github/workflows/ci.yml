@@ -1,5 +1,7 @@
 name: CI
-run-name: CI / ${{ 'pull_request' == github.event_name && github.event.pull_request.head.ref || github.ref_name }}
+run-name: >-
+  CI / ${{ github.event.pull_request.head.ref || github.ref_name }}
+  / ${{ inputs.full_suite && 'full' || 'smoke' }}
 
 on:
   push:
@@ -10,6 +12,11 @@ on:
       - master
   workflow_dispatch:
     inputs:
+      full_suite:
+        description: Run the full test suite (reuse exact-commit packages)
+        type: boolean
+        required: false
+        default: false
       build_sources:
         description: Build packages, run package tests, and benchmark
         type: boolean
@@ -17,6 +24,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      full_suite:
+        description: Run the full test suite (reuse exact-commit packages)
+        type: boolean
+        required: false
+        default: false
       build_sources:
         description: Build packages, run package tests, and benchmark
         type: boolean
@@ -24,11 +36,6 @@ on:
         default: false
       skip_pages:
         description: Skip Pages deployment for internal validation calls
-        type: boolean
-        required: false
-        default: false
-      upload_symbols:
-        description: Upload detached debug symbols for release assembly
         type: boolean
         required: false
         default: false
@@ -42,6 +49,7 @@ concurrency:
 # TODO: [low] Define a schema for CI_MATRIX, validate against it, and extract
 # parameters programmatically. Apply schema defaults explicitly before expansion.
 env:
+  OMNI_TEST_SUITE: ${{ inputs.full_suite && 'full' || 'smoke' }}
   CI_MATRIX: |
     # Currently the primary distribution: one package for Linux, macOS, and Windows.
     cosmo:
@@ -231,7 +239,7 @@ jobs:
       - name: Detect source changes
         id: sources
         env:
-          FORCE_BUILD: ${{ inputs.build_sources }}
+          FORCE_BUILD: ${{ inputs.build_sources || inputs.full_suite }}
           BEFORE_SHA: ${{ github.event.before }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -277,12 +285,49 @@ jobs:
 
           echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
 
+  reusable-packages:
+    name: Find exact-commit CI packages
+    needs:
+      - changes
+      - validate-ci-matrix
+    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run_id: ${{ steps.source.outputs.run_id }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Check package reuse policy
+        run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
+      - name: Find successful package source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MATRIX: ${{ needs.validate-ci-matrix.outputs.matrix }}
+        run: |
+          mapfile -t targets < <(python3 - <<'PYTHON'
+          import json
+          import os
+          print('extras')
+          for runtime in json.loads(os.environ['MATRIX']).values():
+              for row in runtime['build']['include']:
+                  print(row['target'])
+          PYTHON
+          )
+          python3 ci/reuse_ci.py find --require-symbols --targets "${targets[@]}"
+
   build-package-extras:
     name: Package extras
     runs-on: ubuntu-latest
-    needs: changes
+    needs:
+      - changes
+      - reusable-packages
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Checkout Repository
@@ -290,7 +335,16 @@ jobs:
       - name: Resolve Short SHA
         id: commit
         run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - name: Restore Extras Archive
+        if: ${{ '' != needs.reusable-packages.outputs.run_id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
+        run: >-
+          python3 ci/reuse_ci.py download --run-id "$SOURCE_RUN"
+          --target extras --packages-dir artifacts/packages/extras
       - name: Package Extras
+        if: ${{ '' == needs.reusable-packages.outputs.run_id }}
         run: >-
           cmake -DOMNIREFL_PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }}
           -P extras/package.cmake
@@ -308,8 +362,10 @@ jobs:
     needs:
       - changes
       - validate-ci-matrix
+      - reusable-packages
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
+      actions: read
       contents: read
     strategy:
       fail-fast: false
@@ -327,12 +383,25 @@ jobs:
         id: commit
         run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
+      - name: Restore Package and Debug Symbols
+        if: ${{ '' != needs.reusable-packages.outputs.run_id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
+        run: >-
+          python3 ci/reuse_ci.py download --run-id "$SOURCE_RUN"
+          --target ${{ matrix.target }}
+          --packages-dir ./artifacts/packages/${{ matrix.runtime }}
+          --symbols-dir "$RUNNER_TEMP/symbols"
+
       - name: Pull Build Image
+        if: ${{ '' == needs.reusable-packages.outputs.run_id }}
         # Compose owns the toolchain versions and resolves the complete image
         # tag for the selected build service.
         run: docker compose pull ${{ matrix.service }}
 
       - name: Build and Package Omnirefl
+        if: ${{ '' == needs.reusable-packages.outputs.run_id }}
         run: |
           PACKAGE_COMMIT=${{ steps.commit.outputs.short_sha }} \
           PACKAGE_DIR=./artifacts/packages/${{ matrix.runtime }} \
@@ -349,13 +418,9 @@ jobs:
           overwrite: true
 
       - name: Stage Debug Symbols
-        # Successful protected-master artifacts can be reused by a subsequent
-        # release for the same commit. `upload_symbols` retains the full-build
-        # fallback used when no reusable CI run exists.
-        if: >-
-          ${{ inputs.upload_symbols
-            || ('push' == github.event_name
-              && 'refs/heads/master' == github.ref) }}
+        # Keep symbols with smoke packages so full validation and release can
+        # reuse the same builds, including manually dispatched branch runs.
+        if: ${{ '' == needs.reusable-packages.outputs.run_id }}
         run: |
           shopt -s nullglob
           symbol_dirs=(./build-alpine/${{ matrix.runtime }}/${{ matrix.arch }}/*/symbols)
@@ -379,10 +444,6 @@ jobs:
           cp -r "${symbol_dirs[0]}/." "$RUNNER_TEMP/symbols/"
 
       - name: Upload Debug Symbols
-        if: >-
-          ${{ inputs.upload_symbols
-            || ('push' == github.event_name
-              && 'refs/heads/master' == github.ref) }}
         uses: actions/upload-artifact@v6
         with:
           name: symbols-${{ matrix.target }}-${{ steps.commit.outputs.short_sha }}
@@ -396,8 +457,10 @@ jobs:
     needs:
       - changes
       - validate-ci-matrix
+      - reusable-packages
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
+      actions: read
       contents: read
     strategy:
       fail-fast: false
@@ -412,8 +475,10 @@ jobs:
     needs:
       - changes
       - validate-ci-matrix
+      - reusable-packages
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     permissions:
+      actions: read
       contents: read
     strategy:
       fail-fast: false
@@ -468,41 +533,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          download_artifact() {
-            local name=$1
-            local destination=$2
-            local artifact_id artifact_digest archive
-            archive=$RUNNER_TEMP/$name.zip
-            read -r artifact_id artifact_digest < <(
-              gh api \
-                "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$name&per_page=1&direction=desc" \
-                --jq '.artifacts[0] | [.id, .digest] | @tsv'
-            )
-            if [ -z "$artifact_id" ] || [ null = "$artifact_id" ]; then
-              printf 'artifact was not found: %s\n' "$name" >&2
-              return 1
-            fi
-            if [[ "$artifact_digest" != sha256:* ]]; then
-              printf 'artifact has no SHA-256 digest: %s\n' "$name" >&2
-              return 1
-            fi
-
-            mkdir -p "$destination"
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-              > "$archive"
-            printf '%s  %s\n' "${artifact_digest#sha256:}" "$archive" |
-              sha256sum --check -
-            unzip -q "$archive" -d "$destination"
-            rm -f "$archive"
-          }
-
-          download_artifact \
-            packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }} \
-            ./artifacts/packages/current
-          download_artifact \
-            packages-extras-${{ steps.commit.outputs.short_sha }} \
-            ./artifacts/packages/extras
+          python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+            --name "packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}" \
+            --destination ./artifacts/packages/current
+          python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+            --name "packages-extras-${{ steps.commit.outputs.short_sha }}" \
+            --destination ./artifacts/packages/extras
 
       - name: Prepare Docker Image
         run: |
@@ -990,6 +1026,7 @@ jobs:
     # needs must list these jobs explicitly.
     needs:
       - changes
+      - reusable-packages
       - validate-ci-matrix
       - build-package-cosmo
       - build-package-musl
@@ -1110,6 +1147,7 @@ jobs:
               name for name, job in jobs.items()
               if 'success' != job['result'] and (
                   name in ('changes', 'validate-ci-matrix')
+                  or (build_sources and name == 'reusable-packages')
                   or ('check-site' == name
                       and 'pull_request' == os.environ['GITHUB_EVENT_NAME'])
                   or (build_sources and name.startswith(('build-package-', 'test-package-')))
@@ -1120,6 +1158,75 @@ jobs:
           if failed:
               raise SystemExit('Required jobs failed: ' + ', '.join(failed))
           PY
+
+      - name: Record the tested commit
+        if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          Path('validated-commit.json').write_text(json.dumps({
+              'commit': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+          }))
+          PYTHON
+
+      - name: Upload tested-commit proof
+        if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: validated-commit-${{ github.sha }}
+          path: validated-commit.json
+          if-no-files-found: error
+          overwrite: true
+
+  full-suite:
+    name: Full test suite
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - required-ci
+      - benchmark-cosmo
+      - benchmark-musl
+    if: >-
+      ${{ always() && inputs.full_suite
+        && 'true' == needs.changes.outputs.build_sources }}
+    permissions: {}
+    steps:
+      - name: Require complete validation
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          failed = [name for name, job in json.loads(os.environ['JOB_RESULTS']).items()
+                    if job['result'] != 'success']
+          if failed:
+              raise SystemExit('Full validation failed: ' + ', '.join(failed))
+          PYTHON
+
+      - name: Record successful full-suite validation
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          Path('full-suite.json').write_text(json.dumps({
+              'suite': 'full', 'commit': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }))
+          PYTHON
+
+      - name: Upload full-suite proof
+        uses: actions/upload-artifact@v6
+        with:
+          name: full-suite-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: full-suite.json
+          if-no-files-found: error
+          overwrite: true
 
   deploy-pages:
     name: Deploy Pages
@@ -1248,33 +1355,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          found=false
-          while IFS=$'\t' read -r artifact_id name artifact_digest; do
-            archive=$RUNNER_TEMP/$name.zip
-            destination=./artifacts/benchmarks/$name
-            if [[ "$artifact_digest" != sha256:* ]]; then
-              printf 'artifact has no SHA-256 digest: %s\n' "$name" >&2
-              exit 1
-            fi
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          from ci.github_artifacts import artifacts, extract, named_artifact
 
-            mkdir -p "$destination"
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-              > "$archive"
-            printf '%s  %s\n' "${artifact_digest#sha256:}" "$archive" |
-              sha256sum --check -
-            unzip -q "$archive" -d "$destination"
-            rm -f "$archive"
-            found=true
-          done < <(
-            gh api --paginate \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '.artifacts[] | select(.name | startswith("benchmark-")) | [.id, .name, .digest] | @tsv'
-          )
-          echo "available=$found" >> "$GITHUB_OUTPUT"
-          if ! $found; then
-            echo '::warning::No benchmark artifacts found; preserving published benchmark history.'
-          fi
+          available = artifacts(os.environ['GITHUB_RUN_ID'])
+          names = [a['name'] for a in available if a['name'].startswith('benchmark-')]
+          for name in names:
+              extract(named_artifact(available, name), Path('artifacts/benchmarks') / name)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('available=' + str(bool(names)).lower(), file=output)
+          if not names:
+              print('::warning::No benchmark artifacts found; '
+                    'preserving published benchmark history.')
+          PYTHON
 
       # The deployed JSON is the durable history. Only a missing file starts a
       # new history; other download failures must not replace it with an empty
