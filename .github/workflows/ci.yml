@@ -229,8 +229,13 @@ jobs:
               print('| --- | --- | --- |', file=summary)
               for runtime, coverage in matrix.items():
                   packages = ', '.join(row['target'] for row in coverage['build']['include'])
-                  platforms = ', '.join(coverage.get('test', {}))
-                  print(f'| {runtime} | {packages} | {platforms} |', file=summary)
+                  platforms = []
+                  for platform, tests in coverage.get('test', {}).items():
+                      architectures = tests.get('arch') or sorted({
+                          row['arch'] for row in tests.get('include', []) if 'arch' in row
+                      })
+                      platforms.extend(platform + '-' + arch for arch in architectures)
+                  print(f'| {runtime} | {packages} | ' + ', '.join(platforms) + ' |', file=summary)
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
                   print(f'::group::Prepared {runtime} matrix')
