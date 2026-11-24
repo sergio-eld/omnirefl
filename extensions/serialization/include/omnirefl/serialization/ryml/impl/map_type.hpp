@@ -8,6 +8,7 @@
 // RapidYAML: third-party JSON/YAML backend.
 #include <c4/format.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <iterator>
 #include <limits>
@@ -120,6 +121,20 @@ bool is_null(const T &value) {
   return is_null_case<traits::is_optional<T>::value>::get(value);
 }
 
+// The int/long tag prefers size()-based reservation over the unsized fallback.
+template <typename Range>
+auto reserve_range_nodes(::ryml::Tree *tree, const Range &value, int)
+  -> decltype(static_cast<::ryml::id_type>(value.size()), void()) {
+  const auto required = tree->size()
+    + static_cast<::ryml::id_type>(value.size());
+  // Nested ranges share storage; retain geometric growth between reserves.
+  if (required > tree->capacity())
+    tree->reserve(std::max(required, 2 * tree->capacity()));
+}
+
+template <typename Range>
+void reserve_range_nodes(::ryml::Tree *, const Range &, long) {}
+
 template <bool KeyValue>
 struct write_range_case;
 
@@ -130,6 +145,7 @@ struct write_range_case<false> {
   static void apply(State context, const T &value, ::ryml::NodeRef node) {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
+    reserve_range_nodes(node.tree(), value, /*overload_priority=*/0);
     // Separate iterator/sentinel declarations also support non-common ranges
     // before C++17 permitted them in range-based for loops.
     using std::begin;
