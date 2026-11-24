@@ -410,6 +410,7 @@ if(ENABLE_PACKAGE)
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/reflected_target.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/_ad_hoc_compiler_compatibility.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_omnirefl_from_ccdb.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/write_compile_command.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
     # Debian architecture: required because Alpine has no dpkg to auto-detect.

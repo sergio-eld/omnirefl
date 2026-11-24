@@ -47,6 +47,19 @@ if(DEFINED omnirefl_DIR)
     _omnirefl_incremental_build_test(pch.direct_header model.hpp -DUSE_PCH=ON)
     _omnirefl_incremental_build_test(pch.transitive_header fields.hpp -DUSE_PCH=ON)
 
+    add_test(NAME omnirefl.integration.reconfigure
+        COMMAND ${CMAKE_COMMAND}
+            -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/reconfigure"
+            -D "ROOT=${CMAKE_CURRENT_BINARY_DIR}/integration/reconfigure"
+            -D "GENERATOR=${CMAKE_GENERATOR}"
+            -D "C_COMPILER=${CMAKE_C_COMPILER}"
+            -D "CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            -D "OMNIREFL_DIR=${omnirefl_DIR}"
+            -D "CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+            -D
+                "CONFIGURE_ARGS=$<$<BOOL:${CMAKE_CROSSCOMPILING}>:-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/integration/run_reconfigure.cmake")
+
     add_test(NAME omnirefl.integration.dollar_path_source
         COMMAND ${CMAKE_COMMAND}
             -D "FIXTURE=${CMAKE_CURRENT_LIST_DIR}/integration/dollar_path"

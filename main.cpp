@@ -535,7 +535,7 @@ struct namespace_component {
   auto operator<=>(const namespace_component &) const = default;
 };
 
-enum class record_kind { struct_, class_, union_ };
+enum class record_kind { is_struct, is_class, is_union };
 
 struct nm_qual_type {
   /// nullopt for unnamed types
@@ -932,11 +932,11 @@ struct std::formatter<meta::record_kind, char>:
   template <typename FormatContext>
   auto format(meta::record_kind t, FormatContext &ctx) const {
     switch (t) {
-    case meta::record_kind::struct_:
+    case meta::record_kind::is_struct:
       return std::formatter<std::string_view, char>::format("struct"sv, ctx);
-    case meta::record_kind::class_:
+    case meta::record_kind::is_class:
       return std::formatter<std::string_view, char>::format("class"sv, ctx);
-    case meta::record_kind::union_:
+    case meta::record_kind::is_union:
       return std::formatter<std::string_view, char>::format("union"sv, ctx);
     }
 
@@ -4886,10 +4886,10 @@ namespace meta::impl {
 
 record_kind record_kind_from_decl(const clang::RecordDecl &d) {
   return d.isStruct() //
-    ? record_kind::struct_
+    ? record_kind::is_struct
     : d.isClass() //
-      ? record_kind::class_
-      : record_kind::union_;
+      ? record_kind::is_class
+      : record_kind::is_union;
 }
 
 } // namespace meta::impl
@@ -7438,7 +7438,7 @@ std::string reflectable_body(const meta::record_data &d) {
 
     d.has_bases,
     d.is_aggregatable,
-    meta::record_kind::union_ == d.type,
+    meta::record_kind::is_union == d.type,
     d.template_info.has_value());
 }
 
