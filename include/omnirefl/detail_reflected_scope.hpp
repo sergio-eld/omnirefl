@@ -152,6 +152,10 @@ using _all_visible_public_fields_t =
     typename _M::own_public_fields_t,
     typename _expand_bases<typename _M::public_bases_t>::type>::type;
 
+// TODO: [low] Consider emitting flat accessible-field tuples which reuse base
+// field metadata. See extras/benchmarks/accessible_fields: modest compiler
+// memory savings, inconclusive timing gains, unchanged executable code.
+
 template <typename Record, typename Method, typename = void>
 struct _is_public_method_visible_from: std::false_type {};
 

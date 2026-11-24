@@ -1,0 +1,42 @@
+Accessible-field metadata layout experiment
+
+A: current generated metadata plus recursive C++ base-field collection.
+B: emit all accessible field definitions and a flat tuple in each record meta.
+C: emit a flat tuple referencing field definitions in their declaring base metas.
+
+The prototype transforms the same generated A header into B/C. It supports the
+controlled concrete records with distinct field names in these fixtures; it is
+not a production implementation of C++ member lookup. Current public headers
+are used for A; a generated overlay changes only the accessible-field alias for
+B/C. No production mapping or reflection algorithm was changed.
+
+Environment: Alpine, GCC 15.2, C++20, -O2 -g -DNDEBUG. Three measured builds per
+layout/case after warm-up. 20-field cases used up to 14 parallel compilations;
+80-field cases used up to three to bound memory. Timings compare layouts within
+a case; concurrency differs between the two field-count groups. Raw measurements
+and logs are retained in artifacts/accessible-fields/raw-measurements.tar.gz in
+the originating workspace. Results include CPU time and variation coefficients.
+
+Cases: 20 and 80 int fields, flat records and two/four-record public base chains,
+JSON deserialization and serialization. All 36 executables passed per-field
+value checks; serializer checks also preserve base-before-own field ordering.
+
+Representative 80-field/four-record chain, median of three compilations:
+                 A          B          C
+read wall, s     39.79      38.17      39.05
+read RSS, MiB    1574.9     1423.3     1433.0
+write wall, s    8.15       7.81       7.39
+write RSS, MiB   585.3      505.7      490.7
+read header, B   201620     482474     217274
+
+Timing variation was about 4-6% for the representative reads and 8-10% for
+writes. No robust compilation-time win was established. C's read memory saving
+was about 9%; write memory fell about 16%, but from a much smaller baseline.
+Flat records showed essentially no memory improvement.
+
+Across all 12 cases, .text bytes were identical across A/B/C and stripped
+executable sizes matched exactly. Debug-data differences were small.
+
+Conclusion: retain the current implementation. Keep generator-side flattening
+with base metadata reuse as a low-priority consideration. B's duplicated field
+definitions substantially enlarge generated headers without a clear advantage.
