@@ -112,6 +112,14 @@ if(DEFINED omnirefl_DIR)
         -D "REQUIRED_REFLECTION_STEMS=main")
     _omnirefl_accepted_cmake_project(functional_header
         -D "EXECUTABLES=functional_header")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+            AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+            AND CMAKE_SIZEOF_VOID_P EQUAL 8
+            AND NOT CMAKE_CROSSCOMPILING)
+        _omnirefl_accepted_cmake_project(host_libstdcxx
+            -D "EXECUTABLES=host_libstdcxx"
+            -D "REQUIRED_REFLECTION_STEMS=main")
+    endif()
     if(NOT CMAKE_CROSSCOMPILING)
         # The two executables verify reflection against their own record shapes.
         _omnirefl_accepted_cmake_project(pch_shared_source

@@ -779,7 +779,7 @@ typename std::enable_if<0 != std::extent<T>::value>::type make_unique(
 #endif
 
 // remove_cvref / remove_cvref_t
-#if OMNI_CPLUSPLUS >= 202002L
+#if defined(__cpp_lib_remove_cvref) && 201711L <= __cpp_lib_remove_cvref
 using std::remove_cvref;
 using std::remove_cvref_t;
 #else

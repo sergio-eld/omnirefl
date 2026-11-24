@@ -59,6 +59,15 @@ endif()
 string(STRIP "${_compiler_command}" _compiler_command)
 separate_arguments(_compiler_args UNIX_COMMAND "${_compiler_command}")
 
+if(COMPATIBILITY_FLAGS)
+    # Instrumentation-only defaults: the real compiler may reject these options.
+    # Prepending preserves explicit source feature and macro settings.
+    list(INSERT _compiler_args 1 ${COMPATIBILITY_FLAGS})
+endif()
+if(COMPILER_TARGET)
+    list(INSERT _compiler_args 1 "--target=${COMPILER_TARGET}")
+endif()
+
 # clang-cl compile commands may contain a standalone `--` before the source.
 # Clang's driver accepts that as command-line syntax, but the tooling invocation
 # can treat it as an additional input and reject object-output flags as if

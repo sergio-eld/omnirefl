@@ -1845,7 +1845,7 @@ TEST(fn_filter, lifts_a_templated_lambda_predicate) {
 
   const auto filtered =
     tuple | fn::filter(fn::nttp_unary<[]<typename Element>() {
-      return std::is_integral_v<std::remove_cvref_t<Element>>;
+      return std::is_integral_v<omni::compat::remove_cvref_t<Element>>;
     }>());
 
   EXPECT_EQ(std::make_tuple(20, 22L), filtered);
@@ -1857,10 +1857,10 @@ TEST(fn_filter, accepts_a_structural_predicate_directly) {
   const auto tuple = std::make_tuple(20, std::string{"ignored"}, 22L);
 
   const auto called = fn::filter<[]<typename Element>() {
-    return std::is_integral_v<std::remove_cvref_t<Element>>;
+    return std::is_integral_v<omni::compat::remove_cvref_t<Element>>;
   }>(tuple);
   const auto piped = tuple | fn::filter<[]<typename Element>() {
-    return std::is_integral_v<std::remove_cvref_t<Element>>;
+    return std::is_integral_v<omni::compat::remove_cvref_t<Element>>;
   }>();
 
   EXPECT_EQ(std::make_tuple(20, 22L), called);

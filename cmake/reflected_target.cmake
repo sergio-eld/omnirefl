@@ -14,6 +14,8 @@ function(_omni_check_minimum_cxx_standard target)
     endif()
 endfunction()
 
+include("${CMAKE_CURRENT_LIST_DIR}/_ad_hoc_compiler_compatibility.cmake")
+
 # Ninja-only: controls how CMake rewrites DEPFILE paths for Ninja rules
 if(CMAKE_GENERATOR MATCHES "Ninja" AND POLICY CMP0116)
     cmake_policy(SET CMP0116 NEW)
@@ -332,6 +334,8 @@ function(omni_reflected_target target)
     set(_comp_db "${CMAKE_BINARY_DIR}/compile_commands.json")
 
     _omni_check_minimum_cxx_standard("${target}")
+    _omni_resolve_compiler_target(_compiler_target)
+    _omni_compiler_compatibility_flags(_compiler_compatibility_flags)
 
     message(STATUS "omnirefl: reflected target `${target}`")
 
@@ -450,6 +454,8 @@ function(omni_reflected_target target)
                 -D "LOG_LEVEL=${OMNIREFL_LOG_LEVEL}"
                 -D "TIMINGS=${_timings}"
                 -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
+                -D "COMPILER_TARGET=${_compiler_target}"
+                -D "COMPATIBILITY_FLAGS=${_compiler_compatibility_flags}"
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
             COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
