@@ -6,8 +6,8 @@ get_filename_component(omnirefl_PROJECTS_DIR
 if(NOT TARGET omni::tool)
     find_package(omnirefl CONFIG REQUIRED)
 endif()
-include("${omnirefl_PROJECTS_DIR}/cmake/test_dependencies.cmake")
 include("${omnirefl_PROJECTS_DIR}/cmake/toolchain_checks.cmake")
+include("${omnirefl_PROJECTS_DIR}/cmake/test_dependencies.cmake")
 omnirefl_supported_cpp_standards(_supported_cpp_standards)
 
 option(RECORD_CONVERSION_ENABLE_PERF_COUNTERS
