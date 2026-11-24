@@ -217,13 +217,30 @@ jobs:
                   ]}
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               print('matrix=' + json.dumps(matrix), file=output)
-          print('CI_MATRIX YAML is valid')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              print('## Prepared CI matrix\n', file=summary)
+              print('Test suite: **' + os.environ['OMNI_TEST_SUITE'] + '**\n', file=summary)
+              print('| Distribution | Packages | Test platforms |', file=summary)
+              print('| --- | --- | --- |', file=summary)
+              for runtime, coverage in matrix.items():
+                  packages = ', '.join(row['target'] for row in coverage['build']['include'])
+                  platforms = ', '.join(coverage.get('test', {}))
+                  print(f'| {runtime} | {packages} | {platforms} |', file=summary)
+              for runtime, coverage in matrix.items():
+                  prepared = json.dumps(coverage, indent=2)
+                  print(f'::group::Prepared {runtime} matrix')
+                  print(prepared)
+                  print('::endgroup::')
+                  print(f'\n<details><summary>{runtime}: platforms, architectures, '
+                        'compilers, runners, exclusions, and benchmarks</summary>\n',
+                        file=summary)
+                  print('```json\n' + prepared + '\n```\n\n</details>', file=summary)
           PY
 
   # Site-only changes check and deploy Pages without rebuilding packages. A
   # manual or reusable call can force the complete path with `build_sources`.
   changes:
-    name: Select CI work
+    name: Select CI work / ${{ inputs.full_suite && 'full' || 'smoke' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -231,6 +248,11 @@ jobs:
       build_sources: ${{ steps.sources.outputs.build_sources }}
 
     steps:
+      - name: "Test suite: ${{ inputs.full_suite && 'full' || 'smoke' }}"
+        run: |
+          echo "::notice::Selected test suite: $OMNI_TEST_SUITE"
+          printf '## Selected test suite: %s\n' "$OMNI_TEST_SUITE" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout Repository
         uses: actions/checkout@v7
         with:
@@ -285,6 +307,24 @@ jobs:
 
           echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
 
+      - name: "Package checks selected: ${{ steps.sources.outputs.build_sources }}"
+        env:
+          BUILD_SOURCES: ${{ steps.sources.outputs.build_sources }}
+        run: |
+          if [ true = "$BUILD_SOURCES" ]; then
+            decision="Package tests ($OMNI_TEST_SUITE) and benchmarks selected."
+            if [ full = "$OMNI_TEST_SUITE" ]; then
+              scope='All tests across the supported platform, compiler, and C++ standard matrix.'
+            else
+              scope='Guides and base-interface tests across the supported platform, compiler, and C++ standard matrix.'
+            fi
+          else
+            decision='No package changes detected; package tests and benchmarks skipped.'
+            scope=''
+          fi
+          echo "::notice::$decision"
+          printf '\n%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
+
   reusable-packages:
     name: Find exact-commit CI packages
     needs:
@@ -318,6 +358,22 @@ jobs:
           PYTHON
           )
           python3 ci/reuse_ci.py find --require-symbols --targets "${targets[@]}"
+
+      - name: Report package reuse
+        env:
+          SOURCE_RUN: ${{ steps.source.outputs.run_id }}
+        run: |
+          if [ -n "$SOURCE_RUN" ]; then
+            decision="Reusing exact-commit packages and symbols from run $SOURCE_RUN."
+          else
+            decision='No reusable exact-commit packages and symbols found; building packages.'
+          fi
+          echo "::notice::$decision"
+          printf '## Package reuse\n\n%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$SOURCE_RUN" ]; then
+            printf '\n[Source run](%s/%s/actions/runs/%s)\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   build-package-extras:
     name: Package extras
@@ -1228,8 +1284,8 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  deploy-pages:
-    name: Deploy Pages
+  prepare-pages:
+    name: Prepare Pages
     runs-on: ubuntu-latest
     needs:
       - changes
@@ -1250,10 +1306,9 @@ jobs:
       actions: read
       contents: read
       pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      deploy: ${{ steps.pages_order.outputs.deploy }}
+      artifact_name: ${{ steps.pages_artifact.outputs.name }}
 
     steps:
       # Actions concurrency groups retain only one pending job. Wait for the
@@ -1426,9 +1481,24 @@ jobs:
           path: site/dist
           retention-days: 30
 
+  # A job boundary avoids deployment racing its freshly finalized upload.
+  # https://github.com/actions/deploy-pages/issues/451
+  deploy-pages:
+    name: Deploy Pages
+    runs-on: ubuntu-latest
+    needs: prepare-pages
+    if: ${{ 'true' == needs.prepare-pages.outputs.deploy }}
+    permissions:
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy GitHub Pages
         id: deployment
-        if: ${{ 'true' == steps.pages_order.outputs.deploy }}
         uses: actions/deploy-pages@v5
         with:
-          artifact_name: ${{ steps.pages_artifact.outputs.name }}
+          artifact_name: ${{ needs.prepare-pages.outputs.artifact_name }}

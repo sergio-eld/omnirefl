@@ -50,6 +50,17 @@ def select():
     idle_days = (datetime.now(timezone.utc).timestamp() - timestamp) / 86400
     due = (not running and validated_distance > 0
            and (validated_distance >= 5 or idle_days >= 3))
+    if running:
+        reason = 'A full validation run is already active.'
+    elif validated_distance == 0:
+        reason = 'This commit already has a green full test run.'
+    elif validated_distance >= 5:
+        reason = 'No green full run covers the latest five first-parent commits.'
+    elif idle_days >= 3:
+        reason = 'Master has unvalidated commits and has been idle for at least three days.'
+    else:
+        reason = 'Fewer than five unvalidated commits; master has not been idle for three days.'
+    print('Full test suite selected:', due, '-', reason)
     print('Recent full validation distance:', validated_distance,
           '; master idle days:', round(idle_days, 2),
           '; full validation active:', running)
