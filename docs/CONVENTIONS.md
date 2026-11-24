@@ -594,17 +594,20 @@ Package tests have two profiles, selected with `OMNI_TEST_SUITE`:
 
 - `smoke`: guides and the base public interface on the existing compiler,
   platform, and language-standard matrix. Cover ordinary success and failure
-  results, diagnostics, and direct mapping overrides. Commit and PR CI use it.
+  results, diagnostics, and direct mapping overrides. PRs and ordinary master
+  commits use it.
 - `full`: smoke sources plus regressions, policies, negative cases, and
   integration tests. Local builds default to this profile. Release tags require
   it; CI's manual `full_suite` input also selects it.
 
-Automatic full validation runs after five master commits since the latest
-successful full run, or after at least one new commit followed by three idle
-days. Count commits along master's first-parent history. Master pushes and a
-daily schedule check the policy; active full runs prevent duplicates. A missing
-baseline starts an initial full run. The cadence workflow waits for successful
-commit CI before calling the existing full suite, reusing its packages.
+Each master push selects its suite before testing: full after five commits
+since the latest successful full run, otherwise smoke. Count master's
+first-parent history; a missing baseline selects full. Run only the selected
+suite, because full already includes smoke.
+
+A daily schedule separately checks for unvalidated commits after three idle
+days. Only that check considers idle time. Active full runs prevent duplicate
+validation; scheduled runs reuse exact-commit packages when available.
 
 Put base-interface sources under `tests/smoke/`, with their own executable and
 `CMakeLists.txt`. Full targets compile those same sources alongside the remaining
