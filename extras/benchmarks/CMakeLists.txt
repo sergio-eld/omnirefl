@@ -47,4 +47,7 @@ if(NOT DEFINED BUILD_EXTENSIONS OR BUILD_EXTENSIONS)
     endif()
     add_subdirectory("${omnirefl_PROJECTS_DIR}/extensions/serialization/benchmarks"
         extensions/serialization)
+    if(NOT _OMNI_CI_RUN)
+        add_subdirectory(record_shape_compile_cost)
+    endif()
 endif()

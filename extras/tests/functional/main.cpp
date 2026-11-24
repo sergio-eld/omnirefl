@@ -2515,6 +2515,23 @@ TEST(fn_try_fold, supports_nonassignable_accumulators) {
   EXPECT_EQ(6, result.value().value);
 }
 
+TEST(fn_try_fold, consumes_array_elements) {
+  std::array<std::unique_ptr<int>, 3> values{{
+    omni::compat::make_unique<int>(1),
+    omni::compat::make_unique<int>(2),
+    omni::compat::make_unique<int>(3),
+  }};
+
+  const auto result = omni::fn::try_fold(
+    [](int total, std::unique_ptr<int> value) -> fn_test::fold_result<int> {
+      return {total + *value, true};
+    },
+    fn_test::fold_result<int>{0, true}, std::move(values));
+
+  EXPECT_TRUE(result.has_value());
+  EXPECT_EQ(6, result.value());
+}
+
 TEST(fn_try_fold, moves_the_accumulator_through_a_lazy_closure) {
   auto reduce = omni::fn::try_fold(
     [](std::unique_ptr<int> total, int value)
