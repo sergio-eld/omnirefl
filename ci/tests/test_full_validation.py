@@ -48,6 +48,9 @@ class Case:
     active: bool = False
     failed: bool = False
     pr_claim: bool = False
+    idle_check: bool = False
+    automatic: bool = False
+    checking: bool = False
 
 
 class FullValidation(unittest.TestCase):
@@ -57,10 +60,16 @@ class FullValidation(unittest.TestCase):
             Case('four new commits', 4, timedelta(), False),
             Case('five new commits', 5, timedelta(), True),
             Case('one commit idle over three days', 1,
-                 timedelta(days=3, hours=1), True),
+                 timedelta(days=3, hours=1), True, idle_check=True),
             Case('one commit idle under three days', 1,
-                 timedelta(days=2, hours=23), False),
+                 timedelta(days=2, hours=23), False, idle_check=True),
+            Case('push ignores idle time', 1, timedelta(days=4), False),
+            Case('schedule waits for idle time', 5, timedelta(), False, idle_check=True),
             Case('active full run', 5, timedelta(), False, active=True),
+            Case('active automatic full run', 5, timedelta(), False,
+                 active=True, automatic=True),
+            Case('active idle check is not full validation', 5, timedelta(), True,
+                 active=True, checking=True),
             Case('failed full run does not reset', 5, timedelta(), True, failed=True),
             Case('PR head is not its tested merge', 5, timedelta(), True, pr_claim=True),
             Case('initial baseline', None, timedelta(), True),
@@ -105,10 +114,15 @@ class FullValidation(unittest.TestCase):
                         'id': 8, 'head_sha': history[0],
                         'status': 'in_progress' if case.active else 'completed',
                         'event': 'pull_request' if case.pr_claim else 'push',
-                        'path': '.github/workflows/ci.yml',
-                        'display_title': 'CI / master / full',
+                        'path': '.github/workflows/full_validation.yml' if case.checking
+                                else '.github/workflows/ci.yml',
+                        'display_title': 'Periodic full validation' if case.checking
+                                         else 'CI / master / automatic' if case.automatic
+                                         else 'CI / master / full',
                     })
-                    jobs['8'] = [{'name': 'Full test suite',
+                    jobs['8'] = [{'name': 'Validate and prepare CI matrix / full'
+                                  if case.automatic else 'Select periodic full validation'
+                                  if case.checking else 'Full test suite',
                                   'conclusion': 'failure' if case.failed else 'success'}]
                 (root / 'api.json').write_text(json.dumps({'runs': runs, 'jobs': jobs}))
                 (root / 'gh').write_text(GITHUB_CLI)
@@ -120,7 +134,8 @@ class FullValidation(unittest.TestCase):
                     PATH=directory + os.pathsep + os.environ['PATH'])
                 result = subprocess.run(
                     [sys.executable, str(Path(__file__).resolve().parents[1]
-                                         / 'full_validation.py')],
+                                         / 'full_validation.py')]
+                    + (['--idle'] if case.idle_check else []),
                     cwd=directory, env=environment, capture_output=True, text=True)
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual('full_suite=' + str(case.expected).lower() + '\n',

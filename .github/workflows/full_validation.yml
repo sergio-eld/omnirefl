@@ -1,13 +1,10 @@
 name: Periodic full validation
 
 on:
-  push:
-    branches:
-      - master
   schedule:
     - cron: '17 3 * * *'
 
-# Finish the active full run; the newest pending master revision is checked next.
+# Avoid overlapping scheduled full runs.
 concurrency:
   group: full-validation-master
   cancel-in-progress: false
@@ -33,28 +30,28 @@ jobs:
         id: policy
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 ci/full_validation.py
+        run: |
+          selection=$(python3 ci/full_validation.py --idle)
+          printf '%s\n' "$selection"
+          printf '## Full-suite cadence\n\n%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
 
-  commit-ci:
-    name: Wait for successful commit CI
-    needs: select
-    if: ${{ 'true' == needs.select.outputs.full_suite }}
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v7
-      - name: Wait for reusable commit packages
-        timeout-minutes: 180
+      - name: "Full suite selected: ${{ steps.policy.outputs.full_suite }}"
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 ci/reuse_ci.py find --wait-master required --targets extras
+          FULL_SUITE: ${{ steps.policy.outputs.full_suite }}
+        run: |
+          if [ true = "$FULL_SUITE" ]; then
+            echo '::notice::Full test suite selected after three idle days; reusing exact-commit packages when available.'
+            echo '## Full test suite selected' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Running all tests, reusing exact-commit packages when available.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::notice::No additional full test run is due.'
+            echo '## No additional full test run due' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   validation:
     name: Periodic full suite
-    needs: commit-ci
+    needs: select
+    if: ${{ 'true' == needs.select.outputs.full_suite }}
     uses: ./.github/workflows/ci.yml
     with:
       build_sources: true
