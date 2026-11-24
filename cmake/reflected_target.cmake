@@ -385,6 +385,7 @@ function(omni_reflected_target target)
 
     # Shared lists for common plumbing
     set(_gen_outputs)
+    set(_command_checks)
     set(_gen_headers)
     set(_gen_depfiles)
 
@@ -399,6 +400,7 @@ function(omni_reflected_target target)
         set(_generated_header "${_out_dir}/${_stem}_${_src_hash}.omnirefl.hpp")
         set(_depfile "${_generated_header}.d")
         set(_stamp "${_generated_header}.stamp")
+        set(_command_file "${_generated_header}.command")
 
         file(MAKE_DIRECTORY "${_out_dir}")
         if(NOT EXISTS "${_generated_header}")
@@ -429,11 +431,42 @@ function(omni_reflected_target target)
         # launchers. Summed operation times are not parallel build wall time;
         # report after the target builds, without claiming whole-build timing.
 
-        # The compiler command is only available at build time from
-        # compile_commands.json, so this cannot be expressed as a static
-        # add_custom_command argument list. The -P bridge runs ccdb_query,
-        # tokenizes its shell-quoted output, then invokes omnirefl with those
-        # compiler args after `--` while preserving diagnostics.
+        # The database is available only after generation. Extract a stable
+        # per-source command so unrelated database edits do not regenerate
+        # reflection. Include the target to distinguish shared source files.
+        set(_extract_command
+            ${CMAKE_COMMAND}
+            -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
+            -D "COMP_DB=${_comp_db}"
+            -D "SOURCE=${_src}"
+            -D "OUTPUT_CONTAINS=/${target}.dir/"
+            -D "OUT=${_command_file}"
+            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/write_compile_command.cmake")
+        set(_command_dependencies)
+        set(_command_byproducts "${_command_file}")
+        if(CMAKE_GENERATOR MATCHES "Makefiles")
+            # Make has no recovery rule for a missing BYPRODUCT. Give the
+            # snapshot its own rule, then order the checked stamp after it.
+            add_custom_command(OUTPUT "${_command_file}"
+                COMMAND ${_extract_command}
+                VERBATIM)
+            set(_command_dependencies "${_command_file}")
+            set(_command_byproducts)
+        endif()
+
+        # The checked stamp advances even when the command is unchanged;
+        # otherwise Make repeats the database query on every later build.
+        add_custom_command(
+            OUTPUT "${_command_file}.stamp"
+            BYPRODUCTS ${_command_byproducts}
+            COMMAND ${_extract_command}
+            COMMAND ${CMAKE_COMMAND} -E touch "${_command_file}.stamp"
+            COMMENT "omnirefl: reading compile command for ${target}: ${_src}"
+            DEPENDS "${_comp_db}" omni::ccdb_query ${_command_dependencies}
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/write_compile_command.cmake"
+            VERBATIM
+        )
+
         # Slash delimiters make the target's `.dir` a complete output-path
         # component instead of a suffix that can match another target name.
         # The depfile names the header as its target; Ninja requires that output
@@ -442,12 +475,10 @@ function(omni_reflected_target target)
             OUTPUT "${_generated_header}" "${_stamp}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
             COMMAND ${CMAKE_COMMAND}
-                -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
                 -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
                 -D "COMP_DB=${_comp_db}"
-                -D "GENERATOR=${CMAKE_GENERATOR}"
+                -D "COMMAND_FILE=${_command_file}"
                 -D "SOURCE=${_src}"
-                -D "OUTPUT_CONTAINS=/${target}.dir/"
                 -D "OUT=${_generated_header}"
                 -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
                 -D "NO_ANNOTATIONS=${_no_annotations}"
@@ -459,12 +490,14 @@ function(omni_reflected_target target)
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
             COMMENT "omnirefl: generating reflection for ${target}: ${_src}"
-            DEPENDS "${_src}" "${_comp_db}" omni::tool omni::ccdb_query
+            DEPENDS "${_src}" "${_command_file}" omni::tool
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             BYPRODUCTS "${_depfile}"
             DEPFILE "${_depfile}"
             VERBATIM
         )
 
+        list(APPEND _command_checks "${_command_file}.stamp")
         list(APPEND _gen_outputs "${_stamp}")
         list(APPEND _gen_headers "${_generated_header}")
         list(APPEND _gen_depfiles "${_depfile}")
@@ -494,8 +527,11 @@ function(omni_reflected_target target)
 
     # Common plumbing: hook outputs into build + manual force-regenerate target
     set(_gen_target "_gen.${target}.omni")
+    add_custom_target(_commands.${target}.omni DEPENDS ${_command_checks})
     add_custom_target(${_gen_target} DEPENDS ${_gen_outputs})
-    set_target_properties(${_gen_target} PROPERTIES FOLDER "omnirefl/internal")
+    add_dependencies(${_gen_target} _commands.${target}.omni)
+    set_target_properties(_commands.${target}.omni ${_gen_target}
+        PROPERTIES FOLDER "omnirefl/internal")
     add_dependencies(${target} ${_gen_target})
 
     set(_cfg_arg "")

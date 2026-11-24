@@ -980,47 +980,42 @@ struct has_fold_and_then<Result, compat::void_t<decltype(
     std::is_same<Result, decltype(std::declval<Result &&>().and_then(
       std::declval<Result (*)(typename Result::value_type &&)>()))> {};
 
-template <typename Visit, typename Result>
-constexpr Result try_fold_values(Visit &, Result state) { return state; }
+// Index one tuple rather than instantiate a tuple for every suffix.
+// Named continuations retain C++11 constexpr support and short-circuiting
+// without requiring assignment of the expected-like accumulator.
+template <std::size_t Index, std::size_t Size>
+struct try_fold_values {
+  template <typename Visit, typename Result, typename Tuple>
+  struct continuation {
+    Visit &visit;
+    Tuple &tuple;
 
-// A named continuation preserves C++11 support without generic lambdas.
-// References keep tuple elements stationary and retain their call categories.
-template <typename Visit, typename Result, typename Element, typename... Rest>
-struct cpp11_try_fold_step;
+    template <typename Value>
+    constexpr Result operator()(Value &&value) const {
+      return try_fold_values<Index + 1, Size>::call(this->visit,
+        compat::invoke(this->visit, std::forward<Value>(value),
+          compat::detail::tuple_get<Index>(std::forward<Tuple>(this->tuple))),
+        std::forward<Tuple>(this->tuple));
+    }
+  };
 
-template <typename Visit,
-  typename Result,
-  typename Element,
-  typename... Rest>
-constexpr Result try_fold_values(Visit &visit,
-  Result state, Element &&element, Rest &&...rest) {
-  return std::move(state).and_then(
-    cpp11_try_fold_step<Visit, Result, Element, Rest...>{
-      visit, element, std::forward_as_tuple(rest...)});
-}
-
-template <typename Visit, typename Result, typename Element, typename... Rest>
-struct cpp11_try_fold_step {
-  Visit &visit;
-  Element &element;
-  std::tuple<Rest &...> rest;
-
-  template <typename Value, std::size_t... Index>
-  constexpr Result call(Value &&value, compat::index_sequence<Index...>) const {
-    return try_fold_values(this->visit,
-      compat::invoke(this->visit, std::forward<Value>(value),
-        std::forward<Element>(this->element)),
-
-      std::forward<Rest>(std::get<Index>(this->rest))...);
-  }
-
-  template <typename Value>
-  constexpr Result operator()(Value &&value) const {
-    return this->call(std::forward<Value>(value),
-      compat::make_index_sequence<sizeof...(Rest)>{});
+  template <typename Visit, typename Result, typename Tuple>
+  static constexpr Result call(Visit &visit, Result state, Tuple &&tuple) {
+    return std::move(state).and_then(
+      continuation<Visit, Result, Tuple>{visit, tuple});
   }
 };
 
+template <std::size_t Size>
+struct try_fold_values<Size, Size> {
+  template <typename Visit, typename Result, typename Tuple>
+  static constexpr Result call(Visit &, Result state, Tuple &&) {
+    return state;
+  }
+};
+
+// Keep apply's single evaluation of tuple getters, including value results.
+// One reference tuple replaces the separate tuple formerly built per suffix.
 template <typename Visit, typename Result>
 struct cpp11_try_fold_visit {
   Visit &visit;
@@ -1028,8 +1023,9 @@ struct cpp11_try_fold_visit {
 
   template <typename... Element>
   constexpr Result operator()(Element &&...element) const {
-    return try_fold_values(this->visit, std::move(this->initial),
-      std::forward<Element>(element)...);
+    return try_fold_values<0, sizeof...(Element)>::call(this->visit,
+      std::move(this->initial),
+      std::forward_as_tuple(std::forward<Element>(element)...));
   }
 };
 

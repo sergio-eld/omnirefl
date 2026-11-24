@@ -363,31 +363,25 @@ auto map_record_field_value(const depth_exceeded &stopped,
   return read_node(stopped, node, type);
 }
 
-template <typename Record, std::size_t Index, bool CheckPresence,
-  typename Frame>
-bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
-  ::operator()() const {
-  auto &slot = std::get<Index>(this->frame.values);
-  if (CheckPresence)
-    return process_record_presence(this->frame.result, this->frame.object,
-      this->frame.pending[Index], &slot);
-
-  const bool present = this->frame.pending[Index] != ::ryml::NONE;
+template <typename Record, std::size_t Index, typename Frame>
+bool process_record_member(Frame *frame) {
+  auto &slot = std::get<Index>(frame->values);
+  const bool present = frame->pending[Index] != ::ryml::NONE;
   if (present || (slot.stored && std::tuple_size<decltype(
-      this->frame.strategy.validate_fields)>::value != 0)) {
+      frame->strategy.validate_fields)>::value != 0)) {
     constexpr auto type = omni::type_t<
       typename compat::remove_cvref_t<decltype(slot)>::type>{};
     constexpr auto field = typename compat::remove_cvref_t<
       decltype(slot)>::field_type{};
-    const auto &state = this->frame.result->state.template field<Record>(field);
+    const auto &state = frame->result->state.template field<Record>(field);
     const auto node = present
-      ? ::ryml::ConstNodeRef{this->frame.object.tree(),
-          this->frame.pending[Index]}
+      ? ::ryml::ConstNodeRef{frame->object.tree(),
+          frame->pending[Index]}
       : ::ryml::ConstNodeRef{};
     // Validation needs the enclosing policy/progress, not the child's path.
     // A terminal child has no state, so keep the parent for validation.
-    auto mapped = validate_record_field(this->frame.result->state, node, field,
-      compat::invoke([this, &slot, &state, &node, &type, present]()
+    auto mapped = validate_record_field(frame->result->state, node, field,
+      compat::invoke([frame, &slot, &state, &node, &type, present]()
         -> with_diagnostics_t<typename decltype(type)::type> {
         if (!present)
           return {std::move(slot.stored),
@@ -395,14 +389,14 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
               /*base=*/{},
 #endif
-              this->frame.result->state.config.error_policy, {}}, {}, {}}};
+              frame->result->state.config.error_policy, {}}, {}, {}}};
         return map_record_field_value(state, node, type);
-      }), this->frame.strategy.validate_fields);
+      }), frame->strategy.validate_fields);
     if (!present)
       for (auto &entry : mapped.diagnostics.issues) {
         if (entry.node_id != ::ryml::NONE)
           continue;
-        auto path = core::node_path(this->frame.object);
+        auto path = core::node_path(frame->object);
         path.push_back({c4::to_csubstr(field.name()), compat::nullopt});
         path.insert(path.end(), entry.path.begin(), entry.path.end());
         entry.path = std::move(path);
@@ -411,10 +405,10 @@ bool cpp11_record_member_event<Record, Index, CheckPresence, Frame>
       slot.stored.emplace(std::move(*mapped.value));
     if (!mapped.value || !mapped.diagnostics.issues.empty()
       || !mapped.diagnostics.parse_error_message.empty())
-      this->frame.result->append(std::move(mapped).transform(
+      frame->result->append(std::move(mapped).transform(
         omni::fn::default_value<compat::monostate>{}));
   }
-  return !this->frame.result->stopped();
+  return !frame->result->stopped();
 }
 
 } // namespace detail

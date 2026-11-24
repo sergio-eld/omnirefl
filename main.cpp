@@ -535,6 +535,8 @@ struct namespace_component {
   auto operator<=>(const namespace_component &) const = default;
 };
 
+enum class record_kind { is_struct, is_class, is_union };
+
 struct nm_qual_type {
   /// nullopt for unnamed types
   std::optional<std::string> name;
@@ -549,6 +551,8 @@ struct nm_qual_type {
   // instead of recovering missing structure from source text.
   /// non-empty for nested types `struct foo { struct bar{}; };`
   std::vector<std::string> enclosing_records;
+  /// Kind of the outermost enclosing record, if present.
+  std::optional<record_kind> enclosing_root_kind;
 
   static meta::nm_qual_type from_decl(const clang::NamedDecl *decl) noexcept;
 };
@@ -672,11 +676,7 @@ struct record_data {
   std::set<std::string> declared_member_names;
   std::set<std::string> skipped_overloaded_methods;
 
-  enum type_t {
-    is_struct,
-    is_class,
-    is_union,
-  } type;
+  record_kind type;
 
   bool has_bases;
   bool is_aggregatable;
@@ -927,16 +927,16 @@ struct action_timer {
 } // namespace
 
 template <>
-struct std::formatter<meta::record_data::type_t, char>:
+struct std::formatter<meta::record_kind, char>:
     std::formatter<std::string_view, char> {
   template <typename FormatContext>
-  auto format(meta::record_data::type_t t, FormatContext &ctx) const {
+  auto format(meta::record_kind t, FormatContext &ctx) const {
     switch (t) {
-    case meta::record_data::is_struct:
+    case meta::record_kind::is_struct:
       return std::formatter<std::string_view, char>::format("struct"sv, ctx);
-    case meta::record_data::is_class:
+    case meta::record_kind::is_class:
       return std::formatter<std::string_view, char>::format("class"sv, ctx);
-    case meta::record_data::is_union:
+    case meta::record_kind::is_union:
       return std::formatter<std::string_view, char>::format("union"sv, ctx);
     }
 
@@ -4882,19 +4882,32 @@ auto meta::template_data::from_decl(const clang::ASTContext &ast,
   };
 }
 
+namespace meta::impl {
+
+record_kind record_kind_from_decl(const clang::RecordDecl &d) {
+  return d.isStruct() //
+    ? record_kind::is_struct
+    : d.isClass() //
+      ? record_kind::is_class
+      : record_kind::is_union;
+}
+
+} // namespace meta::impl
+
 meta::nm_qual_type meta::nm_qual_type::from_decl(
   const clang::NamedDecl *decl) noexcept {
   // refactorme: function bodies are also captured as enclosing_records. I think
   // capturing them for rendering in diagnostics is somewhat useful, but I'd
   // need to introduce a sum type like {namespace|struct|function}.
-  auto [namespaces, enclosing_records] =
+  auto [namespaces, enclosing_records, enclosing_root_kind] =
     std::invoke([&decl_ctx = *decl->getDeclContext()] {
-      std::pair result{
+      std::tuple result{
         std::vector<meta::namespace_component>{},
         std::vector<std::string>{},
+        std::optional<meta::record_kind>{},
       };
 
-      auto &&[namespaces, enclosing_records] = result;
+      auto &&[namespaces, enclosing_records, enclosing_root_kind] = result;
 
       const clang::DeclContext *dc = &decl_ctx;
       while (!llvm::isa<clang::TranslationUnitDecl>(dc)) {
@@ -4919,6 +4932,7 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
           // unnamed records. I need to get back this later, because rendering
           // this is probably more difficult...
           enclosing_records.emplace_back(id ? id->getName().str() : "");
+          enclosing_root_kind = meta::impl::record_kind_from_decl(*rec);
         }
 
         dc = dc->getParent();
@@ -4970,6 +4984,7 @@ meta::nm_qual_type meta::nm_qual_type::from_decl(
     }),
     .namespaces = std::move(namespaces),
     .enclosing_records = std::move(enclosing_records),
+    .enclosing_root_kind = std::move(enclosing_root_kind),
   };
 }
 
@@ -6302,11 +6317,7 @@ auto meta::record_data::from_type(const clang::ASTContext &ast,
       ? skipped_overloaded_public_method_names(cxx_decl)
       : std::set<std::string>{},
 
-    .type = r_decl.isStruct() //
-      ? meta::record_data::is_struct
-      : r_decl.isClass() //
-        ? meta::record_data::is_class
-        : meta::record_data::is_union,
+    .type = meta::impl::record_kind_from_decl(r_decl),
 
     // Unlike public_bases, this includes bases that are not reflected.
     .has_bases = cxx_decl && !cxx_decl->bases().empty(),
@@ -6630,6 +6641,7 @@ std::string declaration_for_enclosing_root_as_dependent(
 std::string forward_declaration_for_enclosing_root(
   const meta::nm_qual_type &inner_type) {
   assert(!inner_type.enclosing_records.empty());
+  assert(inner_type.enclosing_root_kind);
 
   return std::format(
     "{}"
@@ -6642,7 +6654,8 @@ std::string forward_declaration_for_enclosing_root(
           return std::format("{}\n", namespace_opening(ns));
         }) //
       | util::format_range,
-    std::format("struct {}", inner_type.enclosing_records.front()),
+    std::format("{} {}", *inner_type.enclosing_root_kind,
+      inner_type.enclosing_records.front()),
     inner_type.namespaces //
       | std::views::reverse //
       | std::views::filter(
@@ -7425,7 +7438,7 @@ std::string reflectable_body(const meta::record_data &d) {
 
     d.has_bases,
     d.is_aggregatable,
-    meta::record_data::is_union == d.type,
+    meta::record_kind::is_union == d.type,
     d.template_info.has_value());
 }
 

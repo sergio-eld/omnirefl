@@ -320,27 +320,42 @@ bool process_record_presence(node_accumulator<State> *result,
   return !result->stopped();
 }
 
-// Events capture their frame; the fold carries only continuation success.
+template <std::size_t Index, typename Frame>
+bool process_record_presence_event(Frame *frame) {
+  auto &slot = std::get<Index>(frame->values);
+  return process_record_presence(frame->result, frame->object,
+    frame->pending[Index], &slot);
+}
+
+// Defined after type-mapping selection is available.
+template <typename Record, std::size_t Index, typename Frame>
+bool process_record_member(Frame *frame);
+
+// Bind the frame once; index tags keep callback targets known to the compiler.
+template <typename Record, typename Frame, bool CheckPresence>
 struct cpp11_process_record_event {
-  template <typename Event>
-  auto operator()(compat::monostate, const Event &event) const
+  Frame *frame;
+
+  template <std::size_t Index>
+  auto operator()(compat::monostate,
+    std::integral_constant<std::size_t, Index>) const
     -> compat::expected<compat::monostate, compat::monostate> {
-    if (event())
+    if (this->template process<Index>(compat::bool_constant<CheckPresence>{}))
       return compat::monostate{};
 
     return compat::unexpected<compat::monostate>{compat::monostate{}};
   }
-};
 
-// GCC 7 rejects pack expansions found only inside lambda bodies. Indexed
-// callables retain the same reference capture without that expansion.
-template <typename Record, std::size_t Index, bool CheckPresence,
-  typename Frame>
-struct cpp11_record_member_event {
-  Frame &frame;
+  // C++11 tag dispatch avoids instantiating conversions in the presence pass.
+  template <std::size_t Index>
+  bool process(std::true_type) const {
+    return process_record_presence_event<Index>(this->frame);
+  }
 
-  // Defined after type-mapping selection is available.
-  bool operator()() const;
+  template <std::size_t Index>
+  bool process(std::false_type) const {
+    return process_record_member<Record, Index>(this->frame);
+  }
 };
 
 // Tuple indices keep field values and selected nodes paired without a search.
@@ -361,17 +376,18 @@ auto process_record_members(node_accumulator<State> *result,
     compat::optional<typename Finalizer::result_type::value_type> *value;
   } frame{result, object, *values, pending, strategy, nullptr};
 
-  const auto events = std::tuple_cat(
-    std::make_tuple(
-      cpp11_record_member_event<Record, Index, true,
-        decltype(frame)>{frame}...),
-    std::make_tuple(
-      cpp11_record_member_event<Record, Index, false,
-        decltype(frame)>{frame}...));
+  // These tuple types are shared by all records of the same width, rather
+  // than embedding the entire frame type separately in every tuple element.
+  constexpr std::tuple<std::integral_constant<std::size_t, Index>...> events{};
 
-  auto folded = events | omni::fn::try_fold(cpp11_process_record_event{},
+  // Separate passes bound each fold's instantiation depth to the field count.
+  auto checked = events | omni::fn::try_fold(
+    cpp11_process_record_event<Record, decltype(frame), true>{&frame},
     compat::expected<compat::monostate, compat::monostate>{
       compat::monostate{}});
+  auto folded = events | omni::fn::try_fold(
+    cpp11_process_record_event<Record, decltype(frame), false>{&frame},
+    std::move(checked));
   if (!result->result.value)
     return {compat::nullopt, std::move(result->result.diagnostics)};
 

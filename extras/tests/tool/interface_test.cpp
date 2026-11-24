@@ -40,6 +40,11 @@ struct owner {
   struct nested_template { T value; };
 };
 
+class class_owner {
+public:
+  struct nested_struct {};
+};
+
 struct template_member { struct_template<int> value; };
 struct template_base: struct_template<int> {};
 using template_alias = struct_template<long>;
@@ -100,6 +105,8 @@ const test_case cases[]{
     omni::type_t<mixed_template<int, 2>>{}), {false, true}},
   {"NestedStruct", omni::reflected_call(inspect{},
     omni::type_t<owner::nested_struct>{}), {false, false}},
+  {"NestedStructInClass", omni::reflected_call(inspect{},
+    omni::type_t<class_owner::nested_struct>{}), {false, false}},
   {"NestedUnion", omni::reflected_call(inspect{},
     omni::type_t<owner::nested_union>{}), {true, false}},
   {"NestedTemplate", omni::reflected_call(inspect{},
