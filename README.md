@@ -426,9 +426,8 @@ documentation.
 - **[Latest CI builds](https://github.com/sergio-eld/omnirefl/actions/workflows/ci.yml):** workflow artifacts
   for unreleased changes; availability is temporary.
 
-<!-- TODO: Near Install, explain that the page tracks master and may include
-unreleased features; link to the README at the current release tag, currently
-https://github.com/sergio-eld/omnirefl/blob/v0.0.7/README.md. -->
+This page tracks `master` and may describe unreleased features. Use the
+README at your installed release tag when working with a released package.
 <!-- pages:install:end -->
 
 ### Project integration
@@ -591,7 +590,13 @@ This platform-independent archive contains the examples, tests, and benchmarks.
 
 Examples, tests, and benchmarks are enabled by default; disable a category with
 `-DBUILD_EXAMPLES=OFF`, `-DBUILD_TESTING=OFF`, or `-DBUILD_BENCHMARKS=OFF`.
-Unsupported examples are skipped with a status message.
+Examples whose toolchain requirements are unmet are reported and skipped.
+
+Tests default to the full suite. Use `-DOMNI_TEST_SUITE=smoke` for the smaller
+base-interface suite. Both CI suites cover the supported standard matrix,
+plus guides when supported. PRs use smoke; master selects smoke or full by the
+[validation cadence](docs/CONVENTIONS.md#ci-test-profiles-and-release-validation).
+Release tags and manual full-suite requests use full validation.
 
 CI compares instrumentation and Release object-build times using the
 [benchmark baseline](extras/benchmarks/instrumentation/baseline_test.cpp).
@@ -620,8 +625,9 @@ Extension examples, tests, and benchmarks are grouped under `extras/extensions`.
 <!-- pages:extensions:start -->
 ## Extensions
 
-- **Serialization:** RapidYAML-backed JSON/YAML serialization, compatible with
-  C++11. See the [guide](extras/extensions/serialization/guide/main.cpp).
+- **Serialization:** read and write JSON/YAML using existing C++ types, with
+  diagnostics, field filtering, aliases, and validation. Compatible with C++11;
+  see the [guide](extras/extensions/serialization/guide/main.cpp).
 - Further extensions under consideration include RPC mapping, schema generation,
   and command-line interfaces.
 <!-- pages:extensions:end -->
@@ -773,19 +779,25 @@ Docker Compose uses prepared, versioned build images. Rebuilding a complete
 toolchain image locally can take close to an hour.
 
 ```bash
-export PACKAGE_DIR=./artifacts/packages/current
-docker compose run --rm build-musl
-docker compose run --rm build-musl-aarch64
-docker compose run --rm build-ucrt
-docker compose run --rm build-cosmo
+PACKAGE_DIR=./artifacts/packages/linux-x86_64-musl \
+  docker compose run --rm build-musl
+PACKAGE_DIR=./artifacts/packages/linux-aarch64-musl \
+  docker compose run --rm build-musl-aarch64
+PACKAGE_DIR=./artifacts/packages/windows-x86_64-ucrt \
+  docker compose run --rm build-ucrt
+PACKAGE_DIR=./artifacts/packages/cosmo-universal \
+  docker compose run --rm build-cosmo
+docker compose run --rm package-extras
 ```
 
-The Linux package test expects the matching musl archive and the universal
-Cosmopolitan archive in `PACKAGE_DIR`; the commands above populate that
-directory.
+Keep each target's output separate: a package test expects exactly one archive
+in `PACKAGE_DIR`, together with the extras archive. Test each package in turn:
 
 ```bash
-docker compose run --rm test-alpine
+PACKAGE_DIR=./artifacts/packages/linux-x86_64-musl \
+  docker compose run --rm test-alpine
+PACKAGE_DIR=./artifacts/packages/cosmo-universal \
+  docker compose run --rm test-alpine
 ```
 
 ## Tested Platforms
@@ -994,9 +1006,15 @@ Report defects through
 on Linux, please include the command line, stderr/stdout, the input `.cpp`, the
 generated header if one was produced, and a backtrace.
 
+CI publishes separate `symbols-<target>-<commit>` artifacts. Use symbols from
+the same build as the binary. For native Linux packages, put the `.debug` files
+in a `.debug/` directory beside the executables so GDB finds them automatically.
+
+For a native Linux executable:
+
 ```bash
 # Enable core dumps for the current shell, then rerun the exact failing command.
-binary=./omnirefl # Use ./omnirefl.exe for the Cosmopolitan APE payload.
+binary=./omnirefl
 ulimit -c unlimited
 "$binary" -o out.omnirefl.hpp -c source.cpp -- <compiler command...>
 
@@ -1007,6 +1025,17 @@ gdb --batch -ex "thread apply all bt full" "$binary" ./core > omnirefl.bt.txt
 coredumpctl --output=omnirefl.core dump "$(basename "$binary")"
 gdb --batch -ex "thread apply all bt full" \
   "$binary" omnirefl.core > omnirefl.bt.txt
+```
+
+For a Cosmopolitan APE payload, use `assimilate` from the
+[Cosmopolitan toolchain](https://github.com/jart/cosmopolitan) to make an ELF copy
+for GDB, and load the corresponding architecture's symbols explicitly:
+
+```bash
+# x86_64; use -a and aarch64/omnirefl.debug for ARM64.
+assimilate -e -x -o omnirefl.elf omnirefl.exe
+gdb --batch -ex "symbol-file symbols/x86_64/omnirefl.debug" \
+  -ex "thread apply all bt full" ./omnirefl.elf ./core > omnirefl.bt.txt
 ```
 
 If no core file is produced, check `cat /proc/sys/kernel/core_pattern`; some
