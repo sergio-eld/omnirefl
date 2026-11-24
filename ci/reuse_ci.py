@@ -36,9 +36,7 @@ def pages(path, key):
 
 
 def successful_run(run):
-    return (run['head_sha'] == COMMIT
-            and run['status'] == 'completed'
-            and run['conclusion'] == 'success')
+    return run['status'] == 'completed' and run['conclusion'] == 'success'
 
 
 def artifacts(run_id):
@@ -71,16 +69,35 @@ def full_suite_passed(run_id, available):
     return False
 
 
-def reusable_run(run, full_suite):
+def reusable_run(run, available, full_suite):
     if run['head_sha'] != COMMIT:
-        return False
+        # A PR can author its own artifacts. Bind both proof kinds to GitHub's
+        # recorded base/head parents before trusting a merge-commit claim.
+        if (run.get('event') != 'pull_request'
+                or (run.get('head_repository') or {}).get('full_name') != REPOSITORY):
+            return False
+        merged = api('git/commits/' + COMMIT)
+        parents = [parent['sha'] for parent in merged['parents']]
+        if merged['sha'] != COMMIT or len(parents) != 2 or not any(
+                parents == [pr['base']['sha'], run['head_sha']]
+                and pr['head']['sha'] == run['head_sha']
+                for pr in run.get('pull_requests', [])):
+            return False
+        marker = available.get('validated-commit-' + COMMIT)
+        if not marker:
+            return False
+        with archive(marker) as content:
+            proof = json.loads(content.read('validated-commit.json'))
+        if (proof.get('commit') != COMMIT
+                or str(proof.get('run_id')) != str(run['id'])):
+            return False
     if successful_run(run) or full_suite:
         # A release may fail in publishing after its full validation passed.
         return True
     # A flaky rerun does not invalidate an earlier green attempt of this commit.
     for attempt in range(int(run.get('run_attempt', 1)) - 1, 0, -1):
         previous = api('actions/runs/' + str(run['id']) + '/attempts/' + str(attempt))
-        if successful_run(previous):
+        if previous['head_sha'] == run['head_sha'] and successful_run(previous):
             return True
     return False
 
@@ -101,15 +118,26 @@ def find(args):
 
     package_run = ''
     full_suite = False
-    runs = pages('actions/runs?' + urlencode({'head_sha': COMMIT}),
-                 'workflow_runs')
-    for run in runs:
-        if (run['head_sha'] != COMMIT or run['path'].split('@')[0] not in (
-                '.github/workflows/ci.yml', '.github/workflows/release.yml')):
+    runs = {run['id']: run for run in pages(
+        'actions/runs?' + urlencode({'head_sha': COMMIT}), 'workflow_runs')}
+    # The repository artifact index can find tested PR merge commits even
+    # though the workflow-run index only exposes their head commits.
+    markers = pages('actions/artifacts?' + urlencode({
+        'name': 'validated-commit-' + COMMIT,
+    }), 'artifacts')
+    for marker in markers:
+        if marker['expired']:
+            continue
+        run_id = marker['workflow_run']['id']
+        if run_id not in runs:
+            runs[run_id] = api('actions/runs/' + str(run_id))
+    for run in runs.values():
+        if run['path'].split('@')[0] not in (
+                '.github/workflows/ci.yml', '.github/workflows/release.yml'):
             continue
         available = artifacts(run['id'])
         passed = full_suite_passed(run['id'], available)
-        if not reusable_run(run, passed):
+        if not reusable_run(run, available, passed):
             continue
         full_suite = full_suite or passed
         required = [artifact_name('packages', t) for t in args.targets]
@@ -141,7 +169,7 @@ def extract(artifact, destination):
 def download(args):
     run = api('actions/runs/' + args.run_id)
     available = artifacts(args.run_id)
-    if not reusable_run(run, full_suite_passed(args.run_id, available)):
+    if not reusable_run(run, available, full_suite_passed(args.run_id, available)):
         raise RuntimeError('Package source is not successful CI for ' + COMMIT)
     extract(available[artifact_name('packages', args.target)], args.packages_dir)
     if args.symbols_dir:

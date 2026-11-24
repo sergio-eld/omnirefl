@@ -1,7 +1,6 @@
 name: CI
 run-name: >-
-  CI / ${{ 'pull_request' == github.event_name
-    && github.event.pull_request.head.ref || github.ref_name }}
+  CI / ${{ github.event.pull_request.head.ref || github.ref_name }}
   / ${{ inputs.full_suite && 'full' || 'smoke' }}
 
 on:
@@ -301,6 +300,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+      - name: Check package reuse policy
+        run: python3 ci/tests/reuse_ci.py
       - name: Find successful package source
         id: source
         env:
@@ -1186,6 +1187,28 @@ jobs:
           if failed:
               raise SystemExit('Required jobs failed: ' + ', '.join(failed))
           PY
+
+      - name: Record the tested commit
+        if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          Path('validated-commit.json').write_text(json.dumps({
+              'commit': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+          }))
+          PYTHON
+
+      - name: Upload tested-commit proof
+        if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: validated-commit-${{ github.sha }}
+          path: validated-commit.json
+          if-no-files-found: error
+          overwrite: true
 
   full-suite:
     name: Full test suite

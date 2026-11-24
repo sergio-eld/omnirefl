@@ -605,7 +605,8 @@ Guides remain separate executables and run when their required standard is
 available. Select locally with `-DOMNI_TEST_SUITE=smoke` or `full`.
 
 All CI entry points reuse available packages from successful CI for the exact
-commit, including smoke runs. They rebuild when no complete package set remains.
+commit, including smoke runs. PR proofs identify the tested merge commit, not
+just its head revision. They rebuild when no complete package set remains.
 Release preflight separately checks for a successful full-suite proof for that
 same commit: smoke success cannot replace full validation. Amended commits have
 new IDs and cannot reuse either result.
