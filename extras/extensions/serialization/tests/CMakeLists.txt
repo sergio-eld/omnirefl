@@ -24,7 +24,7 @@ endif()
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.json_ryml.test")
     add_executable(${_test_target} smoke/main.cpp smoke/scalar_roots.cpp
-        smoke/sequence_roots.cpp serialization.cpp scalar_roots.cpp
+        smoke/custom_mapping.cpp serialization.cpp scalar_roots.cpp
         sequence_roots.cpp
         json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp

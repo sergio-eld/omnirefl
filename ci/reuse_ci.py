@@ -7,50 +7,28 @@ and producing run. Used by both CI and release preflight.
 """
 
 import argparse
-import hashlib
-import io
+from collections import Counter
 import json
 import os
-from pathlib import Path
 import subprocess
 from urllib.parse import urlencode
-import zipfile
 
+from github_artifacts import api, archive, artifacts, extract, pages
 
 REPOSITORY = os.environ['GITHUB_REPOSITORY']
 COMMIT = os.environ['GITHUB_SHA']
-
-
-def api(path, binary=False):
-    data = subprocess.check_output(['gh', 'api', 'repos/' + REPOSITORY + '/' + path])
-    return data if binary else json.loads(data)
-
-
-def pages(path, key):
-    page = 1
-    while page:
-        separator = '&' if '?' in path else '?'
-        entries = api(path + separator + urlencode({'per_page': 100, 'page': page}))[key]
-        yield from entries
-        page = page + 1 if len(entries) == 100 else 0
 
 
 def successful_run(run):
     return run['status'] == 'completed' and run['conclusion'] == 'success'
 
 
-def artifacts(run_id):
-    return {a['name']: a for a in pages('actions/runs/' + str(run_id) + '/artifacts',
-                                      'artifacts')
-            if not a['expired'] and (a.get('digest') or '').startswith('sha256:')}
-
-
-def archive(artifact):
-    data = api('actions/artifacts/' + str(artifact['id']) + '/zip', binary=True)
-    digest = 'sha256:' + hashlib.sha256(data).hexdigest()
-    if digest != artifact['digest']:
-        raise RuntimeError('Artifact digest mismatch: ' + artifact['name'])
-    return zipfile.ZipFile(io.BytesIO(data))
+def available_artifacts(run_id):
+    entries = artifacts(run_id)
+    counts = Counter(artifact['name'] for artifact in entries)
+    return {a['name']: a for a in entries
+            if counts[a['name']] == 1 and not a['expired']
+            and (a.get('digest') or '').startswith('sha256:')}
 
 
 def full_suite_passed(run_id, available):
@@ -69,7 +47,7 @@ def full_suite_passed(run_id, available):
     return False
 
 
-def reusable_run(run, available, full_suite):
+def matches_commit(run, available):
     if run['head_sha'] != COMMIT:
         # A PR can author its own artifacts. Bind both proof kinds to GitHub's
         # recorded base/head parents before trusting a merge-commit claim.
@@ -91,6 +69,10 @@ def reusable_run(run, available, full_suite):
         if (proof.get('commit') != COMMIT
                 or str(proof.get('run_id')) != str(run['id'])):
             return False
+    return True
+
+
+def reusable_run(run, full_suite):
     if successful_run(run) or full_suite:
         # A release may fail in publishing after its full validation passed.
         return True
@@ -135,9 +117,11 @@ def find(args):
         if run['path'].split('@')[0] not in (
                 '.github/workflows/ci.yml', '.github/workflows/release.yml'):
             continue
-        available = artifacts(run['id'])
+        available = available_artifacts(run['id'])
+        if not matches_commit(run, available):
+            continue
         passed = full_suite_passed(run['id'], available)
-        if not reusable_run(run, available, passed):
+        if not reusable_run(run, passed):
             continue
         full_suite = full_suite or passed
         required = [artifact_name('packages', t) for t in args.targets]
@@ -155,21 +139,11 @@ def find(args):
                       'full_suite': full_suite}))
 
 
-def extract(artifact, destination):
-    destination = Path(destination)
-    destination.mkdir(parents=True, exist_ok=True)
-    with archive(artifact) as content:
-        for entry in content.infolist():
-            path = (destination / entry.filename).resolve()
-            if destination.resolve() not in path.parents:
-                raise RuntimeError('Unsafe artifact entry: ' + entry.filename)
-        content.extractall(destination)
-
-
 def download(args):
     run = api('actions/runs/' + args.run_id)
-    available = artifacts(args.run_id)
-    if not reusable_run(run, available, full_suite_passed(args.run_id, available)):
+    available = available_artifacts(args.run_id)
+    if (not matches_commit(run, available)
+            or not reusable_run(run, full_suite_passed(args.run_id, available))):
         raise RuntimeError('Package source is not successful CI for ' + COMMIT)
     extract(available[artifact_name('packages', args.target)], args.packages_dir)
     if args.symbols_dir:

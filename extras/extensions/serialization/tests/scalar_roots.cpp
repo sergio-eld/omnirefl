@@ -40,12 +40,6 @@ auto make_vector(First &&first, Args &&...args)
 
 // Keep this translation unit free of reflected records: these roots must not
 // depend on metadata discovered through unrelated record serialization calls.
-TEST(serialization_scalar_roots, writes_string_array_without_record_metadata) {
-  EXPECT_TRUE(serialization_test::matches_json(
-    R"(["first", "second"])",
-    omni::ryml::as_json(std::vector<std::string>{"first", "second"})));
-}
-
 TEST(serialization_scalar_roots, writes_boolean_array_without_record_metadata) {
   EXPECT_TRUE(serialization_test::matches_json(
     R"([true, false])", omni::ryml::as_json(std::vector<bool>{true, false})));
@@ -163,35 +157,6 @@ TEST(deserialization_scalar_roots, reports_invalid_root_values) {
     EXPECT_EQ(omni::json::issue_code::unexpected_kind, issue.reason);
     EXPECT_EQ(omni::json::value_kind::integer, issue.expected);
     EXPECT_TRUE(issue.path.empty());
-  }
-}
-
-TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
-  const auto numbers = serialization_test::deserialize(
-    omni::type_t<std::vector<int>>{}, "[7, 42]");
-
-  const std::vector<int> expected_numbers{7, 42};
-  EXPECT_TRUE(numbers.value);
-  if (numbers.value) {
-    EXPECT_EQ(expected_numbers, *numbers.value);
-  }
-
-  const auto booleans = serialization_test::deserialize(
-    omni::type_t<std::vector<bool>>{}, "[true, false]");
-
-  const std::vector<bool> expected_booleans{true, false};
-  EXPECT_TRUE(booleans.value);
-  if (booleans.value) {
-    EXPECT_EQ(expected_booleans, *booleans.value);
-  }
-
-  const auto nested = serialization_test::deserialize(
-    omni::type_t<std::vector<std::vector<int>>>{}, "[[7], [], [42]]");
-
-  const std::vector<std::vector<int>> expected_nested{{7}, {}, {42}};
-  EXPECT_TRUE(nested.value);
-  if (nested.value) {
-    EXPECT_EQ(expected_nested, *nested.value);
   }
 }
 
@@ -379,6 +344,26 @@ TEST(serialization_trees, borrows_optional_sequence_strings_and_owns_numbers) {
 
   // TODO: [medium] Guard sequence child access after the nonfatal shape check
   // so malformed output reports a failure instead of aborting the suite.
+}
+
+TEST(deserialization_scalar_roots, reads_boolean_and_nested_sequence_roots) {
+  const auto booleans = serialization_test::deserialize(
+    omni::type_t<std::vector<bool>>{}, "[true, false]");
+
+  const std::vector<bool> expected_booleans{true, false};
+  EXPECT_TRUE(booleans.value);
+  if (booleans.value) {
+    EXPECT_EQ(expected_booleans, *booleans.value);
+  }
+
+  const auto nested = serialization_test::deserialize(
+    omni::type_t<std::vector<std::vector<int>>>{}, "[[7], [], [42]]");
+
+  const std::vector<std::vector<int>> expected_nested{{7}, {}, {42}};
+  EXPECT_TRUE(nested.value);
+  if (nested.value) {
+    EXPECT_EQ(expected_nested, *nested.value);
+  }
 }
 
 } // namespace

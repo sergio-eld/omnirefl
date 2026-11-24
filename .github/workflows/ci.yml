@@ -301,7 +301,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Check package reuse policy
-        run: python3 ci/tests/reuse_ci.py
+        run: python3 ci/tests/test_package_reuse.py
       - name: Find successful package source
         id: source
         env:
@@ -533,41 +533,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          download_artifact() {
-            local name=$1
-            local destination=$2
-            local artifact_id artifact_digest archive
-            archive=$RUNNER_TEMP/$name.zip
-            read -r artifact_id artifact_digest < <(
-              gh api \
-                "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$name&per_page=1&direction=desc" \
-                --jq '.artifacts[0] | [.id, .digest] | @tsv'
-            )
-            if [ -z "$artifact_id" ] || [ null = "$artifact_id" ]; then
-              printf 'artifact was not found: %s\n' "$name" >&2
-              return 1
-            fi
-            if [[ "$artifact_digest" != sha256:* ]]; then
-              printf 'artifact has no SHA-256 digest: %s\n' "$name" >&2
-              return 1
-            fi
-
-            mkdir -p "$destination"
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-              > "$archive"
-            printf '%s  %s\n' "${artifact_digest#sha256:}" "$archive" |
-              sha256sum --check -
-            unzip -q "$archive" -d "$destination"
-            rm -f "$archive"
-          }
-
-          download_artifact \
-            packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }} \
-            ./artifacts/packages/current
-          download_artifact \
-            packages-extras-${{ steps.commit.outputs.short_sha }} \
-            ./artifacts/packages/extras
+          python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+            --name "packages-${{ matrix.package_target }}-${{ steps.commit.outputs.short_sha }}" \
+            --destination ./artifacts/packages/current
+          python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
+            --name "packages-extras-${{ steps.commit.outputs.short_sha }}" \
+            --destination ./artifacts/packages/extras
 
       - name: Prepare Docker Image
         run: |
@@ -1384,33 +1355,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          found=false
-          while IFS=$'\t' read -r artifact_id name artifact_digest; do
-            archive=$RUNNER_TEMP/$name.zip
-            destination=./artifacts/benchmarks/$name
-            if [[ "$artifact_digest" != sha256:* ]]; then
-              printf 'artifact has no SHA-256 digest: %s\n' "$name" >&2
-              exit 1
-            fi
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          from ci.github_artifacts import artifacts, extract, named_artifact
 
-            mkdir -p "$destination"
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-              > "$archive"
-            printf '%s  %s\n' "${artifact_digest#sha256:}" "$archive" |
-              sha256sum --check -
-            unzip -q "$archive" -d "$destination"
-            rm -f "$archive"
-            found=true
-          done < <(
-            gh api --paginate \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '.artifacts[] | select(.name | startswith("benchmark-")) | [.id, .name, .digest] | @tsv'
-          )
-          echo "available=$found" >> "$GITHUB_OUTPUT"
-          if ! $found; then
-            echo '::warning::No benchmark artifacts found; preserving published benchmark history.'
-          fi
+          available = artifacts(os.environ['GITHUB_RUN_ID'])
+          names = [a['name'] for a in available if a['name'].startswith('benchmark-')]
+          for name in names:
+              extract(named_artifact(available, name), Path('artifacts/benchmarks') / name)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('available=' + str(bool(names)).lower(), file=output)
+          if not names:
+              print('::warning::No benchmark artifacts found; '
+                    'preserving published benchmark history.')
+          PYTHON
 
       # The deployed JSON is the durable history. Only a missing file starts a
       # new history; other download failures must not replace it with an empty

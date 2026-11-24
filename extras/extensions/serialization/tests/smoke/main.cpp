@@ -35,31 +35,6 @@ TEST(deserialization, default_retains_value_and_diagnostics) {
   EXPECT_EQ(815, result.value->code);
 }
 
-TEST(serialization_composition, parses_then_maps_a_record) {
-  const auto result =
-    omni::ryml::core::parse(R"({"name": "Ada", "code": 815})") //
-      .transform([](::ryml::Tree tree) {
-        auto mapped = omni::ryml::map_by_schema(
-          omni::type_t<serialization_data::payload>{},
-          tree);
-        return omni::ryml::with_diagnostics_t<serialization_data::payload,
-          std::string>{
-          /*value=*/std::move(mapped.value),
-          /*diagnostics=*/omni::ryml::render_diagnostics(tree,
-            mapped.diagnostics),
-        };
-      });
-
-  EXPECT_TRUE(result);
-  if (result) {
-    EXPECT_TRUE(result->value);
-    if (result->value) {
-      EXPECT_EQ("Ada", result->value->name);
-      EXPECT_EQ(815, result->value->code);
-    }
-  }
-}
-
 TEST(serialization_formats, emits_json_without_configuration) {
   const auto output =
     omni::ryml::as_json(serialization_data::payload{"Ada", 815});
@@ -116,6 +91,36 @@ TEST(deserialization, maps_scalars_sequences_and_nested_records) {
   EXPECT_EQ(815, result.value->records[0].code);
   EXPECT_EQ("sunset", result.value->records[1].name);
   EXPECT_EQ(108, result.value->records[1].code);
+}
+
+TEST(deserialization, default_retains_syntax_errors) {
+  const auto result =
+    serialization_test::deserialize(omni::type_t<serialization_data::payload>{},
+      "name: [unterminated");
+
+  EXPECT_FALSE(result.value);
+  if (result.value)
+    return;
+
+  EXPECT_EQ(1U, result.diagnostics.issues.size());
+  if (1U == result.diagnostics.issues.size()) {
+    EXPECT_EQ(omni::json::issue_code::parse_error,
+      result.diagnostics.issues.front().reason);
+  }
+  EXPECT_FALSE((result.diagnostics.config.error_policy.unknown_fields
+    == omni::json::unknown_policy::allow));
+  EXPECT_FALSE(
+    serialization_test::render_diagnostics(result.diagnostics).empty());
+}
+
+TEST(deserialization, reports_the_schema_scalar_expected_by_a_field) {
+  const auto result =
+    strict_deserialize(omni::type_t<serialization_data::nested_record>{},
+      std::string{serialization_data::invalid_nested_integer_json});
+
+  EXPECT_FALSE(result.value);
+  EXPECT_EQ("/data/code: expected integer, found scalar",
+    result.diagnostics.message);
 }
 
 } // namespace

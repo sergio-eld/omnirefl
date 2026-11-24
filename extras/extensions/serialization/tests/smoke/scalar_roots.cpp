@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -41,6 +42,42 @@ TEST(deserialization_scalar_roots, reads_scalars_without_record_metadata) {
   EXPECT_TRUE(text.value);
   if (text.value) {
     EXPECT_EQ("text", *text.value);
+  }
+}
+
+TEST(diagnostics_transform, renders_by_default) {
+  const auto valid = omni::ryml::deserialize(omni::type_t<int>{}, "7");
+  const auto invalid = omni::ryml::deserialize(omni::type_t<int>{}, "bad");
+
+  EXPECT_TRUE(valid.value);
+  EXPECT_EQ("", valid.diagnostics);
+  EXPECT_FALSE(invalid.value);
+  EXPECT_EQ("<root>: expected integer, found scalar", invalid.diagnostics);
+}
+
+TEST(inplace_deserialization, updates_a_scalar) {
+  int into = 7;
+  const auto result = omni::ryml::deserialize(&into, "42");
+
+  EXPECT_TRUE(result.value);
+  EXPECT_TRUE(result.diagnostics.empty());
+  EXPECT_EQ(42, into);
+}
+
+TEST(serialization_scalar_roots, writes_string_array_without_record_metadata) {
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"(["first", "second"])",
+    omni::ryml::as_json(std::vector<std::string>{"first", "second"})));
+}
+
+TEST(deserialization_scalar_roots, reads_scalar_sequence_roots) {
+  const auto numbers = serialization_test::deserialize(
+    omni::type_t<std::vector<int>>{}, "[7, 42]");
+
+  const std::vector<int> expected_numbers{7, 42};
+  EXPECT_TRUE(numbers.value);
+  if (numbers.value) {
+    EXPECT_EQ(expected_numbers, *numbers.value);
   }
 }
 

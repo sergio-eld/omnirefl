@@ -592,15 +592,19 @@ For independent scenario executables, use:
 
 Package tests have two profiles, selected with `OMNI_TEST_SUITE`:
 
-- `smoke`: guides and a small set of basic happy paths on the existing compiler,
-  platform, and language-standard matrix. Commit and PR CI use this profile.
+- `smoke`: guides and the base public interface on the existing compiler,
+  platform, and language-standard matrix. Cover ordinary success and failure
+  results, diagnostics, and direct mapping overrides. Commit and PR CI use it.
 - `full`: smoke sources plus regressions, policies, negative cases, and
   integration tests. Local builds default to this profile. Release tags require
   it; CI's manual `full_suite` input also selects it.
 
-Put happy-path sources under `tests/smoke/`, with their own executable and
+Put base-interface sources under `tests/smoke/`, with their own executable and
 `CMakeLists.txt`. Full targets compile those same sources alongside the remaining
 suite; do not duplicate cases or compile the full suite just to filter its tests.
+Exercise lower layers through their public entry point when that covers the same
+contract: `deserialize` covers parsing and schema mapping. Keep separate low-level
+checks, policies, combinations, and edge scenarios in the full suite.
 Guides remain separate executables and run when their required standard is
 available. Select locally with `-DOMNI_TEST_SUITE=smoke` or `full`.
 

@@ -290,16 +290,6 @@ TEST(diagnostics_transform, moves_retained_state_through_chained_updates) {
     result.diagnostics);
 }
 
-TEST(diagnostics_transform, renders_by_default) {
-  const auto valid = omni::ryml::deserialize(omni::type_t<int>{}, "7");
-  const auto invalid = omni::ryml::deserialize(omni::type_t<int>{}, "bad");
-
-  EXPECT_TRUE(valid.value);
-  EXPECT_EQ("", valid.diagnostics);
-  EXPECT_FALSE(invalid.value);
-  EXPECT_EQ("<root>: expected integer, found scalar", invalid.diagnostics);
-}
-
 TEST(diagnostics_transform, decorates_the_current_callable) {
   const omni::ryml::config_t<> original{};
   const auto options = original.tdm_transform_diagnostics(

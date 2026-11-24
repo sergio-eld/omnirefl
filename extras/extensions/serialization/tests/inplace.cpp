@@ -179,15 +179,6 @@ TEST(inplace_deserialization, rejects_const_destinations) {
     const int *, std::string>::value));
 }
 
-TEST(inplace_deserialization, updates_a_scalar) {
-  int into = 7;
-  const auto result = omni::ryml::deserialize(&into, "42");
-
-  EXPECT_TRUE(result.value);
-  EXPECT_TRUE(result.diagnostics.empty());
-  EXPECT_EQ(42, into);
-}
-
 TEST(inplace_deserialization, updates_an_enum) {
   auto into = inplace_models::mode::idle;
   const auto result = omni::ryml::deserialize(&into, R"("busy")");

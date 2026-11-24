@@ -13,7 +13,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 import zipfile
 
@@ -63,23 +62,25 @@ class PackageReuse(unittest.TestCase):
         commit = 'a' * 40
         head = 'b' * 40
         base = 'd' * 40
-        for name, head, requested, full, conclusion, parents, expected in [
+        for name, head, requested, full, conclusion, parents, expected, full_text in [
             ('PR merge commit', head, commit, False, 'success', [base, head],
-             {'run_id': '7', 'full_suite': 'false'}),
+             {'run_id': '7', 'full_suite': 'false'}, None),
             ('publishing failed after full validation', commit, commit, True,
-             'failure', [base, head], {'run_id': '7', 'full_suite': 'true'}),
+             'failure', [base, head], {'run_id': '7', 'full_suite': 'true'}, None),
             ('amended commit', head, 'c' * 40, False, 'success', [base, head],
-             {'run_id': '', 'full_suite': 'false'}),
+             {'run_id': '', 'full_suite': 'false'}, None),
             ('ordinary push', commit, commit, False, 'success', [base, head],
-             {'run_id': '7', 'full_suite': 'false'}),
+             {'run_id': '7', 'full_suite': 'false'}, None),
             ('unrelated PR smoke claim', head, commit, False, 'success',
-             [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}),
+             [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}, None),
             ('unrelated PR full claim', head, commit, True, 'success',
-             [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}),
+             [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}, None),
+            ('unrelated PR malformed full claim', head, commit, True, 'success',
+             [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}, '{malformed'),
         ]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                (root / 'gh').write_text(textwrap.dedent(GITHUB_CLI))
+                (root / 'gh').write_text(GITHUB_CLI)
                 (root / 'gh').chmod(0o755)
                 artifacts = []
 
@@ -100,8 +101,9 @@ class PackageReuse(unittest.TestCase):
                          json.dumps({'commit': commit, 'run_id': '7'}))
                 if full:
                     artifact('full-suite-' + commit + '-attempt-1', 'full-suite.json',
-                             json.dumps({'suite': 'full', 'commit': commit,
-                                         'run_id': '7', 'run_attempt': '1'}))
+                             full_text if full_text is not None else json.dumps({
+                                 'suite': 'full', 'commit': commit,
+                                 'run_id': '7', 'run_attempt': '1'}))
                 run = {
                     'id': 7, 'head_sha': head, 'status': 'completed',
                     'conclusion': conclusion, 'run_attempt': 1,
@@ -116,7 +118,7 @@ class PackageReuse(unittest.TestCase):
                 }))
                 environment = dict(
                     os.environ, GITHUB_REPOSITORY='example/project', GITHUB_SHA=requested,
-                    GITHUB_RUN_ID='8', GITHUB_OUTPUT=str(root / 'output'),
+                    GITHUB_OUTPUT=str(root / 'output'),
                     GITHUB_FIXTURE=directory,
                     PATH=directory + os.pathsep + os.environ['PATH'],
                 )
@@ -128,14 +130,18 @@ class PackageReuse(unittest.TestCase):
                 output = dict(line.split('=', 1)
                               for line in (root / 'output').read_text().splitlines())
                 self.assertEqual(expected, output)
+                result = subprocess.run(command + [
+                    'download', '--run-id', '7', '--target', 'extras',
+                    '--packages-dir', str(root / 'package'),
+                ], env=environment, capture_output=True, text=True)
                 if output['run_id']:
-                    result = subprocess.run(command + [
-                        'download', '--run-id', '7', '--target', 'extras',
-                        '--packages-dir', str(root / 'package'),
-                    ], env=environment, capture_output=True, text=True)
                     self.assertEqual(0, result.returncode, result.stderr)
                     self.assertEqual('package contents',
                                      (root / 'package/package.tar.gz').read_text())
+                else:
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn('Package source is not successful CI', result.stderr)
+                    self.assertFalse((root / 'package').exists())
 
 
 if __name__ == '__main__':
