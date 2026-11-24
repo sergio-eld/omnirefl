@@ -8,7 +8,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+import time
 from urllib.parse import urlencode
 import zipfile
 
@@ -45,18 +47,29 @@ def archive(artifact):
     if artifact['expired'] or not expected.startswith('sha256:'):
         raise RuntimeError('Artifact is expired or lacks a SHA-256 digest: ' + artifact['name'])
     path = 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/artifacts/'
-    with tempfile.TemporaryFile() as data:
-        subprocess.run(['gh', 'api', path + str(artifact['id']) + '/zip'],
-                       stdout=data, check=True)
-        data.seek(0)
-        digest = hashlib.sha256()
-        for block in iter(lambda: data.read(1024 * 1024), b''):
-            digest.update(block)
-        if 'sha256:' + digest.hexdigest() != expected:
-            raise RuntimeError('Artifact digest mismatch: ' + artifact['name'])
-        data.seek(0)
-        with zipfile.ZipFile(data) as content:
-            yield content
+    for attempt in range(3):
+        # A fresh file discards partial responses before a retry.
+        with tempfile.TemporaryFile() as data:
+            try:
+                subprocess.run(['gh', 'api', path + str(artifact['id']) + '/zip'],
+                               stdout=data, check=True)
+            except subprocess.CalledProcessError:
+                if attempt == 2:
+                    raise
+                print('::warning::Artifact download failed; retrying ' + artifact['name'],
+                      file=sys.stderr)
+                time.sleep(2 ** (attempt + 1))
+                continue
+            data.seek(0)
+            digest = hashlib.sha256()
+            for block in iter(lambda: data.read(1024 * 1024), b''):
+                digest.update(block)
+            if 'sha256:' + digest.hexdigest() != expected:
+                raise RuntimeError('Artifact digest mismatch: ' + artifact['name'])
+            data.seek(0)
+            with zipfile.ZipFile(data) as content:
+                yield content
+            return
 
 
 def extract(artifact, destination):
