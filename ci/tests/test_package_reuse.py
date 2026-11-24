@@ -58,6 +58,45 @@ print(json.dumps(result))
 
 
 class PackageReuse(unittest.TestCase):
+    def test_required_master_ci_is_not_skipped_when_initially_absent(self):
+        # The run appears after the first query, then fails validation.
+        # gh run watch --exit-status: https://cli.github.com/manual/gh_run_watch
+        service = '''\
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+if sys.argv[1:3] == ['run', 'watch']:
+    sys.exit(1)
+path = sys.argv[2]
+if '/actions/workflows/ci.yml/runs?' in path:
+    marker = Path(os.environ['GITHUB_FIXTURE'])
+    visible = marker.exists()
+    marker.touch()
+    result = {'workflow_runs': [{'id': 7}] if visible else []}
+elif '/actions/runs?' in path:
+    result = {'workflow_runs': []}
+else:
+    result = {'artifacts': []}
+print(json.dumps(result))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'gh').write_text(service)
+            (root / 'gh').chmod(0o755)
+            environment = dict(
+                os.environ, GITHUB_REPOSITORY='example/project', GITHUB_SHA='a' * 40,
+                GITHUB_OUTPUT=str(root / 'output'),
+                GITHUB_FIXTURE=str(root / 'master-run-visible'),
+                PATH=directory + os.pathsep + os.environ['PATH'])
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parents[1] / 'reuse_ci.py'),
+                 'find', '--wait-master', 'required', '--targets', 'extras'],
+                env=environment, capture_output=True, text=True, timeout=45)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse((root / 'output').exists())
+
     def test_exact_tested_commit(self):
         commit = 'a' * 40
         head = 'b' * 40

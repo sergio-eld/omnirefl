@@ -11,6 +11,7 @@ from collections import Counter
 import json
 import os
 import subprocess
+import time
 from urllib.parse import urlencode
 
 from github_artifacts import api, archive, artifacts, extract, pages
@@ -91,12 +92,20 @@ def artifact_name(kind, target):
 def find(args):
     if args.wait_master:
         # Preserve the release gate on any active commit CI before reuse.
-        runs = api('actions/workflows/ci.yml/runs?' + urlencode({
+        path = 'actions/workflows/ci.yml/runs?' + urlencode({
             'head_sha': COMMIT, 'branch': 'master', 'event': 'push', 'per_page': 1,
-        }))['workflow_runs']
-        if runs:
-            subprocess.run(['gh', 'run', 'watch', str(runs[0]['id']),
-                            '--interval', '30', '--exit-status'], check=True)
+        })
+        runs = []
+        while not runs:
+            runs = api(path)['workflow_runs']
+            if runs:
+                subprocess.run(['gh', 'run', 'watch', str(runs[0]['id']),
+                                '--interval', '30', '--exit-status'], check=True)
+            elif args.wait_master != 'required':
+                break
+            else:
+                print('Waiting for master CI to appear for ' + COMMIT, flush=True)
+                time.sleep(15)
 
     package_run = ''
     full_suite = False
@@ -115,7 +124,8 @@ def find(args):
             runs[run_id] = api('actions/runs/' + str(run_id))
     for run in runs.values():
         if run['path'].split('@')[0] not in (
-                '.github/workflows/ci.yml', '.github/workflows/release.yml'):
+                '.github/workflows/ci.yml', '.github/workflows/release.yml',
+                '.github/workflows/full_validation.yml'):
             continue
         available = available_artifacts(run['id'])
         if not matches_commit(run, available):
@@ -156,7 +166,8 @@ if __name__ == '__main__':
     command = commands.add_parser('find')
     command.add_argument('--targets', nargs='+', required=True)
     command.add_argument('--require-symbols', action='store_true')
-    command.add_argument('--wait-master', action='store_true')
+    command.add_argument('--wait-master', nargs='?', const='if-present',
+                         choices=('if-present', 'required'))
     command.set_defaults(invoke=find)
     command = commands.add_parser('download')
     command.add_argument('--run-id', required=True)

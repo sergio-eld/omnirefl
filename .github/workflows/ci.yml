@@ -301,7 +301,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Check package reuse policy
-        run: python3 ci/tests/test_package_reuse.py
+        run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
       - name: Find successful package source
         id: source
         env:
