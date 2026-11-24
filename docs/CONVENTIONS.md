@@ -18,6 +18,7 @@ testing conventions used in Omnirefl.
   - [Guide structure](#guide-structure)
   - [Standalone projects](#standalone-projects)
 - [Extension structure](#extension-structure)
+- [CI test profiles and release validation](#ci-test-profiles-and-release-validation)
 - [Standard compatibility](#standard-compatibility)
 - [Value-based metaprogramming](#value-based-metaprogramming)
 
@@ -586,6 +587,38 @@ For independent scenario executables, use:
   second_scenario.cpp
   shared.hpp
 ```
+
+## CI test profiles and release validation
+
+Package tests have two profiles, selected with `OMNI_TEST_SUITE`:
+
+- `smoke`: guides and a small set of basic happy paths on the existing compiler,
+  platform, and language-standard matrix. Commit and PR CI use this profile.
+- `full`: smoke sources plus regressions, policies, negative cases, and
+  integration tests. Local builds default to this profile. Release tags require
+  it; CI's manual `full_suite` input also selects it.
+
+Put happy-path sources under `tests/smoke/`, with their own executable and
+`CMakeLists.txt`. Full targets compile those same sources alongside the remaining
+suite; do not duplicate cases or compile the full suite just to filter its tests.
+Guides remain separate executables and run when their required standard is
+available. Select locally with `-DOMNI_TEST_SUITE=smoke` or `full`.
+
+All CI entry points reuse available packages from successful CI for the exact
+commit, including smoke runs. They rebuild when no complete package set remains.
+Release preflight separately checks for a successful full-suite proof for that
+same commit: smoke success cannot replace full validation. Amended commits have
+new IDs and cannot reuse either result.
+
+Before a release exists, move an annotated release tag and push just that ref:
+
+```sh
+git tag -fa v0.0.9 <commit> -m "v0.0.9"
+git push origin +refs/tags/v0.0.9
+```
+
+This triggers release validation without deleting the remote tag first. For an
+unchanged commit, rerun failed workflow jobs instead of moving the tag.
 
 ## Standard compatibility
 

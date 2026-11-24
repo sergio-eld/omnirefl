@@ -4,6 +4,10 @@ endif()
 set(_OMNI_CI_RUN "${_OMNI_CI_RUN}" CACHE INTERNAL
     "Internal CI configuration marker")
 
+# Load before dependencies with older policy versions define these functions;
+# CMP0067 controls whether probes receive the requested language standard.
+include(CheckCXXSourceCompiles)
+
 function(omnirefl_supported_cpp_standards out)
     set(_standards "")
     foreach(_feature IN LISTS CMAKE_CXX_COMPILE_FEATURES)
@@ -39,7 +43,6 @@ endfunction()
 function(omnirefl_check_cxx20_language result)
     set(_omnirefl_has_cxx20_language OFF)
     if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-        include(CheckCXXSourceCompiles)
         set(CMAKE_CXX_STANDARD 20)
         set(CMAKE_CXX_STANDARD_REQUIRED ON)
         set(CMAKE_CXX_EXTENSIONS OFF)
@@ -59,7 +62,6 @@ int main() { return 0; }
 endfunction()
 
 function(omnirefl_check_cxx23_library result)
-    include(CheckCXXSourceCompiles)
     # Keep the probe's language and link settings local to this function.
     set(CMAKE_CXX_STANDARD 23)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)

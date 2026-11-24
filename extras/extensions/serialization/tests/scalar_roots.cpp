@@ -40,14 +40,6 @@ auto make_vector(First &&first, Args &&...args)
 
 // Keep this translation unit free of reflected records: these roots must not
 // depend on metadata discovered through unrelated record serialization calls.
-TEST(serialization_scalar_roots, writes_scalar_values_without_record_metadata) {
-  EXPECT_EQ("42", omni::ryml::as_json(42));
-  EXPECT_EQ("true", omni::ryml::as_json(true));
-  EXPECT_EQ("1.5", omni::ryml::as_json(1.5));
-  EXPECT_EQ(R"("text")", omni::ryml::as_json(std::string{"text"}));
-  EXPECT_EQ(R"("")", omni::ryml::as_json(std::string{}));
-}
-
 TEST(serialization_scalar_roots, writes_string_array_without_record_metadata) {
   EXPECT_TRUE(serialization_test::matches_json(
     R"(["first", "second"])",
@@ -94,35 +86,6 @@ TEST(serialization_scalar_roots, writes_standard_string_view_array) {
     omni::ryml::as_json(std::vector<std::string_view>{"first", "second"})));
 }
 #endif
-
-TEST(deserialization_scalar_roots, reads_scalars_without_record_metadata) {
-  const auto integer = serialization_test::deserialize(omni::type_t<int>{}, "42");
-  EXPECT_TRUE(integer.value);
-  if (integer.value) {
-    EXPECT_EQ(42, *integer.value);
-  }
-  EXPECT_TRUE(integer.diagnostics.issues.empty());
-
-  const auto boolean = serialization_test::deserialize(omni::type_t<bool>{}, "true");
-  EXPECT_TRUE(boolean.value);
-  if (boolean.value) {
-    EXPECT_TRUE(*boolean.value);
-  }
-
-  const auto real = serialization_test::deserialize(omni::type_t<double>{}, "1.5");
-  EXPECT_TRUE(real.value);
-  if (real.value) {
-    EXPECT_EQ(1.5, *real.value);
-  }
-
-  const auto text = serialization_test::deserialize(
-    omni::type_t<std::string>{}, R"("text")");
-
-  EXPECT_TRUE(text.value);
-  if (text.value) {
-    EXPECT_EQ("text", *text.value);
-  }
-}
 
 TEST(deserialization_scalar_roots, keeps_a_valid_false_value) {
   const auto result = serialization_test::deserialize(omni::type_t<bool>{}, "false");

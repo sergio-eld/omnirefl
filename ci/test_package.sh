@@ -7,6 +7,11 @@ extras=
 name=
 results=
 cmake_arg=
+suite=${OMNI_TEST_SUITE:-full}
+case $suite in
+  smoke | full) ;;
+  *) printf 'unknown test suite: %s\n' "$suite" >&2; exit 2 ;;
+esac
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -197,6 +202,7 @@ set -- cmake \
   -S "$source" \
   -B "$build" \
   -D_OMNI_CI_RUN=ON \
+  -DOMNI_TEST_SUITE="$suite" \
   -DBUILD_BENCHMARKS=OFF \
   -GNinja \
   -DCMAKE_BUILD_TYPE=Release \

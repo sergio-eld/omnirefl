@@ -1,3 +1,8 @@
+if(OMNI_TEST_SUITE STREQUAL "smoke")
+    add_subdirectory(smoke)
+    return()
+endif()
+
 # Exercise the patch helper shipped with the selected source or installed package.
 if(DEFINED omnirefl_DIR)
     set(_serialization_patch_script
@@ -18,7 +23,8 @@ endif()
 
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_test_target "cpp_${_standard}.json_ryml.test")
-    add_executable(${_test_target} serialization.cpp scalar_roots.cpp
+    add_executable(${_test_target} smoke/main.cpp smoke/scalar_roots.cpp
+        smoke/sequence_roots.cpp serialization.cpp scalar_roots.cpp
         sequence_roots.cpp
         json_mapping.cpp alias_mapping.cpp to_record.cpp to_enum.cpp to_range.cpp
         string_mapping.cpp

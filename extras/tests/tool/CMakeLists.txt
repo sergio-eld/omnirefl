@@ -931,7 +931,7 @@ if("17" IN_LIST _supported_cpp_standards)
     foreach(_target IN ITEMS
             regression_ccdb_output_suffix
             myregression_ccdb_output_suffix)
-        add_executable(${_target} EXCLUDE_FROM_ALL example_test.cpp)
+        add_executable(${_target} EXCLUDE_FROM_ALL ../smoke/main.cpp)
         set_target_properties(${_target} PROPERTIES
             CXX_STANDARD 17
             CXX_STANDARD_REQUIRED YES
@@ -1027,7 +1027,7 @@ foreach(cpp_standard IN LISTS _supported_cpp_standards)
         static_members_test.cpp
         regressions/nested_template_field_name.cpp
         interface_test.cpp
-        example_test.cpp
+        ../smoke/main.cpp
         packed_field_test.cpp
         "${omnirefl_PROJECTS_DIR}/benchmarks/instrumentation/baseline_test.cpp"
     )

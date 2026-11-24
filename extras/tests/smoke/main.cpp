@@ -1,8 +1,8 @@
-
-#include "structs.h" //< todo: move to a separate file
-#include <gtest/gtest.h>
+#include "../tool/structs.h"
 
 #include <omnirefl/reflected_scope.hpp>
+
+#include <gtest/gtest.h>
 
 namespace ccdb_output_filter_test {
 
@@ -20,8 +20,6 @@ struct read_value {
 #endif
 
 } // namespace ccdb_output_filter_test
-
-namespace {
 
 TEST(cmake_integration, compile_command_filter_matches_exact_target) {
 #if defined CXX_STANDARD && 11 < CXX_STANDARD
@@ -62,5 +60,3 @@ TEST(print_names, simple) {
     EXPECT_EQ(expected, result);
   }
 }
-
-} // namespace

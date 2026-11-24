@@ -247,6 +247,7 @@ services:
       PACKAGE_TEST_SHELL: /bin/ash
       TEST_NAME: ${TEST_NAME:-alpine-x86_64-${TOOLCHAIN:-gcc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+      OMNI_TEST_SUITE: ${OMNI_TEST_SUITE:-full}
     volumes:
       - ${PACKAGE_DIR:-./artifacts/packages/current}:/packages:ro
       - ${TEST_RESULTS_DIR:-./artifacts/test-results/alpine-x86_64-${TOOLCHAIN:-gcc}}:/results:rw
@@ -286,6 +287,7 @@ services:
       PACKAGE_TEST_SHELL: /bin/bash
       TEST_NAME: ${TEST_NAME:-ubuntu-${UBUNTU_VERSION}-x86_64-${TOOLCHAIN:-gcc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+      OMNI_TEST_SUITE: ${OMNI_TEST_SUITE:-full}
     working_dir: /tmp/build
     entrypoint:
       - /bin/bash
@@ -365,6 +367,7 @@ services:
       TOOLCHAIN: ${TOOLCHAIN:-msvc}
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msvc}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+      OMNI_TEST_SUITE: ${OMNI_TEST_SUITE:-full}
     volumes:
       - ${EXTRAS_DIR:-./artifacts/packages/extras}:C:/extras:ro
       - ./ci:C:/runner:ro
@@ -426,6 +429,7 @@ services:
       TOOLCHAIN: ${TOOLCHAIN:-msys2-mingw}
       TEST_NAME: ${TEST_NAME:-windows-${TOOLCHAIN:-msys2-mingw}}
       KEEP_ALIVE_ON_FAILURE: ${KEEP_ALIVE_ON_FAILURE:-}
+      OMNI_TEST_SUITE: ${OMNI_TEST_SUITE:-full}
     volumes:
       - ${EXTRAS_DIR:-./artifacts/packages/extras}:C:/extras:ro
       - ./ci:C:/runner:ro
