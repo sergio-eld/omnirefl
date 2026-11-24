@@ -1,7 +1,9 @@
 name: CI
 run-name: >-
   CI / ${{ github.event.pull_request.head.ref || github.ref_name }}
-  / ${{ inputs.full_suite && 'full' || 'smoke' }}
+  / ${{ inputs.full_suite && 'full'
+    || (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'automatic'
+    || 'smoke' }}
 
 on:
   push:
@@ -49,7 +51,6 @@ concurrency:
 # TODO: [low] Define a schema for CI_MATRIX, validate against it, and extract
 # parameters programmatically. Apply schema defaults explicitly before expansion.
 env:
-  OMNI_TEST_SUITE: ${{ inputs.full_suite && 'full' || 'smoke' }}
   CI_MATRIX: |
     # Currently the primary distribution: one package for Linux, macOS, and Windows.
     cosmo:
@@ -163,11 +164,15 @@ env:
 
 jobs:
   validate-ci-matrix:
-    name: Validate and prepare CI matrix
+    name: Validate and prepare CI matrix / ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
+    needs: changes
     runs-on: ubuntu-latest
     permissions: {}
+    env:
+      OMNI_TEST_SUITE: ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      suite: ${{ env.OMNI_TEST_SUITE }}
     steps:
       - name: Validate YAML and prepare matrices
         id: matrix
@@ -237,31 +242,53 @@ jobs:
                   print('```json\n' + prepared + '\n```\n\n</details>', file=summary)
           PY
 
-  # Site-only changes check and deploy Pages without rebuilding packages. A
-  # manual or reusable call can force the complete path with `build_sources`.
+  # Site-only changes normally deploy Pages without rebuilding packages.
+  # Full-suite selection or `build_sources` forces package work.
   changes:
-    name: Select CI work / ${{ inputs.full_suite && 'full' || 'smoke' }}
+    name: Select CI work and test suite
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     outputs:
       build_sources: ${{ steps.sources.outputs.build_sources }}
+      full_suite: ${{ steps.suite.outputs.full_suite }}
 
     steps:
-      - name: "Test suite: ${{ inputs.full_suite && 'full' || 'smoke' }}"
-        run: |
-          echo "::notice::Selected test suite: $OMNI_TEST_SUITE"
-          printf '## Selected test suite: %s\n' "$OMNI_TEST_SUITE" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Checkout Repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Select test suite
+        id: suite
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_FULL: ${{ inputs.full_suite }}
+        run: |
+          if [ true = "$REQUESTED_FULL" ]; then
+            echo 'full_suite=true' >> "$GITHUB_OUTPUT"
+            echo 'Full suite explicitly requested.'
+          elif [ push = "$GITHUB_EVENT_NAME" ] && [ refs/heads/master = "$GITHUB_REF" ]; then
+            selection=$(python3 ci/full_validation.py)
+            printf '%s\n' "$selection"
+            printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'full_suite=false' >> "$GITHUB_OUTPUT"
+            echo 'Smoke suite selected; automatic commit cadence applies only to master pushes.'
+          fi
+
+      - name: "Test suite: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}"
+        env:
+          OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
+        run: |
+          echo "::notice::Selected test suite: $OMNI_TEST_SUITE"
+          printf '## Selected test suite: %s\n' "$OMNI_TEST_SUITE" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Detect source changes
         id: sources
         env:
-          FORCE_BUILD: ${{ inputs.build_sources || inputs.full_suite }}
+          FORCE_BUILD: ${{ inputs.build_sources || steps.suite.outputs.full_suite == 'true' }}
           BEFORE_SHA: ${{ github.event.before }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -310,6 +337,7 @@ jobs:
       - name: "Package checks selected: ${{ steps.sources.outputs.build_sources }}"
         env:
           BUILD_SOURCES: ${{ steps.sources.outputs.build_sources }}
+          OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           if [ true = "$BUILD_SOURCES" ]; then
             decision="Package tests ($OMNI_TEST_SUITE) and benchmarks selected."
@@ -560,6 +588,8 @@ jobs:
   test-package-linux-cosmo:
     name: Package test / linux-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
+    env: &test_suite_env
+      OMNI_TEST_SUITE: ${{ needs.validate-ci-matrix.outputs.suite }}
     needs:
       - build-package-cosmo
       - validate-ci-matrix
@@ -640,6 +670,7 @@ jobs:
   test-package-linux-musl:
     name: Package test / linux-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
+    env: *test_suite_env
     needs:
       - build-package-musl
       - validate-ci-matrix
@@ -657,6 +688,7 @@ jobs:
   test-package-macos:
     name: Package test / ${{ matrix.runner }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    env: *test_suite_env
     needs:
       - build-package-cosmo
       - validate-ci-matrix
@@ -728,6 +760,7 @@ jobs:
   test-package-windows-cosmo:
     name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
+    env: *test_suite_env
     needs:
       - changes
       - build-package-cosmo
@@ -851,6 +884,7 @@ jobs:
   test-package-windows-ucrt:
     name: Package test / windows-${{ matrix.runtime }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
+    env: *test_suite_env
     needs:
       - changes
       - build-package-ucrt
@@ -1246,7 +1280,7 @@ jobs:
       - benchmark-cosmo
       - benchmark-musl
     if: >-
-      ${{ always() && inputs.full_suite
+      ${{ always() && needs.changes.outputs.full_suite == 'true'
         && 'true' == needs.changes.outputs.build_sources }}
     permissions: {}
     steps:
