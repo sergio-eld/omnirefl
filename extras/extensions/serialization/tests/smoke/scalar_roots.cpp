@@ -1,4 +1,4 @@
-#include "../json_match.hpp"
+#include "json_match.hpp"
 
 #include <gtest/gtest.h>
 

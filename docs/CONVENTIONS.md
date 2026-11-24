@@ -602,6 +602,8 @@ Package tests have two profiles, selected with `OMNI_TEST_SUITE`:
 Put base-interface sources under `tests/smoke/`, with their own executable and
 `CMakeLists.txt`. Full targets compile those same sources alongside the remaining
 suite; do not duplicate cases or compile the full suite just to filter its tests.
+Reference shared sources from the test root, and provide shared header directories
+with `target_include_directories`; do not use `../` source paths or includes.
 Exercise lower layers through their public entry point when that covers the same
 contract: `deserialize` covers parsing and schema mapping. Keep separate low-level
 checks, policies, combinations, and edge scenarios in the full suite.

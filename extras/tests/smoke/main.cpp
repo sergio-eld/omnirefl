@@ -1,4 +1,4 @@
-#include "../tool/structs.h"
+#include "structs.h"
 
 #include <omnirefl/reflected_scope.hpp>
 

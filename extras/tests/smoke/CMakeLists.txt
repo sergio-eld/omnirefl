@@ -31,6 +31,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
         CXX_EXTENSIONS NO)
     target_compile_definitions(${_target} PRIVATE CXX_STANDARD=${_standard})
     target_link_libraries(${_target} PRIVATE omni::refl gtest_main std_compat)
+    target_include_directories(${_target} PRIVATE
+        "${omnirefl_PROJECTS_DIR}/tests")
     omni_reflected_target(${_target})
     target_sources(${_target} PRIVATE functional.cpp)
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)

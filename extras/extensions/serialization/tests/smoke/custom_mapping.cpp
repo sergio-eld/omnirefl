@@ -1,5 +1,5 @@
-#include "../json_match.hpp"
-#include "../local_mapping.hpp"
+#include "json_match.hpp"
+#include "local_mapping.hpp"
 
 #include <gtest/gtest.h>
 

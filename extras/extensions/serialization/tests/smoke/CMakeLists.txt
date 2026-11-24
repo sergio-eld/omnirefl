@@ -1,5 +1,6 @@
 if(NOT TARGET json_model)
-    add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../model" json_model)
+    add_subdirectory("${omnirefl_PROJECTS_DIR}/extensions/serialization/model"
+        json_model)
 endif()
 
 foreach(_standard IN LISTS _supported_cpp_standards)
@@ -20,6 +21,8 @@ foreach(_standard IN LISTS _supported_cpp_standards)
             AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7))
         target_compile_options(${_target} PRIVATE -fno-exceptions)
     endif()
+    target_include_directories(${_target} PRIVATE
+        "${omnirefl_PROJECTS_DIR}/extensions/serialization/tests")
     omni_reflected_target(${_target})
     if(CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
         add_test(NAME ${_target} COMMAND ${_target})
