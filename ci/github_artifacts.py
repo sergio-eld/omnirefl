@@ -17,8 +17,18 @@ import zipfile
 
 def api(path):
     repository = os.environ['GITHUB_REPOSITORY']
-    return json.loads(subprocess.check_output(
-        ['gh', 'api', 'repos/' + repository + '/' + path]))
+    for attempt in range(3):
+        try:
+            response = subprocess.check_output(
+                ['gh', 'api', 'repos/' + repository + '/' + path])
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+            print('::warning::GitHub metadata request failed; retrying ' + path,
+                  file=sys.stderr)
+            time.sleep(2 ** (attempt + 1))
+            continue
+        return json.loads(response)
 
 
 def pages(path, key):
