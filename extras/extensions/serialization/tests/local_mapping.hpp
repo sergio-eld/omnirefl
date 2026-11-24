@@ -4,6 +4,8 @@
 
 #include <utility>
 
+namespace {
+
 namespace local_mapping {
 
 struct record { int value; };
@@ -36,3 +38,5 @@ struct select_mapping {
 };
 
 } // namespace local_mapping
+
+} // namespace

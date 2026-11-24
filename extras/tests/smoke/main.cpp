@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+namespace {
+
 namespace ccdb_output_filter_test {
 
 struct record {
@@ -60,3 +62,5 @@ TEST(print_names, simple) {
     EXPECT_EQ(expected, result);
   }
 }
+
+} // namespace
