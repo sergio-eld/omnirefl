@@ -387,6 +387,32 @@ struct record_field_names {
   }
 };
 
+// Select field types from the pack; elements are never accessed by index.
+template <typename Predicate, typename Selected, typename... Field>
+struct filter_field_types;
+
+template <typename Predicate, typename... Selected>
+struct filter_field_types<Predicate, std::tuple<Selected...>> {
+  using type = std::tuple<Selected...>;
+};
+
+template <typename Predicate, typename... Selected, typename Field,
+  typename... Rest>
+struct filter_field_types<Predicate, std::tuple<Selected...>, Field, Rest...>:
+    filter_field_types<Predicate,
+      compat::conditional_t<
+        omni::fn::detail::filter_constant<Predicate, Field &&>::value,
+        std::tuple<Selected..., Field>,
+        std::tuple<Selected...>>,
+      Rest...> {};
+
+template <typename Predicate, typename Fields>
+struct filter_fields;
+
+template <typename Predicate, typename... Field>
+struct filter_fields<Predicate, std::tuple<Field...>>:
+    filter_field_types<compat::decay_t<Predicate>, std::tuple<>, Field...> {};
+
 } // namespace detail
 } // namespace reflected_scope
 } // namespace ryml
