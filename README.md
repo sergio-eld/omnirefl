@@ -487,6 +487,12 @@ once into your local Conan cache.
 
 </details>
 
+### Cached builds
+
+Use CMake's compiler launcher to enable ccache. See
+[Cached builds](docs/cached-builds.md) for setup, precompiled-header behavior,
+and older-toolchain limitations.
+
 ### Release archives
 
 Download `omnirefl-cosmo-universal` (`.tar.gz`) from the
