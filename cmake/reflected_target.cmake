@@ -383,8 +383,7 @@ function(omni_reflected_target target)
     # Shared lists for common plumbing
     set(_gen_outputs)
     set(_command_checks)
-    set(_gen_headers)
-    set(_gen_depfiles)
+    set(_force_targets)
 
     message(STATUS "omnirefl: selected generated-header reflection for target ${target}")
     message(STATUS "omnirefl: output dir for target ${target}: ${_out_dir}")
@@ -431,6 +430,7 @@ function(omni_reflected_target target)
         # The database is available only after generation. Extract a stable
         # per-source command so unrelated database edits do not regenerate
         # reflection. Include the target to distinguish shared source files.
+        # Slash delimiters prevent matching another target's name by suffix.
         set(_extract_command
             ${CMAKE_COMMAND}
             -D "CCDB_QUERY=$<TARGET_FILE:omni::ccdb_query>"
@@ -464,25 +464,26 @@ function(omni_reflected_target target)
             VERBATIM
         )
 
-        # Slash delimiters make the target's `.dir` a complete output-path
-        # component instead of a suffix that can match another target name.
-        # The depfile names the header as its target; Ninja requires that output
-        # first. The stamp still forces generation after placeholder creation.
+        # Pass compatibility flags separately to preserve their list as one argument.
+        set(_generate_command ${CMAKE_COMMAND}
+            -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
+            -D "COMP_DB=${_comp_db}"
+            -D "COMMAND_FILE=${_command_file}"
+            -D "SOURCE=${_src}"
+            -D "OUT=${_generated_header}"
+            -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
+            -D "NO_ANNOTATIONS=${_no_annotations}"
+            -D "LOG_LEVEL=${OMNIREFL_LOG_LEVEL}"
+            -D "TIMINGS=${_timings}"
+            -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
+            -D "COMPILER_TARGET=${_compiler_target}")
+
+        # The depfile names the header as its target; Ninja needs that output first.
+        # The stamp still forces generation after placeholder creation.
         add_custom_command(
             OUTPUT "${_generated_header}" "${_stamp}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
-            COMMAND ${CMAKE_COMMAND}
-                -D "OMNIREFL=$<TARGET_FILE:omni::tool>"
-                -D "COMP_DB=${_comp_db}"
-                -D "COMMAND_FILE=${_command_file}"
-                -D "SOURCE=${_src}"
-                -D "OUT=${_generated_header}"
-                -D "RESOURCE_DIR=${omnirefl_RESOURCE_DIR}"
-                -D "NO_ANNOTATIONS=${_no_annotations}"
-                -D "LOG_LEVEL=${OMNIREFL_LOG_LEVEL}"
-                -D "TIMINGS=${_timings}"
-                -D "MSVC_CXX23_PREVIEW_AD_HOC=${_msvc_cxx23_preview_ad_hoc}"
-                -D "COMPILER_TARGET=${_compiler_target}"
+            COMMAND ${_generate_command}
                 -D "COMPATIBILITY_FLAGS=${_compiler_compatibility_flags}"
                 -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
             COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
@@ -494,10 +495,25 @@ function(omni_reflected_target target)
             VERBATIM
         )
 
+        # Independent force actions let the outer build apply its failure limit.
+        # Ninja refreshes its normal output/dependency records on the next build.
+        set(_force_target "_force.${target}.${_src_hash}.omni")
+        add_custom_target(${_force_target}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_stamp}" "${_depfile}"
+            COMMAND ${_generate_command}
+                -D "COMPATIBILITY_FLAGS=${_compiler_compatibility_flags}"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_omnirefl_from_ccdb.cmake"
+            COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
+            DEPENDS "${_src}" "${_command_file}.stamp" omni::tool
+            COMMENT "omnirefl: force-regenerating reflection for ${target}: ${_src}"
+            VERBATIM
+        )
+        set_target_properties(${_force_target} PROPERTIES FOLDER "omnirefl/internal")
+        list(APPEND _force_targets ${_force_target})
+
         list(APPEND _command_checks "${_command_file}.stamp")
         list(APPEND _gen_outputs "${_stamp}")
-        list(APPEND _gen_headers "${_generated_header}")
-        list(APPEND _gen_depfiles "${_depfile}")
 
         set(_fi_prop "OMNIREFL_FORCE_INCLUDE_${_src_hash}")
 
@@ -525,7 +541,7 @@ function(omni_reflected_target target)
 
     target_link_libraries(${target} PRIVATE omni::refl)
 
-    # Common plumbing: hook outputs into build + manual force-regenerate target
+    # Share ordinary generation outputs between the target and its dependencies.
     set(_gen_target "_gen.${target}.omni")
     add_custom_target(_commands.${target}.omni DEPENDS ${_command_checks})
     add_custom_target(${_gen_target} DEPENDS ${_gen_outputs})
@@ -534,28 +550,7 @@ function(omni_reflected_target target)
         PROPERTIES FOLDER "omnirefl/internal")
     add_dependencies(${target} ${_gen_target})
 
-    set(_cfg_arg "")
-    if(CMAKE_CONFIGURATION_TYPES)
-        set(_cfg_arg --config $<CONFIG>)
-    endif()
-
-    # Passing every output to one `cmake -E rm` exceeds the Windows command-line
-    # limit for targets with a few dozen sources, so the list lives in a script.
-    set(_clean_script "${CMAKE_CURRENT_BINARY_DIR}/${target}.omni.clean.cmake")
-    set(_clean_files ${_gen_outputs} ${_gen_headers} ${_gen_depfiles})
-    # These paths are script literals, including any dollar signs or quotes.
-    string(REPLACE "\\" "\\\\" _clean_files "${_clean_files}")
-    string(REPLACE "\"" "\\\"" _clean_files "${_clean_files}")
-    string(REPLACE "$" "\\$" _clean_files "${_clean_files}")
-    list(TRANSFORM _clean_files PREPEND "    \"")
-    list(TRANSFORM _clean_files APPEND "\"")
-    list(JOIN _clean_files "\n" _clean_files)
-    file(WRITE "${_clean_script}" "file(REMOVE\n${_clean_files}\n)\n")
-
-    add_custom_target(${target}.omni
-        COMMAND ${CMAKE_COMMAND} -P "${_clean_script}"
-        COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target ${_gen_target} ${_cfg_arg}
-        COMMENT "omnirefl: force-regenerate for ${target} [.omni]"
-        VERBATIM
-    )
+    add_custom_target(${target}.omni)
+    add_dependencies(${target}.omni ${_gen_target})
+    add_custom_target(${target}.omni.force DEPENDS ${_force_targets})
 endfunction()

@@ -633,6 +633,10 @@ Required CI lists selected C++ matrix standards in one table, grouped by compile
 CI policy tests run alongside package builds when `ci/` or workflow files change,
 and on every full run. Required CI enforces them whenever selected.
 
+Keep opt-in build regressions outside smoke/full. Standalone runners under
+`extras/tests/tool/manual/` document their invocation at the top of the file; see
+[keep-going](../extras/tests/tool/manual/keep_going/check.py).
+
 Available packages from successful CI can be reused for the exact commit,
 including smoke runs. Fresh PR attempts build directly; reopened PRs and reruns
 of package preparation check for reusable packages. After merging a PR, CI can
