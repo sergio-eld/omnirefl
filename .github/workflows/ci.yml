@@ -236,23 +236,18 @@ jobs:
               for runtime, coverage in matrix.items():
                   packages = ', '.join(row['target'] for row in coverage['build']['include'])
                   platforms = []
-                  selected_tests = coverage.get('test', {}) if (
-                      runtime != 'musl' or os.environ['OMNI_TEST_SUITE'] == 'full'
-                  ) else {}
-                  for platform, tests in selected_tests.items():
+                  for platform, tests in coverage.get('test', {}).items():
                       architectures = tests.get('arch') or sorted({
                           row['arch'] for row in tests.get('include', []) if 'arch' in row
                       })
                       platforms.extend(platform + '-' + arch for arch in architectures)
-                  scope = ', '.join(platforms) or 'Skipped (full suite only)'
+                  scope = ', '.join(platforms)
                   print(f'| {runtime} | {packages} | {scope} |', file=summary)
               standards = ('all supported standards' if os.environ['OMNI_TEST_SUITE'] == 'full'
                            else 'minimum and maximum supported standards per compiler')
               print('C++ test matrix: **' + standards + '**. Guides retain their required standards.\n',
                     file=summary)
               print('C++ test matrix: ' + standards)
-              if os.environ['OMNI_TEST_SUITE'] == 'smoke':
-                  print('musl package tests skipped; package builds and benchmarks retained.')
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
                   print(f'::group::Prepared {runtime} matrix')
@@ -381,7 +376,7 @@ jobs:
             if [ full = "$OMNI_TEST_SUITE" ]; then
               scope='All tests across the supported platform, compiler, and C++ standard matrix.'
             else
-              scope="Guides and base-interface tests at each compiler's minimum and maximum supported C++ standards; musl package tests skipped."
+              scope="Guides and base-interface tests across all package distributions at each compiler's minimum and maximum supported C++ standards."
             fi
           else
             decision='No package changes detected; package tests and benchmarks skipped.'
@@ -721,7 +716,6 @@ jobs:
       - build-package-musl
       - validate-ci-matrix
       - build-package-extras
-    if: ${{ needs.validate-ci-matrix.outputs.suite == 'full' }}
     permissions:
       actions: read
       contents: read
@@ -1282,10 +1276,7 @@ jobs:
           build_sources = 'true' == jobs['changes']['outputs'].get('build_sources')
           failed = [
               name for name, job in jobs.items()
-              if 'success' != job['result'] and not (
-                  name == 'test-package-linux-musl' and job['result'] == 'skipped'
-                  and jobs['changes']['outputs'].get('full_suite') != 'true'
-              ) and (
+              if 'success' != job['result'] and (
                   name in ('changes', 'validate-ci-matrix')
                   or (build_sources and name == 'reusable-packages')
                   or ('check-site' == name

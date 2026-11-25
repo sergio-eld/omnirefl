@@ -600,8 +600,8 @@ Examples whose toolchain requirements are unmet are reported and skipped.
 
 Tests default to the full suite. Use `-DOMNI_TEST_SUITE=smoke` for the smaller
 base-interface suite. Smoke uses each compiler's minimum and maximum supported
-C++ standards; full uses every supported standard. CI skips musl package tests
-in smoke. Both suites include guides when supported. PRs use smoke; master
+C++ standards; full uses every supported standard. Both cover all package
+distributions and include guides when supported. PRs use smoke; master
 selects smoke or full by the
 [validation cadence](docs/CONVENTIONS.md#ci-test-profiles-and-release-validation).
 Release tags and manual full-suite requests use full validation.
