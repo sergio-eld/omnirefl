@@ -15,7 +15,7 @@ namespace reflected_scope {
 template <typename Strategy, typename WithNodeCheck>
 struct map_object_node_t;
 
-template <typename Strategy>
+template <typename Strategy, typename ExplicitNulls>
 struct map_record_t;
 
 namespace detail {
@@ -106,29 +106,32 @@ private:
   }
 };
 
-template <typename Strategy>
+template <typename Strategy, typename ExplicitNulls>
 struct tdm_for_map_record {
   /** (QoL) Functional update of the shared mapping strategy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
     typename Result = compat::invoke_result_t<F &&, const Strategy &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_copy_constructible<ExplicitNulls>::value))
   constexpr auto tdm_strategy(F &&f) const &
-    -> map_record_t<compat::decay_t<Result>> {
+    -> map_record_t<compat::decay_t<Result>, ExplicitNulls> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
       /*tdm_base=*/{},
       /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f), this->derived().strategy),
+      this->derived().explicit_nulls,
     };
   }
 
   /** (QoL) Functional update consuming the bound strategy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
     typename Result = compat::invoke_result_t<F &&, Strategy &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_move_constructible<ExplicitNulls>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
-    -> map_record_t<compat::decay_t<Result>> {
+    -> map_record_t<compat::decay_t<Result>, ExplicitNulls> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
       /*tdm_base=*/{},
@@ -136,17 +139,53 @@ struct tdm_for_map_record {
 #endif
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().strategy)),
+      std::move(this->derived().explicit_nulls),
+    };
+  }
+
+  /** (QoL) Functional update of `.explicit_nulls`, copying the strategy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const ExplicitNulls &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_copy_constructible<Strategy>::value))
+  constexpr auto tdm_explicit_nulls(F &&f) const &
+    -> map_record_t<Strategy, compat::decay_t<Result>> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
+#endif
+      this->derived().strategy,
+      compat::invoke(std::forward<F>(f), this->derived().explicit_nulls),
+    };
+  }
+
+  /** (QoL) Functional update of `.explicit_nulls`, consuming the strategy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, ExplicitNulls &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value
+      && std::is_move_constructible<Strategy>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_explicit_nulls(F &&f) &&
+    -> map_record_t<Strategy, compat::decay_t<Result>> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*tdm_base=*/{},
+      /*depth_base=*/{},
+#endif
+      std::move(this->derived().strategy),
+      compat::invoke(std::forward<F>(f),
+        std::move(this->derived().explicit_nulls)),
     };
   }
 
 private:
   // Direct returns keep the updater bodies constexpr-compatible with C++11.
-  constexpr const map_record_t<Strategy> &derived() const & {
-    return static_cast<const map_record_t<Strategy> &>(*this);
+  constexpr const map_record_t<Strategy, ExplicitNulls> &derived() const & {
+    return static_cast<const map_record_t<Strategy, ExplicitNulls> &>(*this);
   }
 
-  OMNI_CPP14_CONSTEXPR map_record_t<Strategy> &derived() & {
-    return static_cast<map_record_t<Strategy> &>(*this);
+  OMNI_CPP14_CONSTEXPR map_record_t<Strategy, ExplicitNulls> &derived() & {
+    return static_cast<map_record_t<Strategy, ExplicitNulls> &>(*this);
   }
 };
 

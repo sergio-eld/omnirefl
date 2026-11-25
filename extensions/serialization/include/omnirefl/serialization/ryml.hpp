@@ -500,13 +500,17 @@ struct as_owning_tree_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
+  /** Shared empty-optional policy; see \ref write_config. */
+  write_config config{};
+  using tdm_provider::tdm_config;
+
   /** Serialize value into an owning tree.
    *
 ```
 as_owning_tree :: const T& -> tree
 ```
    *
-   * Empty optionals produce null;
+   * By default, empty optionals produce null;
    * empty optional sequence elements are omitted. The result can be modified
    * or passed to RapidYAML emitters. */
   template <typename T>
@@ -517,10 +521,13 @@ as_owning_tree :: const T& -> tree
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr as_owning_tree_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode),
-    (std::is_constructible<MapNode, Value &&>::value))
-  constexpr as_owning_tree_t(Value &&value)
-    : map_node(std::forward<Value>(value)) {}
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode,
+    typename Options = write_config),
+    (std::is_constructible<MapNode, Value &&>::value
+      && std::is_constructible<write_config, Options &&>::value))
+  constexpr as_owning_tree_t(Value &&value, Options &&options = Options{})
+    : map_node(std::forward<Value>(value)),
+      config(std::forward<Options>(options)) {}
 #endif
 };
 
@@ -544,6 +551,10 @@ struct as_ref_tree_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
+  /** Shared empty-optional policy; see \ref write_config. */
+  write_config config{};
+  using tdm_provider::tdm_config;
+
   /** Serialize an lvalue into a tree borrowing its existing string storage.
    *
 ```
@@ -551,8 +562,8 @@ as_ref_tree :: T& -> tree
 ```
    *
    * Accepts const and mutable sources. Keep source storage alive and unchanged
-   * while the tree is used. Empty optionals produce null; empty optional
-   * sequence elements are omitted. */
+   * while the tree is used. By default, empty optionals produce null;
+   * empty optional sequence elements are omitted. */
   template <typename T>
   ::ryml::Tree operator()(T &value) const;
 
@@ -565,10 +576,13 @@ as_ref_tree :: T& -> tree
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr as_ref_tree_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode),
-    (std::is_constructible<MapNode, Value &&>::value))
-  constexpr as_ref_tree_t(Value &&value)
-    : map_node(std::forward<Value>(value)) {}
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode,
+    typename Options = write_config),
+    (std::is_constructible<MapNode, Value &&>::value
+      && std::is_constructible<write_config, Options &&>::value))
+  constexpr as_ref_tree_t(Value &&value, Options &&options = Options{})
+    : map_node(std::forward<Value>(value)),
+      config(std::forward<Options>(options)) {}
 #endif
 };
 
@@ -594,6 +608,10 @@ struct serialize_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
+  /** Shared empty-optional policy; see \ref write_config. */
+  write_config config{};
+  using tdm_provider::tdm_config;
+
   /** Serialize a reflected record, supported scalar, or vector to YAML or JSON.
    *
 ```
@@ -603,8 +621,9 @@ serialize :: const T& -> string
    * Vectors may contain nested vectors or reflected records, including at the
    * root. String sources include char-based basic_string and c4 views, plus
    * basic_string_view when the standard library provides it.
-   * Empty optionals emit null at the root or as record fields. Empty optional
-   * sequence elements are omitted; remaining elements keep their order.
+   * By default, empty optionals emit null at the root or as record fields;
+   * empty optional sequence elements are omitted. Remaining elements keep
+   * their order.
    * Populated optionals serialize their contained value.
    * Strings are quoted and borrowed from the input until emission completes.
    * Keep their storage alive and unchanged until the call returns, including
@@ -620,12 +639,15 @@ serialize :: const T& -> string
   constexpr serialize_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename First = ::ryml::EmitType_e,
-    typename Second = MapNode),
+    typename Second = MapNode, typename Options = write_config),
     (std::is_constructible<::ryml::EmitType_e, First &&>::value
-      && std::is_constructible<MapNode, Second &&>::value))
-  constexpr serialize_t(First &&first, Second &&second = Second{})
+      && std::is_constructible<MapNode, Second &&>::value
+      && std::is_constructible<write_config, Options &&>::value))
+  constexpr serialize_t(First &&first, Second &&second = Second{},
+    Options &&options = Options{})
     : format(std::forward<First>(first)),
-      map_node(std::forward<Second>(second)) {}
+      map_node(std::forward<Second>(second)),
+      config(std::forward<Options>(options)) {}
 #endif
 };
 

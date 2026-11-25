@@ -10,6 +10,7 @@
 #include <omnirefl/serialization/ryml/core.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_enum.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_record.hpp>
+#include <omnirefl/serialization/ryml/impl/tdm_type.hpp>
 #include <omnirefl/serialization/ryml/state.hpp>
 #include <omnirefl/traits.hpp>
 
@@ -25,25 +26,37 @@ namespace reflected_scope {
 
 /** Maps selected record fields to object entries with canonical names.
  * Members are mapped through state.map_node.
+ * Empty optional fields follow \ref write_config unless `.explicit_nulls`
+ * is true.
  *
 ```
 map_record :: (state, const T&) -> node
 ```
  *
  * @pre Record metadata must be available in reflected scope. */
-template <typename Strategy = mapping::record_strategy_t<>>
-struct map_record_t:
-    detail::tdm_for_map_record<Strategy>,
+template <typename Strategy = mapping::record_strategy_t<>,
+  typename ExplicitNulls = std::false_type>
+struct map_record_t final:
+    detail::tdm_for_map_record<Strategy, ExplicitNulls>,
     omni::ryml::detail::with_depth_exceeded_operator {
-  using tdm_provider = detail::tdm_for_map_record<Strategy>;
+  using tdm_provider = detail::tdm_for_map_record<Strategy, ExplicitNulls>;
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_record_t requires mapping::record_strategy_t");
+  static_assert(std::is_same<bool, ExplicitNulls>::value
+      || std::is_same<std::false_type, ExplicitNulls>::value
+      || std::is_same<std::true_type, ExplicitNulls>::value,
+    "map_record_t explicit_nulls must be bool or a Boolean integral constant");
 
   /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
+
+  /** True retains empty optional fields as null;
+   * false follows \ref write_config. */
+  ExplicitNulls explicit_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_explicit_nulls;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
@@ -53,12 +66,15 @@ struct map_record_t:
 // Ad hoc: classes with bases are not aggregates before C++17. These
 // constructors preserve field initialization in the older standards.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr map_record_t() = default;
+  constexpr map_record_t() : strategy{}, explicit_nulls{} {}
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
-    (std::is_constructible<Strategy, Value &&>::value))
-  constexpr map_record_t(Value &&value)
-    : strategy(std::forward<Value>(value)) {}
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+    typename Nulls = ExplicitNulls),
+    (std::is_constructible<Strategy, Value &&>::value
+      && std::is_constructible<ExplicitNulls, Nulls &&>::value))
+  constexpr map_record_t(Value &&value, Nulls &&nulls = Nulls{})
+    : strategy(std::forward<Value>(value)),
+      explicit_nulls(std::forward<Nulls>(nulls)) {}
 #endif
 };
 
@@ -236,8 +252,8 @@ static constexpr const map_string_like_t &map_string_like =
   compat::detail::shared_state<map_string_like_t>::value;
 #endif
 
-/** Maps an empty optional to null, or maps its contained value to a node.
- * Contained values are mapped through state.map_node.
+/** Maps an optional's value through state.map_node, or writes null.
+ * Enclosing record/range mappings decide whether empty optionals are omitted.
  *
 ```
 map_optional_like :: (state, const T&) -> node
@@ -264,26 +280,60 @@ static constexpr const map_optional_like_t &map_optional_like =
 map_range :: (state, const T&) -> node
 ```
  *
- * Elements are mapped through state.map_node; empty optional array elements
- * are omitted. \ref traits::is_key_value selects object or array output.
+ * Elements are mapped through state.map_node. Null omission follows
+ * \ref write_config unless `.explicit_nulls` retains null elements or values.
+ * This policy covers immediate elements; nested records/ranges own theirs.
+ * \ref traits::is_key_value selects object or array output.
  * @pre Non-scalar elements are exposed as lvalue references to value_type. */
-struct map_range_t: detail::with_depth_exceeded_operator {
+template <typename ExplicitNulls = std::false_type>
+struct map_range_t final:
+    detail::tdm_for_map_range<ExplicitNulls>,
+    detail::with_depth_exceeded_operator {
+  using tdm_provider = detail::tdm_for_map_range<ExplicitNulls>;
   using detail::with_depth_exceeded_operator::operator();
+
+  static_assert(std::is_same<bool, ExplicitNulls>::value
+      || std::is_same<std::false_type, ExplicitNulls>::value
+      || std::is_same<std::true_type, ExplicitNulls>::value,
+    "map_range_t explicit_nulls must be bool "
+    "or a Boolean integral constant");
+
+  /** True forces null emission; false follows \ref write_config. */
+  ExplicitNulls explicit_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_explicit_nulls;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
       is_write_state<State>>::value))
   auto operator()(State context, const T &value) const -> ::ryml::NodeRef;
+
+// Ad hoc: aggregate bases need constructors before C++17.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr map_range_t() : explicit_nulls{} {}
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = ExplicitNulls),
+    (std::is_constructible<ExplicitNulls, Value &&>::value))
+  constexpr map_range_t(Value &&value)
+    : explicit_nulls(std::forward<Value>(value)) {}
+#endif
 };
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr map_range_t map_range{};
+inline constexpr map_range_t<> map_range{};
 #else
-static constexpr const map_range_t &map_range =
-  compat::detail::shared_state<map_range_t>::value;
+static constexpr const map_range_t<> &map_range =
+  compat::detail::shared_state<map_range_t<>>::value;
 #endif
 
 } // namespace ryml
 } // namespace omni
 
 #include <omnirefl/serialization/ryml/impl/map_type.hpp>
+
+// TODO: [medium] Add explicit-null read/write mappings for nullptr_t and
+// compat::monostate in a separate PR, independent of optional omission.
+// Consider nullopt_t only for writing: optional<nullopt_t> is ill-formed.
+
+// TODO: [medium] Revisit parent omission vs custom empty-optional mappings.
+// A custom sequence compositor can emit values such as "unavailable"; consider
+// an observable trait only if needed, since that would be an ad hoc.

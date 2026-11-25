@@ -198,7 +198,7 @@ template <typename T>
   core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::build(write_state_t<detail::write_state_config<false,
       compat::remove_cvref_t<MapNode>, compat::remove_cvref_t<T>>>{
-      this->map_node, &tree, tree.root_id()}, value);
+      this->map_node, &tree, tree.root_id(), this->config}, value);
   return tree;
 }
 
@@ -209,7 +209,7 @@ template <typename T>
   core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::build(write_state_t<detail::write_state_config<true,
       compat::remove_cvref_t<MapNode>, compat::remove_cvref_t<T>>>{
-      this->map_node, &tree, tree.root_id()}, value);
+      this->map_node, &tree, tree.root_id(), this->config}, value);
   return tree;
 }
 
@@ -220,7 +220,7 @@ std::string serialize_t<MapNode>::operator()(const Value &value) const {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
     /*base=*/{},
 #endif
-    this->map_node}(value);
+    this->map_node, this->config}(value);
 
   // Reserve an initial estimate without a sizing traversal. Borrowed strings,
   // escaping, or deeper YAML indentation may require an emitter resize/retry.

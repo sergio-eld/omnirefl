@@ -213,7 +213,7 @@ using default_mapping_from_type = typename traits::select<
   traits::case_<std::is_floating_point<T>::value, map_floating_point_t>,
   traits::case_<traits::is_optional<T>::value, map_optional_like_t>,
   traits::case_<omni::ryml::detail::is_mapped_range<const T>::value,
-    map_range_t>,
+    map_range_t<>>,
   traits::case_<omni::is_reflected_enum<T>::value,
     reflected_scope::map_enum_t<>>,
   traits::case_<omni::is_reflected_record<T>::value,
