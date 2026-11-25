@@ -630,9 +630,13 @@ available. Select locally with `-DOMNI_TEST_SUITE=smoke` or `full`.
 The final CI summary lists the ten slowest jobs in the current attempt, with
 elapsed time, outcome, and links to their logs.
 Required CI lists selected C++ matrix standards in one table, grouped by compiler.
+CI policy tests run alongside package builds when `ci/` or workflow files change,
+and on every full run. Required CI enforces them whenever selected.
 
-All CI entry points reuse available packages from successful CI for the exact
-commit, including smoke runs. After merging a PR, CI can also reuse its full
+Available packages from successful CI can be reused for the exact commit,
+including smoke runs. Fresh PR attempts build directly; reopened PRs and reruns
+of package preparation check for reusable packages. After merging a PR, CI can
+also reuse its full
 validation and packages: GitHub must identify the final PR head, the tested
 synthetic merge must include that head, and its tree must equal the actual
 merged tree. This resets master's full-validation cadence even when merging
