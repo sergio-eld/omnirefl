@@ -231,12 +231,23 @@ jobs:
               for runtime, coverage in matrix.items():
                   packages = ', '.join(row['target'] for row in coverage['build']['include'])
                   platforms = []
-                  for platform, tests in coverage.get('test', {}).items():
+                  selected_tests = coverage.get('test', {}) if (
+                      runtime != 'musl' or os.environ['OMNI_TEST_SUITE'] == 'full'
+                  ) else {}
+                  for platform, tests in selected_tests.items():
                       architectures = tests.get('arch') or sorted({
                           row['arch'] for row in tests.get('include', []) if 'arch' in row
                       })
                       platforms.extend(platform + '-' + arch for arch in architectures)
-                  print(f'| {runtime} | {packages} | ' + ', '.join(platforms) + ' |', file=summary)
+                  scope = ', '.join(platforms) or 'Skipped (full suite only)'
+                  print(f'| {runtime} | {packages} | {scope} |', file=summary)
+              standards = ('all supported standards' if os.environ['OMNI_TEST_SUITE'] == 'full'
+                           else 'minimum and maximum supported standards per compiler')
+              print('C++ test matrix: **' + standards + '**. Guides retain their required standards.\n',
+                    file=summary)
+              print('C++ test matrix: ' + standards)
+              if os.environ['OMNI_TEST_SUITE'] == 'smoke':
+                  print('musl package tests skipped; package builds and benchmarks retained.')
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
                   print(f'::group::Prepared {runtime} matrix')
@@ -356,7 +367,7 @@ jobs:
             if [ full = "$OMNI_TEST_SUITE" ]; then
               scope='All tests across the supported platform, compiler, and C++ standard matrix.'
             else
-              scope='Guides and base-interface tests across the supported platform, compiler, and C++ standard matrix.'
+              scope="Guides and base-interface tests at each compiler's minimum and maximum supported C++ standards; musl package tests skipped."
             fi
           else
             decision='No package changes detected; package tests and benchmarks skipped.'
@@ -687,6 +698,7 @@ jobs:
       - build-package-musl
       - validate-ci-matrix
       - build-package-extras
+    if: ${{ needs.validate-ci-matrix.outputs.suite == 'full' }}
     permissions:
       actions: read
       contents: read
@@ -1247,7 +1259,10 @@ jobs:
           build_sources = 'true' == jobs['changes']['outputs'].get('build_sources')
           failed = [
               name for name, job in jobs.items()
-              if 'success' != job['result'] and (
+              if 'success' != job['result'] and not (
+                  name == 'test-package-linux-musl' and job['result'] == 'skipped'
+                  and jobs['changes']['outputs'].get('full_suite') != 'true'
+              ) and (
                   name in ('changes', 'validate-ci-matrix')
                   or (build_sources and name == 'reusable-packages')
                   or ('check-site' == name
@@ -1553,3 +1568,55 @@ jobs:
         uses: actions/deploy-pages@v5
         with:
           artifact_name: ${{ needs.prepare-pages.outputs.artifact_name }}
+
+  ci-summary:
+    name: CI summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs:
+      - required-ci
+      - full-suite
+      - benchmark-cosmo
+      - benchmark-musl
+      - prepare-pages
+      - deploy-pages
+    if: always()
+    permissions:
+      actions: read
+    steps:
+      - name: Report ten slowest jobs
+        uses: actions/github-script@v8
+        with:
+          retries: 2
+          script: |
+            try {
+              const jobs = await github.paginate(
+                github.rest.actions.listJobsForWorkflowRunAttempt, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: context.runId,
+                  attempt_number: Number(process.env.GITHUB_RUN_ATTEMPT),
+                  per_page: 100,
+                  request: {timeout: 10000},
+                })
+              const slowest = jobs
+                .filter(job => job.started_at && job.completed_at
+                  && job.conclusion !== 'skipped')
+                .map(job => ({job, seconds: Math.round(
+                  (Date.parse(job.completed_at) - Date.parse(job.started_at)) / 1000)}))
+                .sort((left, right) => right.seconds - left.seconds)
+                .slice(0, 10)
+              const rows = slowest.map(({job, seconds}) =>
+                `| [${job.name.replaceAll('|', '\\|')}](${job.html_url}) | `
+                  + `${Math.floor(seconds / 60)}m ${seconds % 60}s | ${job.conclusion} |`)
+              const report = '## 10 slowest jobs\n\n'
+                + `Current attempt: ${process.env.GITHUB_RUN_ATTEMPT}. Job elapsed time.\n\n`
+                + '| Job | Duration | Result |\n| --- | ---: | --- |\n'
+                + rows.join('\n') + '\n'
+              core.info(report)
+              await core.summary.addRaw(report).write()
+            } catch (error) {
+              core.warning(`Unable to report job timings: ${error.message}`)
+              await core.summary.addRaw('## Job timings\n\n'
+                + 'GitHub job timings could not be retrieved for this attempt.\n').write()
+            }
