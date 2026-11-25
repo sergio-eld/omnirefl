@@ -272,7 +272,7 @@ Build the example:
 
 ```bash
 # Builds rerun instrumentation automatically for changed inputs.
-# To trigger it manually:
+# To update reflection without compiling:
 # cmake --build build --target sneak_peek.omni
 cmake --build build --target sneak_peek
 ```
@@ -1010,6 +1010,17 @@ Distinct recursive paths and depths instantiate separate mappings.
 Language servers can report temporary diagnostics because reflected translation
 units depend on a force-included generated header. Build the affected source or
 refresh it through the `<target>.omni` target.
+
+To continue reflection after errors in independent sources:
+
+```sh
+cmake --build build --target example.omni -- -k 0 # Ninja
+cmake --build build --target example.omni -- -k   # Make
+```
+
+The build still fails if any source fails. `.omni` reuses successful outputs;
+use `.omni.force` to regenerate every source. After `.omni.force`, Ninja's next
+ordinary build regenerates reflection to refresh its dependency records.
 
 Invalid C++ in an instrumented translation unit is reported as a Clang error.
 Compiler warnings are not reported by omnirefl.
