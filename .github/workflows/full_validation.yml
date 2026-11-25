@@ -36,19 +36,6 @@ jobs:
           printf '%s\n' "$selection"
           printf '## Full-suite cadence\n\n%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: "Full suite selected: ${{ steps.policy.outputs.full_suite }}"
-        env:
-          FULL_SUITE: ${{ steps.policy.outputs.full_suite }}
-        run: |
-          if [ true = "$FULL_SUITE" ]; then
-            echo '::notice::Full test suite selected after three idle days; reusing exact-commit packages when available.'
-            echo '## Full test suite selected' >> "$GITHUB_STEP_SUMMARY"
-            echo 'Running all tests, reusing exact-commit packages when available.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '::notice::No additional full test run is due.'
-            echo '## No additional full test run due' >> "$GITHUB_STEP_SUMMARY"
-          fi
-
   validation:
     name: Periodic full suite
     needs: select

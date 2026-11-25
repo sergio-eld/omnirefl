@@ -230,7 +230,6 @@ jobs:
               print('matrix=' + json.dumps(matrix), file=output)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               print('## Prepared CI matrix\n', file=summary)
-              print('Test suite: **' + os.environ['OMNI_TEST_SUITE'] + '**\n', file=summary)
               print('| Distribution | Packages | Test platforms |', file=summary)
               print('| --- | --- | --- |', file=summary)
               for runtime, coverage in matrix.items():
@@ -245,8 +244,6 @@ jobs:
                   print(f'| {runtime} | {packages} | {scope} |', file=summary)
               standards = ('all supported standards' if os.environ['OMNI_TEST_SUITE'] == 'full'
                            else 'minimum and maximum supported standards per compiler')
-              print('C++ test matrix: **' + standards + '**. Guides retain their required standards.\n',
-                    file=summary)
               print('C++ test matrix: ' + standards)
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
@@ -289,33 +286,17 @@ jobs:
         run: |
           if [ true = "$REQUESTED_FULL" ]; then
             echo 'full_suite=true' >> "$GITHUB_OUTPUT"
-            echo 'Full suite explicitly requested.'
+            selection='Full suite explicitly requested.'
           elif [ pull_request = "$GITHUB_EVENT_NAME" ]; then
             selection=$(python3 ci/full_validation.py --pull-request "$PR_NUMBER")
-            printf '%s\n' "$selection"
-            printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
           elif [ push = "$GITHUB_EVENT_NAME" ] && [ refs/heads/master = "$GITHUB_REF" ]; then
             selection=$(python3 ci/full_validation.py)
-            printf '%s\n' "$selection"
-            printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'full_suite=false' >> "$GITHUB_OUTPUT"
-            echo 'Smoke suite selected; automatic commit cadence applies only to master pushes.'
+            selection='Smoke suite selected.'
           fi
-
-      - name: "Test suite: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}"
-        env:
-          OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
-          REUSED_FULL_RUN: ${{ steps.suite.outputs.reused_full_run_id }}
-          REUSED_FULL_COMMIT: ${{ steps.suite.outputs.reused_full_commit }}
-        run: |
-          echo "::notice::Selected test suite: $OMNI_TEST_SUITE"
-          printf '## Selected test suite: %s\n' "$OMNI_TEST_SUITE" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$REUSED_FULL_RUN" ]; then
-            decision="Full validation reused from PR run $REUSED_FULL_RUN (tested $REUSED_FULL_COMMIT; identical merged tree). This run performs smoke checks."
-            echo "::notice::$decision"
-            printf '\n%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          printf '%s\n' "$selection"
+          printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Detect source changes
         id: sources
@@ -372,7 +353,7 @@ jobs:
           OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           if [ true = "$BUILD_SOURCES" ]; then
-            decision="Package tests ($OMNI_TEST_SUITE) and benchmarks selected."
+            decision='Package tests and benchmarks selected.'
             if [ full = "$OMNI_TEST_SUITE" ]; then
               scope='All tests across the supported platform, compiler, and C++ standard matrix.'
             else
@@ -383,7 +364,7 @@ jobs:
             scope=''
           fi
           echo "::notice::$decision"
-          printf '\n%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
 
   reusable-packages:
     name: Find reusable CI packages

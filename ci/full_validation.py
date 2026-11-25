@@ -88,7 +88,9 @@ def select(idle):
     else:
         reason = ('No green full run covers the latest five first-parent commits.'
                   if due else 'Fewer than five commits since the last green full run.')
-    print('Full test suite selected:', due, '-', reason)
+    selection = ('Full suite selected' if due else
+                 'No additional run selected' if idle else 'Smoke suite selected')
+    print(selection + ':', reason)
     print('Recent full validation distance:', validated_distance)
     print('Another full validation run already in progress:',
           'yes' if running else 'no')
