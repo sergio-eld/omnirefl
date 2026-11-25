@@ -47,6 +47,8 @@ elif path == ['artifacts']:
               if a['name'] == query.get('name', [a['name']])[0]]}
 elif len(path) == 2 and path[0] == 'runs':
     result = next(r for r in data['runs'] if str(r['id']) == path[1])
+elif len(path) == 4 and path[0] == 'runs' and path[2] == 'attempts':
+    result = data['attempts'][path[3]]
 elif len(path) == 3 and path[0] == 'runs' and path[2] == 'artifacts':
     result = {'artifacts': data['artifacts']}
 elif path[0] == 'runs' and path[-1] == 'jobs':
@@ -64,6 +66,74 @@ print(json.dumps(result))
 
 
 class PackageReuse(unittest.TestCase):
+    def test_smoke_packages_survive_failed_rerun(self):
+        commit = 'a' * 40
+        for case, earlier_result, replaced, reusable in [
+            ('untouched green smoke artifacts', 'success', False, True),
+            ('replacement after tested gate', 'success', True, False),
+            ('no green attempt', 'failure', False, False),
+        ]:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'gh').write_text(GITHUB_CLI)
+                (root / 'gh').chmod(0o755)
+                artifacts = []
+                for name, filename, content, timestamp in [
+                    ('packages-cosmo-universal-' + commit[:12], 'binary.tar.gz',
+                     'package bytes', '30' if replaced else '10'),
+                    ('symbols-cosmo-universal-' + commit[:12], 'omnirefl.debug',
+                     'matching symbols', '10'),
+                    ('validated-commit-' + commit, 'validated-commit.json',
+                     json.dumps({'commit': commit, 'run_id': '7'}), '20'),
+                ]:
+                    number = len(artifacts) + 1
+                    archive_path = root / (str(number) + '.zip')
+                    with zipfile.ZipFile(archive_path, 'w') as archive:
+                        archive.writestr(filename, content)
+                    artifacts.append({
+                        'id': number, 'name': name, 'expired': False,
+                        'created_at': '2026-11-25T12:00:' + timestamp + 'Z',
+                        'digest': 'sha256:' + hashlib.sha256(
+                            archive_path.read_bytes()).hexdigest(),
+                        'workflow_run': {'id': 7, 'head_sha': commit},
+                    })
+                run = {'id': 7, 'head_sha': commit, 'status': 'completed',
+                       'conclusion': 'failure', 'run_attempt': 2,
+                       'event': 'push', 'path': '.github/workflows/ci.yml'}
+                (root / 'api.json').write_text(json.dumps({
+                    'runs': [run], 'artifacts': artifacts,
+                    'attempts': {'1': {**run, 'run_attempt': 1,
+                                       'conclusion': earlier_result}},
+                }))
+                environment = dict(
+                    os.environ, GITHUB_REPOSITORY='example/project', GITHUB_SHA=commit,
+                    GITHUB_OUTPUT=str(root / 'output'), GITHUB_FIXTURE=directory,
+                    PATH=directory + os.pathsep + os.environ['PATH'])
+                command = [sys.executable, str(Path(__file__).resolve().parents[1]
+                                               / 'reuse_ci.py')]
+                result = subprocess.run(command + [
+                    'find', '--targets', 'cosmo-universal', '--require-symbols'],
+                    env=environment, capture_output=True, text=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                output = dict(line.split('=', 1) for line
+                              in (root / 'output').read_text().splitlines())
+                self.assertEqual('7' if reusable else '', output['run_id'])
+                self.assertEqual('false', output['full_suite'])
+                result = subprocess.run(command + [
+                    'download', '--run-id', '7', '--target', 'cosmo-universal',
+                    '--packages-dir', str(root / 'packages'),
+                    '--symbols-dir', str(root / 'symbols')],
+                    env=environment, capture_output=True, text=True)
+                if reusable:
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual('package bytes',
+                                     (root / 'packages/binary.tar.gz').read_text())
+                    self.assertEqual('matching symbols',
+                                     (root / 'symbols/omnirefl.debug').read_text())
+                else:
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertFalse((root / 'packages').exists())
+
     def test_required_master_ci_is_not_skipped_when_initially_absent(self):
         # The run appears after the first query, then fails validation.
         # gh run watch --exit-status: https://cli.github.com/manual/gh_run_watch

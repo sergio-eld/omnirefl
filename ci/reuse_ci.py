@@ -128,9 +128,6 @@ def merged_pr_full_validations(commit, run_id=None):
 
 
 def reusable_packages(run, full_suite, available, commit, targets):
-    # A run may fail in publishing after its full validation passed.
-    if not successful_run(run) and not full_suite:
-        return False
     # The tested-commit marker is uploaded after package builds and checks.
     # Reject replacements uploaded after that gate, even if a later docs-only
     # rerun turns the overall run green. Untouched earlier packages still qualify.
@@ -141,9 +138,18 @@ def reusable_packages(run, full_suite, available, commit, targets):
         return False
     names = [artifact_name('packages', t, commit) for t in targets]
     names += [artifact_name('symbols', t, commit) for t in targets if t != 'extras']
-    return all(available[name].get('created_at')
+    if not all(available[name].get('created_at')
                and available[name]['created_at'] < cutoff
-               for name in names if name in available)
+               for name in names if name in available):
+        return False
+    if successful_run(run) or full_suite:
+        return True
+    # A failed rerun does not invalidate an earlier green smoke attempt.
+    for attempt in range(int(run.get('run_attempt', 1)) - 1, 0, -1):
+        previous = api('actions/runs/' + str(run['id']) + '/attempts/' + str(attempt))
+        if previous['head_sha'] == run['head_sha'] and successful_run(previous):
+            return True
+    return False
 
 
 def artifact_name(kind, target, commit=COMMIT):

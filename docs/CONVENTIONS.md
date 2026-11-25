@@ -638,15 +638,18 @@ merged tree. This resets master's full-validation cadence even when merging
 changes the commit ID.
 Amended heads, different merged trees, and smoke-only PR runs do not qualify.
 A changed base alone is harmless when the complete resulting tree is identical.
+That green PR full run also counts toward cadence if a later master check fails;
+the tested source tree still has full coverage. Failed master checks remain
+failed; release preflight still waits for an existing master CI run to succeed.
 
 Release preflight uses the same check. Packages and symbols must form a complete
 set from one run; an expired or missing set triggers a rebuild without discarding
 an available full-validation proof. Reused binaries keep their original commit
 IDs and bytes; published asset filenames use the release commit. CI logs the
 source run and tested commit. Pages still builds and publishes from master.
-An earlier green full proof survives a failed rerun. Packages and symbols must
-predate the tested-commit gate; replacements left by a failed rerun are rebuilt
-because uploads can replace them separately.
+An earlier green smoke attempt or full proof survives a failed rerun. Packages
+and symbols must predate the tested-commit gate; replacements left by a failed
+rerun are rebuilt because uploads can replace them separately.
 
 Before a release exists, move an annotated release tag and push just that ref:
 
