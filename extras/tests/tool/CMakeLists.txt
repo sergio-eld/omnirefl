@@ -125,6 +125,16 @@ if(DEFINED omnirefl_DIR)
         -D "REQUIRED_REFLECTION_STEMS=main")
     _omnirefl_accepted_cmake_project(functional_header
         -D "EXECUTABLES=functional_header")
+    set(_object_library_executables
+        object_consumer injected_consumer static_consumer unreflected)
+    if("17" IN_LIST _supported_cpp_standards)
+        list(APPEND _object_library_executables standard_consumer)
+    endif()
+    _omnirefl_accepted_cmake_project(object_library
+        -D "EXECUTABLES=${_object_library_executables}"
+        -D "EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+        -D
+            "CONFIGURE_ARGS=$<$<BOOL:${CMAKE_CROSSCOMPILING}>:-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}>")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
             AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
             AND CMAKE_SIZEOF_VOID_P EQUAL 8

@@ -2,7 +2,8 @@ name: CI
 run-name: >-
   CI / ${{ github.event.pull_request.head.ref || github.ref_name }}
   / ${{ inputs.full_suite && 'full'
-    || (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'automatic'
+    || (github.event_name == 'pull_request'
+      || (github.event_name == 'push' && github.ref == 'refs/heads/master')) && 'automatic'
     || 'smoke' }}
 
 on:
@@ -255,6 +256,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     outputs:
       build_sources: ${{ steps.sources.outputs.build_sources }}
       full_suite: ${{ steps.suite.outputs.full_suite }}
@@ -270,10 +272,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_FULL: ${{ inputs.full_suite }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ true = "$REQUESTED_FULL" ]; then
             echo 'full_suite=true' >> "$GITHUB_OUTPUT"
             echo 'Full suite explicitly requested.'
+          elif [ pull_request = "$GITHUB_EVENT_NAME" ]; then
+            selection=$(python3 ci/full_validation.py --pull-request "$PR_NUMBER")
+            printf '%s\n' "$selection"
+            printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
           elif [ push = "$GITHUB_EVENT_NAME" ] && [ refs/heads/master = "$GITHUB_REF" ]; then
             selection=$(python3 ci/full_validation.py)
             printf '%s\n' "$selection"
