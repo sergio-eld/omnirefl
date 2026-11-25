@@ -13,7 +13,9 @@
   && !defined(OMNI_INCLUDED_GENERATED_REFLECTION_HEADER)
 #  error \
     "Force-include the generated reflection header using the compiler's " \
-    "-include or /FI flag. With CMake, call omni_reflected_target(<target>)."
+    "-include or /FI flag. With CMake, call omni_reflected_target(<target>) " \
+    "for each target compiling reflection-using sources; instrumentation " \
+    "does not propagate to linked targets."
 #endif
 
 // Instrumentation and IDE parsing before generation need wrapper declarations

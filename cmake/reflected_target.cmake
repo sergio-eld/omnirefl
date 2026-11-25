@@ -108,6 +108,11 @@ function(_omni_classify_target_sources
     get_target_property(target_binary_dir "${target_name}" BINARY_DIR)
 
     foreach(s IN LISTS srcs)
+        # Object inputs are already compiled in their own targets.
+        if(s MATCHES "^\\$<TARGET_OBJECTS:[^<>]+>$")
+            continue()
+        endif()
+
         if(s MATCHES "\\$<")
             list(APPEND generator_expressions "${s}")
             continue()
@@ -234,16 +239,8 @@ function(omni_reflected_target target)
         return()
     endif()
 
-    # OBJECT and INTERFACE libraries are not supported.
-    # - OBJECT: can cause duplicated generated reflection metadata when reused.
-    # - INTERFACE: has no compilation step / sources.
+    # INTERFACE libraries are unsupported: they have no compilation step.
     get_target_property(target_type ${target} TYPE)
-    if(target_type STREQUAL "OBJECT_LIBRARY")
-        message(SEND_ERROR
-            "omnirefl: target ${target} is an OBJECT library, which is not supported. "
-            "Use a STATIC library or an EXECUTABLE instead.")
-        return()
-    endif()
     if(target_type STREQUAL "INTERFACE_LIBRARY")
         message(SEND_ERROR
             "omnirefl: target ${target} is an INTERFACE library, which is not supported. "
@@ -511,15 +508,18 @@ function(omni_reflected_target target)
         # Resolve the path through the consuming target: one source can belong
         # to several targets with different compile definitions and metadata.
         set_target_properties(${target} PROPERTIES ${_fi_prop} "${_generated_header}")
+        # Source options are shared by targets; omit the entire option when
+        # the consuming target has no reflection header for this source.
+        set(_fi_header "$<TARGET_PROPERTY:${_fi_prop}>")
         if(MSVC)
             set_source_files_properties("${_src}" PROPERTIES
-                COMPILE_OPTIONS "/FI$<TARGET_PROPERTY:${_fi_prop}>")
+                COMPILE_OPTIONS "$<$<BOOL:${_fi_header}>:/FI${_fi_header}>")
             # The shared PCH dispatcher selects this translation unit's header.
             set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_DEFINITIONS
-                "$<${_msvc_pch}:OMNIREFL_GENERATED_HEADER=\"$<TARGET_PROPERTY:${_fi_prop}>\">")
+                "$<$<AND:$<BOOL:${_fi_header}>,${_msvc_pch}>:OMNIREFL_GENERATED_HEADER=\"${_fi_header}\">")
         else()
             set_source_files_properties("${_src}" PROPERTIES
-                COMPILE_OPTIONS "-include;$<TARGET_PROPERTY:${_fi_prop}>")
+                COMPILE_OPTIONS "$<$<BOOL:${_fi_header}>:-include;${_fi_header}>")
         endif()
     endforeach()
 

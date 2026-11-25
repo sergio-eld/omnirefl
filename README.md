@@ -881,11 +881,13 @@ See [Limitations](#limitations) for the declaration restrictions.
 
 ### CMake integration
 
-- `omni_reflected_target` does not support OBJECT or INTERFACE libraries.
+- Call `omni_reflected_target` for each target compiling reflection-using
+  sources; instrumentation does not propagate to linked targets. INTERFACE
+  libraries are unsupported.
 - The wrapper instruments concrete, non-generated C++ translation units.
-  Generated sources are skipped, source generator expressions are rejected,
-  and C translation units are ignored. If no C++ source remains, reflection is
-  skipped with a warning.
+  Generated sources are skipped, compiled object inputs are accepted, and
+  other source generator expressions are rejected. C translation units are
+  ignored. If no C++ source remains, reflection is skipped with a warning.
 
 ### `reflected_call`
 
