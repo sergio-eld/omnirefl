@@ -592,13 +592,15 @@ For independent scenario executables, use:
 
 Package tests have two profiles, selected with `OMNI_TEST_SUITE`:
 
-- `smoke`: guides and the base public interface on the existing compiler,
-  platform, and language-standard matrix. Cover ordinary success and failure
-  results, diagnostics, and direct mapping overrides. PRs and ordinary master
-  commits use it.
+- `smoke`: guides and the base public interface at each compiler's minimum
+  and maximum supported C++ standards (one row when they coincide), across all
+  package distributions. Retain package builds and benchmarks. Cover ordinary success
+  and failure results, diagnostics, and direct mapping overrides. PRs and
+  ordinary master commits use it.
 - `full`: smoke sources plus regressions, policies, negative cases, and
-  integration tests. Local builds default to this profile. Release tags require
-  it; CI's manual `full_suite` input also selects it.
+  integration tests across every supported C++ standard and package distribution,
+  including musl. Local builds default to this profile. Release tags require it;
+  CI's manual `full_suite` input also selects it.
 
 Each master push selects its suite before testing: full after five commits
 since the latest successful full run, otherwise smoke. Count master's
@@ -625,13 +627,29 @@ contract: `deserialize` covers parsing and schema mapping. Keep separate low-lev
 checks, policies, combinations, and edge scenarios in the full suite.
 Guides remain separate executables and run when their required standard is
 available. Select locally with `-DOMNI_TEST_SUITE=smoke` or `full`.
+The final CI summary lists the ten slowest jobs in the current attempt, with
+elapsed time, outcome, and links to their logs.
 
 All CI entry points reuse available packages from successful CI for the exact
-commit, including smoke runs. PR proofs identify the tested merge commit, not
-just its head revision. They rebuild when no complete package set remains.
-Release preflight separately checks for a successful full-suite proof for that
-same commit: smoke success cannot replace full validation. Amended commits have
-new IDs and cannot reuse either result.
+commit, including smoke runs. After merging a PR, CI can also reuse its full
+validation and packages: GitHub must identify the final PR head, the tested
+synthetic merge must include that head, and its tree must equal the actual
+merged tree. This resets master's full-validation cadence even when merging
+changes the commit ID.
+Amended heads, different merged trees, and smoke-only PR runs do not qualify.
+A changed base alone is harmless when the complete resulting tree is identical.
+That green PR full run also counts toward cadence if a later master check fails;
+the tested source tree still has full coverage. Failed master checks remain
+failed; release preflight still waits for an existing master CI run to succeed.
+
+Release preflight uses the same check. Packages and symbols must form a complete
+set from one run; an expired or missing set triggers a rebuild without discarding
+an available full-validation proof. Reused binaries keep their original commit
+IDs and bytes; published asset filenames use the release commit. CI logs the
+source run and tested commit. Pages still builds and publishes from master.
+An earlier green smoke attempt or full proof survives a failed rerun. Packages
+and symbols must predate the tested-commit gate; replacements left by a failed
+rerun are rebuilt because uploads can replace them separately.
 
 Before a release exists, move an annotated release tag and push just that ref:
 

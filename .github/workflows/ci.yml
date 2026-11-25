@@ -27,6 +27,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      rebuild_packages:
+        description: Rebuild packages rejected by release preflight
+        type: boolean
+        required: false
+        default: false
       full_suite:
         description: Run the full test suite (reuse exact-commit packages)
         type: boolean
@@ -225,7 +230,6 @@ jobs:
               print('matrix=' + json.dumps(matrix), file=output)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               print('## Prepared CI matrix\n', file=summary)
-              print('Test suite: **' + os.environ['OMNI_TEST_SUITE'] + '**\n', file=summary)
               print('| Distribution | Packages | Test platforms |', file=summary)
               print('| --- | --- | --- |', file=summary)
               for runtime, coverage in matrix.items():
@@ -236,7 +240,11 @@ jobs:
                           row['arch'] for row in tests.get('include', []) if 'arch' in row
                       })
                       platforms.extend(platform + '-' + arch for arch in architectures)
-                  print(f'| {runtime} | {packages} | ' + ', '.join(platforms) + ' |', file=summary)
+                  scope = ', '.join(platforms)
+                  print(f'| {runtime} | {packages} | {scope} |', file=summary)
+              standards = ('all supported standards' if os.environ['OMNI_TEST_SUITE'] == 'full'
+                           else 'minimum and maximum supported standards per compiler')
+              print('C++ test matrix: ' + standards)
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
                   print(f'::group::Prepared {runtime} matrix')
@@ -260,6 +268,8 @@ jobs:
     outputs:
       build_sources: ${{ steps.sources.outputs.build_sources }}
       full_suite: ${{ steps.suite.outputs.full_suite }}
+      reused_full_run_id: ${{ steps.suite.outputs.reused_full_run_id }}
+      reused_full_commit: ${{ steps.suite.outputs.reused_full_commit }}
 
     steps:
       - name: Checkout Repository
@@ -276,26 +286,17 @@ jobs:
         run: |
           if [ true = "$REQUESTED_FULL" ]; then
             echo 'full_suite=true' >> "$GITHUB_OUTPUT"
-            echo 'Full suite explicitly requested.'
+            selection='Full suite explicitly requested.'
           elif [ pull_request = "$GITHUB_EVENT_NAME" ]; then
             selection=$(python3 ci/full_validation.py --pull-request "$PR_NUMBER")
-            printf '%s\n' "$selection"
-            printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
           elif [ push = "$GITHUB_EVENT_NAME" ] && [ refs/heads/master = "$GITHUB_REF" ]; then
             selection=$(python3 ci/full_validation.py)
-            printf '%s\n' "$selection"
-            printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'full_suite=false' >> "$GITHUB_OUTPUT"
-            echo 'Smoke suite selected; automatic commit cadence applies only to master pushes.'
+            selection='Smoke suite selected.'
           fi
-
-      - name: "Test suite: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}"
-        env:
-          OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
-        run: |
-          echo "::notice::Selected test suite: $OMNI_TEST_SUITE"
-          printf '## Selected test suite: %s\n' "$OMNI_TEST_SUITE" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$selection"
+          printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Detect source changes
         id: sources
@@ -352,21 +353,21 @@ jobs:
           OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           if [ true = "$BUILD_SOURCES" ]; then
-            decision="Package tests ($OMNI_TEST_SUITE) and benchmarks selected."
+            decision='Package tests and benchmarks selected.'
             if [ full = "$OMNI_TEST_SUITE" ]; then
               scope='All tests across the supported platform, compiler, and C++ standard matrix.'
             else
-              scope='Guides and base-interface tests across the supported platform, compiler, and C++ standard matrix.'
+              scope="Guides and base-interface tests across all package distributions at each compiler's minimum and maximum supported C++ standards."
             fi
           else
             decision='No package changes detected; package tests and benchmarks skipped.'
             scope=''
           fi
           echo "::notice::$decision"
-          printf '\n%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
 
   reusable-packages:
-    name: Find exact-commit CI packages
+    name: Find reusable CI packages
     needs:
       - changes
       - validate-ci-matrix
@@ -375,6 +376,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     outputs:
       run_id: ${{ steps.source.outputs.run_id }}
     steps:
@@ -384,6 +386,7 @@ jobs:
         run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
       - name: Find successful package source
         id: source
+        if: ${{ !inputs.rebuild_packages }}
         env:
           GH_TOKEN: ${{ github.token }}
           MATRIX: ${{ needs.validate-ci-matrix.outputs.matrix }}
@@ -402,11 +405,14 @@ jobs:
       - name: Report package reuse
         env:
           SOURCE_RUN: ${{ steps.source.outputs.run_id }}
+          REBUILD_PACKAGES: ${{ inputs.rebuild_packages }}
         run: |
-          if [ -n "$SOURCE_RUN" ]; then
-            decision="Reusing exact-commit packages and symbols from run $SOURCE_RUN."
+          if [ true = "$REBUILD_PACKAGES" ]; then
+            decision='Release preflight rejected incomplete archive contents; rebuilding packages and symbols.'
+          elif [ -n "$SOURCE_RUN" ]; then
+            decision="Reusing verified packages and symbols from run $SOURCE_RUN; original binary commit IDs are retained."
           else
-            decision='No reusable exact-commit packages and symbols found; building packages.'
+            decision='No complete verified package and symbol set found; building packages.'
           fi
           echo "::notice::$decision"
           printf '## Package reuse\n\n%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
@@ -425,6 +431,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -463,6 +470,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix: >-
@@ -558,6 +566,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix: >-
@@ -576,6 +585,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix: >-
@@ -1292,8 +1302,9 @@ jobs:
       - benchmark-cosmo
       - benchmark-musl
     if: >-
-      ${{ always() && needs.changes.outputs.full_suite == 'true'
-        && 'true' == needs.changes.outputs.build_sources }}
+      ${{ always() && ((needs.changes.outputs.full_suite == 'true'
+        && 'true' == needs.changes.outputs.build_sources)
+        || needs.changes.outputs.reused_full_run_id != '') }}
     permissions: {}
     steps:
       - name: Require complete validation
@@ -1303,23 +1314,35 @@ jobs:
           python3 - <<'PYTHON'
           import json
           import os
-          failed = [name for name, job in json.loads(os.environ['JOB_RESULTS']).items()
-                    if job['result'] != 'success']
+          jobs = json.loads(os.environ['JOB_RESULTS'])
+          reused = bool(jobs['changes']['outputs'].get('reused_full_run_id'))
+          site_only = jobs['changes']['outputs'].get('build_sources') == 'false'
+          failed = [name for name, job in jobs.items()
+                    if job['result'] != 'success' and not (
+                        reused and site_only and job['result'] == 'skipped'
+                        and name in ('benchmark-cosmo', 'benchmark-musl'))]
           if failed:
               raise SystemExit('Full validation failed: ' + ', '.join(failed))
           PYTHON
 
       - name: Record successful full-suite validation
+        env:
+          REUSED_FULL_RUN: ${{ needs.changes.outputs.reused_full_run_id }}
+          REUSED_FULL_COMMIT: ${{ needs.changes.outputs.reused_full_commit }}
         run: |
           python3 - <<'PYTHON'
           import json
           import os
           from pathlib import Path
-          Path('full-suite.json').write_text(json.dumps({
+          proof = {
               'suite': 'full', 'commit': os.environ['GITHUB_SHA'],
               'run_id': os.environ['GITHUB_RUN_ID'],
               'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
-          }))
+          }
+          if os.environ['REUSED_FULL_RUN']:
+              proof['source_run_id'] = os.environ['REUSED_FULL_RUN']
+              proof['source_commit'] = os.environ['REUSED_FULL_COMMIT']
+          Path('full-suite.json').write_text(json.dumps(proof))
           PYTHON
 
       - name: Upload full-suite proof
@@ -1553,3 +1576,55 @@ jobs:
         uses: actions/deploy-pages@v5
         with:
           artifact_name: ${{ needs.prepare-pages.outputs.artifact_name }}
+
+  ci-summary:
+    name: CI summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs:
+      - required-ci
+      - full-suite
+      - benchmark-cosmo
+      - benchmark-musl
+      - prepare-pages
+      - deploy-pages
+    if: always()
+    permissions:
+      actions: read
+    steps:
+      - name: Report ten slowest jobs
+        uses: actions/github-script@v8
+        with:
+          retries: 2
+          script: |
+            try {
+              const jobs = await github.paginate(
+                github.rest.actions.listJobsForWorkflowRunAttempt, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: context.runId,
+                  attempt_number: Number(process.env.GITHUB_RUN_ATTEMPT),
+                  per_page: 100,
+                  request: {timeout: 10000},
+                })
+              const slowest = jobs
+                .filter(job => job.started_at && job.completed_at
+                  && job.conclusion !== 'skipped')
+                .map(job => ({job, seconds: Math.round(
+                  (Date.parse(job.completed_at) - Date.parse(job.started_at)) / 1000)}))
+                .sort((left, right) => right.seconds - left.seconds)
+                .slice(0, 10)
+              const rows = slowest.map(({job, seconds}) =>
+                `| [${job.name.replaceAll('|', '\\|')}](${job.html_url}) | `
+                  + `${Math.floor(seconds / 60)}m ${seconds % 60}s | ${job.conclusion} |`)
+              const report = '## 10 slowest jobs\n\n'
+                + `Current attempt: ${process.env.GITHUB_RUN_ATTEMPT}. Job elapsed time.\n\n`
+                + '| Job | Duration | Result |\n| --- | ---: | --- |\n'
+                + rows.join('\n') + '\n'
+              core.info(report)
+              await core.summary.addRaw(report).write()
+            } catch (error) {
+              core.warning(`Unable to report job timings: ${error.message}`)
+              await core.summary.addRaw('## Job timings\n\n'
+                + 'GitHub job timings could not be retrieved for this attempt.\n').write()
+            }

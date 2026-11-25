@@ -26,6 +26,9 @@ import sys
 from urllib.parse import parse_qs, urlsplit
 data = json.loads(Path(os.environ['GITHUB_FIXTURE']).read_text())
 url = urlsplit(sys.argv[2])
+if '/commits/' in url.path and url.path.endswith('/pulls'):
+    print('[]')
+    sys.exit()
 path = url.path.split('/actions/')[1].split('/')
 if path == ['runs']:
     revision = parse_qs(url.query)['head_sha'][0]
