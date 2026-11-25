@@ -242,9 +242,6 @@ jobs:
                       platforms.extend(platform + '-' + arch for arch in architectures)
                   scope = ', '.join(platforms)
                   print(f'| {runtime} | {packages} | {scope} |', file=summary)
-              standards = ('all supported standards' if os.environ['OMNI_TEST_SUITE'] == 'full'
-                           else 'minimum and maximum supported standards per compiler')
-              print('C++ test matrix: ' + standards)
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
                   print(f'::group::Prepared {runtime} matrix')
@@ -267,6 +264,7 @@ jobs:
       pull-requests: read
     outputs:
       build_sources: ${{ steps.sources.outputs.build_sources }}
+      check_ci_policy: ${{ steps.sources.outputs.check_ci_policy }}
       full_suite: ${{ steps.suite.outputs.full_suite }}
       reused_full_run_id: ${{ steps.suite.outputs.reused_full_run_id }}
       reused_full_commit: ${{ steps.suite.outputs.reused_full_commit }}
@@ -286,14 +284,14 @@ jobs:
         run: |
           if [ true = "$REQUESTED_FULL" ]; then
             echo 'full_suite=true' >> "$GITHUB_OUTPUT"
-            selection='Full suite explicitly requested.'
+            selection='Suite: full (requested)'
           elif [ pull_request = "$GITHUB_EVENT_NAME" ]; then
             selection=$(python3 ci/full_validation.py --pull-request "$PR_NUMBER")
           elif [ push = "$GITHUB_EVENT_NAME" ] && [ refs/heads/master = "$GITHUB_REF" ]; then
             selection=$(python3 ci/full_validation.py)
           else
             echo 'full_suite=false' >> "$GITHUB_OUTPUT"
-            selection='Smoke suite selected.'
+            selection='Suite: smoke'
           fi
           printf '%s\n' "$selection"
           printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
@@ -301,24 +299,31 @@ jobs:
       - name: Detect source changes
         id: sources
         env:
-          FORCE_BUILD: ${{ inputs.build_sources || steps.suite.outputs.full_suite == 'true' }}
+          FORCE_BUILD: ${{ inputs.build_sources }}
+          FULL_SUITE: ${{ steps.suite.outputs.full_suite }}
           BEFORE_SHA: ${{ github.event.before }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ true = "${FORCE_BUILD:-false}" ]; then
+          if [ true = "$FULL_SUITE" ]; then
             echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+            echo 'check_ci_policy=true' >> "$GITHUB_OUTPUT"
             exit
           fi
 
           case "$GITHUB_EVENT_NAME" in
             pull_request)
-              before=$PR_BASE_SHA
+              if ! before=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA"); then
+                echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+                echo 'check_ci_policy=true' >> "$GITHUB_OUTPUT"
+                exit
+              fi
               after=$PR_HEAD_SHA
               ;;
             push)
               if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
                 echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+                echo 'check_ci_policy=true' >> "$GITHUB_OUTPUT"
                 exit
               fi
               before=$BEFORE_SHA
@@ -327,52 +332,85 @@ jobs:
             *)
               if ! before=$(git rev-parse "$GITHUB_SHA^"); then
                 echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+                echo 'check_ci_policy=true' >> "$GITHUB_OUTPUT"
                 exit
               fi
               after=$GITHUB_SHA
               ;;
           esac
 
-          build_sources=false
-          while IFS= read -r file; do
+          changed_files=$(mktemp)
+          trap 'rm -f "$changed_files"' EXIT
+          if ! git diff --name-only --no-renames -z "$before" "$after" > "$changed_files"; then
+            echo 'build_sources=true' >> "$GITHUB_OUTPUT"
+            echo 'check_ci_policy=true' >> "$GITHUB_OUTPUT"
+            exit
+          fi
+          build_sources=${FORCE_BUILD:-false}
+          check_ci_policy=false
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              ci/* | .github/workflows/*) check_ci_policy=true ;;
+            esac
             # Site inputs and Conan recipes do not change the release packages.
             case "$file" in
               README.md | omnirefl-banner.png | site/* | conan/*) ;;
               *)
                 build_sources=true
-                break
                 ;;
             esac
-          done < <(git diff --name-only --no-renames "$before" "$after")
+          done < "$changed_files"
 
           echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
+          echo "check_ci_policy=$check_ci_policy" >> "$GITHUB_OUTPUT"
 
       - name: "Package checks selected: ${{ steps.sources.outputs.build_sources }}"
         env:
           BUILD_SOURCES: ${{ steps.sources.outputs.build_sources }}
+          CHECK_CI_POLICY: ${{ steps.sources.outputs.check_ci_policy }}
           OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           if [ true = "$BUILD_SOURCES" ]; then
-            decision='Package tests and benchmarks selected.'
+            decision='Work: package tests, benchmarks'
             if [ full = "$OMNI_TEST_SUITE" ]; then
-              scope='All tests across the supported platform, compiler, and C++ standard matrix.'
+              scope='Coverage: all tests; all distributions'
             else
-              scope="Guides and base-interface tests across all package distributions at each compiler's minimum and maximum supported C++ standards."
+              scope='Coverage: guides + base interface; all distributions'
             fi
           else
-            decision='No package changes detected; package tests and benchmarks skipped.'
+            decision='Work: package checks skipped (no package changes)'
             scope=''
+          fi
+          if [ true = "$CHECK_CI_POLICY" ]; then
+            decision="$decision, CI policy"
           fi
           echo "::notice::$decision"
           printf '%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
 
+  check-ci-policy:
+    name: Check CI policy
+    needs: changes
+    if: ${{ needs.changes.outputs.check_ci_policy == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Run CI policy tests
+        run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
+
   reusable-packages:
-    name: Find reusable CI packages
+    name: Prepare package builds
     needs:
       - changes
       - validate-ci-matrix
     if: ${{ 'true' == needs.changes.outputs.build_sources }}
     runs-on: ubuntu-latest
+    env:
+      LOOKUP_PACKAGES: >-
+        ${{ !inputs.rebuild_packages && (github.event_name != 'pull_request'
+          || github.run_attempt > 1 || github.event.action == 'reopened') }}
     permissions:
       actions: read
       contents: read
@@ -381,12 +419,11 @@ jobs:
       run_id: ${{ steps.source.outputs.run_id }}
     steps:
       - name: Checkout Repository
+        if: ${{ env.LOOKUP_PACKAGES == 'true' }}
         uses: actions/checkout@v7
-      - name: Check package reuse policy
-        run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
       - name: Find successful package source
         id: source
-        if: ${{ !inputs.rebuild_packages }}
+        if: ${{ env.LOOKUP_PACKAGES == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           MATRIX: ${{ needs.validate-ci-matrix.outputs.matrix }}
@@ -408,14 +445,16 @@ jobs:
           REBUILD_PACKAGES: ${{ inputs.rebuild_packages }}
         run: |
           if [ true = "$REBUILD_PACKAGES" ]; then
-            decision='Release preflight rejected incomplete archive contents; rebuilding packages and symbols.'
+            decision='Packages: rebuild (release preflight)'
+          elif [ false = "$LOOKUP_PACKAGES" ]; then
+            decision='Packages: build (fresh PR)'
           elif [ -n "$SOURCE_RUN" ]; then
-            decision="Reusing verified packages and symbols from run $SOURCE_RUN; original binary commit IDs are retained."
+            decision="Packages: reuse run $SOURCE_RUN"
           else
-            decision='No complete verified package and symbol set found; building packages.'
+            decision='Packages: build (no reusable set)'
           fi
           echo "::notice::$decision"
-          printf '## Package reuse\n\n%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$SOURCE_RUN" ]; then
             printf '\n[Source run](%s/%s/actions/runs/%s)\n' \
               "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
@@ -1138,6 +1177,7 @@ jobs:
     # needs must list these jobs explicitly.
     needs:
       - changes
+      - check-ci-policy
       - reusable-packages
       - validate-ci-matrix
       - build-package-cosmo
@@ -1244,6 +1284,29 @@ jobs:
               })
             }
 
+      - name: Report C++ test matrix
+        # Override the implicit success() guard so earlier failures do not skip the report.
+        if: ${{ always() && needs.changes.outputs.build_sources == 'true' }}
+        continue-on-error: true
+        env:
+          OMNI_TEST_SUITE: ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          rows = set()
+          for path in Path('test-results').rglob('test-standards.tsv'):
+              suite, compiler, standards = path.read_text().rstrip('\r\n').split('\t', 2)
+              if standards and suite == os.environ['OMNI_TEST_SUITE']:
+                  rows.add((compiler, standards))
+          if rows:
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  print('## C++ test matrix\n', file=summary)
+                  print('| Compiler | Standards |\n| --- | --- |', file=summary)
+                  for compiler, standards in sorted(rows):
+                      print(f'| {compiler} | {standards} |', file=summary)
+          PY
+
       - name: Require successful package and test jobs
         if: always()
         env:
@@ -1259,6 +1322,8 @@ jobs:
               name for name, job in jobs.items()
               if 'success' != job['result'] and (
                   name in ('changes', 'validate-ci-matrix')
+                  or (name == 'check-ci-policy'
+                      and jobs['changes']['outputs'].get('check_ci_policy') == 'true')
                   or (build_sources and name == 'reusable-packages')
                   or ('check-site' == name
                       and 'pull_request' == os.environ['GITHUB_EVENT_NAME'])

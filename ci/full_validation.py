@@ -14,8 +14,7 @@ def select_pr(number):
     # Reruns retain the original event; labels may have changed since then.
     labels = api('pulls/' + str(number))['labels']
     full = any(label['name'] == 'ci:full' for label in labels)
-    selection = 'Full suite selected by ci:full.' if full else 'Smoke suite selected.'
-    print(f'PR #{number}: {selection}')
+    print('Suite: full (ci:full)' if full else 'Suite: smoke')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         print('full_suite=' + str(full).lower(), file=output)
 
@@ -66,8 +65,9 @@ def select(idle):
                 validated = True
                 if distance == 0:
                     reused = source
-                print('Full validation reused from PR run', source[0]['id'],
-                      '- tested', source[1], '- identical tree at', revision)
+                label = 'Full reuse' if distance == 0 else 'Full baseline'
+                print(f'{label}: run {source[0]["id"]} '
+                      f'({source[1][:12]} -> {revision[:12]})')
         if validated:
             validated_distance = distance
             break
@@ -76,26 +76,19 @@ def select(idle):
         timestamp = int(subprocess.check_output(
             ['git', 'show', '-s', '--format=%ct', commit], text=True))
         idle_days = (datetime.now(timezone.utc).timestamp() - timestamp) / 86400
-    due = (not running and validated_distance > 0
-           and (idle_days >= 3 if idle else validated_distance >= 5))
-    if running:
-        reason = 'Another full validation run is already in progress.'
-    elif validated_distance == 0:
-        reason = 'This commit already has a green full test run.'
-    elif idle:
-        reason = ('Master has unvalidated commits and has been idle for at least three days.'
-                  if due else 'Master has not been idle for three days.')
-    else:
-        reason = ('No green full run covers the latest five first-parent commits.'
-                  if due else 'Fewer than five commits since the last green full run.')
-    selection = ('Full suite selected' if due else
-                 'No additional run selected' if idle else 'Smoke suite selected')
-    print(selection + ':', reason)
-    print('Recent full validation distance:', validated_distance)
-    print('Another full validation run already in progress:',
-          'yes' if running else 'no')
+    cadence_due = (validated_distance > 0
+                   and (idle_days >= 3 if idle else validated_distance >= 5))
+    due = cadence_due and not running
+    selection = ('Run: full' if due else 'Run: none') if idle else (
+        'Suite: full' if due else 'Suite: smoke')
+    distance = (f'since full: {validated_distance}/5 commits' if validated_distance < 5
+                else 'since green full: 5+/5 commits' if len(history) == 5
+                else 'green full: none')
     if idle:
-        print('Master idle days:', round(idle_days, 2))
+        distance += f'; idle: {int(idle_days * 24)}/72h'
+    if running and cadence_due:
+        distance += '; full run active'
+    print(selection + '; ' + distance)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         print('full_suite=' + str(due).lower(), file=output)
         if reused:

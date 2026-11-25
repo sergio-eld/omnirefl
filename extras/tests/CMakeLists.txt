@@ -20,6 +20,11 @@ if(OMNI_TEST_SUITE STREQUAL "smoke" AND _supported_cpp_standards)
 endif()
 message(STATUS "omnirefl: ${OMNI_TEST_SUITE} test C++ standards: "
     "${_supported_cpp_standards}")
+set(_standard_labels "${_supported_cpp_standards}")
+list(TRANSFORM _standard_labels PREPEND "C++")
+list(JOIN _standard_labels ", " _standard_labels)
+file(WRITE "${CMAKE_BINARY_DIR}/test-standards.tsv"
+    "${OMNI_TEST_SUITE}\t${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\t${_standard_labels}\n")
 if(OMNI_TEST_SUITE STREQUAL "smoke")
     add_subdirectory(smoke)
 elseif(OMNI_TEST_SUITE STREQUAL "full")
