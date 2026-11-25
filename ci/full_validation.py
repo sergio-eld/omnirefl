@@ -20,12 +20,15 @@ def select_pr(number):
 
 
 def select(idle):
+    from reuse_ci import merged_pr_full_validations
+
     commit = os.environ['GITHUB_SHA']
     history = subprocess.check_output(
         ['git', 'rev-list', '--first-parent', '--max-count=5', commit],
         text=True).splitlines()
     validated_distance = 5
     running = False
+    reused = None
     for distance, revision in enumerate(history):
         validated = False
         runs = pages('actions/runs?' + urlencode({'head_sha': revision}),
@@ -49,13 +52,21 @@ def select(idle):
                     active_full = any(job['name'].endswith(' / full') for job in jobs)
                 running = running or active_full
                 continue
-            # Job results outlive artifact retention. PR head commits cannot
-            # stand in for their tested merge commits, so PR runs are excluded.
+            # Job results outlive artifact retention. PR head commits alone
+            # cannot stand in for their tested merge commits.
             jobs = pages('actions/runs/' + str(run['id']) + '/jobs?filter=all',
                          'jobs')
             validated = validated or any(
                 job['name'].split(' / ')[-1] == 'Full test suite'
                 and job['conclusion'] == 'success' for job in jobs)
+        if not validated:
+            source = next(merged_pr_full_validations(revision), None)
+            if source:
+                validated = True
+                if distance == 0:
+                    reused = source
+                print('Full validation reused from PR run', source[0]['id'],
+                      '- tested', source[1], '- identical tree at', revision)
         if validated:
             validated_distance = distance
             break
@@ -84,6 +95,9 @@ def select(idle):
         print('Master idle days:', round(idle_days, 2))
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         print('full_suite=' + str(due).lower(), file=output)
+        if reused:
+            print('reused_full_run_id=' + str(reused[0]['id']), file=output)
+            print('reused_full_commit=' + reused[1], file=output)
 
 
 if __name__ == '__main__':

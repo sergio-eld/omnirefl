@@ -48,13 +48,20 @@ jobs:
             const isReleaseArtifact = (artifact) =>
               artifact.name.startsWith('packages-') ||
               artifact.name.startsWith('symbols-') ||
-              artifact.name.startsWith('release-inputs-')
-            const releaseArtifactSha = (artifact) =>
-              isReleaseArtifact(artifact)
+              artifact.name.startsWith('release-inputs-') ||
+              artifact.name.startsWith('validated-commit-') ||
+              artifact.name.startsWith('full-suite-')
+            const releaseArtifactSha = (artifact) => {
+              // Keep validation proofs with the packages they certify;
+              // full-suite names end in an attempt number, not the commit.
+              const proof = artifact.name.match(
+                /^(?:validated-commit|full-suite)-([0-9a-f]{40})(?:-attempt-[0-9]+)?$/)
+              return proof ? proof[1].substring(0, 12) : isReleaseArtifact(artifact)
                 ? artifact.name
                   .substring(artifact.name.lastIndexOf('-') + 1)
                   .substring(0, 12)
                 : ''
+            }
             const packageCommitDate = new Map()
             for (const artifact of artifacts) {
               if (!artifact.name.startsWith('packages-')) {

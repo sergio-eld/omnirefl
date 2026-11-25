@@ -34,9 +34,11 @@ jobs:
       actions: read
       checks: read
       contents: read
+      pull-requests: read
     outputs:
       reuse_artifacts: ${{ steps.reuse.outputs.reuse_artifacts }}
       full_suite: ${{ steps.reusable_ci.outputs.full_suite }}
+      rebuild_packages: ${{ steps.reusable_ci.outputs.run_id != '' && steps.reusable_ci.outputs.candidate != 'true' }}
     env:
       # Fine-grained token with read/write access to repository contents.
       GH_TOKEN: ${{ secrets.OMNIREFL_RELEASE_TOKEN }}
@@ -112,8 +114,12 @@ jobs:
                 args+=(--symbols-dir \
                   "./reusable-artifacts/symbols/symbols-$target-${GITHUB_SHA::12}")
               fi
-              python3 ci/reuse_ci.py download --run-id "$run_id" \
-                --target "$target" "${args[@]}"
+              if ! python3 ci/reuse_ci.py download --run-id "$run_id" \
+                --target "$target" "${args[@]}"; then
+                echo '::warning::Selected CI artifacts could not be restored; rebuilding packages and symbols.'
+                run_id=
+                break
+              fi
             done
           fi
 
@@ -127,16 +133,22 @@ jobs:
             done
           }
 
+          # Reused PR archives keep their tested commit suffix and contents.
+          # Directory/artifact names still identify this release's commit.
+          shopt -s nullglob
+          required_package_available() {
+            local target=$1
+            local extension=$2
+            local matches=(./reusable-artifacts/packages/packages-"$target"-"${GITHUB_SHA::12}"/omnirefl-"$target"-"$version"-*."$extension")
+            [ 1 -eq "${#matches[@]}" ] && [ -s "${matches[0]}" ] || return 1
+            local filename=${matches[0]##*/}
+            local package_commit=${filename#"omnirefl-$target-$version-"}
+            [[ "${package_commit%."$extension"}" =~ ^[0-9a-f]{12}$ ]]
+          }
+
           version=${GITHUB_REF_NAME#v}
           if [ -n "$run_id" ]; then
             if ! required_files_available \
-              "./reusable-artifacts/packages/packages-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl-linux-x86_64-musl-$version-${GITHUB_SHA::12}.deb" \
-              "./reusable-artifacts/packages/packages-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl-linux-x86_64-musl-$version-${GITHUB_SHA::12}.tar.gz" \
-              "./reusable-artifacts/packages/packages-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl-linux-aarch64-musl-$version-${GITHUB_SHA::12}.deb" \
-              "./reusable-artifacts/packages/packages-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl-linux-aarch64-musl-$version-${GITHUB_SHA::12}.tar.gz" \
-              "./reusable-artifacts/packages/packages-windows-x86_64-ucrt-${GITHUB_SHA::12}/omnirefl-windows-x86_64-ucrt-$version-${GITHUB_SHA::12}.zip" \
-              "./reusable-artifacts/packages/packages-cosmo-universal-${GITHUB_SHA::12}/omnirefl-cosmo-universal-$version-${GITHUB_SHA::12}.tar.gz" \
-              "./reusable-artifacts/packages/packages-extras-${GITHUB_SHA::12}/omnirefl-extras-$version-${GITHUB_SHA::12}.tar.gz" \
               "./reusable-artifacts/symbols/symbols-linux-x86_64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
               "./reusable-artifacts/symbols/symbols-linux-x86_64-musl-${GITHUB_SHA::12}/ccdb_query.debug" \
               "./reusable-artifacts/symbols/symbols-linux-aarch64-musl-${GITHUB_SHA::12}/omnirefl.debug" \
@@ -149,6 +161,13 @@ jobs:
               "./reusable-artifacts/symbols/symbols-cosmo-universal-${GITHUB_SHA::12}/aarch64/ccdb_query.debug"; then
               run_id=
             fi
+            for target in $RELEASE_PACKAGE_TARGETS; do
+              extension=tar.gz
+              if [ windows-x86_64-ucrt = "$target" ]; then extension=zip; fi
+              if ! required_package_available "$target" "$extension"; then run_id=; fi
+              if [[ "$target" = linux-*-musl ]] && \
+                ! required_package_available "$target" deb; then run_id=; fi
+            done
           fi
 
           if [ -n "$run_id" ]; then
@@ -197,6 +216,7 @@ jobs:
       # An existing full-suite proof permits smoke-only package restoration.
       build_sources: true
       full_suite: ${{ 'true' != needs.preflight.outputs.full_suite }}
+      rebuild_packages: ${{ needs.preflight.outputs.rebuild_packages == 'true' }}
       skip_pages: true
     # Ad hoc: `skip_pages` prevents deployment, but GitHub validates every
     # nested job's permission ceiling before evaluating its condition. The
@@ -205,6 +225,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      pull-requests: read
       id-token: write
       pages: write
 
@@ -289,13 +310,23 @@ jobs:
           )
 
           for package in "${packages[@]}"; do
-            matches=(./artifacts/packages/*/"$package")
+            # Keep package bytes/binary IDs intact; only the published asset's
+            # filename uses the release commit. Match the original PR suffix.
+            prefix=${package%-"$short_sha".*}
+            extension=${package##*-"$short_sha".}
+            matches=(./artifacts/packages/*/"$prefix"-*."$extension")
             if [ 1 -ne "${#matches[@]}" ]; then
               echo "expected one $package, found ${#matches[@]}" >&2
               exit 1
             fi
+            filename=${matches[0]##*/}
+            package_commit=${filename#"$prefix"-}
+            if [[ ! "${package_commit%."$extension"}" =~ ^[0-9a-f]{12}$ ]]; then
+              echo "package lacks a tested commit suffix: ${matches[0]}" >&2
+              exit 1
+            fi
 
-            cp "${matches[0]}" "$release_dir/"
+            cp "${matches[0]}" "$release_dir/$package"
           done
 
           for target in linux-x86_64-musl linux-aarch64-musl; do

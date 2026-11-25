@@ -19,6 +19,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     outputs:
       full_suite: ${{ steps.policy.outputs.full_suite }}
     steps:
@@ -61,5 +62,6 @@ jobs:
     permissions:
       actions: write
       contents: read
+      pull-requests: read
       id-token: write
       pages: write

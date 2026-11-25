@@ -27,6 +27,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      rebuild_packages:
+        description: Rebuild packages rejected by release preflight
+        type: boolean
+        required: false
+        default: false
       full_suite:
         description: Run the full test suite (reuse exact-commit packages)
         type: boolean
@@ -271,6 +276,8 @@ jobs:
     outputs:
       build_sources: ${{ steps.sources.outputs.build_sources }}
       full_suite: ${{ steps.suite.outputs.full_suite }}
+      reused_full_run_id: ${{ steps.suite.outputs.reused_full_run_id }}
+      reused_full_commit: ${{ steps.suite.outputs.reused_full_commit }}
 
     steps:
       - name: Checkout Repository
@@ -304,9 +311,16 @@ jobs:
       - name: "Test suite: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}"
         env:
           OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
+          REUSED_FULL_RUN: ${{ steps.suite.outputs.reused_full_run_id }}
+          REUSED_FULL_COMMIT: ${{ steps.suite.outputs.reused_full_commit }}
         run: |
           echo "::notice::Selected test suite: $OMNI_TEST_SUITE"
           printf '## Selected test suite: %s\n' "$OMNI_TEST_SUITE" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$REUSED_FULL_RUN" ]; then
+            decision="Full validation reused from PR run $REUSED_FULL_RUN (tested $REUSED_FULL_COMMIT; identical merged tree). This run performs smoke checks."
+            echo "::notice::$decision"
+            printf '\n%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Detect source changes
         id: sources
@@ -377,7 +391,7 @@ jobs:
           printf '\n%s\n%s\n' "$decision" "$scope" >> "$GITHUB_STEP_SUMMARY"
 
   reusable-packages:
-    name: Find exact-commit CI packages
+    name: Find reusable CI packages
     needs:
       - changes
       - validate-ci-matrix
@@ -386,6 +400,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     outputs:
       run_id: ${{ steps.source.outputs.run_id }}
     steps:
@@ -395,6 +410,7 @@ jobs:
         run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
       - name: Find successful package source
         id: source
+        if: ${{ !inputs.rebuild_packages }}
         env:
           GH_TOKEN: ${{ github.token }}
           MATRIX: ${{ needs.validate-ci-matrix.outputs.matrix }}
@@ -413,11 +429,14 @@ jobs:
       - name: Report package reuse
         env:
           SOURCE_RUN: ${{ steps.source.outputs.run_id }}
+          REBUILD_PACKAGES: ${{ inputs.rebuild_packages }}
         run: |
-          if [ -n "$SOURCE_RUN" ]; then
-            decision="Reusing exact-commit packages and symbols from run $SOURCE_RUN."
+          if [ true = "$REBUILD_PACKAGES" ]; then
+            decision='Release preflight rejected incomplete archive contents; rebuilding packages and symbols.'
+          elif [ -n "$SOURCE_RUN" ]; then
+            decision="Reusing verified packages and symbols from run $SOURCE_RUN; original binary commit IDs are retained."
           else
-            decision='No reusable exact-commit packages and symbols found; building packages.'
+            decision='No complete verified package and symbol set found; building packages.'
           fi
           echo "::notice::$decision"
           printf '## Package reuse\n\n%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
@@ -436,6 +455,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -474,6 +494,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix: >-
@@ -569,6 +590,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix: >-
@@ -587,6 +609,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix: >-
@@ -1307,8 +1330,9 @@ jobs:
       - benchmark-cosmo
       - benchmark-musl
     if: >-
-      ${{ always() && needs.changes.outputs.full_suite == 'true'
-        && 'true' == needs.changes.outputs.build_sources }}
+      ${{ always() && ((needs.changes.outputs.full_suite == 'true'
+        && 'true' == needs.changes.outputs.build_sources)
+        || needs.changes.outputs.reused_full_run_id != '') }}
     permissions: {}
     steps:
       - name: Require complete validation
@@ -1318,23 +1342,35 @@ jobs:
           python3 - <<'PYTHON'
           import json
           import os
-          failed = [name for name, job in json.loads(os.environ['JOB_RESULTS']).items()
-                    if job['result'] != 'success']
+          jobs = json.loads(os.environ['JOB_RESULTS'])
+          reused = bool(jobs['changes']['outputs'].get('reused_full_run_id'))
+          site_only = jobs['changes']['outputs'].get('build_sources') == 'false'
+          failed = [name for name, job in jobs.items()
+                    if job['result'] != 'success' and not (
+                        reused and site_only and job['result'] == 'skipped'
+                        and name in ('benchmark-cosmo', 'benchmark-musl'))]
           if failed:
               raise SystemExit('Full validation failed: ' + ', '.join(failed))
           PYTHON
 
       - name: Record successful full-suite validation
+        env:
+          REUSED_FULL_RUN: ${{ needs.changes.outputs.reused_full_run_id }}
+          REUSED_FULL_COMMIT: ${{ needs.changes.outputs.reused_full_commit }}
         run: |
           python3 - <<'PYTHON'
           import json
           import os
           from pathlib import Path
-          Path('full-suite.json').write_text(json.dumps({
+          proof = {
               'suite': 'full', 'commit': os.environ['GITHUB_SHA'],
               'run_id': os.environ['GITHUB_RUN_ID'],
               'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
-          }))
+          }
+          if os.environ['REUSED_FULL_RUN']:
+              proof['source_run_id'] = os.environ['REUSED_FULL_RUN']
+              proof['source_commit'] = os.environ['REUSED_FULL_COMMIT']
+          Path('full-suite.json').write_text(json.dumps(proof))
           PYTHON
 
       - name: Upload full-suite proof

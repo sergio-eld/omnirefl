@@ -30,8 +30,12 @@ root = Path(os.environ['GITHUB_FIXTURE'])
 data = json.loads((root / 'api.json').read_text())
 url = urlsplit(sys.argv[2])
 if '/git/commits/' in url.path:
-    print(json.dumps({'sha': url.path.rsplit('/', 1)[1],
-                      'parents': [{'sha': p} for p in data['parents']]}))
+    sha = url.path.rsplit('/', 1)[1]
+    print(json.dumps(data.get('commits', {}).get(sha, {
+        'sha': sha, 'parents': [{'sha': p} for p in data.get('parents', [])]})))
+    sys.exit()
+if '/commits/' in url.path and url.path.endswith('/pulls'):
+    print(json.dumps(data.get('merged_pulls', {}).get(url.path.split('/')[-2], [])))
     sys.exit()
 path = url.path.split('/actions/')[1].split('/')
 query = parse_qs(url.query)
@@ -42,12 +46,14 @@ elif path == ['artifacts']:
     result = {'artifacts': [a for a in data['artifacts']
               if a['name'] == query.get('name', [a['name']])[0]]}
 elif len(path) == 2 and path[0] == 'runs':
-    result = data['runs'][0]
+    result = next(r for r in data['runs'] if str(r['id']) == path[1])
 elif len(path) == 3 and path[0] == 'runs' and path[2] == 'artifacts':
     result = {'artifacts': data['artifacts']}
-elif len(path) == 3 and path[0] == 'runs' and path[2] == 'jobs':
-    result = {'jobs': [{'name': 'Build and validate release / Full test suite',
-                       'conclusion': 'success'}]}
+elif path[0] == 'runs' and path[-1] == 'jobs':
+    key = path[1] + ':' + path[3] if len(path) == 5 else path[1]
+    result = {'jobs': data.get('jobs', {}).get(key, data.get('jobs', {}).get(path[1], [
+        {'name': 'Build and validate release / Full test suite',
+         'conclusion': 'success'}]))}
 elif len(path) == 3 and path[0] == 'artifacts' and path[2] == 'zip':
     sys.stdout.buffer.write((root / (path[1] + '.zip')).read_bytes())
     sys.exit()
@@ -130,6 +136,8 @@ print(json.dumps(result))
                         archive.writestr(file, content)
                     artifacts.append({
                         'id': number, 'name': name, 'expired': False,
+                        'created_at': '2026-11-25T12:00:20Z' if name.startswith(
+                            'validated-commit-') else '2026-11-25T12:00:10Z',
                         'digest': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest(),
                         'workflow_run': {'id': 7, 'head_sha': head},
                     })
