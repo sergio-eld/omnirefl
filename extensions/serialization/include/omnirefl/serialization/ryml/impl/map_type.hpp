@@ -91,12 +91,20 @@ auto map_record_t<Strategy>::operator()(State context, const T &value) const
     compat::apply(detail::record_field_names{},
       omni::meta_for<T>::accessible_data_members()), this->strategy));
   node.set_map();
+  // Ad hoc: retain the original predicate construction and filter constraints
+  // on an empty tuple, avoiding the costly tuple of every field binding.
+  static_cast<void>(std::tuple<>{}
+    | omni::fn::filter(this->strategy.filter_fields));
   detail::write_record_members(
     omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/std::move(context),
     },
     value,
+    // REFACTORME: [high] Slop ad hoc: reconstruct and filter binding types
+    // because metadata traversal exposes a tuple whose construction/indexing
+    // causes wide-record compile growth. Replace this nested type plumbing
+    // with direct field-pack traversal that preserves strategy filtering.
     omni::type_t<typename detail::filter_fields<
       decltype(std::declval<Strategy>().filter_fields),
       typename detail::record_member_bindings<const T,

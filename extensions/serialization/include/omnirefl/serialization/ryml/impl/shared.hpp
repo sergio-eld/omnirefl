@@ -411,7 +411,7 @@ struct filter_fields;
 
 template <typename Predicate, typename... Field>
 struct filter_fields<Predicate, std::tuple<Field...>>:
-    filter_field_types<Predicate, std::tuple<>, Field...> {};
+    filter_field_types<compat::decay_t<Predicate>, std::tuple<>, Field...> {};
 
 } // namespace detail
 } // namespace reflected_scope

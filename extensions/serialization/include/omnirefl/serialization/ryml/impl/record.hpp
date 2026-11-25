@@ -66,6 +66,20 @@ struct record_value_slots: record_value_slots_base<
   }
 };
 
+template <typename Values>
+struct record_aggregate_source {
+  Values *values;
+};
+
+// Ad hoc: aggregate_into's existing lookup accepts tuples only. One pointer
+// adapts private flat slots without extending the public get overload set.
+// Replace this carrier when an internal aggregate-storage protocol is agreed.
+template <typename Values>
+auto record_aggregate_fields(Values *values)
+  -> std::tuple<record_aggregate_source<Values>> {
+  return {record_aggregate_source<Values>{values}};
+}
+
 template <typename T, typename... Field>
 void assign_record_fields(T *into, record_value_slots<Field...> *values) {
   // Initializer-list evaluation preserves field order before C++17.
@@ -83,7 +97,10 @@ template <typename T, typename Frame>
 struct aggregate_record_constructor {
   Frame *frame;
 
-  operator T() && { return omni::refl::aggregate_into<T>(this->frame->values); }
+  operator T() && {
+    return omni::refl::aggregate_into<T>(record_aggregate_fields(
+      std::addressof(this->frame->values)));
+  }
 };
 
 template <typename T>
@@ -117,7 +134,8 @@ struct aggregate_record_into {
 
   template <typename Frame>
   void operator()(Frame *frame) const {
-    *this->into = omni::refl::aggregate_into<T>(frame->values);
+    *this->into = omni::refl::aggregate_into<T>(record_aggregate_fields(
+      std::addressof(frame->values)));
     frame->value->emplace();
   }
 };
@@ -455,6 +473,19 @@ auto map_record_fields(State context, ::ryml::ConstNodeRef node,
   assert(mapping::valid_record_strategy(compat::apply(record_field_names{},
     omni::meta_for<T>::accessible_data_members()), strategy));
 
+  // Ad hoc: retain the old predicate construction and filter constraints
+  // without materializing every field. Readers require constexpr construction
+  // from C++14; an internal type-filter protocol should replace this check.
+  using filter_type = decltype(strategy.filter_fields);
+#if 201402L <= OMNI_CPLUSPLUS
+  constexpr auto checked_filter = std::tuple<>{}
+#else
+  const auto checked_filter = std::tuple<>{}
+#endif
+    | omni::fn::filter(omni::fn::is_non_static)
+    | omni::fn::filter(filter_type{});
+  static_cast<void>(checked_filter);
+
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr auto table = omni::fn::lookup_table(Field{}...);
 #else
@@ -639,4 +670,23 @@ auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
 
 } // namespace reflected_scope
 } // namespace ryml
+} // namespace omni
+
+namespace omni {
+namespace refl {
+namespace detail {
+
+// Keep the private flat-slot adapter behind the existing tuple lookup.
+template <typename TargetField, typename Values, typename Target>
+struct _get_t<0, TargetField,
+  std::tuple<ryml::reflected_scope::detail::record_aggregate_source<Values>>,
+  Target, false> {
+  static Target from(std::tuple<
+    ryml::reflected_scope::detail::record_aggregate_source<Values>> &fields) {
+    return std::get<0>(fields).values->template take<TargetField>();
+  }
+};
+
+} // namespace detail
+} // namespace refl
 } // namespace omni

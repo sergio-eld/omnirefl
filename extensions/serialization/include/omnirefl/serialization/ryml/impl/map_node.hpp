@@ -365,6 +365,9 @@ auto map_record_field_value(const depth_exceeded &stopped,
 
 template <typename Record, std::size_t Index, typename Field, typename Frame>
 bool process_record_member(Frame *frame) {
+  // REFACTORME: [high] Encapsulate these inheritance-layout casts, including
+  // presence processing, behind metadata-keyed slot access. The direct casts
+  // currently avoid recursive tuple indexing and its wide-record compile cost.
   auto &slot = static_cast<
     reflected_scope::detail::record_value_slot<Field> &>(frame->values);
   const bool present = frame->pending[Index] != ::ryml::NONE;
