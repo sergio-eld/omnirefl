@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select full validation by commit cadence or scheduled idle time."""
+"""Select full validation by PR label, commit cadence, or scheduled idle time."""
 
 import argparse
 from datetime import datetime, timezone
@@ -7,7 +7,16 @@ import os
 import subprocess
 from urllib.parse import urlencode
 
-from github_artifacts import pages
+from github_artifacts import api, pages
+
+
+def select_pr(number):
+    # Reruns retain the original event; labels may have changed since then.
+    labels = api('pulls/' + str(number))['labels']
+    full = any(label['name'] == 'ci:full' for label in labels)
+    print(f'PR #{number}: full test suite selected: {full} (current ci:full label).')
+    with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+        print('full_suite=' + str(full).lower(), file=output)
 
 
 def select(idle):
@@ -78,6 +87,13 @@ def select(idle):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--idle', action='store_true',
-                        help='Use the three-day idle condition instead of commit cadence')
-    select(parser.parse_args().idle)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--idle', action='store_true',
+                      help='Use the three-day idle condition instead of commit cadence')
+    mode.add_argument('--pull-request', type=int, metavar='NUMBER',
+                      help='Select from the current ci:full label on a PR')
+    arguments = parser.parse_args()
+    if arguments.pull_request is not None:
+        select_pr(arguments.pull_request)
+    else:
+        select(arguments.idle)

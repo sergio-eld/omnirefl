@@ -605,6 +605,12 @@ since the latest successful full run, otherwise smoke. Count master's
 first-parent history; a missing baseline selects full. Run only the selected
 suite, because full already includes smoke.
 
+To request full PR validation, add the `ci:full` label before the next push,
+or add it and select **Re-run all jobs** on the PR's CI run. CI reads current
+labels on every attempt; subsequent commits stay full while the label is
+present. PR run names say `automatic`; the selection step and Summary report
+the actual suite. A standalone manual workflow run does not satisfy PR checks.
+
 A daily schedule separately checks for unvalidated commits after three idle
 days. Only that check considers idle time. Active full runs prevent duplicate
 validation; scheduled runs reuse exact-commit packages when available.
