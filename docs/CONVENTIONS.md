@@ -629,6 +629,7 @@ Guides remain separate executables and run when their required standard is
 available. Select locally with `-DOMNI_TEST_SUITE=smoke` or `full`.
 The final CI summary lists the ten slowest jobs in the current attempt, with
 elapsed time, outcome, and links to their logs.
+Required CI lists selected C++ matrix standards in one table, grouped by compiler.
 
 All CI entry points reuse available packages from successful CI for the exact
 commit, including smoke runs. After merging a PR, CI can also reuse its full

@@ -214,6 +214,9 @@ if ! "$@" 2>&1 | tee "$results/configure.log"; then
   printf 'omnirefl: packaged project configuration failed\n' >&2
   exit 1
 fi
+if [ -f "$build/test-standards.tsv" ]; then
+  cp "$build/test-standards.tsv" "$results/test-standards.tsv"
+fi
 
 if ! cmake --build "$build" --parallel "$parallel" 2>&1 | tee "$results/build.log"; then
   printf 'omnirefl: packaged project build failed\n' >&2

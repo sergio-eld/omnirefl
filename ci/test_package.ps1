@@ -64,6 +64,10 @@ try {
     exit $LASTEXITCODE
   }
 
+  if (Test-Path "$build/test-standards.tsv") {
+    cp "$build/test-standards.tsv" "$Results/test-standards.tsv"
+  }
+
   cmake --build $build --parallel ([Environment]::ProcessorCount) 2>&1 |
     tee "$Results/build.log"
   if (0 -ne $LASTEXITCODE) {

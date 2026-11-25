@@ -242,9 +242,6 @@ jobs:
                       platforms.extend(platform + '-' + arch for arch in architectures)
                   scope = ', '.join(platforms)
                   print(f'| {runtime} | {packages} | {scope} |', file=summary)
-              standards = ('all supported standards' if os.environ['OMNI_TEST_SUITE'] == 'full'
-                           else 'minimum and maximum supported standards per compiler')
-              print('C++ test matrix: ' + standards)
               for runtime, coverage in matrix.items():
                   prepared = json.dumps(coverage, indent=2)
                   print(f'::group::Prepared {runtime} matrix')
@@ -286,14 +283,14 @@ jobs:
         run: |
           if [ true = "$REQUESTED_FULL" ]; then
             echo 'full_suite=true' >> "$GITHUB_OUTPUT"
-            selection='Full suite explicitly requested.'
+            selection='Suite: full (requested)'
           elif [ pull_request = "$GITHUB_EVENT_NAME" ]; then
             selection=$(python3 ci/full_validation.py --pull-request "$PR_NUMBER")
           elif [ push = "$GITHUB_EVENT_NAME" ] && [ refs/heads/master = "$GITHUB_REF" ]; then
             selection=$(python3 ci/full_validation.py)
           else
             echo 'full_suite=false' >> "$GITHUB_OUTPUT"
-            selection='Smoke suite selected.'
+            selection='Suite: smoke'
           fi
           printf '%s\n' "$selection"
           printf '%s\n\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
@@ -353,14 +350,14 @@ jobs:
           OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           if [ true = "$BUILD_SOURCES" ]; then
-            decision='Package tests and benchmarks selected.'
+            decision='Work: package tests, benchmarks'
             if [ full = "$OMNI_TEST_SUITE" ]; then
-              scope='All tests across the supported platform, compiler, and C++ standard matrix.'
+              scope='Coverage: all tests; all distributions'
             else
-              scope="Guides and base-interface tests across all package distributions at each compiler's minimum and maximum supported C++ standards."
+              scope='Coverage: guides + base interface; all distributions'
             fi
           else
-            decision='No package changes detected; package tests and benchmarks skipped.'
+            decision='Work: package checks skipped (no package changes)'
             scope=''
           fi
           echo "::notice::$decision"
@@ -1243,6 +1240,29 @@ jobs:
                 artifact_id: artifact.id,
               })
             }
+
+      - name: Report C++ test matrix
+        # Override the implicit success() guard so earlier failures do not skip the report.
+        if: ${{ always() && needs.changes.outputs.build_sources == 'true' }}
+        continue-on-error: true
+        env:
+          OMNI_TEST_SUITE: ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          rows = set()
+          for path in Path('test-results').rglob('test-standards.tsv'):
+              suite, compiler, standards = path.read_text().rstrip('\r\n').split('\t', 2)
+              if standards and suite == os.environ['OMNI_TEST_SUITE']:
+                  rows.add((compiler, standards))
+          if rows:
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  print('## C++ test matrix\n', file=summary)
+                  print('| Compiler | Standards |\n| --- | --- |', file=summary)
+                  for compiler, standards in sorted(rows):
+                      print(f'| {compiler} | {standards} |', file=summary)
+          PY
 
       - name: Require successful package and test jobs
         if: always()
