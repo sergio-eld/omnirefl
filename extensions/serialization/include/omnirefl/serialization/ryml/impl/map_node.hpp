@@ -363,9 +363,10 @@ auto map_record_field_value(const depth_exceeded &stopped,
   return read_node(stopped, node, type);
 }
 
-template <typename Record, std::size_t Index, typename Frame>
+template <typename Record, std::size_t Index, typename Field, typename Frame>
 bool process_record_member(Frame *frame) {
-  auto &slot = std::get<Index>(frame->values);
+  auto &slot = static_cast<
+    reflected_scope::detail::record_value_slot<Field> &>(frame->values);
   const bool present = frame->pending[Index] != ::ryml::NONE;
   if (present || (slot.stored && std::tuple_size<decltype(
       frame->strategy.validate_fields)>::value != 0)) {

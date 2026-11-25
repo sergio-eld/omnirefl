@@ -1016,6 +1016,11 @@ struct try_fold_values<Size, Size> {
 
 // Keep apply's single evaluation of tuple getters, including value results.
 // One reference tuple replaces the separate tuple formerly built per suffix.
+// FIXME: [medium] Clang 6/libstdc++ 7 exceeds template-depth=2048 for the
+// 160-field read in extras/benchmarks/record_shape_compile_cost: std::tuple's
+// constructor constraints recurse through every index-tag reference. Replace
+// this tuple with flat reference storage, preserving expected-like
+// continuation and value categories.
 template <typename Visit, typename Result>
 struct cpp11_try_fold_visit {
   Visit &visit;

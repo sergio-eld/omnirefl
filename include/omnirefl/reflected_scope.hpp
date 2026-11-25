@@ -1841,6 +1841,15 @@ typename TargetField::type get(std::tuple<Field...> &fields) {
     sizeof...(Field) == 0>::from(fields);
 }
 
+// Generated aggregate_into calls qualified refl::get. This bridge must be
+// visible before those definitions to support metadata-keyed field storage.
+/** Forward metadata-keyed sources to their `take<TargetField>()` member. */
+template <typename TargetField, typename Fields>
+auto get(Fields &fields)
+  -> decltype(fields.template take<TargetField>()) {
+  return fields.template take<TargetField>();
+}
+
 /**
  * For each supported `Record`, the generator emits an implementation
  * equivalent to:

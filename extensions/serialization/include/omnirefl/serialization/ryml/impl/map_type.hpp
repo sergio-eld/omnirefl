@@ -12,6 +12,7 @@
 #include <cassert>
 #include <iterator>
 #include <limits>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -56,6 +57,28 @@ struct cpp11_write_member {
 } // namespace detail
 
 namespace reflected_scope {
+namespace detail {
+
+// The binding types the record's binding would expose, without its tuple.
+template <typename Record, typename Fields>
+struct record_member_bindings;
+
+template <typename Record, typename... _F>
+struct record_member_bindings<Record,
+  std::tuple<omni::data_member_meta_t<_F>...>> {
+  using type = std::tuple<omni::data_member_binding_t<Record, _F>...>;
+};
+
+template <typename Write, typename Record, typename... Binding>
+void write_record_members(const Write &write, Record &value,
+  omni::type_t<std::tuple<Binding...>>) {
+  // Initializer-list evaluation preserves member order before C++17.
+  const int written[] = {0, (write(Binding{value}), 0)...};
+  static_cast<void>(written);
+  static_cast<void>(value);
+}
+
+} // namespace detail
 
 template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
@@ -68,13 +91,16 @@ auto map_record_t<Strategy>::operator()(State context, const T &value) const
     compat::apply(detail::record_field_names{},
       omni::meta_for<T>::accessible_data_members()), this->strategy));
   node.set_map();
-  const auto binding = omni::meta_for<T>::bind(value);
-  binding.accessible_data_members()
-    | omni::fn::filter(this->strategy.filter_fields)
-    | omni::fn::each(omni::ryml::detail::cpp11_write_member<State>{
+  detail::write_record_members(
+    omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/std::move(context),
-    });
+    },
+    value,
+    omni::type_t<typename detail::filter_fields<
+      decltype(std::declval<Strategy>().filter_fields),
+      typename detail::record_member_bindings<const T,
+        typename omni::meta_for<T>::accessible_data_members_t>::type>::type>{});
   return node;
 }
 

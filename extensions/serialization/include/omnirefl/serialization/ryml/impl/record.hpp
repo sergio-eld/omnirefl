@@ -40,22 +40,42 @@ struct record_value_slot: Field {
   typename Field::type &&value() && { return std::move(*this->stored); }
 };
 
+// Flat slots provide lookup by metadata type; index tags select their bases
+// without instantiating recursive tuple_element chains.
+template <std::size_t Index, typename Field>
+struct record_field_index {};
+
+template <std::size_t Index, typename Field>
+omni::type_t<Field> record_field_at(record_field_index<Index, Field>);
+
+template <typename Indices, typename... Field>
+struct record_value_slots_base;
+
+template <std::size_t... Index, typename... Field>
+struct record_value_slots_base<compat::index_sequence<Index...>, Field...>:
+    record_value_slot<Field>..., record_field_index<Index, Field>... {};
+
 template <typename... Field>
-auto record_value_slots(const std::tuple<Field...> &)
-  -> std::tuple<record_value_slot<Field>...> {
-  return {};
-}
-
-template <typename T>
-struct assign_record_fields {
-  T *into;
-
-  template <typename Field>
-  void operator()(record_value_slot<Field> &field) const {
-    bind_record_member(this->into, static_cast<Field>(field))
-      .set_value(std::move(field).value());
+struct record_value_slots: record_value_slots_base<
+    compat::make_index_sequence<sizeof...(Field)>, Field...> {
+  template <typename Tag>
+  typename omni::data_member_meta_t<Tag>::type take() {
+    using field = omni::data_member_meta_t<Tag>;
+    return static_cast<typename field::type>(std::move(static_cast<
+      record_value_slot<field> &>(*this)).value());
   }
 };
+
+template <typename T, typename... Field>
+void assign_record_fields(T *into, record_value_slots<Field...> *values) {
+  // Initializer-list evaluation preserves field order before C++17.
+  const int assigned[] = {0,
+    (bind_record_member(into, static_cast<Field>(
+        static_cast<record_value_slot<Field> &>(*values)))
+      .set_value(std::move(
+        static_cast<record_value_slot<Field> &>(*values)).value()), 0)...};
+  static_cast<void>(assigned);
+}
 
 // A conversion result lets optional construct T directly; forwarding an
 // already-constructed T through its constructor would require another move.
@@ -85,8 +105,8 @@ struct bind_record_value {
     static_assert(std::is_default_constructible<T>::value,
       "Filtered value mapping requires a default-constructible record; "
       "use the T* overload for an existing root");
-    frame->values | omni::fn::each(assign_record_fields<T>{
-      std::addressof(frame->value->emplace())});
+    assign_record_fields(std::addressof(frame->value->emplace()),
+      std::addressof(frame->values));
   }
 };
 
@@ -109,7 +129,7 @@ struct bind_record_into {
 
   template <typename Frame>
   void operator()(Frame *frame) const {
-    frame->values | omni::fn::each(assign_record_fields<T>{this->into});
+    assign_record_fields(this->into, std::addressof(frame->values));
     frame->value->emplace();
   }
 };
@@ -320,18 +340,18 @@ bool process_record_presence(node_accumulator<State> *result,
   return !result->stopped();
 }
 
-template <std::size_t Index, typename Frame>
+template <std::size_t Index, typename Field, typename Frame>
 bool process_record_presence_event(Frame *frame) {
-  auto &slot = std::get<Index>(frame->values);
   return process_record_presence(frame->result, frame->object,
-    frame->pending[Index], &slot);
+    frame->pending[Index], std::addressof(static_cast<
+      reflected_scope::detail::record_value_slot<Field> &>(frame->values)));
 }
 
 // Defined after type-mapping selection is available.
-template <typename Record, std::size_t Index, typename Frame>
+template <typename Record, std::size_t Index, typename Field, typename Frame>
 bool process_record_member(Frame *frame);
 
-// Bind the frame once; index tags keep callback targets known to the compiler.
+// Index tags retain the expected-like fold without indexing a field tuple.
 template <typename Record, typename Frame, bool CheckPresence>
 struct cpp11_process_record_event {
   Frame *frame;
@@ -346,23 +366,27 @@ struct cpp11_process_record_event {
     return compat::unexpected<compat::monostate>{compat::monostate{}};
   }
 
-  // C++11 tag dispatch avoids instantiating conversions in the presence pass.
   template <std::size_t Index>
   bool process(std::true_type) const {
-    return process_record_presence_event<Index>(this->frame);
+    using field = typename decltype(reflected_scope::detail::record_field_at<
+      Index>(this->frame->values))::type;
+    return process_record_presence_event<Index, field>(this->frame);
   }
 
   template <std::size_t Index>
   bool process(std::false_type) const {
-    return process_record_member<Record, Index>(this->frame);
+    using field = typename decltype(reflected_scope::detail::record_field_at<
+      Index>(this->frame->values))::type;
+    return process_record_member<Record, Index, field>(this->frame);
   }
 };
 
-// Tuple indices keep field values and selected nodes paired without a search.
-template <typename Record, typename State, typename Values,
+// Field types select value slots; indices pair them with the selected nodes.
+template <typename Record, typename State, typename... Field,
   typename Strategy, typename Finalizer, std::size_t... Index>
 auto process_record_members(node_accumulator<State> *result,
-  ::ryml::ConstNodeRef object, Values *values,
+  ::ryml::ConstNodeRef object,
+  reflected_scope::detail::record_value_slots<Field...> *values,
   const std::array<::ryml::id_type, sizeof...(Index)> &pending,
   const Strategy &strategy, Finalizer finalizer,
   compat::index_sequence<Index...>)
@@ -370,14 +394,13 @@ auto process_record_members(node_accumulator<State> *result,
   struct {
     node_accumulator<State> *result;
     ::ryml::ConstNodeRef object;
-    Values &values;
+    reflected_scope::detail::record_value_slots<Field...> &values;
     const std::array<::ryml::id_type, sizeof...(Index)> &pending;
     const Strategy &strategy;
     compat::optional<typename Finalizer::result_type::value_type> *value;
   } frame{result, object, *values, pending, strategy, nullptr};
 
-  // These tuple types are shared by all records of the same width, rather
-  // than embedding the entire frame type separately in every tuple element.
+  // Index-tag tuple types are shared by records of the same width.
   constexpr std::tuple<std::integral_constant<std::size_t, Index>...> events{};
 
   // Separate passes bound each fold's instantiation depth to the field count.
@@ -404,27 +427,27 @@ auto process_record_members(node_accumulator<State> *result,
 namespace reflected_scope {
 namespace detail {
 
+template <typename T>
+using non_static_record_fields_t = typename filter_fields<
+  compat::decay_t<decltype(omni::fn::is_non_static)>,
+  typename omni::meta_for<T>::accessible_data_members_t>::type;
+
 template <typename T, typename Strategy>
-constexpr auto readable_record_fields()
-  -> decltype(omni::meta_for<T>::accessible_data_members()
-    | omni::fn::filter(omni::fn::is_non_static)
-    | omni::fn::filter(decltype(std::declval<Strategy>().filter_fields){})) {
-  using filter_type = decltype(std::declval<Strategy>().filter_fields);
-  return omni::meta_for<T>::accessible_data_members()
-    | omni::fn::filter(omni::fn::is_non_static)
-    | omni::fn::filter(filter_type{});
-}
+using readable_record_fields_t = typename filter_fields<
+  decltype(std::declval<Strategy>().filter_fields),
+  non_static_record_fields_t<T>>::type;
 
 template <typename T, typename Strategy>
 constexpr bool selects_all_record_fields() {
-  return std::tuple_size<decltype(readable_record_fields<T, Strategy>())>::value
-    == std::tuple_size<decltype(omni::meta_for<T>::accessible_data_members()
-      | omni::fn::filter(omni::fn::is_non_static))>::value;
+  return std::tuple_size<readable_record_fields_t<T, Strategy>>::value
+    == std::tuple_size<non_static_record_fields_t<T>>::value;
 }
 
-template <typename T, typename State, typename Strategy, typename Finalizer>
-auto map_record(State context, ::ryml::ConstNodeRef node,
-  const Strategy &strategy, Finalizer finalizer)
+template <typename T, typename State, typename Strategy, typename Finalizer,
+  typename... Field>
+auto map_record_fields(State context, ::ryml::ConstNodeRef node,
+  const Strategy &strategy, Finalizer finalizer,
+  omni::type_t<std::tuple<Field...>>)
   -> typename Finalizer::result_type {
   auto result = omni::ryml::detail::make_node_accumulator(
     std::move(context));
@@ -433,21 +456,17 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
     omni::meta_for<T>::accessible_data_members()), strategy));
 
 #if 201402L <= OMNI_CPLUSPLUS
-  constexpr auto fields = readable_record_fields<T, Strategy>();
-  constexpr auto table = omni::fn::lookup_table(fields);
+  constexpr auto table = omni::fn::lookup_table(Field{}...);
 #else
-  const auto fields = readable_record_fields<T, Strategy>();
-  const auto table = omni::fn::lookup_table(fields);
+  const auto table = omni::fn::lookup_table(Field{}...);
 #endif
 
   // Selected children share this object's tree; only IDs need storage.
-  std::array<::ryml::id_type,
-    std::tuple_size<decltype(fields)>::value> pending;
+  std::array<::ryml::id_type, sizeof...(Field)> pending;
   pending.fill(::ryml::NONE);
 
   // The default no-alias resolver makes this cache unused and removable.
-  std::array<compat::optional<bool>,
-    std::tuple_size<decltype(fields)>::value> canonical_presence{};
+  std::array<compat::optional<bool>, sizeof...(Field)> canonical_presence{};
 
   // Structural issues precede missing fields and value mapping, preserving
   // diagnostic order regardless of the document's member order.
@@ -523,10 +542,19 @@ auto map_record(State context, ::ryml::ConstNodeRef node,
   if (result.stopped())
     return {compat::nullopt, std::move(result.result.diagnostics)};
 
-  auto values = record_value_slots(fields);
+  record_value_slots<Field...> values{};
   return omni::ryml::detail::process_record_members<T>(&result, node, &values,
     pending, strategy, std::move(finalizer),
-    compat::make_index_sequence<std::tuple_size<decltype(fields)>::value>{});
+    compat::make_index_sequence<sizeof...(Field)>{});
+}
+
+template <typename T, typename State, typename Strategy, typename Finalizer>
+auto map_record(State context, ::ryml::ConstNodeRef node,
+  const Strategy &strategy, Finalizer finalizer)
+  -> typename Finalizer::result_type {
+  return map_record_fields<T>(std::move(context), node, strategy,
+    std::move(finalizer),
+    omni::type_t<readable_record_fields_t<T, Strategy>>{});
 }
 
 } // namespace detail

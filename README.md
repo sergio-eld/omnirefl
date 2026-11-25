@@ -657,6 +657,9 @@ when the source or an included header changes.
 
 ## Continuous Benchmark
 
+For local A/B comparisons of compile time, peak memory and object size, see
+[Performance tracking](docs/performance-tracking.md).
+
 CI benchmarks native musl and Cosmopolitan on Linux x86_64, plus Cosmopolitan
 on Intel and Apple Silicon macOS. Benchmark inputs use `Release`;
 distributable packages retain `RelWithDebInfo` for detached symbols.
