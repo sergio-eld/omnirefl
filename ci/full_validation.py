@@ -14,7 +14,8 @@ def select_pr(number):
     # Reruns retain the original event; labels may have changed since then.
     labels = api('pulls/' + str(number))['labels']
     full = any(label['name'] == 'ci:full' for label in labels)
-    print(f'PR #{number}: full test suite selected: {full} (current ci:full label).')
+    selection = 'Full suite selected by ci:full.' if full else 'Smoke suite selected.'
+    print(f'PR #{number}: {selection}')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         print('full_suite=' + str(full).lower(), file=output)
 
