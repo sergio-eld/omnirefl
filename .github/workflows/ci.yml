@@ -27,6 +27,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      native_packages:
+        description: Require packages originally built from this exact commit
+        type: boolean
+        required: false
+        default: false
       rebuild_packages:
         description: Rebuild packages rejected by release preflight
         type: boolean
@@ -57,6 +62,7 @@ concurrency:
 # TODO: [low] Define a schema for CI_MATRIX, validate against it, and extract
 # parameters programmatically. Apply schema defaults explicitly before expansion.
 env:
+  NATIVE_PACKAGES: ${{ inputs.native_packages }}
   CI_MATRIX: |
     # Currently the primary distribution: one package for Linux, macOS, and Windows.
     cosmo:
@@ -418,6 +424,8 @@ jobs:
     outputs:
       run_id: ${{ steps.source.outputs.run_id }}
       artifact_commit: ${{ steps.source.outputs.artifact_commit }}
+      build_commit: ${{ steps.source.outputs.build_commit }}
+      artifact_manifest: ${{ steps.source.outputs.artifact_manifest }}
       reuse_checks: ${{ steps.decision.outputs.reuse_checks }}
     steps:
       - name: Checkout Repository
@@ -428,6 +436,7 @@ jobs:
         if: ${{ env.LOOKUP_PACKAGES == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          NATIVE_PACKAGES: ${{ inputs.native_packages }}
           MATRIX: ${{ needs.validate-ci-matrix.outputs.matrix }}
         run: |
           mapfile -t targets < <(python3 - <<'PYTHON'
@@ -439,7 +448,9 @@ jobs:
                   print(row['target'])
           PYTHON
           )
-          python3 ci/reuse_ci.py find --require-symbols --targets "${targets[@]}"
+          args=()
+          if [ true = "$NATIVE_PACKAGES" ]; then args+=(--native --wait-active); fi
+          python3 ci/reuse_ci.py find "${args[@]}" --require-symbols --targets "${targets[@]}"
 
       - name: Report package reuse
         id: decision
@@ -499,9 +510,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
-        run: >-
-          python3 ci/reuse_ci.py download --run-id "$SOURCE_RUN"
-          --target extras --packages-dir artifacts/packages/extras
+          SOURCE_MANIFEST: ${{ needs.reusable-packages.outputs.artifact_manifest }}
+        run: |
+          args=()
+          if [ true = "$NATIVE_PACKAGES" ]; then args+=(--native); fi
+          python3 ci/reuse_ci.py download "${args[@]}" \
+            --manifest "$SOURCE_MANIFEST" --run-id "$SOURCE_RUN" \
+            --target extras --packages-dir artifacts/packages/extras
       - name: Package Extras
         if: ${{ '' == needs.reusable-packages.outputs.run_id }}
         run: >-
@@ -548,11 +563,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
-        run: >-
-          python3 ci/reuse_ci.py download --run-id "$SOURCE_RUN"
-          --target ${{ matrix.target }}
-          --packages-dir ./artifacts/packages/${{ matrix.runtime }}
-          --symbols-dir "$RUNNER_TEMP/symbols"
+          SOURCE_MANIFEST: ${{ needs.reusable-packages.outputs.artifact_manifest }}
+        run: |
+          args=()
+          if [ true = "$NATIVE_PACKAGES" ]; then args+=(--native); fi
+          python3 ci/reuse_ci.py download "${args[@]}" \
+            --manifest "$SOURCE_MANIFEST" --run-id "$SOURCE_RUN" \
+            --target ${{ matrix.target }} \
+            --packages-dir ./artifacts/packages/${{ matrix.runtime }} \
+            --symbols-dir "$RUNNER_TEMP/symbols"
 
       - name: Pull Build Image
         if: ${{ '' == needs.reusable-packages.outputs.run_id }}
@@ -1394,6 +1413,7 @@ jobs:
           REUSED_CHECKS: ${{ needs.reusable-packages.outputs.reuse_checks }}
           SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
           SOURCE_COMMIT: ${{ needs.reusable-packages.outputs.artifact_commit }}
+          SOURCE_BUILD_COMMIT: ${{ needs.reusable-packages.outputs.build_commit }}
           OMNI_TEST_SUITE: ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           python3 - <<'PYTHON'
@@ -1405,6 +1425,8 @@ jobs:
               'run_id': os.environ['GITHUB_RUN_ID'],
               'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
               'suite': os.environ['OMNI_TEST_SUITE'],
+              'build_commit': (os.environ.get('SOURCE_BUILD_COMMIT', '')
+                               if os.environ['SOURCE_RUN'] else os.environ['GITHUB_SHA']),
           }
           if os.environ['REUSED_CHECKS'] == 'true':
               proof['source_run_id'] = os.environ['SOURCE_RUN']
@@ -1427,6 +1449,7 @@ jobs:
     needs:
       - changes
       - required-ci
+      - reusable-packages
       - benchmark-cosmo
       - benchmark-musl
     if: >-
@@ -1447,7 +1470,7 @@ jobs:
           failed = [name for name, job in jobs.items()
                     if job['result'] != 'success' and not (
                         reused and job['result'] == 'skipped'
-                        and name in ('benchmark-cosmo', 'benchmark-musl'))]
+                        and name in ('benchmark-cosmo', 'benchmark-musl', 'reusable-packages'))]
           if failed:
               raise SystemExit('Full validation failed: ' + ', '.join(failed))
           PYTHON
@@ -1456,6 +1479,8 @@ jobs:
         env:
           REUSED_FULL_RUN: ${{ needs.changes.outputs.reused_full_run_id }}
           REUSED_FULL_COMMIT: ${{ needs.changes.outputs.reused_full_commit }}
+          SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
+          SOURCE_BUILD_COMMIT: ${{ needs.reusable-packages.outputs.build_commit }}
         run: |
           python3 - <<'PYTHON'
           import json
@@ -1465,6 +1490,8 @@ jobs:
               'suite': 'full', 'commit': os.environ['GITHUB_SHA'],
               'run_id': os.environ['GITHUB_RUN_ID'],
               'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'build_commit': (os.environ.get('SOURCE_BUILD_COMMIT', '')
+                               if os.environ['SOURCE_RUN'] else os.environ['GITHUB_SHA']),
           }
           if os.environ['REUSED_FULL_RUN']:
               proof['source_run_id'] = os.environ['REUSED_FULL_RUN']

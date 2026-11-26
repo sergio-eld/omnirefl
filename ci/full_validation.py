@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Select full validation by PR label, commit cadence, or scheduled idle time."""
+"""Select full validation by PR label or master commit cadence."""
 
 import argparse
-from datetime import datetime, timezone
 import os
 import subprocess
 from urllib.parse import urlencode
@@ -19,7 +18,7 @@ def select_pr(number):
         print('full_suite=' + str(full).lower(), file=output)
 
 
-def select(idle):
+def select():
     from reuse_ci import merged_pr_full_validations
 
     commit = os.environ['GITHUB_SHA']
@@ -72,20 +71,12 @@ def select(idle):
             validated_distance = distance
             break
 
-    if idle:
-        timestamp = int(subprocess.check_output(
-            ['git', 'show', '-s', '--format=%ct', commit], text=True))
-        idle_days = (datetime.now(timezone.utc).timestamp() - timestamp) / 86400
-    cadence_due = (validated_distance > 0
-                   and (idle_days >= 3 if idle else validated_distance >= 5))
+    cadence_due = validated_distance >= 5
     due = cadence_due and not running
-    selection = ('Run: full' if due else 'Run: none') if idle else (
-        'Suite: full' if due else 'Suite: smoke')
+    selection = 'Suite: full' if due else 'Suite: smoke'
     distance = (f'since full: {validated_distance}/5 commits' if validated_distance < 5
                 else 'since green full: 5+/5 commits' if len(history) == 5
                 else 'green full: none')
-    if idle:
-        distance += f'; idle: {int(idle_days * 24)}/72h'
     if running and cadence_due:
         distance += '; full run active'
     print(selection + '; ' + distance)
@@ -99,12 +90,10 @@ def select(idle):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--idle', action='store_true',
-                      help='Use the three-day idle condition instead of commit cadence')
     mode.add_argument('--pull-request', type=int, metavar='NUMBER',
                       help='Select from the current ci:full label on a PR')
     arguments = parser.parse_args()
     if arguments.pull_request is not None:
         select_pr(arguments.pull_request)
     else:
-        select(arguments.idle)
+        select()

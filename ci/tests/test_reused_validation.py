@@ -119,7 +119,7 @@ class ReusedValidation(unittest.TestCase):
                     'SOURCE_RUN': '7', 'SOURCE_COMMIT': 'b' * 40}, directory)
                 self.assertEqual(0, result.returncode, result.stderr)
                 expected = {'commit': 'a' * 40, 'run_id': '10',
-                            'run_attempt': '2', 'suite': 'smoke'}
+                            'run_attempt': '2', 'suite': 'smoke', 'build_commit': ''}
                 if reused:
                     expected.update(source_run_id='7', source_commit='b' * 40)
                 self.assertEqual(expected, json.loads(
