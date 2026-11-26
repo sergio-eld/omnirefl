@@ -1,4 +1,4 @@
-"""Reuse a merged PR's full run only when GitHub proves identical source trees.
+"""Reuse merged PR validation only when GitHub proves identical source trees.
 
 Exercise the real selection/download CLIs through the documented GitHub REST
 boundary, sharing the artifact service fixture from test_package_reuse.
@@ -21,13 +21,17 @@ class MergedPRReuse(unittest.TestCase):
     def test_merged_source_and_artifacts(self):
         for case in ('identical tree', 'different tree', 'amended head',
                      'unrelated merge head', 'advanced tested base',
-                     'failed full gate', 'smoke only',
+                     'failed full gate', 'smoke only', 'failed smoke',
                      'expired packages', 'missing symbols', 'expired proof',
                      'failed rerun after green full', 'another attempt green',
                      'GitHub cleared merged PR metadata',
                      'successful rerun without package validation',
                      'successful rerun rebuilt packages',
-                     'failed rerun left packages intact'):
+                     'failed rerun left packages intact',
+                     'failed smoke refreshed marker', 'failed smoke untouched uploads',
+                     'failed full refreshed marker', 'stale green smoke metadata',
+                     'docs-only green after failed replacement', 'checked smoke',
+                     'checked full without full gate', 'failed checked smoke gate'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / 'gh').write_text(GITHUB_CLI)
@@ -87,9 +91,19 @@ class MergedPRReuse(unittest.TestCase):
                 if case != 'missing symbols':
                     artifact('symbols-cosmo-universal-' + tested[:12],
                              'omnirefl.debug', 'paired symbols')
+                commit_proof = {'commit': tested, 'run_id': '7'}
+                if case in ('checked smoke', 'checked full without full gate',
+                            'failed checked smoke gate'):
+                    commit_proof.update(run_attempt='1', suite='full' if case ==
+                        'checked full without full gate' else 'smoke')
                 artifact('validated-commit-' + tested, 'validated-commit.json',
-                         json.dumps({'commit': tested, 'run_id': '7'}))
-                if case != 'smoke only':
+                         json.dumps(commit_proof))
+                if case not in ('smoke only', 'failed smoke',
+                                'failed smoke refreshed marker',
+                                'failed smoke untouched uploads',
+                                'stale green smoke metadata', 'checked smoke',
+                                'checked full without full gate',
+                                'failed checked smoke gate'):
                     artifact('full-suite-' + tested + '-attempt-1', 'full-suite.json',
                              json.dumps({'suite': 'full', 'commit': tested,
                                          'run_id': '7', 'run_attempt': '1'}),
@@ -97,18 +111,30 @@ class MergedPRReuse(unittest.TestCase):
                 run = {
                     'id': 7, 'head_sha': head, 'status': 'completed',
                     'conclusion': 'failure' if case in (
-                        'failed rerun after green full', 'failed rerun left packages intact')
+                        'failed rerun after green full', 'failed rerun left packages intact',
+                        'failed smoke', 'failed smoke refreshed marker',
+                        'failed smoke untouched uploads', 'failed full refreshed marker',
+                        'checked smoke', 'failed checked smoke gate')
                                   else 'success',
                     'run_attempt': 2 if case in ('failed rerun after green full',
                         'another attempt green', 'successful rerun without package validation',
                         'successful rerun rebuilt packages',
-                        'failed rerun left packages intact') else 1,
+                        'failed rerun left packages intact',
+                        'failed smoke refreshed marker', 'failed smoke untouched uploads',
+                        'failed full refreshed marker') else 1,
+                    'updated_at': '2026-11-25T12:00:25Z' if case ==
+                                  'stale green smoke metadata' else '2026-11-25T12:00:50Z',
+                    'run_started_at': '2026-11-25T12:00:26Z' if case in (
+                        'successful rerun without package validation',
+                        'successful rerun rebuilt packages') else '2026-11-25T12:00:00Z',
                     'event': 'pull_request', 'display_title': 'CI / feature / automatic',
                     'head_repository': {'full_name': 'example/project'},
                     'pull_requests': [{'number': 1, 'base': {'sha': base},
                                       'head': {'sha': head}}],
                     'path': '.github/workflows/ci.yml',
                 }
+                if case == 'docs-only green after failed replacement':
+                    run.update(run_attempt=3, run_started_at='2026-11-25T12:00:45Z')
                 if case == 'GitHub cleared merged PR metadata':
                     run['pull_requests'] = []
                 if case in ('failed rerun after green full',
@@ -120,13 +146,36 @@ class MergedPRReuse(unittest.TestCase):
                     for entry in artifacts:
                         if entry['name'].startswith('validated-commit-'):
                             entry['created_at'] = '2026-11-25T12:00:40Z'
+                if case in ('failed smoke refreshed marker', 'failed full refreshed marker',
+                            'stale green smoke metadata',
+                            'docs-only green after failed replacement'):
+                    artifacts[0]['created_at'] = '2026-11-25T12:00:30Z'
+                    artifacts[1]['created_at'] = '2026-11-25T12:00:30Z'
+                    artifacts[2]['created_at'] = '2026-11-25T12:00:30Z'
+                if case in ('failed smoke refreshed marker', 'failed full refreshed marker',
+                            'failed smoke untouched uploads', 'stale green smoke metadata',
+                            'docs-only green after failed replacement'):
+                    for entry in artifacts:
+                        if entry['name'].startswith('validated-commit-'):
+                            entry['created_at'] = '2026-11-25T12:00:40Z'
                 (root / 'api.json').write_text(json.dumps({
                     'runs': [run], 'artifacts': artifacts, 'commits': commits,
+                    'attempts': {'1': {**run, 'run_attempt': 1, 'conclusion': 'success',
+                                       'updated_at': '2026-11-25T12:00:25Z',
+                                       'run_started_at': '2026-11-25T12:00:00Z'},
+                                 '2': {**run, 'run_attempt': 2, 'conclusion': 'failure',
+                                       'updated_at': '2026-11-25T12:00:42Z',
+                                       'run_started_at': '2026-11-25T12:00:26Z'}},
                     'jobs': {'7': [{'name': 'Full test suite', 'conclusion': 'success'}],
                              '7:1': [{'name': 'Full test suite',
                                       'conclusion': 'failure' if case in (
                                           'failed full gate', 'another attempt green')
-                                                    else 'success'}]},
+                                                    else 'success',
+                                      'completed_at': '2026-11-25T12:00:25Z'},
+                                     {'name': 'Required CI',
+                                      'conclusion': 'failure' if case ==
+                                          'failed checked smoke gate' else 'success',
+                                      'completed_at': '2026-11-25T12:00:25Z'}]},
                     'merged_pulls': {merged: [{
                         'number': 1, 'merged_at': '2026-11-25T12:00:00Z',
                         'merge_commit_sha': merged,
@@ -153,12 +202,17 @@ class MergedPRReuse(unittest.TestCase):
                 output = dict(line.split('=', 1) for line
                               in (root / 'output').read_text().splitlines())
                 valid = case in ('identical tree', 'expired packages', 'missing symbols',
+                                 'failed full refreshed marker',
+                                 'docs-only green after failed replacement',
                                  'failed rerun after green full',
                                  'GitHub cleared merged PR metadata', 'advanced tested base',
                                  'successful rerun without package validation',
                                  'successful rerun rebuilt packages',
                                  'failed rerun left packages intact')
                 packages = case in ('identical tree', 'advanced tested base',
+                                    'smoke only', 'expired proof',
+                                    'failed smoke untouched uploads', 'checked smoke',
+                                    'checked full without full gate',
                                     'GitHub cleared merged PR metadata',
                                     'successful rerun rebuilt packages',
                                     'failed rerun left packages intact')

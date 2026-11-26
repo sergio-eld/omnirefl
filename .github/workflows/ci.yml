@@ -417,6 +417,8 @@ jobs:
       pull-requests: read
     outputs:
       run_id: ${{ steps.source.outputs.run_id }}
+      artifact_commit: ${{ steps.source.outputs.artifact_commit }}
+      reuse_checks: ${{ steps.decision.outputs.reuse_checks }}
     steps:
       - name: Checkout Repository
         if: ${{ env.LOOKUP_PACKAGES == 'true' }}
@@ -440,9 +442,12 @@ jobs:
           python3 ci/reuse_ci.py find --require-symbols --targets "${targets[@]}"
 
       - name: Report package reuse
+        id: decision
         env:
           SOURCE_RUN: ${{ steps.source.outputs.run_id }}
           REBUILD_PACKAGES: ${{ inputs.rebuild_packages }}
+          FULL_SUITE: ${{ needs.changes.outputs.full_suite }}
+          FORCE_BUILD: ${{ inputs.build_sources }}
         run: |
           if [ true = "$REBUILD_PACKAGES" ]; then
             decision='Packages: rebuild (release preflight)'
@@ -453,6 +458,18 @@ jobs:
           else
             decision='Packages: build (no reusable set)'
           fi
+          reuse_checks=false
+          # Explicit requests still execute checks; cadence-selected full also runs.
+          if [ push = "$GITHUB_EVENT_NAME" ] &&
+             [ refs/heads/master = "$GITHUB_REF" ] &&
+             [ true != "$FULL_SUITE" ] &&
+             [ true != "$FORCE_BUILD" ] &&
+             [ true != "$REBUILD_PACKAGES" ] &&
+             [ -n "$SOURCE_RUN" ]; then
+            reuse_checks=true
+            decision="$decision; checks reused"
+          fi
+          echo "reuse_checks=$reuse_checks" >> "$GITHUB_OUTPUT"
           echo "::notice::$decision"
           printf '%s\n' "$decision" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$SOURCE_RUN" ]; then
@@ -652,9 +669,12 @@ jobs:
     env: &test_suite_env
       OMNI_TEST_SUITE: ${{ needs.validate-ci-matrix.outputs.suite }}
     needs:
+      - reusable-packages
       - build-package-cosmo
       - validate-ci-matrix
       - build-package-extras
+    if: >-
+      ${{ needs.reusable-packages.outputs.reuse_checks != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -733,9 +753,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env: *test_suite_env
     needs:
+      - reusable-packages
       - build-package-musl
       - validate-ci-matrix
       - build-package-extras
+    if: >-
+      ${{ needs.reusable-packages.outputs.reuse_checks != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -751,9 +774,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env: *test_suite_env
     needs:
+      - reusable-packages
       - build-package-cosmo
       - validate-ci-matrix
       - build-package-extras
+    if: >-
+      ${{ needs.reusable-packages.outputs.reuse_checks != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -823,11 +849,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env: *test_suite_env
     needs:
+      - reusable-packages
       - changes
       - build-package-cosmo
       - validate-ci-matrix
       - build-package-extras
-    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    if: >-
+      ${{ 'true' == needs.changes.outputs.build_sources
+        && needs.reusable-packages.outputs.reuse_checks != 'true' }}
     strategy:
       fail-fast: false
       matrix: >-
@@ -947,11 +976,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env: *test_suite_env
     needs:
+      - reusable-packages
       - changes
       - build-package-ucrt
       - validate-ci-matrix
       - build-package-extras
-    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    if: >-
+      ${{ 'true' == needs.changes.outputs.build_sources
+        && needs.reusable-packages.outputs.reuse_checks != 'true' }}
     strategy:
       fail-fast: false
       matrix: >-
@@ -959,17 +991,20 @@ jobs:
 
     steps: *test_package_windows_steps
 
-  # Benchmarks run independently on every CI event so pull requests can report
-  # regressions. Pages only persists successful master records afterward.
+  # PRs report benchmarks; identical merged trees reuse those checks on master.
+  # Pages only persists newly measured successful master records.
   # TODO: Add Windows benchmark coverage for Cosmo and UCRT after validating
   # the benchmark runner on Windows.
   benchmark-cosmo:
     name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
     needs:
+      - reusable-packages
       - build-package-cosmo
       - validate-ci-matrix
       - build-package-extras
+    if: >-
+      ${{ needs.reusable-packages.outputs.reuse_checks != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -1129,9 +1164,12 @@ jobs:
     name: Benchmark / ${{ matrix.system }}-${{ matrix.architecture }}-${{ matrix.libc }}-${{ matrix.toolchain }}
     runs-on: ${{ matrix.runner }}
     needs:
+      - reusable-packages
       - build-package-musl
       - validate-ci-matrix
       - build-package-extras
+    if: >-
+      ${{ needs.reusable-packages.outputs.reuse_checks != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -1176,6 +1214,8 @@ jobs:
     # GitHub constructs the job graph before matrix outputs exist;
     # needs must list these jobs explicitly.
     needs:
+      - benchmark-cosmo
+      - benchmark-musl
       - changes
       - check-ci-policy
       - reusable-packages
@@ -1198,7 +1238,9 @@ jobs:
     steps:
       - name: Find previous aggregate artifact
         id: previous_aggregate
-        if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        if: >-
+          ${{ 'true' == needs.changes.outputs.build_sources
+            && needs.reusable-packages.outputs.reuse_checks != 'true' }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -1231,7 +1273,9 @@ jobs:
 
       - name: Download test artifacts
         id: download_tests
-        if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        if: >-
+          ${{ 'true' == needs.changes.outputs.build_sources
+            && needs.reusable-packages.outputs.reuse_checks != 'true' }}
         uses: actions/download-artifact@v8
         with:
           pattern: test-*
@@ -1242,6 +1286,7 @@ jobs:
         if: >-
           ${{ always()
             && 'true' == needs.changes.outputs.build_sources
+            && needs.reusable-packages.outputs.reuse_checks != 'true'
             && 'success' == steps.download_tests.outcome
             && ('' == steps.previous_aggregate.outputs.name
               || 'success' == steps.download_previous.outcome) }}
@@ -1257,6 +1302,7 @@ jobs:
         if: >-
           ${{ always()
             && 'true' == needs.changes.outputs.build_sources
+            && needs.reusable-packages.outputs.reuse_checks != 'true'
             && 'success' == steps.upload_agg.outcome
             && ('pull_request' != github.event_name
               || github.event.pull_request.head.repo.full_name
@@ -1286,7 +1332,9 @@ jobs:
 
       - name: Report C++ test matrix
         # Override the implicit success() guard so earlier failures do not skip the report.
-        if: ${{ always() && needs.changes.outputs.build_sources == 'true' }}
+        if: >-
+          ${{ always() && needs.changes.outputs.build_sources == 'true'
+            && needs.reusable-packages.outputs.reuse_checks != 'true' }}
         continue-on-error: true
         env:
           OMNI_TEST_SUITE: ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
@@ -1318,16 +1366,20 @@ jobs:
 
           jobs = json.loads(os.environ['JOB_RESULTS'])
           build_sources = 'true' == jobs['changes']['outputs'].get('build_sources')
+          reused = jobs['reusable-packages']['outputs'].get('reuse_checks') == 'true'
           failed = [
               name for name, job in jobs.items()
-              if 'success' != job['result'] and (
+              if 'success' != job['result'] and not (
+                  reused and job['result'] == 'skipped'
+                  and name.startswith(('test-package-', 'benchmark-'))) and (
                   name in ('changes', 'validate-ci-matrix')
                   or (name == 'check-ci-policy'
                       and jobs['changes']['outputs'].get('check_ci_policy') == 'true')
                   or (build_sources and name == 'reusable-packages')
                   or ('check-site' == name
                       and 'pull_request' == os.environ['GITHUB_EVENT_NAME'])
-                  or (build_sources and name.startswith(('build-package-', 'test-package-')))
+                  or (build_sources and name.startswith((
+                      'build-package-', 'test-package-', 'benchmark-')))
               )
           ]
           for name, job in jobs.items():
@@ -1338,15 +1390,26 @@ jobs:
 
       - name: Record the tested commit
         if: ${{ 'true' == needs.changes.outputs.build_sources }}
+        env:
+          REUSED_CHECKS: ${{ needs.reusable-packages.outputs.reuse_checks }}
+          SOURCE_RUN: ${{ needs.reusable-packages.outputs.run_id }}
+          SOURCE_COMMIT: ${{ needs.reusable-packages.outputs.artifact_commit }}
+          OMNI_TEST_SUITE: ${{ needs.changes.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
           python3 - <<'PYTHON'
           import json
           import os
           from pathlib import Path
-          Path('validated-commit.json').write_text(json.dumps({
+          proof = {
               'commit': os.environ['GITHUB_SHA'],
               'run_id': os.environ['GITHUB_RUN_ID'],
-          }))
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'suite': os.environ['OMNI_TEST_SUITE'],
+          }
+          if os.environ['REUSED_CHECKS'] == 'true':
+              proof['source_run_id'] = os.environ['SOURCE_RUN']
+              proof['source_commit'] = os.environ['SOURCE_COMMIT']
+          Path('validated-commit.json').write_text(json.dumps(proof))
           PYTHON
 
       - name: Upload tested-commit proof
@@ -1381,10 +1444,9 @@ jobs:
           import os
           jobs = json.loads(os.environ['JOB_RESULTS'])
           reused = bool(jobs['changes']['outputs'].get('reused_full_run_id'))
-          site_only = jobs['changes']['outputs'].get('build_sources') == 'false'
           failed = [name for name, job in jobs.items()
                     if job['result'] != 'success' and not (
-                        reused and site_only and job['result'] == 'skipped'
+                        reused and job['result'] == 'skipped'
                         and name in ('benchmark-cosmo', 'benchmark-musl'))]
           if failed:
               raise SystemExit('Full validation failed: ' + ', '.join(failed))
@@ -1422,6 +1484,7 @@ jobs:
     name: Prepare Pages
     runs-on: ubuntu-latest
     needs:
+      - reusable-packages
       - changes
       - required-ci
       - benchmark-cosmo
@@ -1430,6 +1493,7 @@ jobs:
       ${{ always()
         && 'success' == needs['required-ci'].result
         && ('false' == needs.changes.outputs.build_sources
+          || 'true' == needs.reusable-packages.outputs.reuse_checks
           || ('success' == needs['benchmark-cosmo'].result
             && 'success' == needs['benchmark-musl'].result))
         && !inputs.skip_pages
@@ -1536,7 +1600,8 @@ jobs:
         id: benchmark_records
         if: >-
           ${{ 'true' == steps.pages_order.outputs.deploy
-            && 'true' == needs.changes.outputs.build_sources }}
+            && 'true' == needs.changes.outputs.build_sources
+            && needs.reusable-packages.outputs.reuse_checks != 'true' }}
         # Ad hoc: download-artifact currently fails for some artifacts uploaded
         # by Ubuntu runners. The REST download remains valid.
         # https://github.com/actions/upload-artifact/issues/811
@@ -1590,6 +1655,7 @@ jobs:
         if: >-
           ${{ 'true' == steps.pages_order.outputs.deploy
             && 'true' == needs.changes.outputs.build_sources
+            && needs.reusable-packages.outputs.reuse_checks != 'true'
             && 'true' == steps.benchmark_records.outputs.available }}
         run: |
           mapfile -d '' records < <(
