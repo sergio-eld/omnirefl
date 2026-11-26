@@ -341,3 +341,7 @@ static constexpr const map_range_t<> &map_range =
 // TODO: [medium] Revisit parent omission vs custom empty-optional mappings.
 // A custom sequence compositor can emit values such as "unavailable"; consider
 // an observable trait only if needed, since that would be an ad hoc.
+
+// REFACTORME: [medium] Consider sharing `.keep_nulls` with schema rendering,
+// including in-place overrides for RPC return types. Input field requirements
+// need a separate policy.
