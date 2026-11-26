@@ -8,7 +8,8 @@
 
 namespace {
 
-struct keep_range_nulls {
+template <typename Keep = omni::compat::bool_constant<true>>
+struct range_null_policy {
   template <typename State, typename T>
   auto operator()(State state, omni::type_t<T> type) const
     -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
@@ -18,9 +19,9 @@ struct keep_range_nulls {
 
   template <typename State, typename T>
   auto operator()(State, omni::type_t<std::vector<T>>) const
-    -> omni::ryml::map_range_t<std::true_type> {
+    -> omni::ryml::map_range_t<Keep> {
     return omni::ryml::map_range.tdm_keep_nulls(
-      omni::fn::always_true);
+      omni::fn::default_value<Keep>{});
   }
 };
 
@@ -30,7 +31,7 @@ TEST(keep_nulls, preserves_empty_optional_array_positions) {
     omni::compat::nullopt};
   const auto writer = omni::ryml::serialize.tdm_map_node(
     [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return keep_range_nulls{};
+      return range_null_policy<>{};
     });
 
   EXPECT_TRUE(serialization_test::matches_json("[null, 7, null]",
@@ -58,14 +59,14 @@ struct select_null_policy {
     -> omni::ryml::reflected_scope::map_record_t<
       omni::mapping::record_strategy_t<>, bool> {
     return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
-      [this](std::false_type) { return this->record; });
+      [this](omni::compat::monostate) { return this->record; });
   }
 
   template <typename State, typename T>
   auto operator()(State, omni::type_t<std::vector<T>>) const
     -> omni::ryml::map_range_t<bool> {
     return omni::ryml::map_range.tdm_keep_nulls(
-      [this](std::false_type) { return this->range; });
+      [this](omni::compat::monostate) { return this->range; });
   }
 };
 
@@ -74,8 +75,8 @@ struct null_policy_case {
   std::string name;
   bool keep_fields;
   bool keep_elements;
-  bool force_record;
-  bool force_range;
+  bool record_override;
+  bool range_override;
   std::string expected;
 };
 
@@ -94,8 +95,8 @@ TEST_P(null_policy, serializes_record) {
     })
     .tdm_map_node(
       [&parameter](omni::ryml::reflected_scope::mapping_from_type_t) {
-        return select_null_policy{parameter.force_record,
-          parameter.force_range};
+        return select_null_policy{parameter.record_override,
+          parameter.range_override};
       });
 
   EXPECT_TRUE(serialization_test::matches_json(parameter.expected,
@@ -104,21 +105,46 @@ TEST_P(null_policy, serializes_record) {
 
 INSTANTIATE_TEST_SUITE_P(omission_and_overrides, null_policy,
   ::testing::Values(
-    null_policy_case{"defaults", true, false, false, false,
-      R"({"value":null,"samples":[1,2]})"},
-    null_policy_case{"omit_both", false, false, false, false,
+    null_policy_case{"omit_both", true, true, false, false,
       R"({"samples":[1,2]})"},
-    null_policy_case{"keep_elements", false, true, false, false,
-      R"({"samples":[1,null,2]})"},
-    null_policy_case{"force_record", false, false, true, false,
+    null_policy_case{"keep_both", false, false, true, true,
+      R"({"value":null,"samples":[1,null,2]})"},
+    null_policy_case{"keep_record", false, true, true, false,
       R"({"value":null,"samples":[1,2]})"},
-    null_policy_case{"force_range", false, false, false, true,
-      R"({"samples":[1,null,2]})"},
-    null_policy_case{"force_both", false, false, true, true,
-      R"({"value":null,"samples":[1,null,2]})"}),
+    null_policy_case{"keep_range", true, false, false, true,
+      R"({"samples":[1,null,2]})"}),
   [](const ::testing::TestParamInfo<null_policy_case> &parameter) {
     return parameter.param.name;
   });
+
+TEST(keep_nulls, inherits_shared_policy) {
+  const measurement source{omni::compat::nullopt,
+    {omni::compat::make_optional(1), omni::compat::nullopt}};
+  const auto writer = omni::ryml::serialize.tdm_config(
+    [](omni::ryml::serialize_config_t options) {
+      options.keep_null_fields = false;
+      options.keep_null_elements = true;
+      return options;
+    });
+
+  EXPECT_TRUE(serialization_test::matches_json(R"({"samples":[1,null]})",
+    writer(source)));
+}
+
+TEST(keep_nulls, constant_false_overrides_shared_policy) {
+  const std::vector<omni::compat::optional<int>> source{
+    omni::compat::nullopt, omni::compat::make_optional(7)};
+  const auto writer = omni::ryml::serialize
+    .tdm_config([](omni::ryml::serialize_config_t options) {
+      options.keep_null_elements = true;
+      return options;
+    })
+    .tdm_map_node([](omni::ryml::reflected_scope::mapping_from_type_t) {
+      return range_null_policy<omni::compat::bool_constant<false>>{};
+    });
+
+  EXPECT_TRUE(serialization_test::matches_json("[7]", writer(source)));
+}
 
 TEST(keep_nulls, preserves_null_root) {
   const omni::compat::optional<int> source;
@@ -164,7 +190,7 @@ TEST(keep_nulls, preserves_nested_empty_optional_position) {
     omni::compat::make_optional(omni::compat::optional<int>{})};
   const auto writer = omni::ryml::serialize.tdm_map_node(
     [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return keep_range_nulls{};
+      return range_null_policy<>{};
     });
 
   EXPECT_TRUE(serialization_test::matches_json("[null]", writer(source)));
@@ -184,7 +210,7 @@ TEST(keep_nulls, preserves_positions_without_forcing_record_fields) {
       return options;
     })
     .tdm_map_node([](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return keep_range_nulls{};
+      return range_null_policy<>{};
     });
 
   EXPECT_TRUE(serialization_test::matches_json("[null,{}]", writer(source)));

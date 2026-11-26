@@ -37,6 +37,14 @@ auto select_write_mapping(const State &state, omni::type_t<T> type)
   return compat::invoke(state.map_node, state, type);
 }
 
+constexpr bool resolve_keep_nulls(bool keep, bool) {
+  return keep;
+}
+
+constexpr bool resolve_keep_nulls(compat::monostate, bool configured) {
+  return configured;
+}
+
 template <typename T>
 bool is_empty_optional(const T &value);
 
@@ -127,8 +135,8 @@ auto map_record_t<Strategy, KeepNulls>::operator()(State context,
     omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/context,
-      /*keep_null_fields=*/context.config.keep_null_fields
-        || this->keep_nulls,
+      /*keep_null_fields=*/omni::ryml::detail::resolve_keep_nulls(
+        this->keep_nulls, context.config.keep_null_fields),
     },
     value,
     // REFACTORME: [high] Slop ad hoc: reconstruct and filter binding types
@@ -189,8 +197,6 @@ struct write_range_case<false> {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
     reserve_range_nodes(node.tree(), value, /*overload_priority=*/0);
-    const bool keep_null_elements = context.config.keep_null_elements
-      || keep_nulls;
     // Separate iterator/sentinel declarations also support non-common ranges
     // before C++17 permitted them in range-based for loops.
     using std::begin;
@@ -199,7 +205,7 @@ struct write_range_case<false> {
     const auto last = end(value);
     for (; current != last; ++current) {
       const element_type &element = *current;
-      if (!keep_null_elements && is_empty_optional(element))
+      if (!keep_nulls && is_empty_optional(element))
         continue;
 
       const auto state = context.at(node.append_child()).element();
@@ -221,15 +227,13 @@ struct write_range_case<true> {
 
     node.set_map();
     reserve_range_nodes(node.tree(), value, /*overload_priority=*/0);
-    const bool keep_null_fields = context.config.keep_null_fields
-      || keep_nulls;
     using std::begin;
     using std::end;
     auto current = begin(value);
     const auto last = end(value);
     for (; current != last; ++current) {
       const auto &entry = *current;
-      if (!keep_null_fields && is_empty_optional(entry.second))
+      if (!keep_nulls && is_empty_optional(entry.second))
         continue;
 
       const auto &key = adapt::as_string(entry.first);
@@ -379,7 +383,9 @@ auto map_range_t<KeepNulls>::operator()(State context, const T &value) const
     context,
     value,
     node,
-    this->keep_nulls);
+    detail::resolve_keep_nulls(this->keep_nulls,
+      traits::is_key_value<T>::value ? context.config.keep_null_fields
+        : context.config.keep_null_elements));
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.

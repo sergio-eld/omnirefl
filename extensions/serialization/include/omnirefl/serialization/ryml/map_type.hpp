@@ -27,7 +27,7 @@ namespace reflected_scope {
 /** Maps selected record fields to object entries with canonical names.
  * Members are mapped through state.map_node.
  * Empty optional fields follow \ref serialize_config_t unless `.keep_nulls`
- * is true.
+ * overrides it.
  *
 ```
 map_record :: (state, const T&) -> node
@@ -35,8 +35,8 @@ map_record :: (state, const T&) -> node
  *
  * @pre Record metadata must be available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>,
-  typename KeepNulls = std::false_type>
-struct map_record_t final final:
+  typename KeepNulls = compat::monostate>
+struct map_record_t final:
     detail::tdm_for_map_record<Strategy, KeepNulls>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_record<Strategy, KeepNulls>;
@@ -44,17 +44,19 @@ struct map_record_t final final:
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_record_t requires mapping::record_strategy_t");
-  static_assert(std::is_same<bool, KeepNulls>::value
-      || std::is_same<std::false_type, KeepNulls>::value
-      || std::is_same<std::true_type, KeepNulls>::value,
-    "map_record_t keep_nulls must be bool or a Boolean integral constant");
+  static_assert(std::is_same<compat::monostate, KeepNulls>::value
+      || std::is_same<bool, KeepNulls>::value
+      || std::is_same<compat::bool_constant<false>, KeepNulls>::value
+      || std::is_same<compat::bool_constant<true>, KeepNulls>::value,
+    "map_record_t keep_nulls must be compat::monostate, bool, "
+    "or compat::bool_constant");
 
   /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
 
-  /** True retains empty optional fields as null;
-   * false follows \ref serialize_config_t. */
+  /** `compat::monostate` follows \ref serialize_config_t; `bool` or
+   * `compat::bool_constant` overrides it: true keeps nulls, false omits. */
   KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_keep_nulls;
 
@@ -281,24 +283,26 @@ map_range :: (state, const T&) -> node
 ```
  *
  * Elements are mapped through state.map_node. Null omission follows
- * \ref serialize_config_t unless `.keep_nulls` retains null elements or values.
+ * \ref serialize_config_t unless `.keep_nulls` overrides it.
  * This policy covers immediate elements; nested records/ranges own theirs.
  * \ref traits::is_key_value selects object or array output.
  * @pre Non-scalar elements are exposed as lvalue references to value_type. */
-template <typename KeepNulls = std::false_type>
-struct map_range_t final final:
+template <typename KeepNulls = compat::monostate>
+struct map_range_t final:
     detail::tdm_for_map_range<KeepNulls>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_range<KeepNulls>;
   using detail::with_depth_exceeded_operator::operator();
 
-  static_assert(std::is_same<bool, KeepNulls>::value
-      || std::is_same<std::false_type, KeepNulls>::value
-      || std::is_same<std::true_type, KeepNulls>::value,
-    "map_range_t keep_nulls must be bool "
-    "or a Boolean integral constant");
+  static_assert(std::is_same<compat::monostate, KeepNulls>::value
+      || std::is_same<bool, KeepNulls>::value
+      || std::is_same<compat::bool_constant<false>, KeepNulls>::value
+      || std::is_same<compat::bool_constant<true>, KeepNulls>::value,
+    "map_range_t keep_nulls must be compat::monostate, bool, "
+    "or compat::bool_constant");
 
-  /** True forces null emission; false follows \ref serialize_config_t. */
+  /** `compat::monostate` follows \ref serialize_config_t; `bool` or
+   * `compat::bool_constant` overrides it: true keeps nulls, false omits. */
   KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_keep_nulls;
 

@@ -685,9 +685,11 @@ struct response {
 
 /** `.config` on `serialize` and the tree builders controls empty optionals.
  * Defaults retain null object fields and omit empty array elements.
- * `.keep_nulls = true` on `map_record` or `map_range` overrides that
- * policy; `false` defers to it. Records control their fields; ranges control
- * their immediate elements or mapped values. Nested mappings own their policy.
+ * `.keep_nulls` on `map_record` or `map_range` defaults to `compat::monostate`,
+ * inheriting `.config`. A `bool` or `compat::bool_constant` overrides it:
+ * `true` keeps nulls, `false` omits them. Records control their fields; ranges
+ * control their immediate elements or mapped values. Nested policies are
+ * independent.
  * Empty roots remain null; quoted "null" remains a string. */
 TEST(advanced, keep_nulls) {
   const keep_nulls_example::response source{

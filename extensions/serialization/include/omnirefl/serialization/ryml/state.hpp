@@ -139,7 +139,7 @@ template <typename MapNode>
 struct as_ref_tree_t;
 
 /** Shared policy for empty optionals in records and ranges.
- * Their `.keep_nulls = true` retains nulls; false follows this policy.
+ * Mappers inherit this policy unless `.keep_nulls` overrides it.
  * Empty roots remain null. */
 struct serialize_config_t {
   // Empty optional record fields and associative values.
