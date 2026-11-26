@@ -39,12 +39,15 @@ predate their validation gate. A failed rerun can preserve earlier green bytes,
 but its replacement uploads cannot borrow older success. Full coverage reused
 from another tree-equivalent run never validates new uploads.
 
-Before a release exists, move an annotated tag by pushing just its ref:
+Move an annotated tag by pushing just its ref:
 
 ```sh
 git tag -fa v0.0.9 <commit> -m "v0.0.9"
 git push origin +refs/tags/v0.0.9
 ```
 
-This triggers release validation without deleting the remote tag first. For an
-unchanged commit, rerun failed workflow jobs instead of moving the tag.
+This triggers release validation without manually deleting the remote tag or
+draft release. Preflight removes an existing draft and its stale assets, leaving
+the pushed tag unchanged. The new draft is created only after full validation
+succeeds. Published releases cannot be replaced. For an unchanged commit, rerun
+all Release workflow jobs so preflight also clears any partial draft.
