@@ -101,13 +101,13 @@ struct schema_path {
 
 // Type-only bundles keep state friendship independent of parameter-list arity.
 template <typename Config,
-  typename MapNode = reflected_scope::mapping_to_type_t,
+  typename SelectMapping = reflected_scope::mapping_to_type_t,
   typename Root = void, typename EnclosingRecord = void,
   typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
   std::size_t DepthLimit = 10>
 struct read_state_config {
   using config_type = Config;
-  using map_node_type = MapNode;
+  using select_mapping_type = SelectMapping;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
   using path_type = Path;
@@ -115,25 +115,25 @@ struct read_state_config {
   static constexpr std::size_t depth_limit = DepthLimit;
 
   template <typename Record, typename Name>
-  using child = read_state_config<Config, MapNode, Root, Record,
+  using child = read_state_config<Config, SelectMapping, Root, Record,
     typename Path::template child<Name>, Depth + 1, DepthLimit>;
 
   template <typename Record, typename Field>
-  using field = read_state_config<Config, MapNode, Root, Record,
+  using field = read_state_config<Config, SelectMapping, Root, Record,
     typename Path::template field<Field>, Depth + 1, DepthLimit>;
 
-  using element = read_state_config<Config, MapNode, Root, EnclosingRecord,
-    typename Path::element, Depth + 1, DepthLimit>;
+  using element = read_state_config<Config, SelectMapping, Root,
+    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
 };
 
 template <bool BorrowStrings = false,
-  typename MapNode = reflected_scope::mapping_from_type_t,
+  typename SelectMapping = reflected_scope::mapping_from_type_t,
   typename Root = void, typename EnclosingRecord = void,
   typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
   std::size_t DepthLimit = 10>
 struct write_state_config {
   static constexpr bool borrow_strings = BorrowStrings;
-  using map_node_type = MapNode;
+  using select_mapping_type = SelectMapping;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
   using path_type = Path;
@@ -141,14 +141,14 @@ struct write_state_config {
   static constexpr std::size_t depth_limit = DepthLimit;
 
   template <typename Record, typename Name>
-  using child = write_state_config<BorrowStrings, MapNode, Root, Record,
+  using child = write_state_config<BorrowStrings, SelectMapping, Root, Record,
     typename Path::template child<Name>, Depth + 1, DepthLimit>;
 
   template <typename Record, typename Field>
-  using field = write_state_config<BorrowStrings, MapNode, Root, Record,
+  using field = write_state_config<BorrowStrings, SelectMapping, Root, Record,
     typename Path::template field<Field>, Depth + 1, DepthLimit>;
 
-  using element = write_state_config<BorrowStrings, MapNode, Root,
+  using element = write_state_config<BorrowStrings, SelectMapping, Root,
     EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
 };
 

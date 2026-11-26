@@ -129,13 +129,13 @@ namespace ryml {
 
 struct diagnostics;
 
-template <typename Config, typename MapNode>
+template <typename Config, typename SelectMapping>
 struct map_by_schema_t;
 
-template <typename MapNode>
+template <typename SelectMapping>
 struct as_owning_tree_t;
 
-template <typename MapNode>
+template <typename SelectMapping>
 struct as_ref_tree_t;
 
 /** Shared policy for empty optionals in records and ranges.
@@ -360,7 +360,7 @@ struct read_state_t {
   std::size_t warning_count;
 
   // (state, type<T>) -> mapping callable; borrowed throughout traversal.
-  const typename StateConfig::map_node_type &map_node;
+  const typename StateConfig::select_mapping_type &select_mapping;
 
   /** Tree depth, starting at zero for the root.
    * child(), field(), and element() increment it; optional unwrapping does not.
@@ -435,13 +435,14 @@ private:
   template <typename ParentConfig>
   constexpr read_state_t(const read_state_t<ParentConfig> &parent)
     : config(parent.config), error_count(parent.error_count),
-      warning_count(parent.warning_count), map_node(parent.map_node) {}
+      warning_count(parent.warning_count),
+      select_mapping(parent.select_mapping) {}
 
   constexpr read_state_t(const typename StateConfig::config_type &options,
     std::size_t errors, std::size_t warnings,
-    const typename StateConfig::map_node_type &mapping)
+    const typename StateConfig::select_mapping_type &mapping)
     : config(options), error_count(errors), warning_count(warnings),
-      map_node(mapping) {}
+      select_mapping(mapping) {}
 };
 
 /** Serialization policy, local mapping selection, and schema position.
@@ -460,7 +461,7 @@ struct write_state_t {
   using enclosing_record = typename StateConfig::enclosing_record;
 
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
-  const typename StateConfig::map_node_type &map_node;
+  const typename StateConfig::select_mapping_type &select_mapping;
   const serialize_config_t &config;
 
   /** Destination node, valid only during the active builder call. */
@@ -540,16 +541,17 @@ private:
 
   template <typename ParentConfig>
   constexpr write_state_t(const write_state_t<ParentConfig> &parent)
-    : map_node(parent.map_node), config(parent.config),
+    : select_mapping(parent.select_mapping), config(parent.config),
       tree(parent.tree), node_id(parent.node_id) {}
 
-  constexpr write_state_t(const typename StateConfig::map_node_type &mapping,
+  constexpr write_state_t(
+    const typename StateConfig::select_mapping_type &mapping,
     ::ryml::Tree *tree, ::ryml::id_type node_id,
     const serialize_config_t &config)
-    : map_node(mapping), config(config), tree(tree), node_id(node_id) {}
+    : select_mapping(mapping), config(config), tree(tree), node_id(node_id) {}
 
   constexpr write_state_t(const write_state_t &parent, ::ryml::id_type node_id)
-    : map_node(parent.map_node), config(parent.config),
+    : select_mapping(parent.select_mapping), config(parent.config),
       tree(parent.tree), node_id(node_id) {}
 
   ::ryml::Tree *tree;

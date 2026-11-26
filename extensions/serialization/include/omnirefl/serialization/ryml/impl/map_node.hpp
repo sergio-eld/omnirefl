@@ -59,7 +59,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
 auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
   -> with_diagnostics_t<T, diagnostics> {
-  const auto mapping = compat::invoke(context.map_node, context, type);
+  const auto mapping = compat::invoke(context.select_mapping, context, type);
   return map_node_to_value(std::move(context),
     mapping, node, type);
 }
@@ -73,7 +73,7 @@ auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
     result.result.value.reset();
   else {
     const auto mapping =
-      compat::invoke(context.map_node, context, omni::type_t<T>{});
+      compat::invoke(context.select_mapping, context, omni::type_t<T>{});
 
     result.append(read_into(std::move(context),
       mapping,
@@ -352,7 +352,7 @@ OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_read_state<State>::value))
 auto map_record_field_value(State state, ::ryml::ConstNodeRef node,
   omni::type_t<T> type) -> with_diagnostics_t<T> {
-  const auto mapping = compat::invoke(state.map_node, state, type);
+  const auto mapping = compat::invoke(state.select_mapping, state, type);
   return map_node_to_value_using(std::move(state), mapping, node, type,
     /*priority=*/0);
 }

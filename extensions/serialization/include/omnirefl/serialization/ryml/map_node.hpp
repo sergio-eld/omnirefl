@@ -50,7 +50,7 @@ map_object_node :: {
 }
 ```
  *
- * Members are mapped through state.map_node.
+ * Members are mapped through state.select_mapping.
  * Non-object input reports an expected-object diagnostic by default.
  * @pre node belongs to a valid tree, pointers are non-null, and record
  * metadata is available in reflected scope. */
@@ -187,7 +187,7 @@ static constexpr const map_node_to_enum_t<> &map_node_to_enum =
 /** Non-recursive fundamental mappings may be used in custom cp::to_type
  * implementations: they do not call \ref reflected_scope::mapping_to_type,
  * avoiding recursive selection of the customization. Optional and range
- * mappings dispatch their contained values through state.map_node. */
+ * mappings dispatch their contained values through state.select_mapping. */
 
 /** Checked arithmetic node-to-type mapping.
  *
@@ -491,7 +491,7 @@ struct to_optional_like_t final: detail::with_depth_exceeded_operator {
 };
 
 /** Maps null or a value node into an optional-like destination.
- * Contained values are mapped through state.map_node.
+ * Contained values are mapped through state.select_mapping.
  *
 ```
 map_value_node :: (state, node, T*) -> with_diagnostics<monostate>
@@ -538,7 +538,7 @@ static constexpr const map_value_node_t<> &map_value_node =
 to_range :: (state, node, T*) -> with_diagnostics<monostate>
 ```
  *
- * Elements are mapped through state.map_node.
+ * Elements are mapped through state.select_mapping.
  * @pre into is non-null; node is valid and has the destination's shape.
  * Object keys are string-like; range operations use \ref adapt::clear and
  * the insertion adapters. */
@@ -556,7 +556,7 @@ struct to_range_t final: detail::with_depth_exceeded_operator {
 };
 
 /** Maps array nodes into element ranges and object nodes into key/value ranges.
- * Elements are mapped through state.map_node.
+ * Elements are mapped through state.select_mapping.
  *
 ```
 map_range_node :: (state, node, T*) -> with_diagnostics<monostate>

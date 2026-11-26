@@ -21,7 +21,7 @@ namespace ryml {
 namespace detail {
 
 // Ad hoc: traversal selects a writer before its terminal overload can run.
-// The depth sentinel lacks the state interface required by `.map_node`.
+// The depth sentinel lacks the state interface required by `.select_mapping`.
 // REFACTORME: [high] Consolidate writer selection and depth termination in
 // traversal, then remove these separate selection overloads.
 template <typename T>
@@ -33,8 +33,8 @@ auto select_write_mapping(const depth_exceeded &, omni::type_t<T>)
 OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
   (is_write_state<State>::value))
 auto select_write_mapping(const State &state, omni::type_t<T> type)
-  -> decltype(compat::invoke(state.map_node, state, type)) {
-  return compat::invoke(state.map_node, state, type);
+  -> decltype(compat::invoke(state.select_mapping, state, type)) {
+  return compat::invoke(state.select_mapping, state, type);
 }
 
 constexpr bool resolve_keep_nulls(bool keep, bool) {
@@ -335,7 +335,7 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
 auto map_optional_like_t::operator()(State context, const T &value) const
   -> ::ryml::NodeRef {
   if (adapt::has_value(value)) {
-    const auto mapping = compat::invoke(context.map_node,
+    const auto mapping = compat::invoke(context.select_mapping,
       context, omni::type_t<typename T::value_type>{});
     return mapping(context, adapt::get_value(value));
   }

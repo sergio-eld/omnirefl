@@ -25,7 +25,7 @@ namespace ryml {
 namespace reflected_scope {
 
 /** Maps selected record fields to object entries with canonical names.
- * Members are mapped through state.map_node.
+ * Members are mapped through state.select_mapping.
  * Empty optional fields follow \ref serialize_config_t unless `.keep_nulls`
  * overrides it.
  *
@@ -46,8 +46,8 @@ struct map_record_t final:
     "map_record_t requires mapping::record_strategy_t");
   static_assert(std::is_same<compat::monostate, KeepNulls>::value
       || std::is_same<bool, KeepNulls>::value
-      || std::is_same<compat::bool_constant<false>, KeepNulls>::value
-      || std::is_same<compat::bool_constant<true>, KeepNulls>::value,
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
     "map_record_t keep_nulls must be compat::monostate, bool, "
     "or compat::bool_constant");
 
@@ -141,7 +141,7 @@ static constexpr const map_enum_t<> &map_enum =
 /** Non-recursive fundamental mappings may be used in custom cp::from_type
  * implementations: they do not call \ref reflected_scope::mapping_from_type,
  * avoiding recursive selection of the customization. Optional and range
- * mappings dispatch their contained values through state.map_node. */
+ * mappings dispatch their contained values through state.select_mapping. */
 
 /** Maps an arithmetic value to a Boolean, integer, or real JSON/YAML scalar.
  *
@@ -254,7 +254,7 @@ static constexpr const map_string_like_t &map_string_like =
   compat::detail::shared_state<map_string_like_t>::value;
 #endif
 
-/** Maps an optional's value through state.map_node, or writes null.
+/** Maps an optional's value through state.select_mapping, or writes null.
  * Enclosing record/range mappings decide whether empty optionals are omitted.
  *
 ```
@@ -282,7 +282,7 @@ static constexpr const map_optional_like_t &map_optional_like =
 map_range :: (state, const T&) -> node
 ```
  *
- * Elements are mapped through state.map_node. Null omission follows
+ * Elements are mapped through state.select_mapping. Null omission follows
  * \ref serialize_config_t unless `.keep_nulls` overrides it.
  * This policy covers immediate elements; nested records/ranges own theirs.
  * \ref traits::is_key_value selects object or array output.
@@ -296,8 +296,8 @@ struct map_range_t final:
 
   static_assert(std::is_same<compat::monostate, KeepNulls>::value
       || std::is_same<bool, KeepNulls>::value
-      || std::is_same<compat::bool_constant<false>, KeepNulls>::value
-      || std::is_same<compat::bool_constant<true>, KeepNulls>::value,
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
     "map_range_t keep_nulls must be compat::monostate, bool, "
     "or compat::bool_constant");
 
