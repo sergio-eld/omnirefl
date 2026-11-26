@@ -329,8 +329,6 @@ namespace detail {
 // Ad hoc: C++11 cannot deduce function return types from their bodies.
 // WARNING: keep these argument lists synchronized with mapping_to_type and
 // mapping_from_type; default selection is shared through the aliases above.
-// Static-assert sanity checks:
-// extras/extensions/serialization/tests/type_mapping.cpp.
 template <typename T>
 struct to_type_cpp11_trailing_return {
   using type = decltype(first_available(

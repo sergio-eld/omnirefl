@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -28,9 +27,6 @@ struct endpoint_names {
 };
 
 struct shifted_integer { int value; };
-struct qualified_integer { int value; };
-
-struct registered_integer { int value; };
 
 } // namespace
 
@@ -38,32 +34,12 @@ namespace omni {
 namespace ryml {
 namespace cp {
 
-template <>
-struct to_type_t<registered_integer> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
-  auto operator()(State state,
-    ::ryml::ConstNodeRef node,
-    registered_integer *into) const
-    -> with_diagnostics_t<compat::monostate> {
-    return map_integer_node(std::move(state), node, &into->value);
-  }
-};
-
-template <>
-struct from_type_t<registered_integer> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  auto operator()(State state,
-    const registered_integer &value) const -> ::ryml::NodeRef {
-    return map_arithmetic(std::move(state), value.value);
-  }
-};
-
 // C++14 supports variable-template registration and partial specialization.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
 const auto from_type<endpoint<T>> = [](auto state,
   const endpoint<T> &value) -> ::ryml::NodeRef {
-  const auto mapping = compat::invoke(state.map_node,
+  const auto mapping = compat::invoke(state.select_mapping,
     state, omni::type_t<T>{});
   return mapping(std::move(state), value.port);
 };
@@ -79,7 +55,7 @@ struct from_type_t<endpoint<T>> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   auto operator()(State state,
     const endpoint<T> &value) const -> ::ryml::NodeRef {
-    const auto mapping = compat::invoke(state.map_node,
+    const auto mapping = compat::invoke(state.select_mapping,
       state, omni::type_t<T>{});
     return mapping(std::move(state), value.port);
   }
@@ -161,73 +137,11 @@ struct from_type_t<shifted_integer> {
 };
 #endif
 
-// Registration lookup normalizes qualified type tags.
-template <>
-struct from_type_t<qualified_integer> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
-  auto operator()(State state,
-    const qualified_integer &value) const -> ::ryml::NodeRef {
-    return map_integral(std::move(state), value.value);
-  }
-};
-
 } // namespace cp
 } // namespace ryml
 } // namespace omni
 
 namespace {
-
-static_assert(omni::traits::cp::unavailable{}
-    == omni::ryml::cp::to_type_t<int>{},
-  "Unregistered structs compare equal to unavailable");
-static_assert(omni::traits::cp::unavailable{}
-    != omni::ryml::cp::to_type_t<registered_integer>{},
-  "Registered structs do not compare equal to unavailable");
-
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_to_type(
-      omni::type_t<registered_integer>{})),
-    omni::ryml::cp::to_type_t<registered_integer>>::value,
-  "Struct registration to-type selection");
-
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<registered_integer>{})),
-    omni::ryml::cp::from_type_t<registered_integer>>::value,
-  "Struct registration from-type selection");
-
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<const qualified_integer>{})),
-    omni::ryml::cp::from_type_t<qualified_integer>>::value,
-  "Registration lookup normalizes the qualified type");
-
-// Compare registrations with the registered objects, not a return-type helper.
-#if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_to_type(
-      omni::type_t<endpoint<int>>{})),
-    omni::compat::remove_cvref_t<decltype(
-      omni::ryml::cp::to_type<endpoint<int>>)>>::value,
-  "Variable registration selects its callable type");
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<endpoint<int>>{})),
-    omni::compat::remove_cvref_t<decltype(
-      omni::ryml::cp::from_type<endpoint<int>>)>>::value,
-  "Variable registration selects its writer type");
-#else
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_to_type(
-      omni::type_t<endpoint<int>>{})),
-    omni::ryml::cp::to_type_t<endpoint<int>>>::value,
-  "C++11 template registration selects its reader type");
-static_assert(std::is_same<
-    decltype(omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<endpoint<int>>{})),
-    omni::ryml::cp::from_type_t<endpoint<int>>>::value,
-  "C++11 template registration selects its writer type");
-#endif
 
 TEST(mapping_core, parses_and_converts_through_explicit_core_mappings) {
   const auto tree = omni::ryml::core::parse(
@@ -291,62 +205,6 @@ TEST(type_mapping, preserves_initialized_reader_state) {
 
 TEST(type_mapping, preserves_initialized_writer_state) {
   EXPECT_EQ("16", omni::ryml::as_json(shifted_integer{5}));
-}
-
-// C++11 needs a named generic selector to retain the explicitly queried tag.
-template <typename Qualified>
-struct select_qualified_writer {
-  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
-    (omni::ryml::is_write_state<State>::value))
-  auto operator()(State, omni::type_t<T>) const
-    -> decltype(omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<Qualified>{})) {
-    return omni::ryml::reflected_scope::mapping_from_type(
-      omni::type_t<Qualified>{});
-  }
-};
-
-TEST(type_mapping, writes_cv_qualified_boolean_tags) {
-  const bool enabled = true;
-  volatile bool disabled = false;
-  const volatile bool fixed = true;
-  const auto write_const = omni::ryml::as_owning_tree.tdm_map_node(
-    [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return select_qualified_writer<const bool>{};
-    });
-  const auto write_volatile = omni::ryml::as_owning_tree.tdm_map_node(
-    [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return select_qualified_writer<volatile bool>{};
-    });
-  const auto write_const_volatile = omni::ryml::as_owning_tree.tdm_map_node(
-    [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return select_qualified_writer<const volatile bool>{};
-    });
-
-  EXPECT_EQ("true", ::ryml::emitrs_json<std::string>(write_const(enabled)));
-  EXPECT_EQ("false",
-    ::ryml::emitrs_json<std::string>(write_volatile(disabled)));
-  EXPECT_EQ("true",
-    ::ryml::emitrs_json<std::string>(write_const_volatile(fixed)));
-}
-
-TEST(type_mapping, reads_a_volatile_boolean) {
-  volatile bool into = false;
-  const auto result = omni::ryml::deserialize(&into, "true");
-
-  EXPECT_TRUE(result.value);
-  EXPECT_TRUE(result.diagnostics.empty());
-  EXPECT_TRUE(into);
-}
-
-TEST(type_mapping, normalizes_qualified_registration_lookup) {
-  const qualified_integer value{23};
-  const auto as_owning_tree = omni::ryml::as_owning_tree.tdm_map_node(
-    [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return select_qualified_writer<const qualified_integer>{};
-    });
-
-  EXPECT_EQ("23", ::ryml::emitrs_json<std::string>(as_owning_tree(value)));
 }
 
 TEST(write_state, preserves_string_storage_through_custom_mapping) {

@@ -47,7 +47,7 @@ struct from_type_t<my_int> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_write_state<State>::value))
   auto operator()(State context,
     const my_int &value) const -> ::ryml::NodeRef {
-    const auto mapping = compat::invoke(context.map_node,
+    const auto mapping = compat::invoke(context.select_mapping,
       context, omni::type_t<int>{});
     return mapping(std::move(context), value.value);
   }

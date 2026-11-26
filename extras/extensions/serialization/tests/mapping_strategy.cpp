@@ -514,7 +514,7 @@ TEST(mapping_strategy, filtered_fields_keep_their_defaults) {
 
 TEST(mapping_strategy, static_fields_are_opt_in_for_serialization_only) {
   const auto serialize = omni::ryml::serialize
-    .tdm_map_node(omni::fn::default_value<
+    .tdm_select_mapping(omni::fn::default_value<
       strategy_examples::select_static_writer>{});
   strategy_examples::interval value{};
   value.begin = 1;

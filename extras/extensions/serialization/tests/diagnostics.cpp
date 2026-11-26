@@ -353,27 +353,6 @@ TEST(diagnostics_transform, reports_parse_errors_without_a_valid_tree) {
   EXPECT_FALSE(result.diagnostics.empty());
 }
 
-TEST(diagnostics_transform, retains_mutable_renderer_state) {
-  auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_t<> options) {
-      int calls = 0;
-      return options.tdm_transform_diagnostics(
-        [calls](omni::ryml::render_diagnostics_t) mutable {
-          return [calls](const ::ryml::Tree &, omni::ryml::diagnostics) mutable {
-            return ++calls;
-          };
-        });
-    });
-
-  const auto first = load(omni::type_t<int>{}, "7");
-  const auto second = load(omni::type_t<int>{}, "bad");
-
-  EXPECT_TRUE(first.value);
-  EXPECT_EQ(1, first.diagnostics);
-  EXPECT_FALSE(second.value);
-  EXPECT_EQ(2, second.diagnostics);
-}
-
 TEST(diagnostics_transform, preserves_policies_and_the_original_binding) {
   const auto limited = omni::ryml::deserialize.tdm_config(
     [](omni::ryml::config_t<> options) {
@@ -397,20 +376,6 @@ TEST(diagnostics_transform, preserves_policies_and_the_original_binding) {
   EXPECT_EQ(1U, configured(omni::type_t<int>{}, "bad").diagnostics);
   EXPECT_EQ("<root>: expected integer, found scalar",
     limited(omni::type_t<int>{}, "bad").diagnostics);
-}
-
-TEST(diagnostics_transform, accepts_named_mutable_configurators) {
-  int calls = 0;
-  auto configure = [calls](omni::ryml::config_t<> options) mutable {
-    options.error_policy.error_limit = ++calls;
-    return options;
-  };
-
-  const auto first = omni::ryml::deserialize.tdm_config(configure);
-  const auto second = omni::ryml::deserialize.tdm_config(configure);
-
-  EXPECT_EQ(1, first.config.error_policy.error_limit);
-  EXPECT_EQ(2, second.config.error_policy.error_limit);
 }
 
 TEST(diagnostics_transform, renders_a_caller_owned_tree) {

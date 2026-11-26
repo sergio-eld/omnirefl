@@ -10,8 +10,8 @@
  * read/write states, and default type mappings. core::parse and map_by_schema
  * support composing parsing and schema-driven mapping explicitly. Entry points
  * are callable objects; their config members can be set at construction or
- * transformed through tdm_config. map_node selects local mappings throughout
- * serialization and deserialization, including recursive schema traversal.
+ * transformed through tdm_config. `.select_mapping` selects local mappings
+ * throughout serialization and deserialization, including recursive traversal.
  *
  * Compatible with C++11 and later; examples use C++20 syntax for brevity.
  * Guide: extras/extensions/serialization/guide/main.cpp.
@@ -92,19 +92,19 @@ using map_by_schema_dispatch_t = compat::conditional_t<
 
 /** Schema-driven mapping of a caller-owned tree or subtree with config. */
 template <typename Config = omni::ryml::config_t<>,
-  typename MapNode = reflected_scope::mapping_to_type_t>
+  typename SelectMapping = reflected_scope::mapping_to_type_t>
 struct map_by_schema_t final:
-    detail::tdm_for_map_by_schema<Config, MapNode> {
-  using tdm_provider = detail::tdm_for_map_by_schema<Config, MapNode>;
+    detail::tdm_for_map_by_schema<Config, SelectMapping> {
+  using tdm_provider = detail::tdm_for_map_by_schema<Config, SelectMapping>;
 
   Config config OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_config;
 
   /** Local mapping selection, propagated through recursive reads.
-   * `map_node :: (state, type<T>) -> Mapping`
+   * `select_mapping :: (state, type<T>) -> Mapping`
    * Mapping follows the cp::to_type callable contract. */
-  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_map_node;
+  SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_select_mapping;
 
   /** Map a node into T by traversing its C++ schema over the node.
    *
@@ -124,11 +124,11 @@ map_by_schema :: (type<T>, node) -> with_diagnostics<T>
     // Borrowing config must not change the state type accepted by mappings.
     return detail::map_by_schema_dispatch_t<T>{}(
       read_state_t<detail::read_state_config<compat::remove_cvref_t<Config>,
-        compat::remove_cvref_t<MapNode>, T>>{
+        compat::remove_cvref_t<SelectMapping>, T>>{
         /*config=*/this->config,
         /*error_count=*/0,
         /*warning_count=*/0,
-        /*map_node=*/this->map_node,
+        /*select_mapping=*/this->select_mapping,
       },
 
       node,
@@ -175,11 +175,11 @@ map_by_schema :: (T*, node) -> with_diagnostics<monostate>
     -> with_diagnostics_t<compat::monostate> {
     return detail::map_by_schema_dispatch_t<T>{}(
       read_state_t<detail::read_state_config<compat::remove_cvref_t<Config>,
-        compat::remove_cvref_t<MapNode>, T>>{
+        compat::remove_cvref_t<SelectMapping>, T>>{
         /*config=*/this->config,
         /*error_count=*/0,
         /*warning_count=*/0,
-        /*map_node=*/this->map_node,
+        /*select_mapping=*/this->select_mapping,
       },
 
       node,
@@ -218,12 +218,12 @@ map_by_schema :: (T*, tree) -> with_diagnostics<monostate>
   constexpr map_by_schema_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename First = Config,
-    typename Second = MapNode),
+    typename Second = SelectMapping),
     (std::is_constructible<Config, First &&>::value
-      && std::is_constructible<MapNode, Second &&>::value))
+      && std::is_constructible<SelectMapping, Second &&>::value))
   constexpr map_by_schema_t(First &&first, Second &&second = Second{})
     : config(std::forward<First>(first)),
-      map_node(std::forward<Second>(second)) {}
+      select_mapping(std::forward<Second>(second)) {}
 #endif
 };
 
@@ -240,8 +240,9 @@ namespace detail {
 
 // Shared parsing and diagnostics transformation for both destination forms
 // and all config value categories. The return type constrains renderer calls.
-template <typename T, typename Config, typename MapNode, typename Destination>
-auto deserialize(Config &&options, const MapNode &map_node,
+template <typename T, typename Config, typename SelectMapping,
+  typename Destination>
+auto deserialize(Config &&options, const SelectMapping &select_mapping,
   Destination destination, std::string source)
   -> with_diagnostics_t<T, diagnostics_result_t<Config>>;
 
@@ -254,19 +255,19 @@ auto deserialize(Config &&options, const MapNode &map_node,
  * diagnostics must not retain views into it.
  * tdm_config returns a new callable with transformed configuration. */
 template <typename Config = omni::ryml::config_t<>,
-  typename MapNode = reflected_scope::mapping_to_type_t>
+  typename SelectMapping = reflected_scope::mapping_to_type_t>
 struct deserialize_t final:
-    detail::tdm_for_deserialize<Config, MapNode> {
-  using tdm_provider = detail::tdm_for_deserialize<Config, MapNode>;
+    detail::tdm_for_deserialize<Config, SelectMapping> {
+  using tdm_provider = detail::tdm_for_deserialize<Config, SelectMapping>;
 
   Config config OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_config;
 
   /** Local mapping selection, propagated through recursive reads.
-   * `map_node :: (state, type<T>) -> Mapping`
+   * `select_mapping :: (state, type<T>) -> Mapping`
    * Mapping follows the cp::to_type callable contract. */
-  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_map_node;
+  SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_select_mapping;
 
   /** Deserialize source text into Record, returning transformed diagnostics.
    *
@@ -286,9 +287,9 @@ deserialize :: (type<Record>, string) ->
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) &
     -> decltype(detail::deserialize<Record>(this->config,
-      this->map_node, record_type, std::move(source))) {
+      this->select_mapping, record_type, std::move(source))) {
     return detail::deserialize<Record>(this->config,
-      this->map_node, record_type, std::move(source));
+      this->select_mapping, record_type, std::move(source));
   }
 
   /** Deserialize source text into Record, returning transformed diagnostics.
@@ -309,9 +310,9 @@ deserialize :: (type<Record>, string) ->
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) const &
     -> decltype(detail::deserialize<Record>(this->config,
-      this->map_node, record_type, std::move(source))) {
+      this->select_mapping, record_type, std::move(source))) {
     return detail::deserialize<Record>(this->config,
-      this->map_node, record_type, std::move(source));
+      this->select_mapping, record_type, std::move(source));
   }
 
   /** Deserialize source text into Record, returning transformed diagnostics.
@@ -332,9 +333,9 @@ deserialize :: (type<Record>, string) ->
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) &&
     -> decltype(detail::deserialize<Record>(std::move(this->config),
-      this->map_node, record_type, std::move(source))) {
+      this->select_mapping, record_type, std::move(source))) {
     return detail::deserialize<Record>(std::move(this->config),
-      this->map_node, record_type, std::move(source));
+      this->select_mapping, record_type, std::move(source));
   }
 
   /** Deserialize source text into Record with const-rvalue configuration.
@@ -355,9 +356,9 @@ deserialize :: (type<Record>, string) ->
     (std::is_object<Record>::value && !std::is_const<Record>::value))
   auto operator()(omni::type_t<Record> record_type, std::string source) const &&
     -> decltype(detail::deserialize<Record>(std::move(this->config),
-      this->map_node, record_type, std::move(source))) {
+      this->select_mapping, record_type, std::move(source))) {
     return detail::deserialize<Record>(std::move(this->config),
-      this->map_node, record_type, std::move(source));
+      this->select_mapping, record_type, std::move(source));
   }
 
   /** Deserialize source text into *into with mutable config.
@@ -379,10 +380,10 @@ deserialize :: (T*, string) ->
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) &
     -> decltype(detail::deserialize<compat::monostate>(this->config,
-      this->map_node, into, std::move(source))) {
+      this->select_mapping, into, std::move(source))) {
     assert(into);
     return detail::deserialize<compat::monostate>(this->config,
-      this->map_node, into, std::move(source));
+      this->select_mapping, into, std::move(source));
   }
 
   /** Deserialize source text into *into with const config.
@@ -404,10 +405,10 @@ deserialize :: (T*, string) ->
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) const &
     -> decltype(detail::deserialize<compat::monostate>(this->config,
-      this->map_node, into, std::move(source))) {
+      this->select_mapping, into, std::move(source))) {
     assert(into);
     return detail::deserialize<compat::monostate>(this->config,
-      this->map_node, into, std::move(source));
+      this->select_mapping, into, std::move(source));
   }
 
   /** Deserialize source text into *into, passing config as an rvalue.
@@ -429,10 +430,10 @@ deserialize :: (T*, string) ->
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) &&
     -> decltype(detail::deserialize<compat::monostate>(std::move(this->config),
-      this->map_node, into, std::move(source))) {
+      this->select_mapping, into, std::move(source))) {
     assert(into);
     return detail::deserialize<compat::monostate>(std::move(this->config),
-      this->map_node, into, std::move(source));
+      this->select_mapping, into, std::move(source));
   }
 
   /** Deserialize source text into *into with const-rvalue configuration.
@@ -454,10 +455,10 @@ deserialize :: (T*, string) ->
     (std::is_object<T>::value && !std::is_const<T>::value))
   auto operator()(T *into, std::string source) const &&
     -> decltype(detail::deserialize<compat::monostate>(std::move(this->config),
-      this->map_node, into, std::move(source))) {
+      this->select_mapping, into, std::move(source))) {
     assert(into);
     return detail::deserialize<compat::monostate>(std::move(this->config),
-      this->map_node, into, std::move(source));
+      this->select_mapping, into, std::move(source));
   }
 
   static_assert(is_config<Config>::value,
@@ -469,12 +470,12 @@ deserialize :: (T*, string) ->
   constexpr deserialize_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename First = Config,
-    typename Second = MapNode),
+    typename Second = SelectMapping),
     (std::is_constructible<Config, First &&>::value
-      && std::is_constructible<MapNode, Second &&>::value))
+      && std::is_constructible<SelectMapping, Second &&>::value))
   constexpr deserialize_t(First &&first, Second &&second = Second{})
     : config(std::forward<First>(first)),
-      map_node(std::forward<Second>(second)) {}
+      select_mapping(std::forward<Second>(second)) {}
 #endif
 };
 
@@ -491,14 +492,14 @@ static constexpr const deserialize_t<> &deserialize =
 // between these builders and mapping remains to be designed.
 /** Owning RapidYAML tree serialization of supported C++ values.
  * Strings are copied into the tree's arena, so it can outlive the source. */
-template <typename MapNode = reflected_scope::mapping_from_type_t>
+template <typename SelectMapping = reflected_scope::mapping_from_type_t>
 struct as_owning_tree_t final:
-    detail::tdm_for_as_owning_tree<MapNode> {
-  using tdm_provider = detail::tdm_for_as_owning_tree<MapNode>;
+    detail::tdm_for_as_owning_tree<SelectMapping> {
+  using tdm_provider = detail::tdm_for_as_owning_tree<SelectMapping>;
 
   // (state, type<T>) -> mapping callable, selected at every schema position.
-  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_map_node;
+  SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_select_mapping;
 
   /** Shared empty-optional policy; see \ref serialize_config_t. */
   serialize_config_t config{};
@@ -521,12 +522,12 @@ as_owning_tree :: const T& -> tree
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr as_owning_tree_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode,
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = SelectMapping,
     typename Options = serialize_config_t),
-    (std::is_constructible<MapNode, Value &&>::value
+    (std::is_constructible<SelectMapping, Value &&>::value
       && std::is_constructible<serialize_config_t, Options &&>::value))
   constexpr as_owning_tree_t(Value &&value, Options &&options = Options{})
-    : map_node(std::forward<Value>(value)),
+    : select_mapping(std::forward<Value>(value)),
       config(std::forward<Options>(options)) {}
 #endif
 };
@@ -542,14 +543,14 @@ static constexpr const as_owning_tree_t<> &as_owning_tree =
 /** RapidYAML tree serialization borrowing the source's string storage.
  * The tree owns nodes and generated text. Source storage must remain alive
  * and unchanged while the tree is used. */
-template <typename MapNode = reflected_scope::mapping_from_type_t>
+template <typename SelectMapping = reflected_scope::mapping_from_type_t>
 struct as_ref_tree_t final:
-    detail::tdm_for_as_ref_tree<MapNode> {
-  using tdm_provider = detail::tdm_for_as_ref_tree<MapNode>;
+    detail::tdm_for_as_ref_tree<SelectMapping> {
+  using tdm_provider = detail::tdm_for_as_ref_tree<SelectMapping>;
 
   // (state, type<T>) -> mapping callable, selected at every schema position.
-  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_map_node;
+  SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_select_mapping;
 
   /** Shared empty-optional policy; see \ref serialize_config_t. */
   serialize_config_t config{};
@@ -576,12 +577,12 @@ as_ref_tree :: T& -> tree
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr as_ref_tree_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode,
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = SelectMapping,
     typename Options = serialize_config_t),
-    (std::is_constructible<MapNode, Value &&>::value
+    (std::is_constructible<SelectMapping, Value &&>::value
       && std::is_constructible<serialize_config_t, Options &&>::value))
   constexpr as_ref_tree_t(Value &&value, Options &&options = Options{})
-    : map_node(std::forward<Value>(value)),
+    : select_mapping(std::forward<Value>(value)),
       config(std::forward<Options>(options)) {}
 #endif
 };
@@ -595,18 +596,18 @@ static constexpr const as_ref_tree_t<> &as_ref_tree =
 #endif
 
 /** JSON/YAML text serialization with the selected .format. */
-template <typename MapNode = reflected_scope::mapping_from_type_t>
+template <typename SelectMapping = reflected_scope::mapping_from_type_t>
 struct serialize_t final:
-    detail::tdm_for_serialize<MapNode> {
-  using tdm_provider = detail::tdm_for_serialize<MapNode>;
+    detail::tdm_for_serialize<SelectMapping> {
+  using tdm_provider = detail::tdm_for_serialize<SelectMapping>;
 
   // Output format; use as_yaml or as_json for the predefined configurations.
   ::ryml::EmitType_e format{};
   using tdm_provider::tdm_format;
 
   // (state, type<T>) -> mapping callable, selected at every schema position.
-  MapNode map_node OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_map_node;
+  SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_select_mapping;
 
   /** Shared empty-optional policy; see \ref serialize_config_t. */
   serialize_config_t config{};
@@ -639,14 +640,14 @@ serialize :: const T& -> string
   constexpr serialize_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename First = ::ryml::EmitType_e,
-    typename Second = MapNode, typename Options = serialize_config_t),
+    typename Second = SelectMapping, typename Options = serialize_config_t),
     (std::is_constructible<::ryml::EmitType_e, First &&>::value
-      && std::is_constructible<MapNode, Second &&>::value
+      && std::is_constructible<SelectMapping, Second &&>::value
       && std::is_constructible<serialize_config_t, Options &&>::value))
   constexpr serialize_t(First &&first, Second &&second = Second{},
     Options &&options = Options{})
     : format(std::forward<First>(first)),
-      map_node(std::forward<Second>(second)),
+      select_mapping(std::forward<Second>(second)),
       config(std::forward<Options>(options)) {}
 #endif
 };

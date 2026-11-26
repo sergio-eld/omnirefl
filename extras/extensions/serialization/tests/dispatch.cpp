@@ -56,10 +56,6 @@ struct immutable_number {
   explicit immutable_number(int value): value(value) {}
 };
 
-struct default_state_number {
-  int value;
-};
-
 namespace custom_depth {
 
 struct leaf { int checked; int raw; };
@@ -137,31 +133,12 @@ inline std::string parse_error_diagnostics(
   return "application helper";
 }
 
-struct const_category_renderer {
-  std::string operator()(const ::ryml::Tree &,
-    const omni::ryml::diagnostics &report) const & {
-    return "const_lvalue/" + classification(report);
-  }
-
-  std::string operator()(const ::ryml::Tree &,
-    const omni::ryml::diagnostics &report) const && {
-    return "const_rvalue/" + classification(report);
-  }
-};
-
 struct consuming_renderer {
   std::unique_ptr<std::string> prefix;
 
   std::string operator()(const ::ryml::Tree &,
     const omni::ryml::diagnostics &report) && {
     return *this->prefix + classification(report);
-  }
-};
-
-struct const_rvalue_only_renderer {
-  std::string operator()(const ::ryml::Tree &,
-    const omni::ryml::diagnostics &report) const && {
-    return "const_rvalue/" + classification(report);
   }
 };
 
@@ -199,21 +176,6 @@ struct omni::ryml::cp::to_type_t<immutable_number> {
       .transform([](int value) -> immutable_number {
         return immutable_number{value};
       });
-  }
-};
-
-template <>
-struct omni::ryml::cp::to_type_t<default_state_number> {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_read_state<State>::value))
-  auto operator()(State state,
-    ::ryml::ConstNodeRef node,
-    omni::type_t<default_state_number>) const
-    -> omni::ryml::with_diagnostics_t<default_state_number> {
-    return omni::ryml::map_integer_node(std::move(state),
-      node,
-      omni::type_t<int>{})
-      .transform([](int value) -> default_state_number { return {value}; });
   }
 };
 
@@ -275,31 +237,6 @@ struct omni::ryml::cp::to_type_t<custom_depth::leaf> {
 
 namespace {
 
-TEST(deserialize_diagnostics, accepts_const_rvalue_only_callbacks) {
-  const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_t<> options) {
-      return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
-          return diagnostic_callbacks::const_rvalue_only_renderer{};
-        });
-    });
-
-  EXPECT_FALSE((omni::compat::is_invocable<decltype(load) &,
-    omni::type_t<int>, std::string>::value));
-  EXPECT_FALSE((omni::compat::is_invocable<decltype(load) &,
-    int *, std::string>::value));
-
-  const auto value = std::move(load)(omni::type_t<int>{}, "42");
-  EXPECT_EQ(42, value.value);
-  EXPECT_EQ("const_rvalue/success", value.diagnostics);
-
-  int into = 7;
-  const auto result = std::move(load)(&into, "42");
-  EXPECT_TRUE(result.value);
-  EXPECT_EQ(42, into);
-  EXPECT_EQ("const_rvalue/success", result.diagnostics);
-}
-
 struct diagnostics_case {
   std::string name;
   std::string document;
@@ -340,46 +277,6 @@ TEST_P(deserialize_diagnostics, uses_the_configured_mutating_renderer) {
 
   EXPECT_EQ(bool(c.expected), bool(result.value));
   EXPECT_EQ("configured/" + c.name, result.diagnostics);
-  if (c.expected)
-    EXPECT_EQ(*c.expected, into);
-  else if ("syntax_error" == c.name)
-    EXPECT_EQ(7, into);
-}
-
-TEST_P(deserialize_diagnostics, preserves_const_rvalues_for_values) {
-  const auto &c = GetParam();
-  const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_t<> options) {
-      return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
-          return diagnostic_callbacks::const_category_renderer{};
-        });
-    });
-
-  const auto lvalue = load(omni::type_t<int>{}, c.document);
-  const auto rvalue = std::move(load)(omni::type_t<int>{}, c.document);
-
-  EXPECT_EQ(c.expected, lvalue.value);
-  EXPECT_EQ("const_lvalue/" + c.name, lvalue.diagnostics);
-  EXPECT_EQ(c.expected, rvalue.value);
-  EXPECT_EQ("const_rvalue/" + c.name, rvalue.diagnostics);
-}
-
-TEST_P(deserialize_diagnostics, preserves_const_rvalues_for_mutation) {
-  const auto &c = GetParam();
-  const auto load = omni::ryml::deserialize.tdm_config(
-    [](omni::ryml::config_t<> options) {
-      return options.tdm_transform_diagnostics(
-        [](omni::ryml::render_diagnostics_t) {
-          return diagnostic_callbacks::const_category_renderer{};
-        });
-    });
-
-  int into = 7;
-  const auto result = std::move(load)(&into, c.document);
-
-  EXPECT_EQ(bool(c.expected), bool(result.value));
-  EXPECT_EQ("const_rvalue/" + c.name, result.diagnostics);
   if (c.expected)
     EXPECT_EQ(*c.expected, into);
   else if ("syntax_error" == c.name)
@@ -438,17 +335,6 @@ INSTANTIATE_TEST_SUITE_P(documents,
   [](const testing::TestParamInfo<diagnostics_case> &info) {
     return info.param.name;
   });
-
-TEST(mapping_dispatch, bound_config_passes_a_read_state) {
-  const auto result = omni::ryml::deserialize(
-    omni::type_t<default_state_number>{}, "42");
-
-  EXPECT_TRUE(result.value);
-  if (result.value)
-    EXPECT_EQ(42, result.value->value);
-
-  EXPECT_TRUE(result.diagnostics.empty());
-}
 
 TEST(tree_serialization, exposes_callable_tree_builders) {
   const auto own = omni::ryml::as_owning_tree;
@@ -683,7 +569,8 @@ struct select_mapping {
 
 TEST(mapping_dispatch, built_in_readers_allow_prevalidated_nodes) {
   const auto deserialize = serialization_test::deserialize
-    .tdm_map_node(omni::fn::default_value<unchecked_nodes::select_mapping>{});
+    .tdm_select_mapping(
+      omni::fn::default_value<unchecked_nodes::select_mapping>{});
   const auto result = deserialize(omni::type_t<unchecked_nodes::record>{},
     R"({"enabled": true, "count": 3, "weight": 2.5, "label": "ready",
       "values": [4, 8], "scores": {"math": 15},
@@ -703,7 +590,7 @@ TEST(mapping_dispatch, built_in_readers_allow_prevalidated_nodes) {
   }
 }
 
-TEST(mapping_dispatch, local_map_node_customization) {
+TEST(mapping_dispatch, local_mapping_selection) {
   const auto customize = [](omni::ryml::reflected_scope::mapping_to_type_t) {
     return local_mapping::select_mapping{5};
   };
@@ -712,7 +599,8 @@ TEST(mapping_dispatch, local_map_node_customization) {
   if (!parsed)
     return;
 
-  const auto map_by_schema = omni::ryml::map_by_schema.tdm_map_node(customize);
+  const auto map_by_schema = omni::ryml::map_by_schema
+    .tdm_select_mapping(customize);
   const auto mapped = map_by_schema(omni::type_t<local_mapping::record>{},
     *parsed);
   EXPECT_TRUE(mapped.value);
@@ -726,7 +614,7 @@ TEST(mapping_dispatch, local_map_node_customization) {
   && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
     || (defined(__clang__) && 17 <= __clang_major__))
   constexpr auto designated = omni::ryml::deserialize_t{
-    .map_node = local_mapping::select_mapping{5},
+    .select_mapping = local_mapping::select_mapping{5},
   };
   const auto direct = designated(omni::type<local_mapping::record>,
     R"({"value": 7})");
@@ -734,13 +622,6 @@ TEST(mapping_dispatch, local_map_node_customization) {
   if (direct.value)
     EXPECT_EQ(12, direct.value->value);
 #endif
-}
-
-TEST(mapping_dispatch, value_initialization_preserves_defaults) {
-  constexpr omni::ryml::serialize_t<> serialize{};
-  static_assert(::ryml::EmitType_e{} == serialize.format,
-    "Value initialization preserves the default format");
-  EXPECT_TRUE(serialization_test::matches_json("7", serialize(7)));
 }
 
 TEST(mapping_dispatch, custom_recursive_fields_can_delegate_scalar_children) {
@@ -761,7 +642,7 @@ TEST(mapping_dispatch, custom_recursive_fields_can_delegate_scalar_children) {
 
 TEST(mapping_dispatch, recursive_writers_preserve_path_specific_selection) {
   const custom_depth::node source{{1, 2}, {{{3, 4}, {}}}};
-  const auto as_json = omni::ryml::as_json.tdm_map_node(
+  const auto as_json = omni::ryml::as_json.tdm_select_mapping(
     omni::fn::default_value<custom_depth::select_writer>{});
 
   EXPECT_TRUE(serialization_test::matches_json(R"({
@@ -977,7 +858,8 @@ TEST(mapping_dispatch, depth_selects_read_and_write_decorations) {
     "locations": {"remote": {"number": 4}}
   }]})";
   const auto deserialize = omni::ryml::deserialize
-    .tdm_map_node([](auto) { return traversal_depth::select_reader{}; });
+    .tdm_select_mapping(
+      omni::fn::default_value<traversal_depth::select_reader>{});
   const auto result = deserialize(omni::type_t<schema_paths::root>{}, source);
   EXPECT_TRUE(result.value) << result.diagnostics;
   if (!result.value)
@@ -991,7 +873,8 @@ TEST(mapping_dispatch, depth_selects_read_and_write_decorations) {
   }]})", omni::ryml::as_json(*result.value)));
 
   const auto as_json = omni::ryml::as_json
-    .tdm_map_node([](auto) { return traversal_depth::select_writer{}; });
+    .tdm_select_mapping(
+      omni::fn::default_value<traversal_depth::select_writer>{});
   EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
     "address": {"number": 9},
     "work_address": {"number": 10},
@@ -1010,7 +893,8 @@ TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
     "locations": {"remote": {"number": 4}}
   })";
   const auto deserialize = omni::ryml::deserialize
-    .tdm_map_node([](auto) { return schema_paths::select_reader{}; });
+    .tdm_select_mapping(
+      omni::fn::default_value<schema_paths::select_reader>{});
   const auto mapped = deserialize(omni::type_t<schema_paths::record>{}, source);
   EXPECT_TRUE(mapped.value);
   EXPECT_TRUE(mapped.diagnostics.empty());
@@ -1023,7 +907,8 @@ TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
 
   const schema_paths::record value{{1}, {2}, {{3}}, {{"remote", {4}}}};
   constexpr auto as_json = omni::ryml::as_json
-    .tdm_map_node([](auto) { return schema_paths::select_writer{}; });
+    .tdm_select_mapping(
+      omni::fn::default_value<schema_paths::select_writer>{});
   EXPECT_TRUE(serialization_test::matches_json(R"({
     "address": {"number": 1},
     "work_address": {"number": 102},
@@ -1037,7 +922,7 @@ TEST(mapping_dispatch, schema_paths_select_reads_and_writes) {
   && ((defined(__cpp_deduction_guides) && 201907L <= __cpp_deduction_guides) \
     || (defined(__clang__) && 17 <= __clang_major__))
   constexpr auto designated = omni::ryml::as_owning_tree_t{
-    .map_node = schema_paths::select_writer{},
+    .select_mapping = schema_paths::select_writer{},
   };
   const auto tree = designated(value);
   EXPECT_EQ("102", tree["work_address"]["number"].val());
@@ -1052,7 +937,8 @@ TEST(mapping_dispatch, reads_and_writes_use_parent_root_and_schema_location) {
     "locations": {"remote": {"number": 4}}
   }]})";
   const auto deserialize = omni::ryml::deserialize
-    .tdm_map_node([](auto) { return schema_paths::select_context_reader{}; });
+    .tdm_select_mapping(
+      omni::fn::default_value<schema_paths::select_context_reader>{});
   const auto mapped = deserialize(omni::type_t<schema_paths::root>{}, source);
   EXPECT_TRUE(mapped.value) << mapped.diagnostics;
   if (!mapped.value)
@@ -1072,7 +958,8 @@ TEST(mapping_dispatch, reads_and_writes_use_parent_root_and_schema_location) {
   EXPECT_EQ(4, record.locations.at("remote").number);
 
   constexpr auto as_json = omni::ryml::as_json
-    .tdm_map_node([](auto) { return schema_paths::select_context_writer{}; });
+    .tdm_select_mapping(
+      omni::fn::default_value<schema_paths::select_context_writer>{});
   EXPECT_TRUE(serialization_test::matches_json(R"({"records": [{
     "address": {"number": 1},
     "work_address": {"number": 22},

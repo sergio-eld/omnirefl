@@ -8,7 +8,7 @@
 
 namespace {
 
-template <typename Keep = omni::compat::bool_constant<true>>
+template <typename Keep = std::true_type>
 struct range_null_policy {
   template <typename State, typename T>
   auto operator()(State state, omni::type_t<T> type) const
@@ -29,10 +29,8 @@ TEST(keep_nulls, preserves_empty_optional_array_positions) {
   const std::vector<omni::compat::optional<int>> source{
     omni::compat::nullopt, omni::compat::make_optional(7),
     omni::compat::nullopt};
-  const auto writer = omni::ryml::serialize.tdm_map_node(
-    [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return range_null_policy<>{};
-    });
+  const auto writer = omni::ryml::serialize.tdm_select_mapping(
+    omni::fn::default_value<range_null_policy<>>{});
 
   EXPECT_TRUE(serialization_test::matches_json("[null, 7, null]",
     writer(source)));
@@ -93,7 +91,7 @@ TEST_P(null_policy, serializes_record) {
       options.keep_null_elements = parameter.keep_elements;
       return options;
     })
-    .tdm_map_node(
+    .tdm_select_mapping(
       [&parameter](omni::ryml::reflected_scope::mapping_from_type_t) {
         return select_null_policy{parameter.record_override,
           parameter.range_override};
@@ -139,9 +137,8 @@ TEST(keep_nulls, constant_false_overrides_shared_policy) {
       options.keep_null_elements = true;
       return options;
     })
-    .tdm_map_node([](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return range_null_policy<omni::compat::bool_constant<false>>{};
-    });
+    .tdm_select_mapping(
+      omni::fn::default_value<range_null_policy<std::false_type>>{});
 
   EXPECT_TRUE(serialization_test::matches_json("[7]", writer(source)));
 }
@@ -188,10 +185,8 @@ TEST(keep_nulls, maps_unsized_range) {
 TEST(keep_nulls, preserves_nested_empty_optional_position) {
   const std::vector<omni::compat::optional<omni::compat::optional<int>>> source{
     omni::compat::make_optional(omni::compat::optional<int>{})};
-  const auto writer = omni::ryml::serialize.tdm_map_node(
-    [](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return range_null_policy<>{};
-    });
+  const auto writer = omni::ryml::serialize.tdm_select_mapping(
+    omni::fn::default_value<range_null_policy<>>{});
 
   EXPECT_TRUE(serialization_test::matches_json("[null]", writer(source)));
 }
@@ -209,9 +204,8 @@ TEST(keep_nulls, preserves_positions_without_forcing_record_fields) {
       options.keep_null_fields = false;
       return options;
     })
-    .tdm_map_node([](omni::ryml::reflected_scope::mapping_from_type_t) {
-      return range_null_policy<>{};
-    });
+    .tdm_select_mapping(
+      omni::fn::default_value<range_null_policy<>>{});
 
   EXPECT_TRUE(serialization_test::matches_json("[null,{}]", writer(source)));
 }
@@ -224,7 +218,7 @@ TEST(keep_nulls, tree_builder_keeps_policy_when_changing_selector) {
       options.keep_null_elements = true;
       return options;
     })
-    .tdm_map_node(omni::fn::identity{});
+    .tdm_select_mapping(omni::fn::identity{});
   const auto tree = build(source);
 
   EXPECT_TRUE(serialization_test::matches_json("[null,7]",

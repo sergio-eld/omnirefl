@@ -564,11 +564,11 @@ struct settings {
 
 } // namespace static_field_serialization
 
-/** `deserialize` and `serialize` expose a `.map_node` callable data member.
+/** `deserialize` and `serialize` expose the callable member `.select_mapping`.
  * It receives `(state, type<T>)` and returns the mapping for that position.
  * Defaults delegate to `mapping_to_type` and `mapping_from_type`, respectively;
  * those dispatchers select a `cp::` registration or a built-in mapping.
- * `.tdm_map_node` returns a local binding with a different selector.
+ * `.tdm_select_mapping` returns a local binding with a different selector.
  * Here it includes static data members for `settings`; other types keep the
  * default selection. Static members remain excluded from deserialization.
  * See `advanced.record_strategy` for field selection and
@@ -582,7 +582,7 @@ TEST(basics, in_place_mapping_customization) {
   using static_field_serialization::settings;
 
   constexpr auto serialize = omni::ryml::serialize
-    .tdm_map_node([](auto) {
+    .tdm_select_mapping([](auto) {
       return []<typename T>(omni::ryml::write_state_like auto state,
         omni::type_t<T> type) {
         if constexpr (std::is_same_v<T, settings>) {
@@ -708,7 +708,7 @@ TEST(advanced, keep_nulls) {
   EXPECT_TRUE(same_document(R"({"samples":[1,2]})", serialize(source)));
 
   // Retain empty fields in this record and preserve sample positions.
-  const auto serialize_with_nulls = serialize.tdm_map_node([](auto) {
+  const auto serialize_with_nulls = serialize.tdm_select_mapping([](auto) {
     return []<typename T>(omni::ryml::write_state_like auto state,
       omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, keep_nulls_example::response>) {
@@ -1873,7 +1873,7 @@ TEST(advanced, path_specific_mapping) {
   using path_specific_mapping::address;
   using path_specific_mapping::contact;
 
-  constexpr auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
+  constexpr auto serialize = omni::ryml::serialize.tdm_select_mapping([](auto) {
     return []<typename T>(omni::ryml::write_state_like auto state,
       omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, address>
@@ -2188,7 +2188,7 @@ struct from_type_t<customization_mapping::extended_values> {
         [&node, context](omni::data_member_binding auto field) -> void {
           const auto state = context.at(node.append_child())
             .template field<T>(field.as_meta());
-          const auto mapping = compat::invoke(context.map_node,
+          const auto mapping = compat::invoke(context.select_mapping,
             state, omni::type<typename decltype(field)::type>);
           mapping(state, field.value());
         });
@@ -2229,7 +2229,7 @@ struct from_type_t<customization_mapping::integer> {
   template <omni::ryml::write_state_like State>
   auto operator()(State context,
     const customization_mapping::integer &value) const -> ::ryml::NodeRef {
-    const auto mapping = compat::invoke(context.map_node,
+    const auto mapping = compat::invoke(context.select_mapping,
       context, omni::type<int>);
     return mapping(std::move(context), value.value);
   }
@@ -2398,7 +2398,7 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
  * For earlier-standard named selectors and compile-time path selection, see
  * the compatibility note above `TEST(advanced, path_specific_mapping)`. */
 TEST(extended_container_mapping, customizes_appended_members_by_schema_path) {
-  const auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
+  const auto serialize = omni::ryml::serialize.tdm_select_mapping([](auto) {
     return []<omni::ryml::write_state_like State, typename T>(State state,
       omni::type_t<T> type) {
       if constexpr (std::is_same<T, int>::value

@@ -102,8 +102,9 @@ auto parse_error_diagnostics(Config &&options, std::string message)
     tree, std::move(report));
 }
 
-template <typename T, typename Config, typename MapNode, typename Destination>
-auto deserialize(Config &&options, const MapNode &map_node,
+template <typename T, typename Config, typename SelectMapping,
+  typename Destination>
+auto deserialize(Config &&options, const SelectMapping &select_mapping,
   Destination destination, std::string source)
   -> with_diagnostics_t<T, diagnostics_result_t<Config>> {
   auto parsed = core::parse(std::move(source));
@@ -114,11 +115,11 @@ auto deserialize(Config &&options, const MapNode &map_node,
         std::forward<Config>(options), std::move(parsed.error())),
     };
 
-  const map_by_schema_t<Config &, const MapNode &> map{
+  const map_by_schema_t<Config &, const SelectMapping &> map{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
     /*base=*/{},
 #endif
-    options, map_node};
+    options, select_mapping};
   auto mapped = map(destination, parsed->crootref());
 
   return {
@@ -144,7 +145,7 @@ struct cpp11_lambda_write {
 
   template <typename _M, omni::reflected_entity Entity>
   void operator()(omni::meta_t<_M, Entity>) const {
-    const auto mapping = compat::invoke(this->context.map_node,
+    const auto mapping = compat::invoke(this->context.select_mapping,
       this->context, omni::type_t<typename State::enclosing_root>{});
     mapping(this->context, this->value);
   }
@@ -159,7 +160,7 @@ struct tree_builder_case {
   OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
     (is_write_state<State>::value))
   static void build(State context, T &value) {
-    const auto mapping = compat::invoke(context.map_node,
+    const auto mapping = compat::invoke(context.select_mapping,
       context, omni::type_t<typename State::enclosing_root>{});
     mapping(std::move(context), value);
   }
@@ -191,36 +192,36 @@ struct tree_builder_case<Discovery, false, true> {
 } // namespace detail
 } // namespace core
 
-template <typename MapNode>
+template <typename SelectMapping>
 template <typename T>
-::ryml::Tree as_owning_tree_t<MapNode>::operator()(const T &value) const {
+::ryml::Tree as_owning_tree_t<SelectMapping>::operator()(const T &value) const {
   ::ryml::Tree tree;
   core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::build(write_state_t<detail::write_state_config<false,
-      compat::remove_cvref_t<MapNode>, compat::remove_cvref_t<T>>>{
-      this->map_node, &tree, tree.root_id(), this->config}, value);
+      compat::remove_cvref_t<SelectMapping>, compat::remove_cvref_t<T>>>{
+      this->select_mapping, &tree, tree.root_id(), this->config}, value);
   return tree;
 }
 
-template <typename MapNode>
+template <typename SelectMapping>
 template <typename T>
-::ryml::Tree as_ref_tree_t<MapNode>::operator()(T &value) const {
+::ryml::Tree as_ref_tree_t<SelectMapping>::operator()(T &value) const {
   ::ryml::Tree tree;
   core::detail::tree_builder_case<compat::remove_cvref_t<T>>
     ::build(write_state_t<detail::write_state_config<true,
-      compat::remove_cvref_t<MapNode>, compat::remove_cvref_t<T>>>{
-      this->map_node, &tree, tree.root_id(), this->config}, value);
+      compat::remove_cvref_t<SelectMapping>, compat::remove_cvref_t<T>>>{
+      this->select_mapping, &tree, tree.root_id(), this->config}, value);
   return tree;
 }
 
-template <typename MapNode>
+template <typename SelectMapping>
 template <typename Value>
-std::string serialize_t<MapNode>::operator()(const Value &value) const {
-  const auto tree = as_ref_tree_t<const MapNode &>{
+std::string serialize_t<SelectMapping>::operator()(const Value &value) const {
+  const auto tree = as_ref_tree_t<const SelectMapping &>{
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
     /*base=*/{},
 #endif
-    this->map_node, this->config}(value);
+    this->select_mapping, this->config}(value);
 
   // Reserve an initial estimate without a sizing traversal. Borrowed strings,
   // escaping, or deeper YAML indentation may require an emitter resize/retry.

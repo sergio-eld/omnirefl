@@ -7,11 +7,12 @@
 
 namespace {
 
-TEST(mapping_dispatch, deserialize_map_node_override) {
+TEST(mapping_dispatch, deserialize_selection_override) {
   const auto customize = [](omni::ryml::reflected_scope::mapping_to_type_t) {
     return local_mapping::select_mapping{5};
   };
-  const auto deserialize = omni::ryml::deserialize.tdm_map_node(customize);
+  const auto deserialize = omni::ryml::deserialize
+    .tdm_select_mapping(customize);
   const auto result = deserialize(omni::type_t<local_mapping::record>{},
     R"({"value": 7})");
 
@@ -49,8 +50,8 @@ struct select_mapping {
 
 } // namespace local_write_mapping
 
-TEST(mapping_dispatch, serialize_map_node_override) {
-  const auto as_json = omni::ryml::as_json.tdm_map_node(
+TEST(mapping_dispatch, serialize_selection_override) {
+  const auto as_json = omni::ryml::as_json.tdm_select_mapping(
     [](omni::ryml::reflected_scope::mapping_from_type_t) {
       return local_write_mapping::select_mapping{5};
     });
