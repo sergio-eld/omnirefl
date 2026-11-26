@@ -14,6 +14,8 @@
 namespace omni {
 namespace ryml {
 
+struct serialize_config_t;
+
 template <typename Config, typename MapNode>
 struct map_by_schema_t;
 
@@ -202,6 +204,7 @@ struct tdm_for_as_owning_tree {
       /*base=*/{},
 #endif
       /*map_node=*/compat::invoke(std::forward<F>(f), this->derived().map_node),
+      /*config=*/this->derived().config,
     };
   }
 
@@ -217,6 +220,39 @@ struct tdm_for_as_owning_tree {
 #endif
       /*map_node=*/compat::invoke(std::forward<F>(f),
         std::move(this->derived().map_node)),
+      /*config=*/this->derived().config,
+    };
+  }
+
+  /** (QoL) Functional update of the shared serialization policy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<
+      F &&, const serialize_config_t &>),
+    (std::is_constructible<serialize_config_t, Result>::value
+      && std::is_copy_constructible<MapNode>::value))
+  constexpr auto tdm_config(F &&f) const & -> as_owning_tree_t<MapNode> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      /*map_node=*/this->derived().map_node,
+      /*config=*/compat::invoke(std::forward<F>(f), this->derived().config),
+    };
+  }
+
+  /** (QoL) Functional update of the shared serialization policy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, serialize_config_t &&>),
+    (std::is_constructible<serialize_config_t, Result>::value
+      && std::is_move_constructible<MapNode>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) && -> as_owning_tree_t<MapNode> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      /*map_node=*/std::move(this->derived().map_node),
+      /*config=*/compat::invoke(std::forward<F>(f),
+        std::move(this->derived().config)),
     };
   }
 
@@ -244,6 +280,7 @@ struct tdm_for_as_ref_tree {
       /*base=*/{},
 #endif
       /*map_node=*/compat::invoke(std::forward<F>(f), this->derived().map_node),
+      /*config=*/this->derived().config,
     };
   }
 
@@ -259,6 +296,39 @@ struct tdm_for_as_ref_tree {
 #endif
       /*map_node=*/compat::invoke(std::forward<F>(f),
         std::move(this->derived().map_node)),
+      /*config=*/this->derived().config,
+    };
+  }
+
+  /** (QoL) Functional update of the shared serialization policy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<
+      F &&, const serialize_config_t &>),
+    (std::is_constructible<serialize_config_t, Result>::value
+      && std::is_copy_constructible<MapNode>::value))
+  constexpr auto tdm_config(F &&f) const & -> as_ref_tree_t<MapNode> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      /*map_node=*/this->derived().map_node,
+      /*config=*/compat::invoke(std::forward<F>(f), this->derived().config),
+    };
+  }
+
+  /** (QoL) Functional update of the shared serialization policy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, serialize_config_t &&>),
+    (std::is_constructible<serialize_config_t, Result>::value
+      && std::is_move_constructible<MapNode>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) && -> as_ref_tree_t<MapNode> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      /*map_node=*/std::move(this->derived().map_node),
+      /*config=*/compat::invoke(std::forward<F>(f),
+        std::move(this->derived().config)),
     };
   }
 
@@ -288,6 +358,7 @@ struct tdm_for_serialize {
 #endif
       /*format=*/compat::invoke(std::forward<F>(f), this->derived().format),
       /*map_node=*/this->derived().map_node,
+      /*config=*/this->derived().config,
     };
   }
 
@@ -304,6 +375,7 @@ struct tdm_for_serialize {
       /*format=*/compat::invoke(std::forward<F>(f),
         std::move(this->derived().format)),
       /*map_node=*/std::move(this->derived().map_node),
+      /*config=*/this->derived().config,
     };
   }
 
@@ -319,6 +391,7 @@ struct tdm_for_serialize {
 #endif
       /*format=*/this->derived().format,
       /*map_node=*/compat::invoke(std::forward<F>(f), this->derived().map_node),
+      /*config=*/this->derived().config,
     };
   }
 
@@ -335,6 +408,41 @@ struct tdm_for_serialize {
       /*format=*/this->derived().format,
       /*map_node=*/compat::invoke(std::forward<F>(f),
         std::move(this->derived().map_node)),
+      /*config=*/this->derived().config,
+    };
+  }
+
+  /** (QoL) Functional update of the shared serialization policy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<
+      F &&, const serialize_config_t &>),
+    (std::is_constructible<serialize_config_t, Result>::value
+      && std::is_copy_constructible<MapNode>::value))
+  constexpr auto tdm_config(F &&f) const & -> serialize_t<MapNode> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      /*format=*/this->derived().format,
+      /*map_node=*/this->derived().map_node,
+      /*config=*/compat::invoke(std::forward<F>(f), this->derived().config),
+    };
+  }
+
+  /** (QoL) Functional update of the shared serialization policy. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, serialize_config_t &&>),
+    (std::is_constructible<serialize_config_t, Result>::value
+      && std::is_move_constructible<MapNode>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) && -> serialize_t<MapNode> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      /*format=*/this->derived().format,
+      /*map_node=*/std::move(this->derived().map_node),
+      /*config=*/compat::invoke(std::forward<F>(f),
+        std::move(this->derived().config)),
     };
   }
 

@@ -1,3 +1,5 @@
+// Expected failure: std::apply requests reflection before model's definition.
+// A later call through the same specialization must not hide the first use.
 #include <omnirefl/reflected_scope.hpp>
 
 #include <cstddef>
@@ -29,7 +31,6 @@ struct model {
   int value;
 };
 
-// A valid later call through the same specialization must not hide the first.
 std::size_t after_definition() {
   return std::apply(invoke{}, std::make_tuple(omni::type_t<model>{}));
 }

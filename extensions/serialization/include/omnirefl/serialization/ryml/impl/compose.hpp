@@ -82,7 +82,7 @@ namespace compose {
 namespace detail {
 
 template <typename Function>
-struct lifted_node_function {
+struct lifted_node_function final {
   Function function;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State,

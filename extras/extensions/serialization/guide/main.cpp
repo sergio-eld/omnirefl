@@ -29,6 +29,7 @@
  * Advanced
  *   advanced.local_configuration - customize config with tdm_config
  *   advanced.explicit_configuration - construct a configured deserializer
+ *   advanced.keep_nulls - shared omission policy and local null overrides
  *   advanced.unknown_fields - reject, ignore, or warn about unknown fields
  *   advanced.duplicate_fields - choose a repeated field occurrence
  *   advanced.error_limit - experimental collection of multiple errors
@@ -46,7 +47,7 @@
  *
  * Advanced: customization and composition
  *   advanced.custom_scalar_mapping_cpp11
- *     equivalent C++11 struct registration
+ *     C++11 class registration and mapper composition
  *   advanced.custom_container_mapping
  *     reuse range mapping for a container wrapper
  *   advanced.custom_string_mapping - reuse string mapping for a string wrapper
@@ -111,6 +112,7 @@
 #include <cstdint>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -410,7 +412,7 @@ TEST(basics, optional_fields) {
   EXPECT_FALSE(invalid.value);
 }
 
-// Empty optional fields emit null; populated fields emit their value.
+// Empty optional fields emit null by default; see advanced.keep_nulls.
 TEST(basics, serialize_optional_fields) {
   const optional_mapping::measurement empty{omni::compat::nullopt};
   EXPECT_TRUE(same_document(R"({"value": null})", omni::ryml::as_json(empty)));
@@ -536,7 +538,9 @@ namespace {
 
 /** A custom record mapping can delegate to `map_object_node` and `map_record`.
  * Member conversions still use their `cp::` registrations, so
- * `my_record::reading` uses the scalar mapping for `my_integer` shown above. */
+ * `my_record::reading` uses the scalar mapping for `my_integer` shown above.
+ * Built-in mappers are `final`; see `advanced.custom_scalar_mapping_cpp11`
+ * for class registration by delegation. */
 TEST(basics, custom_record_mapping) {
   const std::string document = R"({"reading": 7, "name": "sensor"})";
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
@@ -579,7 +583,8 @@ TEST(basics, in_place_mapping_customization) {
 
   constexpr auto serialize = omni::ryml::serialize
     .tdm_map_node([](auto) {
-      return []<typename T>(auto state, omni::type_t<T> type) {
+      return []<typename T>(omni::ryml::write_state_like auto state,
+        omni::type_t<T> type) {
         if constexpr (std::is_same_v<T, settings>) {
           // Include static data members while still excluding functions.
           // See `advanced.record_strategy` for `.filter_fields`.
@@ -669,6 +674,56 @@ TEST(advanced, explicit_configuration) {
     EXPECT_EQ(7, result.value->value);
 
   EXPECT_TRUE(result.diagnostics.empty());
+}
+
+namespace keep_nulls_example {
+
+struct response {
+  std::optional<int> timeout;
+  std::vector<std::optional<int>> samples;
+};
+
+} // namespace keep_nulls_example
+
+/** `.config` on `serialize` and the tree builders controls empty optionals.
+ * Defaults retain null object fields and omit empty array elements.
+ * `.keep_nulls` on `map_record` or `map_range` defaults to `compat::monostate`,
+ * inheriting `.config`. A `bool` or `compat::bool_constant` overrides it:
+ * `true` keeps nulls, `false` omits them. Records control their fields; ranges
+ * control their immediate elements or mapped values. Nested policies are
+ * independent.
+ * Empty roots remain null; quoted "null" remains a string. */
+TEST(advanced, keep_nulls) {
+  const keep_nulls_example::response source{
+    .timeout = std::nullopt,
+    .samples = {1, std::nullopt, 2},
+  };
+  const auto serialize = omni::ryml::serialize.tdm_config(
+    [](omni::ryml::serialize_config_t options) {
+      options.keep_null_fields = false;
+      options.keep_null_elements = false;
+      return options;
+    });
+
+  EXPECT_TRUE(same_document(R"({"samples":[1,2]})", serialize(source)));
+
+  // Retain empty fields in this record and preserve sample positions.
+  const auto serialize_with_nulls = serialize.tdm_map_node([](auto) {
+    return []<typename T>(omni::ryml::write_state_like auto state,
+      omni::type_t<T> type) {
+      if constexpr (std::is_same_v<T, keep_nulls_example::response>) {
+        return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
+          omni::fn::always_true);
+      } else if constexpr (std::is_same_v<T, std::vector<std::optional<int>>>) {
+        return omni::ryml::map_range.tdm_keep_nulls(omni::fn::always_true);
+      } else {
+        return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      }
+    };
+  });
+
+  EXPECT_TRUE(same_document(R"({"timeout":null,"samples":[1,null,2]})",
+    serialize_with_nulls(source)));
 }
 
 /** Unknown fields are rejected by default. allow ignores them; allow | warn
@@ -1005,8 +1060,17 @@ struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
 
 namespace {
 
-/** Before C++14, specialize to_type_t and from_type_t instead of variable
- * templates. my_cpp11_integer uses the equivalent named callables above. */
+/** Before C++14, specialize `cp::to_type_t` and `cp::from_type_t` instead of
+ * variable templates. `my_cpp11_integer` uses the named callables above.
+ *
+ * Built-in mappers are `final`; class registrations delegate to them.
+ * `.tdm_` updates return the mapper's own type, possibly with new template
+ * arguments, and would discard members added by a derived registration.
+ * Mappers without `.tdm_` members are also `final` so adding updates later
+ * does not change the inheritance contract.
+ * Stateless compositions can use an in-class `static constexpr` factory and
+ * a `constexpr` local in `operator()` to require compile-time construction.
+ * This needs no static data member or out-of-class definition in C++11. */
 TEST(advanced, custom_scalar_mapping_cpp11) {
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type_t<basic_customization::my_cpp11_integer>{}, "42");
@@ -1810,7 +1874,8 @@ TEST(advanced, path_specific_mapping) {
   using path_specific_mapping::contact;
 
   constexpr auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
-    return []<typename T>(auto state, omni::type_t<T> type) {
+    return []<typename T>(omni::ryml::write_state_like auto state,
+      omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, address>
         && state.path().starts_with("root.work_address")) {
         return omni::ryml::reflected_scope::map_record
@@ -2338,7 +2403,8 @@ TEST(extended_container_mapping, customizes_appended_members_by_schema_path) {
       omni::type_t<T> type) {
       if constexpr (std::is_same<T, int>::value
         && state.path().ends_with("root.first"))
-        return [](auto state, const int &value) -> ::ryml::NodeRef {
+        return [](omni::ryml::write_state_like auto state,
+          const int &value) -> ::ryml::NodeRef {
           return omni::ryml::map_integral(std::move(state), value + 10);
         };
       else

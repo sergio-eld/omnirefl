@@ -324,9 +324,23 @@ struct to_type_t<numeric_strategy_examples::settings> {
 };
 
 template <>
-struct to_type_t<filtered_root_examples::settings>:
-    reflected_scope::map_object_node_t<mapping::record_strategy_t<
-      filtered_root_examples::parsed_only>> {};
+struct to_type_t<filtered_root_examples::settings> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto record_mapping()
+    -> decltype(reflected_scope::map_object_node_t<mapping::record_strategy_t<
+      filtered_root_examples::parsed_only>>{}) {
+    return reflected_scope::map_object_node_t<mapping::record_strategy_t<
+      filtered_root_examples::parsed_only>>{};
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(record_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = record_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 template <>
 struct to_type_t<generic_strategy_examples::settings> {

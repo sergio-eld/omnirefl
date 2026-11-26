@@ -37,9 +37,23 @@ const auto omni::ryml::cp::to_type<composed_boolean::value> =
   omni::ryml::compose::map_boolean_node(composed_boolean::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_boolean::value>:
-    decltype(omni::ryml::compose::map_boolean_node(
-      composed_boolean::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_boolean::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_boolean_node(
+      composed_boolean::read{})) {
+    return omni::ryml::compose::map_boolean_node(
+      composed_boolean::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 class composed_booleans: public testing::TestWithParam<bool> {};
@@ -101,9 +115,23 @@ const auto omni::ryml::cp::to_type<composed_integer::value> =
   omni::ryml::compose::map_integer_node(composed_integer::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_integer::value>:
-    decltype(omni::ryml::compose::map_integer_node(
-      composed_integer::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_integer::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_integer_node(
+      composed_integer::read{})) {
+    return omni::ryml::compose::map_integer_node(
+      composed_integer::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_integer, deserializes_an_integer_wrapper) {
@@ -165,8 +193,23 @@ const auto omni::ryml::cp::to_type<composed_real::value> =
   omni::ryml::compose::map_number_node(composed_real::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_real::value>:
-    decltype(omni::ryml::compose::map_number_node(composed_real::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_real::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_number_node(
+      composed_real::read{})) {
+    return omni::ryml::compose::map_number_node(
+      composed_real::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_real, deserializes_a_real_wrapper_through_a_pointer_callback) {
@@ -214,8 +257,23 @@ const auto omni::ryml::cp::to_type<composed_string::value> =
   omni::ryml::compose::map_string_node(composed_string::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_string::value>:
-    decltype(omni::ryml::compose::map_string_node(composed_string::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_string::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_string_node(
+      composed_string::read{})) {
+    return omni::ryml::compose::map_string_node(
+      composed_string::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_string, deserializes_a_string_wrapper_with_a_type_tag) {
@@ -269,8 +327,23 @@ const auto omni::ryml::cp::to_type<composed_enum::value> =
   omni::ryml::compose::map_string_node(composed_enum::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_enum::value>:
-    decltype(omni::ryml::compose::map_string_node(composed_enum::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_enum::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_string_node(
+      composed_enum::read{})) {
+    return omni::ryml::compose::map_string_node(
+      composed_enum::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_enum, deserializes_an_enumerator_through_the_callback) {
@@ -341,9 +414,23 @@ const auto omni::ryml::cp::to_type<composed_arithmetic::value> =
   omni::ryml::compose::map_arithmetic_node(composed_arithmetic::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_arithmetic::value>:
-    decltype(omni::ryml::compose::map_arithmetic_node(
-      composed_arithmetic::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_arithmetic::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_arithmetic_node(
+      composed_arithmetic::read{})) {
+    return omni::ryml::compose::map_arithmetic_node(
+      composed_arithmetic::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 class composed_numbers:
@@ -405,8 +492,23 @@ const auto omni::ryml::cp::to_type<composed_range::value> =
   omni::ryml::compose::map_array_node(composed_range::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_range::value>:
-    decltype(omni::ryml::compose::map_array_node(composed_range::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_range::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_array_node(
+      composed_range::read{})) {
+    return omni::ryml::compose::map_array_node(
+      composed_range::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_range, deserializes_elements_through_the_forwarded_state) {
@@ -469,9 +571,23 @@ const auto omni::ryml::cp::to_type<composed_optional::value> =
   omni::ryml::compose::map_value_node(composed_optional::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_optional::value>:
-    decltype(omni::ryml::compose::map_value_node(
-      composed_optional::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_optional::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_value_node(
+      composed_optional::read{})) {
+    return omni::ryml::compose::map_value_node(
+      composed_optional::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_optional, deserializes_a_present_value_through_its_registration) {
@@ -559,8 +675,23 @@ const auto omni::ryml::cp::to_type<composed_record::value> =
   omni::ryml::compose::map_object_node(composed_record::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_record::value>:
-    decltype(omni::ryml::compose::map_object_node(composed_record::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_record::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_object_node(
+      composed_record::read{})) {
+    return omni::ryml::compose::map_object_node(
+      composed_record::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_record, deserializes_a_record_through_the_forwarded_state) {
@@ -712,9 +843,23 @@ const auto omni::ryml::cp::to_type<composed_existing::value> =
     omni::ryml::reflected_scope::map_object_node_t<>{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_existing::value>:
-    decltype(omni::ryml::compose::map_object_node(
-      omni::ryml::reflected_scope::map_object_node_t<>{})) {};
+struct omni::ryml::cp::to_type_t<composed_existing::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_object_node(
+      omni::ryml::reflected_scope::map_object_node_t<>{})) {
+    return omni::ryml::compose::map_object_node(
+      omni::ryml::reflected_scope::map_object_node_t<>{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_existing, deserializes_into_a_non_default_constructible_root) {
@@ -801,9 +946,23 @@ const auto omni::ryml::cp::to_type<composed_state_expected::value> =
   omni::ryml::compose::map_boolean_node(composed_state_expected::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_state_expected::value>:
-    decltype(omni::ryml::compose::map_boolean_node(
-      composed_state_expected::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_state_expected::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_boolean_node(
+      composed_state_expected::read{})) {
+    return omni::ryml::compose::map_boolean_node(
+      composed_state_expected::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_state_expected, deserializes_with_node_and_state_arguments) {
@@ -847,9 +1006,23 @@ const auto omni::ryml::cp::to_type<composed_state_diagnostics::value> =
   omni::ryml::compose::map_boolean_node(composed_state_diagnostics::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_state_diagnostics::value>:
-    decltype(omni::ryml::compose::map_boolean_node(
-      composed_state_diagnostics::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_state_diagnostics::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_boolean_node(
+      composed_state_diagnostics::read{})) {
+    return omni::ryml::compose::map_boolean_node(
+      composed_state_diagnostics::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_state_diagnostics, deserializes_a_nested_value_with_diagnostics) {
@@ -912,9 +1085,23 @@ const auto omni::ryml::cp::to_type<composed_value_precedence::value> =
   omni::ryml::compose::map_boolean_node(composed_value_precedence::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_value_precedence::value>:
-    decltype(omni::ryml::compose::map_boolean_node(
-      composed_value_precedence::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_value_precedence::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_boolean_node(
+      composed_value_precedence::read{})) {
+    return omni::ryml::compose::map_boolean_node(
+      composed_value_precedence::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_value_precedence, prefers_type_tag_when_creating_a_root_value) {
@@ -994,9 +1181,23 @@ const auto omni::ryml::cp::to_type<composed_move_only::value> =
   omni::ryml::compose::map_boolean_node(composed_move_only::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_move_only::value>:
-    decltype(omni::ryml::compose::map_boolean_node(
-      composed_move_only::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_move_only::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_boolean_node(
+      composed_move_only::read{})) {
+    return omni::ryml::compose::map_boolean_node(
+      composed_move_only::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_move_only, assigns_produced_values_directly_to_record_fields) {
@@ -1040,9 +1241,23 @@ const auto omni::ryml::cp::to_type<composed_rvalue_state::value> =
   omni::ryml::compose::map_boolean_node(composed_rvalue_state::read{});
 #else
 template <>
-struct omni::ryml::cp::to_type_t<composed_rvalue_state::value>:
-    decltype(omni::ryml::compose::map_boolean_node(
-      composed_rvalue_state::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_rvalue_state::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_boolean_node(
+      composed_rvalue_state::read{})) {
+    return omni::ryml::compose::map_boolean_node(
+      composed_rvalue_state::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 TEST(composed_rvalue_state, deserializes_a_root_value) {
@@ -1099,9 +1314,23 @@ struct envelope {
 
 // The C++11 registration form remains usable in every supported standard.
 template <>
-struct omni::ryml::cp::to_type_t<composed_constructed::value>:
-    decltype(omni::ryml::compose::map_integer_node(
-      composed_constructed::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_constructed::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_integer_node(
+      composed_constructed::read{})) {
+    return omni::ryml::compose::map_integer_node(
+      composed_constructed::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 TEST(composed_constructed, constructs_values_inside_ranges_and_optionals) {
   const auto result = serialization_test::deserialize(
@@ -1190,9 +1419,23 @@ struct read {
 } // namespace composed_bound_input
 
 template <>
-struct omni::ryml::cp::to_type_t<composed_bound_input::value>:
-    decltype(omni::ryml::compose::map_integer_node(
-      composed_bound_input::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_bound_input::value> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_integer_node(
+      composed_bound_input::read{})) {
+    return omni::ryml::compose::map_integer_node(
+      composed_bound_input::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 namespace composed_nonassignable {
 
@@ -1241,14 +1484,42 @@ struct read {
 } // namespace composed_nonassignable
 
 template <>
-struct omni::ryml::cp::to_type_t<composed_nonassignable::constructed>:
-    decltype(omni::ryml::compose::map_integer_node(
-      composed_nonassignable::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_nonassignable::constructed> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_integer_node(
+      composed_nonassignable::read{})) {
+    return omni::ryml::compose::map_integer_node(
+      composed_nonassignable::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 template <>
-struct omni::ryml::cp::to_type_t<composed_nonassignable::defaulted>:
-    decltype(omni::ryml::compose::map_integer_node(
-      composed_nonassignable::read{})) {};
+struct omni::ryml::cp::to_type_t<composed_nonassignable::defaulted> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_integer_node(
+      composed_nonassignable::read{})) {
+    return omni::ryml::compose::map_integer_node(
+      composed_nonassignable::read{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 TEST(composed_nonassignable, accepts_a_default_constructible_pointer_field) {
   const auto result = serialization_test::deserialize(
@@ -1282,9 +1553,23 @@ struct add {
 } // namespace composed_bitfield
 
 template <>
-struct omni::ryml::cp::to_type_t<composed_bitfield::digit>:
-    decltype(omni::ryml::compose::map_integer_node(
-      composed_bitfield::add{})) {};
+struct omni::ryml::cp::to_type_t<composed_bitfield::digit> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_integer_node(
+      composed_bitfield::add{})) {
+    return omni::ryml::compose::map_integer_node(
+      composed_bitfield::add{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 TEST(composed_bitfield, reports_a_pointer_mapping_error_at_the_field) {
   composed_bitfield::envelope into{composed_bitfield::digit::two};

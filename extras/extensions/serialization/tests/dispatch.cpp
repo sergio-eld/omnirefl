@@ -255,9 +255,23 @@ struct omni::ryml::cp::to_type_t<my_string> {
 #endif
 
 template <>
-struct omni::ryml::cp::to_type_t<custom_depth::leaf>:
-    decltype(omni::ryml::compose::map_object_node(
-      custom_depth::read_leaf{})) {};
+struct omni::ryml::cp::to_type_t<custom_depth::leaf> {
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
+  static constexpr auto composed_mapping()
+    -> decltype(omni::ryml::compose::map_object_node(
+      custom_depth::read_leaf{})) {
+    return omni::ryml::compose::map_object_node(
+      custom_depth::read_leaf{});
+  }
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
+  }
+};
 
 namespace {
 

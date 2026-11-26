@@ -1,3 +1,5 @@
+// Expected failure: template composition requests reflection before record's
+// definition. A later valid instantiation must not hide the incomplete use.
 #include <omnirefl/reflected_scope.hpp>
 
 namespace composed_definition_after_use {
@@ -23,7 +25,6 @@ struct record {
   int value;
 };
 
-// A valid later instantiation must not hide the earlier incomplete use.
 void after_definition() {
   compose<record, 1>();
 }

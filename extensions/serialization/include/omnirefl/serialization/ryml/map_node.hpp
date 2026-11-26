@@ -56,7 +56,7 @@ map_object_node :: {
  * metadata is available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>,
   typename WithNodeCheck = std::true_type>
-struct map_object_node_t:
+struct map_object_node_t final:
     detail::tdm_for_map_object_node<Strategy, WithNodeCheck>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider =
@@ -125,7 +125,7 @@ map_node_to_enum :: {
  * is available in reflected scope. */
 template <typename Strategy = mapping::enum_strategy_t<>,
   typename WithNodeCheck = std::true_type>
-struct map_node_to_enum_t:
+struct map_node_to_enum_t final:
     detail::tdm_for_map_node_to_enum<Strategy, WithNodeCheck>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider =
@@ -199,7 +199,7 @@ map_arithmetic_node :: {
 ```
  */
 template <typename WithNodeCheck = std::true_type>
-struct map_arithmetic_node_t:
+struct map_arithmetic_node_t final:
     detail::tdm_for_map_arithmetic_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_arithmetic_node<WithNodeCheck>;
@@ -264,7 +264,7 @@ map_integer_node :: {
 ```
  */
 template <typename WithNodeCheck = std::true_type>
-struct map_integer_node_t:
+struct map_integer_node_t final:
     detail::tdm_for_map_integer_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_integer_node<WithNodeCheck>;
@@ -320,7 +320,7 @@ map_number_node :: {
 ```
  */
 template <typename WithNodeCheck = std::true_type>
-struct map_number_node_t:
+struct map_number_node_t final:
     detail::tdm_for_map_number_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_number_node<WithNodeCheck>;
@@ -373,7 +373,7 @@ map_boolean_node :: {
 ```
  */
 template <typename WithNodeCheck = std::true_type>
-struct map_boolean_node_t:
+struct map_boolean_node_t final:
     detail::tdm_for_map_boolean_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_boolean_node<WithNodeCheck>;
@@ -430,7 +430,7 @@ map_string_node :: {
  * @details String-view destinations borrow the tree's character storage.
  * The tree and its character storage must remain valid while views are used. */
 template <typename WithNodeCheck = std::true_type>
-struct map_string_node_t:
+struct map_string_node_t final:
     detail::tdm_for_map_string_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_string_node<WithNodeCheck>;
@@ -481,7 +481,7 @@ to_optional_like :: (state, node, T*) -> with_diagnostics<monostate>
  *
  * Null resets the destination. Non-null input uses the contained type's
  * registered mapping and is emplaced only on success. */
-struct to_optional_like_t: detail::with_depth_exceeded_operator {
+struct to_optional_like_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -498,7 +498,7 @@ map_value_node :: (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
 template <typename WithNodeCheck = std::true_type>
-struct map_value_node_t:
+struct map_value_node_t final:
     detail::tdm_for_map_value_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_value_node<WithNodeCheck>;
@@ -542,7 +542,7 @@ to_range :: (state, node, T*) -> with_diagnostics<monostate>
  * @pre into is non-null; node is valid and has the destination's shape.
  * Object keys are string-like; range operations use \ref adapt::clear and
  * the insertion adapters. */
-struct to_range_t: detail::with_depth_exceeded_operator {
+struct to_range_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -563,7 +563,7 @@ map_range_node :: (state, node, T*) -> with_diagnostics<monostate>
 ```
  */
 template <typename WithNodeCheck = std::true_type>
-struct map_range_node_t:
+struct map_range_node_t final:
     detail::tdm_for_map_range_node<WithNodeCheck>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_range_node<WithNodeCheck>;

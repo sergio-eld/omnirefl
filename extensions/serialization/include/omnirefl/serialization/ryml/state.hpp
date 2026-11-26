@@ -138,6 +138,17 @@ struct as_owning_tree_t;
 template <typename MapNode>
 struct as_ref_tree_t;
 
+/** Shared policy for empty optionals in records and ranges.
+ * Mappers inherit this policy unless `.keep_nulls` overrides it.
+ * Empty roots remain null. */
+struct serialize_config_t {
+  // Empty optional record fields and associative values.
+  bool keep_null_fields = true;
+
+  // Retain empty optional array elements to preserve their indices.
+  bool keep_null_elements = false;
+};
+
 /** Render issue records using their source tree while it is alive. */
 struct render_diagnostics_t {
   std::string operator()(const ::ryml::Tree &tree, const diagnostics &d) const;
@@ -293,7 +304,7 @@ mapping_to_type :: (state, type<T>) -> Mapping
 ```
  * State is accepted for compatibility with local mapping selectors.
  * The default selection depends only on T. */
-struct mapping_to_type_t {
+struct mapping_to_type_t final {
   template <typename State, typename T>
   OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
     OMNI_CPP11_TRAILING_RETURN(
@@ -306,7 +317,7 @@ struct mapping_to_type_t {
 mapping_from_type :: (state, type<T>) -> Mapping
 ```
  * The default selection depends only on T. */
-struct mapping_from_type_t {
+struct mapping_from_type_t final {
   template <typename State, typename T>
   OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
     OMNI_CPP11_TRAILING_RETURN(
@@ -450,6 +461,7 @@ struct write_state_t {
 
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
   const typename StateConfig::map_node_type &map_node;
+  const serialize_config_t &config;
 
   /** Destination node, valid only during the active builder call. */
   ::ryml::NodeRef node() const { return {this->tree, this->node_id}; }
@@ -528,15 +540,17 @@ private:
 
   template <typename ParentConfig>
   constexpr write_state_t(const write_state_t<ParentConfig> &parent)
-    : map_node(parent.map_node), tree(parent.tree),
-      node_id(parent.node_id) {}
+    : map_node(parent.map_node), config(parent.config),
+      tree(parent.tree), node_id(parent.node_id) {}
 
   constexpr write_state_t(const typename StateConfig::map_node_type &mapping,
-    ::ryml::Tree *tree, ::ryml::id_type node_id)
-    : map_node(mapping), tree(tree), node_id(node_id) {}
+    ::ryml::Tree *tree, ::ryml::id_type node_id,
+    const serialize_config_t &config)
+    : map_node(mapping), config(config), tree(tree), node_id(node_id) {}
 
   constexpr write_state_t(const write_state_t &parent, ::ryml::id_type node_id)
-    : map_node(parent.map_node), tree(parent.tree), node_id(node_id) {}
+    : map_node(parent.map_node), config(parent.config),
+      tree(parent.tree), node_id(node_id) {}
 
   ::ryml::Tree *tree;
   ::ryml::id_type node_id;
