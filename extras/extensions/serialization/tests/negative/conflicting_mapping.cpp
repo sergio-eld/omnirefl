@@ -10,12 +10,16 @@ template <>
 struct to_type_t<int> {
   // Delegate because the mapper is final: `.tdm_` updates return its own type
   // and cannot preserve members added by derived registrations.
-  map_arithmetic_node_t<> arithmetic_mapping{};
+  static constexpr auto arithmetic_mapping()
+    -> decltype(map_arithmetic_node_t<>{}) {
+    return map_arithmetic_node_t<>{};
+  }
 
   template <typename... Args>
   auto operator()(Args &&...args) const
-    -> decltype(this->arithmetic_mapping(std::forward<Args>(args)...)) {
-    return this->arithmetic_mapping(std::forward<Args>(args)...);
+    -> decltype(arithmetic_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = arithmetic_mapping();
+    return mapping(std::forward<Args>(args)...);
   }
 };
 

@@ -90,15 +90,22 @@ template <typename T>
 struct to_type_t<endpoint<T>> {
   // Delegate because the mapper is final: `.tdm_` updates return its own type
   // and cannot preserve members added by derived registrations.
-  decltype(compose::with_node_check<core::expect_object_node>(
-    reflected_scope::map_object_node_t<mapping::record_strategy_t<
-      decltype(mapping::record_strategy.filter_fields),
-      endpoint_names>>{})) composed_mapping{};
+  static constexpr auto composed_mapping()
+    -> decltype(compose::with_node_check<core::expect_object_node>(
+      reflected_scope::map_object_node_t<mapping::record_strategy_t<
+        decltype(mapping::record_strategy.filter_fields),
+        endpoint_names>>{})) {
+    return compose::with_node_check<core::expect_object_node>(
+      reflected_scope::map_object_node_t<mapping::record_strategy_t<
+        decltype(mapping::record_strategy.filter_fields),
+        endpoint_names>>{});
+  }
 
   template <typename... Args>
   auto operator()(Args &&...args) const
-    -> decltype(this->composed_mapping(std::forward<Args>(args)...)) {
-    return this->composed_mapping(std::forward<Args>(args)...);
+    -> decltype(composed_mapping()(std::forward<Args>(args)...)) {
+    constexpr auto mapping = composed_mapping();
+    return mapping(std::forward<Args>(args)...);
   }
 };
 #endif

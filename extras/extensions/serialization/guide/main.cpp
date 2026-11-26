@@ -1067,7 +1067,10 @@ namespace {
  * `.tdm_` updates return the mapper's own type, possibly with new template
  * arguments, and would discard members added by a derived registration.
  * Mappers without `.tdm_` members are also `final` so adding updates later
- * does not change the inheritance contract. */
+ * does not change the inheritance contract.
+ * Stateless compositions can use an in-class `static constexpr` factory and
+ * a `constexpr` local in `operator()` to require compile-time construction.
+ * This needs no static data member or out-of-class definition in C++11. */
 TEST(advanced, custom_scalar_mapping_cpp11) {
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type_t<basic_customization::my_cpp11_integer>{}, "42");
