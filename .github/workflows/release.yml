@@ -88,9 +88,17 @@ jobs:
                         f'{notes.stem} exist; preparing {sys.argv[1]}.')
           PY
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "release already exists for $GITHUB_REF_NAME" >&2
-            exit 1
+          release=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | [.id, .draft] | @tsv")
+          if [ -n "$release" ]; then
+            read -r release_id draft <<< "$release"
+            if [ true != "$draft" ]; then
+              echo "published release already exists for $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            # Delete stale release assets without changing the pushed tag.
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
+            echo "Removed stale draft; a new draft requires successful full validation."
           fi
 
       - name: Wait for Commit CI and Import Artifacts
@@ -391,7 +399,6 @@ jobs:
           fi
 
       - name: Create Draft Prerelease
-        id: create_release
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --draft \
@@ -401,18 +408,7 @@ jobs:
             --title "Omnirefl ${GITHUB_REF_NAME#v}"
 
       - name: Upload Release Assets
-        id: upload_assets
         env:
           ASSET_DIR: ${{ steps.assets.outputs.directory }}
+        # A full workflow rerun clears partial drafts through preflight.
         run: gh release upload "$GITHUB_REF_NAME" "$ASSET_DIR"/*
-
-      # The create step succeeded in this run, so cleanup cannot delete a draft
-      # created elsewhere during validation.
-      - name: Remove Partial Draft
-        if: >-
-          ${{
-            failure()
-            && 'success' == steps.create_release.outcome
-            && 'failure' == steps.upload_assets.outcome
-          }}
-        run: gh release delete "$GITHUB_REF_NAME" --yes
