@@ -139,14 +139,14 @@ template <typename MapNode>
 struct as_ref_tree_t;
 
 /** Shared policy for empty optionals in records and ranges.
- * Their `.explicit_nulls = true` retains nulls; false follows this policy.
+ * Their `.keep_nulls = true` retains nulls; false follows this policy.
  * Empty roots remain null. */
-struct write_config {
+struct serialize_config_t {
   // Empty optional record fields and associative values.
-  bool omit_null_fields = false;
+  bool keep_null_fields = true;
 
-  // Empty optional array elements; omission compacts the array.
-  bool omit_null_elements = true;
+  // Retain empty optional array elements to preserve their indices.
+  bool keep_null_elements = false;
 };
 
 /** Render issue records using their source tree while it is alive. */
@@ -461,7 +461,7 @@ struct write_state_t {
 
   static constexpr bool borrow_strings = StateConfig::borrow_strings;
   const typename StateConfig::map_node_type &map_node;
-  const write_config &config;
+  const serialize_config_t &config;
 
   /** Destination node, valid only during the active builder call. */
   ::ryml::NodeRef node() const { return {this->tree, this->node_id}; }
@@ -544,7 +544,7 @@ private:
       tree(parent.tree), node_id(parent.node_id) {}
 
   constexpr write_state_t(const typename StateConfig::map_node_type &mapping,
-    ::ryml::Tree *tree, ::ryml::id_type node_id, const write_config &config)
+    ::ryml::Tree *tree, ::ryml::id_type node_id, const serialize_config_t &config)
     : map_node(mapping), config(config), tree(tree), node_id(node_id) {}
 
   constexpr write_state_t(const write_state_t &parent, ::ryml::id_type node_id)

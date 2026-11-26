@@ -26,7 +26,7 @@ namespace reflected_scope {
 
 /** Maps selected record fields to object entries with canonical names.
  * Members are mapped through state.map_node.
- * Empty optional fields follow \ref write_config unless `.explicit_nulls`
+ * Empty optional fields follow \ref serialize_config_t unless `.keep_nulls`
  * is true.
  *
 ```
@@ -35,28 +35,28 @@ map_record :: (state, const T&) -> node
  *
  * @pre Record metadata must be available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>,
-  typename ExplicitNulls = std::false_type>
+  typename KeepNulls = std::false_type>
 struct map_record_t final:
-    detail::tdm_for_map_record<Strategy, ExplicitNulls>,
+    detail::tdm_for_map_record<Strategy, KeepNulls>,
     omni::ryml::detail::with_depth_exceeded_operator {
-  using tdm_provider = detail::tdm_for_map_record<Strategy, ExplicitNulls>;
+  using tdm_provider = detail::tdm_for_map_record<Strategy, KeepNulls>;
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_record_t requires mapping::record_strategy_t");
-  static_assert(std::is_same<bool, ExplicitNulls>::value
-      || std::is_same<std::false_type, ExplicitNulls>::value
-      || std::is_same<std::true_type, ExplicitNulls>::value,
-    "map_record_t explicit_nulls must be bool or a Boolean integral constant");
+  static_assert(std::is_same<bool, KeepNulls>::value
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
+    "map_record_t keep_nulls must be bool or a Boolean integral constant");
 
   /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
 
   /** True retains empty optional fields as null;
-   * false follows \ref write_config. */
-  ExplicitNulls explicit_nulls OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_explicit_nulls;
+   * false follows \ref serialize_config_t. */
+  KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_keep_nulls;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
@@ -66,15 +66,15 @@ struct map_record_t final:
 // Ad hoc: classes with bases are not aggregates before C++17. These
 // constructors preserve field initialization in the older standards.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr map_record_t() : strategy{}, explicit_nulls{} {}
+  constexpr map_record_t() : strategy{}, keep_nulls{} {}
 
   OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
-    typename Nulls = ExplicitNulls),
+    typename Nulls = KeepNulls),
     (std::is_constructible<Strategy, Value &&>::value
-      && std::is_constructible<ExplicitNulls, Nulls &&>::value))
+      && std::is_constructible<KeepNulls, Nulls &&>::value))
   constexpr map_record_t(Value &&value, Nulls &&nulls = Nulls{})
     : strategy(std::forward<Value>(value)),
-      explicit_nulls(std::forward<Nulls>(nulls)) {}
+      keep_nulls(std::forward<Nulls>(nulls)) {}
 #endif
 };
 
@@ -281,26 +281,26 @@ map_range :: (state, const T&) -> node
 ```
  *
  * Elements are mapped through state.map_node. Null omission follows
- * \ref write_config unless `.explicit_nulls` retains null elements or values.
+ * \ref serialize_config_t unless `.keep_nulls` retains null elements or values.
  * This policy covers immediate elements; nested records/ranges own theirs.
  * \ref traits::is_key_value selects object or array output.
  * @pre Non-scalar elements are exposed as lvalue references to value_type. */
-template <typename ExplicitNulls = std::false_type>
+template <typename KeepNulls = std::false_type>
 struct map_range_t final:
-    detail::tdm_for_map_range<ExplicitNulls>,
+    detail::tdm_for_map_range<KeepNulls>,
     detail::with_depth_exceeded_operator {
-  using tdm_provider = detail::tdm_for_map_range<ExplicitNulls>;
+  using tdm_provider = detail::tdm_for_map_range<KeepNulls>;
   using detail::with_depth_exceeded_operator::operator();
 
-  static_assert(std::is_same<bool, ExplicitNulls>::value
-      || std::is_same<std::false_type, ExplicitNulls>::value
-      || std::is_same<std::true_type, ExplicitNulls>::value,
-    "map_range_t explicit_nulls must be bool "
+  static_assert(std::is_same<bool, KeepNulls>::value
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
+    "map_range_t keep_nulls must be bool "
     "or a Boolean integral constant");
 
-  /** True forces null emission; false follows \ref write_config. */
-  ExplicitNulls explicit_nulls OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_explicit_nulls;
+  /** True forces null emission; false follows \ref serialize_config_t. */
+  KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_keep_nulls;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
@@ -309,12 +309,12 @@ struct map_range_t final:
 
 // Ad hoc: aggregate bases need constructors before C++17.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr map_range_t() : explicit_nulls{} {}
+  constexpr map_range_t() : keep_nulls{} {}
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = ExplicitNulls),
-    (std::is_constructible<ExplicitNulls, Value &&>::value))
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = KeepNulls),
+    (std::is_constructible<KeepNulls, Value &&>::value))
   constexpr map_range_t(Value &&value)
-    : explicit_nulls(std::forward<Value>(value)) {}
+    : keep_nulls(std::forward<Value>(value)) {}
 #endif
 };
 

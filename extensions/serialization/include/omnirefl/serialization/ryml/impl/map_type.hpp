@@ -64,12 +64,12 @@ template <typename State>
 struct cpp11_write_member {
   ::ryml::NodeRef &node;
   State context;
-  bool omit_null_fields;
+  bool keep_null_fields;
 
   template <typename Record, typename _F>
   void operator()(omni::data_member_binding_t<Record, _F> field) const {
     const auto &value = field.value();
-    if (this->omit_null_fields && is_empty_optional(value))
+    if (!this->keep_null_fields && is_empty_optional(value))
       return;
 
     auto child = this->node.append_child();
@@ -108,11 +108,11 @@ void write_record_members(const Write &write, Record &value,
 
 } // namespace detail
 
-template <typename Strategy, typename ExplicitNulls>
+template <typename Strategy, typename KeepNulls>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto map_record_t<Strategy, ExplicitNulls>::operator()(State context,
+auto map_record_t<Strategy, KeepNulls>::operator()(State context,
   const T &value) const -> ::ryml::NodeRef {
   auto node = context.node();
   assert(mapping::valid_record_strategy(
@@ -127,8 +127,8 @@ auto map_record_t<Strategy, ExplicitNulls>::operator()(State context,
     omni::ryml::detail::cpp11_write_member<State>{
       /*node=*/node,
       /*context=*/context,
-      /*omit_null_fields=*/context.config.omit_null_fields
-        && !this->explicit_nulls,
+      /*keep_null_fields=*/context.config.keep_null_fields
+        || this->keep_nulls,
     },
     value,
     // REFACTORME: [high] Slop ad hoc: reconstruct and filter binding types
@@ -185,12 +185,12 @@ struct write_range_case<false> {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_write_state<State>::value))
   static void apply(State context, const T &value, ::ryml::NodeRef node,
-    bool explicit_nulls) {
+    bool keep_nulls) {
     using element_type = compat::range_value_t<T>;
     node.set_seq();
     reserve_range_nodes(node.tree(), value, /*overload_priority=*/0);
-    const bool omit_null_elements = context.config.omit_null_elements
-      && !explicit_nulls;
+    const bool keep_null_elements = context.config.keep_null_elements
+      || keep_nulls;
     // Separate iterator/sentinel declarations also support non-common ranges
     // before C++17 permitted them in range-based for loops.
     using std::begin;
@@ -199,7 +199,7 @@ struct write_range_case<false> {
     const auto last = end(value);
     for (; current != last; ++current) {
       const element_type &element = *current;
-      if (omit_null_elements && is_empty_optional(element))
+      if (!keep_null_elements && is_empty_optional(element))
         continue;
 
       const auto state = context.at(node.append_child()).element();
@@ -215,21 +215,21 @@ struct write_range_case<true> {
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (is_write_state<State>::value))
   static void apply(State context, const T &value, ::ryml::NodeRef node,
-    bool explicit_nulls) {
+    bool keep_nulls) {
     static_assert(traits::is_string_like<traits::key_type_t<T>>::value,
       "map_range requires string-adaptable keys for JSON/YAML objects");
 
     node.set_map();
     reserve_range_nodes(node.tree(), value, /*overload_priority=*/0);
-    const bool omit_null_fields = context.config.omit_null_fields
-      && !explicit_nulls;
+    const bool keep_null_fields = context.config.keep_null_fields
+      || keep_nulls;
     using std::begin;
     using std::end;
     auto current = begin(value);
     const auto last = end(value);
     for (; current != last; ++current) {
       const auto &entry = *current;
-      if (omit_null_fields && is_empty_optional(entry.second))
+      if (!keep_null_fields && is_empty_optional(entry.second))
         continue;
 
       const auto &key = adapt::as_string(entry.first);
@@ -356,11 +356,11 @@ auto map_optional_like_t::operator()(State context, const T &value) const
   return node;
 }
 
-template <typename ExplicitNulls>
+template <typename KeepNulls>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-auto map_range_t<ExplicitNulls>::operator()(State context, const T &value) const
+auto map_range_t<KeepNulls>::operator()(State context, const T &value) const
   -> ::ryml::NodeRef {
   auto node = context.node();
   using element_type = compat::range_value_t<T>;
@@ -379,7 +379,7 @@ auto map_range_t<ExplicitNulls>::operator()(State context, const T &value) const
     context,
     value,
     node,
-    this->explicit_nulls);
+    this->keep_nulls);
 
   // TODO: [medium] Consider supporting generators and temporary-producing
   // iterators by copying materialized elements' strings into tree storage.

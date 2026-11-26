@@ -29,7 +29,7 @@
  * Advanced
  *   advanced.local_configuration - customize config with tdm_config
  *   advanced.explicit_configuration - construct a configured deserializer
- *   advanced.explicit_nulls - shared omission policy and local null overrides
+ *   advanced.keep_nulls - shared omission policy and local null overrides
  *   advanced.unknown_fields - reject, ignore, or warn about unknown fields
  *   advanced.duplicate_fields - choose a repeated field occurrence
  *   advanced.error_limit - experimental collection of multiple errors
@@ -412,7 +412,7 @@ TEST(basics, optional_fields) {
   EXPECT_FALSE(invalid.value);
 }
 
-// Empty optional fields emit null by default; see advanced.explicit_nulls.
+// Empty optional fields emit null by default; see advanced.keep_nulls.
 TEST(basics, serialize_optional_fields) {
   const optional_mapping::measurement empty{omni::compat::nullopt};
   EXPECT_TRUE(same_document(R"({"value": null})", omni::ryml::as_json(empty)));
@@ -581,7 +581,8 @@ TEST(basics, in_place_mapping_customization) {
 
   constexpr auto serialize = omni::ryml::serialize
     .tdm_map_node([](auto) {
-      return []<typename T>(auto state, omni::type_t<T> type) {
+      return []<typename T>(omni::ryml::write_state_like auto state,
+        omni::type_t<T> type) {
         if constexpr (std::is_same_v<T, settings>) {
           // Include static data members while still excluding functions.
           // See `advanced.record_strategy` for `.filter_fields`.
@@ -673,44 +674,44 @@ TEST(advanced, explicit_configuration) {
   EXPECT_TRUE(result.diagnostics.empty());
 }
 
-namespace explicit_nulls_example {
+namespace keep_nulls_example {
 
 struct response {
   std::optional<int> timeout;
   std::vector<std::optional<int>> samples;
 };
 
-} // namespace explicit_nulls_example
+} // namespace keep_nulls_example
 
 /** `.config` on `serialize` and the tree builders controls empty optionals.
  * Defaults retain null object fields and omit empty array elements.
- * `.explicit_nulls = true` on `map_record` or `map_range` overrides that
+ * `.keep_nulls = true` on `map_record` or `map_range` overrides that
  * policy; `false` defers to it. Records control their fields; ranges control
  * their immediate elements or mapped values. Nested mappings own their policy.
  * Empty roots remain null; quoted "null" remains a string. */
-TEST(advanced, explicit_nulls) {
-  const explicit_nulls_example::response source{
+TEST(advanced, keep_nulls) {
+  const keep_nulls_example::response source{
     .timeout = std::nullopt,
     .samples = {1, std::nullopt, 2},
   };
   const auto serialize = omni::ryml::serialize.tdm_config(
-    [](omni::ryml::write_config options) {
-      options.omit_null_fields = true;
-      options.omit_null_elements = true;
+    [](omni::ryml::serialize_config_t options) {
+      options.keep_null_fields = false;
+      options.keep_null_elements = false;
       return options;
     });
 
   EXPECT_TRUE(same_document(R"({"samples":[1,2]})", serialize(source)));
 
   // Retain empty fields in this record and preserve sample positions.
-  const auto serialize_explicit = serialize.tdm_map_node([](auto) {
-    return []<typename T>(auto state, omni::type_t<T> type) {
-      if constexpr (std::is_same_v<T, explicit_nulls_example::response>) {
-        return omni::ryml::reflected_scope::map_record.tdm_explicit_nulls(
-          [](auto) { return std::true_type{}; });
+  const auto serialize_with_nulls = serialize.tdm_map_node([](auto) {
+    return []<typename T>(omni::ryml::write_state_like auto state,
+      omni::type_t<T> type) {
+      if constexpr (std::is_same_v<T, keep_nulls_example::response>) {
+        return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
+          omni::fn::always_true);
       } else if constexpr (std::is_same_v<T, std::vector<std::optional<int>>>) {
-        return omni::ryml::map_range.tdm_explicit_nulls(
-          [](auto) { return std::true_type{}; });
+        return omni::ryml::map_range.tdm_keep_nulls(omni::fn::always_true);
       } else {
         return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
       }
@@ -718,7 +719,7 @@ TEST(advanced, explicit_nulls) {
   });
 
   EXPECT_TRUE(same_document(R"({"timeout":null,"samples":[1,null,2]})",
-    serialize_explicit(source)));
+    serialize_with_nulls(source)));
 }
 
 /** Unknown fields are rejected by default. allow ignores them; allow | warn
@@ -1860,7 +1861,8 @@ TEST(advanced, path_specific_mapping) {
   using path_specific_mapping::contact;
 
   constexpr auto serialize = omni::ryml::serialize.tdm_map_node([](auto) {
-    return []<typename T>(auto state, omni::type_t<T> type) {
+    return []<typename T>(omni::ryml::write_state_like auto state,
+      omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, address>
         && state.path().starts_with("root.work_address")) {
         return omni::ryml::reflected_scope::map_record
@@ -2388,7 +2390,8 @@ TEST(extended_container_mapping, customizes_appended_members_by_schema_path) {
       omni::type_t<T> type) {
       if constexpr (std::is_same<T, int>::value
         && state.path().ends_with("root.first"))
-        return [](auto state, const int &value) -> ::ryml::NodeRef {
+        return [](omni::ryml::write_state_like auto state,
+          const int &value) -> ::ryml::NodeRef {
           return omni::ryml::map_integral(std::move(state), value + 10);
         };
       else

@@ -14,7 +14,7 @@
 namespace omni {
 namespace ryml {
 
-struct write_config;
+struct serialize_config_t;
 
 template <typename Config, typename MapNode>
 struct map_by_schema_t;
@@ -226,8 +226,8 @@ struct tdm_for_as_owning_tree {
 
   /** (QoL) Functional update of the shared serialization policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const write_config &>),
-    (std::is_constructible<write_config, Result>::value
+    typename Result = compat::invoke_result_t<F &&, const serialize_config_t &>),
+    (std::is_constructible<serialize_config_t, Result>::value
       && std::is_copy_constructible<MapNode>::value))
   constexpr auto tdm_config(F &&f) const & -> as_owning_tree_t<MapNode> {
     return {
@@ -241,8 +241,8 @@ struct tdm_for_as_owning_tree {
 
   /** (QoL) Functional update of the shared serialization policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, write_config &&>),
-    (std::is_constructible<write_config, Result>::value
+    typename Result = compat::invoke_result_t<F &&, serialize_config_t &&>),
+    (std::is_constructible<serialize_config_t, Result>::value
       && std::is_move_constructible<MapNode>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) && -> as_owning_tree_t<MapNode> {
     return {
@@ -301,8 +301,8 @@ struct tdm_for_as_ref_tree {
 
   /** (QoL) Functional update of the shared serialization policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const write_config &>),
-    (std::is_constructible<write_config, Result>::value
+    typename Result = compat::invoke_result_t<F &&, const serialize_config_t &>),
+    (std::is_constructible<serialize_config_t, Result>::value
       && std::is_copy_constructible<MapNode>::value))
   constexpr auto tdm_config(F &&f) const & -> as_ref_tree_t<MapNode> {
     return {
@@ -316,8 +316,8 @@ struct tdm_for_as_ref_tree {
 
   /** (QoL) Functional update of the shared serialization policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, write_config &&>),
-    (std::is_constructible<write_config, Result>::value
+    typename Result = compat::invoke_result_t<F &&, serialize_config_t &&>),
+    (std::is_constructible<serialize_config_t, Result>::value
       && std::is_move_constructible<MapNode>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) && -> as_ref_tree_t<MapNode> {
     return {
@@ -412,8 +412,8 @@ struct tdm_for_serialize {
 
   /** (QoL) Functional update of the shared serialization policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const write_config &>),
-    (std::is_constructible<write_config, Result>::value
+    typename Result = compat::invoke_result_t<F &&, const serialize_config_t &>),
+    (std::is_constructible<serialize_config_t, Result>::value
       && std::is_copy_constructible<MapNode>::value))
   constexpr auto tdm_config(F &&f) const & -> serialize_t<MapNode> {
     return {
@@ -428,8 +428,8 @@ struct tdm_for_serialize {
 
   /** (QoL) Functional update of the shared serialization policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, write_config &&>),
-    (std::is_constructible<write_config, Result>::value
+    typename Result = compat::invoke_result_t<F &&, serialize_config_t &&>),
+    (std::is_constructible<serialize_config_t, Result>::value
       && std::is_move_constructible<MapNode>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_config(F &&f) && -> serialize_t<MapNode> {
     return {

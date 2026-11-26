@@ -500,8 +500,8 @@ struct as_owning_tree_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
-  /** Shared empty-optional policy; see \ref write_config. */
-  write_config config{};
+  /** Shared empty-optional policy; see \ref serialize_config_t. */
+  serialize_config_t config{};
   using tdm_provider::tdm_config;
 
   /** Serialize value into an owning tree.
@@ -522,9 +522,9 @@ as_owning_tree :: const T& -> tree
   constexpr as_owning_tree_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode,
-    typename Options = write_config),
+    typename Options = serialize_config_t),
     (std::is_constructible<MapNode, Value &&>::value
-      && std::is_constructible<write_config, Options &&>::value))
+      && std::is_constructible<serialize_config_t, Options &&>::value))
   constexpr as_owning_tree_t(Value &&value, Options &&options = Options{})
     : map_node(std::forward<Value>(value)),
       config(std::forward<Options>(options)) {}
@@ -551,8 +551,8 @@ struct as_ref_tree_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
-  /** Shared empty-optional policy; see \ref write_config. */
-  write_config config{};
+  /** Shared empty-optional policy; see \ref serialize_config_t. */
+  serialize_config_t config{};
   using tdm_provider::tdm_config;
 
   /** Serialize an lvalue into a tree borrowing its existing string storage.
@@ -577,9 +577,9 @@ as_ref_tree :: T& -> tree
   constexpr as_ref_tree_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename Value = MapNode,
-    typename Options = write_config),
+    typename Options = serialize_config_t),
     (std::is_constructible<MapNode, Value &&>::value
-      && std::is_constructible<write_config, Options &&>::value))
+      && std::is_constructible<serialize_config_t, Options &&>::value))
   constexpr as_ref_tree_t(Value &&value, Options &&options = Options{})
     : map_node(std::forward<Value>(value)),
       config(std::forward<Options>(options)) {}
@@ -608,8 +608,8 @@ struct serialize_t:
   MapNode map_node OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_map_node;
 
-  /** Shared empty-optional policy; see \ref write_config. */
-  write_config config{};
+  /** Shared empty-optional policy; see \ref serialize_config_t. */
+  serialize_config_t config{};
   using tdm_provider::tdm_config;
 
   /** Serialize a reflected record, supported scalar, or vector to YAML or JSON.
@@ -639,10 +639,10 @@ serialize :: const T& -> string
   constexpr serialize_t() = default;
 
   OMNI_CONSTRAINED_TEMPLATE((typename First = ::ryml::EmitType_e,
-    typename Second = MapNode, typename Options = write_config),
+    typename Second = MapNode, typename Options = serialize_config_t),
     (std::is_constructible<::ryml::EmitType_e, First &&>::value
       && std::is_constructible<MapNode, Second &&>::value
-      && std::is_constructible<write_config, Options &&>::value))
+      && std::is_constructible<serialize_config_t, Options &&>::value))
   constexpr serialize_t(First &&first, Second &&second = Second{},
     Options &&options = Options{})
     : format(std::forward<First>(first)),
