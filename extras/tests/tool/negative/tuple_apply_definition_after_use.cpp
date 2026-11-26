@@ -1,5 +1,5 @@
 // Expected failure: std::apply requests reflection before model's definition.
-// A later call through the same specialization must not hide the incomplete use.
+// A later call through the same specialization must not hide the first use.
 #include <omnirefl/reflected_scope.hpp>
 
 #include <cstddef>
