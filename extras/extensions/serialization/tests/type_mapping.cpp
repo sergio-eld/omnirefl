@@ -85,18 +85,19 @@ struct from_type_t<endpoint<T>> {
   }
 };
 
-// C++11 registers a struct and configures the default compositor at invocation.
+// C++11 uses class registration for the configured compositor.
 template <typename T>
 struct to_type_t<endpoint<T>> {
+  // Class registration delegates to the compositor's final callable.
   decltype(compose::with_node_check<core::expect_object_node>(
     reflected_scope::map_object_node_t<mapping::record_strategy_t<
       decltype(mapping::record_strategy.filter_fields),
-      endpoint_names>>{})) mapping{};
+      endpoint_names>>{})) composed_mapping{};
 
   template <typename... Args>
   auto operator()(Args &&...args) const
-    -> decltype(this->mapping(std::forward<Args>(args)...)) {
-    return this->mapping(std::forward<Args>(args)...);
+    -> decltype(this->composed_mapping(std::forward<Args>(args)...)) {
+    return this->composed_mapping(std::forward<Args>(args)...);
   }
 };
 #endif

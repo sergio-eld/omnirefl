@@ -8,12 +8,13 @@ namespace cp {
 
 template <>
 struct to_type_t<int> {
-  map_arithmetic_node_t<> mapping{};
+  // Delegate to a valid final mapper so only registration conflicts fail.
+  map_arithmetic_node_t<> arithmetic_mapping{};
 
   template <typename... Args>
   auto operator()(Args &&...args) const
-    -> decltype(this->mapping(std::forward<Args>(args)...)) {
-    return this->mapping(std::forward<Args>(args)...);
+    -> decltype(this->arithmetic_mapping(std::forward<Args>(args)...)) {
+    return this->arithmetic_mapping(std::forward<Args>(args)...);
   }
 };
 

@@ -325,13 +325,14 @@ struct to_type_t<numeric_strategy_examples::settings> {
 
 template <>
 struct to_type_t<filtered_root_examples::settings> {
+  // Delegate to the final record mapper configured with this field filter.
   reflected_scope::map_object_node_t<mapping::record_strategy_t<
-    filtered_root_examples::parsed_only>> mapping{};
+    filtered_root_examples::parsed_only>> record_mapping{};
 
   template <typename... Args>
   auto operator()(Args &&...args) const
-    -> decltype(this->mapping(std::forward<Args>(args)...)) {
-    return this->mapping(std::forward<Args>(args)...);
+    -> decltype(this->record_mapping(std::forward<Args>(args)...)) {
+    return this->record_mapping(std::forward<Args>(args)...);
   }
 };
 

@@ -256,13 +256,14 @@ struct omni::ryml::cp::to_type_t<my_string> {
 
 template <>
 struct omni::ryml::cp::to_type_t<custom_depth::leaf> {
+  // Class registration delegates to the compositor's final callable.
   decltype(omni::ryml::compose::map_object_node(
-    custom_depth::read_leaf{})) mapping{};
+    custom_depth::read_leaf{})) composed_mapping{};
 
   template <typename... Args>
   auto operator()(Args &&...args) const
-    -> decltype(this->mapping(std::forward<Args>(args)...)) {
-    return this->mapping(std::forward<Args>(args)...);
+    -> decltype(this->composed_mapping(std::forward<Args>(args)...)) {
+    return this->composed_mapping(std::forward<Args>(args)...);
   }
 };
 
