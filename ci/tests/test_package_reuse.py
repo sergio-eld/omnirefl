@@ -55,7 +55,7 @@ elif path[0] == 'runs' and path[-1] == 'jobs':
     key = path[1] + ':' + path[3] if len(path) == 5 else path[1]
     result = {'jobs': data.get('jobs', {}).get(key, data.get('jobs', {}).get(path[1], [
         {'name': 'Build and validate release / Full test suite',
-         'conclusion': 'success'}]))}
+         'conclusion': 'success', 'completed_at': '2026-11-25T12:00:25Z'}]))}
 elif len(path) == 3 and path[0] == 'artifacts' and path[2] == 'zip':
     sys.stdout.buffer.write((root / (path[1] + '.zip')).read_bytes())
     sys.exit()
@@ -99,11 +99,15 @@ class PackageReuse(unittest.TestCase):
                     })
                 run = {'id': 7, 'head_sha': commit, 'status': 'completed',
                        'conclusion': 'failure', 'run_attempt': 2,
-                       'event': 'push', 'path': '.github/workflows/ci.yml'}
+                       'event': 'push', 'path': '.github/workflows/ci.yml',
+                       'updated_at': '2026-11-25T12:00:50Z',
+                       'run_started_at': '2026-11-25T12:00:26Z'}
                 (root / 'api.json').write_text(json.dumps({
                     'runs': [run], 'artifacts': artifacts,
                     'attempts': {'1': {**run, 'run_attempt': 1,
-                                       'conclusion': earlier_result}},
+                                       'conclusion': earlier_result,
+                                       'updated_at': '2026-11-25T12:00:25Z',
+                                       'run_started_at': '2026-11-25T12:00:00Z'}},
                 }))
                 environment = dict(
                     os.environ, GITHUB_REPOSITORY='example/project', GITHUB_SHA=commit,
@@ -192,6 +196,11 @@ print(json.dumps(result))
              [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}, None),
             ('unrelated PR malformed full claim', head, commit, True, 'success',
              [base, 'e' * 40], {'run_id': '', 'full_suite': 'false'}, '{malformed'),
+            ('reused full does not validate uploads', commit, commit, True,
+             'success', [base, head], {'run_id': '', 'full_suite': 'true'},
+             json.dumps({'suite': 'full', 'commit': commit, 'run_id': '7',
+                         'run_attempt': '3', 'source_run_id': '8',
+                         'source_commit': head})),
         ]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -217,21 +226,38 @@ print(json.dumps(result))
                 artifact('validated-commit-' + commit, 'validated-commit.json',
                          json.dumps({'commit': commit, 'run_id': '7'}))
                 if full:
-                    artifact('full-suite-' + commit + '-attempt-1', 'full-suite.json',
+                    attempt = '3' if name == 'reused full does not validate uploads' else '1'
+                    artifact('full-suite-' + commit + '-attempt-' + attempt, 'full-suite.json',
                              full_text if full_text is not None else json.dumps({
                                  'suite': 'full', 'commit': commit,
                                  'run_id': '7', 'run_attempt': '1'}))
                 run = {
                     'id': 7, 'head_sha': head, 'status': 'completed',
                     'conclusion': conclusion, 'run_attempt': 1,
+                    'updated_at': '2026-11-25T12:00:25Z',
+                    'run_started_at': '2026-11-25T12:00:00Z',
                     'event': 'pull_request' if head != commit else 'push',
                     'head_repository': {'full_name': 'example/project'},
                     'pull_requests': [{'base': {'sha': base}, 'head': {'sha': head}}],
                     'path': '.github/workflows/release.yml' if full
                             else '.github/workflows/ci.yml',
                 }
+                attempts = {}
+                jobs = {}
+                if name == 'reused full does not validate uploads':
+                    artifacts[0]['created_at'] = '2026-11-25T12:00:30Z'
+                    artifacts[1]['created_at'] = '2026-11-25T12:00:40Z'
+                    artifacts[2]['created_at'] = '2026-11-25T12:00:49Z'
+                    run.update(run_attempt=3,
+                               run_started_at='2026-11-25T12:00:45Z',
+                               updated_at='2026-11-25T12:00:50Z')
+                    attempts = {str(n): {**run, 'run_attempt': n,
+                                         'conclusion': 'failure'} for n in (1, 2)}
+                    jobs = {'7:3': [{'name': 'Full test suite', 'conclusion': 'success',
+                                     'completed_at': '2026-11-25T12:00:50Z'}]}
                 (root / 'api.json').write_text(json.dumps({
                     'runs': [run], 'artifacts': artifacts, 'parents': parents,
+                    'attempts': attempts, 'jobs': jobs,
                 }))
                 environment = dict(
                     os.environ, GITHUB_REPOSITORY='example/project', GITHUB_SHA=requested,
@@ -246,7 +272,9 @@ print(json.dumps(result))
                 self.assertEqual(0, result.returncode, result.stderr)
                 output = dict(line.split('=', 1)
                               for line in (root / 'output').read_text().splitlines())
-                self.assertEqual(expected, output)
+                self.assertEqual({**expected,
+                                  'artifact_commit': commit if expected['run_id'] else ''},
+                                 output)
                 result = subprocess.run(command + [
                     'download', '--run-id', '7', '--target', 'extras',
                     '--packages-dir', str(root / 'package'),

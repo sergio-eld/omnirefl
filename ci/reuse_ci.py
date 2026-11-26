@@ -2,7 +2,7 @@
 """Reuse successful CI packages; full-suite proofs are independent.
 
 Exact commits qualify directly. A merged PR also qualifies when a synthetic
-checkout of its final head was fully tested and equals the merged source tree.
+checkout of its final head passed validation and equals the merged source tree.
 Artifacts retain SHA-256 verification and their original binary provenance.
 Used by both CI and release preflight.
 """
@@ -34,13 +34,17 @@ def available_artifacts(run_id):
             and (a.get('digest') or '').startswith('sha256:')}
 
 
-def full_suite_passed(run_id, available, commit=COMMIT):
+def full_suite_passed(run_id, available, commit=COMMIT, artifacts_created_at=None):
     prefix = 'full-suite-' + commit + '-attempt-'
     for name, artifact in available.items():
         if not name.startswith(prefix):
             continue
         with archive(artifact) as content:
             proof = json.loads(content.read('full-suite.json'))
+        # Reused coverage proves the tree, not uploads made in this run.
+        if artifacts_created_at is not None and (
+                'source_run_id' in proof or 'source_commit' in proof):
+            continue
         attempt = str(proof.get('run_attempt', ''))
         if (proof.get('suite') == 'full' and proof.get('commit') == commit
                 and str(proof.get('run_id')) == str(run_id)
@@ -49,19 +53,23 @@ def full_suite_passed(run_id, available, commit=COMMIT):
             jobs = pages('actions/runs/' + str(run_id) + '/attempts/' + attempt
                          + '/jobs', 'jobs')
             if any(job['name'].split(' / ')[-1] == 'Full test suite'
-                   and job['conclusion'] == 'success' for job in jobs):
+                   and job['conclusion'] == 'success'
+                   and (artifacts_created_at is None
+                        or (job.get('completed_at') or '') > artifacts_created_at)
+                   for job in jobs):
                 return True
     return False
 
 
-def has_commit_proof(run_id, available, commit):
+def commit_proof(run_id, available, commit):
     marker = available.get('validated-commit-' + commit)
     if not marker:
-        return False
+        return None
     with archive(marker) as content:
         proof = json.loads(content.read('validated-commit.json'))
-    return (proof.get('commit') == commit
-            and str(proof.get('run_id')) == str(run_id))
+    if proof.get('commit') == commit and str(proof.get('run_id')) == str(run_id):
+        return proof
+    return None
 
 
 def matches_commit(run, available, commit=COMMIT):
@@ -81,13 +89,13 @@ def matches_commit(run, available, commit=COMMIT):
                 and pr['head']['sha'] == run['head_sha']
                 for pr in run.get('pull_requests', [])):
             return False
-        if not has_commit_proof(run['id'], available, commit):
+        if not commit_proof(run['id'], available, commit):
             return False
     return True
 
 
-def merged_pr_full_validations(commit, run_id=None):
-    """Yield full proofs for the final PR tree actually merged as commit."""
+def merged_pr_validations(commit, run_id=None):
+    """Yield tested final PR checkouts whose tree was actually merged."""
     pulls = api('commits/' + commit + '/pulls')
     for pr in pulls:
         if (not pr.get('merged_at') or pr.get('merge_commit_sha') != commit
@@ -112,8 +120,7 @@ def merged_pr_full_validations(commit, run_id=None):
                 if (tested == run['head_sha']
                         or len(tested) != 40
                         or any(c not in '0123456789abcdef' for c in tested)
-                        or not has_commit_proof(run['id'], available, tested)
-                        or not full_suite_passed(run['id'], available, tested)):
+                        or not commit_proof(run['id'], available, tested)):
                     continue
                 # GitHub clears run.pull_requests after merging. Bind the
                 # immutable synthetic checkout to the merged PR's final head;
@@ -127,14 +134,26 @@ def merged_pr_full_validations(commit, run_id=None):
                     yield run, tested, available
 
 
+def merged_pr_full_validations(commit, run_id=None):
+    """Yield full-suite proofs for the merged tree, independently of packages."""
+    for run, tested, available in merged_pr_validations(commit, run_id):
+        if full_suite_passed(run['id'], available, tested):
+            yield run, tested, available
+
+
 def reusable_packages(run, full_suite, available, commit, targets):
     # The tested-commit marker is uploaded after package builds and checks.
     # Reject replacements uploaded after that gate, even if a later docs-only
     # rerun turns the overall run green. Untouched earlier packages still qualify.
     # Check even on attempt 1: a rerun may start after fetching run metadata.
+    # A failed or unverifiable full-suite claim cannot stand in for green smoke.
+    if not full_suite and any(name.startswith('full-suite-' + commit + '-attempt-')
+                              for name in available):
+        return False
     marker = available.get('validated-commit-' + commit)
     cutoff = (marker or {}).get('created_at')
-    if not cutoff or not has_commit_proof(run['id'], available, commit):
+    proof = commit_proof(run['id'], available, commit)
+    if not cutoff or not proof:
         return False
     names = [artifact_name('packages', t, commit) for t in targets]
     names += [artifact_name('symbols', t, commit) for t in targets if t != 'extras']
@@ -142,12 +161,36 @@ def reusable_packages(run, full_suite, available, commit, targets):
                and available[name]['created_at'] < cutoff
                for name in names if name in available):
         return False
-    if successful_run(run) or full_suite:
+    newest = max((available[name]['created_at'] for name in names
+                  if name in available), default='')
+    # A later attempt can refresh the marker and replace uploads. Bind the
+    # bytes to the successful attempt, including stale green run metadata.
+    if full_suite and full_suite_passed(
+            run['id'], available, commit, artifacts_created_at=newest):
+        return True
+    # Current markers are published after package, test, and benchmark gates.
+    # Verify that exact attempt; later docs-only success validates no new bytes.
+    if 'suite' in proof or 'run_attempt' in proof:
+        attempt = str(proof.get('run_attempt', ''))
+        if (proof.get('suite') not in ('smoke', 'full')
+                or not attempt.isdecimal() or int(attempt) < 1):
+            return False
+        jobs = pages('actions/runs/' + str(run['id']) + '/attempts/' + attempt
+                     + '/jobs', 'jobs')
+        return any(job['name'].split(' / ')[-1] == 'Required CI'
+                   and job['conclusion'] == 'success'
+                   and cutoff <= (job.get('completed_at') or '') for job in jobs)
+    # Legacy markers lack an attempt. Only accept uploads from within a green
+    # attempt's interval, not replacements left by a later failed attempt.
+    if (successful_run(run) and run.get('run_started_at')
+            and run['run_started_at'] <= newest < (run.get('updated_at') or '')):
         return True
     # A failed rerun does not invalidate an earlier green smoke attempt.
     for attempt in range(int(run.get('run_attempt', 1)) - 1, 0, -1):
         previous = api('actions/runs/' + str(run['id']) + '/attempts/' + str(attempt))
-        if previous['head_sha'] == run['head_sha'] and successful_run(previous):
+        if (previous['head_sha'] == run['head_sha'] and successful_run(previous)
+                and previous.get('run_started_at')
+                and previous['run_started_at'] <= newest < (previous.get('updated_at') or '')):
             return True
     return False
 
@@ -191,7 +234,7 @@ def find(args):
         if run_id not in runs:
             runs[run_id] = api('actions/runs/' + str(run_id))
     candidates = chain(((run, COMMIT, None) for run in runs.values()),
-                       merged_pr_full_validations(COMMIT))
+                       merged_pr_validations(COMMIT))
     for run, source_commit, available in candidates:
         if run['path'].split('@')[0] not in (
                 '.github/workflows/ci.yml', '.github/workflows/release.yml',
@@ -201,9 +244,7 @@ def find(args):
             available = available_artifacts(run['id'])
             if not matches_commit(run, available, source_commit):
                 continue
-            passed = full_suite_passed(run['id'], available, source_commit)
-        else:
-            passed = True  # Already verified by merged_pr_full_validations.
+        passed = full_suite_passed(run['id'], available, source_commit)
         full_suite = full_suite or passed
         if not reusable_packages(run, passed, available, source_commit, args.targets):
             continue
@@ -219,6 +260,7 @@ def find(args):
 
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         print('run_id=' + package_run, file=output)
+        print('artifact_commit=' + package_commit, file=output)
         print('full_suite=' + str(full_suite).lower(), file=output)
     print(json.dumps({'commit': COMMIT, 'package_run': package_run,
                       'artifact_commit': package_commit, 'full_suite': full_suite}))
@@ -229,13 +271,11 @@ def download(args):
     available = available_artifacts(args.run_id)
     source_commit = COMMIT
     if not matches_commit(run, available):
-        merged_source = next(merged_pr_full_validations(COMMIT, args.run_id), None)
+        merged_source = next(merged_pr_validations(COMMIT, args.run_id), None)
         if not merged_source:
             raise RuntimeError('Package source is not successful CI for ' + COMMIT)
         run, source_commit, available = merged_source
-        passed = True
-    else:
-        passed = full_suite_passed(args.run_id, available, source_commit)
+    passed = full_suite_passed(args.run_id, available, source_commit)
     if not reusable_packages(run, passed, available, source_commit, [args.target]):
         raise RuntimeError('Package source is not successful CI for ' + COMMIT)
     print(json.dumps({'commit': COMMIT, 'source_run': args.run_id,
