@@ -255,9 +255,16 @@ struct omni::ryml::cp::to_type_t<my_string> {
 #endif
 
 template <>
-struct omni::ryml::cp::to_type_t<custom_depth::leaf>:
-    decltype(omni::ryml::compose::map_object_node(
-      custom_depth::read_leaf{})) {};
+struct omni::ryml::cp::to_type_t<custom_depth::leaf> {
+  decltype(omni::ryml::compose::map_object_node(
+    custom_depth::read_leaf{})) mapping{};
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(this->mapping(std::forward<Args>(args)...)) {
+    return this->mapping(std::forward<Args>(args)...);
+  }
+};
 
 namespace {
 

@@ -324,9 +324,16 @@ struct to_type_t<numeric_strategy_examples::settings> {
 };
 
 template <>
-struct to_type_t<filtered_root_examples::settings>:
-    reflected_scope::map_object_node_t<mapping::record_strategy_t<
-      filtered_root_examples::parsed_only>> {};
+struct to_type_t<filtered_root_examples::settings> {
+  reflected_scope::map_object_node_t<mapping::record_strategy_t<
+    filtered_root_examples::parsed_only>> mapping{};
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(this->mapping(std::forward<Args>(args)...)) {
+    return this->mapping(std::forward<Args>(args)...);
+  }
+};
 
 template <>
 struct to_type_t<generic_strategy_examples::settings> {

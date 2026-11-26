@@ -304,7 +304,7 @@ mapping_to_type :: (state, type<T>) -> Mapping
 ```
  * State is accepted for compatibility with local mapping selectors.
  * The default selection depends only on T. */
-struct mapping_to_type_t {
+struct mapping_to_type_t final {
   template <typename State, typename T>
   OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
     OMNI_CPP11_TRAILING_RETURN(
@@ -317,7 +317,7 @@ struct mapping_to_type_t {
 mapping_from_type :: (state, type<T>) -> Mapping
 ```
  * The default selection depends only on T. */
-struct mapping_from_type_t {
+struct mapping_from_type_t final {
   template <typename State, typename T>
   OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
     OMNI_CPP11_TRAILING_RETURN(

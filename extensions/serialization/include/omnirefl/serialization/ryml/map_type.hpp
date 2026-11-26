@@ -36,7 +36,7 @@ map_record :: (state, const T&) -> node
  * @pre Record metadata must be available in reflected scope. */
 template <typename Strategy = mapping::record_strategy_t<>,
   typename KeepNulls = std::false_type>
-struct map_record_t final:
+struct map_record_t final final:
     detail::tdm_for_map_record<Strategy, KeepNulls>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_record<Strategy, KeepNulls>;
@@ -93,7 +93,7 @@ map_enum :: (state, T) -> node
  *
  * @pre Metadata for T must be available in reflected scope. */
 template <typename Strategy = mapping::enum_strategy_t<>>
-struct map_enum_t:
+struct map_enum_t final:
     detail::tdm_for_map_enum<Strategy>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_enum<Strategy>;
@@ -147,7 +147,7 @@ static constexpr const map_enum_t<> &map_enum =
 map_arithmetic :: (state, const T&) -> node
 ```
  */
-struct map_arithmetic_t: detail::with_depth_exceeded_operator {
+struct map_arithmetic_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -168,7 +168,7 @@ static constexpr const map_arithmetic_t &map_arithmetic =
 map_integral :: (state, const T&) -> node
 ```
  */
-struct map_integral_t: detail::with_depth_exceeded_operator {
+struct map_integral_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -192,7 +192,7 @@ static constexpr const map_integral_t &map_integral =
 map_floating_point :: (state, const T&) -> node
 ```
  */
-struct map_floating_point_t: detail::with_depth_exceeded_operator {
+struct map_floating_point_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -213,7 +213,7 @@ static constexpr const map_floating_point_t &map_floating_point =
 map_boolean :: (state, const T&) -> node
 ```
  */
-struct map_boolean_t: detail::with_depth_exceeded_operator {
+struct map_boolean_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -236,7 +236,7 @@ static constexpr const map_boolean_t &map_boolean =
 map_string_like :: (state, const T&) -> node
 ```
  */
-struct map_string_like_t: detail::with_depth_exceeded_operator {
+struct map_string_like_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -259,7 +259,7 @@ static constexpr const map_string_like_t &map_string_like =
 map_optional_like :: (state, const T&) -> node
 ```
  */
-struct map_optional_like_t: detail::with_depth_exceeded_operator {
+struct map_optional_like_t final: detail::with_depth_exceeded_operator {
   using detail::with_depth_exceeded_operator::operator();
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
@@ -286,7 +286,7 @@ map_range :: (state, const T&) -> node
  * \ref traits::is_key_value selects object or array output.
  * @pre Non-scalar elements are exposed as lvalue references to value_type. */
 template <typename KeepNulls = std::false_type>
-struct map_range_t final:
+struct map_range_t final final:
     detail::tdm_for_map_range<KeepNulls>,
     detail::with_depth_exceeded_operator {
   using tdm_provider = detail::tdm_for_map_range<KeepNulls>;

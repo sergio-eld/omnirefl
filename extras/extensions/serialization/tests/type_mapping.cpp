@@ -87,11 +87,18 @@ struct from_type_t<endpoint<T>> {
 
 // C++11 registers a struct and configures the default compositor at invocation.
 template <typename T>
-struct to_type_t<endpoint<T>>:
-    decltype(compose::with_node_check<core::expect_object_node>(
-      reflected_scope::map_object_node_t<mapping::record_strategy_t<
-        decltype(mapping::record_strategy.filter_fields),
-        endpoint_names>>{})) {};
+struct to_type_t<endpoint<T>> {
+  decltype(compose::with_node_check<core::expect_object_node>(
+    reflected_scope::map_object_node_t<mapping::record_strategy_t<
+      decltype(mapping::record_strategy.filter_fields),
+      endpoint_names>>{})) mapping{};
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(this->mapping(std::forward<Args>(args)...)) {
+    return this->mapping(std::forward<Args>(args)...);
+  }
+};
 #endif
 
 // Initialized captures must survive dispatcher selection in both directions.

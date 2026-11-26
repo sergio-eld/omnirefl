@@ -5,7 +5,15 @@ namespace ryml {
 namespace cp {
 
 template <>
-struct to_type_t<int>: map_arithmetic_node_t<> {};
+struct to_type_t<int> {
+  map_arithmetic_node_t<> mapping{};
+
+  template <typename... Args>
+  auto operator()(Args &&...args) const
+    -> decltype(this->mapping(std::forward<Args>(args)...)) {
+    return this->mapping(std::forward<Args>(args)...);
+  }
+};
 
 template <>
 constexpr auto to_type<int> = map_arithmetic_node;

@@ -546,7 +546,7 @@ with_node_check<Check> :: Mapping -> Mapping
 // implementation.
 // REFACTORME: [medium] Consider selecting factory-produced default values.
 template <node_check Check, typename Mapping>
-struct with_node_check_t:
+struct with_node_check_t final:
     omni::ryml::detail::with_depth_exceeded_operator {
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
@@ -603,7 +603,7 @@ struct with_node_check_t:
 };
 
 template <typename Mapping>
-struct with_mutating_node_to_type_overload_t:
+struct with_mutating_node_to_type_overload_t final:
     omni::ryml::detail::with_depth_exceeded_operator {
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 

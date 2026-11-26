@@ -93,7 +93,7 @@ using map_by_schema_dispatch_t = compat::conditional_t<
 /** Schema-driven mapping of a caller-owned tree or subtree with config. */
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t>
-struct map_by_schema_t:
+struct map_by_schema_t final:
     detail::tdm_for_map_by_schema<Config, MapNode> {
   using tdm_provider = detail::tdm_for_map_by_schema<Config, MapNode>;
 
@@ -255,7 +255,7 @@ auto deserialize(Config &&options, const MapNode &map_node,
  * tdm_config returns a new callable with transformed configuration. */
 template <typename Config = omni::ryml::config_t<>,
   typename MapNode = reflected_scope::mapping_to_type_t>
-struct deserialize_t:
+struct deserialize_t final:
     detail::tdm_for_deserialize<Config, MapNode> {
   using tdm_provider = detail::tdm_for_deserialize<Config, MapNode>;
 
@@ -492,7 +492,7 @@ static constexpr const deserialize_t<> &deserialize =
 /** Owning RapidYAML tree serialization of supported C++ values.
  * Strings are copied into the tree's arena, so it can outlive the source. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
-struct as_owning_tree_t:
+struct as_owning_tree_t final:
     detail::tdm_for_as_owning_tree<MapNode> {
   using tdm_provider = detail::tdm_for_as_owning_tree<MapNode>;
 
@@ -543,7 +543,7 @@ static constexpr const as_owning_tree_t<> &as_owning_tree =
  * The tree owns nodes and generated text. Source storage must remain alive
  * and unchanged while the tree is used. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
-struct as_ref_tree_t:
+struct as_ref_tree_t final:
     detail::tdm_for_as_ref_tree<MapNode> {
   using tdm_provider = detail::tdm_for_as_ref_tree<MapNode>;
 
@@ -596,7 +596,7 @@ static constexpr const as_ref_tree_t<> &as_ref_tree =
 
 /** JSON/YAML text serialization with the selected .format. */
 template <typename MapNode = reflected_scope::mapping_from_type_t>
-struct serialize_t:
+struct serialize_t final:
     detail::tdm_for_serialize<MapNode> {
   using tdm_provider = detail::tdm_for_serialize<MapNode>;
 

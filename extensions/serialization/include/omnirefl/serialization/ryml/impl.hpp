@@ -26,7 +26,7 @@ struct reflection_target<T,
 
 // C++11 type selection needs a callable for the non-reflected alternative.
 // Keep its invocation through read_node so local/global overrides still apply.
-struct map_selected {
+struct map_selected final {
   template <typename State, typename Destination>
   auto operator()(State state, ::ryml::ConstNodeRef node,
     Destination into) const -> decltype(read_node(state, node, into)) {
@@ -61,7 +61,7 @@ struct cpp11_lambda_read {
   }
 };
 
-struct map_in_reflected_scope {
+struct map_in_reflected_scope final {
   template <typename T, typename State>
   auto operator()(State state, ::ryml::ConstNodeRef node,
     omni::type_t<T>) const -> with_diagnostics_t<T> {
