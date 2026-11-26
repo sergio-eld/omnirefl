@@ -544,7 +544,8 @@ private:
       tree(parent.tree), node_id(parent.node_id) {}
 
   constexpr write_state_t(const typename StateConfig::map_node_type &mapping,
-    ::ryml::Tree *tree, ::ryml::id_type node_id, const serialize_config_t &config)
+    ::ryml::Tree *tree, ::ryml::id_type node_id,
+    const serialize_config_t &config)
     : map_node(mapping), config(config), tree(tree), node_id(node_id) {}
 
   constexpr write_state_t(const write_state_t &parent, ::ryml::id_type node_id)

@@ -45,27 +45,13 @@ constexpr bool resolve_keep_nulls(compat::monostate, bool configured) {
   return configured;
 }
 
-template <typename T>
-bool is_empty_optional(const T &value);
+OMNI_CONSTRAINED_TEMPLATE((typename T), (!traits::is_optional<T>::value))
+bool is_empty_optional(const T &) { return false; }
 
-template <bool Optional>
-struct is_empty_optional_case {
-  template <typename T>
-  static bool get(const T &) { return false; }
-};
-
-template <>
-struct is_empty_optional_case<true> {
-  template <typename T>
-  static bool get(const T &value) {
-    return !adapt::has_value(value)
-      || is_empty_optional(adapt::get_value(value));
-  }
-};
-
-template <typename T>
+OMNI_CONSTRAINED_TEMPLATE((typename T), (traits::is_optional<T>::value))
 bool is_empty_optional(const T &value) {
-  return is_empty_optional_case<traits::is_optional<T>::value>::get(value);
+  return !adapt::has_value(value)
+    || is_empty_optional(adapt::get_value(value));
 }
 
 template <typename State>
