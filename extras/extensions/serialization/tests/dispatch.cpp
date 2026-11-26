@@ -256,7 +256,8 @@ struct omni::ryml::cp::to_type_t<my_string> {
 
 template <>
 struct omni::ryml::cp::to_type_t<custom_depth::leaf> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_object_node(
     custom_depth::read_leaf{})) composed_mapping{};
 

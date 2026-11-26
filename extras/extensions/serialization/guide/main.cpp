@@ -47,7 +47,7 @@
  *
  * Advanced: customization and composition
  *   advanced.custom_scalar_mapping_cpp11
- *     equivalent C++11 struct registration
+ *     C++11 class registration and mapper composition
  *   advanced.custom_container_mapping
  *     reuse range mapping for a container wrapper
  *   advanced.custom_string_mapping - reuse string mapping for a string wrapper
@@ -538,7 +538,9 @@ namespace {
 
 /** A custom record mapping can delegate to `map_object_node` and `map_record`.
  * Member conversions still use their `cp::` registrations, so
- * `my_record::reading` uses the scalar mapping for `my_integer` shown above. */
+ * `my_record::reading` uses the scalar mapping for `my_integer` shown above.
+ * Built-in mappers are `final`; see `advanced.custom_scalar_mapping_cpp11`
+ * for class registration by delegation. */
 TEST(basics, custom_record_mapping) {
   const std::string document = R"({"reading": 7, "name": "sensor"})";
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
@@ -1058,8 +1060,14 @@ struct omni::ryml::cp::from_type_t<basic_customization::my_cpp11_integer> {
 
 namespace {
 
-/** Before C++14, specialize to_type_t and from_type_t instead of variable
- * templates. my_cpp11_integer uses the equivalent named callables above. */
+/** Before C++14, specialize `cp::to_type_t` and `cp::from_type_t` instead of
+ * variable templates. `my_cpp11_integer` uses the named callables above.
+ *
+ * Built-in mappers are `final`; class registrations delegate to them.
+ * `.tdm_` updates return the mapper's own type, possibly with new template
+ * arguments, and would discard members added by a derived registration.
+ * Mappers without `.tdm_` members are also `final` so adding updates later
+ * does not change the inheritance contract. */
 TEST(advanced, custom_scalar_mapping_cpp11) {
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
     omni::type_t<basic_customization::my_cpp11_integer>{}, "42");

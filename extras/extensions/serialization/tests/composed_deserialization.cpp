@@ -38,7 +38,8 @@ const auto omni::ryml::cp::to_type<composed_boolean::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_boolean::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_boolean_node(
     composed_boolean::read{})) composed_mapping{};
 
@@ -110,7 +111,8 @@ const auto omni::ryml::cp::to_type<composed_integer::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_integer::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_integer_node(
     composed_integer::read{})) composed_mapping{};
 
@@ -182,7 +184,8 @@ const auto omni::ryml::cp::to_type<composed_real::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_real::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_number_node(
     composed_real::read{})) composed_mapping{};
 
@@ -240,7 +243,8 @@ const auto omni::ryml::cp::to_type<composed_string::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_string::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_string_node(
     composed_string::read{})) composed_mapping{};
 
@@ -304,7 +308,8 @@ const auto omni::ryml::cp::to_type<composed_enum::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_enum::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_string_node(
     composed_enum::read{})) composed_mapping{};
 
@@ -385,7 +390,8 @@ const auto omni::ryml::cp::to_type<composed_arithmetic::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_arithmetic::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_arithmetic_node(
     composed_arithmetic::read{})) composed_mapping{};
 
@@ -457,7 +463,8 @@ const auto omni::ryml::cp::to_type<composed_range::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_range::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_array_node(
     composed_range::read{})) composed_mapping{};
 
@@ -530,7 +537,8 @@ const auto omni::ryml::cp::to_type<composed_optional::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_optional::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_value_node(
     composed_optional::read{})) composed_mapping{};
 
@@ -628,7 +636,8 @@ const auto omni::ryml::cp::to_type<composed_record::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_record::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_object_node(
     composed_record::read{})) composed_mapping{};
 
@@ -790,7 +799,8 @@ const auto omni::ryml::cp::to_type<composed_existing::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_existing::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_object_node(
     omni::ryml::reflected_scope::map_object_node_t<>{})) composed_mapping{};
 
@@ -887,7 +897,8 @@ const auto omni::ryml::cp::to_type<composed_state_expected::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_state_expected::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_boolean_node(
     composed_state_expected::read{})) composed_mapping{};
 
@@ -941,7 +952,8 @@ const auto omni::ryml::cp::to_type<composed_state_diagnostics::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_state_diagnostics::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_boolean_node(
     composed_state_diagnostics::read{})) composed_mapping{};
 
@@ -1014,7 +1026,8 @@ const auto omni::ryml::cp::to_type<composed_value_precedence::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_value_precedence::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_boolean_node(
     composed_value_precedence::read{})) composed_mapping{};
 
@@ -1104,7 +1117,8 @@ const auto omni::ryml::cp::to_type<composed_move_only::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_move_only::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_boolean_node(
     composed_move_only::read{})) composed_mapping{};
 
@@ -1158,7 +1172,8 @@ const auto omni::ryml::cp::to_type<composed_rvalue_state::value> =
 #else
 template <>
 struct omni::ryml::cp::to_type_t<composed_rvalue_state::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_boolean_node(
     composed_rvalue_state::read{})) composed_mapping{};
 
@@ -1225,7 +1240,8 @@ struct envelope {
 // The C++11 registration form remains usable in every supported standard.
 template <>
 struct omni::ryml::cp::to_type_t<composed_constructed::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_integer_node(
     composed_constructed::read{})) composed_mapping{};
 
@@ -1324,7 +1340,8 @@ struct read {
 
 template <>
 struct omni::ryml::cp::to_type_t<composed_bound_input::value> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_integer_node(
     composed_bound_input::read{})) composed_mapping{};
 
@@ -1383,7 +1400,8 @@ struct read {
 
 template <>
 struct omni::ryml::cp::to_type_t<composed_nonassignable::constructed> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_integer_node(
     composed_nonassignable::read{})) composed_mapping{};
 
@@ -1396,7 +1414,8 @@ struct omni::ryml::cp::to_type_t<composed_nonassignable::constructed> {
 
 template <>
 struct omni::ryml::cp::to_type_t<composed_nonassignable::defaulted> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_integer_node(
     composed_nonassignable::read{})) composed_mapping{};
 
@@ -1440,7 +1459,8 @@ struct add {
 
 template <>
 struct omni::ryml::cp::to_type_t<composed_bitfield::digit> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(omni::ryml::compose::map_integer_node(
     composed_bitfield::add{})) composed_mapping{};
 

@@ -325,7 +325,8 @@ struct to_type_t<numeric_strategy_examples::settings> {
 
 template <>
 struct to_type_t<filtered_root_examples::settings> {
-  // Delegate to the final record mapper configured with this field filter.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   reflected_scope::map_object_node_t<mapping::record_strategy_t<
     filtered_root_examples::parsed_only>> record_mapping{};
 

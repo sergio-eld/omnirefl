@@ -88,7 +88,8 @@ struct from_type_t<endpoint<T>> {
 // C++11 uses class registration for the configured compositor.
 template <typename T>
 struct to_type_t<endpoint<T>> {
-  // Class registration delegates to the compositor's final callable.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   decltype(compose::with_node_check<core::expect_object_node>(
     reflected_scope::map_object_node_t<mapping::record_strategy_t<
       decltype(mapping::record_strategy.filter_fields),

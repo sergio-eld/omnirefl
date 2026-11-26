@@ -8,7 +8,8 @@ namespace cp {
 
 template <>
 struct to_type_t<int> {
-  // Delegate to a valid final mapper so only registration conflicts fail.
+  // Delegate because the mapper is final: `.tdm_` updates return its own type
+  // and cannot preserve members added by derived registrations.
   map_arithmetic_node_t<> arithmetic_mapping{};
 
   template <typename... Args>
