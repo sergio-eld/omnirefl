@@ -1,3 +1,5 @@
+// Expected failure: both cp::to_type_t and cp::to_type register int.
+// Selection must diagnose conflicting registrations, not an invalid mapper.
 #include <omnirefl/serialization/ryml.hpp>
 
 namespace omni {

@@ -1,3 +1,5 @@
+// Expected failure: unregistered has neither a custom mapping nor a supported
+// default. Selection must report "No node mapping: specialize".
 #include <omnirefl/serialization/ryml.hpp>
 
 struct unregistered {};
