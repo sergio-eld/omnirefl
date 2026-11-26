@@ -37,7 +37,7 @@ jobs:
       pull-requests: read
     outputs:
       reuse_artifacts: ${{ steps.reuse.outputs.reuse_artifacts }}
-      full_suite: ${{ steps.reusable_ci.outputs.full_suite }}
+      full_suite: ${{ steps.reuse.outputs.full_suite }}
       rebuild_packages: ${{ steps.reusable_ci.outputs.run_id != '' && steps.reusable_ci.outputs.candidate != 'true' }}
     env:
       # Fine-grained token with read/write access to repository contents.
@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           GITHUB_OUTPUT="$RUNNER_TEMP/reusable-ci.outputs" \
-            python3 ci/reuse_ci.py find --wait-master --require-symbols \
+            python3 ci/reuse_ci.py find --native --wait-master --wait-active --require-symbols \
               --targets $RELEASE_PACKAGE_TARGETS
           cat "$RUNNER_TEMP/reusable-ci.outputs" >> "$GITHUB_OUTPUT"
           source "$RUNNER_TEMP/reusable-ci.outputs"
@@ -114,7 +114,7 @@ jobs:
                 args+=(--symbols-dir \
                   "./reusable-artifacts/symbols/symbols-$target-${GITHUB_SHA::12}")
               fi
-              if ! python3 ci/reuse_ci.py download --run-id "$run_id" \
+              if ! python3 ci/reuse_ci.py download --native --manifest "$artifact_manifest" --run-id "$run_id" \
                 --target "$target" "${args[@]}"; then
                 echo '::warning::Selected CI artifacts could not be restored; rebuilding packages and symbols.'
                 run_id=
@@ -133,8 +133,7 @@ jobs:
             done
           }
 
-          # Reused PR archives keep their tested commit suffix and contents.
-          # Directory/artifact names still identify this release's commit.
+          # Native archives must carry this tagged commit's package suffix.
           shopt -s nullglob
           required_package_available() {
             local target=$1
@@ -143,7 +142,7 @@ jobs:
             [ 1 -eq "${#matches[@]}" ] && [ -s "${matches[0]}" ] || return 1
             local filename=${matches[0]##*/}
             local package_commit=${filename#"omnirefl-$target-$version-"}
-            [[ "${package_commit%."$extension"}" =~ ^[0-9a-f]{12}$ ]]
+            [ "${package_commit%."$extension"}" = "${GITHUB_SHA::12}" ]
           }
 
           version=${GITHUB_REF_NAME#v}
@@ -194,6 +193,7 @@ jobs:
         env:
           CANDIDATE: ${{ steps.reusable_ci.outputs.candidate }}
           UPLOAD_OUTCOME: ${{ steps.reusable_artifacts.outcome }}
+          FULL_SUITE: ${{ steps.reusable_ci.outputs.full_suite }}
         run: |
           reuse_artifacts=false
           if [ true = "$CANDIDATE" ] && [ success = "$UPLOAD_OUTCOME" ]; then
@@ -203,6 +203,11 @@ jobs:
             exit 1
           fi
           echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
+          if [ true = "$reuse_artifacts" ] && [ true = "$FULL_SUITE" ]; then
+            echo 'full_suite=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'full_suite=false' >> "$GITHUB_OUTPUT"
+          fi
 
   validation:
     name: Build and validate release
@@ -212,10 +217,9 @@ jobs:
         || 'true' != needs.preflight.outputs.full_suite }}
     uses: ./.github/workflows/ci.yml
     with:
-      # Smoke packages are reusable independently of full-suite success.
-      # An existing full-suite proof permits smoke-only package restoration.
       build_sources: true
-      full_suite: ${{ 'true' != needs.preflight.outputs.full_suite }}
+      full_suite: true
+      native_packages: true
       rebuild_packages: ${{ needs.preflight.outputs.rebuild_packages == 'true' }}
       skip_pages: true
     # Ad hoc: `skip_pages` prevents deployment, but GitHub validates every
@@ -269,10 +273,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REUSE_ARTIFACTS: ${{ needs.preflight.outputs.reuse_artifacts }}
+          VALIDATION_RESULT: ${{ needs.validation.result }}
         run: |
           set -euo pipefail
           short_sha=${GITHUB_SHA::12}
-          if [ true = "$REUSE_ARTIFACTS" ]; then
+          if [ true = "$REUSE_ARTIFACTS" ] && [ skipped = "$VALIDATION_RESULT" ]; then
             python3 ci/github_artifacts.py --run-id "$GITHUB_RUN_ID" \
               --name "release-inputs-$GITHUB_SHA" --destination ./artifacts
           else
@@ -310,8 +315,7 @@ jobs:
           )
 
           for package in "${packages[@]}"; do
-            # Keep package bytes/binary IDs intact; only the published asset's
-            # filename uses the release commit. Match the original PR suffix.
+            # The archives and embedded binary IDs must name the tagged commit.
             prefix=${package%-"$short_sha".*}
             extension=${package##*-"$short_sha".}
             matches=(./artifacts/packages/*/"$prefix"-*."$extension")
@@ -321,8 +325,8 @@ jobs:
             fi
             filename=${matches[0]##*/}
             package_commit=${filename#"$prefix"-}
-            if [[ ! "${package_commit%."$extension"}" =~ ^[0-9a-f]{12}$ ]]; then
-              echo "package lacks a tested commit suffix: ${matches[0]}" >&2
+            if [ "${package_commit%."$extension"}" != "$short_sha" ]; then
+              echo "package does not name the tagged commit: ${matches[0]}" >&2
               exit 1
             fi
 

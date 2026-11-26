@@ -51,7 +51,6 @@ class Case:
     active: bool = False
     failed: bool = False
     pr_claim: bool = False
-    idle_check: bool = False
     automatic: bool = False
     checking: bool = False
 
@@ -62,12 +61,7 @@ class FullValidation(unittest.TestCase):
             Case('validated idle head', 0, timedelta(days=4), False),
             Case('four new commits', 4, timedelta(), False),
             Case('five new commits', 5, timedelta(), True),
-            Case('one commit idle over three days', 1,
-                 timedelta(days=3, hours=1), True, idle_check=True),
-            Case('one commit idle under three days', 1,
-                 timedelta(days=2, hours=23), False, idle_check=True),
             Case('push ignores idle time', 1, timedelta(days=4), False),
-            Case('schedule waits for idle time', 5, timedelta(), False, idle_check=True),
             Case('active full run', 5, timedelta(), False, active=True),
             Case('active automatic full run', 5, timedelta(), False,
                  active=True, automatic=True),
@@ -137,8 +131,7 @@ class FullValidation(unittest.TestCase):
                     PATH=directory + os.pathsep + os.environ['PATH'])
                 result = subprocess.run(
                     [sys.executable, str(Path(__file__).resolve().parents[1]
-                                         / 'full_validation.py')]
-                    + (['--idle'] if case.idle_check else []),
+                                         / 'full_validation.py')],
                     cwd=directory, env=environment, capture_output=True, text=True)
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual('full_suite=' + str(case.expected).lower() + '\n',

@@ -602,20 +602,8 @@ Package tests have two profiles, selected with `OMNI_TEST_SUITE`:
   including musl. Local builds default to this profile. Release tags require it;
   CI's manual `full_suite` input also selects it.
 
-Each master push selects its suite before testing: full after five commits
-since the latest successful full run, otherwise smoke. Count master's
-first-parent history; a missing baseline selects full. Run only the selected
-suite, because full already includes smoke.
-
-To request full PR validation, add the `ci:full` label before the next push,
-or add it and select **Re-run all jobs** on the PR's CI run. CI reads current
-labels on every attempt; subsequent commits stay full while the label is
-present. PR run names say `automatic`; the selection step and Summary report
-the actual suite. A standalone manual workflow run does not satisfy PR checks.
-
-A daily schedule separately checks for unvalidated commits after three idle
-days. Only that check considers idle time. Active full runs prevent duplicate
-validation; scheduled runs reuse exact-commit packages when available.
+See [CI validation](ci.md) for suite selection, package reuse, nightly runs,
+and release requirements.
 
 Put base-interface sources under `tests/smoke/`, with their own executable and
 `CMakeLists.txt`. Full targets compile those same sources alongside the remaining
@@ -636,43 +624,6 @@ and on every full run. Required CI enforces them whenever selected.
 Keep opt-in build regressions outside smoke/full. Standalone runners under
 `extras/tests/tool/manual/` document their invocation at the top of the file; see
 [keep-going](../extras/tests/tool/manual/keep_going/check.py).
-
-Available packages from successful CI can be reused for the exact commit,
-including smoke runs. Fresh PR attempts build directly; reopened PRs and reruns
-of package preparation check for reusable packages. After merging a PR, CI can
-also reuse its green smoke or full validation and packages: GitHub must identify
-its final head, the tested synthetic merge must include that head, and its tree
-must equal the actual merged tree. With usable packages, master skips checks
-already covered by that run. If full validation is due, a smoke run supplies the
-packages and master runs full; smoke reuse does not reset the cadence. An existing
-green full run satisfies full validation and resets the cadence to zero, even
-when merging changes the commit ID. Amended heads and different merged trees
-do not qualify. Explicit manual/full requests still run their selected tests.
-A changed base alone is harmless when the complete resulting tree is identical.
-That green PR full run also counts toward cadence if a later master check fails;
-the tested source tree still has full coverage. Failed master checks remain
-failed; release preflight still waits for an existing master CI run to succeed.
-
-Release preflight uses the same check. Packages and symbols must form a complete
-set from one run; an expired or missing set triggers a rebuild without discarding
-an available full-validation proof. Reused binaries keep their original commit
-IDs and bytes; published asset filenames use the release commit. CI logs the
-source run and tested commit. Pages still builds and publishes from master.
-An earlier green smoke attempt or full proof survives a failed rerun. Packages
-and symbols must predate the tested-commit gate; replacements left by a failed
-rerun are rebuilt because uploads can replace them separately. Current markers
-bind to the successful aggregate job's attempt; older successes cannot authorize
-replacement uploads. A reused full proof covers the tree, not new uploads.
-
-Before a release exists, move an annotated release tag and push just that ref:
-
-```sh
-git tag -fa v0.0.9 <commit> -m "v0.0.9"
-git push origin +refs/tags/v0.0.9
-```
-
-This triggers release validation without deleting the remote tag first. For an
-unchanged commit, rerun failed workflow jobs instead of moving the tag.
 
 ## Standard compatibility
 

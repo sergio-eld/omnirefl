@@ -8,6 +8,7 @@ Used by both CI and release preflight.
 """
 
 import argparse
+import base64
 from collections import Counter
 from itertools import chain
 import json
@@ -34,7 +35,8 @@ def available_artifacts(run_id):
             and (a.get('digest') or '').startswith('sha256:')}
 
 
-def full_suite_passed(run_id, available, commit=COMMIT, artifacts_created_at=None):
+def full_suite_passed(run_id, available, commit=COMMIT, artifacts_created_at=None,
+                      build_commit=None):
     prefix = 'full-suite-' + commit + '-attempt-'
     for name, artifact in available.items():
         if not name.startswith(prefix):
@@ -44,6 +46,8 @@ def full_suite_passed(run_id, available, commit=COMMIT, artifacts_created_at=Non
         # Reused coverage proves the tree, not uploads made in this run.
         if artifacts_created_at is not None and (
                 'source_run_id' in proof or 'source_commit' in proof):
+            continue
+        if build_commit is not None and proof.get('build_commit') != build_commit:
             continue
         attempt = str(proof.get('run_attempt', ''))
         if (proof.get('suite') == 'full' and proof.get('commit') == commit
@@ -199,6 +203,26 @@ def artifact_name(kind, target, commit=COMMIT):
     return kind + '-' + target + '-' + commit[:12]
 
 
+def wait_active():
+    # Order attempts, not original run creation: reruns can start after newer
+    # full runs. A deterministic tie-break avoids selectors waiting in a cycle.
+    def started(run):
+        attempt = api('actions/runs/' + str(run['id']) + '/attempts/'
+                      + str(run['run_attempt']))
+        return attempt['run_started_at'], int(run['id'])
+
+    current = started(api('actions/runs/' + os.environ['GITHUB_RUN_ID']))
+    for run in pages('actions/runs?' + urlencode({'head_sha': COMMIT}), 'workflow_runs'):
+        if (str(run['id']) != os.environ['GITHUB_RUN_ID']
+                and run['status'] != 'completed' and run['event'] != 'pull_request'
+                and run['path'].split('@')[0] in (
+                    '.github/workflows/ci.yml', '.github/workflows/release.yml',
+                    '.github/workflows/full_validation.yml')
+                and started(run) < current):
+            subprocess.run(['gh', 'run', 'watch', str(run['id']),
+                            '--interval', '30', '--exit-status'], check=True)
+
+
 def find(args):
     if args.wait_master:
         # Preserve the release gate on any active commit CI before reuse.
@@ -217,8 +241,13 @@ def find(args):
                 print('Waiting for master CI to appear for ' + COMMIT, flush=True)
                 time.sleep(15)
 
+    if args.wait_active:
+        wait_active()
+
     package_run = ''
     package_commit = ''
+    build_commit = ''
+    manifest = {}
     full_suite = False
     runs = {run['id']: run for run in pages(
         'actions/runs?' + urlencode({'head_sha': COMMIT}), 'workflow_runs')}
@@ -234,7 +263,7 @@ def find(args):
         if run_id not in runs:
             runs[run_id] = api('actions/runs/' + str(run_id))
     candidates = chain(((run, COMMIT, None) for run in runs.values()),
-                       merged_pr_validations(COMMIT))
+                       () if args.native else merged_pr_validations(COMMIT))
     for run, source_commit, available in candidates:
         if run['path'].split('@')[0] not in (
                 '.github/workflows/ci.yml', '.github/workflows/release.yml',
@@ -244,23 +273,44 @@ def find(args):
             available = available_artifacts(run['id'])
             if not matches_commit(run, available, source_commit):
                 continue
+        proof = commit_proof(run['id'], available, source_commit) or {}
+        origin = proof.get('build_commit', '')
+        if args.native and (source_commit != COMMIT or origin != COMMIT
+                            or run['event'] == 'pull_request'):
+            continue
         passed = full_suite_passed(run['id'], available, source_commit)
-        full_suite = full_suite or passed
+        if not args.native:
+            full_suite = full_suite or passed
         if not reusable_packages(run, passed, available, source_commit, args.targets):
             continue
         required = [artifact_name('packages', t, source_commit) for t in args.targets]
         if args.require_symbols:
             required += [artifact_name('symbols', t, source_commit)
                          for t in args.targets if t != 'extras']
-        if not package_run and all(name in available for name in required):
-            package_run = str(run['id'])
-            package_commit = source_commit
+        if all(name in available for name in required):
+            native_full = args.native and full_suite_passed(
+                run['id'], available, source_commit,
+                artifacts_created_at=max(available[name]['created_at'] for name in required),
+                build_commit=COMMIT)
+            if not package_run or native_full:
+                package_run = str(run['id'])
+                package_commit = source_commit
+                build_commit = origin
+                manifest = {name: {key: available[name][key] for key in ('id', 'digest')}
+                            for name in required}
+                if args.native:
+                    full_suite = native_full
         if package_run and full_suite:
             break
 
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         print('run_id=' + package_run, file=output)
         print('artifact_commit=' + package_commit, file=output)
+        if build_commit:
+            print('build_commit=' + build_commit, file=output)
+        if package_run and (args.native or build_commit):
+            encoded = base64.urlsafe_b64encode(json.dumps(manifest).encode()).decode()
+            print('artifact_manifest=' + encoded, file=output)
         print('full_suite=' + str(full_suite).lower(), file=output)
     print(json.dumps({'commit': COMMIT, 'package_run': package_run,
                       'artifact_commit': package_commit, 'full_suite': full_suite}))
@@ -275,9 +325,24 @@ def download(args):
         if not merged_source:
             raise RuntimeError('Package source is not successful CI for ' + COMMIT)
         run, source_commit, available = merged_source
+    proof = commit_proof(args.run_id, available, source_commit) or {}
+    if args.native and (source_commit != COMMIT or proof.get('build_commit') != COMMIT
+                        or run['event'] == 'pull_request'):
+        raise RuntimeError('Package source was not built from ' + COMMIT)
     passed = full_suite_passed(args.run_id, available, source_commit)
     if not reusable_packages(run, passed, available, source_commit, [args.target]):
         raise RuntimeError('Package source is not successful CI for ' + COMMIT)
+    if args.native and not args.manifest:
+        raise RuntimeError('Native download requires its selected artifact manifest')
+    if args.manifest:
+        manifest = json.loads(base64.urlsafe_b64decode(args.manifest))
+        names = [artifact_name('packages', args.target, source_commit)]
+        if args.symbols_dir:
+            names.append(artifact_name('symbols', args.target, source_commit))
+        for name in names:
+            selected = {key: available.get(name, {}).get(key) for key in ('id', 'digest')}
+            if selected != manifest.get(name):
+                raise RuntimeError('Selected artifact was replaced: ' + name)
     print(json.dumps({'commit': COMMIT, 'source_run': args.run_id,
                       'artifact_commit': source_commit, 'target': args.target}))
     extract(available[artifact_name('packages', args.target, source_commit)],
@@ -293,12 +358,17 @@ if __name__ == '__main__':
     command = commands.add_parser('find')
     command.add_argument('--targets', nargs='+', required=True)
     command.add_argument('--require-symbols', action='store_true')
+    command.add_argument('--native', action='store_true',
+                         help='Require original builds from this exact commit')
+    command.add_argument('--wait-active', action='store_true')
     command.add_argument('--wait-master', nargs='?', const='if-present',
                          choices=('if-present', 'required'))
     command.set_defaults(invoke=find)
     command = commands.add_parser('download')
+    command.add_argument('--native', action='store_true')
     command.add_argument('--run-id', required=True)
     command.add_argument('--target', required=True)
+    command.add_argument('--manifest')
     command.add_argument('--packages-dir', required=True)
     command.add_argument('--symbols-dir')
     command.set_defaults(invoke=download)
