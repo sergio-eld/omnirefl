@@ -1,6 +1,6 @@
 #pragma once
 
-/** Record, enum, and range mapping policies shared by protocol extensions.
+/** Enum, record, and range mapping policies shared by protocol extensions.
  * Policies contain field selection, aliases, and value-preserving validation;
  * they do not depend on generated metadata or a document backend.
  * See docs/CONVENTIONS.md, functional data-member updates. */
@@ -18,6 +18,30 @@
 
 namespace omni {
 namespace mapping {
+
+/** Enum names and their accepted aliases. */
+template <typename AliasesByName = std::tuple<>>
+struct enum_policy_t:
+    detail::tdm_for_enum_policy<AliasesByName> {
+  using tdm_provider = detail::tdm_for_enum_policy<AliasesByName>;
+
+  /** Additional input names for each enumerator; output keeps its C++ name.
+   * Aliases must not overlap enumerator names or one another. */
+  // aliases_by_name :: {enumerator_name: [alias]}
+  AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_aliases_by_name;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr enum_policy_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = AliasesByName),
+    (std::is_constructible<AliasesByName, Value &&>::value))
+  constexpr enum_policy_t(Value &&value)
+    : aliases_by_name(std::forward<Value>(value)) {}
+#endif
+};
 
 /** Record field selection, aliases, validation, and output null policy.
  * Predicates are stateless, default-constructible, and return Boolean traits.
@@ -41,21 +65,27 @@ struct record_policy_t:
   using tdm_provider = detail::record_policy_updates<FilterFields,
     AliasesByName, ValidateFields, Finalize, KeepNulls>;
 
+  /** Unary predicate selecting fields to map; defaults to
+   * `fn::is_non_static && fn::is_non_functional`. */
   // filter_fields :: field_meta_like -> bool_constant
   FilterFields filter_fields OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_filter_fields;
 
+  /** Additional input names for each field; output keeps its C++ name.
+   * Aliases must not overlap canonical field names or one another. */
   // aliases_by_name :: {field_name: [alias]}
   AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_aliases_by_name;
 
+  /** Validators for each named field, run after decoding; empty by default. */
   // validate_fields :: {field_name: [validator]}
   // validator :: T -> expected<T, Error> | with_diagnostics<T>
   ValidateFields validate_fields OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_validate_fields;
 
+  /** Post-processes the completed record; defaults to `fn::identity`
+   * (no validation). */
   // finalize :: Record -> expected<Record, Error> | with_diagnostics<Record>
-  // The default identity performs no validation.
   Finalize finalize OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_finalize;
 
@@ -94,28 +124,6 @@ private:
 #endif
 };
 
-/** Enum names and their accepted aliases.
- * aliases_by_name :: {enumerator_name: [alias]} */
-template <typename AliasesByName = std::tuple<>>
-struct enum_policy_t:
-    detail::tdm_for_enum_policy<AliasesByName> {
-  using tdm_provider = detail::tdm_for_enum_policy<AliasesByName>;
-
-  AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_aliases_by_name;
-
-// Ad hoc: classes with bases are not aggregates before C++17. These
-// constructors preserve field initialization in the older standards.
-#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr enum_policy_t() = default;
-
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = AliasesByName),
-    (std::is_constructible<AliasesByName, Value &&>::value))
-  constexpr enum_policy_t(Value &&value)
-    : aliases_by_name(std::forward<Value>(value)) {}
-#endif
-};
-
 /** Output policy for empty optional elements or mapped values.
  * Input mappings ignore this policy. */
 template <typename KeepNulls = compat::monostate>
@@ -146,17 +154,17 @@ struct range_policy_t:
 #endif
 };
 
-/** Whether T specializes record_policy_t, ignoring cv/ref qualifiers. */
-template <typename T>
-struct is_record_policy:
-    compat::bool_constant<
-      traits::is_specialization_of<record_policy_t, T>()> {};
-
 /** Whether T specializes enum_policy_t, ignoring cv/ref qualifiers. */
 template <typename T>
 struct is_enum_policy:
     compat::bool_constant<
       traits::is_specialization_of<enum_policy_t, T>()> {};
+
+/** Whether T specializes record_policy_t, ignoring cv/ref qualifiers. */
+template <typename T>
+struct is_record_policy:
+    compat::bool_constant<
+      traits::is_specialization_of<record_policy_t, T>()> {};
 
 /** Whether T specializes range_policy_t, ignoring cv/ref qualifiers. */
 template <typename T>
@@ -167,10 +175,10 @@ struct is_range_policy:
 // C++14 adds variable templates for trait values.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
-constexpr bool is_record_policy_v = is_record_policy<T>::value;
+constexpr bool is_enum_policy_v = is_enum_policy<T>::value;
 
 template <typename T>
-constexpr bool is_enum_policy_v = is_enum_policy<T>::value;
+constexpr bool is_record_policy_v = is_record_policy<T>::value;
 
 template <typename T>
 constexpr bool is_range_policy_v = is_range_policy<T>::value;
@@ -179,24 +187,24 @@ constexpr bool is_range_policy_v = is_range_policy<T>::value;
 // C++20 concepts expose the same policy contracts.
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
 template <typename T>
-concept record_policy_like = is_record_policy<T>::value;
+concept enum_policy_like = is_enum_policy<T>::value;
 
 template <typename T>
-concept enum_policy_like = is_enum_policy<T>::value;
+concept record_policy_like = is_record_policy<T>::value;
 
 template <typename T>
 concept range_policy_like = is_range_policy<T>::value;
 #endif
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr record_policy_t<> record_policy{};
 inline constexpr enum_policy_t<> enum_policy{};
+inline constexpr record_policy_t<> record_policy{};
 inline constexpr range_policy_t<> range_policy{};
 #else
-static constexpr const record_policy_t<> &record_policy =
-  compat::detail::shared_state<record_policy_t<>>::value;
 static constexpr const enum_policy_t<> &enum_policy =
   compat::detail::shared_state<enum_policy_t<>>::value;
+static constexpr const record_policy_t<> &record_policy =
+  compat::detail::shared_state<record_policy_t<>>::value;
 static constexpr const range_policy_t<> &range_policy =
   compat::detail::shared_state<range_policy_t<>>::value;
 #endif
