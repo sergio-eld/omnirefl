@@ -102,11 +102,11 @@ void write_record_members(const Write &write, Record &value,
 
 } // namespace detail
 
-template <typename Strategy, typename KeepNulls>
+template <typename Strategy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto map_record_t<Strategy, KeepNulls>::operator()(State context,
+auto map_record_t<Strategy>::operator()(State context,
   const T &value) const -> ::ryml::NodeRef {
   auto node = context.node();
   assert(mapping::valid_record_strategy(
@@ -123,7 +123,7 @@ auto map_record_t<Strategy, KeepNulls>::operator()(State context,
       /*node=*/node,
       /*context=*/state,
       /*keep_null_fields=*/omni::ryml::detail::resolve_keep_nulls(
-        this->keep_nulls, context.config.keep_null_fields),
+        this->strategy.keep_nulls, context.config.keep_null_fields),
     },
     value,
     // REFACTORME: [high] Slop ad hoc: reconstruct and filter binding types

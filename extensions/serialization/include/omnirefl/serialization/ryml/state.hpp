@@ -140,7 +140,7 @@ template <typename SelectMapping>
 struct as_ref_tree_t;
 
 /** Shared policy for empty optionals in records and ranges.
- * Mappers inherit this policy unless `.keep_nulls` overrides it.
+ * Record strategies and range mappers can override it with `.keep_nulls`.
  * Empty roots remain null. */
 struct serialize_config_t {
   // Empty optional record fields and associative values.

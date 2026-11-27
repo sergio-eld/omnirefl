@@ -41,6 +41,13 @@ struct measurement {
   std::vector<omni::compat::optional<int>> samples;
 };
 
+// A named updater lets C++11 spell the strategy's return type below.
+struct null_override {
+  bool keep;
+
+  constexpr bool operator()(omni::compat::monostate) const { return keep; }
+};
+
 struct select_null_policy {
   bool record;
   bool range;
@@ -55,16 +62,19 @@ struct select_null_policy {
   template <typename Path>
   auto operator()(Path, omni::type_t<measurement>) const
     -> omni::ryml::reflected_scope::map_record_t<
-      omni::mapping::record_strategy_t<>, bool> {
-    return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
-      [this](omni::compat::monostate) { return this->record; });
+      decltype(omni::mapping::record_strategy.tdm_keep_nulls(
+        null_override{}))> {
+    return omni::ryml::reflected_scope::map_record.tdm_strategy(
+      [this](const omni::mapping::record_strategy_t<> &strategy) {
+        return strategy.tdm_keep_nulls(null_override{this->record});
+      });
   }
 
   template <typename Path, typename T>
   auto operator()(Path, omni::type_t<std::vector<T>>) const
     -> omni::ryml::map_range_t<bool> {
     return omni::ryml::map_range.tdm_keep_nulls(
-      [this](omni::compat::monostate) { return this->range; });
+      null_override{this->range});
   }
 };
 

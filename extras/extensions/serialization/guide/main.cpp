@@ -688,8 +688,9 @@ struct response {
 
 /** `.config` on `serialize` and the tree builders controls empty optionals.
  * Defaults retain null object fields and omit empty array elements.
- * `.keep_nulls` on `map_record` or `map_range` defaults to `compat::monostate`,
- * inheriting `.config`. A `bool` or `compat::bool_constant` overrides it:
+ * `.strategy.keep_nulls` on `map_record` and `.keep_nulls` on `map_range`
+ * default to `compat::monostate`, inheriting `.config`.
+ * A `bool` or `compat::bool_constant` overrides it:
  * `true` keeps nulls, `false` omits them. Records control their fields; ranges
  * control their immediate elements or mapped values. Nested policies are
  * independent.
@@ -713,8 +714,10 @@ TEST(advanced, keep_nulls) {
     return []<typename T>(omni::ryml::schema_path auto path,
       omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, keep_nulls_example::response>) {
-        return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
-          omni::fn::always_true);
+        return omni::ryml::reflected_scope::map_record.tdm_strategy(
+          [](auto strategy) {
+            return strategy.tdm_keep_nulls(omni::fn::always_true);
+          });
       } else if constexpr (std::is_same_v<T, std::vector<std::optional<int>>>) {
         return omni::ryml::map_range.tdm_keep_nulls(omni::fn::always_true);
       } else {
@@ -1672,7 +1675,8 @@ const auto omni::ryml::cp::from_type<record_strategy_example::account> =
     return record_strategy_example::public_fields;
   });
 
-/** `record_strategy_t` configures field selection, aliases, and validation.
+/** `record_strategy_t` configures field selection, aliases, validation,
+ * and output null retention.
  * `.tdm_strategy` attaches it to a record mapping. Both `cp::` registrations
  * share one strategy: `secret` is neither emitted nor required on input.
  * The default `.filter_fields` is `fn::is_non_static && fn::is_non_functional`.
@@ -1680,8 +1684,8 @@ const auto omni::ryml::cp::from_type<record_strategy_example::account> =
  * C++11 uses a named metadata predicate with a templated `operator()` returning
  * `compat::bool_constant`; see `strategy_examples::without_label` in
  * `../tests/mapping_strategy.cpp` for that predicate idiom.
- * See `advanced.strategy_aliases`, `advanced.field_validation`, and
- * `advanced.record_validation` for the other properties, or
+ * See `advanced.strategy_aliases`, `advanced.field_validation`,
+ * `advanced.record_validation`, and `advanced.keep_nulls`, or
  * \ref omni::mapping::record_strategy_t for their contracts. */
 TEST(advanced, record_strategy) {
   const record_strategy_example::account source{

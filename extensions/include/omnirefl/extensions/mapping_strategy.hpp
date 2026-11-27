@@ -19,7 +19,7 @@
 namespace omni {
 namespace mapping {
 
-/** Record field selection, aliases, and validation.
+/** Record field selection, aliases, validation, and output null policy.
  * Predicates are stateless, default-constructible, and return Boolean traits.
  * Validators preserve successfully checked values; Error is interpreted by
  * the consuming extension. Type-carried keys such as OMNI_META_STRING("age")
@@ -33,12 +33,13 @@ template <typename FilterFields = decltype(
     omni::fn::is_non_static && omni::fn::is_non_functional),
   typename AliasesByName = std::tuple<>,
   typename ValidateFields = std::tuple<>,
-  typename Finalize = omni::fn::identity>
+  typename Finalize = omni::fn::identity,
+  typename KeepNulls = compat::monostate>
 struct record_strategy_t:
     detail::record_strategy_updates<FilterFields, AliasesByName,
-      ValidateFields, Finalize> {
+      ValidateFields, Finalize, KeepNulls> {
   using tdm_provider = detail::record_strategy_updates<FilterFields,
-    AliasesByName, ValidateFields, Finalize>;
+    AliasesByName, ValidateFields, Finalize, KeepNulls>;
 
   // filter_fields :: field_meta_like -> bool_constant
   FilterFields filter_fields OMNI_CPP14_DEFAULT_INIT();
@@ -58,23 +59,38 @@ struct record_strategy_t:
   Finalize finalize OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_finalize;
 
+  /** Output policy for empty optional fields; ignored by input mappings.
+   * `compat::monostate` inherits the output configuration. A `bool` or
+   * `compat::bool_constant` overrides it: true keeps nulls, false omits. */
+  KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_keep_nulls;
+
+  static_assert(std::is_same<compat::monostate, KeepNulls>::value
+      || std::is_same<bool, KeepNulls>::value
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
+    "record_strategy_t keep_nulls must be compat::monostate, bool, "
+    "or compat::bool_constant");
+
 // Before C++17, aggregate bases need constructors for constexpr tdm_ updates.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr record_strategy_t()
-    : filter_fields{}, aliases_by_name{}, validate_fields{}, finalize{} {}
+    : filter_fields{}, aliases_by_name{}, validate_fields{}, finalize{},
+      keep_nulls{} {}
 
 private:
-  template <typename, typename, typename, typename>
+  template <typename, typename, typename, typename, typename>
   friend struct detail::record_strategy_updates;
 
   template <typename Filter, typename Aliases, typename Validators,
-    typename Finish>
+    typename Finish, typename Nulls>
   constexpr record_strategy_t(Filter &&filter, Aliases &&aliases,
-    Validators &&validators, Finish &&finish)
+    Validators &&validators, Finish &&finish, Nulls &&nulls)
     : filter_fields(std::forward<Filter>(filter)),
       aliases_by_name(std::forward<Aliases>(aliases)),
       validate_fields(std::forward<Validators>(validators)),
-      finalize(std::forward<Finish>(finish)) {}
+      finalize(std::forward<Finish>(finish)),
+      keep_nulls(std::forward<Nulls>(nulls)) {}
 #endif
 };
 

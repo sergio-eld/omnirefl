@@ -26,39 +26,27 @@ namespace reflected_scope {
 
 /** Maps selected record fields to object entries with canonical names.
  * Members are mapped through state.select_mapping.
- * Empty optional fields follow \ref serialize_config_t unless `.keep_nulls`
- * overrides it.
+ * Empty optional fields follow \ref serialize_config_t unless
+ * `.strategy.keep_nulls` overrides it.
  *
 ```
 map_record :: (state, const T&) -> node
 ```
  *
  * @pre Record metadata must be available in reflected scope. */
-template <typename Strategy = mapping::record_strategy_t<>,
-  typename KeepNulls = compat::monostate>
+template <typename Strategy = mapping::record_strategy_t<>>
 struct map_record_t final:
-    detail::tdm_for_map_record<Strategy, KeepNulls>,
+    detail::tdm_for_map_record<Strategy>,
     omni::ryml::detail::with_depth_exceeded_operator {
-  using tdm_provider = detail::tdm_for_map_record<Strategy, KeepNulls>;
+  using tdm_provider = detail::tdm_for_map_record<Strategy>;
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
   static_assert(mapping::is_record_strategy<Strategy>::value,
     "map_record_t requires mapping::record_strategy_t");
-  static_assert(std::is_same<compat::monostate, KeepNulls>::value
-      || std::is_same<bool, KeepNulls>::value
-      || std::is_same<std::false_type, KeepNulls>::value
-      || std::is_same<std::true_type, KeepNulls>::value,
-    "map_record_t keep_nulls must be compat::monostate, bool, "
-    "or compat::bool_constant");
 
   /** \ref mapping::record_strategy_t */
   Strategy strategy OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_strategy;
-
-  /** `compat::monostate` follows \ref serialize_config_t; `bool` or
-   * `compat::bool_constant` overrides it: true keeps nulls, false omits. */
-  KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_keep_nulls;
 
   OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
     (compat::conjunction<omni::is_reflected_record<T>,
@@ -68,15 +56,12 @@ struct map_record_t final:
 // Ad hoc: classes with bases are not aggregates before C++17. These
 // constructors preserve field initialization in the older standards.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr map_record_t() : strategy{}, keep_nulls{} {}
+  constexpr map_record_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
-    typename Nulls = KeepNulls),
-    (std::is_constructible<Strategy, Value &&>::value
-      && std::is_constructible<KeepNulls, Nulls &&>::value))
-  constexpr map_record_t(Value &&value, Nulls &&nulls = Nulls{})
-    : strategy(std::forward<Value>(value)),
-      keep_nulls(std::forward<Nulls>(nulls)) {}
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy),
+    (std::is_constructible<Strategy, Value &&>::value))
+  constexpr map_record_t(Value &&value)
+    : strategy(std::forward<Value>(value)) {}
 #endif
 };
 
@@ -342,6 +327,6 @@ static constexpr const map_range_t<> &map_range =
 // A custom sequence compositor can emit values such as "unavailable"; consider
 // an observable trait only if needed, since that would be an ad hoc.
 
-// REFACTORME: [medium] Consider sharing `.keep_nulls` with schema rendering,
-// including in-place overrides for RPC return types. Input field requirements
-// need a separate policy.
+// REFACTORME: [medium] Consider sharing `map_range.keep_nulls` with schema
+// rendering, including in-place overrides for RPC return types. Input field
+// requirements need a separate policy.
