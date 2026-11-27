@@ -793,7 +793,7 @@ TEST(mapping_dispatch, schema_parent_of_optional_fields_and_range_elements) {
     R"({"number": 21, "numbers": [42]})", serialize(*result.value)));
 }
 
-// C++20 selectors can branch on exact wrapper types or user-defined concepts.
+// C++20 selectors can branch on exact wrapper types or concepts.
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts \
   && defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
 namespace wrapper_selection {
@@ -803,10 +803,6 @@ struct request {
   std::optional<record> maybe;
   std::vector<record> records;
 };
-
-// User concepts can use the library's existing optional-adapter contract.
-template <typename T>
-concept optional_like = omni::traits::is_optional<T>::value;
 
 const std::string document =
   R"({"maybe": {"number": 3}, "records": [{"number": 7}]})";
@@ -841,7 +837,7 @@ TEST(mapping_dispatch, selects_optional_record_field_by_concept) {
   const auto deserialize = omni::ryml::deserialize.tdm_select_mapping([](auto) {
     return []<typename T>(omni::ryml::schema_path auto path,
       omni::type_t<T> type) {
-      if constexpr (wrapper_selection::optional_like<T>)
+      if constexpr (omni::traits::optional_like<T>)
         return omni::ryml::compose::map_value_node(omni::fn::default_value<
           omni::compat::expected<T, omni::ryml::issue>>{});
       else
@@ -960,34 +956,14 @@ struct root {
   omni::compat::optional<std::vector<record>> records;
 };
 
-struct read_context_integer {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_read_state<State>::value))
-  auto operator()(State state, ::ryml::ConstNodeRef node,
-    omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
-    return local_mapping::add_integer{
-      std::is_same<typename State::enclosing_root, root>::value ? 10 : 0}(
-        std::move(state), node, type);
-  }
-};
-
-struct write_context_integer {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_write_state<State>::value))
-  auto operator()(State state, int value) const -> ::ryml::NodeRef {
-    return write_integer{
-      std::is_same<typename State::enclosing_root, root>::value ? 10 : 0}(
-        std::move(state), value);
-  }
-};
-
 struct select_context_reader {
   template <typename Path, typename T>
   auto operator()(Path path, omni::type_t<T> type) const {
-    if constexpr (path.schema_parent == omni::type<address>
+    if constexpr (path.enclosing_root == omni::type<root>
+      && path.schema_parent == omni::type<address>
       && std::is_same<T, int>::value
       && path.str().ends_with("work_address.number"))
-      return read_context_integer{};
+      return local_mapping::add_integer{10};
     else
       return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
   }
@@ -996,10 +972,11 @@ struct select_context_reader {
 struct select_context_writer {
   template <typename Path, typename T>
   auto operator()(Path path, omni::type_t<T> type) const {
-    if constexpr (path.schema_parent == omni::type<address>
+    if constexpr (path.enclosing_root == omni::type<root>
+      && path.schema_parent == omni::type<address>
       && std::is_same<T, int>::value
       && path.str().ends_with("work_address.number"))
-      return write_context_integer{};
+      return write_integer{10};
     else
       return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }

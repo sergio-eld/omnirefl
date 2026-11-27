@@ -379,7 +379,8 @@ struct read_state_t {
    * edges reuse their first path. str() exposes the compile-time string;
    * schema_parent identifies the containing record or range. */
   static constexpr auto path()
-    -> schema_path_t<typename StateConfig::schema_parent,
+    -> schema_path_t<typename StateConfig::enclosing_root,
+      typename StateConfig::schema_parent,
       typename StateConfig::path_type::text> {
     return {};
   }
@@ -497,7 +498,8 @@ struct write_state_t {
 
   /** Canonical schema path; see read_state_t::path. */
   static constexpr auto path()
-    -> schema_path_t<typename StateConfig::schema_parent,
+    -> schema_path_t<typename StateConfig::enclosing_root,
+      typename StateConfig::schema_parent,
       typename StateConfig::path_type::text> {
     return {};
   }

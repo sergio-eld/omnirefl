@@ -1864,7 +1864,8 @@ struct contact {
  * containing record or range's type token: `omni::type<contact>` for both
  * addresses, or `omni::type<void>` at the root. Optionals are transparent.
  * `Path::schema_parent_t` gives the same type in a named path template.
- * `type<T>` identifies the current value's type.
+ * `Path::enclosing_root_t` and `path.enclosing_root` describe the original
+ * root; `type<T>` identifies the current value's type.
  *
  * This selector omits `street` only within `work_address`. The home address and
  * other types keep their default mappings. See `advanced.record_strategy` for
