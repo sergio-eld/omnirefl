@@ -10,14 +10,6 @@
 #include <utility>
 #include <vector>
 
-#if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
-#  include <optional>
-#endif
-
-#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
-#  include <ranges>
-#endif
-
 #if defined(__GNUC__) && !defined(__clang__)
 // GCC warns about GTest conditionals inside unbraced assertion guards.
 #  pragma GCC diagnostic push
