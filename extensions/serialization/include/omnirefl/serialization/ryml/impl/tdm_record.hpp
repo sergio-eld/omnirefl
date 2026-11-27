@@ -12,39 +12,39 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-template <typename Strategy, typename WithNodeCheck>
+template <typename Policy, typename WithNodeCheck>
 struct map_object_node_t;
 
-template <typename Strategy>
+template <typename Policy>
 struct map_record_t;
 
 namespace detail {
 
-template <typename Strategy, typename WithNodeCheck>
+template <typename Policy, typename WithNodeCheck>
 struct tdm_for_map_object_node {
-  /** (QoL) Functional update of the shared mapping strategy. */
+  /** (QoL) Functional update of the shared mapping policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
+    typename Result = compat::invoke_result_t<F &&, const Policy &>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value
       && std::is_copy_constructible<WithNodeCheck>::value))
-  constexpr auto tdm_strategy(F &&f) const &
+  constexpr auto tdm_policy(F &&f) const &
     -> map_object_node_t<compat::decay_t<Result>, WithNodeCheck> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
       /*tdm_base=*/{},
       /*depth_base=*/{},
 #endif
-      compat::invoke(std::forward<F>(f), this->derived().strategy),
+      compat::invoke(std::forward<F>(f), this->derived().policy),
       this->derived().with_node_check,
     };
   }
 
-  /** (QoL) Functional update consuming the bound strategy. */
+  /** (QoL) Functional update consuming the bound policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
+    typename Result = compat::invoke_result_t<F &&, Policy &&>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value
       && std::is_move_constructible<WithNodeCheck>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
+  OMNI_CPP14_CONSTEXPR auto tdm_policy(F &&f) &&
     -> map_object_node_t<compat::decay_t<Result>, WithNodeCheck> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
@@ -52,41 +52,41 @@ struct tdm_for_map_object_node {
       /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
-        std::move(this->derived().strategy)),
+        std::move(this->derived().policy)),
       std::move(this->derived().with_node_check),
     };
   }
 
-  /** (QoL) Functional update of .with_node_check, copying the strategy. */
+  /** (QoL) Functional update of .with_node_check, copying the policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
     typename Result = compat::invoke_result_t<F &&, const WithNodeCheck &>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_copy_constructible<Strategy>::value))
+      && std::is_copy_constructible<Policy>::value))
   constexpr auto tdm_with_node_check(F &&f) const &
-    -> map_object_node_t<Strategy, compat::decay_t<Result>> {
+    -> map_object_node_t<Policy, compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
       /*tdm_base=*/{},
       /*depth_base=*/{},
 #endif
-      this->derived().strategy,
+      this->derived().policy,
       compat::invoke(std::forward<F>(f), this->derived().with_node_check),
     };
   }
 
-  /** (QoL) Functional update of .with_node_check, moving the strategy. */
+  /** (QoL) Functional update of .with_node_check, moving the policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
     typename Result = compat::invoke_result_t<F &&, WithNodeCheck &&>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value
-      && std::is_move_constructible<Strategy>::value))
+      && std::is_move_constructible<Policy>::value))
   OMNI_CPP14_CONSTEXPR auto tdm_with_node_check(F &&f) &&
-    -> map_object_node_t<Strategy, compat::decay_t<Result>> {
+    -> map_object_node_t<Policy, compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
       /*tdm_base=*/{},
       /*depth_base=*/{},
 #endif
-      std::move(this->derived().strategy),
+      std::move(this->derived().policy),
       compat::invoke(std::forward<F>(f),
         std::move(this->derived().with_node_check)),
     };
@@ -94,40 +94,40 @@ struct tdm_for_map_object_node {
 
 private:
   // Direct returns keep the updater bodies constexpr-compatible with C++11.
-  constexpr const map_object_node_t<Strategy, WithNodeCheck> &
+  constexpr const map_object_node_t<Policy, WithNodeCheck> &
   derived() const & {
     return static_cast<
-      const map_object_node_t<Strategy, WithNodeCheck> &>(*this);
+      const map_object_node_t<Policy, WithNodeCheck> &>(*this);
   }
 
-  OMNI_CPP14_CONSTEXPR map_object_node_t<Strategy, WithNodeCheck> &
+  OMNI_CPP14_CONSTEXPR map_object_node_t<Policy, WithNodeCheck> &
   derived() & {
-    return static_cast<map_object_node_t<Strategy, WithNodeCheck> &>(*this);
+    return static_cast<map_object_node_t<Policy, WithNodeCheck> &>(*this);
   }
 };
 
-template <typename Strategy>
+template <typename Policy>
 struct tdm_for_map_record {
-  /** (QoL) Functional update of the shared mapping strategy. */
+  /** (QoL) Functional update of the shared mapping policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const Strategy &>),
+    typename Result = compat::invoke_result_t<F &&, const Policy &>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_strategy(F &&f) const &
+  constexpr auto tdm_policy(F &&f) const &
     -> map_record_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
       /*tdm_base=*/{},
       /*depth_base=*/{},
 #endif
-      compat::invoke(std::forward<F>(f), this->derived().strategy),
+      compat::invoke(std::forward<F>(f), this->derived().policy),
     };
   }
 
-  /** (QoL) Functional update consuming the bound strategy. */
+  /** (QoL) Functional update consuming the bound policy. */
   OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, Strategy &&>),
+    typename Result = compat::invoke_result_t<F &&, Policy &&>),
     (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_strategy(F &&f) &&
+  OMNI_CPP14_CONSTEXPR auto tdm_policy(F &&f) &&
     -> map_record_t<compat::decay_t<Result>> {
     return {
 #if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
@@ -135,18 +135,18 @@ struct tdm_for_map_record {
       /*depth_base=*/{},
 #endif
       compat::invoke(std::forward<F>(f),
-        std::move(this->derived().strategy)),
+        std::move(this->derived().policy)),
     };
   }
 
 private:
   // Direct returns keep the updater bodies constexpr-compatible with C++11.
-  constexpr const map_record_t<Strategy> &derived() const & {
-    return static_cast<const map_record_t<Strategy> &>(*this);
+  constexpr const map_record_t<Policy> &derived() const & {
+    return static_cast<const map_record_t<Policy> &>(*this);
   }
 
-  OMNI_CPP14_CONSTEXPR map_record_t<Strategy> &derived() & {
-    return static_cast<map_record_t<Strategy> &>(*this);
+  OMNI_CPP14_CONSTEXPR map_record_t<Policy> &derived() & {
+    return static_cast<map_record_t<Policy> &>(*this);
   }
 };
 

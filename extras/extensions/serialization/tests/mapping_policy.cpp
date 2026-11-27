@@ -1,4 +1,4 @@
-/** Shared strategies through public JSON/YAML mapping entry points. */
+/** Shared policies through public JSON/YAML mapping entry points. */
 #include "json_match.hpp"
 
 #include <array>
@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace strategy_examples {
+namespace policy_examples {
 
 using omni::compat::string_view;
 
@@ -90,18 +90,18 @@ struct interval_validators {
   }
 };
 
-const auto interval_strategy = omni::mapping::record_strategy
+const auto interval_policy = omni::mapping::record_policy
   .tdm_aliases_by_name(interval_aliases{})
   .tdm_validate_fields(interval_validators{})
   .tdm_finalize(omni::fn::default_value<increasing_interval>{});
 
 struct include_statics {
-  template <typename Strategy>
-  constexpr auto operator()(const Strategy &strategy) const
-    -> decltype(strategy.tdm_filter_fields(
+  template <typename Policy>
+  constexpr auto operator()(const Policy &policy) const
+    -> decltype(policy.tdm_filter_fields(
       omni::fn::default_value<
         omni::compat::remove_cvref_t<decltype(omni::fn::always_true)>>{})) {
-    return strategy.tdm_filter_fields(
+    return policy.tdm_filter_fields(
       omni::fn::default_value<
         omni::compat::remove_cvref_t<decltype(omni::fn::always_true)>>{});
   }
@@ -118,9 +118,9 @@ struct select_static_writer {
   template <typename Path>
   auto operator()(Path, omni::type_t<interval>) const
     -> decltype(omni::ryml::reflected_scope::map_record
-      .tdm_strategy(include_statics{})) {
+      .tdm_policy(include_statics{})) {
     return omni::ryml::reflected_scope::map_record
-      .tdm_strategy(include_statics{});
+      .tdm_policy(include_statics{});
   }
 
   template <typename Path, typename T>
@@ -141,7 +141,7 @@ struct status_aliases {
   }
 };
 
-const auto status_strategy = omni::mapping::enum_strategy
+const auto status_policy = omni::mapping::enum_policy
   .tdm_aliases_by_name(status_aliases{});
 
 struct existing {
@@ -160,7 +160,7 @@ struct positive_existing {
   }
 };
 
-const auto existing_strategy = omni::mapping::record_strategy
+const auto existing_policy = omni::mapping::record_policy
   .tdm_finalize(omni::fn::default_value<positive_existing>{});
 
 struct copy_only_aliases {
@@ -185,18 +185,18 @@ struct owning_check {
 };
 
 struct update_aliases {
-  template <typename Strategy>
-  auto operator()(Strategy &&strategy) const
-    -> decltype(std::forward<Strategy>(strategy).tdm_aliases_by_name(
+  template <typename Policy>
+  auto operator()(Policy &&policy) const
+    -> decltype(std::forward<Policy>(policy).tdm_aliases_by_name(
       omni::fn::identity{})) {
-    return std::forward<Strategy>(strategy).tdm_aliases_by_name(
+    return std::forward<Policy>(policy).tdm_aliases_by_name(
       omni::fn::identity{});
   }
 };
 
-} // namespace strategy_examples
+} // namespace policy_examples
 
-namespace optional_strategy_examples {
+namespace optional_policy_examples {
 
 struct settings { omni::compat::optional<int> value; };
 
@@ -218,9 +218,9 @@ struct field_checks {
   }
 };
 
-} // namespace optional_strategy_examples
+} // namespace optional_policy_examples
 
-namespace numeric_strategy_examples {
+namespace numeric_policy_examples {
 
 struct settings {
   int age;
@@ -231,13 +231,13 @@ struct settings {
 struct field_checks {
   auto operator()(const std::tuple<> &) const
     -> decltype(std::make_tuple(
-      std::make_tuple("age", strategy_examples::nonnegative{}))) {
+      std::make_tuple("age", policy_examples::nonnegative{}))) {
     return std::make_tuple(
-      std::make_tuple("age", strategy_examples::nonnegative{}));
+      std::make_tuple("age", policy_examples::nonnegative{}));
   }
 };
 
-} // namespace numeric_strategy_examples
+} // namespace numeric_policy_examples
 
 namespace filtered_root_examples {
 
@@ -260,7 +260,7 @@ struct parsed_only {
 
 } // namespace filtered_root_examples
 
-namespace generic_strategy_examples {
+namespace generic_policy_examples {
 
 struct settings {
   int age;
@@ -301,23 +301,23 @@ struct field_checks {
   }
 };
 
-} // namespace generic_strategy_examples
+} // namespace generic_policy_examples
 
 namespace omni {
 namespace ryml {
 namespace cp {
 
 template <>
-struct to_type_t<numeric_strategy_examples::settings> {
+struct to_type_t<numeric_policy_examples::settings> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    omni::type_t<numeric_strategy_examples::settings> type) const
-    -> with_diagnostics_t<numeric_strategy_examples::settings> {
-    const auto strategy = mapping::record_strategy
-      .tdm_validate_fields(numeric_strategy_examples::field_checks{});
-    return reflected_scope::map_object_node.tdm_strategy(
-      [&strategy](const mapping::record_strategy_t<> &) {
-        return strategy;
+    omni::type_t<numeric_policy_examples::settings> type) const
+    -> with_diagnostics_t<numeric_policy_examples::settings> {
+    const auto policy = mapping::record_policy
+      .tdm_validate_fields(numeric_policy_examples::field_checks{});
+    return reflected_scope::map_object_node.tdm_policy(
+      [&policy](const mapping::record_policy_t<> &) {
+        return policy;
       })(
       std::move(state), node, type);
   }
@@ -328,9 +328,9 @@ struct to_type_t<filtered_root_examples::settings> {
   // Delegate because the mapper is final: `.tdm_` updates return its own type
   // and cannot preserve members added by derived registrations.
   static constexpr auto record_mapping()
-    -> decltype(reflected_scope::map_object_node_t<mapping::record_strategy_t<
+    -> decltype(reflected_scope::map_object_node_t<mapping::record_policy_t<
       filtered_root_examples::parsed_only>>{}) {
-    return reflected_scope::map_object_node_t<mapping::record_strategy_t<
+    return reflected_scope::map_object_node_t<mapping::record_policy_t<
       filtered_root_examples::parsed_only>>{};
   }
 
@@ -343,72 +343,72 @@ struct to_type_t<filtered_root_examples::settings> {
 };
 
 template <>
-struct to_type_t<generic_strategy_examples::settings> {
+struct to_type_t<generic_policy_examples::settings> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    omni::type_t<generic_strategy_examples::settings> type) const
-    -> with_diagnostics_t<generic_strategy_examples::settings> {
-    const auto strategy = mapping::record_strategy
-      .tdm_validate_fields(generic_strategy_examples::field_checks{});
-    return reflected_scope::map_object_node.tdm_strategy(
-      [&strategy](const mapping::record_strategy_t<> &) {
-        return strategy;
+    omni::type_t<generic_policy_examples::settings> type) const
+    -> with_diagnostics_t<generic_policy_examples::settings> {
+    const auto policy = mapping::record_policy
+      .tdm_validate_fields(generic_policy_examples::field_checks{});
+    return reflected_scope::map_object_node.tdm_policy(
+      [&policy](const mapping::record_policy_t<> &) {
+        return policy;
       })(
       std::move(state), node, type);
   }
 };
 
 template <>
-struct to_type_t<optional_strategy_examples::settings> {
+struct to_type_t<optional_policy_examples::settings> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    omni::type_t<optional_strategy_examples::settings> type) const
-    -> with_diagnostics_t<optional_strategy_examples::settings> {
-    const auto strategy = mapping::record_strategy
-      .tdm_validate_fields(optional_strategy_examples::field_checks{});
-    return reflected_scope::map_object_node.tdm_strategy(
-      [&strategy](const mapping::record_strategy_t<> &) {
-        return strategy;
+    omni::type_t<optional_policy_examples::settings> type) const
+    -> with_diagnostics_t<optional_policy_examples::settings> {
+    const auto policy = mapping::record_policy
+      .tdm_validate_fields(optional_policy_examples::field_checks{});
+    return reflected_scope::map_object_node.tdm_policy(
+      [&policy](const mapping::record_policy_t<> &) {
+        return policy;
       })(
       std::move(state), node, type);
   }
 };
 
 template <>
-struct to_type_t<strategy_examples::interval> {
+struct to_type_t<policy_examples::interval> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    omni::type_t<strategy_examples::interval> type) const
-    -> with_diagnostics_t<strategy_examples::interval> {
-    return reflected_scope::map_object_node.tdm_strategy(
-      [](const mapping::record_strategy_t<> &) {
-        return strategy_examples::interval_strategy;
+    omni::type_t<policy_examples::interval> type) const
+    -> with_diagnostics_t<policy_examples::interval> {
+    return reflected_scope::map_object_node.tdm_policy(
+      [](const mapping::record_policy_t<> &) {
+        return policy_examples::interval_policy;
       })(std::move(state), node, type);
   }
 };
 
 template <>
-struct to_type_t<strategy_examples::status> {
+struct to_type_t<policy_examples::status> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    omni::type_t<strategy_examples::status> type) const
-    -> with_diagnostics_t<strategy_examples::status> {
-    return reflected_scope::map_node_to_enum.tdm_strategy(
-      [](const mapping::enum_strategy_t<> &) {
-        return strategy_examples::status_strategy;
+    omni::type_t<policy_examples::status> type) const
+    -> with_diagnostics_t<policy_examples::status> {
+    return reflected_scope::map_node_to_enum.tdm_policy(
+      [](const mapping::enum_policy_t<> &) {
+        return policy_examples::status_policy;
       })(std::move(state), node, type);
   }
 };
 
 template <>
-struct to_type_t<strategy_examples::existing> {
+struct to_type_t<policy_examples::existing> {
   OMNI_CONSTRAINED_TEMPLATE((typename State), (is_read_state<State>::value))
   auto operator()(State state, ::ryml::ConstNodeRef node,
-    strategy_examples::existing *into) const
+    policy_examples::existing *into) const
     -> with_diagnostics_t<compat::monostate> {
-    return reflected_scope::map_object_node.tdm_strategy(
-      [](const mapping::record_strategy_t<> &) {
-        return strategy_examples::existing_strategy;
+    return reflected_scope::map_object_node.tdm_policy(
+      [](const mapping::record_policy_t<> &) {
+        return policy_examples::existing_policy;
       })(std::move(state), node, into);
   }
 };
@@ -417,9 +417,9 @@ struct to_type_t<strategy_examples::existing> {
 } // namespace ryml
 } // namespace omni
 
-TEST(mapping_strategy, aliases_and_field_validation_keep_canonical_output) {
+TEST(mapping_policy, aliases_and_field_validation_keep_canonical_output) {
   const auto result = serialization_test::deserialize(
-    omni::type_t<strategy_examples::interval>{},
+    omni::type_t<policy_examples::interval>{},
     R"({"start":1,"finish":3,"label":"ok"})");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -437,13 +437,13 @@ struct invalid_interval_case {
   std::string field;
 };
 
-class field_strategy_validation:
+class field_policy_validation:
     public testing::TestWithParam<invalid_interval_case> {};
 
-TEST_P(field_strategy_validation, reports_the_rejected_field) {
+TEST_P(field_policy_validation, reports_the_rejected_field) {
   const auto &input = GetParam();
   const auto result = serialization_test::deserialize(
-    omni::type_t<strategy_examples::interval>{}, input.document);
+    omni::type_t<policy_examples::interval>{}, input.document);
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
   if (result.diagnostics.issues.size() == 1) {
@@ -454,14 +454,14 @@ TEST_P(field_strategy_validation, reports_the_rejected_field) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(bounds, field_strategy_validation, testing::Values(
+INSTANTIATE_TEST_SUITE_P(bounds, field_policy_validation, testing::Values(
   invalid_interval_case{R"({"start":-1,"finish":3,"label":"ok"})", "/start"},
   invalid_interval_case{R"({"start":101,"finish":103,"label":"ok"})", "/start"},
   invalid_interval_case{R"({"start":1,"finish":-3,"label":"ok"})", "/finish"}));
 
-TEST(mapping_strategy, nested_finalization_stops_before_later_items) {
+TEST(mapping_policy, nested_finalization_stops_before_later_items) {
   const auto result = serialization_test::deserialize(
-    omni::type_t<strategy_examples::schedule>{},
+    omni::type_t<policy_examples::schedule>{},
     R"({"intervals":[{"start":5,"finish":3,"label":"ok"},false]})");
   EXPECT_FALSE(result.value);
   EXPECT_EQ(1U, result.diagnostics.issues.size());
@@ -471,38 +471,38 @@ TEST(mapping_strategy, nested_finalization_stops_before_later_items) {
   }
 }
 
-TEST(mapping_strategy, filtered_fields_keep_their_defaults) {
-  const auto strategy = strategy_examples::interval_strategy
+TEST(mapping_policy, filtered_fields_keep_their_defaults) {
+  const auto policy = policy_examples::interval_policy
     .tdm_filter_fields(
-      omni::fn::default_value<strategy_examples::without_label>{});
+      omni::fn::default_value<policy_examples::without_label>{});
   const auto mapping = omni::ryml::reflected_scope::map_object_node
-    .tdm_strategy([&strategy](const omni::mapping::record_strategy_t<> &) {
-      return strategy;
+    .tdm_policy([&policy](const omni::mapping::record_policy_t<> &) {
+      return policy;
     });
   const auto tree = omni::ryml::core::parse(R"({"start":1,"finish":3})");
   EXPECT_TRUE(tree);
   if (!tree)
     return;
   const auto result = serialization_test::map_using(omni::ryml::config_t<>{},
-    mapping, omni::type_t<strategy_examples::interval>{}, tree->crootref());
+    mapping, omni::type_t<policy_examples::interval>{}, tree->crootref());
   EXPECT_TRUE(result.value);
   if (result.value) {
     EXPECT_EQ("private", result.value->label);
   }
 #if defined(__cpp_designated_initializers) \
   && 201707L <= __cpp_designated_initializers
-  const decltype(strategy) designated{
+  const decltype(policy) designated{
     .filter_fields = {},
-    .aliases_by_name = strategy.aliases_by_name,
-    .validate_fields = strategy.validate_fields,
-    .finalize = strategy.finalize,
+    .aliases_by_name = policy.aliases_by_name,
+    .validate_fields = policy.validate_fields,
+    .finalize = policy.finalize,
   };
   const auto direct = serialization_test::map_using(omni::ryml::config_t<>{},
-    omni::ryml::reflected_scope::map_object_node.tdm_strategy(
-      [&designated](const omni::mapping::record_strategy_t<> &) {
+    omni::ryml::reflected_scope::map_object_node.tdm_policy(
+      [&designated](const omni::mapping::record_policy_t<> &) {
         return designated;
       }),
-    omni::type_t<strategy_examples::interval>{}, tree->crootref());
+    omni::type_t<policy_examples::interval>{}, tree->crootref());
   EXPECT_TRUE(direct.value);
   if (direct.value) {
     EXPECT_EQ(1, direct.value->begin);
@@ -512,22 +512,22 @@ TEST(mapping_strategy, filtered_fields_keep_their_defaults) {
 #endif
 }
 
-TEST(mapping_strategy, static_fields_are_opt_in_for_serialization_only) {
+TEST(mapping_policy, static_fields_are_opt_in_for_serialization_only) {
   const auto serialize = omni::ryml::serialize
     .tdm_select_mapping(omni::fn::default_value<
-      strategy_examples::select_static_writer>{});
-  strategy_examples::interval value{};
+      policy_examples::select_static_writer>{});
+  policy_examples::interval value{};
   value.begin = 1;
   value.end = 3;
   value.label = "ok";
   EXPECT_TRUE(serialization_test::matches_json(
     R"({"begin":1,"end":3,"label":"ok","revision":4})", serialize(value)));
 
-  const auto strategy = strategy_examples::include_statics{}(
-    omni::mapping::record_strategy);
+  const auto policy = policy_examples::include_statics{}(
+    omni::mapping::record_policy);
   const auto mapping = omni::ryml::reflected_scope::map_object_node
-    .tdm_strategy([&strategy](const omni::mapping::record_strategy_t<> &) {
-      return strategy;
+    .tdm_policy([&policy](const omni::mapping::record_policy_t<> &) {
+      return policy;
     });
   const auto tree = omni::ryml::core::parse(
     R"({"begin":1,"end":3,"label":"ok"})");
@@ -535,23 +535,23 @@ TEST(mapping_strategy, static_fields_are_opt_in_for_serialization_only) {
   if (!tree)
     return;
   const auto result = serialization_test::map_using(omni::ryml::config_t<>{},
-    mapping, omni::type_t<strategy_examples::interval>{}, tree->crootref());
+    mapping, omni::type_t<policy_examples::interval>{}, tree->crootref());
   EXPECT_TRUE(result.value);
-  EXPECT_EQ(4, strategy_examples::interval::revision);
+  EXPECT_EQ(4, policy_examples::interval::revision);
 }
 
-TEST(mapping_strategy, enum_aliases_preserve_serialized_names) {
+TEST(mapping_policy, enum_aliases_preserve_serialized_names) {
   const auto result = serialization_test::deserialize(
-    omni::type_t<strategy_examples::status>{}, R"("working")");
+    omni::type_t<policy_examples::status>{}, R"("working")");
   EXPECT_TRUE(result.value);
   if (result.value) {
-    EXPECT_EQ(strategy_examples::status::busy, *result.value);
+    EXPECT_EQ(policy_examples::status::busy, *result.value);
     EXPECT_EQ(R"("busy")", omni::ryml::as_json(*result.value));
   }
 }
 
-TEST(mapping_strategy, finalization_accepts_an_existing_nondefault_root) {
-  strategy_examples::existing value(7);
+TEST(mapping_policy, finalization_accepts_an_existing_nondefault_root) {
+  policy_examples::existing value(7);
   const auto result = serialization_test::deserialize(
     &value, R"({"number":11})");
   EXPECT_TRUE(result.value);
@@ -562,9 +562,9 @@ TEST(mapping_strategy, finalization_accepts_an_existing_nondefault_root) {
   EXPECT_EQ(1U, rejected.diagnostics.issues.size());
 }
 
-TEST(mapping_strategy, validation_warnings_obey_the_active_warning_limit) {
+TEST(mapping_policy, validation_warnings_obey_the_active_warning_limit) {
   const auto accepted = serialization_test::deserialize(
-    omni::type_t<strategy_examples::interval>{},
+    omni::type_t<policy_examples::interval>{},
     R"({"start":1,"finish":3,"label":"review"})");
   EXPECT_TRUE(accepted.value);
   EXPECT_EQ(1U, accepted.diagnostics.issues.size());
@@ -579,7 +579,7 @@ TEST(mapping_strategy, validation_warnings_obey_the_active_warning_limit) {
       return config;
     });
   const auto rejected = deserialize(
-    omni::type_t<strategy_examples::interval>{},
+    omni::type_t<policy_examples::interval>{},
     R"({"start":1,"finish":3,"label":"review"})");
   EXPECT_FALSE(rejected.value);
   EXPECT_EQ(2U, rejected.diagnostics.issues.size());
@@ -589,7 +589,7 @@ TEST(mapping_strategy, validation_warnings_obey_the_active_warning_limit) {
   }
 }
 
-TEST(mapping_strategy, checks_alias_names_and_collisions) {
+TEST(mapping_policy, checks_alias_names_and_collisions) {
 #if 202002L <= OMNI_CPLUSPLUS
   constexpr std::array<omni::compat::string_view, 2> known{{"begin", "end"}};
   constexpr auto aliases = omni::mapping::aliases_dict(
@@ -618,13 +618,13 @@ struct optional_validation_case {
   omni::json::value_kind actual;
 };
 
-class optional_strategy_validation:
+class optional_policy_validation:
     public testing::TestWithParam<optional_validation_case> {};
 
-TEST_P(optional_strategy_validation, validates_the_decoded_optional) {
+TEST_P(optional_policy_validation, validates_the_decoded_optional) {
   const auto &input = GetParam();
   const auto result = serialization_test::deserialize(
-    omni::type_t<optional_strategy_examples::settings>{}, input.document);
+    omni::type_t<optional_policy_examples::settings>{}, input.document);
   EXPECT_EQ(input.accepted, result.value.has_value());
   if (input.accepted) {
     EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -643,7 +643,7 @@ TEST_P(optional_strategy_validation, validates_the_decoded_optional) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(presence, optional_strategy_validation,
+INSTANTIATE_TEST_SUITE_P(presence, optional_policy_validation,
   testing::Values(
     optional_validation_case{"omitted", "{}", false,
       omni::json::value_kind::unknown},
@@ -655,9 +655,9 @@ INSTANTIATE_TEST_SUITE_P(presence, optional_strategy_validation,
     return input.param.name;
   });
 
-TEST(mapping_strategy, integer_validation_leaves_other_scalar_types_unchanged) {
+TEST(mapping_policy, integer_validation_leaves_other_scalar_types_unchanged) {
   const auto result = serialization_test::deserialize(
-    omni::type_t<numeric_strategy_examples::settings>{},
+    omni::type_t<numeric_policy_examples::settings>{},
     R"({"age":7,"ratio":1.25,"total":42})");
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -668,7 +668,7 @@ TEST(mapping_strategy, integer_validation_leaves_other_scalar_types_unchanged) {
   }
 }
 
-TEST(mapping_strategy, filtered_nondefault_root_uses_its_pointer_mapping) {
+TEST(mapping_policy, filtered_nondefault_root_uses_its_pointer_mapping) {
   filtered_root_examples::settings value{filtered_root_examples::token{19}, 1};
   const auto result = serialization_test::deserialize(
     &value, R"({"parsed":7})");
@@ -684,13 +684,13 @@ struct generic_validation_case {
   std::string rejected_field;
 };
 
-class typed_key_strategy_validation:
+class typed_key_policy_validation:
     public testing::TestWithParam<generic_validation_case> {};
 
-TEST_P(typed_key_strategy_validation, binds_generic_checks_to_the_named_type) {
+TEST_P(typed_key_policy_validation, binds_generic_checks_to_the_named_type) {
   const auto &input = GetParam();
   const auto result = serialization_test::deserialize(
-    omni::type_t<generic_strategy_examples::settings>{}, input.document);
+    omni::type_t<generic_policy_examples::settings>{}, input.document);
   EXPECT_EQ(input.rejected_field.empty(), result.value.has_value());
   if (input.rejected_field.empty()) {
     EXPECT_TRUE(result.diagnostics.issues.empty());
@@ -707,7 +707,7 @@ TEST_P(typed_key_strategy_validation, binds_generic_checks_to_the_named_type) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(fields, typed_key_strategy_validation,
+INSTANTIATE_TEST_SUITE_P(fields, typed_key_policy_validation,
   testing::Values(
     generic_validation_case{"valid", R"({"age":7,"name":"Alice"})", ""},
     generic_validation_case{"negative", R"({"age":-1,"name":"Alice"})", "/age"},
@@ -716,26 +716,26 @@ INSTANTIATE_TEST_SUITE_P(fields, typed_key_strategy_validation,
     return input.param.name;
   });
 
-TEST(mapping_strategy, functional_updates_preserve_other_properties) {
-  const omni::mapping::record_strategy_t<
-    decltype(omni::mapping::record_strategy.filter_fields),
-    strategy_examples::copy_only_aliases> original{};
+TEST(mapping_policy, functional_updates_preserve_other_properties) {
+  const omni::mapping::record_policy_t<
+    decltype(omni::mapping::record_policy.filter_fields),
+    policy_examples::copy_only_aliases> original{};
   const auto updated = original.tdm_filter_fields(omni::fn::identity{});
   EXPECT_EQ(omni::compat::string_view{"name"},
     omni::mapping::resolve_alias(updated.aliases_by_name, "legacy"));
 
-  using owning_strategy = omni::mapping::record_strategy_t<
-    decltype(omni::mapping::record_strategy.filter_fields), std::tuple<>,
-    std::tuple<>, strategy_examples::owning_check>;
-  static_assert(!omni::compat::is_invocable<strategy_examples::update_aliases,
-    const owning_strategy &>::value,
+  using owning_policy = omni::mapping::record_policy_t<
+    decltype(omni::mapping::record_policy.filter_fields), std::tuple<>,
+    std::tuple<>, policy_examples::owning_check>;
+  static_assert(!omni::compat::is_invocable<policy_examples::update_aliases,
+    const owning_policy &>::value,
     "A const update cannot copy a move-only property");
-  static_assert(omni::compat::is_invocable<strategy_examples::update_aliases,
-    owning_strategy &&>::value,
+  static_assert(omni::compat::is_invocable<policy_examples::update_aliases,
+    owning_policy &&>::value,
     "A consuming update can move that property");
-  owning_strategy owned{};
+  owning_policy owned{};
   owned.finalize.limit.reset(new int{4});
-  const auto consumed = strategy_examples::update_aliases{}(std::move(owned));
+  const auto consumed = policy_examples::update_aliases{}(std::move(owned));
   EXPECT_EQ(7, consumed.finalize(7));
   const auto rejected = consumed.finalize(3);
   EXPECT_FALSE(rejected);
@@ -744,16 +744,16 @@ TEST(mapping_strategy, functional_updates_preserve_other_properties) {
   }
 }
 
-TEST(mapping_strategy, node_check_updates_preserve_the_record_strategy) {
+TEST(mapping_policy, node_check_updates_preserve_the_record_policy) {
   using omni::ryml::reflected_scope::map_object_node;
   const auto unchecked = map_object_node
     .tdm_with_node_check(omni::fn::default_value<std::false_type>{});
-  const auto mapping = unchecked.tdm_strategy(
-    [](const omni::mapping::record_strategy_t<> &) {
-      return strategy_examples::interval_strategy;
+  const auto mapping = unchecked.tdm_policy(
+    [](const omni::mapping::record_policy_t<> &) {
+      return policy_examples::interval_policy;
     });
   static_assert(!decltype(mapping.with_node_check)::value,
-    "Updating the strategy retains the disabled node check");
+    "Updating the policy retains the disabled node check");
 
   const auto checked = mapping.tdm_with_node_check(
     omni::fn::default_value<std::true_type>{});
@@ -765,7 +765,7 @@ TEST(mapping_strategy, node_check_updates_preserve_the_record_strategy) {
     return;
 
   const auto result = serialization_test::map_using(omni::ryml::config_t<>{},
-    checked, omni::type_t<strategy_examples::interval>{}, tree->crootref());
+    checked, omni::type_t<policy_examples::interval>{}, tree->crootref());
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.issues.empty());
   if (result.value) {
@@ -781,7 +781,7 @@ TEST(mapping_strategy, node_check_updates_preserve_the_record_strategy) {
 
   const auto mismatch = serialization_test::map_using(
     omni::ryml::config_t<>{}, checked,
-    omni::type_t<strategy_examples::interval>{}, sequence->crootref());
+    omni::type_t<policy_examples::interval>{}, sequence->crootref());
   EXPECT_FALSE(mismatch.value);
   EXPECT_EQ(1U, mismatch.diagnostics.issues.size());
   if (!mismatch.diagnostics.issues.empty()) {

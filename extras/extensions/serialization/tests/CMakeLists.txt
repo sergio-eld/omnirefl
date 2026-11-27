@@ -71,7 +71,7 @@ foreach(_standard IN LISTS _supported_cpp_standards)
 
 endforeach()
 
-# Dispatch and strategy regressions have their own executable so iterations
+# Dispatch and policy regressions have their own executable so iterations
 # need not rebuild all serialization test sources.
 set(_serialization_dispatch_pool "")
 if(_OMNI_CI_RUN AND CMAKE_GENERATOR MATCHES "Ninja"
@@ -84,7 +84,7 @@ if(_OMNI_CI_RUN AND CMAKE_GENERATOR MATCHES "Ninja"
 endif()
 foreach(_standard IN LISTS _supported_cpp_standards)
     set(_dispatch_target "cpp_${_standard}.json_ryml.test.dispatch")
-    add_executable(${_dispatch_target} dispatch.cpp mapping_strategy.cpp)
+    add_executable(${_dispatch_target} dispatch.cpp mapping_policy.cpp)
     set_target_properties(${_dispatch_target} PROPERTIES
         OUTPUT_NAME "json_ryml_test_dispatch_cpp_${_standard}"
         CXX_STANDARD ${_standard}

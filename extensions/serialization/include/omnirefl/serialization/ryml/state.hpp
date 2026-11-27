@@ -30,7 +30,7 @@ namespace json {
 /** Member-name mapping contract.
  * Each mapped member has a canonical name and may accept aliases. The sets
  * consisting of each member's canonical name and aliases must be disjoint
- * across members. Shared strategy dictionaries provide valid_aliases checks;
+ * across members. Shared policy dictionaries provide valid_aliases checks;
  * opaque callable resolvers retain responsibility for this precondition.
  *
  * If any canonical occurrence exists, its aliases are ignored regardless of
@@ -140,7 +140,7 @@ template <typename SelectMapping>
 struct as_ref_tree_t;
 
 /** Shared policy for empty optionals in records and ranges.
- * Record strategies and range mappers can override it with `.keep_nulls`.
+ * Record and range policies can override it with `.keep_nulls`.
  * Empty roots remain null. */
 struct serialize_config_t {
   // Empty optional record fields and associative values.

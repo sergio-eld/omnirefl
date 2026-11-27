@@ -47,8 +47,8 @@ const auto from_type<endpoint<T>> = [](auto state,
 template <typename T>
 const auto to_type<endpoint<T>> =
   compose::with_node_check<core::expect_object_node>(
-    reflected_scope::map_object_node_t<mapping::record_strategy_t<
-        decltype(mapping::record_strategy.filter_fields), endpoint_names>>{});
+    reflected_scope::map_object_node_t<mapping::record_policy_t<
+        decltype(mapping::record_policy.filter_fields), endpoint_names>>{});
 #else
 template <typename T>
 struct from_type_t<endpoint<T>> {
@@ -68,12 +68,12 @@ struct to_type_t<endpoint<T>> {
   // and cannot preserve members added by derived registrations.
   static constexpr auto composed_mapping()
     -> decltype(compose::with_node_check<core::expect_object_node>(
-      reflected_scope::map_object_node_t<mapping::record_strategy_t<
-        decltype(mapping::record_strategy.filter_fields),
+      reflected_scope::map_object_node_t<mapping::record_policy_t<
+        decltype(mapping::record_policy.filter_fields),
         endpoint_names>>{})) {
     return compose::with_node_check<core::expect_object_node>(
-      reflected_scope::map_object_node_t<mapping::record_strategy_t<
-        decltype(mapping::record_strategy.filter_fields),
+      reflected_scope::map_object_node_t<mapping::record_policy_t<
+        decltype(mapping::record_policy.filter_fields),
         endpoint_names>>{});
   }
 

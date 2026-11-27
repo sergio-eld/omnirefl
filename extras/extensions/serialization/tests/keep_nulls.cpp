@@ -19,9 +19,11 @@ struct range_null_policy {
 
   template <typename Path, typename T>
   auto operator()(Path, omni::type_t<std::vector<T>>) const
-    -> omni::ryml::map_range_t<Keep> {
-    return omni::ryml::map_range.tdm_keep_nulls(
-      omni::fn::default_value<Keep>{});
+    -> omni::ryml::map_range_t<omni::mapping::range_policy_t<Keep>> {
+    return omni::ryml::map_range.tdm_policy(
+      [](const omni::mapping::range_policy_t<> &policy) {
+        return policy.tdm_keep_nulls(omni::fn::default_value<Keep>{});
+      });
   }
 };
 
@@ -41,7 +43,7 @@ struct measurement {
   std::vector<omni::compat::optional<int>> samples;
 };
 
-// A named updater lets C++11 spell the strategy's return type below.
+// A named updater lets C++11 spell the policy's return type below.
 struct null_override {
   bool keep;
 
@@ -62,19 +64,21 @@ struct select_null_policy {
   template <typename Path>
   auto operator()(Path, omni::type_t<measurement>) const
     -> omni::ryml::reflected_scope::map_record_t<
-      decltype(omni::mapping::record_strategy.tdm_keep_nulls(
+      decltype(omni::mapping::record_policy.tdm_keep_nulls(
         null_override{}))> {
-    return omni::ryml::reflected_scope::map_record.tdm_strategy(
-      [this](const omni::mapping::record_strategy_t<> &strategy) {
-        return strategy.tdm_keep_nulls(null_override{this->record});
+    return omni::ryml::reflected_scope::map_record.tdm_policy(
+      [this](const omni::mapping::record_policy_t<> &policy) {
+        return policy.tdm_keep_nulls(null_override{this->record});
       });
   }
 
   template <typename Path, typename T>
   auto operator()(Path, omni::type_t<std::vector<T>>) const
-    -> omni::ryml::map_range_t<bool> {
-    return omni::ryml::map_range.tdm_keep_nulls(
-      null_override{this->range});
+    -> omni::ryml::map_range_t<omni::mapping::range_policy_t<bool>> {
+    return omni::ryml::map_range.tdm_policy(
+      [this](const omni::mapping::range_policy_t<> &policy) {
+        return policy.tdm_keep_nulls(null_override{this->range});
+      });
   }
 };
 

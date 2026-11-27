@@ -4,7 +4,7 @@
  * Signature notation: docs/CONVENTIONS.md#functional-composition-notation. */
 
 #include <omnirefl/extensions/compat.hpp>
-#include <omnirefl/extensions/mapping_strategy.hpp>
+#include <omnirefl/extensions/mapping_policy.hpp>
 #include <omnirefl/extensions/traits.hpp>
 #include <omnirefl/reflected_scope.hpp>
 #include <omnirefl/serialization/ryml/core.hpp>
@@ -30,10 +30,10 @@ namespace reflected_scope {
  *
  * @pre node is a string in a valid tree; enum metadata is available. */
 OMNI_CONSTRAINED_TEMPLATE((typename T,
-  typename Strategy = mapping::enum_strategy_t<>),
+  typename Policy = mapping::enum_policy_t<>),
   (omni::is_reflected_enum<T>::value
-    && mapping::is_enum_strategy<Strategy>::value))
-auto parse_as_enum(::ryml::ConstNodeRef node, const Strategy &strategy = {})
+    && mapping::is_enum_policy<Policy>::value))
+auto parse_as_enum(::ryml::ConstNodeRef node, const Policy &policy = {})
   -> compat::expected<T, issue>;
 
 } // namespace reflected_scope
@@ -54,21 +54,21 @@ map_object_node :: {
  * Non-object input reports an expected-object diagnostic by default.
  * @pre node belongs to a valid tree, pointers are non-null, and record
  * metadata is available in reflected scope. */
-template <typename Strategy = mapping::record_strategy_t<>,
+template <typename Policy = mapping::record_policy_t<>,
   typename WithNodeCheck = std::true_type>
 struct map_object_node_t final:
-    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>,
+    detail::tdm_for_map_object_node<Policy, WithNodeCheck>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider =
-    detail::tdm_for_map_object_node<Strategy, WithNodeCheck>;
+    detail::tdm_for_map_object_node<Policy, WithNodeCheck>;
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
-  static_assert(mapping::is_record_strategy<Strategy>::value,
-    "map_object_node_t requires mapping::record_strategy_t");
+  static_assert(mapping::is_record_policy<Policy>::value,
+    "map_object_node_t requires mapping::record_policy_t");
 
-  /** \ref mapping::record_strategy_t */
-  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_strategy;
+  /** \ref mapping::record_policy_t */
+  Policy policy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_policy;
 
   /** Disable only when the node is already known to be an object. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -93,17 +93,17 @@ struct map_object_node_t final:
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr map_object_node_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Policy,
     typename CheckValue = WithNodeCheck),
-    (std::is_constructible<Strategy, Value &&>::value
+    (std::is_constructible<Policy, Value &&>::value
       && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
   constexpr map_object_node_t(Value &&value, CheckValue &&check = {})
-    : strategy(std::forward<Value>(value)),
+    : policy(std::forward<Value>(value)),
       with_node_check(std::forward<CheckValue>(check)) {}
 #endif
 };
 
-/** Reflected-record mapping with the shared default strategy and
+/** Reflected-record mapping with the shared default policy and
  * node checking enabled. */
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
 inline constexpr map_object_node_t<> map_object_node{};
@@ -123,21 +123,21 @@ map_node_to_enum :: {
  *
  * @pre node belongs to a valid tree, pointers are non-null, and enum metadata
  * is available in reflected scope. */
-template <typename Strategy = mapping::enum_strategy_t<>,
+template <typename Policy = mapping::enum_policy_t<>,
   typename WithNodeCheck = std::true_type>
 struct map_node_to_enum_t final:
-    detail::tdm_for_map_node_to_enum<Strategy, WithNodeCheck>,
+    detail::tdm_for_map_node_to_enum<Policy, WithNodeCheck>,
     omni::ryml::detail::with_depth_exceeded_operator {
   using tdm_provider =
-    detail::tdm_for_map_node_to_enum<Strategy, WithNodeCheck>;
+    detail::tdm_for_map_node_to_enum<Policy, WithNodeCheck>;
   using omni::ryml::detail::with_depth_exceeded_operator::operator();
 
-  static_assert(mapping::is_enum_strategy<Strategy>::value,
-    "map_node_to_enum_t requires mapping::enum_strategy_t");
+  static_assert(mapping::is_enum_policy<Policy>::value,
+    "map_node_to_enum_t requires mapping::enum_policy_t");
 
-  /** \ref mapping::enum_strategy_t */
-  Strategy strategy OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_strategy;
+  /** \ref mapping::enum_policy_t */
+  Policy policy OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_policy;
 
   /** Disable only when the node is already known to be a string. */
   WithNodeCheck with_node_check OMNI_CPP14_DEFAULT_INIT();
@@ -161,12 +161,12 @@ struct map_node_to_enum_t final:
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
   constexpr map_node_to_enum_t() = default;
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = Strategy,
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = Policy,
     typename CheckValue = WithNodeCheck),
-    (std::is_constructible<Strategy, Value &&>::value
+    (std::is_constructible<Policy, Value &&>::value
       && std::is_constructible<WithNodeCheck, CheckValue &&>::value))
   constexpr map_node_to_enum_t(Value &&value, CheckValue &&check = {})
-    : strategy(std::forward<Value>(value)),
+    : policy(std::forward<Value>(value)),
       with_node_check(std::forward<CheckValue>(check)) {}
 #endif
 };
