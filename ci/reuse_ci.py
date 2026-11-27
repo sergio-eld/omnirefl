@@ -223,7 +223,7 @@ def wait_active():
                             '--interval', '30', '--exit-status'], check=True)
 
 
-def find(args):
+def wait_for_runs(args):
     if args.wait_master:
         # Preserve the release gate on any active commit CI before reuse.
         path = 'actions/workflows/ci.yml/runs?' + urlencode({
@@ -244,6 +244,9 @@ def find(args):
     if args.wait_active:
         wait_active()
 
+
+def find(args):
+    wait_for_runs(args)
     package_run = ''
     package_commit = ''
     build_commit = ''
@@ -316,6 +319,65 @@ def find(args):
                       'artifact_commit': package_commit, 'full_suite': full_suite}))
 
 
+def full_inputs(args):
+    """Reuse original full coverage, without relabeling or restaging binaries."""
+    from validation_inputs import snapshot
+
+    wait_for_runs(args)
+    current = snapshot(COMMIT)
+    reused = {}
+    if current:
+        fingerprint, targets = current
+        master = api('git/ref/heads/master')['object']['sha']
+        seen = set()
+        for marker in pages('actions/artifacts', 'artifacts'):
+            if marker['expired'] or not marker['name'].startswith('full-suite-'):
+                continue
+            run_id = marker['workflow_run']['id']
+            if run_id in seen:
+                continue
+            seen.add(run_id)
+            try:
+                run = api('actions/runs/' + str(run_id))
+                source = run['head_sha']
+                if (run['status'] != 'completed' or run.get('event') == 'pull_request'
+                        or run['path'].split('@')[0] not in (
+                            '.github/workflows/ci.yml', '.github/workflows/release.yml',
+                            '.github/workflows/full_validation.yml')):
+                    continue
+                # Only native coverage on master's history is an original source.
+                # Never promote a derived proof or an arbitrary branch's artifacts.
+                if source != master and api('compare/' + source + '...' + master)[
+                        'status'] not in ('ahead', 'identical'):
+                    continue
+                previous = snapshot(source)
+                if not previous or previous[0] != fingerprint:
+                    continue
+                available = available_artifacts(run_id)
+                proof = commit_proof(run_id, available, source) or {}
+                if proof.get('build_commit') != source:
+                    continue
+                names = [artifact_name('packages', target, source) for target in targets]
+                names += [artifact_name('symbols', target, source)
+                          for target in targets if target != 'extras']
+                if not all(name in available and available[name].get('created_at') for name in names):
+                    continue
+                if (full_suite_passed(run_id, available, source, build_commit=source,
+                        artifacts_created_at=max(available[name]['created_at'] for name in names))
+                        and reusable_packages(run, True, available, source, targets)):
+                    reused = dict(reused_full_run_id=str(run_id), reused_full_commit=source,
+                                  reused_full_build_commit=source)
+                    break
+            except subprocess.CalledProcessError:
+                # Historical runs/commits can disappear. Unavailable metadata
+                # cannot grant coverage; fall back to normal package work.
+                print('::warning::Full source unavailable: run ' + str(run_id))
+    with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+        for key in ('reused_full_run_id', 'reused_full_commit', 'reused_full_build_commit'):
+            print(key + '=' + reused.get(key, ''), file=output)
+    print(json.dumps({'commit': COMMIT, **reused}))
+
+
 def download(args):
     run = api('actions/runs/' + args.run_id)
     available = available_artifacts(args.run_id)
@@ -364,6 +426,12 @@ if __name__ == '__main__':
     command.add_argument('--wait-master', nargs='?', const='if-present',
                          choices=('if-present', 'required'))
     command.set_defaults(invoke=find)
+    command = commands.add_parser('full-inputs',
+                                  help='Find native full coverage with identical workload inputs')
+    command.add_argument('--wait-active', action='store_true')
+    command.add_argument('--wait-master', nargs='?', const='if-present',
+                         choices=('if-present', 'required'))
+    command.set_defaults(invoke=full_inputs)
     command = commands.add_parser('download')
     command.add_argument('--native', action='store_true')
     command.add_argument('--run-id', required=True)

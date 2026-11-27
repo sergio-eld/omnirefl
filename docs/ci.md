@@ -18,13 +18,25 @@ execute full tests. Pages continues to build and publish from master.
 
 ## Nightly and release packages
 
-At 06:00 Europe/Belgrade every day, nightly inspects master. Nightly and release
-require packages originally built from that exact commit. A restaged PR build
-or an older artifact without build provenance triggers a fresh build and full
-suite. An exact-commit smoke build can supply packages for full validation. A
-complete exact-commit package/symbol set with green full validation needs no
-duplicate work. Missing packages or symbols require a fresh build and full
-validation; tree-only full coverage cannot authorize new binaries.
+Nightly has two scheduled attempts, at 05:17 and 06:17 Europe/Belgrade. GitHub's
+[scheduled events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+can be delayed or dropped. **Run workflow** on `master` performs the same
+inspection manually. The Summary shows local start time, commit, and package
+source. Attempts run serially and reuse full coverage for unchanged build/test inputs.
+
+Automatic PR/master runs and nightly can reuse a native green full run from
+master's history when build/test inputs are identical. Documentation and CI
+selection policy do not invalidate C++ coverage; source, tests, dependencies,
+matrix, and build/test job changes do. CI policy checks and Pages still run
+from the current commit. The Summary identifies the original run and binary
+build commit. Missing packages or symbols prevent this reuse.
+
+Release requires packages originally built from the exact tagged commit.
+A restaged PR build or an older artifact without build provenance triggers a
+fresh build and full suite. An exact-commit smoke build can supply packages for
+full validation. A complete exact-commit package/symbol set with green full
+validation needs no duplicate work. Missing packages or symbols require a fresh
+build and full validation; tree-only full coverage cannot authorize new binaries.
 
 Release preflight waits for existing master CI to succeed. Native selectors
 wait for earlier active runs for the commit before choosing work; failures stay

@@ -1,8 +1,9 @@
 name: Nightly native validation
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '17 5,6 * * *'
       timezone: Europe/Belgrade
 
 concurrency:
@@ -25,6 +26,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+      - name: Install policy dependencies
+        run: python3 -m pip install --quiet PyYAML==6.0.2
       - name: Select full suite
         id: policy
         timeout-minutes: 180
@@ -32,20 +35,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          started=$(TZ=Europe/Belgrade date --iso-8601=seconds)
+          printf 'Started: %s\nCommit: %s\n' "$started" "$GITHUB_SHA"
+          printf '## Nightly native validation\n\nStarted: `%s`\n\nCommit: `%s`\n' \
+            "$started" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           GITHUB_OUTPUT="$RUNNER_TEMP/native-packages.outputs" \
-            python3 ci/reuse_ci.py find --native --wait-master --wait-active \
-              --require-symbols --targets extras cosmo-universal \
-              linux-x86_64-musl linux-aarch64-musl windows-x86_64-ucrt
+            python3 ci/reuse_ci.py full-inputs --wait-master --wait-active
           source "$RUNNER_TEMP/native-packages.outputs"
-          if [ true = "$full_suite" ]; then
+          if [ -n "$reused_full_run_id" ]; then
             echo 'full_suite=false' >> "$GITHUB_OUTPUT"
-            selection="Native packages already passed full validation: run $run_id"
+            selection="Full coverage: run $reused_full_run_id; build $reused_full_build_commit (unchanged inputs)"
           else
             echo 'full_suite=true' >> "$GITHUB_OUTPUT"
             selection='Native packages require full validation'
           fi
           printf '%s\n' "$selection"
-          printf '## Nightly native validation\n\n%s\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n%s\n' "$selection" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$reused_full_run_id" ]; then
+            printf '\n[Package source run](%s/%s/actions/runs/%s)\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$reused_full_run_id" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   validation:
     name: Nightly native full suite
