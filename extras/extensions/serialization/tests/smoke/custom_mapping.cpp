@@ -36,14 +36,15 @@ struct add_integer {
 struct select_mapping {
   int increment;
 
-  template <typename State, typename T>
-  auto operator()(const State &state, omni::type_t<T> type) const
-    -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(state, type)) {
-    return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+  template <typename Path, typename T>
+  auto operator()(const Path &path, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
+      path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 
-  template <typename State>
-  add_integer operator()(State, omni::type_t<int>) const {
+  template <typename Path>
+  add_integer operator()(Path, omni::type_t<int>) const {
     return {this->increment};
   }
 };

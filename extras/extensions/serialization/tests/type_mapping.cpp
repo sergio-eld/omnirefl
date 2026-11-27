@@ -40,7 +40,7 @@ template <typename T>
 const auto from_type<endpoint<T>> = [](auto state,
   const endpoint<T> &value) -> ::ryml::NodeRef {
   const auto mapping = compat::invoke(state.select_mapping,
-    state, omni::type_t<T>{});
+    state.path(), omni::type_t<T>{});
   return mapping(std::move(state), value.port);
 };
 
@@ -56,7 +56,7 @@ struct from_type_t<endpoint<T>> {
   auto operator()(State state,
     const endpoint<T> &value) const -> ::ryml::NodeRef {
     const auto mapping = compat::invoke(state.select_mapping,
-      state, omni::type_t<T>{});
+      state.path(), omni::type_t<T>{});
     return mapping(std::move(state), value.port);
   }
 };

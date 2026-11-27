@@ -5,6 +5,7 @@
 #include <omnirefl/extensions/compat.hpp>
 #include <omnirefl/serialization/ryml/impl/state.hpp>
 #include <omnirefl/serialization/ryml/impl/tdm_config.hpp>
+#include <omnirefl/serialization/ryml/schema_path.hpp>
 #include <omnirefl/traits.hpp>
 
 // RapidYAML: third-party JSON/YAML backend.
@@ -300,13 +301,13 @@ namespace reflected_scope {
 /** Callable form of the node-to-type customization lookup.
  *
 ```
-mapping_to_type :: (state, type<T>) -> Mapping
+mapping_to_type :: (schema_path, type<T>) -> Mapping
 ```
- * State is accepted for compatibility with local mapping selectors.
  * The default selection depends only on T. */
 struct mapping_to_type_t final {
-  template <typename State, typename T>
-  OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
+  OMNI_CONSTRAINED_TEMPLATE((typename Path, typename T),
+    (is_schema_path<Path>::value))
+  OMNI_CPP14_CONSTEXPR auto operator()(Path, omni::type_t<T>) const
     OMNI_CPP11_TRAILING_RETURN(
       typename omni::ryml::detail::to_type_cpp11_trailing_return<T>::type);
 };
@@ -314,12 +315,13 @@ struct mapping_to_type_t final {
 /** Callable form of the type-to-node customization lookup.
  *
 ```
-mapping_from_type :: (state, type<T>) -> Mapping
+mapping_from_type :: (schema_path, type<T>) -> Mapping
 ```
  * The default selection depends only on T. */
 struct mapping_from_type_t final {
-  template <typename State, typename T>
-  OMNI_CPP14_CONSTEXPR auto operator()(const State &, omni::type_t<T>) const
+  OMNI_CONSTRAINED_TEMPLATE((typename Path, typename T),
+    (is_schema_path<Path>::value))
+  OMNI_CPP14_CONSTEXPR auto operator()(Path, omni::type_t<T>) const
     OMNI_CPP11_TRAILING_RETURN(
       typename omni::ryml::detail::from_type_cpp11_trailing_return<T>::type);
 };
@@ -333,19 +335,19 @@ struct mapping_from_type_t final {
  * Counters include issues reported by preceding operations in the enclosing
  * traversal. enclosing_root is the original root type; enclosing_record is
  * the immediate containing record, or void at the root. Containers and
- * optionals retain their containing record. The path describes the C++
- * schema, independently of input keys.
+ * optionals retain their containing record. path().schema_parent identifies
+ * the immediate containing record or range. The path follows the C++ schema,
+ * independently of input keys.
  * Mapping callbacks take a generic State, constrained by is_read_state,
  * because child paths and local selectors produce different state types.
- * Path-aware selectors take State by value so path() remains a constant
- * expression in C++17/20; config and the selector are still borrowed.
+ * Selectors receive schema_path values; only selected mappers receive state.
  * Same-node indirections forward the existing state. Custom traversal derives
  * a child state for each edge: child(OMNI_META_STRING("field")) for a named
  * field, field(meta) for a reflected field, or element() for container values.
  *
 ```cpp
 // Inside a generic mapping selector, from C++17:
-if constexpr (state.path().ends_with("root.work_address")) {
+if constexpr (path.str().ends_with("root.work_address")) {
   // Select the work-address mapping; other address fields keep their defaults.
 }
 ```
@@ -359,7 +361,7 @@ struct read_state_t {
   std::size_t error_count;
   std::size_t warning_count;
 
-  // (state, type<T>) -> mapping callable; borrowed throughout traversal.
+  // (schema_path, type<T>) -> mapping callable; borrowed throughout traversal.
   const typename StateConfig::select_mapping_type &select_mapping;
 
   /** Tree depth, starting at zero for the root.
@@ -374,17 +376,21 @@ struct read_state_t {
 
   /** Canonical schema path: root.field, with [] for container values.
    * Independent of runtime keys, indices, and input aliases. Recursive schema
-   * edges reuse their first path; this is not a runtime ancestry trace. */
+   * edges reuse their first path. str() exposes the compile-time string;
+   * schema_parent identifies the containing record or range. */
   static constexpr auto path()
-    OMNI_CPP11_TRAILING_RETURN(typename StateConfig::path_type::text) {
-    return StateConfig::path_type::string();
+    -> schema_path_t<typename StateConfig::enclosing_root,
+      typename StateConfig::schema_parent,
+      typename StateConfig::path_type::text> {
+    return {};
   }
 
   /** Child state from a string token: child(OMNI_META_STRING("address"))
    * appends .address. Every call appends; reflected-field identity is unknown.
-   * Record sets enclosing_record; omitted, the current record is retained.
+   * Record overrides the parent type. Omission infers the path parent and
+   * retains enclosing_record for compatibility.
    * At depth_limit(), returns depth_exceeded instead. */
-  template <typename Record = enclosing_record, typename Name>
+  template <typename Record = detail::inferred_schema_parent, typename Name>
   constexpr auto child(Name) const
     -> typename detail::state_children<read_state_t, StateConfig>::template
       child<Record, Name> {
@@ -395,9 +401,10 @@ struct read_state_t {
   /** Child state from reflected metadata: appends `.` then field.name().
    * Repeating the same field metadata reuses its first path, removing the
    * intervening suffix to keep recursive schema paths finite.
-   * Record sets enclosing_record; omitted, the current record is retained.
+   * Record overrides the parent type. Omission infers the path parent and
+   * retains enclosing_record for compatibility.
    * At depth_limit(), returns depth_exceeded instead. */
-  template <typename Record = enclosing_record, typename Field>
+  template <typename Record = detail::inferred_schema_parent, typename Field>
   constexpr auto field(Field) const
     -> typename detail::state_children<read_state_t, StateConfig>::template
       field<Record, Field> {
@@ -406,7 +413,8 @@ struct read_state_t {
   }
 
   /** Container-value state: root.items becomes root.items[].
-   * Indices and mapping keys share []; enclosing_record is retained.
+   * Indices and mapping keys share []; schema_parent becomes the range type.
+   * enclosing_record is retained.
    * At depth_limit(), returns depth_exceeded instead. */
   constexpr auto element() const
     -> typename detail::state_children<read_state_t, StateConfig>::element {
@@ -425,6 +433,10 @@ struct read_state_t {
   constexpr read_state_t(const read_state_t &) = default;
 
 private:
+  // Rebinding the current schema changes neither path nor traversal progress.
+  template <typename>
+  friend struct detail::state_schema;
+
   // Child states use other configurations and need constructor access.
   template <typename>
   friend struct read_state_t;
@@ -453,8 +465,7 @@ private:
  * The mapping selector is borrowed. Mapping callbacks take a generic State
  * constrained by is_write_state, preserving the child path and local selector
  * when forwarding it. enclosing_root and enclosing_record follow the same
- * rules as read_state_t. Path-aware selectors
- * take State by value for C++17/20 constant evaluation. */
+ * rules as read_state_t. Selectors receive schema_path values. */
 template <typename StateConfig = detail::write_state_config<>>
 struct write_state_t {
   using enclosing_root = typename StateConfig::enclosing_root;
@@ -487,15 +498,18 @@ struct write_state_t {
 
   /** Canonical schema path; see read_state_t::path. */
   static constexpr auto path()
-    OMNI_CPP11_TRAILING_RETURN(typename StateConfig::path_type::text) {
-    return StateConfig::path_type::string();
+    -> schema_path_t<typename StateConfig::enclosing_root,
+      typename StateConfig::schema_parent,
+      typename StateConfig::path_type::text> {
+    return {};
   }
 
   /** Child state from a string token: child(OMNI_META_STRING("address"))
    * appends .address. Every call appends; reflected-field identity is unknown.
-   * Record sets enclosing_record; omitted, the current record is retained.
+   * Record overrides the parent type. Omission infers the path parent and
+   * retains enclosing_record for compatibility.
    * At depth_limit(), returns depth_exceeded instead. */
-  template <typename Record = enclosing_record, typename Name>
+  template <typename Record = detail::inferred_schema_parent, typename Name>
   constexpr auto child(Name) const
     -> typename detail::state_children<write_state_t, StateConfig>::template
       child<Record, Name> {
@@ -506,9 +520,10 @@ struct write_state_t {
   /** Child state from reflected metadata: appends `.` then field.name().
    * Repeating the same field metadata reuses its first path, removing the
    * intervening suffix to keep recursive schema paths finite.
-   * Record sets enclosing_record; omitted, the current record is retained.
+   * Record overrides the parent type. Omission infers the path parent and
+   * retains enclosing_record for compatibility.
    * At depth_limit(), returns depth_exceeded instead. */
-  template <typename Record = enclosing_record, typename Field>
+  template <typename Record = detail::inferred_schema_parent, typename Field>
   constexpr auto field(Field) const
     -> typename detail::state_children<write_state_t, StateConfig>::template
       field<Record, Field> {
@@ -517,7 +532,8 @@ struct write_state_t {
   }
 
   /** Container-value state: root.items becomes root.items[].
-   * Indices and mapping keys share []; enclosing_record is retained.
+   * Indices and mapping keys share []; schema_parent becomes the range type.
+   * enclosing_record is retained.
    * At depth_limit(), returns depth_exceeded instead. */
   constexpr auto element() const
     -> typename detail::state_children<write_state_t, StateConfig>::element {
@@ -529,6 +545,10 @@ struct write_state_t {
   constexpr write_state_t(const write_state_t &) = default;
 
 private:
+  // Rebinding the current schema changes neither path nor traversal progress.
+  template <typename>
+  friend struct detail::state_schema;
+
   // Child states use other configurations and need constructor access.
   template <typename>
   friend struct write_state_t;

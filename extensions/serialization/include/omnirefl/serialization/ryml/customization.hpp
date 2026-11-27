@@ -356,16 +356,18 @@ namespace omni {
 namespace ryml {
 namespace reflected_scope {
 
-template <typename State, typename T>
-OMNI_CPP14_CONSTEXPR auto mapping_to_type_t::operator()(const State &,
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Path, typename T),
+  (is_schema_path<Path>::value))
+OMNI_CPP14_CONSTEXPR auto mapping_to_type_t::operator()(Path,
   omni::type_t<T> type) const
   OMNI_CPP11_TRAILING_RETURN(
     typename omni::ryml::detail::to_type_cpp11_trailing_return<T>::type) {
   return reflected_scope::mapping_to_type(type);
 }
 
-template <typename State, typename T>
-OMNI_CPP14_CONSTEXPR auto mapping_from_type_t::operator()(const State &,
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename Path, typename T),
+  (is_schema_path<Path>::value))
+OMNI_CPP14_CONSTEXPR auto mapping_from_type_t::operator()(Path,
   omni::type_t<T> type) const
   OMNI_CPP11_TRAILING_RETURN(
     typename omni::ryml::detail::from_type_cpp11_trailing_return<T>::type) {

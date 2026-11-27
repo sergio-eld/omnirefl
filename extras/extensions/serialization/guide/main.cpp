@@ -565,7 +565,8 @@ struct settings {
 } // namespace static_field_serialization
 
 /** `deserialize` and `serialize` expose the callable member `.select_mapping`.
- * It receives `(state, type<T>)` and returns the mapping for that position.
+ * It receives `(path, type<T>)` and returns the mapping for that position.
+ * The path satisfies `schema_path`; the selected mapper receives the state.
  * Defaults delegate to `mapping_to_type` and `mapping_from_type`, respectively;
  * those dispatchers select a `cp::` registration or a built-in mapping.
  * `.tdm_select_mapping` returns a local binding with a different selector.
@@ -583,7 +584,7 @@ TEST(basics, in_place_mapping_customization) {
 
   constexpr auto serialize = omni::ryml::serialize
     .tdm_select_mapping([](auto) {
-      return []<typename T>(omni::ryml::write_state_like auto state,
+      return []<typename T>(omni::ryml::schema_path auto path,
         omni::type_t<T> type) {
         if constexpr (std::is_same_v<T, settings>) {
           // Include static data members while still excluding functions.
@@ -596,7 +597,7 @@ TEST(basics, in_place_mapping_customization) {
             });
         } else {
           return omni::ryml::reflected_scope::fn::mapping_from_type(
-            state, type);
+            path, type);
         }
       };
     });
@@ -709,7 +710,7 @@ TEST(advanced, keep_nulls) {
 
   // Retain empty fields in this record and preserve sample positions.
   const auto serialize_with_nulls = serialize.tdm_select_mapping([](auto) {
-    return []<typename T>(omni::ryml::write_state_like auto state,
+    return []<typename T>(omni::ryml::schema_path auto path,
       omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, keep_nulls_example::response>) {
         return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
@@ -717,7 +718,7 @@ TEST(advanced, keep_nulls) {
       } else if constexpr (std::is_same_v<T, std::vector<std::optional<int>>>) {
         return omni::ryml::map_range.tdm_keep_nulls(omni::fn::always_true);
       } else {
-        return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+        return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
       }
     };
   });
@@ -1856,28 +1857,33 @@ struct contact {
 
 } // namespace path_specific_mapping
 
-/** `state.path()` is a compile-time schema path built from C++ field names:
+/** `.select_mapping` receives a `schema_path` built from C++ field names:
  * `root.home_address` and `root.work_address` identify two uses of `address`.
  * Container values add `[]` independently of runtime keys and indices.
- * `typename decltype(state)::enclosing_record` names the containing C++ type:
- * `contact` for both addresses. `type<T>` identifies the current value's type.
+ * `path.str()` returns the compile-time string. `path.schema_parent` is the
+ * containing record or range's type token: `omni::type<contact>` for both
+ * addresses, or `omni::type<void>` at the root. Optionals are transparent.
+ * `Path::schema_parent_t` gives the same type in a named path template.
+ * `Path::enclosing_root_t` and `path.enclosing_root` describe the original
+ * root; `type<T>` identifies the current value's type.
  *
  * This selector omits `street` only within `work_address`. The home address and
  * other types keep their default mappings. See `advanced.record_strategy` for
  * `.filter_fields`. `if constexpr` requires C++17; lambda templates require
  * C++20. Earlier standards use named overloaded selectors, as in
  * `strategy_examples::select_static_writer` in `../tests/mapping_strategy.cpp`.
- * A selector can query `State::path()` and use `compat::conditional_t` in its
+ * A selector can query `Path::str()` and use `compat::conditional_t` in its
  * return type when the path selects different mapper types. */
 TEST(advanced, path_specific_mapping) {
   using path_specific_mapping::address;
   using path_specific_mapping::contact;
 
   constexpr auto serialize = omni::ryml::serialize.tdm_select_mapping([](auto) {
-    return []<typename T>(omni::ryml::write_state_like auto state,
+    return []<typename T>(omni::ryml::schema_path auto path,
       omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, address>
-        && state.path().starts_with("root.work_address")) {
+        && path.schema_parent == omni::type<contact>
+        && path.str().starts_with("root.work_address")) {
         return omni::ryml::reflected_scope::map_record
           .tdm_strategy([](auto strategy) {
             return strategy.tdm_filter_fields([](auto) {
@@ -1888,7 +1894,7 @@ TEST(advanced, path_specific_mapping) {
             });
           });
       } else {
-        return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+        return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
       }
     };
   });
@@ -2096,7 +2102,8 @@ cp::to_type<T> :: {
  * state to the next operation.
  * write_state_like constrains the writer's state, which carries the destination
  * and string storage policy. Same-node delegation forwards state unchanged.
- * Child writers retarget with at(child) and derive field() or element() state.
+ * Child writers retarget with `at(child)` and derive `field(meta)` or
+ * `element()` state.
  * Before C++20, is_read_state<State> and is_write_state<State> provide the
  * corresponding Boolean traits; C++14 also provides their _v forms.
  *
@@ -2189,7 +2196,7 @@ struct from_type_t<customization_mapping::extended_values> {
           const auto state = context.at(node.append_child())
             .template field<T>(field.as_meta());
           const auto mapping = compat::invoke(context.select_mapping,
-            state, omni::type<typename decltype(field)::type>);
+            state.path(), omni::type<typename decltype(field)::type>);
           mapping(state, field.value());
         });
     return node;
@@ -2230,7 +2237,7 @@ struct from_type_t<customization_mapping::integer> {
   auto operator()(State context,
     const customization_mapping::integer &value) const -> ::ryml::NodeRef {
     const auto mapping = compat::invoke(context.select_mapping,
-      context, omni::type<int>);
+      context.path(), omni::type<int>);
     return mapping(std::move(context), value.value);
   }
 };
@@ -2399,16 +2406,19 @@ INSTANTIATE_TEST_SUITE_P(flat_arrays,
  * the compatibility note above `TEST(advanced, path_specific_mapping)`. */
 TEST(extended_container_mapping, customizes_appended_members_by_schema_path) {
   const auto serialize = omni::ryml::serialize.tdm_select_mapping([](auto) {
-    return []<omni::ryml::write_state_like State, typename T>(State state,
+    return []<omni::ryml::schema_path Path, typename T>(Path path,
       omni::type_t<T> type) {
-      if constexpr (std::is_same<T, int>::value
-        && state.path().ends_with("root.first"))
+      using parent = typename Path::schema_parent_t;
+      if constexpr (std::is_same_v<parent,
+        customization_mapping::extended_values>
+        && std::is_same_v<T, int>
+        && path.str().ends_with("root.first"))
         return [](omni::ryml::write_state_like auto state,
           const int &value) -> ::ryml::NodeRef {
           return omni::ryml::map_integral(std::move(state), value + 10);
         };
       else
-        return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+        return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
     };
   });
 

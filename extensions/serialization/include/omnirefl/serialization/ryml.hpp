@@ -101,7 +101,7 @@ struct map_by_schema_t final:
   using tdm_provider::tdm_config;
 
   /** Local mapping selection, propagated through recursive reads.
-   * `select_mapping :: (state, type<T>) -> Mapping`
+   * `select_mapping :: (schema_path, type<T>) -> Mapping`
    * Mapping follows the cp::to_type callable contract. */
   SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_select_mapping;
@@ -264,7 +264,7 @@ struct deserialize_t final:
   using tdm_provider::tdm_config;
 
   /** Local mapping selection, propagated through recursive reads.
-   * `select_mapping :: (state, type<T>) -> Mapping`
+   * `select_mapping :: (schema_path, type<T>) -> Mapping`
    * Mapping follows the cp::to_type callable contract. */
   SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_select_mapping;
@@ -497,7 +497,7 @@ struct as_owning_tree_t final:
     detail::tdm_for_as_owning_tree<SelectMapping> {
   using tdm_provider = detail::tdm_for_as_owning_tree<SelectMapping>;
 
-  // (state, type<T>) -> mapping callable, selected at every schema position.
+  // (schema_path, type<T>) -> mapping callable for each schema position.
   SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_select_mapping;
 
@@ -548,7 +548,7 @@ struct as_ref_tree_t final:
     detail::tdm_for_as_ref_tree<SelectMapping> {
   using tdm_provider = detail::tdm_for_as_ref_tree<SelectMapping>;
 
-  // (state, type<T>) -> mapping callable, selected at every schema position.
+  // (schema_path, type<T>) -> mapping callable for each schema position.
   SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_select_mapping;
 
@@ -605,7 +605,7 @@ struct serialize_t final:
   ::ryml::EmitType_e format{};
   using tdm_provider::tdm_format;
 
-  // (state, type<T>) -> mapping callable, selected at every schema position.
+  // (schema_path, type<T>) -> mapping callable for each schema position.
   SelectMapping select_mapping OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_select_mapping;
 

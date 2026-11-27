@@ -146,7 +146,7 @@ struct cpp11_lambda_write {
   template <typename _M, omni::reflected_entity Entity>
   void operator()(omni::meta_t<_M, Entity>) const {
     const auto mapping = compat::invoke(this->context.select_mapping,
-      this->context, omni::type_t<typename State::enclosing_root>{});
+      this->context.path(), omni::type_t<typename State::enclosing_root>{});
     mapping(this->context, this->value);
   }
 };
@@ -161,7 +161,7 @@ struct tree_builder_case {
     (is_write_state<State>::value))
   static void build(State context, T &value) {
     const auto mapping = compat::invoke(context.select_mapping,
-      context, omni::type_t<typename State::enclosing_root>{});
+      context.path(), omni::type_t<typename State::enclosing_root>{});
     mapping(std::move(context), value);
   }
 };

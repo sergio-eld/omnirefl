@@ -115,19 +115,19 @@ struct without_label {
 };
 
 struct select_static_writer {
-  template <typename State>
-  auto operator()(State, omni::type_t<interval>) const
+  template <typename Path>
+  auto operator()(Path, omni::type_t<interval>) const
     -> decltype(omni::ryml::reflected_scope::map_record
       .tdm_strategy(include_statics{})) {
     return omni::ryml::reflected_scope::map_record
       .tdm_strategy(include_statics{});
   }
 
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const
     -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
-      state, type)) {
-    return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 };
 

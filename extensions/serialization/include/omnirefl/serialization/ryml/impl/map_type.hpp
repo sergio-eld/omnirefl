@@ -33,8 +33,8 @@ auto select_write_mapping(const depth_exceeded &, omni::type_t<T>)
 OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
   (is_write_state<State>::value))
 auto select_write_mapping(const State &state, omni::type_t<T> type)
-  -> decltype(compat::invoke(state.select_mapping, state, type)) {
-  return compat::invoke(state.select_mapping, state, type);
+  -> decltype(compat::invoke(state.select_mapping, state.path(), type)) {
+  return compat::invoke(state.select_mapping, state.path(), type);
 }
 
 constexpr bool resolve_keep_nulls(bool keep, bool) {
@@ -117,10 +117,11 @@ auto map_record_t<Strategy, KeepNulls>::operator()(State context,
   // on an empty tuple, avoiding the costly tuple of every field binding.
   static_cast<void>(std::tuple<>{}
     | omni::fn::filter(this->strategy.filter_fields));
+  const auto state = omni::ryml::detail::state_schema<T>::bind(context);
   detail::write_record_members(
-    omni::ryml::detail::cpp11_write_member<State>{
+    omni::ryml::detail::cpp11_write_member<decltype(state)>{
       /*node=*/node,
-      /*context=*/context,
+      /*context=*/state,
       /*keep_null_fields=*/omni::ryml::detail::resolve_keep_nulls(
         this->keep_nulls, context.config.keep_null_fields),
     },
@@ -335,9 +336,11 @@ OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
 auto map_optional_like_t::operator()(State context, const T &value) const
   -> ::ryml::NodeRef {
   if (adapt::has_value(value)) {
-    const auto mapping = compat::invoke(context.select_mapping,
-      context, omni::type_t<typename T::value_type>{});
-    return mapping(context, adapt::get_value(value));
+    const auto state =
+      detail::state_schema<typename T::value_type>::bind(context);
+    const auto mapping = compat::invoke(state.select_mapping,
+      state.path(), omni::type_t<typename T::value_type>{});
+    return mapping(state, adapt::get_value(value));
   }
 
   auto node = context.node();
@@ -366,7 +369,7 @@ auto map_range_t<KeepNulls>::operator()(State context, const T &value) const
     "or converting-proxy iterators.");
 
   detail::write_range_case<traits::is_key_value<T>::value>::apply(
-    context,
+    detail::state_schema<T>::bind(context),
     value,
     node,
     detail::resolve_keep_nulls(this->keep_nulls,

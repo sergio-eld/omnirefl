@@ -425,6 +425,12 @@ struct is_optional<T,
       std::is_same<decltype(adapt::get_value(
         std::declval<const T &>())), const typename T::value_type &>> {};
 
+// C++20 constraint for the optional-adapter contract above.
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts
+template <typename T>
+concept optional_like = is_optional<T>::value;
+#endif
+
 // TODO: [high] Document the generalized operation-adapter pattern:
 // traits::cp specializations override primary member-based defaults;
 // dispatchers deduce the adapted type and invoke the selected struct without

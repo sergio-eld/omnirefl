@@ -253,7 +253,7 @@ auto to_range_t::operator()(State context,
     "to_range requires emplace, or try_emplace and replace for unique keys");
 
   auto result = omni::ryml::detail::make_node_accumulator(
-    std::move(context));
+    omni::ryml::detail::state_schema<T>::bind(context));
   assert(into);
   assert(traits::is_key_value<T>::value ? node.is_map() : node.is_seq());
 
