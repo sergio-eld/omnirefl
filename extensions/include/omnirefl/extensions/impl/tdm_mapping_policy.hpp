@@ -11,17 +11,59 @@
 namespace omni {
 namespace mapping {
 
+template <typename AliasesByName>
+struct enum_policy_t;
+
 template <typename FilterFields, typename AliasesByName,
   typename ValidateFields, typename Finalize, typename KeepNulls>
 struct record_policy_t;
-
-template <typename AliasesByName>
-struct enum_policy_t;
 
 template <typename KeepNulls>
 struct range_policy_t;
 
 namespace detail {
+
+template <typename AliasesByName>
+struct tdm_for_enum_policy {
+  /** (QoL) Functional update of .aliases_by_name. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, const AliasesByName &>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
+  constexpr auto tdm_aliases_by_name(F &&f) const &
+    -> enum_policy_t<compat::decay_t<Result>> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      compat::invoke(std::forward<F>(f), this->derived().aliases_by_name),
+    };
+  }
+
+  /** (QoL) Functional update consuming .aliases_by_name. */
+  OMNI_CONSTRAINED_TEMPLATE((typename F,
+    typename Result = compat::invoke_result_t<F &&, AliasesByName &&>),
+    (std::is_constructible<compat::decay_t<Result>, Result>::value))
+  OMNI_CPP14_CONSTEXPR auto tdm_aliases_by_name(F &&f) &&
+    -> enum_policy_t<compat::decay_t<Result>> {
+    return {
+#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
+      /*base=*/{},
+#endif
+      compat::invoke(std::forward<F>(f),
+        std::move(this->derived().aliases_by_name)),
+    };
+  }
+
+private:
+  // Direct returns keep the updater bodies constexpr-compatible with C++11.
+  constexpr const enum_policy_t<AliasesByName> &derived() const & {
+    return static_cast<const enum_policy_t<AliasesByName> &>(*this);
+  }
+
+  OMNI_CPP14_CONSTEXPR enum_policy_t<AliasesByName> &derived() & {
+    return static_cast<enum_policy_t<AliasesByName> &>(*this);
+  }
+};
 
 template <typename FilterFields, typename AliasesByName,
   typename ValidateFields, typename Finalize, typename KeepNulls>
@@ -266,48 +308,6 @@ private:
       /*finalize=*/std::forward<Finish>(finish),
       /*keep_nulls=*/std::forward<Nulls>(nulls),
     };
-  }
-};
-
-template <typename AliasesByName>
-struct tdm_for_enum_policy {
-  /** (QoL) Functional update of .aliases_by_name. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, const AliasesByName &>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  constexpr auto tdm_aliases_by_name(F &&f) const &
-    -> enum_policy_t<compat::decay_t<Result>> {
-    return {
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
-#endif
-      compat::invoke(std::forward<F>(f), this->derived().aliases_by_name),
-    };
-  }
-
-  /** (QoL) Functional update consuming .aliases_by_name. */
-  OMNI_CONSTRAINED_TEMPLATE((typename F,
-    typename Result = compat::invoke_result_t<F &&, AliasesByName &&>),
-    (std::is_constructible<compat::decay_t<Result>, Result>::value))
-  OMNI_CPP14_CONSTEXPR auto tdm_aliases_by_name(F &&f) &&
-    -> enum_policy_t<compat::decay_t<Result>> {
-    return {
-#if defined(__cpp_aggregate_bases) && 201603L <= __cpp_aggregate_bases
-      /*base=*/{},
-#endif
-      compat::invoke(std::forward<F>(f),
-        std::move(this->derived().aliases_by_name)),
-    };
-  }
-
-private:
-  // Direct returns keep the updater bodies constexpr-compatible with C++11.
-  constexpr const enum_policy_t<AliasesByName> &derived() const & {
-    return static_cast<const enum_policy_t<AliasesByName> &>(*this);
-  }
-
-  OMNI_CPP14_CONSTEXPR enum_policy_t<AliasesByName> &derived() & {
-    return static_cast<enum_policy_t<AliasesByName> &>(*this);
   }
 };
 
