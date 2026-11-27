@@ -50,7 +50,7 @@ struct to_type_t<enum_alias_models::state> {
     ::ryml::ConstNodeRef node,
     enum_alias_models::state *into) const -> with_diagnostics_t<compat::monostate> {
     return reflected_scope::map_node_to_enum_t<
-      mapping::enum_strategy_t<enum_alias_models::state_names>>{}(
+      mapping::enum_policy_t<enum_alias_models::state_names>>{}(
       std::move(state), node, into);
   }
 };
@@ -102,11 +102,11 @@ TEST(to_enum_aliases, declared_names_bypass_the_resolver) {
   const auto resolver = [](string_view)
     -> omni::compat::optional<string_view> { return string_view{"idle"}; };
 
-  const auto strategy = omni::mapping::enum_strategy.tdm_aliases_by_name(
+  const auto policy = omni::mapping::enum_policy.tdm_aliases_by_name(
     [resolver](const std::tuple<> &) { return resolver; });
   const auto compositor = omni::ryml::reflected_scope::map_node_to_enum
-    .tdm_strategy([strategy](const omni::mapping::enum_strategy_t<> &) {
-      return strategy;
+    .tdm_policy([policy](const omni::mapping::enum_policy_t<> &) {
+      return policy;
     });
 
   const auto tree = omni::ryml::core::parse(R"("active")");

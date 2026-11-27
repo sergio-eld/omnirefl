@@ -376,7 +376,7 @@ bool process_record_member(Frame *frame) {
     reflected_scope::detail::record_value_slot<Field> &>(frame->values);
   const bool present = frame->pending[Index] != ::ryml::NONE;
   if (present || (slot.stored && std::tuple_size<decltype(
-      frame->strategy.validate_fields)>::value != 0)) {
+      frame->policy.validate_fields)>::value != 0)) {
     constexpr auto type = omni::type_t<
       typename compat::remove_cvref_t<decltype(slot)>::type>{};
     constexpr auto field = typename compat::remove_cvref_t<
@@ -399,7 +399,7 @@ bool process_record_member(Frame *frame) {
 #endif
               frame->result->state.config.error_policy, {}}, {}, {}}};
         return map_record_field_value(state, node, type);
-      }), frame->strategy.validate_fields);
+      }), frame->policy.validate_fields);
     if (!present)
       for (auto &entry : mapped.diagnostics.issues) {
         if (entry.node_id != ::ryml::NONE)

@@ -401,12 +401,12 @@ struct cpp11_process_record_event {
 
 // Field types select value slots; indices pair them with the selected nodes.
 template <typename Record, typename State, typename... Field,
-  typename Strategy, typename Finalizer, std::size_t... Index>
+  typename Policy, typename Finalizer, std::size_t... Index>
 auto process_record_members(node_accumulator<State> *result,
   ::ryml::ConstNodeRef object,
   reflected_scope::detail::record_value_slots<Field...> *values,
   const std::array<::ryml::id_type, sizeof...(Index)> &pending,
-  const Strategy &strategy, Finalizer finalizer,
+  const Policy &policy, Finalizer finalizer,
   compat::index_sequence<Index...>)
   -> typename Finalizer::result_type {
   struct {
@@ -414,9 +414,9 @@ auto process_record_members(node_accumulator<State> *result,
     ::ryml::ConstNodeRef object;
     reflected_scope::detail::record_value_slots<Field...> &values;
     const std::array<::ryml::id_type, sizeof...(Index)> &pending;
-    const Strategy &strategy;
+    const Policy &policy;
     compat::optional<typename Finalizer::result_type::value_type> *value;
-  } frame{result, object, *values, pending, strategy, nullptr};
+  } frame{result, object, *values, pending, policy, nullptr};
 
   // Index-tag tuple types are shared by records of the same width.
   constexpr std::tuple<std::integral_constant<std::size_t, Index>...> events{};
@@ -450,33 +450,33 @@ using non_static_record_fields_t = typename filter_fields<
   compat::decay_t<decltype(omni::fn::is_non_static)>,
   typename omni::meta_for<T>::accessible_data_members_t>::type;
 
-template <typename T, typename Strategy>
+template <typename T, typename Policy>
 using readable_record_fields_t = typename filter_fields<
-  decltype(std::declval<Strategy>().filter_fields),
+  decltype(std::declval<Policy>().filter_fields),
   non_static_record_fields_t<T>>::type;
 
-template <typename T, typename Strategy>
+template <typename T, typename Policy>
 constexpr bool selects_all_record_fields() {
-  return std::tuple_size<readable_record_fields_t<T, Strategy>>::value
+  return std::tuple_size<readable_record_fields_t<T, Policy>>::value
     == std::tuple_size<non_static_record_fields_t<T>>::value;
 }
 
-template <typename T, typename State, typename Strategy, typename Finalizer,
+template <typename T, typename State, typename Policy, typename Finalizer,
   typename... Field>
 auto map_record_fields(State context, ::ryml::ConstNodeRef node,
-  const Strategy &strategy, Finalizer finalizer,
+  const Policy &policy, Finalizer finalizer,
   omni::type_t<std::tuple<Field...>>)
   -> typename Finalizer::result_type {
   auto result = omni::ryml::detail::make_node_accumulator(
     omni::ryml::detail::state_schema<T>::bind(context));
   assert(node.is_map());
-  assert(mapping::valid_record_strategy(compat::apply(record_field_names{},
-    omni::meta_for<T>::accessible_data_members()), strategy));
+  assert(mapping::valid_record_policy(compat::apply(record_field_names{},
+    omni::meta_for<T>::accessible_data_members()), policy));
 
   // Ad hoc: retain the old predicate construction and filter constraints
   // without materializing every field. Readers require constexpr construction
   // from C++14; an internal type-filter protocol should replace this check.
-  using filter_type = decltype(strategy.filter_fields);
+  using filter_type = decltype(policy.filter_fields);
 #if 201402L <= OMNI_CPLUSPLUS
   constexpr auto checked_filter = std::tuple<>{}
 #else
@@ -510,8 +510,8 @@ auto map_record_fields(State context, ::ryml::ConstNodeRef node,
     auto direct = table.lookup(input_name);
     const auto canonical = direct
       ? compat::decay_t<decltype(mapping::resolve_alias(
-          strategy.aliases_by_name, input_name))>{}
-      : mapping::resolve_alias(strategy.aliases_by_name, input_name);
+          policy.aliases_by_name, input_name))>{}
+      : mapping::resolve_alias(policy.aliases_by_name, input_name);
     const auto field = std::move(direct).or_else([&table, &canonical](
       omni::fn::not_found_t<compat::string_view> missing) {
       if (canonical)
@@ -575,28 +575,28 @@ auto map_record_fields(State context, ::ryml::ConstNodeRef node,
 
   record_value_slots<Field...> values{};
   return omni::ryml::detail::process_record_members<T>(&result, node, &values,
-    pending, strategy, std::move(finalizer),
+    pending, policy, std::move(finalizer),
     compat::make_index_sequence<sizeof...(Field)>{});
 }
 
-template <typename T, typename State, typename Strategy, typename Finalizer>
+template <typename T, typename State, typename Policy, typename Finalizer>
 auto map_record(State context, ::ryml::ConstNodeRef node,
-  const Strategy &strategy, Finalizer finalizer)
+  const Policy &policy, Finalizer finalizer)
   -> typename Finalizer::result_type {
-  return map_record_fields<T>(std::move(context), node, strategy,
+  return map_record_fields<T>(std::move(context), node, policy,
     std::move(finalizer),
-    omni::type_t<readable_record_fields_t<T, Strategy>>{});
+    omni::type_t<readable_record_fields_t<T, Policy>>{});
 }
 
 } // namespace detail
 
-template <typename Strategy, typename WithNodeCheck>
+template <typename Policy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && std::is_move_constructible<T>::value
     && std::is_default_constructible<T>::value
     && is_read_state<State>::value))
-auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
+auto map_object_node_t<Policy, WithNodeCheck>::operator()(State context,
   ::ryml::ConstNodeRef node, omni::type_t<T>) const
   -> with_diagnostics_t<T, diagnostics> {
   if (context.limit_exceeded())
@@ -620,20 +620,20 @@ auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && detail::selects_all_record_fields<T, Strategy>()
+        && detail::selects_all_record_fields<T, Policy>()
         && std::is_move_constructible<T>::value,
       detail::aggregate_record_value<T>>,
     detail::bind_record_value<T>>::type{};
   return omni::ryml::detail::finalize_record(context, node,
-    detail::map_record<T>(context, node, this->strategy, finalize),
-    this->strategy.finalize);
+    detail::map_record<T>(context, node, this->policy, finalize),
+    this->policy.finalize);
 }
 
-template <typename Strategy, typename WithNodeCheck>
+template <typename Policy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_record<T>::value
     && is_read_state<State>::value))
-auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
+auto map_object_node_t<Policy, WithNodeCheck>::operator()(State context,
   ::ryml::ConstNodeRef node, T *into) const
   -> with_diagnostics_t<compat::monostate, diagnostics> {
   assert(into);
@@ -658,14 +658,14 @@ auto map_object_node_t<Strategy, WithNodeCheck>::operator()(State context,
   // Before C++17, aggregate_into's return requires a usable move constructor.
   const auto finalize = typename traits::select<
     traits::case_<omni::refl::is_aggregatable<T>::value
-        && detail::selects_all_record_fields<T, Strategy>()
+        && detail::selects_all_record_fields<T, Policy>()
         && std::is_move_constructible<T>::value
         && std::is_assignable<T &, T &&>::value,
       detail::aggregate_record_into<T>>,
     detail::bind_record_into<T>>::type{into};
   return omni::ryml::detail::finalize_record_into(context, node,
-    detail::map_record<T>(context, node, this->strategy, finalize), into,
-    this->strategy.finalize);
+    detail::map_record<T>(context, node, this->policy, finalize), into,
+    this->policy.finalize);
 }
 
 } // namespace reflected_scope

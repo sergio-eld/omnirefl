@@ -1,12 +1,12 @@
 #pragma once
 
-/** Record and enum mapping properties shared by protocol extensions.
- * Strategies contain field selection, aliases, and value-preserving validation;
+/** Enum, record, and range mapping policies shared by protocol extensions.
+ * Policies contain field selection, aliases, and value-preserving validation;
  * they do not depend on generated metadata or a document backend.
  * See docs/CONVENTIONS.md, functional data-member updates. */
 
 #include <omnirefl/extensions/compat.hpp>
-#include <omnirefl/extensions/impl/tdm_mapping_strategy.hpp>
+#include <omnirefl/extensions/impl/tdm_mapping_policy.hpp>
 #include <omnirefl/functional.hpp>
 #include <omnirefl/traits.hpp>
 
@@ -19,7 +19,31 @@
 namespace omni {
 namespace mapping {
 
-/** Record field selection, aliases, and validation.
+/** Enum names and their accepted aliases. */
+template <typename AliasesByName = std::tuple<>>
+struct enum_policy_t:
+    detail::tdm_for_enum_policy<AliasesByName> {
+  using tdm_provider = detail::tdm_for_enum_policy<AliasesByName>;
+
+  /** Additional input names for each enumerator; output keeps its C++ name.
+   * Aliases must not overlap enumerator names or one another. */
+  // aliases_by_name :: {enumerator_name: [alias]}
+  AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_aliases_by_name;
+
+// Ad hoc: classes with bases are not aggregates before C++17. These
+// constructors preserve field initialization in the older standards.
+#if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
+  constexpr enum_policy_t() = default;
+
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = AliasesByName),
+    (std::is_constructible<AliasesByName, Value &&>::value))
+  constexpr enum_policy_t(Value &&value)
+    : aliases_by_name(std::forward<Value>(value)) {}
+#endif
+};
+
+/** Record field selection, aliases, validation, and output null policy.
  * Predicates are stateless, default-constructible, and return Boolean traits.
  * Validators preserve successfully checked values; Error is interpreted by
  * the consuming extension. Type-carried keys such as OMNI_META_STRING("age")
@@ -33,116 +57,161 @@ template <typename FilterFields = decltype(
     omni::fn::is_non_static && omni::fn::is_non_functional),
   typename AliasesByName = std::tuple<>,
   typename ValidateFields = std::tuple<>,
-  typename Finalize = omni::fn::identity>
-struct record_strategy_t:
-    detail::record_strategy_updates<FilterFields, AliasesByName,
-      ValidateFields, Finalize> {
-  using tdm_provider = detail::record_strategy_updates<FilterFields,
-    AliasesByName, ValidateFields, Finalize>;
+  typename Finalize = omni::fn::identity,
+  typename KeepNulls = compat::monostate>
+struct record_policy_t:
+    detail::record_policy_updates<FilterFields, AliasesByName,
+      ValidateFields, Finalize, KeepNulls> {
+  using tdm_provider = detail::record_policy_updates<FilterFields,
+    AliasesByName, ValidateFields, Finalize, KeepNulls>;
 
+  /** Unary predicate selecting fields to map; defaults to
+   * `fn::is_non_static && fn::is_non_functional`. */
   // filter_fields :: field_meta_like -> bool_constant
   FilterFields filter_fields OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_filter_fields;
 
+  /** Additional input names for each field; output keeps its C++ name.
+   * Aliases must not overlap canonical field names or one another. */
   // aliases_by_name :: {field_name: [alias]}
   AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_aliases_by_name;
 
+  /** Validators for each named field, run after decoding; empty by default. */
   // validate_fields :: {field_name: [validator]}
   // validator :: T -> expected<T, Error> | with_diagnostics<T>
   ValidateFields validate_fields OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_validate_fields;
 
+  /** Post-processes the completed record; defaults to `fn::identity`
+   * (no validation). */
   // finalize :: Record -> expected<Record, Error> | with_diagnostics<Record>
-  // The default identity performs no validation.
   Finalize finalize OMNI_CPP14_DEFAULT_INIT();
   using tdm_provider::tdm_finalize;
 
+  /** Output policy for empty optional fields; ignored by input mappings.
+   * `compat::monostate` inherits the output configuration. A `bool` or
+   * `compat::bool_constant` overrides it: true keeps nulls, false omits. */
+  KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_keep_nulls;
+
+  static_assert(std::is_same<compat::monostate, KeepNulls>::value
+      || std::is_same<bool, KeepNulls>::value
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
+    "record_policy_t keep_nulls must be compat::monostate, bool, "
+    "or compat::bool_constant");
+
 // Before C++17, aggregate bases need constructors for constexpr tdm_ updates.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr record_strategy_t()
-    : filter_fields{}, aliases_by_name{}, validate_fields{}, finalize{} {}
+  constexpr record_policy_t()
+    : filter_fields{}, aliases_by_name{}, validate_fields{}, finalize{},
+      keep_nulls{} {}
 
 private:
-  template <typename, typename, typename, typename>
-  friend struct detail::record_strategy_updates;
+  template <typename, typename, typename, typename, typename>
+  friend struct detail::record_policy_updates;
 
   template <typename Filter, typename Aliases, typename Validators,
-    typename Finish>
-  constexpr record_strategy_t(Filter &&filter, Aliases &&aliases,
-    Validators &&validators, Finish &&finish)
+    typename Finish, typename Nulls>
+  constexpr record_policy_t(Filter &&filter, Aliases &&aliases,
+    Validators &&validators, Finish &&finish, Nulls &&nulls)
     : filter_fields(std::forward<Filter>(filter)),
       aliases_by_name(std::forward<Aliases>(aliases)),
       validate_fields(std::forward<Validators>(validators)),
-      finalize(std::forward<Finish>(finish)) {}
+      finalize(std::forward<Finish>(finish)),
+      keep_nulls(std::forward<Nulls>(nulls)) {}
 #endif
 };
 
-/** Enum names and their accepted aliases.
- * aliases_by_name :: {enumerator_name: [alias]} */
-template <typename AliasesByName = std::tuple<>>
-struct enum_strategy_t:
-    detail::tdm_for_enum_strategy<AliasesByName> {
-  using tdm_provider = detail::tdm_for_enum_strategy<AliasesByName>;
+/** Output policy for empty optional elements or mapped values.
+ * Input mappings ignore this policy. */
+template <typename KeepNulls = compat::monostate>
+struct range_policy_t:
+    detail::tdm_for_range_policy<KeepNulls> {
+  using tdm_provider = detail::tdm_for_range_policy<KeepNulls>;
 
-  AliasesByName aliases_by_name OMNI_CPP14_DEFAULT_INIT();
-  using tdm_provider::tdm_aliases_by_name;
+  /** `compat::monostate` inherits the output configuration. A `bool` or
+   * `compat::bool_constant` overrides it: true keeps nulls, false omits. */
+  KeepNulls keep_nulls OMNI_CPP14_DEFAULT_INIT();
+  using tdm_provider::tdm_keep_nulls;
 
-// Ad hoc: classes with bases are not aggregates before C++17. These
-// constructors preserve field initialization in the older standards.
+  static_assert(std::is_same<compat::monostate, KeepNulls>::value
+      || std::is_same<bool, KeepNulls>::value
+      || std::is_same<std::false_type, KeepNulls>::value
+      || std::is_same<std::true_type, KeepNulls>::value,
+    "range_policy_t keep_nulls must be compat::monostate, bool, "
+    "or compat::bool_constant");
+
+// Ad hoc: aggregate bases need constructors before C++17.
 #if !defined(__cpp_aggregate_bases) || 201603L > __cpp_aggregate_bases
-  constexpr enum_strategy_t() = default;
+  constexpr range_policy_t() : keep_nulls{} {}
 
-  OMNI_CONSTRAINED_TEMPLATE((typename Value = AliasesByName),
-    (std::is_constructible<AliasesByName, Value &&>::value))
-  constexpr enum_strategy_t(Value &&value)
-    : aliases_by_name(std::forward<Value>(value)) {}
+  OMNI_CONSTRAINED_TEMPLATE((typename Value = KeepNulls),
+    (std::is_constructible<KeepNulls, Value &&>::value))
+  constexpr range_policy_t(Value &&value)
+    : keep_nulls(std::forward<Value>(value)) {}
 #endif
 };
 
-/** Whether T specializes record_strategy_t, ignoring cv/ref qualifiers. */
+/** Whether T specializes enum_policy_t, ignoring cv/ref qualifiers. */
 template <typename T>
-struct is_record_strategy:
+struct is_enum_policy:
     compat::bool_constant<
-      traits::is_specialization_of<record_strategy_t, T>()> {};
+      traits::is_specialization_of<enum_policy_t, T>()> {};
 
-/** Whether T specializes enum_strategy_t, ignoring cv/ref qualifiers. */
+/** Whether T specializes record_policy_t, ignoring cv/ref qualifiers. */
 template <typename T>
-struct is_enum_strategy:
+struct is_record_policy:
     compat::bool_constant<
-      traits::is_specialization_of<enum_strategy_t, T>()> {};
+      traits::is_specialization_of<record_policy_t, T>()> {};
+
+/** Whether T specializes range_policy_t, ignoring cv/ref qualifiers. */
+template <typename T>
+struct is_range_policy:
+    compat::bool_constant<
+      traits::is_specialization_of<range_policy_t, T>()> {};
 
 // C++14 adds variable templates for trait values.
 #if defined(__cpp_variable_templates) && 201304L <= __cpp_variable_templates
 template <typename T>
-constexpr bool is_record_strategy_v = is_record_strategy<T>::value;
+constexpr bool is_enum_policy_v = is_enum_policy<T>::value;
 
 template <typename T>
-constexpr bool is_enum_strategy_v = is_enum_strategy<T>::value;
+constexpr bool is_record_policy_v = is_record_policy<T>::value;
+
+template <typename T>
+constexpr bool is_range_policy_v = is_range_policy<T>::value;
 #endif
 
-// C++20 concepts expose the same strategy contracts.
+// C++20 concepts expose the same policy contracts.
 #if defined(__cpp_concepts) && 201907L <= __cpp_concepts
 template <typename T>
-concept record_strategy_like = is_record_strategy<T>::value;
+concept enum_policy_like = is_enum_policy<T>::value;
 
 template <typename T>
-concept enum_strategy_like = is_enum_strategy<T>::value;
+concept record_policy_like = is_record_policy<T>::value;
+
+template <typename T>
+concept range_policy_like = is_range_policy<T>::value;
 #endif
 
 #if defined(__cpp_inline_variables) && 201606L <= __cpp_inline_variables
-inline constexpr record_strategy_t<> record_strategy{};
-inline constexpr enum_strategy_t<> enum_strategy{};
+inline constexpr enum_policy_t<> enum_policy{};
+inline constexpr record_policy_t<> record_policy{};
+inline constexpr range_policy_t<> range_policy{};
 #else
-static constexpr const record_strategy_t<> &record_strategy =
-  compat::detail::shared_state<record_strategy_t<>>::value;
-static constexpr const enum_strategy_t<> &enum_strategy =
-  compat::detail::shared_state<enum_strategy_t<>>::value;
+static constexpr const enum_policy_t<> &enum_policy =
+  compat::detail::shared_state<enum_policy_t<>>::value;
+static constexpr const record_policy_t<> &record_policy =
+  compat::detail::shared_state<record_policy_t<>>::value;
+static constexpr const range_policy_t<> &range_policy =
+  compat::detail::shared_state<range_policy_t<>>::value;
 #endif
 
 /** (QoL) Canonical-name groups, each followed by its aliases.
  * aliases_dict :: (group, ...) -> {name: [alias]}
- * Borrowed names must outlive uses of the strategy. */
+ * Borrowed names must outlive uses of the policy. */
 template <typename... Groups>
 constexpr auto aliases_dict(Groups &&...groups)
   -> std::tuple<compat::decay_t<Groups>...> {
@@ -216,7 +285,7 @@ auto resolve_alias(const Aliases &aliases, compat::string_view alias)
 
 namespace detail {
 
-struct strategy_name {
+struct policy_name {
   compat::string_view spelling;
   bool is_canonical;
 };
@@ -225,7 +294,7 @@ struct alias_group_names {
   template <typename Name, typename... Aliases>
   OMNI_CPP14_CONSTEXPR auto operator()(const Name &name,
     const Aliases &...aliases) const
-    -> std::array<strategy_name, 1 + sizeof...(Aliases)> {
+    -> std::array<policy_name, 1 + sizeof...(Aliases)> {
     return {{{compat::string_view{name}, true},
       {compat::string_view{aliases}, false}...}};
   }
@@ -241,10 +310,10 @@ OMNI_CPP14_CONSTEXPR bool contains_name(const Names &names,
   return false;
 }
 
-struct collect_strategy_names {
+struct collect_policy_names {
   template <typename... Entries>
   constexpr auto operator()(const Entries &...entries) const
-    -> std::array<strategy_name, sizeof...(Entries)> {
+    -> std::array<policy_name, sizeof...(Entries)> {
     return {{entries...}};
   }
 };
@@ -252,7 +321,7 @@ struct collect_strategy_names {
 template <typename Names, typename Groups, std::size_t... Index>
 OMNI_CPP14_CONSTEXPR bool valid_alias_groups(const Names &names,
   const Groups &groups, compat::index_sequence<Index...>) {
-  const auto entries = compat::apply(collect_strategy_names{}, std::tuple_cat(
+  const auto entries = compat::apply(collect_policy_names{}, std::tuple_cat(
     compat::apply(alias_group_names{}, std::get<Index>(groups))...));
   // Fixed-size arrays keep validation allocation-free.
   const auto names_valid = std::array<bool, sizeof...(Index)>{{
@@ -306,14 +375,14 @@ OMNI_CONSTRAINED_TEMPLATE((typename Names, typename Aliases),
   (compat::is_invocable<const Aliases &, compat::string_view>::value))
 constexpr bool valid_aliases(const Names &, const Aliases &) { return true; }
 
-/** Field-name and alias validation for a record strategy. */
-template <typename Names, typename Strategy>
-OMNI_CPP14_CONSTEXPR bool valid_record_strategy(const Names &names,
-  const Strategy &strategy) {
-  return valid_aliases(names, strategy.aliases_by_name)
-    && detail::valid_field_groups(names, strategy.validate_fields,
+/** Field-name and alias validation for a record policy. */
+template <typename Names, typename Policy>
+OMNI_CPP14_CONSTEXPR bool valid_record_policy(const Names &names,
+  const Policy &policy) {
+  return valid_aliases(names, policy.aliases_by_name)
+    && detail::valid_field_groups(names, policy.validate_fields,
       compat::make_index_sequence<std::tuple_size<
-        decltype(strategy.validate_fields)>::value>{});
+        decltype(policy.validate_fields)>::value>{});
 }
 
 } // namespace mapping

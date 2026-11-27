@@ -102,46 +102,46 @@ void write_record_members(const Write &write, Record &value,
 
 } // namespace detail
 
-template <typename Strategy, typename KeepNulls>
+template <typename Policy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_record<T>,
     is_write_state<State>>::value))
-auto map_record_t<Strategy, KeepNulls>::operator()(State context,
+auto map_record_t<Policy>::operator()(State context,
   const T &value) const -> ::ryml::NodeRef {
   auto node = context.node();
-  assert(mapping::valid_record_strategy(
+  assert(mapping::valid_record_policy(
     compat::apply(detail::record_field_names{},
-      omni::meta_for<T>::accessible_data_members()), this->strategy));
+      omni::meta_for<T>::accessible_data_members()), this->policy));
   node.set_map();
   // Ad hoc: retain the original predicate construction and filter constraints
   // on an empty tuple, avoiding the costly tuple of every field binding.
   static_cast<void>(std::tuple<>{}
-    | omni::fn::filter(this->strategy.filter_fields));
+    | omni::fn::filter(this->policy.filter_fields));
   const auto state = omni::ryml::detail::state_schema<T>::bind(context);
   detail::write_record_members(
     omni::ryml::detail::cpp11_write_member<decltype(state)>{
       /*node=*/node,
       /*context=*/state,
       /*keep_null_fields=*/omni::ryml::detail::resolve_keep_nulls(
-        this->keep_nulls, context.config.keep_null_fields),
+        this->policy.keep_nulls, context.config.keep_null_fields),
     },
     value,
     // REFACTORME: [high] Slop ad hoc: reconstruct and filter binding types
     // because metadata traversal exposes a tuple whose construction/indexing
     // causes wide-record compile growth. Replace this nested type plumbing
-    // with direct field-pack traversal that preserves strategy filtering.
+    // with direct field-pack traversal that preserves policy filtering.
     omni::type_t<typename detail::filter_fields<
-      decltype(std::declval<Strategy>().filter_fields),
+      decltype(std::declval<Policy>().filter_fields),
       typename detail::record_member_bindings<const T,
         typename omni::meta_for<T>::accessible_data_members_t>::type>::type>{});
   return node;
 }
 
-template <typename Strategy>
+template <typename Policy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::is_reflected_enum<T>,
     is_write_state<State>>::value))
-auto map_enum_t<Strategy>::operator()(State context, T value) const
+auto map_enum_t<Policy>::operator()(State context, T value) const
   -> ::ryml::NodeRef {
   auto node = context.node();
   constexpr auto enumerators = omni::meta_for<T>::enumerators();
@@ -349,11 +349,11 @@ auto map_optional_like_t::operator()(State context, const T &value) const
   return node;
 }
 
-template <typename KeepNulls>
+template <typename Policy>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (compat::conjunction<omni::ryml::detail::is_mapped_range<const T>,
     is_write_state<State>>::value))
-auto map_range_t<KeepNulls>::operator()(State context, const T &value) const
+auto map_range_t<Policy>::operator()(State context, const T &value) const
   -> ::ryml::NodeRef {
   auto node = context.node();
   using element_type = compat::range_value_t<T>;
@@ -372,7 +372,7 @@ auto map_range_t<KeepNulls>::operator()(State context, const T &value) const
     detail::state_schema<T>::bind(context),
     value,
     node,
-    detail::resolve_keep_nulls(this->keep_nulls,
+    detail::resolve_keep_nulls(this->policy.keep_nulls,
       traits::is_key_value<T>::value ? context.config.keep_null_fields
         : context.config.keep_null_elements));
 

@@ -64,8 +64,8 @@
  *   advanced.composed_record_mapping - nested lookup for vector elements
  *   advanced.mutating_scalar_mapping - exceptional pointer-only conversion
  *   advanced.mutating_record_mapping - existing records and state delegation
- *   advanced.record_strategy - share field selection between reader and writer
- *   advanced.strategy_aliases - alternate record field and enum names
+ *   advanced.record_policy - share field selection between reader and writer
+ *   advanced.policy_aliases - alternate record field and enum names
  *   advanced.field_validation - validate decoded fields without changing them
  *   advanced.record_validation - validate whole records, including nested ones
  *   advanced.path_specific_mapping - customize one use of a nested type
@@ -572,13 +572,13 @@ struct settings {
  * `.tdm_select_mapping` returns a local binding with a different selector.
  * Here it includes static data members for `settings`; other types keep the
  * default selection. Static members remain excluded from deserialization.
- * See `advanced.record_strategy` for field selection and
+ * See `advanced.record_policy` for field selection and
  * `advanced.path_specific_mapping` for path-based customization.
  *
  * C++11 uses named callables and overloaded `operator()` instead of generic
- * lambdas and `if constexpr`. See `strategy_examples::select_static_writer`
- * and `strategy_examples::include_statics` in `../tests/mapping_strategy.cpp`
- * for the selector and `.tdm_strategy` updater idioms. */
+ * lambdas and `if constexpr`. See `policy_examples::select_static_writer`
+ * and `policy_examples::include_statics` in `../tests/mapping_policy.cpp`
+ * for the selector and `.tdm_policy` updater idioms. */
 TEST(basics, in_place_mapping_customization) {
   using static_field_serialization::settings;
 
@@ -588,10 +588,10 @@ TEST(basics, in_place_mapping_customization) {
         omni::type_t<T> type) {
         if constexpr (std::is_same_v<T, settings>) {
           // Include static data members while still excluding functions.
-          // See `advanced.record_strategy` for `.filter_fields`.
+          // See `advanced.record_policy` for `.filter_fields`.
           return omni::ryml::reflected_scope::map_record
-            .tdm_strategy([](auto strategy) {
-              return strategy.tdm_filter_fields([](auto) {
+            .tdm_policy([](auto policy) {
+              return policy.tdm_filter_fields([](auto) {
                 return omni::fn::is_non_functional;
               });
             });
@@ -688,8 +688,9 @@ struct response {
 
 /** `.config` on `serialize` and the tree builders controls empty optionals.
  * Defaults retain null object fields and omit empty array elements.
- * `.keep_nulls` on `map_record` or `map_range` defaults to `compat::monostate`,
- * inheriting `.config`. A `bool` or `compat::bool_constant` overrides it:
+ * `.policy.keep_nulls` on `map_record` and `map_range` defaults to
+ * `compat::monostate`, inheriting `.config`.
+ * A `bool` or `compat::bool_constant` overrides it:
  * `true` keeps nulls, `false` omits them. Records control their fields; ranges
  * control their immediate elements or mapped values. Nested policies are
  * independent.
@@ -713,10 +714,14 @@ TEST(advanced, keep_nulls) {
     return []<typename T>(omni::ryml::schema_path auto path,
       omni::type_t<T> type) {
       if constexpr (std::is_same_v<T, keep_nulls_example::response>) {
-        return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
-          omni::fn::always_true);
+        return omni::ryml::reflected_scope::map_record.tdm_policy(
+          [](auto policy) {
+            return policy.tdm_keep_nulls(omni::fn::always_true);
+          });
       } else if constexpr (std::is_same_v<T, std::vector<std::optional<int>>>) {
-        return omni::ryml::map_range.tdm_keep_nulls(omni::fn::always_true);
+        return omni::ryml::map_range.tdm_policy([](auto policy) {
+          return policy.tdm_keep_nulls(omni::fn::always_true);
+        });
       } else {
         return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
       }
@@ -1644,47 +1649,48 @@ TEST(advanced, mutating_record_mapping) {
   EXPECT_EQ(443, into.port);
 }
 
-namespace record_strategy_example {
+namespace record_policy_example {
 
 struct account {
   std::string name;
   std::string secret;
 };
 
-constexpr auto public_fields = omni::mapping::record_strategy
+constexpr auto public_fields = omni::mapping::record_policy
   .tdm_filter_fields([](auto) {
     return [](omni::data_member_meta auto field) {
       return std::bool_constant<std::string_view{field.name()} != "secret">{};
     };
   });
 
-} // namespace record_strategy_example
+} // namespace record_policy_example
 
 template <>
-const auto omni::ryml::cp::to_type<record_strategy_example::account> =
-  omni::ryml::reflected_scope::map_object_node.tdm_strategy([](auto) {
-    return record_strategy_example::public_fields;
+const auto omni::ryml::cp::to_type<record_policy_example::account> =
+  omni::ryml::reflected_scope::map_object_node.tdm_policy([](auto) {
+    return record_policy_example::public_fields;
   });
 
 template <>
-const auto omni::ryml::cp::from_type<record_strategy_example::account> =
-  omni::ryml::reflected_scope::map_record.tdm_strategy([](auto) {
-    return record_strategy_example::public_fields;
+const auto omni::ryml::cp::from_type<record_policy_example::account> =
+  omni::ryml::reflected_scope::map_record.tdm_policy([](auto) {
+    return record_policy_example::public_fields;
   });
 
-/** `record_strategy_t` configures field selection, aliases, and validation.
- * `.tdm_strategy` attaches it to a record mapping. Both `cp::` registrations
- * share one strategy: `secret` is neither emitted nor required on input.
+/** `record_policy_t` configures field selection, aliases, validation,
+ * and output null retention.
+ * `.tdm_policy` attaches it to a record mapping. Both `cp::` registrations
+ * share one policy: `secret` is neither emitted nor required on input.
  * The default `.filter_fields` is `fn::is_non_static && fn::is_non_functional`.
  * The Basics example drops the first check to emit static data members.
  * C++11 uses a named metadata predicate with a templated `operator()` returning
- * `compat::bool_constant`; see `strategy_examples::without_label` in
- * `../tests/mapping_strategy.cpp` for that predicate idiom.
- * See `advanced.strategy_aliases`, `advanced.field_validation`, and
- * `advanced.record_validation` for the other properties, or
- * \ref omni::mapping::record_strategy_t for their contracts. */
-TEST(advanced, record_strategy) {
-  const record_strategy_example::account source{
+ * `compat::bool_constant`; see `policy_examples::without_label` in
+ * `../tests/mapping_policy.cpp` for that predicate idiom.
+ * See `advanced.policy_aliases`, `advanced.field_validation`,
+ * `advanced.record_validation`, and `advanced.keep_nulls`, or
+ * \ref omni::mapping::record_policy_t for their contracts. */
+TEST(advanced, record_policy) {
+  const record_policy_example::account source{
     .name = "Ada",
     .secret = "session-token",
   };
@@ -1693,7 +1699,7 @@ TEST(advanced, record_strategy) {
   EXPECT_TRUE(same_document(document, omni::ryml::serialize(source)));
 
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
-    omni::type<record_strategy_example::account>, document);
+    omni::type<record_policy_example::account>, document);
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.empty());
@@ -1703,7 +1709,7 @@ TEST(advanced, record_strategy) {
   }
 }
 
-namespace strategy_aliases {
+namespace policy_aliases {
 
 enum class status { ready, busy };
 
@@ -1712,45 +1718,45 @@ struct task {
   status state;
 };
 
-} // namespace strategy_aliases
+} // namespace policy_aliases
 
 template <>
-const auto omni::ryml::cp::to_type<strategy_aliases::task> =
-  omni::ryml::reflected_scope::map_object_node.tdm_strategy([](auto strategy) {
-    return strategy.tdm_aliases_by_name([](auto) {
+const auto omni::ryml::cp::to_type<policy_aliases::task> =
+  omni::ryml::reflected_scope::map_object_node.tdm_policy([](auto policy) {
+    return policy.tdm_aliases_by_name([](auto) {
       return omni::mapping::aliases_dict(std::tuple{"title", "name"});
     });
   });
 
 template <>
-const auto omni::ryml::cp::to_type<strategy_aliases::status> =
-  omni::ryml::reflected_scope::map_node_to_enum.tdm_strategy([](auto strategy) {
-    return strategy.tdm_aliases_by_name([](auto) {
+const auto omni::ryml::cp::to_type<policy_aliases::status> =
+  omni::ryml::reflected_scope::map_node_to_enum.tdm_policy([](auto policy) {
+    return policy.tdm_aliases_by_name([](auto) {
       return omni::mapping::aliases_dict(std::tuple{"busy", "working"});
     });
   });
 
-/** Record and enum strategies accept aliases through `.aliases_by_name`.
+/** Record and enum policies accept aliases through `.aliases_by_name`.
  * Each `aliases_dict` group starts with the C++ name, followed by aliases.
  * Here `name` supplies `title`, and `working` selects `status::busy`.
  * Serialization keeps the declared C++ names. */
-TEST(advanced, strategy_aliases) {
+TEST(advanced, policy_aliases) {
   const omni::ryml::with_diagnostics_t result = omni::ryml::deserialize(
-    omni::type<strategy_aliases::task>,
+    omni::type<policy_aliases::task>,
     R"({"name": "Sync accounts", "state": "working"})");
 
   EXPECT_TRUE(result.value);
   EXPECT_TRUE(result.diagnostics.empty());
   if (result.value) {
     EXPECT_EQ("Sync accounts", result.value->title);
-    EXPECT_EQ(strategy_aliases::status::busy, result.value->state);
+    EXPECT_EQ(policy_aliases::status::busy, result.value->state);
     EXPECT_TRUE(same_document(
       R"({"title": "Sync accounts", "state": "busy"})",
       omni::ryml::serialize(*result.value)));
   }
 }
 
-namespace strategy_validation {
+namespace policy_validation {
 
 struct interval {
   int begin;
@@ -1779,19 +1785,19 @@ auto ordered(interval value)
   return value;
 }
 
-} // namespace strategy_validation
+} // namespace policy_validation
 
 template <>
-const auto omni::ryml::cp::to_type<strategy_validation::interval> =
-  omni::ryml::reflected_scope::map_object_node.tdm_strategy([](auto strategy) {
-    return strategy
+const auto omni::ryml::cp::to_type<policy_validation::interval> =
+  omni::ryml::reflected_scope::map_object_node.tdm_policy([](auto policy) {
+    return policy
       .tdm_validate_fields([](auto) {
         return std::tuple{
-          std::tuple{"begin", &strategy_validation::nonnegative},
-          std::tuple{"end", &strategy_validation::nonnegative},
+          std::tuple{"begin", &policy_validation::nonnegative},
+          std::tuple{"end", &policy_validation::nonnegative},
         };
       })
-      .tdm_finalize([](auto) { return strategy_validation::ordered; });
+      .tdm_finalize([](auto) { return policy_validation::ordered; });
   });
 
 /** `.validate_fields` associates C++ field names with value-preserving checks.
@@ -1800,7 +1806,7 @@ const auto omni::ryml::cp::to_type<strategy_validation::interval> =
  * receives the field's document path. Here both bounds must be nonnegative. */
 TEST(advanced, field_validation) {
   const omni::ryml::with_diagnostics_t valid = omni::ryml::deserialize(
-    omni::type<strategy_validation::interval>, R"({"begin": 1, "end": 3})");
+    omni::type<policy_validation::interval>, R"({"begin": 1, "end": 3})");
 
   EXPECT_TRUE(valid.value);
   EXPECT_TRUE(valid.diagnostics.empty());
@@ -1810,7 +1816,7 @@ TEST(advanced, field_validation) {
   }
 
   const omni::ryml::with_diagnostics_t invalid = omni::ryml::deserialize(
-    omni::type<strategy_validation::interval>, R"({"begin": -1, "end": 3})");
+    omni::type<policy_validation::interval>, R"({"begin": -1, "end": 3})");
 
   EXPECT_FALSE(invalid.value);
   EXPECT_EQ("/begin: \"-1\" is out of range", invalid.diagnostics);
@@ -1822,7 +1828,7 @@ TEST(advanced, field_validation) {
  * when an `interval` appears inside a sequence. */
 TEST(advanced, record_validation) {
   const omni::ryml::with_diagnostics_t valid = omni::ryml::deserialize(
-    omni::type<strategy_validation::schedule>,
+    omni::type<policy_validation::schedule>,
     R"({"windows": [{"begin": 1, "end": 3}]})");
 
   EXPECT_TRUE(valid.value);
@@ -1836,7 +1842,7 @@ TEST(advanced, record_validation) {
   }
 
   const omni::ryml::with_diagnostics_t invalid = omni::ryml::deserialize(
-    omni::type<strategy_validation::schedule>,
+    omni::type<policy_validation::schedule>,
     R"({"windows": [{"begin": 3, "end": 1}]})");
 
   EXPECT_FALSE(invalid.value);
@@ -1868,10 +1874,10 @@ struct contact {
  * root; `type<T>` identifies the current value's type.
  *
  * This selector omits `street` only within `work_address`. The home address and
- * other types keep their default mappings. See `advanced.record_strategy` for
+ * other types keep their default mappings. See `advanced.record_policy` for
  * `.filter_fields`. `if constexpr` requires C++17; lambda templates require
  * C++20. Earlier standards use named overloaded selectors, as in
- * `strategy_examples::select_static_writer` in `../tests/mapping_strategy.cpp`.
+ * `policy_examples::select_static_writer` in `../tests/mapping_policy.cpp`.
  * A selector can query `Path::str()` and use `compat::conditional_t` in its
  * return type when the path selects different mapper types. */
 TEST(advanced, path_specific_mapping) {
@@ -1885,8 +1891,8 @@ TEST(advanced, path_specific_mapping) {
         && path.schema_parent == omni::type<contact>
         && path.str().starts_with("root.work_address")) {
         return omni::ryml::reflected_scope::map_record
-          .tdm_strategy([](auto strategy) {
-            return strategy.tdm_filter_fields([](auto) {
+          .tdm_policy([](auto policy) {
+            return policy.tdm_filter_fields([](auto) {
               return [](omni::data_member_meta auto field) {
                 return std::bool_constant<
                   std::string_view{field.name()} != "street">{};
@@ -2117,8 +2123,8 @@ namespace cp {
 // A configured record mapping can be registered without a wrapper.
 template <>
 const auto to_type<customization_mapping::record> =
-  reflected_scope::map_object_node.tdm_strategy([](auto strategy) {
-    return strategy.tdm_aliases_by_name([](auto) {
+  reflected_scope::map_object_node.tdm_policy([](auto policy) {
+    return policy.tdm_aliases_by_name([](auto) {
       return omni::mapping::aliases_dict(std::tuple{"count", "legacy_count"});
     });
   });
@@ -2129,8 +2135,8 @@ const auto from_type<customization_mapping::record> =
 
 template <>
 const auto to_type<customization_mapping::status> =
-  reflected_scope::map_node_to_enum.tdm_strategy([](auto strategy) {
-    return strategy.tdm_aliases_by_name([](auto) {
+  reflected_scope::map_node_to_enum.tdm_policy([](auto policy) {
+    return policy.tdm_aliases_by_name([](auto) {
       return omni::mapping::aliases_dict(std::tuple{"busy", "working"});
     });
   });

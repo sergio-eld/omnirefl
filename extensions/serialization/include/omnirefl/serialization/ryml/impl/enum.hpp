@@ -15,10 +15,10 @@ namespace ryml {
 namespace core {
 namespace reflected_scope {
 
-OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename Strategy),
+OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename Policy),
   (omni::is_reflected_enum<T>::value
-    && mapping::is_enum_strategy<Strategy>::value))
-auto parse_as_enum(::ryml::ConstNodeRef node, const Strategy &strategy)
+    && mapping::is_enum_policy<Policy>::value))
+auto parse_as_enum(::ryml::ConstNodeRef node, const Policy &policy)
   -> compat::expected<T, issue> {
   assert(core::expect_string_node(node));
 
@@ -27,7 +27,7 @@ auto parse_as_enum(::ryml::ConstNodeRef node, const Strategy &strategy)
   std::array<compat::string_view, enumerators.size()> names{};
   for (std::size_t index = 0; index < enumerators.size(); ++index)
     names[index] = enumerators[index].second;
-  assert(mapping::valid_aliases(names, strategy.aliases_by_name));
+  assert(mapping::valid_aliases(names, policy.aliases_by_name));
 #endif
   const auto find_name = [enumerators](compat::string_view name)
     -> compat::optional<T> {
@@ -43,7 +43,7 @@ auto parse_as_enum(::ryml::ConstNodeRef node, const Strategy &strategy)
     return *found;
 
   if (const auto canonical = mapping::resolve_alias(
-      strategy.aliases_by_name, value))
+      policy.aliases_by_name, value))
     if (const auto found = find_name(*canonical))
       return *found;
 
@@ -56,10 +56,10 @@ auto parse_as_enum(::ryml::ConstNodeRef node, const Strategy &strategy)
 
 namespace reflected_scope {
 
-template <typename Strategy, typename WithNodeCheck>
+template <typename Policy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_enum<T>::value && is_read_state<State>::value))
-auto map_node_to_enum_t<Strategy, WithNodeCheck>::operator()(State state,
+auto map_node_to_enum_t<Policy, WithNodeCheck>::operator()(State state,
   ::ryml::ConstNodeRef node,
   omni::type_t<T>) const -> with_diagnostics_t<T> {
   if (state.limit_exceeded())
@@ -80,15 +80,15 @@ auto map_node_to_enum_t<Strategy, WithNodeCheck>::operator()(State state,
   }
 
   return omni::ryml::detail::node_result(std::move(state),
-    core::reflected_scope::parse_as_enum<T>(node, this->strategy), node);
+    core::reflected_scope::parse_as_enum<T>(node, this->policy), node);
 }
 
-template <typename Strategy, typename WithNodeCheck>
+template <typename Policy, typename WithNodeCheck>
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (omni::is_reflected_enum<T>::value
     && std::is_assignable<T &, T &&>::value
     && is_read_state<State>::value))
-auto map_node_to_enum_t<Strategy, WithNodeCheck>::operator()(State state,
+auto map_node_to_enum_t<Policy, WithNodeCheck>::operator()(State state,
   ::ryml::ConstNodeRef node, T *into) const
   -> with_diagnostics_t<compat::monostate> {
   assert(into);
