@@ -38,6 +38,11 @@ struct type_t;
 template <typename T>
 struct type_t {
   using type = T;
+
+  template <typename Other>
+  constexpr bool operator==(type_t<Other>) const noexcept {
+    return std::is_same<T, Other>::value;
+  }
 };
 #  define OMNI_TYPE_T_DEFINED
 #endif

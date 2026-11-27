@@ -65,22 +65,6 @@ constexpr auto first_available(const First &first, const Second &second,
 #endif
 }
 
-template <typename T,
-  bool Optional = traits::is_optional<T>::value,
-  bool KeyValue = traits::is_key_value<T>::value>
-struct discovered_range_type {
-  using type = compat::remove_cvref_t<compat::range_value_t<T>>;
-};
-
-template <typename T, bool KeyValue>
-struct discovered_range_type<T, true, KeyValue> {
-  using type = compat::remove_cvref_t<typename T::value_type>;
-};
-
-template <typename T>
-struct discovered_range_type<T, false, true> {
-  using type = compat::remove_cvref_t<traits::mapped_type_t<T>>;
-};
 
 struct alias_entry {
   compat::string_view alias;

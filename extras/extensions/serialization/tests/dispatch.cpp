@@ -10,6 +10,14 @@
 #include <utility>
 #include <vector>
 
+#if defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
+#  include <optional>
+#endif
+
+#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
+#  include <ranges>
+#endif
+
 #if defined(__GNUC__) && !defined(__clang__)
 // GCC warns about GTest conditionals inside unbraced assertion guards.
 #  pragma GCC diagnostic push
@@ -92,19 +100,19 @@ struct write_integer {
 };
 
 struct select_writer {
-  OMNI_CONSTRAINED_TEMPLATE((typename State),
-    (omni::ryml::is_write_state<State>::value))
-  auto operator()(State state, omni::type_t<int>) const -> write_integer {
-    return {state.path().ends_with(".data.checked")};
+  OMNI_CONSTRAINED_TEMPLATE((typename Path),
+    (omni::ryml::is_schema_path<Path>::value))
+  auto operator()(Path path, omni::type_t<int>) const -> write_integer {
+    return {path.str().ends_with(".data.checked")};
   }
 
-  OMNI_CONSTRAINED_TEMPLATE((typename State, typename T),
-    (omni::ryml::is_write_state<State>::value
+  OMNI_CONSTRAINED_TEMPLATE((typename Path, typename T),
+    (omni::ryml::is_schema_path<Path>::value
       && !std::is_same<T, int>::value))
-  auto operator()(State state, omni::type_t<T> type) const
+  auto operator()(Path path, omni::type_t<T> type) const
     -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
-      state, type)) {
-    return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 };
 
@@ -548,16 +556,16 @@ struct record {
 };
 
 struct select_mapping {
-  template <typename State, typename T>
-  auto operator()(State, omni::type_t<T> type) const
+  template <typename Path, typename T>
+  auto operator()(Path, omni::type_t<T> type) const
     -> decltype(omni::ryml::reflected_scope::mapping_to_type(type)
       .tdm_with_node_check(omni::fn::default_value<std::false_type>{})) {
     return omni::ryml::reflected_scope::mapping_to_type(type)
       .tdm_with_node_check(omni::fn::default_value<std::false_type>{});
   }
 
-  template <typename State>
-  auto operator()(State, omni::type_t<short>) const
+  template <typename Path>
+  auto operator()(Path, omni::type_t<short>) const
     -> decltype(omni::ryml::map_arithmetic_node.tdm_with_node_check(
       omni::fn::default_value<std::false_type>{})) {
     return omni::ryml::map_arithmetic_node.tdm_with_node_check(
@@ -725,6 +733,168 @@ TEST(traversal, root_record_reports_field_depth_overflow) {
 } // namespace bounded_depth
 #endif
 
+namespace schema_parent_selection {
+
+struct record {
+  omni::compat::optional<int> number;
+  omni::compat::optional<std::vector<int>> numbers;
+};
+
+struct select_reader {
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_to_type(path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
+  }
+
+  template <typename Path>
+  local_mapping::add_integer operator()(Path, omni::type_t<int>) const {
+    using parent = typename Path::schema_parent_t;
+    return {std::is_same<parent, record>::value ? 10
+      : std::is_same<parent, std::vector<int>>::value ? 20 : 0};
+  }
+};
+
+struct write_integer {
+  int increment;
+
+  template <typename State>
+  auto operator()(State state, const int &value) const -> ::ryml::NodeRef {
+    return omni::ryml::map_integral(std::move(state), value + this->increment);
+  }
+};
+
+struct select_writer {
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
+      path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
+  }
+
+  template <typename Path>
+  write_integer operator()(Path path, omni::type_t<int>) const {
+    return {path.schema_parent == omni::type_t<record>{} ? 10
+      : path.schema_parent == omni::type_t<std::vector<int>>{} ? 20 : 0};
+  }
+};
+
+} // namespace schema_parent_selection
+
+TEST(mapping_dispatch, schema_parent_of_optional_fields_and_range_elements) {
+  const auto deserialize = omni::ryml::deserialize.tdm_select_mapping(
+    omni::fn::default_value<schema_parent_selection::select_reader>{});
+  const auto result = deserialize(
+    omni::type_t<schema_parent_selection::record>{},
+    R"({"number": 1, "numbers": [2]})");
+
+  EXPECT_TRUE(result.value) << result.diagnostics;
+  if (!result.value)
+    return;
+
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"number": 11, "numbers": [22]})", omni::ryml::as_json(*result.value)));
+
+  const auto serialize = omni::ryml::serialize.tdm_select_mapping(
+    omni::fn::default_value<schema_parent_selection::select_writer>{});
+  EXPECT_TRUE(serialization_test::matches_json(
+    R"({"number": 21, "numbers": [42]})", serialize(*result.value)));
+}
+
+// C++20 selectors can branch on exact wrapper types or user-defined concepts.
+#if defined(__cpp_concepts) && 201907L <= __cpp_concepts \
+  && defined(__cpp_lib_optional) && 201606L <= __cpp_lib_optional
+namespace wrapper_selection {
+
+struct record { int number; };
+struct request {
+  std::optional<record> maybe;
+  std::vector<record> records;
+};
+
+// User concepts can use the library's existing optional-adapter contract.
+template <typename T>
+concept optional_like = omni::traits::is_optional<T>::value;
+
+const std::string document =
+  R"({"maybe": {"number": 3}, "records": [{"number": 7}]})";
+
+} // namespace wrapper_selection
+
+TEST(mapping_dispatch, selects_optional_record_field_by_exact_type) {
+  const auto deserialize = omni::ryml::deserialize.tdm_select_mapping([](auto) {
+    return []<typename T>(omni::ryml::schema_path auto path,
+      omni::type_t<T> type) {
+      if constexpr (std::is_same_v<T,
+        std::optional<wrapper_selection::record>>)
+        return omni::ryml::compose::map_value_node(omni::fn::default_value<
+          omni::compat::expected<T, omni::ryml::issue>>{});
+      else
+        return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
+    };
+  });
+  const auto result = deserialize(omni::type<wrapper_selection::request>,
+    wrapper_selection::document);
+
+  EXPECT_TRUE(result.value) << result.diagnostics;
+  if (result.value) {
+    EXPECT_FALSE(result.value->maybe);
+    EXPECT_EQ(1U, result.value->records.size());
+    if (!result.value->records.empty())
+      EXPECT_EQ(7, result.value->records.front().number);
+  }
+}
+
+TEST(mapping_dispatch, selects_optional_record_field_by_concept) {
+  const auto deserialize = omni::ryml::deserialize.tdm_select_mapping([](auto) {
+    return []<typename T>(omni::ryml::schema_path auto path,
+      omni::type_t<T> type) {
+      if constexpr (wrapper_selection::optional_like<T>)
+        return omni::ryml::compose::map_value_node(omni::fn::default_value<
+          omni::compat::expected<T, omni::ryml::issue>>{});
+      else
+        return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
+    };
+  });
+  const auto result = deserialize(omni::type<wrapper_selection::request>,
+    wrapper_selection::document);
+
+  EXPECT_TRUE(result.value) << result.diagnostics;
+  if (result.value) {
+    EXPECT_FALSE(result.value->maybe);
+    EXPECT_EQ(1U, result.value->records.size());
+    if (!result.value->records.empty())
+      EXPECT_EQ(7, result.value->records.front().number);
+  }
+}
+
+// The standard range concept also requires library ranges support.
+#if defined(__cpp_lib_ranges) && 201911L <= __cpp_lib_ranges
+TEST(mapping_dispatch, selects_record_vector_field_by_range_concept) {
+  const auto deserialize = omni::ryml::deserialize.tdm_select_mapping([](auto) {
+    return []<typename T>(omni::ryml::schema_path auto path,
+      omni::type_t<T> type) {
+      if constexpr (std::ranges::range<T>)
+        return omni::ryml::compose::map_array_node(omni::fn::default_value<
+          omni::compat::expected<T, omni::ryml::issue>>{});
+      else
+        return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
+    };
+  });
+  const auto result = deserialize(omni::type<wrapper_selection::request>,
+    wrapper_selection::document);
+
+  EXPECT_TRUE(result.value) << result.diagnostics;
+  if (result.value) {
+    EXPECT_TRUE(result.value->records.empty());
+    EXPECT_TRUE(result.value->maybe);
+    if (result.value->maybe)
+      EXPECT_EQ(3, result.value->maybe->number);
+  }
+}
+#endif
+#endif
+
 #if 201703L <= OMNI_CPLUSPLUS
 namespace schema_paths {
 
@@ -749,16 +919,16 @@ struct read_address {
 };
 
 struct select_reader {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const {
-    if constexpr (state.path().ends_with("root.work_address"))
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const {
+    if constexpr (path.str().ends_with("root.work_address"))
       return read_address{};
-    else if constexpr (state.path().ends_with("root.offices[].number"))
+    else if constexpr (path.str().ends_with("root.offices[].number"))
       return local_mapping::add_integer{10};
-    else if constexpr (state.path().ends_with("root.locations[].number"))
+    else if constexpr (path.str().ends_with("root.locations[].number"))
       return local_mapping::add_integer{20};
     else
-      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+      return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
   }
 };
 
@@ -781,16 +951,16 @@ struct write_integer {
 };
 
 struct select_writer {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const {
-    if constexpr (state.path().ends_with("root.work_address"))
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const {
+    if constexpr (path.str().ends_with("root.work_address"))
       return write_address{};
-    else if constexpr (state.path().ends_with("root.offices[].number"))
+    else if constexpr (path.str().ends_with("root.offices[].number"))
       return write_integer{10};
-    else if constexpr (state.path().ends_with("root.locations[].number"))
+    else if constexpr (path.str().ends_with("root.locations[].number"))
       return write_integer{20};
     else
-      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 };
 
@@ -798,29 +968,48 @@ struct root {
   omni::compat::optional<std::vector<record>> records;
 };
 
+struct read_context_integer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
+    return local_mapping::add_integer{
+      std::is_same<typename State::enclosing_root, root>::value ? 10 : 0}(
+        std::move(state), node, type);
+  }
+};
+
+struct write_context_integer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
+  auto operator()(State state, int value) const -> ::ryml::NodeRef {
+    return write_integer{
+      std::is_same<typename State::enclosing_root, root>::value ? 10 : 0}(
+        std::move(state), value);
+  }
+};
+
 struct select_context_reader {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const {
-    if constexpr (std::is_same<typename State::enclosing_root, root>::value
-      && std::is_same<typename State::enclosing_record, address>::value
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const {
+    if constexpr (path.schema_parent == omni::type<address>
       && std::is_same<T, int>::value
-      && state.path().ends_with("work_address.number"))
-      return local_mapping::add_integer{10};
+      && path.str().ends_with("work_address.number"))
+      return read_context_integer{};
     else
-      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+      return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
   }
 };
 
 struct select_context_writer {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const {
-    if constexpr (std::is_same<typename State::enclosing_root, root>::value
-      && std::is_same<typename State::enclosing_record, address>::value
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const {
+    if constexpr (path.schema_parent == omni::type<address>
       && std::is_same<T, int>::value
-      && state.path().ends_with("work_address.number"))
-      return write_integer{10};
+      && path.str().ends_with("work_address.number"))
+      return write_context_integer{};
     else
-      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 };
 
@@ -828,23 +1017,43 @@ struct select_context_writer {
 
 namespace traversal_depth {
 
+// Traversal progress belongs to the selected mapper, not its selector.
+struct read_integer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_read_state<State>::value))
+  auto operator()(State state, ::ryml::ConstNodeRef node,
+    omni::type_t<int> type) const -> omni::ryml::with_diagnostics_t<int> {
+    return local_mapping::add_integer{static_cast<int>(state.depth())}(
+      std::move(state), node, type);
+  }
+};
+
+struct write_integer {
+  OMNI_CONSTRAINED_TEMPLATE((typename State),
+    (omni::ryml::is_write_state<State>::value))
+  auto operator()(State state, int value) const -> ::ryml::NodeRef {
+    return schema_paths::write_integer{static_cast<int>(state.depth())}(
+      std::move(state), value);
+  }
+};
+
 struct select_reader {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const {
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const {
     if constexpr (std::is_same<T, int>::value)
-      return local_mapping::add_integer{static_cast<int>(state.depth())};
+      return read_integer{};
     else
-      return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+      return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
   }
 };
 
 struct select_writer {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const {
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const {
     if constexpr (std::is_same<T, int>::value)
-      return schema_paths::write_integer{static_cast<int>(state.depth())};
+      return write_integer{};
     else
-      return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 };
 

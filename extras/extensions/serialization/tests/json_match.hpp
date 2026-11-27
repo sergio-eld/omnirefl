@@ -51,16 +51,16 @@ template <typename T, typename Mapping>
 struct select_mapping {
   const Mapping &mapping;
 
-  template <typename State>
-  const Mapping &operator()(const State &, omni::type_t<T>) const {
+  template <typename Path>
+  const Mapping &operator()(const Path &, omni::type_t<T>) const {
     return this->mapping;
   }
 
-  OMNI_CONSTRAINED_TEMPLATE((typename State, typename Other),
+  OMNI_CONSTRAINED_TEMPLATE((typename Path, typename Other),
     (!std::is_same<T, Other>::value))
-  auto operator()(const State &state, omni::type_t<Other> type) const
-    -> decltype(omni::ryml::reflected_scope::fn::mapping_to_type(state, type)) {
-    return omni::ryml::reflected_scope::fn::mapping_to_type(state, type);
+  auto operator()(const Path &path, omni::type_t<Other> type) const
+    -> decltype(omni::ryml::reflected_scope::fn::mapping_to_type(path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_to_type(path, type);
   }
 };
 

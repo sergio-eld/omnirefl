@@ -3,6 +3,7 @@
 /** Internal schema paths, state configuration, and terminal-child selection. */
 
 #include <omnirefl/extensions/static_string.hpp>
+#include <omnirefl/extensions/traits.hpp>
 
 #include <cstddef>
 
@@ -10,6 +11,12 @@ namespace omni {
 namespace ryml {
 
 struct depth_exceeded;
+
+template <typename StateConfig>
+struct read_state_t;
+
+template <typename StateConfig>
+struct write_state_t;
 
 namespace reflected_scope {
 struct mapping_to_type_t;
@@ -86,70 +93,137 @@ struct schema_path {
 
   using element = schema_path<Segments..., path_element>;
   using text = cpp11_static_string<Segments...>;
-
-  // Default traversal needs segment identity only. Render characters when a
-  // callback queries path(), rather than while forming every child state.
-  static constexpr auto string() OMNI_CPP11_TRAILING_RETURN(text) {
-#if OMNI_HAS_NTTP_STRING
-    return nttp_string<omni::detail::static_string_literal<
-      text::size() + 1>{text::view()}>{};
-#else
-    return text{};
-#endif
-  }
 };
+
+template <typename T,
+  bool Optional = traits::is_optional<T>::value,
+  bool KeyValue = traits::is_key_value<T>::value>
+struct discovered_range_type {
+  using type = compat::remove_cvref_t<compat::range_value_t<T>>;
+};
+
+template <typename T, bool KeyValue>
+struct discovered_range_type<T, true, KeyValue> {
+  using type = compat::remove_cvref_t<typename T::value_type>;
+};
+
+template <typename T>
+struct discovered_range_type<T, false, true> {
+  using type = compat::remove_cvref_t<traits::mapped_type_t<T>>;
+};
+
+// Named custom children may have no declared schema type. Their selected
+// default range mapper supplies it before descending; reflected fields and
+// ordinary range elements retain their declared type directly.
+template <typename T, typename = void>
+struct schema_element_type { using type = void; };
+
+template <typename T>
+struct schema_element_type<T, compat::void_t<compat::range_value_t<T>>>:
+    discovered_range_type<T> {};
+
+template <typename T>
+struct state_schema;
+
+// Omission infers the path parent but retains the legacy enclosing_record.
+// An explicit parent overrides both, even when it equals enclosing_record.
+struct inferred_schema_parent {};
 
 // Type-only bundles keep state friendship independent of parameter-list arity.
 template <typename Config,
   typename SelectMapping = reflected_scope::mapping_to_type_t,
   typename Root = void, typename EnclosingRecord = void,
   typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
-  std::size_t DepthLimit = 10>
+  std::size_t DepthLimit = 10, typename SchemaParent = EnclosingRecord,
+  typename Schema = Root>
 struct read_state_config {
   using config_type = Config;
   using select_mapping_type = SelectMapping;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
+  using schema_parent = SchemaParent;
   using path_type = Path;
   static constexpr std::size_t depth = Depth;
   static constexpr std::size_t depth_limit = DepthLimit;
 
+  template <typename Record>
+  using record_parent = compat::conditional_t<
+    std::is_same<Record, inferred_schema_parent>::value,
+    EnclosingRecord, Record>;
+
+  template <typename Record>
+  using path_parent = compat::conditional_t<
+    std::is_same<Record, inferred_schema_parent>::value,
+    compat::conditional_t<std::is_void<Schema>::value, EnclosingRecord, Schema>,
+    Record>;
+
   template <typename Record, typename Name>
-  using child = read_state_config<Config, SelectMapping, Root, Record,
-    typename Path::template child<Name>, Depth + 1, DepthLimit>;
+  using child = read_state_config<Config, SelectMapping, Root,
+    record_parent<Record>,
+    typename Path::template child<Name>, Depth + 1, DepthLimit,
+    path_parent<Record>, void>;
 
   template <typename Record, typename Field>
-  using field = read_state_config<Config, SelectMapping, Root, Record,
-    typename Path::template field<Field>, Depth + 1, DepthLimit>;
+  using field = read_state_config<Config, SelectMapping, Root,
+    record_parent<Record>,
+    typename Path::template field<Field>, Depth + 1, DepthLimit,
+    path_parent<Record>, typename Field::type>;
+
+  template <typename T>
+  using at_schema = read_state_config<Config, SelectMapping, Root,
+    EnclosingRecord, Path, Depth, DepthLimit, SchemaParent, T>;
 
   using element = read_state_config<Config, SelectMapping, Root,
-    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
+    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit, Schema,
+    typename schema_element_type<Schema>::type>;
 };
 
 template <bool BorrowStrings = false,
   typename SelectMapping = reflected_scope::mapping_from_type_t,
   typename Root = void, typename EnclosingRecord = void,
   typename Path = schema_path<root_path_name>, std::size_t Depth = 0,
-  std::size_t DepthLimit = 10>
+  std::size_t DepthLimit = 10, typename SchemaParent = EnclosingRecord,
+  typename Schema = Root>
 struct write_state_config {
   static constexpr bool borrow_strings = BorrowStrings;
   using select_mapping_type = SelectMapping;
   using enclosing_root = Root;
   using enclosing_record = EnclosingRecord;
+  using schema_parent = SchemaParent;
   using path_type = Path;
   static constexpr std::size_t depth = Depth;
   static constexpr std::size_t depth_limit = DepthLimit;
 
+  template <typename Record>
+  using record_parent = compat::conditional_t<
+    std::is_same<Record, inferred_schema_parent>::value,
+    EnclosingRecord, Record>;
+
+  template <typename Record>
+  using path_parent = compat::conditional_t<
+    std::is_same<Record, inferred_schema_parent>::value,
+    compat::conditional_t<std::is_void<Schema>::value, EnclosingRecord, Schema>,
+    Record>;
+
   template <typename Record, typename Name>
-  using child = write_state_config<BorrowStrings, SelectMapping, Root, Record,
-    typename Path::template child<Name>, Depth + 1, DepthLimit>;
+  using child = write_state_config<BorrowStrings, SelectMapping, Root,
+    record_parent<Record>,
+    typename Path::template child<Name>, Depth + 1, DepthLimit,
+    path_parent<Record>, void>;
 
   template <typename Record, typename Field>
-  using field = write_state_config<BorrowStrings, SelectMapping, Root, Record,
-    typename Path::template field<Field>, Depth + 1, DepthLimit>;
+  using field = write_state_config<BorrowStrings, SelectMapping, Root,
+    record_parent<Record>,
+    typename Path::template field<Field>, Depth + 1, DepthLimit,
+    path_parent<Record>, typename Field::type>;
+
+  template <typename T>
+  using at_schema = write_state_config<BorrowStrings, SelectMapping, Root,
+    EnclosingRecord, Path, Depth, DepthLimit, SchemaParent, T>;
 
   using element = write_state_config<BorrowStrings, SelectMapping, Root,
-    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit>;
+    EnclosingRecord, typename Path::element, Depth + 1, DepthLimit, Schema,
+    typename schema_element_type<Schema>::type>;
 };
 
 // Select the terminal token before forming any child configuration or path.
@@ -174,6 +248,23 @@ struct state_children<State, StateConfig, false> {
   using field = depth_exceeded;
 
   using element = depth_exceeded;
+};
+
+// Selection knows the current C++ type. Retain it for parameterless element()
+// and for default range mapping delegated to by a custom mapper.
+template <typename T>
+struct state_schema {
+  template <typename Config>
+  static constexpr auto bind(const read_state_t<Config> &state)
+    -> read_state_t<typename Config::template at_schema<T>> {
+    return {state};
+  }
+
+  template <typename Config>
+  static constexpr auto bind(const write_state_t<Config> &state)
+    -> write_state_t<typename Config::template at_schema<T>> {
+    return {state};
+  }
 };
 
 } // namespace detail

@@ -57,23 +57,26 @@ auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
-auto read_node(State context, ::ryml::ConstNodeRef node, omni::type_t<T> type)
+auto read_node(State source, ::ryml::ConstNodeRef node, omni::type_t<T> type)
   -> with_diagnostics_t<T, diagnostics> {
-  const auto mapping = compat::invoke(context.select_mapping, context, type);
+  const auto context = state_schema<T>::bind(source);
+  const auto mapping = compat::invoke(context.select_mapping,
+    context.path(), type);
   return map_node_to_value(std::move(context),
     mapping, node, type);
 }
 
 OMNI_CONSTRAINED_TEMPLATE_REDECL((typename T, typename State),
   (is_read_state<State>::value))
-auto read_node(State context, ::ryml::ConstNodeRef node, T *into)
+auto read_node(State source, ::ryml::ConstNodeRef node, T *into)
   -> with_diagnostics_t<compat::monostate, diagnostics> {
+  const auto context = state_schema<T>::bind(source);
   auto result = make_node_accumulator(context);
   if (context.limit_exceeded())
     result.result.value.reset();
   else {
     const auto mapping =
-      compat::invoke(context.select_mapping, context, omni::type_t<T>{});
+      compat::invoke(context.select_mapping, context.path(), omni::type_t<T>{});
 
     result.append(read_into(std::move(context),
       mapping,
@@ -350,9 +353,10 @@ namespace detail {
 // The record frame applies diagnostic limits; retain its direct mapping path.
 OMNI_CONSTRAINED_TEMPLATE((typename T, typename State),
   (is_read_state<State>::value))
-auto map_record_field_value(State state, ::ryml::ConstNodeRef node,
+auto map_record_field_value(State source, ::ryml::ConstNodeRef node,
   omni::type_t<T> type) -> with_diagnostics_t<T> {
-  const auto mapping = compat::invoke(state.select_mapping, state, type);
+  const auto state = state_schema<T>::bind(source);
+  const auto mapping = compat::invoke(state.select_mapping, state.path(), type);
   return map_node_to_value_using(std::move(state), mapping, node, type,
     /*priority=*/0);
 }

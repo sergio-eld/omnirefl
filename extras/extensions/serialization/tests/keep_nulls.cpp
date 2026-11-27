@@ -10,15 +10,15 @@ namespace {
 
 template <typename Keep = std::true_type>
 struct range_null_policy {
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const
     -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
-      state, type)) {
-    return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 
-  template <typename State, typename T>
-  auto operator()(State, omni::type_t<std::vector<T>>) const
+  template <typename Path, typename T>
+  auto operator()(Path, omni::type_t<std::vector<T>>) const
     -> omni::ryml::map_range_t<Keep> {
     return omni::ryml::map_range.tdm_keep_nulls(
       omni::fn::default_value<Keep>{});
@@ -45,23 +45,23 @@ struct select_null_policy {
   bool record;
   bool range;
 
-  template <typename State, typename T>
-  auto operator()(State state, omni::type_t<T> type) const
+  template <typename Path, typename T>
+  auto operator()(Path path, omni::type_t<T> type) const
     -> decltype(omni::ryml::reflected_scope::fn::mapping_from_type(
-      state, type)) {
-    return omni::ryml::reflected_scope::fn::mapping_from_type(state, type);
+      path, type)) {
+    return omni::ryml::reflected_scope::fn::mapping_from_type(path, type);
   }
 
-  template <typename State>
-  auto operator()(State, omni::type_t<measurement>) const
+  template <typename Path>
+  auto operator()(Path, omni::type_t<measurement>) const
     -> omni::ryml::reflected_scope::map_record_t<
       omni::mapping::record_strategy_t<>, bool> {
     return omni::ryml::reflected_scope::map_record.tdm_keep_nulls(
       [this](omni::compat::monostate) { return this->record; });
   }
 
-  template <typename State, typename T>
-  auto operator()(State, omni::type_t<std::vector<T>>) const
+  template <typename Path, typename T>
+  auto operator()(Path, omni::type_t<std::vector<T>>) const
     -> omni::ryml::map_range_t<bool> {
     return omni::ryml::map_range.tdm_keep_nulls(
       [this](omni::compat::monostate) { return this->range; });

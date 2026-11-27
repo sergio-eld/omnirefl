@@ -468,7 +468,7 @@ auto map_record_fields(State context, ::ryml::ConstNodeRef node,
   omni::type_t<std::tuple<Field...>>)
   -> typename Finalizer::result_type {
   auto result = omni::ryml::detail::make_node_accumulator(
-    std::move(context));
+    omni::ryml::detail::state_schema<T>::bind(context));
   assert(node.is_map());
   assert(mapping::valid_record_strategy(compat::apply(record_field_names{},
     omni::meta_for<T>::accessible_data_members()), strategy));
