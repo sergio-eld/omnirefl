@@ -260,7 +260,7 @@ jobs:
           PY
 
   # Site-only changes normally deploy Pages without rebuilding packages.
-  # Full-suite selection or `build_sources` forces package work.
+  # Explicit requests force package work; unchanged full coverage can satisfy cadence.
   changes:
     name: Select CI work and test suite
     runs-on: ubuntu-latest
@@ -269,11 +269,12 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      build_sources: ${{ steps.sources.outputs.build_sources }}
+      build_sources: ${{ steps.coverage.outputs.reused_full_run_id != '' && 'false' || steps.sources.outputs.build_sources }}
       check_ci_policy: ${{ steps.sources.outputs.check_ci_policy }}
       full_suite: ${{ steps.suite.outputs.full_suite }}
-      reused_full_run_id: ${{ steps.suite.outputs.reused_full_run_id }}
-      reused_full_commit: ${{ steps.suite.outputs.reused_full_commit }}
+      reused_full_run_id: ${{ steps.coverage.outputs.reused_full_run_id || steps.suite.outputs.reused_full_run_id }}
+      reused_full_commit: ${{ steps.coverage.outputs.reused_full_commit || steps.suite.outputs.reused_full_commit }}
+      reused_full_build_commit: ${{ steps.coverage.outputs.reused_full_build_commit }}
 
     steps:
       - name: Checkout Repository
@@ -370,9 +371,24 @@ jobs:
           echo "build_sources=$build_sources" >> "$GITHUB_OUTPUT"
           echo "check_ci_policy=$check_ci_policy" >> "$GITHUB_OUTPUT"
 
-      - name: "Package checks selected: ${{ steps.sources.outputs.build_sources }}"
+      - name: Find full coverage for unchanged inputs
+        id: coverage
+        if: >-
+          ${{ steps.sources.outputs.build_sources == 'true'
+            && !inputs.full_suite && !inputs.build_sources && !inputs.rebuild_packages
+            && (github.event_name == 'push' && github.ref == 'refs/heads/master'
+              || github.event_name == 'pull_request' && steps.suite.outputs.full_suite != 'true') }}
         env:
-          BUILD_SOURCES: ${{ steps.sources.outputs.build_sources }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m pip install --quiet PyYAML==6.0.2
+          python3 ci/reuse_ci.py full-inputs
+
+      - name: Report selected work
+        env:
+          BUILD_SOURCES: ${{ steps.coverage.outputs.reused_full_run_id != '' && 'false' || steps.sources.outputs.build_sources }}
+          REUSED_FULL_RUN: ${{ steps.coverage.outputs.reused_full_run_id }}
+          REUSED_FULL_COMMIT: ${{ steps.coverage.outputs.reused_full_commit }}
           CHECK_CI_POLICY: ${{ steps.sources.outputs.check_ci_policy }}
           OMNI_TEST_SUITE: ${{ steps.suite.outputs.full_suite == 'true' && 'full' || 'smoke' }}
         run: |
@@ -386,6 +402,10 @@ jobs:
           else
             decision='Work: package checks skipped (no package changes)'
             scope=''
+            if [ -n "$REUSED_FULL_RUN" ]; then
+              decision="Work: reuse full run $REUSED_FULL_RUN (unchanged build/test inputs)"
+              scope="Build commit: $REUSED_FULL_COMMIT"
+            fi
           fi
           if [ true = "$CHECK_CI_POLICY" ]; then
             decision="$decision, CI policy"
@@ -404,14 +424,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Run CI policy tests
-        run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
+        run: |
+          python3 -m pip install --quiet PyYAML==6.0.2
+          python3 -m unittest discover -s ci/tests -p 'test_*.py'
 
   reusable-packages:
     name: Prepare package builds
     needs:
       - changes
       - validate-ci-matrix
-    if: ${{ 'true' == needs.changes.outputs.build_sources }}
+    if: ${{ 'true' == needs.changes.outputs.build_sources || needs.changes.outputs.reused_full_build_commit != '' }}
     runs-on: ubuntu-latest
     env:
       LOOKUP_PACKAGES: >-
@@ -429,16 +451,24 @@ jobs:
       reuse_checks: ${{ steps.decision.outputs.reuse_checks }}
     steps:
       - name: Checkout Repository
-        if: ${{ env.LOOKUP_PACKAGES == 'true' }}
+        if: ${{ env.LOOKUP_PACKAGES == 'true' || needs.changes.outputs.reused_full_build_commit != '' }}
         uses: actions/checkout@v7
       - name: Find successful package source
         id: source
-        if: ${{ env.LOOKUP_PACKAGES == 'true' }}
+        if: ${{ env.LOOKUP_PACKAGES == 'true' || needs.changes.outputs.reused_full_build_commit != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           NATIVE_PACKAGES: ${{ inputs.native_packages }}
           MATRIX: ${{ needs.validate-ci-matrix.outputs.matrix }}
+          INPUT_FULL_RUN: ${{ needs.changes.outputs.reused_full_run_id }}
+          INPUT_BUILD_COMMIT: ${{ needs.changes.outputs.reused_full_build_commit }}
         run: |
+          if [ -n "$INPUT_BUILD_COMMIT" ]; then
+            echo "run_id=$INPUT_FULL_RUN" >> "$GITHUB_OUTPUT"
+            echo "artifact_commit=$INPUT_BUILD_COMMIT" >> "$GITHUB_OUTPUT"
+            echo "build_commit=$INPUT_BUILD_COMMIT" >> "$GITHUB_OUTPUT"
+            exit
+          fi
           mapfile -t targets < <(python3 - <<'PYTHON'
           import json
           import os
@@ -459,8 +489,11 @@ jobs:
           REBUILD_PACKAGES: ${{ inputs.rebuild_packages }}
           FULL_SUITE: ${{ needs.changes.outputs.full_suite }}
           FORCE_BUILD: ${{ inputs.build_sources }}
+          INPUT_BUILD_COMMIT: ${{ needs.changes.outputs.reused_full_build_commit }}
         run: |
-          if [ true = "$REBUILD_PACKAGES" ]; then
+          if [ -n "${INPUT_BUILD_COMMIT:-}" ]; then
+            decision="Full coverage: run $SOURCE_RUN; build $INPUT_BUILD_COMMIT"
+          elif [ true = "$REBUILD_PACKAGES" ]; then
             decision='Packages: rebuild (release preflight)'
           elif [ false = "$LOOKUP_PACKAGES" ]; then
             decision='Packages: build (fresh PR)'
@@ -470,7 +503,7 @@ jobs:
             decision='Packages: build (no reusable set)'
           fi
           reuse_checks=false
-          # Explicit requests still execute checks; cadence-selected full also runs.
+          # Explicit requests execute checks; unchanged full coverage is handled above.
           if [ push = "$GITHUB_EVENT_NAME" ] &&
              [ refs/heads/master = "$GITHUB_REF" ] &&
              [ true != "$FULL_SUITE" ] &&
